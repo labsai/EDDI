@@ -26,6 +26,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -134,6 +135,11 @@ class ConversationLongTermPersistenceTest {
         void run() throws Exception;
     }
 
+    private Conversation turnWith(IExecutableWorkflow workflow) {
+        return new Conversation(List.of(workflow), memory, propertiesHandler,
+                (IConversation.IConversationOutputRenderer) null);
+    }
+
     private static HitlDecision approved() {
         var decision = new HitlDecision();
         decision.setVerdict(HitlVerdict.APPROVED);
@@ -149,8 +155,7 @@ class ConversationLongTermPersistenceTest {
             throw new ConversationPauseException("wf1", 2, "needs approval");
         });
 
-        new Conversation(List.of(pausing), memory, propertiesHandler, (IConversation.IConversationOutputRenderer) null)
-                .say("I am vegan", new LinkedHashMap<>());
+        turnWith(pausing).say("I am vegan", new LinkedHashMap<>());
 
         assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
         verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
@@ -158,8 +163,45 @@ class ConversationLongTermPersistenceTest {
         // The human approves. ConversationService builds a NEW Conversation over the
         // memory it reloaded from the conversation document — which already carries
         // the un-persisted property, so a value diff alone can never see it as changed.
-        new Conversation(List.of(pausing), memory, propertiesHandler, (IConversation.IConversationOutputRenderer) null)
-                .resume(approved());
+        turnWith(pausing).resume(approved());
+
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(entry.capture());
+        assertEquals("dietary_restriction", entry.getValue().key());
+        assertEquals("vegan", entry.getValue().value());
+    }
+
+    /**
+     * The baseline must model what the USER MEMORY STORE holds, not what the
+     * conversation document holds. A HITL pause persists the document (properties
+     * included) without ever upserting, so a resume that re-captured the document
+     * as its baseline would see "unchanged" and drop the property forever.
+     * <p>
+     * Same scenario as {@link #longTermWriteSurvivesAHitlPause()}, but resumed with
+     * a REJECTED verdict — the owed write must not depend on the verdict.
+     */
+    @Test
+    @DisplayName("G6 — a longTerm property set in a turn that HITL-pauses is still persisted on resume")
+    void longTermPropertySetBeforeAPauseIsPersistedOnResume() throws Exception {
+        IExecutableWorkflow workflow = workflowThat(() -> {
+            // The turn sets the property and THEN trips the human-approval gate.
+            memory.getConversationProperties().put("dietary_restriction",
+                    new Property("dietary_restriction", "vegan", Scope.longTerm));
+            throw new ConversationPauseException("wf1", 2, "needs approval");
+        });
+
+        turnWith(workflow).say("I am vegan", new LinkedHashMap<>());
+
+        // The pause skips the post-conversation tasks, so nothing reached the store —
+        // but the AWAITING_HUMAN snapshot DID carry the property into the document.
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
+
+        // Resume: a FRESH Conversation over the hydrated memory, as
+        // Agent#continueConversation builds for the resume request.
+        HitlDecision decision = new HitlDecision();
+        decision.setVerdict(HitlVerdict.REJECTED);
+        turnWith(workflow).resume(decision);
 
         ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(entry.capture());
@@ -175,8 +217,7 @@ class ConversationLongTermPersistenceTest {
             throw new LifecycleException("task blew up");
         });
 
-        Conversation errored = new Conversation(List.of(failing), memory, propertiesHandler,
-                (IConversation.IConversationOutputRenderer) null);
+        Conversation errored = turnWith(failing);
         assertThrows(LifecycleException.class, () -> errored.say("I am allergic to peanuts", new LinkedHashMap<>()));
         assertEquals(ConversationState.ERROR, memory.getConversationState());
         verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
@@ -186,6 +227,24 @@ class ConversationLongTermPersistenceTest {
         ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(entry.capture());
         assertEquals("allergy", entry.getValue().key());
+    }
+
+    /**
+     * Same divergence, reached through a turn that ended in ERROR: the post-tasks
+     * never ran, so the restored document is not a persisted baseline either.
+     */
+    @Test
+    @DisplayName("G6 — a longTerm property left over from an ERRORed turn is persisted on the next turn")
+    void longTermPropertyFromAnErroredTurnIsPersistedOnTheNextTurn() throws Exception {
+        memory.getConversationProperties().put("favorite_color", new Property("favorite_color", "blue", Scope.longTerm));
+        memory.setConversationState(ConversationState.ERROR);
+
+        nextTurn().say("hello again", new LinkedHashMap<>());
+
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(entry.capture());
+        assertEquals("favorite_color", entry.getValue().key());
+        assertEquals("blue", entry.getValue().value());
     }
 
     @Test
@@ -205,6 +264,46 @@ class ConversationLongTermPersistenceTest {
         ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(entry.capture());
         assertEquals("home_city", entry.getValue().key());
+    }
+
+    /**
+     * G10 narrowed the step scope too far: the mirror that backs
+     * {@code {memory.current.properties.X}} was suppressed outright, so a
+     * step-scoped property was invisible to templates even during the turn that set
+     * it. The documented contract is that step scope lives FOR the turn and is
+     * cleared at the END of it — so the mirror is written and then stripped again
+     * when the property is dropped, before the step is persisted.
+     */
+    @Test
+    @DisplayName("G10 — a step-scoped property resolves via {memory.current.properties.X} during its turn only")
+    void stepScopedPropertyIsMirroredForTheTurnAndUnmirroredAfterIt() throws Exception {
+        Map<String, Object> visibleDuringTurn = new LinkedHashMap<>();
+        IExecutableWorkflow workflow = workflowThat(() -> {
+            memory.getConversationProperties().put("tmp", new Property("tmp", "scratch", Scope.step));
+            memory.getConversationProperties().put("keep", new Property("keep", "kept", Scope.conversation));
+            visibleDuringTurn.putAll(mirroredProperties());
+        });
+
+        turnWith(workflow).say("hi", new LinkedHashMap<>());
+
+        assertEquals("scratch", visibleDuringTurn.get("tmp"),
+                "{memory.current.properties.tmp} must resolve during the turn that set it");
+        assertEquals("kept", visibleDuringTurn.get("keep"));
+
+        Map<String, Object> afterTurn = mirroredProperties();
+        assertNull(afterTurn.get("tmp"), "the step-scoped mirror must not survive into the persisted step");
+        assertEquals("kept", afterTurn.get("keep"));
+    }
+
+    /** The {@code properties} conversation output of the current step. */
+    private Map<String, Object> mirroredProperties() {
+        Object mirrored = memory.getCurrentStep().getConversationOutput().get("properties");
+        if (mirrored instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            map.forEach((key, value) -> copy.put(String.valueOf(key), value));
+            return copy;
+        }
+        return new LinkedHashMap<>();
     }
 
     @Test

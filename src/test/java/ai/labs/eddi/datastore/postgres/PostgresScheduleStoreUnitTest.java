@@ -99,7 +99,36 @@ class PostgresScheduleStoreUnitTest {
         sut.createSchedule(config);
 
         // then
-        verify(preparedStatement).setString(5, null); // trigger_type
+        verify(preparedStatement).setString(6, null); // trigger_type (param 5 is user_id)
+    }
+
+    /**
+     * GDPR erasure regression. PostgresScheduleStore did not persist userId at all
+     * — the column did not exist and nothing referenced it — so a schedule read
+     * back always had a null userId, the erasure scan matched nothing, and the
+     * sweep reported success while the user's schedules kept firing. Mongo was
+     * unaffected because it stores the whole document, which is why the Mongo-side
+     * fix looked complete. These pin the column on both write paths.
+     */
+    @Test
+    void createSchedule_persistsUserIdSoErasureCanFindIt() throws Exception {
+        var config = newScheduleConfig();
+        config.setUserId("user-42");
+
+        sut.createSchedule(config);
+
+        verify(preparedStatement).setString(5, "user-42");
+    }
+
+    @Test
+    void updateSchedule_persistsUserId() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        var config = newScheduleConfig();
+        config.setUserId("user-42");
+
+        sut.updateSchedule("sched-1", config);
+
+        verify(preparedStatement).setString(4, "user-42");
     }
 
     // ─── readSchedule ───────────────────────────────────────────
@@ -188,8 +217,8 @@ class PostgresScheduleStoreUnitTest {
         // when
         sut.updateSchedule("sched-1", config);
 
-        // then — fire_status is param 11
-        verify(preparedStatement).setString(11, FireStatus.PENDING.name());
+        // then — fire_status is param 12 (user_id was inserted at 4)
+        verify(preparedStatement).setString(12, FireStatus.PENDING.name());
     }
 
     // ─── deleteSchedule ─────────────────────────────────────────

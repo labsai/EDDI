@@ -219,10 +219,24 @@ public class BaseRuntime implements IRuntime {
                 if (callbackFired.compareAndSet(false, true)) {
                     try {
                         completion.onComplete(result);
-                    } catch (Throwable t) {
-                        // Deliberately NOT routed to onFailure: the callable already ran.
-                        log.error("Completion callback failed after the work had already executed — "
-                                + "not reporting it as a failure to avoid re-execution", t);
+                    } catch (RuntimeException | Error t) {
+                        // Deliberately NOT routed to onFailure: the callable already ran,
+                        // and every caller reads onFailure as "the work never happened"
+                        // (the coordinator dead-letters the turn, ConversationService
+                        // writes ERROR for a turn that actually succeeded).
+                        //
+                        // It must not vanish either: name the callback that failed AND
+                        // fail the Future, so the submitter — which knows the conversation
+                        // — still sees it. ConversationService.waitForExecutionFinishOrTimeout
+                        // turns the resulting ExecutionException into a context-carrying
+                        // logConversationError (conversationId + logging context + ERROR
+                        // state), which is exactly what the pre-token onFailure route did.
+                        log.errorf(t, "Completion callback %s failed after the work had already executed "
+                                + "(callable=%s, thread=%s) — not reported through onFailure (callers read that as "
+                                + "'never ran' and would re-execute); surfaced through the Future instead",
+                                completion.getClass().getName(), callable.getClass().getName(),
+                                Thread.currentThread().getName());
+                        throw t;
                     }
                 }
                 return result;

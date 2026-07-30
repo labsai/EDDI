@@ -68,6 +68,19 @@ public class RagCrudIT extends BaseIntegrationIT {
             }
             """;
 
+    private static final String UNSUPPORTED_CHUNK_STRATEGY_JSON = """
+            {
+              "name": "test-knowledge-base-unsupported",
+              "embeddingProvider": "openai",
+              "storeType": "in-memory",
+              "chunkStrategy": "semantic",
+              "chunkSize": 512,
+              "chunkOverlap": 64,
+              "maxResults": 5,
+              "minScore": 0.7
+            }
+            """;
+
     @Test
     @Order(1)
     @DisplayName("Create RAG configuration")
@@ -118,17 +131,30 @@ public class RagCrudIT extends BaseIntegrationIT {
 
     @Test
     @Order(6)
-    @DisplayName("Update RAG configuration")
+    @DisplayName("Update RAG configuration — a legacy chunkStrategy is stored as what ingestion does")
     void updateRag() {
+        // "paragraph" was documented once but never implemented: ingestion has always
+        // built a recursive splitter. The write boundary rewrites it rather than
+        // rejecting it, so knowledge bases authored against the old documentation stay
+        // updatable, importable and duplicable (finding I3).
         assertUpdate(UPDATE_JSON, ROOT_PATH, RESOURCE_URI, resourceId)
                 .then().assertThat()
                 .body("name", equalTo("test-knowledge-base-updated"))
-                .body("chunkStrategy", equalTo("paragraph"))
+                .body("chunkStrategy", equalTo("recursive"))
                 .body("maxResults", equalTo(10));
     }
 
     @Test
     @Order(7)
+    @DisplayName("Create RAG configuration with an unimplemented chunkStrategy is rejected")
+    void createRag_unsupportedChunkStrategyIsRejected() {
+        given().body(UNSUPPORTED_CHUNK_STRATEGY_JSON).contentType(ContentType.JSON).post(ROOT_PATH)
+                .then().assertThat()
+                .statusCode(400);
+    }
+
+    @Test
+    @Order(8)
     @DisplayName("Delete RAG configuration")
     void deleteRag() {
         assertDelete(ROOT_PATH, resourceId[0]);

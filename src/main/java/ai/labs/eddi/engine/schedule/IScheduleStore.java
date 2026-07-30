@@ -72,12 +72,17 @@ public interface IScheduleStore {
      * recreating the very data the erasure just removed, indefinitely.
      * <p>
      * The default implementation is a portable scan-and-delete over
-     * {@link #readAllSchedules}, so every backend erases correctly; backends with
-     * an index on {@code userId} should override it with a single bulk delete. The
-     * scan is bounded by {@link #ERASURE_SCAN_LIMIT} — an explicit number rather
-     * than a "no limit" sentinel, because the backends disagree on what 0 means
-     * ({@code LIMIT 0} returns nothing on PostgreSQL, everything on MongoDB), and
-     * an erasure that silently deletes nothing is the worst possible failure here.
+     * {@link #readAllSchedules}. It is correct only for a backend that actually
+     * persists {@code userId} — Postgres did not, so the scan compared against a
+     * column that did not exist and erased nothing while reporting success. A
+     * backend must therefore either persist the field or override this method;
+     * those with an index on {@code userId} should override it with a single bulk
+     * delete regardless, since a deployment holding more schedules than the scan
+     * limit would otherwise erase only part of the user's data. The scan is bounded
+     * by {@link #ERASURE_SCAN_LIMIT} — an explicit number rather than a "no limit"
+     * sentinel, because the backends disagree on what 0 means ({@code LIMIT 0}
+     * returns nothing on PostgreSQL, everything on MongoDB), and an erasure that
+     * silently deletes nothing is the worst possible failure here.
      *
      * @param userId
      *            the user whose schedules to delete
@@ -88,11 +93,24 @@ public interface IScheduleStore {
             return 0;
         }
         int deleted = 0;
-        for (ScheduleConfiguration schedule : readAllSchedules(ERASURE_SCAN_LIMIT)) {
+        List<ScheduleConfiguration> scanned = readAllSchedules(ERASURE_SCAN_LIMIT);
+        for (ScheduleConfiguration schedule : scanned) {
             if (userId.equals(schedule.getUserId())) {
                 deleteSchedule(schedule.getId());
                 deleted++;
             }
+        }
+        // A full page means the scan hit its ceiling and there may be schedules it
+        // never looked at. Returning a count here would report a complete erasure
+        // that is not one — the worst outcome available, because the caller records
+        // the request as satisfied and the remaining schedules keep firing under the
+        // erased user's id. A backend holding more schedules than this must override
+        // the method with an indexed delete (PostgresScheduleStore does).
+        if (scanned.size() >= ERASURE_SCAN_LIMIT) {
+            throw new IResourceStore.ResourceStoreException(
+                    "Erasure incomplete: the portable scan reached its limit of " + ERASURE_SCAN_LIMIT
+                            + " schedules, so schedules belonging to this user may remain. "
+                            + "This backend must override deleteSchedulesByUserId with an indexed delete.");
         }
         return deleted;
     }

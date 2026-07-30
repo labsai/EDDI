@@ -38,6 +38,15 @@ public class MemorySnapshotService {
      * {@code AgentConfiguration.SessionManagement#maxCheckpointsPerConversation};
      * callers that have the agent configuration at hand should pass it explicitly
      * via {@link #createCheckpoint(IConversationMemory, String, String, int)}.
+     * <p>
+     * <strong>Today this is what every auto-checkpoint uses.</strong> The only
+     * production caller, {@code AgentOrchestrator#executeSingleToolCallResult}, has
+     * the conversation memory but not the agent configuration, and
+     * {@code SessionManagement} has no slot on {@link IConversationMemory} — so the
+     * agent-level {@code maxCheckpointsPerConversation} is NOT honoured at runtime
+     * yet. Wiring it requires carrying {@code SessionManagement} onto the memory
+     * (as {@code UserMemoryConfig} and {@code MemoryPolicy} already are) and
+     * passing it at the call site.
      */
     static final int DEFAULT_MAX_CHECKPOINTS = 10;
 

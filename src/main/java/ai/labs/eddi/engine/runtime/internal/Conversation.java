@@ -43,6 +43,7 @@ public class Conversation implements IConversation {
     private static final Logger LOGGER = Logger.getLogger(Conversation.class);
     private static final String KEY_USER_INFO = "userInfo";
     private static final String KEY_CONTEXT = "context";
+    private static final String KEY_PROPERTIES = "properties";
     private static final String KEY_SECRET_INPUT = "secretInput";
     private static final String SECRET_INPUT_PLACEHOLDER = "<secret input>";
     private static final String CONVERSATION_START = "CONVERSATION_START";
@@ -80,7 +81,50 @@ public class Conversation implements IConversation {
         this.conversationMemory = conversationMemory;
         this.propertiesHandler = propertiesHandler;
         this.outputProvider = outputProvider;
+        captureRestoredLongTermBaseline();
+    }
+
+    /**
+     * Constructor-time baseline capture, i.e. over memory hydrated from the
+     * conversation document.
+     * <p>
+     * The baseline must model what the USER MEMORY STORE holds, not what the
+     * conversation document holds — and those two diverge whenever a turn ends
+     * without {@link #postConversationLifecycleTasks()} running. A HITL pause is
+     * the canonical case: {@code executeConversationStep} skips the post-tasks (so
+     * nothing is upserted to {@code usermemories}), yet the AWAITING_HUMAN snapshot
+     * still writes every conversation property into the conversation document. If
+     * the next {@code Conversation} (built by {@code Agent#continueConversation} to
+     * serve the resume) captured that document as its baseline, the diff would
+     * report "unchanged" and the property would never be persisted — silently and
+     * permanently lost. The same holds for a turn that ended in ERROR or was
+     * interrupted.
+     * <p>
+     * So the document is only trusted as a persisted baseline when the previous
+     * turn demonstrably completed (READY / ENDED), or when there is no previous
+     * turn at all (state still {@code null} on a freshly created memory). Otherwise
+     * the baseline stays empty and every longTerm property is written — the
+     * pre-diff behaviour, which is safe because {@code upsert} is idempotent.
+     */
+    private void captureRestoredLongTermBaseline() {
+        longTermBaseline.clear();
+        if (conversationMemory == null) {
+            return;
+        }
+        ConversationState restoredState = conversationMemory.getConversationState();
+        if (!priorTurnPersistedLongTermProperties(restoredState)) {
+            LOGGER.debugf("[MEMORY] Conversation %s restored in state %s — the previous turn never ran "
+                    + "storePropertiesPermanently(), so its longTerm properties are treated as unpersisted.",
+                    sanitize(conversationMemory.getConversationId()), restoredState);
+            return;
+        }
         captureLongTermBaseline();
+    }
+
+    private static boolean priorTurnPersistedLongTermProperties(ConversationState restoredState) {
+        return restoredState == null
+                || restoredState == ConversationState.READY
+                || restoredState == ConversationState.ENDED;
     }
 
     /**
@@ -411,19 +455,48 @@ public class Conversation implements IConversation {
             // un-persisted value.
             recordPendingLongTermWrites();
         }
-        // A cancelled turn must not commit its side effects. ConversationService
-        // discards the snapshot of a cancelled turn, but storePropertiesPermanently()
-        // writes straight to the user-memory store, so without this guard a turn the
-        // caller was told is CANCELLED still upserts whatever longTerm properties it
-        // managed to set before stopping — the same "a failed turn must not persist
+        // A turn whose outcome is discarded must not commit its side effects.
+        // ConversationService discards the snapshot of a cancelled or abandoned turn,
+        // but storePropertiesPermanently() writes straight to the user-memory store,
+        // so without this guard such a turn still upserts whatever longTerm properties
+        // it managed to set before stopping — the same "a failed turn must not persist
         // partial state" rule the ERROR path already follows.
-        if (!paused && !conversationMemory.isCancelled()) {
+        if (!paused && !isTurnDiscarded()) {
             try {
                 postConversationLifecycleTasks();
             } catch (IResourceStore.ResourceStoreException e) {
                 throw new LifecycleException(e.getLocalizedMessage(), e);
             }
         }
+    }
+
+    /**
+     * True when this turn's result will be thrown away, so its side effects outside
+     * the conversation snapshot must not be committed either.
+     * <p>
+     * Two independent abort signals reach a running turn, and only one of them is a
+     * flag on the memory:
+     * <ul>
+     * <li>a cooperative <em>cancel</em> ({@code /cancel}, client disconnect) sets
+     * {@code conversationMemory.setCancelled(true)}; the pipeline observes it and
+     * the snapshot is discarded;</li>
+     * <li>the runtime watchdog <em>abandons</em> a turn that exceeded
+     * {@code agentTimeoutInSeconds} by interrupting the pipeline thread —
+     * {@code BaseRuntime.AbandonableFuture#cancel} only sets its own
+     * {@code abandoned} flag and interrupts, it never sets the memory's cancel flag
+     * — and routes the late completion to {@code onFailure}, so the conversation
+     * document is never stored.</li>
+     * </ul>
+     * Only the first was checked here, so an interrupt that landed during the last
+     * task of the last workflow (a short in-memory task such as output or
+     * templating; interruptibly-blocking tasks throw instead) left the pipeline
+     * returning normally and this turn's changed longTerm properties upserted into
+     * {@code usermemories} for a turn whose conversation document was then thrown
+     * away. Narrow race, pre-existing; the interrupt flag is only read here, never
+     * cleared, so the runtime still sees it.
+     */
+    private boolean isTurnDiscarded() {
+        return conversationMemory.isCancelled() || Thread.currentThread().isInterrupted();
     }
 
     private void checkActionsForConversationEnd() {
@@ -448,7 +521,46 @@ public class Conversation implements IConversation {
      */
     private void removeOldInvalidProperties() {
         IConversationProperties conversationProperties = conversationMemory.getConversationProperties();
-        conversationProperties.entrySet().removeIf(property -> property.getValue() == null || property.getValue().getScope() == Scope.step);
+        IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
+        conversationProperties.entrySet().removeIf(entry -> {
+            Property property = entry.getValue();
+            if (property == null) {
+                return true;
+            }
+            if (property.getScope() != Scope.step) {
+                return false;
+            }
+            dropMirroredProperty(currentStep, entry.getKey(), property.getName());
+            return true;
+        });
+    }
+
+    /**
+     * Drops a step-scoped property's mirrored conversation-output entry.
+     * <p>
+     * {@code ConversationProperties} mirrors step-scoped properties into the
+     * current step's conversation output so {@code {memory.current.properties.X}}
+     * resolves DURING the turn that set them. Removing the mirror here — before the
+     * step is persisted — keeps them out of the conversation document and out of
+     * the next turn's {@code {memory.last.properties.X}}, which is what "cleared at
+     * the end of the turn" has to mean for the projection as well as for the live
+     * map.
+     */
+    private static void dropMirroredProperty(IWritableConversationStep currentStep, String key, String propertyName) {
+        if (currentStep == null || currentStep.getConversationOutput() == null) {
+            return;
+        }
+        Object mirrored = currentStep.getConversationOutput().get(KEY_PROPERTIES);
+        if (mirrored instanceof Map<?, ?> mirroredProperties) {
+            // The mirror is keyed on the property NAME; the map key is removed as
+            // well because the two can differ.
+            if (propertyName != null) {
+                mirroredProperties.remove(propertyName);
+            }
+            if (key != null) {
+                mirroredProperties.remove(key);
+            }
+        }
     }
 
     /**
@@ -907,12 +1019,13 @@ public class Conversation implements IConversation {
             recordPendingLongTermWrites();
             // Persist long-term properties only on a clean outcome. Skip on a
             // re-pause (AWAITING_HUMAN — the pause is not the end of the turn), on
-            // ERROR, and on a cancel — mirroring the say path (executeConversationStep
-            // only runs post-tasks when execution did not throw and was not
-            // cancelled), so a failed or cancelled resume does not upsert
-            // partial/inconsistent property state into the user memory store.
+            // ERROR, and on a discarded turn (cancelled, or abandoned by the watchdog
+            // that guards the resume exactly like the say path) — mirroring
+            // executeConversationStep, so a failed, cancelled or abandoned resume does
+            // not upsert partial/inconsistent property state into the user memory
+            // store.
             if (finalState != ConversationState.AWAITING_HUMAN && finalState != ConversationState.ERROR
-                    && !conversationMemory.isCancelled()) {
+                    && !isTurnDiscarded()) {
                 try {
                     postConversationLifecycleTasks();
                 } catch (IResourceStore.ResourceStoreException ex) {

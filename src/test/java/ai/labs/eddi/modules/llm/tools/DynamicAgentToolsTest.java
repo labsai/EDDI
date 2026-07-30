@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -928,6 +929,7 @@ class DynamicAgentToolsTest {
 
         private IAgentFactory agentFactory;
         private IAgentStore agentStore;
+        private IDeploymentStore deploymentStore;
         private List<String> createdAgentIds;
         private Set<String> retainedAgentIds;
         private TeardownAgentTool tool;
@@ -936,9 +938,10 @@ class DynamicAgentToolsTest {
         void setUp() {
             agentFactory = mock(IAgentFactory.class);
             agentStore = mock(IAgentStore.class);
+            deploymentStore = mock(IDeploymentStore.class);
             createdAgentIds = new CopyOnWriteArrayList<>(List.of("created-1", "created-2"));
             retainedAgentIds = ConcurrentHashMap.newKeySet();
-            tool = new TeardownAgentTool(agentFactory, agentStore, createdAgentIds, retainedAgentIds);
+            tool = new TeardownAgentTool(agentFactory, agentStore, deploymentStore, createdAgentIds, retainedAgentIds);
         }
 
         @Test
@@ -959,6 +962,34 @@ class DynamicAgentToolsTest {
             assertTrue(result.contains("deleted"));
             verify(agentFactory).undeployAgent(any(Environment.class), eq("created-1"), isNull());
             verify(agentStore).deleteAllPermanently("created-1");
+        }
+
+        @Test
+        void teardownAgent_deleteAlsoRetiresDeploymentRecords() throws Exception {
+            // This path deletes the Agent directly, not through RestAgentStore.
+            // So it has to clear the deployment record itself.
+            tool.teardownAgent("created-1", true);
+
+            verify(deploymentStore).deleteDeploymentInfos("created-1");
+        }
+
+        @Test
+        void teardownAgent_failedDeletePreservesDeploymentRecords() throws Exception {
+            // The Agent is still there if the delete threw, so its records must stay.
+            doThrow(new RuntimeException("store down")).when(agentStore).deleteAllPermanently("created-1");
+
+            String result = tool.teardownAgent("created-1", true);
+
+            assertTrue(result.contains("deletion failed"));
+            verify(deploymentStore, never()).deleteDeploymentInfos(any());
+        }
+
+        @Test
+        void teardownAgent_undeployOnlyLeavesDeploymentRecordsAlone() throws Exception {
+            // Undeploy without delete: the Agent still exists, so its records must survive.
+            tool.teardownAgent("created-1", false);
+
+            verify(deploymentStore, never()).deleteDeploymentInfos(any());
         }
 
         @Test
@@ -1065,7 +1096,7 @@ class DynamicAgentToolsTest {
         @Test
         void constructor_nullArgs_doesNotThrow() {
             // Null constructor args should produce safe fallback collections
-            var safeTool = new TeardownAgentTool(agentFactory, agentStore, null, null);
+            var safeTool = new TeardownAgentTool(agentFactory, agentStore, null, null, null);
             // teardownAgent with unknown agentId returns a warning (doesn't NPE)
             String result = safeTool.teardownAgent("non-existent", false);
             assertTrue(result.contains("⚠️"));

@@ -18,6 +18,8 @@ import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -222,6 +224,96 @@ class ScheduleFireExecutorTest {
         }
     }
 
+    /**
+     * B2, ordering half. Restoring the interrupt flag is only safe AFTER the fire
+     * log has been written. The synchronous MongoDB driver checks out a connection
+     * with {@code lockInterruptibly()} and aborts with
+     * {@code MongoInterruptedException} when the calling thread's flag is already
+     * set, so a restore placed inside the catch block makes {@code logFire} throw
+     * on exactly the interrupt it exists to record — the FAILED attempt then
+     * vanishes (the local catch swallows the store failure) and the poller can
+     * never see it. A plain Mockito mock is interrupt-insensitive by construction,
+     * so this stub reproduces that sensitivity explicitly.
+     */
+    @Test
+    @Timeout(10)
+    void fire_interrupted_writesFireLogBeforeRestoringTheFlag() throws Exception {
+        var schedule = makeCronSchedule("sched-interrupt-order", "new");
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-int", null));
+        doAnswer(inv -> {
+            Thread.currentThread().interrupt();
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        List<ScheduleFireLog> persisted = interruptSensitiveFireLogStore();
+
+        assertFalse(Thread.currentThread().isInterrupted(), "precondition: flag starts clear");
+        try {
+            ScheduleFireLog result = executor.fire(schedule, "instance-1", 4);
+
+            assertEquals(1, persisted.size(),
+                    "the FAILED attempt must reach an interrupt-sensitive store — restoring the flag before "
+                            + "logFire() aborts the very write the interrupt path exists to perform");
+            assertEquals(FireStatus.FAILED.name(), persisted.get(0).status());
+            assertEquals(4, persisted.get(0).attemptNumber());
+            assertEquals(FireStatus.FAILED.name(), result.status());
+            // ...and the cancellation signal still reaches the caller afterwards.
+            assertTrue(Thread.currentThread().isInterrupted(),
+                    "fire() must still re-assert the interrupt flag that latch.await consumed");
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    /** Same ordering guarantee on the Dream fast-path's sibling catch. */
+    @Test
+    @Timeout(10)
+    void fire_dreamScheduleInterrupted_writesFireLogBeforeRestoringTheFlag() throws Exception {
+        var schedule = makeDreamSchedule("sched-dream-interrupt-order", "user-9");
+        schedule.setAgentVersion(1);
+        when(dreamService.processScheduledFire(any(), any(), any())).thenAnswer(inv -> {
+            Thread.interrupted();
+            throw new InterruptedException("consolidation interrupted");
+        });
+
+        List<ScheduleFireLog> persisted = interruptSensitiveFireLogStore();
+
+        assertFalse(Thread.currentThread().isInterrupted(), "precondition: flag starts clear");
+        try {
+            ScheduleFireLog result = executor.fire(schedule, "instance-1", 2);
+
+            assertEquals(1, persisted.size(),
+                    "the Dream fast-path must log the FAILED attempt before re-asserting the interrupt flag");
+            assertEquals(FireStatus.FAILED.name(), persisted.get(0).status());
+            assertEquals(2, persisted.get(0).attemptNumber());
+            assertEquals(FireStatus.FAILED.name(), result.status());
+            assertTrue(Thread.currentThread().isInterrupted(),
+                    "the Dream fast-path must still re-assert the interrupt flag its catch consumed");
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    /**
+     * Stubs {@code logFire} the way the synchronous MongoDB driver behaves: a write
+     * attempted while the calling thread's interrupt flag is set aborts instead of
+     * persisting.
+     *
+     * @return the live list of fire logs that actually made it to the store
+     */
+    private List<ScheduleFireLog> interruptSensitiveFireLogStore() throws Exception {
+        List<ScheduleFireLog> persisted = new ArrayList<>();
+        doAnswer(inv -> {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new RuntimeException("MongoInterruptedException: interrupted on connection checkout");
+            }
+            persisted.add(inv.getArgument(0));
+            return null;
+        }).when(scheduleStore).logFire(any());
+        return persisted;
+    }
+
     @Test
     void fire_logsFireAttemptEvenOnFailure() throws Exception {
         var schedule = makeCronSchedule("sched-err2", "new");
@@ -397,6 +489,45 @@ class ScheduleFireExecutorTest {
     }
 
     // --- Helpers ---
+
+    /**
+     * B2 again, on the OTHER broad catch. {@code fire()} restores the interrupt
+     * flag with an explicit comment; the Dream fast-path added by this PR has an
+     * equally broad {@code catch (Exception)} and did not. A blocking call inside
+     * consolidation that throws InterruptedException CLEARS the flag, so swallowing
+     * it leaves the poller thread firing further schedules through a shutdown — the
+     * exact failure B2 was raised for, reachable by the second of two sibling
+     * catches in the same class.
+     */
+    @Test
+    @Timeout(10)
+    void fire_dreamScheduleInterrupted_restoresInterruptFlagAndLogsFailed() throws Exception {
+        var schedule = makeDreamSchedule("sched-dream-interrupt", "user-9");
+        schedule.setAgentVersion(1);
+
+        // Mimic a blocking call inside consolidation being interrupted: the flag is
+        // consumed by the throw, exactly as latch.await() does on the conversation
+        // path.
+        when(dreamService.processScheduledFire(any(), any(), any())).thenAnswer(inv -> {
+            Thread.interrupted();
+            throw new InterruptedException("consolidation interrupted");
+        });
+
+        assertFalse(Thread.currentThread().isInterrupted(), "precondition: flag starts clear");
+        try {
+            ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+            assertTrue(Thread.currentThread().isInterrupted(),
+                    "the Dream fast-path must re-assert the interrupt flag its catch consumed, or the poller "
+                            + "keeps firing schedules through shutdown");
+            assertEquals(FireStatus.FAILED.name(), result.status());
+            assertTrue(result.errorMessage().startsWith("InterruptedException"),
+                    "expected the interrupt to be recorded, got: " + result.errorMessage());
+            verify(scheduleStore).logFire(argThat(log -> log.status().equals(FireStatus.FAILED.name())));
+        } finally {
+            Thread.interrupted();
+        }
+    }
 
     private static ScheduleConfiguration makeDreamSchedule(String id, String userId) {
         var s = new ScheduleConfiguration();

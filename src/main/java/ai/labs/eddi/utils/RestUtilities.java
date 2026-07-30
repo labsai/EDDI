@@ -67,9 +67,18 @@ public class RestUtilities {
         if (uriString.contains("://")) {
             uriString = uriString.substring(uriString.indexOf("://") + 3);
             int pathStartIndex = uriString.indexOf("/");
-            // an authority-only URI such as "eddi://ai.labs.agent" has no path segment
-            // to extract an id from — treat it as an empty path rather than blowing up
-            relativeUriString = pathStartIndex >= 0 ? uriString.substring(pathStartIndex) : "";
+            if (pathStartIndex >= 0) {
+                relativeUriString = uriString.substring(pathStartIndex);
+            } else {
+                // An authority-only URI such as "eddi://ai.labs.agent" has no path segment
+                // to extract an id from — treat it as an empty path rather than blowing up.
+                // The query has to survive that: "eddi://ai.labs.agent?version=1" carries no
+                // id but does carry a version, and discarding the whole remainder reported
+                // version 0 — which is the value callers already use to mean "unspecified",
+                // so an explicit version was silently indistinguishable from none.
+                int queryStartIndex = uriString.indexOf('?');
+                relativeUriString = queryStartIndex >= 0 ? uriString.substring(queryStartIndex) : "";
+            }
         } else {
             relativeUriString = uriString;
         }

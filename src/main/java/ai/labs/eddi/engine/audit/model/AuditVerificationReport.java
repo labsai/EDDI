@@ -25,12 +25,13 @@ import java.util.List;
  * <p>
  * <strong>What the chain check does not cover.</strong> A gap is only visible
  * between two surviving entries, plus at the head when the swept page provably
- * starts at the beginning of the conversation ({@code skip == 0} and the page
- * did not fill its limit, so sequence 0 must be present). Removing the
- * <em>newest</em> entries of a conversation is not detectable at all without a
- * stored high-water mark, which this ledger does not keep — {@code INTACT}
- * therefore means "no hole inside the swept range", not "nothing was ever
- * removed".
+ * covers the conversation in full — which is established by the page holding as
+ * many entries as the store counts for that conversation, not by
+ * {@code skip == 0} (the ledger pages newest-first, so skip 0 is the most
+ * recent page, not the first). Removing the <em>newest</em> entries of a
+ * conversation is not detectable at all without a stored high-water mark, which
+ * this ledger does not keep — {@code INTACT} therefore means "no hole inside
+ * the swept range", not "nothing was ever removed".
  *
  * @param scope
  *            what was swept — {@code "conversation"} or {@code "agent"}
@@ -79,10 +80,22 @@ public record AuditVerificationReport(String scope, String scopeId, boolean sign
      * verification or the chain is anything other than {@code INTACT} — note that a
      * sweep with no signing key is never {@code intact}, because it checked
      * nothing, and that an {@code INCOMPLETE} chain is still an incomplete record
-     * even though it is not evidence of tampering.
+     * even though it is not evidence of tampering. Duplicate sequence numbers also
+     * defeat it: the chain cannot be trusted when two entries claim the same
+     * position, even where no number is missing. The one status that does
+     * <em>not</em> defeat it is {@code NOT_APPLICABLE} — that is an agent-scope
+     * sweep, where no single sequence run is expected in the first place.
      */
     public boolean intact() {
-        return signingEnabled && invalid == 0 && unsigned == 0 && chainStatus == ChainStatus.INTACT;
+        // NOT_APPLICABLE counts as clean: an agent-scope sweep spans many
+        // conversations whose sequences interleave, so no single run is expected and
+        // the chain is deliberately not evaluated. Demanding INTACT there would make
+        // every clean agent sweep report intact=false and render the health bit
+        // useless. UNAVAILABLE is NOT clean — there the chain could not be
+        // established, so a deletion would go unseen.
+        boolean chainOk = chainStatus == ChainStatus.INTACT || chainStatus == ChainStatus.NOT_APPLICABLE;
+        return signingEnabled && invalid == 0 && unsigned == 0 && chainOk
+                && (duplicateSequences == null || duplicateSequences.isEmpty());
     }
 
     /**

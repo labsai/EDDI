@@ -92,22 +92,37 @@ public class RestAttachmentUpload {
     }
 
     /**
-     * Ownership gate for every attachment endpoint — and, unlike
-     * {@link ConversationAccessGuard#requireConversationOwner} on its own,
-     * fail-CLOSED on a conversation that does not exist.
+     * Ownership gate for every attachment endpoint. Always invoked on the REQUEST
+     * thread, before any async hop — {@link ConversationAccessGuard} reads the
+     * request-scoped {@code SecurityIdentity}, which is gone once the work moves
+     * onto {@link ManagedExecutor}.
      * <p>
-     * The guard deliberately admits a conversation whose descriptor is missing: on
-     * {@code RestAgentEngine} that is harmless because the operation itself then
-     * 404s, and the leniency exists for legacy conversations that predate ownership
-     * stamping. The attachment store has no such backstop — it happily CREATES a
-     * record for any id and serves it back — so an unknown conversationId turned
-     * these endpoints into a shared, cross-user blob namespace: user A uploads
-     * under an invented id, user B reads it back from the same invented id. A
-     * conversation that was never created is not a legacy conversation; it is a
-     * 404.
+     * Two things must hold, and both are asserted here:
+     * <ol>
+     * <li><strong>The CALLER owns the conversation</strong> (finding A2).
+     * {@code IAttachmentStore} only verifies that the conversation NAMED in the
+     * path owns the blob, and the caller picks that name, so that check is
+     * self-satisfying and says nothing about who is asking.
+     * {@link ConversationAccessGuard#requireExistingConversationOwner} is the
+     * shared gate for this.</li>
+     * <li><strong>The conversation actually exists</strong> (fail-closed). Plain
+     * {@link ConversationAccessGuard#requireConversationOwner} deliberately admits
+     * a conversation whose descriptor is missing: on {@code RestAgentEngine} that
+     * is harmless because the operation itself then 404s, and the leniency exists
+     * for legacy conversations that predate ownership stamping. The attachment
+     * store has no such backstop — it happily CREATES a record for any id and
+     * serves it back — so an unknown conversationId turned these endpoints into a
+     * shared, cross-user blob namespace: user A uploads under an invented id, user
+     * B reads it back from the same invented id. A conversation that was never
+     * created is not a legacy conversation; it is a 404.</li>
+     * </ol>
+     * The guard's {@code requireExistingConversationOwner} already folds the
+     * existence check in, so the local descriptor read below is a deliberate second
+     * gate: it keeps the fail-closed behaviour anchored in this endpoint rather
+     * than depending on which guard method a future edit happens to call.
      */
     private void requireExistingConversationOwner(String conversationId) {
-        conversationAccessGuard.requireConversationOwner(conversationId);
+        conversationAccessGuard.requireExistingConversationOwner(conversationId);
         try {
             if (conversationDescriptorStore.readDescriptor(conversationId, 0) == null) {
                 throw new NotFoundException("Conversation '" + sanitize(conversationId) + "' not found");

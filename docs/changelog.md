@@ -94,6 +94,23 @@ Because E6 makes previously-accepted input fail, the upgrade path was verified b
 
 Third wave of the 124-finding external review. **16 fixed, 1 partial.** This is the wave where the findings were hardest to fix correctly, because the bugs are non-deterministic and several of the obvious fixes are wrong.
 
+### Pre-merge review pass (2026-07-29)
+
+Like #618, this PR reached "approved" without CI or any review bot having seen it — a stacked base disables CodeRabbit, and a base retarget does not fire the CI trigger. A dedicated pass over the 37-file diff produced **6 findings that survived adversarial verification (12 of 18 were refuted) plus 22 from completeness/test critics**, and Copilot found four more once CI could finally run. The high refutation rate is the point: concurrency invites "this looks racy", and verifiers were required to name the interleaving or drop the claim.
+
+- **A destructive primitive behind a missing ownership check (HIGH).** The schedule REST surface never checked `schedule.userId`, which on its own was inert. This PR's `dreamType=dream_consolidation` dispatch armed it: any `eddi-editor` could create and fire a schedule that **bulk-deletes another user's persistent memories**. `RestScheduleStore` already injected `OwnershipValidator` and simply did not use it here. Now admin-or-self on create, update (the re-point path) and `fireNow` — refusing with 403 rather than silently rewriting `userId`, which would hand back a schedule that does something other than what was asked. `system:scheduler` and blank ids stay exempt so existing stored schedules and Manager round-trips keep working.
+- **Dream consolidation crossed agent boundaries.** `process()` read `getAllEntries(userId)` — userId-only, agent-unscoped — while every knob it obeyed came from *one* agent's config, so agent A's `pruneStaleAfterDays` deleted agent B's memories and A's model endpoint saw B's text. Cycles are now scoped to the firing agent's own `sourceAgentId` writes, with `crossAgentMaintenance: true` as an explicit opt-in. Newly reachable in this PR, which gave `process()` its first scheduled caller.
+- **A transient LLM blip permanently disabled a schedule.** A single failure aborted the whole cycle and marked the fire FAILED, so three consecutive 429s dead-lettered the user's dream schedule. Transient classes (429/timeout/5xx) now skip the group and continue.
+- **The B2 interrupt fix destroyed the bookkeeping it was protecting.** The restore in `fire()` ran *before* `logFire()`, and the sync Mongo driver throws `MongoInterruptedException` on connection checkout while the flag is set — so on exactly the interrupt the restore existed to handle, the FAILED fire log was lost and `failCount` never incremented. The flag is now parked and re-asserted in a `finally` after the store round trip, in both `fire()` and the Dream fast-path. The residual half was in `SchedulePollerService`, which ran `markFailed()` on the same still-interrupted thread: the schedule stayed CLAIMED with `nextFire` in the past, was re-claimed every lease expiry, and could never reach `maxRetries` — **an interrupt turned a failing schedule into an unbounded re-fire loop.**
+- **A draining node answered 500 instead of "retry elsewhere".** `RestAgentEngine.sayInternal`'s trailing `catch (Exception)` swallowed the `RejectedExecutionException` from the new shutdown gate and rethrew it as a generic 500 — defeating the point of the graceful-shutdown work in this same PR.
+- Also: the parallel-phase batch deadline was sized at one member *attempt*, so it always fired first and made the per-member RETRY/ABORT/attributed-SKIP branches unreachable; `maxSummarizationCalls` silently stopped being enforced for stored configs (now honoured as an explicit backstop, deprecated in favour of `maxCostPerRun`); `BaseRuntime` swallowed `onComplete` failures with no identifying context; and `WorkflowStoreClientLibrary` documented an invariant the code neither enforced nor detected — now the component key no longer depends on it at all.
+
+**Docs corrected against the code, not against intent** — the third and fourth instances of that error in this stack, so every claim was re-read out of the implementation: `architecture.md` told operators to create Dream schedules with the `create_schedule` MCP tool, which has **no `metadata` parameter** and therefore cannot set the marker the dispatcher matches on, so the documented procedure produced a schedule that never consolidated (REST is the only working route today, now written out with the two gotchas that bite: a `message` is required for CRON triggers even though the Dream path ignores it, and an unset `userId` defaults to `system:scheduler`, which `DreamService` refuses). `IEventBus` and `InMemoryConversationCoordinator` both claimed the coordinator is selected at runtime via `eddi.messaging.type`; it is `@IfBuildProfile("nats")`, a **build-time** condition, and that property is read by no Java code at all.
+
+**One disagreement adjudicated rather than deferred to severity.** The completeness critic rated the NATS C13/C10 parity gap CRITICAL; two independent verifiers refuted it because `@IfBuildProfile("nats")` keeps that class out of shipped artifacts. Both cannot be right. The code defect is real and was fixed, but the CRITICAL rating was not — it is unreachable unless someone builds with that profile, and the class now records why the two coordinators differ.
+
+**Two tests were relabelled rather than trusted.** The critics caught that both new `GracefulShutdownService` interrupt tests pass identically with and without the fix — `sleepQuietly` restores the flag, so the old code's next `sleep` threw immediately and it exited just as fast. That fix buys accurate logs (an interrupt was being reported as a 30-second timeout), not changed behaviour, and the tests now say so instead of implying coverage they do not have.
+
 ### Cancellation that cancelled nothing (C1)
 
 `CompletableFuture.cancel(true)` does **not** interrupt a `runAsync`/`supplyAsync` body — the JDK documents `mayInterruptIfRunning` as having no effect there. Five call sites in `GroupConversationService` relied on it, so "cancelled" agent threads **kept mutating `gc.getTaskList()`, `gc.getTranscript()` and the errors list after the orchestrator had already persisted the document**. Replaced with a cooperative `MemberTurnCancellation` token checked at the agent turn's own await points, plus a bounded drain. This is also the root cause of C7 (`resetStrandedInProgressTasks` could strand the very task it exists to rescue, because a falsely-"cancelled" thread flips state between the snapshot and the mutate).
@@ -138,11 +155,93 @@ Per the repo owner's decision, `DreamService` is now registered with `ScheduleFi
 
 ### Partial
 
-**F6** — the REST/pipeline half is done (a `ConnectionCallback` now sets cancelled on client disconnect, and cancellation is checked at more points). The in-`modules/llm` half — cancellation checks inside the tool loop and the cascade — is deferred, since that module is owned by another workstream.
+**F6** — the REST/pipeline half is done (client disconnect now sets cancelled, and cancellation is checked at more points). The in-`modules/llm` half — cancellation checks inside the tool loop and the cascade — is deferred, since that module is owned by another workstream.
+
+> Disconnect is detected by testing `SseEventSink.isClosed()` before and around each send — **not** by a `ConnectionCallback`, which RESTEasy Reactive does not invoke on this path, as `RestAgentEngineStreaming` documents at the call site. An earlier draft of this entry named `ConnectionCallback`: it described the approach that was tried, not the one that shipped.
 
 ### Verification
 
-Clean compile passed **first attempt**, with no repairs needed despite three cross-workstream signature changes. Full suite: 12,633 tests, **0 non-environmental failures** (308 listed failures/errors all carry a loopback/selector/event-loop signature; this machine cannot bind sockets). All four mutation checks bite — C1, C5, C9 and B2 each fail a test when reverted, verified against whole test classes and with surefire reports checked to confirm the new classes actually executed rather than being silently skipped.
+Clean compile passed **first attempt**, with no repairs needed despite three cross-workstream signature changes. Full suite **as of the original wave-3 work**: 12,633 tests, **0 non-environmental failures** (308 listed failures/errors all carry a loopback/selector/event-loop signature; this machine cannot bind sockets). All four mutation checks bite — C1, C5, C9 and B2 each fail a test when reverted, verified against whole test classes and with surefire reports checked to confirm the new classes actually executed rather than being silently skipped.
+
+> The pre-merge review pass above re-ran the suite after its fixes: **12,912 tests**, failures confined to the same 15 known network-dependent classes. Both figures are real runs at different points — the earlier one is not superseded, it just predates ~280 added tests.
+## 🔎 fix(llm): review follow-ups — workflow version parse, log sanitization (2026-07-29)
+
+**Repo:** EDDI (`fix/review-followup-workflow-version`)
+
+Two findings Copilot raised against #618 after it had already been approved, kept out of that PR so they arrive small enough for CodeRabbit to actually review (#618 reached 120 files, past CodeRabbit's 100-file limit, so it merged without ever getting a CodeRabbit pass).
+
+- **`WorkflowTraversal` aborted tool discovery for a whole turn over one malformed URI.** Every other malformed-URI branch in that loop warns, marks the traversal degraded and continues. The version parse did not. `String.replaceAll` returns its input **unchanged** when the pattern does not match, so a workflow URI carrying `?version=abc` passed the `contains("version=")` guard and reached `Integer.parseInt` as the literal string `"version=abc"`. The `NumberFormatException` escaped `discoverConfigs` entirely — so a single bad workflow URI took out httpcall, mcpcall and RAG tool discovery for that turn, rather than skipping the one workflow that was broken. Now matched explicitly, with "present but unusable" treated exactly like "absent" (and a digit run too large for an `int` folded into the same path).
+
+- **`MemoryItemConverter` logged raw exception messages** in both the prompt-snippet and global-variable catch blocks. Exception text can carry user-controlled values, so this is the same CWE-117 class CodeQL flagged five times in #618; routed through `LogSanitizer`.
+
+## 🐳 fix(demo): the Open WebUI seeder did nothing on a second run (2026-07-29)
+
+**Repo:** EDDI (`feat/openai-api-adapter`)
+
+Two defects in `src/main/docker/seed-demo-agent.sh`, both found by actually re-running the stack rather than reading it. Also `.env.example` and [`docs/open-webui-integration.md`](open-webui-integration.md) §1.
+
+**Adding an LLM key later silently did nothing.** The seeder guarded on *"is any model exposed"* and `exit 0`-ed if so. Because the MongoDB volume persists, the most common second run is exactly the case it broke: the rule-based agent is already there, the user has now set `EDDI_DEMO_LLM_API_KEY`, and they re-run to get an agent that can actually answer questions — and got no new model and no explanation. The guard is now **per agent**, keyed on the model-id prefix each descriptor name slugifies to (`eddi-demo-agent-`, `eddi-llm-demo-`), so each run creates only what is missing and says what it skipped. Vault storage was split into its own step that runs whenever a key is supplied, so changing the key rotates it instead of leaving the old one behind an "already exists" check.
+
+**The final "Ready" listing could omit the agent just created.** The poll exited on `grep -q '"id"'`, which a pre-existing agent satisfies immediately — so a freshly deployed LLM agent, still inside the adapter's 30s model-cache TTL, was absent from the output and looked like a failure. Verified it was only a display problem: re-querying after the TTL showed all four models. The loop now waits for the specific prefixes expected on this run.
+
+**Verified live, not reasoned about.** Ran the stack against a populated volume: first run created the rule-based agent, second reported `already deployed — skipping` and created no duplicate, third (with a key) added the LLM agent and listed all four models. The old code would have exited at step two.
+
+**Also:** the closing "open this URL" line hardcoded port 3000 and was wrong whenever `OPEN_WEBUI_PORT` was remapped — compose now passes `OPEN_WEBUI_URL`. `.env.example` gained an Open WebUI demo section (the demo's `.env` is gitignored, so these variables were undiscoverable from a fresh clone). The docs gained three subsections that only exist because they bit during testing: re-running, port collisions (`Bind for 0.0.0.0:7070 failed` when another EDDI holds the port), and `down` vs `down -v`.
+
+**Doc accuracy pass.** Cross-checked §3 against `application.properties` — all 11 `eddi.openai-compat.*` keys and all 11 defaults match; the §8 error table's 8 codes all exist in `OpenAiErrorResponse`; the documented endpoints match `RestOpenAiAdapter`'s `@Path`s. No drift found there.
+
+---
+
+## 🔒 fix(openai): two CodeQL alerts — logged intent, and a regex flagged as ReDoS (2026-07-29)
+
+**Repo:** EDDI (`feat/openai-api-adapter`)
+
+CodeQL failed the PR with 3 new alerts. Two are addressed here; the third is deliberately left.
+
+**`java/log-injection` (medium, `PostgresUserConversationStore:139`).** The delete path logged `intent` unsanitized. That file predates this branch, but the OpenAI adapter is what makes it carry attacker-influenced data: the intent is `channel:openai:<agentId>:<chatKey>` and the chat key comes from a request header, so a newline in it could forge log entries. Routed through the existing `LogSanitizer.sanitize()`, which the bridge already uses for its own logging. The Mongo store logs nothing, so there was no counterpart to mirror.
+
+**`java/polynomial-redos` (high, `AgentModelResolver.slugify`).** The dash trim `(^-+|-+$)` is replaced with a character walk. **This is not a fixed vulnerability, and should not be read as one.** The alert is a false positive twice over:
+
+1. The `NON_SLUG_CHARS` pass on the line immediately above collapses every run of non-slug characters into a *single* `-`, so `-+` can never match more than one character.
+2. Measured directly, the regex is linear anyway — 3ms on 400k separator characters. Java's engine anchors on `$` rather than backtracking, so the quadratic path CodeQL models does not exist here.
+
+It was replaced regardless: a standing high-severity alert competes for attention with real ones, and character walking is no harder to read than the regex was.
+
+**A vacuous test was written and then removed.** The first version of this change asserted `slugify` completed within 2 seconds on 400k separators. Measuring the *old* regex showed it finishes in 3ms — so that assertion would have passed against both implementations and proved nothing. It was deleted rather than shipped; a test that cannot fail is worse than no test. What remains asserts trimming *behaviour* across the implementation swap, and is mutation-checked: stubbing out the trim kills 3 tests.
+
+**Dismissed with justification: `java/user-controlled-bypass` (high, `OpenAiAuthFilter:84`).** The filter returns early when the request path is not under `/v1`, and the path is user-controlled — which CodeQL reads as authentication being skippable.
+
+It is not, because this filter is neither the only nor the first check in front of those paths. `application.properties` ends with `quarkus.http.auth.permission.authenticated.paths=/,/*` at policy `authenticated`, and **Quarkus HTTP authorization runs before JAX-RS request filters** — so every path the filter declines has already been required to authenticate. The one exception is `/v1/*`, which carries its own permission entry at policy `permit` precisely so the shared API key can be checked in the filter rather than rejected at the OIDC layer as a malformed JWT. That `permit` set is exactly what `isGuarded` returns `true` for. The guard therefore does not choose between *authenticated* and *anonymous*; it chooses between *the adapter's key check* and *Quarkus' own*, and declining is the safe branch.
+
+The reasoning lives in a javadoc block on `isGuarded`, not only in the GitHub dismissal, so a reader of the code finds it where the suspicious-looking early return is.
+
+**The dismissal is pinned by a test.** It rests entirely on two lines of configuration, and a security finding waved away on the strength of config that nobody re-checks is how a real bypass eventually ships. `quarkusStillGuardsEverythingThisFilterDeclines` reads `src/main/resources/application.properties` and asserts the catch-all paths, the catch-all policy, and the `/v1/*` exemption. Flipping the catch-all policy to `permit` fails it. Note it reads the file from *source*: the first version loaded `/application.properties` from the classpath, where `src/test/resources` shadows the production file and declares none of these keys — it asserted nothing and failed loudly on first run.
+
+---
+
+## ✨ feat(openai): render structured outputs, report token usage (2026-07-28)
+
+**Repo:** EDDI (`feat/openai-api-adapter`)
+
+Two gaps closed in the `/v1` adapter, both from the honest support assessment of the previous session. Files: new `OpenAiOutputRenderer`, new `TokenUsage` + `StreamOptions` DTOs, changes to `OpenAiConversationBridge`, `OpenAiSseWriter`, `RestOpenAiAdapter`, `ChatCompletionResponse`, `ChatCompletionChunk`, `ChatCompletionRequest`. Docs: [`docs/open-webui-integration.md`](open-webui-integration.md) §7.1, §7.2, §10.
+
+**Structured outputs are no longer dropped.** An EDDI turn carries eight output types; the OpenAI protocol carries one string, and the shared `ConversationOutputExtractor` keeps only the text. Through that lens a wizard agent whose whole turn is *"Which provider?"* plus five quick replies arrived as a question with no visible answers — indistinguishable from a broken agent. `OpenAiOutputRenderer` now takes the shared extractor's text **verbatim** (a reply's wording must not depend on which channel it left through) and appends a Markdown rendering of the rest: quick replies as backticked values, images as `![alt](uri)`, application links as Markdown links, buttons as their label, input fields as a described prompt. `agentFace` and `other` are dropped deliberately — an avatar has no text equivalent, and captioning it would add a line the agent author never wrote.
+
+- **The shared extractor is untouched.** Its other callers (`GroupConversationService`, `CreateSubAgentTool`, `ConverseWithAgentTool`) feed agent-to-agent prompts, where interaction affordances are noise. The renderer is adapter-local.
+- **Quick replies render as literal values, not a numbered list.** A numbered list invites `2` as an answer, which no input matcher recognises. The `value` is what a chat UI puts on a button and therefore what a user would retype; `expressions` stays internal (asserted by test — it is an internal identifier that must not be shown).
+- **Both POJO and Map item shapes are handled** — a turn that just ran yields typed items, a rehydrated conversation yields Maps.
+- **Streaming needed a split.** When the model streamed the prose token by token, re-rendering the full text at `onComplete` would have sent the whole reply twice, so `renderExtras()` emits the affordances alone.
+
+**`usage` is now reported — the previous entry's claim that EDDI does not surface token counts was wrong.** `LlmTask` writes `audit:token_usage` (`inputTokens`/`outputTokens`/`totalTokens`) into the current step, accumulated across every model call the turn made — cascade steps and tool round-trips included.
+
+- **This required `returnDetailed=true` on both `say` and `sayStreaming`.** The filtered snapshot keeps only `input:initial`, `actions`, `output*` and `quickReplies*`, dropping every audit key — which is why the counts looked unavailable. The snapshot is read in-process and never serialized to the client, so the cost is one extra step's worth of references. This flag is load-bearing and otherwise invisible, so a test pins it: flipping it back would silently remove `usage` from every response with nothing else failing.
+- **Absent, not zero, for rule-based agents.** They call no model; `0 tokens` reads in a client as a measurement rather than an absence.
+- **`totalTokens` is derived when a provider omits it** but reports both parts — a usage block whose parts do not add up is worse than one that computes the sum.
+- **Streaming usage is opt-in via `stream_options.include_usage`**, emitted as a trailing empty-`choices` frame after `finish_reason` and before `[DONE]`, per spec. An unrequested empty-choices frame is a protocol deviation some clients reject.
+
+**Testing:** 183 adapter tests (up from 151) — new `OpenAiOutputRendererTest` (21) plus usage coverage in the bridge, SSE writer and wire-format suites. Two mutation checks were run rather than trusting green: stubbing `renderQuickReplies` to `null` killed 7 tests, and reverting `returnDetailed` to `false` killed the 2 flag-pinning tests.
+
+**Not done: exposing agent groups as models.** Assessed rather than assumed — every piece exists (groups list via `readDescriptors("ai.labs.group", …)`, `discuss()` returns a `synthesizedAnswer`, `continueDiscussion()` gives multi-turn, `GroupDiscussionEventListener` gives streaming), but it needs a second bridge with its own conversation mapping, streaming path and approval surface. That is a feature-sized change, not an addition to this one, so it is recorded as gap #1 in §10 instead of half-landed here.
 
 ---
 
@@ -151,6 +250,24 @@ Clean compile passed **first attempt**, with no repairs needed despite three cro
 **Repo:** EDDI (`fix/code-review-llm-memory`)
 
 Second half of wave 2, stacked on the access-control PR. Covers the LLM tool pipeline, the persistent-memory subsystem, the v5→v6 migrations, and import/export.
+
+### Pre-merge review pass — and corrections to the claims below (2026-07-29)
+
+This PR reached "approved" having been reviewed by **no CI run and no review bot**: CodeRabbit reported `Review skipped: reviews are disabled for this base branch` because it was stacked on a disabled base, and a base-branch retarget fires `edited`, which is not in the default `pull_request` trigger set — so no workflow ever ran on its head SHA. A dedicated review pass over the 91-file diff found **16 findings that survived adversarial verification**, plus 21 from completeness/test critics. All are fixed here except one, named below. **Several entries further down overstated what the code delivered; those claims are corrected here rather than quietly edited away.**
+
+Fixes with user-visible consequence:
+
+- **F14 broke the error path it was meant to unify.** Routing rule-triggered MCP calls through `ToolExecutionService.executeToolWrapped` was right in intent, but that wrapper *catches every exception and returns an error string*. `RetryConfiguration.executeWithRetry` therefore never saw a throwable: retry never retried, `continueOnError` became dead code, and a failed MCP call was **stored as a successful response**. The metering wrapper is kept; a real failure signal is restored on top of it.
+- **F18's delegation-depth guard was inert in production.** `delegationDepth` was injected only into the callee's `startConversation` context, landing on step 0; the follow-up `say` carried no context, so the turn that actually decides delegation read nothing. The claim below that F18 was "mutation-checked" was true of the *test*, not of production — the test drove the mechanism directly and never crossed the `say` boundary where the value was lost. The depth now propagates to the turn that reads it.
+- **F15 was fixed on two of three merge routes.** Within-server dedupe and the `AgentOrchestrator` source merge were handled; the cross-server merge in `discoverTools()` was still `addAll`/`putAll`, so two MCP servers advertising the same tool name still shadowed silently.
+- **G12 / G5 / G7 shipped on MongoDB only.** The "a turn is never silently discarded" guarantee, the `most_accessed` recency reservation, and global-entry ownership preservation were all absent from the PostgreSQL adapter — which answered benignly rather than signalling the gap. Now ported, with tests. **This is the third cross-backend gap in this stack** (after schedule `userId` and the audit `sequence`), which is no longer coincidence: each was a feature built against one backend, silently missing on the other, and invisible because the degraded answer looked like a normal one. The cross-backend conformance suite (D4/J3) is the real fix and remains outstanding.
+- **A summarizer could be handed another vendor's API key.** When `conversationSummary` names a different `llmProvider` than the parent task, the parent's resolved parameters — `apiKey`, `baseUrl` — were inherited and passed to that other vendor's client. Not theoretical: the pre-PR POJO defaults serialized `llmProvider: "anthropic"` into stored configs. Credential- and endpoint-bearing keys now stop at a provider boundary; vendor-neutral tuning keys still travel.
+- **Validation moved to the boundary where rejecting is safe.** `McpCallsTask.configure()` and RAG retrieval were both throwing/dropping on *stored* configs — a workflow-load failure and a silently empty knowledge base respectively. Both are now lenient on read (stored configs stay loadable, which is the one backward-compat contract that matters) and strict on write, in `RestMcpCallsStore` and `RestRagStore`.
+- Also fixed: the v6 rename migration aborting permanently when a v6 collection merely *exists* (EDDI creates those itself via `createIndex`) instead of skipping; the new pre-migration backup duplicating conversation transcripts outside the reach of GDPR erasure; export cleanup recursively deleting a shared `tmp/<agentId>` it could not prove it created, reaching `tmp/import/`; and the streaming no-partials fallback overwriting the `warning` key that `responseValidation` dispatches on, silently skipping `onTruncation`/`onContentFilter`.
+
+**Still not fixed — I5.** `AgentConfiguration.maxCheckpointsPerConversation` is *still ignored at runtime*. The test named `explicitRetentionIsHonoured` exercises an overload no production path calls, so it proved nothing; the misleading label is removed rather than left to imply coverage. Wiring the value through needs a session-scope slot on `IConversationMemory` and propagation via `IAgent`/`Agent`, which is a larger change than a review fix should smuggle in. **Any statement below that I5 is complete is wrong.**
+
+One critic finding was investigated and **rejected**: the `ExpressionFactory.setDomain` removal was claimed to change `and(...)`/`or(...)` parsing, but domain splitting happens only in `setExpressionName(String)` and the parser builds children through constructors that assign the name verbatim — the deleted line really was a no-op.
 
 ### The tool pipeline had a second door
 
@@ -194,6 +311,133 @@ The wave-2 agent added `inheritedParameters` overloads to `SummarizationService`
 ### Verification
 
 Full unit suite: 12,384 tests, **0 non-environmental failures**. G2 and G12 mutation-checked, plus a second sharper mutation for G2 that removes only the input-scrub call — both halves are independently covered. F13's new wiring is mutation-checked at the `LlmTask` hop.
+## 🧵 fix(security): carry caller identity across the cascade and group dispatches (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+The caller binding is a `ThreadLocal`, and four more dispatch sites hand a turn to a fresh virtual
+thread without carrying it. A `${caller:token}` apicall reached from any of them failed closed with
+"the conversation turn has no authenticated caller" — safe, but invisible to the agent designer and
+dependent on unrelated configuration.
+
+- `CascadingModelExecutor:577` — every cascade step runs on `TIMEOUT_EXECUTOR`. The same agent config
+  worked or failed purely on whether `modelCascade` was set.
+- `GroupConversationService:282` — the whole discussion is dispatched to a virtual thread, so *no*
+  member agent had a caller.
+- `GroupConversationService:2366` — parallel-phase speakers fan out to further threads.
+- `GroupConversationService:3772` — the HITL resume path.
+
+`CallerIdentityContext` gains `withIdentity` for `Runnable`/`Callable`, `withIdentitySupplying` for
+`Supplier` (needed by `CompletableFuture.supplyAsync`), and `captureOrCurrent()`, which prefers the
+active request and falls back to the thread's binding — the group discussion is dispatched from the
+REST thread, the cascade from mid-pipeline.
+
+**Design note.** The `Supplier` variant is named apart from the `withIdentity` overloads on purpose:
+a value-returning lambda satisfies both `Callable` and `Supplier`, so same-named overloads are
+ambiguous at every call site.
+
+**Review round two** found a fifth site and two flaws in the wrapper itself:
+
+- `GroupConversationService:1788` — the task-force EXECUTE phase fans out again through
+  `CompletableFuture.runAsync`, so every task wave lost the caller. Missed first time because the
+  search pattern covered `submit` and `supplyAsync` but not `runAsync`.
+- The parallel-phase fan-out captured with `current()`, which is null when `discuss()` is called
+  synchronously on the REST thread — only `captureOrCurrent()` sees the request there.
+- **A null identity was a no-op**, so work dispatched *without* a caller inherited whatever binding
+  the pooled thread still carried from the turn before. It now binds null, masking it.
+- **Nested wrappers cleared instead of restoring**, so an inner wrapper wiped the outer caller and
+  the rest of that turn ran unauthenticated. The previous binding is now saved and restored.
+
+**Note on scope.** A group member agent now acts as the person who started the discussion. That
+follows the feature's model — the operator acts as the chatting user — but it is worth stating,
+because a member agent's reads are now attributed to that user in the audit trail.
+
+1204 tests pass across the affected suites. Neutering the `Runnable` wrapper fails the propagation
+test, so the binding is pinned rather than assumed.
+
+---
+
+## 🔓 fix(security): ${caller:token} never reached its resolver (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+A critical review of the caller-identity PR found the feature was **dead on arrival**, and the same
+defect silently disables two older documented features.
+
+`ApiCallExecutor.buildRequest` runs every header value through `prePostUtils.templateValues`
+*before* the caller-identity, global-variable and vault resolvers. `TemplatingEngine`'s trigger
+regex `\{[a-zA-Z#/!]` matches `{c`, so `Bearer ${caller:token}` is handed to Qute, which parses
+`{caller:token}` as a namespaced expression. An unresolvable namespace is a hard failure regardless
+of `strictRendering`, and no `caller` resolver existed. Proven against the project's own build:
+
+```text
+Bearer ${caller:token} -> THREW: No namespace resolver found for [caller]
+Bearer ${vault:my-key} -> THREW: No namespace resolver found for [vault]
+${vars:default-model}  -> THREW: No namespace resolver found for [vars]
+```
+
+So `${vault:...}` and `${vars:...}` in apicall headers have never worked either.
+
+**Fix.** `CallerNamespaceResolver` returns the `caller` placeholder verbatim so it round-trips
+through templating to the real resolver. It resolves nothing itself.
+
+**Deliberately `caller` only.** `vault`/`eddivault` keep failing loudly in templated positions.
+Letting them through would widen where a secret is substituted, and the resolved request *body* is
+written to conversation memory unscrubbed — a vault reference in a body template would put a
+plaintext API key into MongoDB. Docs claiming vault works in apicall headers were the bug, not the
+behaviour.
+
+**Why no test caught it:** all three `ApiCallExecutor` suites stub templating as a pass-through, and
+`CallerIdentityResolverTest` calls the resolver directly. Nothing exercised header -> Qute ->
+resolver. `CallerNamespaceResolverTest` now does, including a guard-rail test that fails without the
+resolver and one asserting vault still refuses.
+
+**Also fixed**
+- `setup-api` hardcoded `null` for the LLM base URL while the manager sent Ollama's URL as
+  `apiBaseUrl` — the *tool target* — pointing every generated tool at the model server.
+  `CreateApiAgentRequest` gains an `llmBaseUrl` field, passed to `createLlmConfig`.
+- The by-value token redaction added last round was untested through `ApiCallExecutor`; deleting the
+  call kept every test green. Now covered with a real resolver and mutation-checked.
+- Docs overclaimed: `${caller:userId}` is resolved in headers and query parameters, not "anywhere";
+  `rejectTokenReference`'s Javadoc claimed request bodies are checked.
+
+---
+
+## 🔐 feat(security): forward the caller's identity to apicall headers (2026-07-28)
+
+**Repo:** EDDI (`feat/caller-identity-passthrough`)
+
+An agent could only call an API with a *static* credential baked into its apicall config. That is the wrong shape whenever the API being called is EDDI's own: an OIDC token expires within the hour, cannot be least-privilege, and collapses every action to one synthetic principal in the audit trail. The EDDI-Manager "Platform Operator" needs exactly this — an agent that reads the platform on behalf of whoever is chatting with it — and could only be built by smuggling the user's bearer through the per-turn conversation `context`, which persists the token to MongoDB.
+
+**What changed.** Apicall *headers* may now reference the authenticated caller:
+
+- `${caller:token}` — the caller's raw bearer token
+- `${caller:userId}` — the caller's principal name (not a secret)
+
+`ApiCallExecutor` resolves these last in the header chain (after global variables and vault refs), because resolution needs the target URI.
+
+**Files**
+- `engine/security/CallerIdentity.java` — record (token, userId, origin); deliberately not part of `IConversationMemory`.
+- `engine/security/CallerIdentityContext.java` — captures the identity on the REST request thread and binds it to whichever pool thread runs the turn.
+- `engine/security/CallerIdentityResolver.java` — the `${caller:...}` resolver, mirroring `SecretResolver` / `GlobalVariableResolver`.
+- `engine/security/OriginMatcher.java` — scheme/host/port comparison with default-port normalization.
+- `engine/internal/ConversationService.java` — captures in `processConversationStep` and decorates the callable.
+- `modules/apicalls/impl/ApiCallExecutor.java` — resolves in headers; rejects a token reference in a query parameter.
+
+**Threading — the non-obvious part.** A turn is built on the request thread but executed twice removed from it: `submitInOrder` hands it to a coordinator thread, which hands the pipeline to *another* thread via `runtime.submitCallable`. Request-scoped beans (`SecurityIdentity`) resolve at none of those points. So the identity is captured while the request context is still live and travels **with the callable** (`withCallerIdentity`), not with a thread. Binding the coordinator thread would have missed the pipeline entirely — an easy and silent mistake.
+
+**Design decisions**
+1. **Same-origin only.** The token is released only when the outbound call targets the exact `scheme://host:port` the caller addressed, taken from the inbound request rather than configuration. An agent config naming a third-party host therefore cannot exfiltrate a user's token, and the feature needs no allow-list to be safe out of the box.
+2. **Headers only.** `${caller:token}` in a query parameter or request body is rejected — tokens in URLs leak through access logs, proxies and browser history, and outside a header the reference is never substituted. `${caller:userId}` is resolved in headers and query parameters.
+3. **Fails closed.** An unsatisfiable reference throws rather than resolving to `""`, which would silently send `Bearer ` and surface far away as a puzzling 401.
+4. **Never stored.** Resolution happens while building the request, and `scrubSensitiveHeaders` redacts it before the request is written to conversation memory. Header-*name* matching alone was not enough — a token placed in an unconventionally named header would have slipped through — so the resolved token is additionally matched by value.
+5. **Opt-out.** `eddi.caller-identity.enabled` (default `true`) forbids the feature outright.
+
+**Async boundaries.** Two further hand-offs lose a `ThreadLocal` binding and had to be covered explicitly, or `${caller:token}` would fail closed for no reason the config author could see: the HITL **resume** path (`runtime.submitCallable(resumeCallable, ...)`) and **fire-and-forget batch** calls in `ApiCallExecutor`. `CallerIdentityContext.propagate()` carries the binding across the latter; the resume path captures its own caller, since a resume is itself an authenticated request.
+
+**Tests.** `CallerIdentityResolverTest` (24) and `CallerIdentityContextTest` (10) — same-origin refusals (host, port, scheme downgrade), fail-closed paths, regex-escaping of tokens containing `$`/`\`, thread isolation, and clearing on pooled threads. Disabling the same-origin guard fails 4 tests (mutation-checked). All 227 `ConversationService*Test` tests still pass.
+
+**Note for the manager:** the operator ships this as its `caller-identity` auth mode, provisioning `apiAuth` as `Bearer ${caller:token}`; the conversation-context workaround and its token-at-rest warning are gone.
 
 ---
 
@@ -210,7 +454,7 @@ EDDI already has `OwnershipValidator`, `ConversationAccessGuard` and `HitlAccess
 - **A1 (critical)** — The **SSE turn endpoint had no ownership check** while its non-streaming twin did. The turn then executed under the *target* conversation's `userId`, loading that user's long-term memories into the prompt and running tool calls in their context. Fixed in two layers: the guard moved **down into `ConversationService.say`/`sayStreaming`** so no future REST adapter can omit it, *before* the memory snapshot loads — plus a REST-layer check so denial is a plain 403 rather than an error event on an already-200 SSE stream.
 - **A2 (critical)** — Attachment endpoints **authorised the path parameter, not the caller**. `IAttachmentStore.load(ref, requestingConversationId)` checks that the *named* conversation owns the blob — and the caller supplies that name, so the check was self-satisfying. All five methods now require caller ownership, checked on the request thread *before* the async hop (`SecurityIdentity` is request-scoped).
 - **A3** — `?deleteOlderThanDays=0` permanently deleted **every ended conversation in the deployment**, from an endpoint with no role at all. Now admin-only with a minimum of 1 day.
-- **A4** — The tool control plane was unroled: rate-limiter reset, cost-budget reset, and a history endpoint dumping **raw tool arguments and results** for any conversation.
+- **A4** — The tool control plane carried no `@RolesAllowed` at all: rate-limiter reset, cost-budget reset, and a history endpoint dumping **raw tool arguments and results** for any conversation.
 - **A5** — `/propertiesstore/properties/{userId}` had neither role nor ownership check over the same `IUserMemoryStore` that `RestUserMemoryStore` guards on all nine of its methods. Writes there land in the victim's next system prompt.
 - **A6** — A **conversation-id oracle**: it returned another user's live `conversationId`, which is the discovery half of A1 and A3.
 - **A7** — Template preview read **any** conversation's memory and returned a flattened dump of properties/context/memory — and since the caller supplies the template, it was effectively a query language over someone else's conversation.
@@ -225,6 +469,7 @@ EDDI already has `OwnershipValidator`, `ConversationAccessGuard` and `HitlAccess
 - **G16** — `AuditHmac.verifyHmac` had **zero production callers**; the docs told operators to "recompute the HMAC and compare it" and the product shipped no way to do so. Added admin verification endpoints.
 - **G17** — GDPR pseudonymisation did `updateMany($set userId)` with no HMAC recompute, and `userId` is a *signed* field — so **every routine erasure produced rows cryptographically indistinguishable from tampered ones**. The class javadoc claiming a write-once contract was literally true and substantively false.
 - **G18** — No hash chain: entries were independently signed, so **deletion and reordering were undetectable**. Added a per-conversation sequence inside the signed payload (chosen over a global chain, which would serialise all audit writes).
+  - **Follow-up (review):** the first cut shipped this on **MongoDB only**. `PostgresAuditStore` persisted no sequence and left `supportsSequence()` at its `false` default, so `AuditLedgerService` skipped assigning one entirely — **every PostgreSQL deployment silently had no deletion detection**, reported as `UNAVAILABLE`, which reads like "not applicable" rather than "unprotected". Added the column, an idempotent `ALTER TABLE` defaulting old rows to the `UNSEQUENCED` sentinel, the `(conversation_id, sequence)` index verification reads, and `supportsSequence() = true`. This is the second cross-backend gap in this PR (after schedule `userId`), both in compliance code, both invisible because the degraded answer looked benign — the case for the deferred D4/J3 conformance suite.
 - **G19** — `eddi.vault.master-key` ships empty, so entries were written **unsigned by default** while the docs present the ledger as evidence-grade. `ComplianceStartupChecks` had zero references to vault/HMAC/audit.
 - **G20** — Unbounded audit queue that **re-offered failed batches into itself** — an OOM loop under a slow store.
 
@@ -235,6 +480,9 @@ Several docs described behaviour that did not exist. `docs/semantic-parser.md` d
 ### Verification
 
 Full unit suite: 12,384 tests, **0 non-environmental failures** (308 listed failures/errors all carry a loopback/selector/event-loop signature — this machine cannot bind sockets; CI is the gate for those). Five high-stakes fixes were **mutation-checked** — revert the fix, confirm a test actually fails, restore: G2, G12, A1, A2 and F18 all bite, verified against whole test classes (a `-Dtest=Class#method` filter silently runs 0 tests and exits 0 when the method is in a `@Nested` class, which reads exactly like a pass).
+
+---
+
 
 ---
 
@@ -330,6 +578,93 @@ The two backends had silently diverged, because nothing tests them against each 
 `./mvnw clean test-compile` green from scratch (deliberately clean, not incremental — several signature changes crossed workstream boundaries, and incremental builds reuse stale `.class` files for unedited callers). 158 targeted tests pass. E1's fix was mutation-checked: reverting it fails 2 tests in `RuleTest`.
 
 **Deliberately deferred to later waves:** E6 (write-time config validation), E12, D4/J3 (cross-backend conformance suite — needs Testcontainers), the `pom.xml` batch (H4/H11/H15 + J1/J8/J9), and the doc corrections these fixes imply (I7, I8, I12, `semantic-parser.md`, `httpcalls.md`).
+
+---
+
+## ✨ feat(openai): OpenAI-compatible API adapter for Open WebUI (2026-07-27)
+
+**Repo:** EDDI (`feat/openai-api-adapter`)
+
+New `/v1` surface presenting deployed agents as OpenAI "models", so Open WebUI, the Python `openai` SDK, LangChain and LiteLLM can drive EDDI conversations. New package `integrations/openai/`, parallel to `integrations/slack/`. **Disabled by default.** Full guide: [`docs/open-webui-integration.md`](open-webui-integration.md); design rationale in [`planning/openai-api-adapter-plan.md`](../planning/openai-api-adapter-plan.md).
+
+**Four earlier drafts of this plan were built on premises that turned out to be false.** Each was verified against source before implementing; the corrections shaped the design:
+
+- **Content negotiation cannot dispatch sync vs streaming.** The plan routed on `Accept` via two `@Produces` methods. But `openai-python` hardcodes `Accept: application/json` and never varies it by `stream`, and Open WebUI sends no `Accept` header at all (it sniffs the *response* content-type). Every streaming request would have landed on the JSON method. → **one method, dispatching on the `stream` field of the body**, which is what the OpenAI spec says and what vLLM/llama.cpp/LiteLLM/Ollama all do.
+- **Open WebUI does not map `chat_id` to the `user` field.** [#27174](https://github.com/open-webui/open-webui/pull/27174) is an *issue*, closed as *not planned*; `payload['user']` is set only for pipeline models and is an object, not a chat id. The plan's entire per-chat isolation mechanism did not exist. → **key on `X-OpenWebUI-Chat-Id`** ([#15813](https://github.com/open-webui/open-webui/pull/15813), gated by `ENABLE_FORWARD_USER_INFO_HEADERS`), with `user` as a defensively-typed fallback.
+- **`IRestAgentAdministration` is `@RolesAllowed({"eddi-admin","eddi-editor"})` at type level**, and Quarkus enforces it via a CDI interceptor. Injecting it for `/v1/models`, as planned, would have 403'd for every ordinary caller. → read `IAgentFactory` + `IDocumentDescriptorStore` directly. REST facades are the authorization boundary; a public surface must not reach around one.
+- **The auth story did not exist.** `quarkus.http.auth.permission.authenticated.paths=/,/*` captures `/v1/*`, so an `sk-…` bearer would be rejected by OIDC before the adapter ran. → explicit `/v1/*` permission entry plus two modes (`permit` + shared key, or `authenticated` + OIDC), constant-time key compare, and a startup guard.
+- **`UtilityAgentProvisioner` was cut.** It had an unauthenticated caller creating and deploying an agent, cloning another agent's credential reference and consuming `maxAgentsPerTenant` quota — blocked by the role checks above anyway, and in tension with Pillar 1 (the engine authoring agent config at runtime). → replaced by **`<model>:stateless` variants**: start, say, end. No writes, no roles, and useful beyond title generation.
+- **The new-chat heuristic was cut.** `userMessageCount == 1 && hasTurns → endConversation` is unreliable (regenerate and edit-and-resend look identical to a first message), destructive (memory loss is irrecoverable), and directly contradicted the plan's own recommended Open WebUI Filter, which strips history to the last user message — under which *every* turn would have destroyed the conversation. A new chat is a new chat key, which is a new intent. No inference needed.
+- **HITL was unaddressed.** `onSkipped` fires for both `AWAITING_HUMAN` and `IN_PROGRESS`; the plan mapped both to "conversation busy", which would make any agent using `PAUSE_CONVERSATION` permanently unusable with a misleading message. → sentinel-snapshot discrimination, mirroring `SlackEventHandler`, and pauses surface as **chat text with `200`**, never as an HTTP error — a 4xx makes clients discard the user's message.
+
+**Components** (`src/main/java/ai/labs/eddi/integrations/openai/`): `RestOpenAiAdapter` (`/v1`), `OpenAiConversationBridge`, `AgentModelResolver`, `OpenAiMessageMapper`, `OpenAiSseWriter`, `OpenAiAuthFilter`, `OpenAiStartupGuard`, `OpenAiCompatConfig`, `OpenAiApiException` + `OpenAiExceptionMapper`, and 11 wire DTOs under `model/`.
+
+**Other design decisions:**
+- Model ids are `<slug>-<last 6 of agentId>`. Agent names are not unique, so a bare slug would be non-deterministic with two agents called "Support". Name and slug lookups are accepted but only when unique; an ambiguous match returns 400 listing candidates rather than guessing.
+- Slugging folds accents via NFD rather than dropping them — `Übersicht` was slugging to `bersicht`, mangling every non-ASCII agent name. Caught by its own test.
+- Images map to `attachment_N` context entries, so they flow through the existing `AttachmentForwarder` with its vision gating, byte caps and SSRF-guarded fetching. Zero core changes. Two parsing fixes: `data:image/png,payload` is legal and has no `;` (scanning to `;` threw), and remote URLs get a concrete MIME from the extension — `image/*` passes the forwarder's `startsWith("image/")` gate but is rejected by providers when handed to `ImageContent.from`.
+- `usage` is omitted rather than zero-filled when the agent called no model. (This originally read "EDDI does not surface per-request token counts here" — that was wrong, and is corrected in the 2026-07-28 entry below.)
+- In-flight completions are semaphore-bounded — each holds a worker thread, since the bridge blocks on the turn as the Slack handler does.
+- **Reused, not duplicated:** `ConversationOutputExtractor.extractResponse()` already existed in `engine/memory` (added upstream) and handles more output formats than the Slack-local copy the plan proposed extracting. Phase 2 of the plan became unnecessary. Noted separately: `SlackHitlSupport.extractSlackResponseText` still duplicates it and should delegate.
+
+**Self-review pass** (after the feature was complete) found and fixed six defects, each now covered by a test:
+- **Semaphore permit leak.** The streaming path handed its permit to the `StreamingOutput` body to release. If that body never runs — a client disconnecting before serialization starts, say — the permit is never reclaimed, and after `max-concurrent-requests` such events the adapter returns 429 *permanently*, until restart. The resource now releases unconditionally and the stream body takes its own permit inside one try/finally.
+- **`GET /v1/models/{id}` echoed the caller's string, not the canonical id** — a lookup by agent name returned `{"id":"Customer Support"}`, which is absent from `GET /v1/models`, so a client round-tripping the answer would ask for a model that does not exist. `ResolvedModel` now carries requested and canonical ids separately (plus the descriptor timestamp, which was hardcoded to 0).
+- **`InterruptedException` was swallowed** in the turn wait, leaving the worker thread looking healthy with its shutdown signal gone.
+- **A null exception message rendered to the user as the literal text "null"** in the stream error path (NPEs carry no message).
+- **`hasSentContent()` lied** — it returned "the stream has started", true even after a content-free `finish()`. Renamed `hasStarted()`.
+- **The `eddi.openai.requests` counter documented in the plan was never implemented.** Added with `mode` and `outcome` tags, so `paused` (reviewers behind) and `busy` (clients racing) are distinguishable from real errors.
+
+Also verified rather than assumed: `quarkus.rest.jackson.optimization.enable-reflection-free-serializers=false` in this project, so `@JsonProperty` on record components works — `finish_reason` and `owned_by` serialize correctly. Added `OpenAiWireFormatTest` to pin that, since the non-streaming response shape had no coverage at all.
+
+Corrected a documentation claim rather than the code: unimplemented `/v1` paths (`/v1/embeddings` etc.) return Quarkus' plain 404, not an OpenAI error envelope. A catch-all route would risk shadowing the real endpoints for a cosmetic gain.
+
+**Tests:** 148 unit tests plus 16 integration tests, all green. Mutation-checked — reverting the model-ambiguity guard, the identity refusal, and the HITL sentinel distinction each makes the relevant tests fail. `RestOpenAiAdapterTest` (`@QuarkusTest`, binds a socket) is deferred to CI per the local-environment constraint.
+
+**Attachment support** covers all three binary content-part types: `image_url`, `file` (inline PDFs and documents) and `input_audio`. All map to `attachment_N` context entries, so EDDI's existing forwarder does the real work — capability gating, byte caps, PDF text extraction, SSRF-guarded fetching. Three details the wire formats make easy to get wrong, each pinned by a test:
+- `input_audio.data` is **raw base64 with no `data:` prefix**, unlike every other binary payload in the protocol, with the type in a separate `format` field. `mp3` maps to `audio/mpeg` — `"audio/" + format` would produce `audio/mp3`, which is not a real media type.
+- `file.file_data` **is** a full data URI, and the declared `filename` beats a generic `application/octet-stream` type, since clients that base64 a file without sniffing it send exactly that.
+- `file.file_id` references the OpenAI Files API, which EDDI does not implement; those parts are skipped with an actionable warning rather than becoming empty attachments.
+
+**Stateless requests** have two routes to the same behaviour. The `:stateless` model suffix exists because a model name is the only per-request dimension a UI like Open WebUI can express — its title-generation setting is a dropdown, so a query param, header or body field could not be selected there at all. It follows the ecosystem convention for behavioural model variants (OpenRouter's `:nitro`/`:floor`/`:free`, Ollama's `llama3:8b`) and has the side benefit of appearing in `GET /v1/models`, making the capability discoverable. Alongside it, a `stateless` **body field** gives programmatic callers the explicit parameter (`extra_body={"stateless": True}` in the Python SDK). The two are OR-ed rather than letting either win: `model:"x:stateless"` plus `stateless:false` is self-contradictory, and running stateless only loses continuity while running stateful would persist a conversation the caller may not have wanted. `expose-stateless-variants=false` blocks both routes, so the switch cannot be circumvented by moving the request into the body.
+
+**Gateway-agent recipe** documented in §11 of the integration guide, rather than building a passthrough proxy mode. A thin LLM-only agent behind this adapter already provides vaulted API keys, audit, tenant quotas and cost tracking — which is what the passthrough idea was actually after. Building a real proxy would mean entering the LLM-gateway market (LiteLLM, Portkey, Cloudflare AI Gateway) with a worse product, inheriting per-provider streaming/tool/vision passthrough maintenance for zero agent value, and shipping a feature with neither logic nor configuration — which is the opposite of Pillar 1. The recipe's limits are stated up front: single-turn only, one agent per model, no caching/fallbacks/virtual keys.
+
+**`OpenAiCompatIT`** closes the one gap the unit tests structurally could not. The adapter serves sync and streaming from a *single* JAX-RS method, dispatching on the `stream` body field rather than the `Accept` header — a design forced by real client behaviour. A refactor toward content negotiation would look correct in every unit test and silently return JSON to every streaming client, so the guard has to live at the HTTP layer: `stream:true` with `Accept: application/json` (what openai-python sends) and with no `Accept` header at all (what Open WebUI sends) must both yield `text/event-stream`. 16 tests also cover the response wire shape, per-chat conversation isolation end to end, the error envelopes, and tolerance of the unknown request fields every client sends.
+
+It deploys the shared minimal agent (parser/rules/output/templating), so it needs no LLM credentials and is deterministic. **Runs in CI only** — Quarkus cannot boot in the dev sandbox (`Unable to establish loopback connection`), the same environmental limit that already fails `SlackWebApiClientTest`. The test compiles and is discovered by failsafe locally; whether it passes is for CI to say.
+
+**A real defect the integration test caught immediately.** `OpenAiCompatIT.streamingBodyIsWellFormed` failed on its first CI run (passing only on failsafe's retry) with content arriving *after* the `[DONE]` sentinel. Root cause: `ConversationService.sayStreaming` ends with `conversationCoordinator.submitInOrder(...)` and **returns immediately** — every handler callback fires later on another thread. The bridge wrote the terminator in its `finally` as soon as `sayStreaming` returned, so the response closed mid-turn and late tokens raced a closing stream. Fixed by awaiting a `CompletableFuture` completed by whichever terminal callback fires (`onComplete`/`onSkipped`/`onError`), bounded by `request-timeout-seconds`.
+
+The unit tests had all passed because their Mockito stubs invoked the handler **synchronously**, hiding the asynchronous contract entirely — a mock that was more convenient than the real collaborator. A regression test now drives the handler from a background thread, and mutation-checking confirms removing the await makes it fail. This is precisely the class of bug an HTTP-level test exists to find, and it was found on the first run.
+
+**A runnable demo — and two more defects it caught.** `docker-compose.openwebui.yml` brings up MongoDB, EDDI (built from the working tree, since no published image has the adapter), Open WebUI and a seeder that deploys a small rule-based agent so the model list is not empty. Standing it up and actually talking to an agent found two bugs that 146 unit tests and 16 integration tests had not:
+
+- **`plainText` leaked into every assistant message.** Jackson treats `ChatMessage.isPlainText()` as a bean property, so responses carried a field absent from the OpenAI schema. Harmless to clients, wrong on the wire — and invisible to `OpenAiWireFormatTest`, which asserted expected fields were *present* but never that there were no extras. Fixed with `@JsonIgnore`; the tests now assert the exact field set.
+- **The create-conversation race returned a bare 500.** Open WebUI issues the completion and its title request concurrently with the same chat id, so both find no mapping and both insert. The handler caught `ResourceAlreadyExistsException` — but the Mongo store lets a raw `MongoWriteException` (E11000) out, so the catch was dead code against the real store. Now caught broadly and resolved by re-reading the mapping, which is datastore-agnostic (the Postgres store reports it differently again). Verified with four concurrent requests to one chat: all 200.
+
+Also noted while building the demo, and **not fixed here** because it is unrelated to this PR: `POST /backup/import/initialAgents` cannot import the bundled Agent Father on Linux. The ZIP's entries are correctly forward-slashed, but extraction writes them as single files with literal backslashes, so the workflow directory never exists and the import 500s. The demo seeds through the ordinary REST API instead.
+
+**A documentation error found by using the demo, and two settings verified from Open WebUI v0.11.0's notes.**
+
+The guide claimed Open WebUI injects RAG context into the **system message**. It does not, by default. Verified in the running container: `RAG_SYSTEM_CONTEXT` defaults to `False` (`open_webui/env.py`), and `middleware.py` then calls `add_or_update_user_message(...)` rather than `add_or_update_system_message(...)`. So dropping a PDF into a chat delivers several thousand tokens of `### Task: …`, `<context><source id="1">…</source></context>` and `<attached_files>` markup as `{memory.current.input}`, with the user's real question buried at the end — which breaks input matchers, makes property setters capture the whole blob, and stops quick replies firing. Corrected in the guide, added to the must-configure table, and `RAG_SYSTEM_CONTEXT=true` set in the demo compose. This was found by actually uploading a file, not by review.
+
+Also verified and documented: **`AIOHTTP_CLIENT_STREAM_IDLE_TIMEOUT`** (new in v0.11.0) ends a stream when the upstream goes quiet — sized for an LLM's time-to-first-token it will cut EDDI agents short, since a rule-based agent emits nothing at all until its turn completes; and **`passthrough_params`** on a connection forwards non-standard body fields verbatim, which makes the `stateless` field settable from the Open WebUI UI rather than only via `extra_body`.
+
+The demo agent's prompt was also reworded. A property setter bound to `{memory.current.input}` stores the *whole* turn, so answering "Gregor. What are you capable of?" stored all of it as the name and looked like a parsing bug. It now says it stores the next message verbatim — which is what a naive slot-filler does, and a fair thing for a demo to teach.
+
+**A second injection path, and an LLM-backed demo agent.** Setting `RAG_SYSTEM_CONTEXT=true` moved the retrieved chunks to the system message as intended, but an attachment-carrying turn still arrived polluted — this time with an `<attached_files>` block. Different mechanism: Open WebUI's built-in Files tool, gated by `use_builtin_tools`, which depends on a per-model `builtin_tools` capability with **no environment override**. On an EDDI model that capability is pure cost — the adapter never returns `tool_calls`, so the tools can never fire, yet enabling them rewrites the user's message. Documented as a per-model toggle in the model editor, and added to the must-configure table alongside `RAG_SYSTEM_CONTEXT`.
+
+The demo also gained an **optional LLM agent, with its provider key in the Secrets Vault**. The rule-based one demonstrates the transport and the state bridge without credentials, but it has no model, so it cannot answer questions *about* anything — which made "what is this pdf about?" look like an adapter failure when it was simply an agent with nothing to think with. Set `EDDI_DEMO_LLM_API_KEY` (plus optional `_TYPE`/`_MODEL`) and a second agent is deployed whose system prompt references `{context.openai_system_message}`, so it can answer about uploaded files. The key is stored via `PUT /secretstore/secrets/default/demo-llm-api-key` and the config holds only `${vault:demo-llm-api-key}` — an agent config is exported, diffed, rendered in the Manager UI and logged, so a literal key would travel with all of it.
+
+Verified on a clean run: both agents reach `READY`, all four models are exposed, the stored config reads `"apiKey": "${vault:demo-llm-api-key}"`, and a scan of every collection in the database finds the plaintext key in none of them. The LLM *call* itself is still unverified — the run used a deliberately fake key.
+
+Getting there also surfaced a documentation error in `AGENTS.md` §5.5: the workflow step type for LLM interaction is listed as `eddi://ai.labs.langchain`, but `LlmTask.ID` is `ai.labs.llm`, so a workflow built from the table fails to deploy with `Extension 'ai.labs.langchain' not found`. The config-store URI in that row (`eddi://ai.labs.llm/...`) was already right; only the step type was stale. Corrected.
+
+**Not implemented (v1):** `/v1/embeddings`, `tool_calls` passthrough (would cause double-execution — EDDI's tools do not exist in Open WebUI), `n > 1`, `logprobs`. ~~Quick replies and `inputField` outputs are dropped; only text reaches OpenAI clients.~~ (Superseded by the 2026-07-28 entry above — they are rendered as Markdown now.)
+
+---
+
 ## 🎨 Keycloak login theme matching the EDDI corporate identity (2026-07-27)
 
 **Repo:** EDDI (`feat/keycloak-eddi-theme`)
@@ -466,6 +801,70 @@ That last fix required the theme's **first JavaScript** (`resources/js/eddi-a11y
 2. **The verification protocol is not vacuous.** Run against that deliberately broken state, both §6 step 2 (log grep) and step 3 (html-class and stylesheet assertions) fail as designed. Checks that cannot fail are worthless; these can.
 3. **The `install.sh` realm update was executed, not just written.** Against a realm reset to `loginTheme: ""`, the GET-modify-PUT returns 204, sets all three fields, and is idempotent on a second run.
 4. **A dead CSS selector removed.** `.pf-v5-c-login__main-header-desc` matches nothing and appears in no `keycloak.v2` template — the same mistake (styling an element the theme never emits) that killed the original `div.kc-logo-text` approach, reproduced at low stakes. Found by auditing every selector in our stylesheet against the live DOM. `.pf-v5-c-login__main-footer-band` was checked the same way and **kept**: it is emitted by `login.ftl` and only hidden because `registrationAllowed: false`. Also verified the keyboard focus ring — `:focus-visible` needs a real key event to match, and does then give `solid 2px #f59e0b` at 8.25:1 on the card, past WCAG 2.2's 3:1 for non-text indicators.
+
+
+---
+
+## 🧹 fix(release): retire stale deployment records, quiet the Postgres health line, revive two dead checks (2026-07-27)
+
+**Repo:** EDDI (`fix/release-6.2-polish`) + eddi-chat-ui (`fix/release-6.2-polish`)
+
+Findings from a full smoke test of `labsai/eddi:6.2.0-b638` against **both** datastore backends (MongoDB and PostgreSQL). Agent CRUD, multi-turn conversations, PropertySetter + Qute templating, undo/redo, group conversations (ROUND_TABLE, followup/continue/close), MCP handshake and SSE streaming all behaved identically on both — no engine defects found. The items below are the rough edges that surfaced.
+
+### 1. Deleting an Agent orphaned its deployment record (both datastores)
+
+`RestAgentStore.deleteAgent` cascaded to schedules, workflows and the capability registry but never to `deployments`, and `IDeploymentStore` had no delete method to call. Every deleted-but-once-deployed Agent therefore left a row at status `deployed`; on each startup the runtime retried the redeploy, failed with `ResourceNotFoundException`, and logged a full ERROR stack trace — forever, accumulating with each deletion. Reproduced on current code; this instance had an orphan dating to 2026-04-01.
+
+`AgentDeploymentManagement.checkDeployments` *already* carried self-heal logic for exactly this case (`isCausedByResourceNotFound` → mark `undeployed`), but it was unreachable: `AgentFactory.deployAgent` returns `void` and swallows the `ServiceException` internally, so the catch blocks never fired. That is why the April orphan survived for months despite the code being there.
+
+- `IDeploymentStorage` / `IDeploymentStore`: added `deleteDeploymentInfos(agentId)`, implemented in `MongoDeploymentStorage` (`deleteMany`) and `PostgresDeploymentStorage` (`DELETE … WHERE AGENT_ID = ?`)
+- `RestAgentStore.deleteAgent`: clears the Agent's deployment records; a failure here logs a warning and still deletes the Agent
+- `AgentDeploymentManagement.checkDeployments`: checks up front whether the Agent config still exists and retires the record instead of attempting a doomed deploy. `isAgentConfigMissing` treats **only** `ResourceNotFoundException` as proof of absence — a store outage leaves the record untouched, so a transient DB failure can never mass-retire live deployments.
+
+Three call sites delete Agents, not one. `McpAdminTools.deleteAgent` delegates to `RestAgentStore` and inherits the cascade, but `GroupConversationService`'s ephemeral cleanup and `TeardownAgentTool` call `agentStore.deleteAllPermanently` directly — and dynamic sub-agents *do* get deployment records, because `AgentSetupService.deployAndWait` goes through `RestAgentAdministration`. Every ephemeral group agent was therefore orphaning a record. Both now retire their records too (null-tolerant, non-fatal), following the existing field-injection pattern in those classes so the directly-constructed unit tests keep working.
+
+**Ordering:** the cascade runs *after* `restVersionInfo.delete`, not before. That method validates its arguments internally and throws on a stale or unknown version — clearing the records first would strip a still-live Agent of what it needs to come back up. Pinned by a test.
+
+**Design note:** the pre-check was chosen over making `deployAgent` rethrow — that method's dummy-agent-on-failure contract is relied on by the on-demand deploy path, and widening it for this would have been a far riskier change than a cheap existence check.
+
+Verified against the real Postgres instance: the April orphan was retired, the ERROR + stack trace was replaced by a single `WARN … retiring stale deployment record`, and deleting a fresh Agent logged `Cascade-deleted 1 deployment record(s)` with the row gone.
+
+> That run was observed against the first implementation, which retired a record by marking it `undeployed` — so the orphan was seen flipping `deployed` → `undeployed`. The review pass below replaced that with a scoped **delete**, so the record is now simply absent. The ERROR-to-WARN result and the cascade behaviour are unchanged.
+
+### 2. MongoDB health check reported UP with no MongoDB (postgres profile)
+
+Under `QUARKUS_PROFILE=postgres`, with the Mongo container stopped and its hostname unresolvable, `/q/health` still listed `"MongoDB connection health check": "UP"` — noise that would equally mask a genuine outage in Mongo mode.
+
+The obvious `%postgres.quarkus.mongodb.health.enabled=false` **does not work**: that property is fixed at build time, so it cannot apply to one image pointed at either datastore (confirmed — even passing it as a runtime env var leaves the check in place). Disabled through smallrye-health instead, which *is* runtime-scoped:
+
+    %postgres.quarkus.smallrye-health.check."io.quarkus.mongodb.health.MongoHealthCheck".enabled=false
+
+### 3. Two checks that could never fail
+
+- `InfrastructureIT.openApiSpec` asserted `anyOf(200, 404)` against `/q/openapi` — a path that never serves the spec (`quarkus.smallrye-openapi.path=/openapi`). It passed whether or not OpenAPI worked. Now asserts `200` on `/openapi` plus real body content.
+- `AGENTS.md` documented EDDI-Manager as served at `/chat/production`. It is served at `/manage`; `/` redirects to the `/welcome` chooser and `/workforce` is the group workspace. `/chat/production` is the standalone chat widget. The wrong path in this file is what sent an earlier review to the wrong URL.
+
+### 4. eddi-chat-ui: dead-end landing and an agent name that never loaded
+
+- `main.tsx` routed its catch-all to a hard-coded `/chat/production/default`. No instance has an agent literally named `default`, so this 404'd and left the visitor on a spinner that never resolved. Replaced with a new `AgentPicker` that lists the instance's actual agents, with explicit empty and error states. Reached only by deep-linking `/chat/production` without an agent id — the Manager's own chat (`/manage/chat`) was never affected.
+- `fetchAgentDescriptor` called `GET /agentstore/agents/{id}` with no `version`, which answers `400`. Even fixed, that endpoint returns the Agent config and carries no name at all — so the agent name had never rendered. Now resolves the current version and reads `/descriptorstore/descriptors/{id}?version=N`.
+
+**Note:** eddi-chat-ui builds its bundle directly into `EDDI/src/main/resources/META-INF/resources/`, so the two repos ship together. The superseded `chat-ui.p4wYUapg.js` / `chat-ui.D213XXZR.css` were removed; `chat.html` now points at the new hashes.
+
+### Review pass on PR #611
+
+- **CodeQL log injection (RestAgentStore).** `id` is a raw REST path parameter and reached two `log.infof`/`warnf` calls unsanitized. Now routed through `LogSanitizer.sanitize`, the pattern already used across the config REST stores. The equivalent logs in `TeardownAgentTool` and `GroupConversationService` were left raw on purpose: both only reach them after the id has passed a `createdAgentIds.contains(...)` check, so the value is a server-generated agent id, and every neighbouring log line in those classes prints it the same way.
+- **Retire scoped, not agent-wide (CodeRabbit, Major).** The sweep proves only that *one* `(environment, agentId, version)` is missing, so retiring with an agent-wide `deleteDeploymentInfos(agentId)` acted far beyond its evidence — it would take out sibling records for versions nobody checked. Added `deleteDeploymentInfo(environment, agentId, version)` and use it here; the agent-wide variant stays for the delete cascade, where the whole Agent really is gone. In practice the harmful case is hard to construct — `HistorizedResourceStore.read` falls back to history, so an older version normally still resolves — but the mismatch between what is checked and what is acted on is the kind that bites once versioning semantics shift. Covered by a mixed-version regression test.
+- **Pin the sibling in the mixed-version test.** The regression test asserted the missing version's record was deleted and that no agent-wide delete happened — but it would still have passed if the code had *also* removed the live sibling through the scoped API. Added the explicit negative (`never()` on version 2, in any environment) and `times(1)` on the deletion that should happen. Mutation-checked: injecting a sibling delete now fails the test, where before it slipped through. While there, the `never()` verifications in these classes moved from `anyString()`/`anyInt()` to `any()`, which also matches null — `anyString()` does not, so a null-argument regression would have verified vacuously.
+- **Retire by delete, not by upsert.** `setDeploymentInfo` upserts. If an Agent were deleted between the sweep reading the deployment list and reaching the retire branch, marking it `undeployed` would *resurrect* the row the delete cascade had just removed — an inert but permanent tombstone. The sweep now calls `deleteDeploymentInfos`, which is idempotent, and an Agent that no longer exists has nothing to undeploy.
+- **TOCTOU between the pre-check and the deploy (CodeRabbit, Major) — acknowledged, not fixed.** If an Agent is deleted in the window between `isAgentConfigMissing` and `deployAgent`, the record can stay `deployed` and be cached in `deploymentInfos` until the next restart. The suggested remedy is to make `deployAgent` surface a definitive missing-result — the contract change deliberately avoided above, since the dummy-agent-on-failure behaviour is relied on by the on-demand deploy path. The window is milliseconds, the consequence is one stale row, and it self-corrects on restart, so it is not worth widening a core contract on a release-polish branch.
+- CodeRabbit nitpicks, all taken: `.gitattributes` marks the chat-ui bundles and Vite assets `linguist-generated` so reviewers stop being handed minified output; `MongoDeploymentStorage` gains an `agentId`-leading index, since the existing compound index starts with `deploymentStatus` and cannot serve the new agentId-only delete; and two coverage gaps closed — deployment cleanup on the cascade-success path, and the guarantee that a *failed* permanent delete leaves the records alone.
+- Style nits from Copilot: imports instead of inline `java.util.concurrent.*` FQNs in `TeardownAgentTool` (per §4.7), and four comments the Eclipse formatter had reflowed into orphaned fragments (`// throws`, `// path`, `// it`, `// up.`). Comment lines are now short enough to survive `formatter:format`.
+
+### Not fixed here (deployment config, not the release artifact)
+
+- The stored Anthropic API key is invalid — every LLM-backed agent fails with `invalid x-api-key`. EDDI handles it correctly (non-retryable, conversation `ERROR`, no stack trace to the client), but any demo needs a working key.
+- `VaultSaltManager` reports existing DEKs with no per-deployment salt and is falling back to the legacy fixed salt; the KEK migration should be run.
 
 ---
 

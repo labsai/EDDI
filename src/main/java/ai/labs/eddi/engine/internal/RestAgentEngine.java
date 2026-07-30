@@ -49,6 +49,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.engine.internal.RestAgentManagement.KEY_LANG;
@@ -248,6 +249,21 @@ public class RestAgentEngine implements IRestAgentEngine {
             response.resume(Response.status(TOO_MANY_REQUESTS)
                     .entity(Map.of("error", "quota_exceeded", "message", e.getMessage()))
                     .type(MediaType.APPLICATION_JSON).header("Retry-After", "60").build());
+        } catch (RejectedExecutionException e) {
+            // Same reason as the quota branch above: say() is resumed through an
+            // AsyncResponse, so RejectedExecutionExceptionMapper never runs and the
+            // generic handler below turned backpressure into a 500. Both sources —
+            // coordinator saturation and the graceful-shutdown gate
+            // (ConversationService#rejectIfShuttingDown, which fires on the request
+            // thread once a SIGTERM drain starts) — are retryable elsewhere, so the
+            // status/body/Retry-After mirror the mapper verbatim. Without this,
+            // POST /agents/{agentId}/conversations answered a draining node with 503
+            // while say()/rerun answered 500, and clients keyed on 503 never failed over.
+            LOGGER.warnf("Turn rejected for conversation %s: %s", sanitize(conversationId), e.getMessage());
+            response.resume(Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "capacity_exceeded",
+                            "message", e.getMessage() != null ? e.getMessage() : "Service temporarily unavailable"))
+                    .type(MediaType.APPLICATION_JSON).header("Retry-After", "5").build());
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("An internal error occurred");

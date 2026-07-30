@@ -12,6 +12,7 @@ import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.RenameCollectionOptions;
 import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.types.ObjectId;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
 import java.util.ArrayList;
@@ -353,21 +355,18 @@ class V6RenameMigrationBranchTest {
 
             migration.runIfNeeded();
 
-            verify(emptyCol, never()).renameCollection(any(MongoNamespace.class));
+            verify(emptyCol, never()).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
         }
 
         @SuppressWarnings("unchecked")
         @Test
-        @DisplayName("MongoCommandException with error code 48 is handled (target exists)")
-        void errorCode48Handled() throws Exception {
+        @DisplayName("a generic rename failure is caught and reported as a failed rename")
+        void genericRenameFailureIsReported() throws Exception {
             MongoCollection<Document> collection = mock(MongoCollection.class);
             when(collection.estimatedDocumentCount()).thenReturn(5L);
 
-            // Code 48 = NamespaceExists
-            // We can't easily construct a MongoCommandException with code 48,
-            // so we test via the general exception path
             doThrow(new RuntimeException("generic rename error"))
-                    .when(collection).renameCollection(any(MongoNamespace.class));
+                    .when(collection).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
 
             var method = V6RenameMigration.class.getDeclaredMethod(
                     "renameCollectionIfExists", String.class, String.class);
@@ -376,8 +375,49 @@ class V6RenameMigrationBranchTest {
             when(database.getCollection("old")).thenReturn(collection);
             when(database.getName()).thenReturn("eddi");
 
-            // Should not throw — exception is caught
-            assertDoesNotThrow(() -> method.invoke(migration, "old", "new"));
+            assertEquals(false, method.invoke(migration, "old", "new"),
+                    "a rename that could not happen must be reported, not shrugged off");
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a source collection that does not exist is not a failure")
+        void missingSourceIsNotAFailure() throws Exception {
+            MongoCollection<Document> collection = mock(MongoCollection.class);
+            when(collection.estimatedDocumentCount()).thenReturn(0L);
+
+            var method = V6RenameMigration.class.getDeclaredMethod(
+                    "renameCollectionIfExists", String.class, String.class);
+            method.setAccessible(true);
+
+            when(database.getCollection("old")).thenReturn(collection);
+
+            assertEquals(true, method.invoke(migration, "old", "new"));
+            verify(collection, never()).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a count that cannot be established is treated as non-empty, so the target is never dropped")
+        void uncountableTargetIsNotDropped() throws Exception {
+            MongoCollection<Document> source = mock(MongoCollection.class);
+            when(source.estimatedDocumentCount()).thenReturn(5L);
+
+            MongoCollection<Document> target = mock(MongoCollection.class);
+            when(target.countDocuments()).thenThrow(new IllegalStateException("count unavailable"));
+
+            when(database.getCollection("old")).thenReturn(source);
+            when(database.getCollection("new")).thenReturn(target);
+            when(database.getName()).thenReturn("eddi");
+
+            var method = V6RenameMigration.class.getDeclaredMethod(
+                    "renameCollectionIfExists", String.class, String.class);
+            method.setAccessible(true);
+            method.invoke(migration, "old", "new");
+
+            var options = ArgumentCaptor.forClass(RenameCollectionOptions.class);
+            verify(source).renameCollection(any(MongoNamespace.class), options.capture());
+            assertFalse(options.getValue().isDropTarget(), "an uncountable target must not be dropped");
         }
     }
 

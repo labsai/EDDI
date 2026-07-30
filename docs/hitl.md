@@ -136,7 +136,7 @@ Status codes are discriminating: `400` invalid body (missing verdict, note > 4 K
 
 | Where | Key | Notes |
 |-------|-----|-------|
-| Templates (same turn, APPROVED) | `{{memory.current.hitlDecision}}`, `{{memory.current.hitlDecisionNote}}` | Conversation output written at resume time |
+| Templates (same turn, APPROVED) | `{memory.current.hitlDecision}`, `{memory.current.hitlDecisionNote}` | Conversation output written at resume time |
 | Properties (this + later turns) | `{properties.hitlVerdict}` | Conversation-scoped property — next-turn behavior rules can react via a property matcher |
 | Raw step data (pipeline tasks) | `hitl:decision_verdict`, `hitl:decision_note`, `hitl:decision_by` | Not template-accessible (colon keys) |
 

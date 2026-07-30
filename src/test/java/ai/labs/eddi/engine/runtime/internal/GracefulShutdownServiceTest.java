@@ -270,4 +270,69 @@ class GracefulShutdownServiceTest {
         assertEquals(HealthCheckResponse.Status.DOWN, healthCheck.call().getStatus(),
                 "readiness must go DOWN so the load balancer stops routing traffic to this node");
     }
+
+    /**
+     * Pins the interrupt CONTRACT: an interrupted drain returns promptly, returns
+     * the honest boolean, and leaves the accept gate shut.
+     * <p>
+     * Be clear about what this does <em>not</em> do: it does not distinguish the
+     * readiness-grace fix from the code before it. Reverting that fix leaves these
+     * tests green, because {@code sleepQuietly} restores the interrupt flag — so
+     * the next {@code Thread.sleep} in the poll loop threw immediately and the old
+     * code broke out just as fast, with the same return value. The fix buys two
+     * things this test cannot see: the failure is logged as an interrupt rather
+     * than as a 30-second TIMEOUT that never happened, and the exit no longer
+     * depends on that restored-flag side effect to stop waiting.
+     */
+    @Test
+    @Timeout(30)
+    @DisplayName("an interrupt during the readiness grace stops the drain instead of being ignored")
+    void interruptDuringReadinessGraceStopsTheDrain() throws Exception {
+        IConversationCoordinator coordinator = mock(IConversationCoordinator.class);
+        when(coordinator.getQueueDepths()).thenReturn(Map.of("conv-1", 1));
+
+        // A grace window long enough that the interrupt lands inside it.
+        var shutdownService = new GracefulShutdownService(coordinator, 30_000L, 10_000L, 1L);
+
+        var drained = new AtomicBoolean(true);
+        var finished = new CountDownLatch(1);
+        Thread drainThread = new Thread(() -> {
+            drained.set(shutdownService.drain());
+            finished.countDown();
+        });
+        drainThread.start();
+
+        // Let it reach the grace sleep, then interrupt.
+        Thread.sleep(150);
+        drainThread.interrupt();
+
+        assertTrue(finished.await(10, TimeUnit.SECONDS),
+                "an interrupted drain must return promptly, not sit out the full 30s grace window");
+        assertFalse(drained.get(), "work was still in flight, so the drain did not complete");
+        assertTrue(shutdownService.isShuttingDown(), "the accept gate stays closed regardless of how the drain ended");
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("an interrupt with nothing in flight still reports a completed drain")
+    void interruptWithNothingInFlightStillCompletes() throws Exception {
+        IConversationCoordinator coordinator = mock(IConversationCoordinator.class);
+        when(coordinator.getQueueDepths()).thenReturn(Map.of());
+
+        var shutdownService = new GracefulShutdownService(coordinator, 30_000L, 10_000L, 1L);
+
+        var drained = new AtomicBoolean(false);
+        var finished = new CountDownLatch(1);
+        Thread drainThread = new Thread(() -> {
+            drained.set(shutdownService.drain());
+            finished.countDown();
+        });
+        drainThread.start();
+
+        Thread.sleep(150);
+        drainThread.interrupt();
+
+        assertTrue(finished.await(10, TimeUnit.SECONDS));
+        assertTrue(drained.get(), "nothing was in flight, so an interrupted wait is still a clean drain");
+    }
 }

@@ -273,8 +273,10 @@ public class LifecycleManager implements ILifecycleManager {
             // Position of this task in the workflow's FULL task list. On a selective
             // (sublist) execution the loop index is sublist-relative, but every
             // index-keyed lookup below is ABSOLUTE: WorkflowStoreClientLibrary caches
-            // each task's component under the workflow-step index, and the HITL
-            // bookmark / telemetry / audit rows are read back against the full list.
+            // each task's component under its position in THIS task list (which is why
+            // a workflow step that contributes no task can no longer shift the keys of
+            // later ones), and the HITL bookmark / telemetry / audit rows are read back
+            // against the full list.
             // Using the relative index made a rerun look up a component key that was
             // never written, so the task ran with component == null and no-opped.
             final int absoluteIndex = indexOffset + index;
@@ -466,14 +468,26 @@ public class LifecycleManager implements ILifecycleManager {
             }
         }
 
-        // Exit cancel check. The in-loop check only guards the transition INTO a task,
-        // so a cancel that lands while the LAST task runs was never observed: the loop
+        // Exit checks. The in-loop checks only guard the transition INTO a task, so an
+        // abort signal that lands while the LAST task runs was never observed: the loop
         // simply ran out, the turn returned normally, and Conversation went on to
-        // commit the turn's side effects (long-term property upserts) for work the
-        // caller was already told is cancelled. Re-checking here closes that window
-        // for the last task of every workflow, and for an empty/exhausted range.
+        // commit the turn's side effects (long-term property upserts) for work whose
+        // outcome the runtime then discards. Re-checking here closes that window for
+        // the last task of every workflow, and for an empty/exhausted range.
+        //
+        // Both signals are re-checked, mirroring the in-loop pair, because the two
+        // abort paths are distinct: a cooperative cancel sets the memory flag, while
+        // the runtime watchdog abandons a timed-out turn by interrupting this thread
+        // ONLY (AbandonableFuture#cancel never touches the memory flag) and routes the
+        // late completion to onFailure, so the conversation document is thrown away.
+        // This is the earlier of two guards, not the durable one — an interrupt can
+        // still land after this point, which is why Conversation re-checks immediately
+        // before the post-conversation tasks.
         if (conversationMemory.isCancelled()) {
             throw new ConversationStopException();
+        }
+        if (Thread.currentThread().isInterrupted()) {
+            throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
         }
     }
 

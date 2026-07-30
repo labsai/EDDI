@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
@@ -125,7 +126,7 @@ class ConversationServiceStaleTurnTest {
                 conversationSetup, cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
                 jsonSerialization, new SimpleMeterRegistry(),
-                ConversationServiceTestFixtures.hitlResumeEvent(), AGENT_TIMEOUT);
+                ConversationServiceTestFixtures.hitlResumeEvent(), new CallerIdentityContext(null, null), AGENT_TIMEOUT);
     }
 
     @AfterEach

@@ -105,6 +105,17 @@ ENV LANG='C.utf8' LANGUAGE='C.utf8'
 
 USER root
 
+# TEMPORARY CVE STOPGAP - remove once the base image ships the fixes.
+# ubi9/openjdk-25-runtime:1.24 has not been republished with these, so there is no
+# newer digest to move to (verified against the registry: the tag still resolves to
+# the digest pinned above). Per the Trivy remediation procedure in AGENTS.md, patch
+# the packages in place rather than dropping the digest pin.
+#   CVE-2026-58016  glib2    integer underflow in gio/gdbusintrospection.c
+#   CVE-2026-54369  libacl   symlink traversal privilege escalation
+#   CVE-2026-15308  python3  CPU denial of service in the HTML parser
+# These block the image push now that the Trivy gate enforces (exit-code: 1).
+RUN microdnf update -y glib2 libacl python3 && microdnf clean all
+
 RUN mkdir -p /deployments/tmp/import && \
       chown -R 185:0 /deployments/tmp && \
       chmod -R 775 /deployments/tmp

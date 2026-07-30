@@ -85,7 +85,12 @@ public class ConverseWithAgentTool {
     /**
      * @param config
      *            dynamic-agent guardrails governing this delegation. {@code null}
-     *            falls back to permissive defaults.
+     *            falls back to the same {@link #permissiveDefault()} the two-arg
+     *            constructor uses — delegation allowed, still bounded by the
+     *            {@link DynamicAgentConfig} depth and per-task defaults. A bare
+     *            {@code new DynamicAgentConfig()} would be {@code enabled=false}
+     *            and refuse everything, which is not what a caller that supplies no
+     *            config means.
      * @param currentDepth
      *            how many delegation hops led to the current conversation (0 when a
      *            human started it)
@@ -93,7 +98,7 @@ public class ConverseWithAgentTool {
     public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth) {
         this.conversationService = conversationService;
         this.userId = userId;
-        this.config = config != null ? config : new DynamicAgentConfig();
+        this.config = config != null ? config : permissiveDefault();
         this.currentDepth = Math.max(0, currentDepth);
     }
 
@@ -147,14 +152,15 @@ public class ConverseWithAgentTool {
             }
 
             // Propagate the hop count so the callee's own converse_with_agent knows how
-            // deep it is — the same mechanism GroupConversationService uses for
-            // groupDepth. Built ONCE and attached to BOTH the startConversation call and
-            // every say() turn: AgentOrchestrator.resolveDelegationDepth reads
-            // "context:delegationDepth" out of the CURRENT step, and Conversation only
-            // materialises context data from the contexts handed to that turn. Attaching
-            // it to startConversation alone left it on step 0 while the delegated
-            // question travelled on step 1 with an empty context — the callee read depth
-            // 0 and the A→B→A cycle still recursed unbounded.
+            // deep it is — the same mechanism GroupConversationService uses for groupDepth.
+            //
+            // It must ride on BOTH the start context AND every per-turn InputData:
+            // Conversation.init() materializes the start context as context:delegationDepth
+            // on step 0 only, while the delegated message is processed on the NEXT step —
+            // which is the step AgentOrchestrator.resolveDelegationDepth reads. Without the
+            // per-turn context the callee always resolves depth 0 and the cycle guard below
+            // can never fire. Continuing an existing conversation (conversationId supplied)
+            // never goes through startConversation at all and needs it for the same reason.
             Map<String, Context> delegationContext = Map.of(CONTEXT_DELEGATION_DEPTH,
                     new Context(Context.ContextType.string, String.valueOf(currentDepth + 1)));
 
@@ -181,6 +187,9 @@ public class ConverseWithAgentTool {
             // all.
             InputData inputData = new InputData();
             inputData.setInput(message);
+            // Mutable copy: the immutable Map.of above is shared with the
+            // startConversation call, and downstream turn processing may add context
+            // entries of its own.
             inputData.setContext(new HashMap<>(delegationContext));
 
             CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();

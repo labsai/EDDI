@@ -18,6 +18,7 @@ import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Ticker;
 import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -52,10 +53,17 @@ public class RestSemanticParser implements IRestSemanticParser {
     static final int MAX_CACHED_PARSERS = 100;
 
     /**
-     * Bounds how long an edited parser configuration keeps being served from the
-     * cache. Without a TTL, a config change would only take effect after a restart.
+     * How long a built parser is retained after it was put into the cache.
+     * <p>
+     * It is deliberately <em>not</em> what makes an edited configuration visible:
+     * the cache key is the versioned resource URI ({@code parserId} +
+     * {@code version}) and the parser store is historized — updating a parser
+     * configuration writes version+1, so an edit is served under a different key
+     * from the moment it is saved. What the TTL bounds is retention: a parser built
+     * from a version that has since been superseded or deleted eventually stops
+     * occupying a cache slot instead of living until the process restarts.
      */
-    private static final Duration PARSER_CACHE_TTL = Duration.ofMinutes(5);
+    static final Duration PARSER_CACHE_TTL = Duration.ofMinutes(5);
 
     private final IRuntime runtime;
     private final IResourceClientLibrary resourceClientLibrary;
@@ -75,6 +83,16 @@ public class RestSemanticParser implements IRestSemanticParser {
     @Inject
     public RestSemanticParser(IRuntime runtime, IResourceClientLibrary resourceClientLibrary,
             @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTasks) {
+        this(runtime, resourceClientLibrary, lifecycleTasks, Ticker.systemTicker());
+    }
+
+    /**
+     * Test seam: the same construction with an injectable clock, so cache expiry
+     * can be driven deterministically instead of by waiting
+     * {@link #PARSER_CACHE_TTL}.
+     */
+    RestSemanticParser(IRuntime runtime, IResourceClientLibrary resourceClientLibrary,
+            Map<String, Provider<ILifecycleTask>> lifecycleTasks, Ticker ticker) {
         this.runtime = runtime;
         this.resourceClientLibrary = resourceClientLibrary;
         this.parserProvider = lifecycleTasks.get("ai.labs.parser");
@@ -82,6 +100,7 @@ public class RestSemanticParser implements IRestSemanticParser {
         this.parserCache = Caffeine.newBuilder()
                 .maximumSize(MAX_CACHED_PARSERS)
                 .expireAfterWrite(PARSER_CACHE_TTL)
+                .ticker(ticker)
                 .build();
     }
 
@@ -139,11 +158,15 @@ public class RestSemanticParser implements IRestSemanticParser {
 
     /**
      * Drops all cached parsers so that the next request re-reads the parser
-     * configuration from the store. Intended as the explicit hook for parser
-     * configuration updates; until a store wires it up, the TTL is what bounds
-     * staleness.
+     * configuration from the store.
+     * <p>
+     * Not public, and deliberately not wired into the parser store: that store is
+     * historized, so an update writes a new version and therefore a new cache key —
+     * there is nothing for an update hook to invalidate. This exists so the cache
+     * tests can assert that cached parsers really are rebuilt from the store, not
+     * as a configuration-update contract.
      */
-    public void invalidateCache() {
+    void invalidateCache() {
         parserCache.invalidateAll();
     }
 

@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IDataFactory;
@@ -111,20 +112,6 @@ public class RagContextProvider {
             RagConfiguration ragConfig = step.config();
             String kbName = ragConfig.getName();
 
-            // Finding I3: chunkStrategy was accepted and never read — ingestion always
-            // splits recursively. Surface an unimplemented value as a clear, traced
-            // error instead of quietly doing something else.
-            try {
-                ragConfig.validate();
-            } catch (IllegalArgumentException e) {
-                LOGGER.errorf("Knowledge base '%s' has an unusable configuration: %s", kbName, e.getMessage());
-                Map<String, Object> invalidTrace = new HashMap<>();
-                invalidTrace.put("kb", kbName);
-                invalidTrace.put("error", e.getMessage());
-                traceEntries.add(invalidTrace);
-                continue;
-            }
-
             // Determine retrieval params
             int maxResults;
             double minScore;
@@ -145,6 +132,24 @@ public class RagContextProvider {
 
                 maxResults = ref.getMaxResults() != null ? ref.getMaxResults() : ragConfig.getMaxResults();
                 minScore = ref.getMinScore() != null ? ref.getMinScore() : ragConfig.getMinScore();
+            }
+
+            // Finding I3: chunkStrategy was accepted and never read — ingestion always
+            // splits recursively. Surface an unimplemented value as a warning plus a
+            // trace entry, but never drop the knowledge base: chunkStrategy is an
+            // ingestion-time setting, the documents are already embedded, and they
+            // stay retrievable. Rejection belongs at the create/update boundary
+            // (RestRagStore), not on the retrieval hot path — failing here would mean
+            // a knowledge base that answered fine yesterday silently contributes
+            // nothing today.
+            String unsupportedSettings = ragConfig.findUnsupportedSettings();
+            if (unsupportedSettings != null) {
+                LOGGER.warnf("Knowledge base '%s': %s Retrieval continues unaffected.", LogSanitizer.sanitize(kbName),
+                        LogSanitizer.sanitize(unsupportedSettings));
+                Map<String, Object> warningTrace = new HashMap<>();
+                warningTrace.put("kb", kbName);
+                warningTrace.put("warning", unsupportedSettings);
+                traceEntries.add(warningTrace);
             }
 
             try {

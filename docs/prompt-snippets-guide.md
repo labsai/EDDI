@@ -25,11 +25,11 @@ Content-Type: application/json
 Reference the snippet in your LLM task's system prompt template:
 
 ```
-You are a helpful customer service agent for {{properties.company_name}}.
+You are a helpful customer service agent for {properties.company_name}.
 
-{{snippets.cautious_mode}}
+{snippets.cautious_mode}
 
-Always respond in {{properties.preferred_language}}.
+Always respond in {properties.preferred_language}.
 ```
 
 That's it. The snippet content is automatically injected at template resolution time.
@@ -40,7 +40,7 @@ That's it. The snippet content is automatically injected at template resolution 
 
 ### Auto-Loading
 
-All snippets are loaded from MongoDB at LLM task execution time and injected into the template data map under the `snippets` namespace. This happens **before** the Jinja2 template engine processes the system prompt, so `{{snippets.xxx}}` resolves like any other template variable.
+All snippets are loaded from MongoDB at LLM task execution time and injected into the template data map under the `snippets` namespace. This happens **before** the Qute template engine processes the system prompt, so `{snippets.xxx}` resolves like any other template variable.
 
 ```
 Template Data Map:
@@ -75,7 +75,7 @@ Snippet names **must** match the pattern `[a-z0-9_]+`:
 | `tone_formal` | `with.dot` (dot) |
 | `rule_42` | `with space` (space) |
 
-This ensures safe Jinja2 dot-notation access (`{{snippets.name}}`).
+This ensures safe Qute dot-notation access (`{snippets.name}`).
 
 ---
 
@@ -83,36 +83,36 @@ This ensures safe Jinja2 dot-notation access (`{{snippets.name}}`).
 
 ### `templateEnabled` (default: `true`)
 
-Controls whether the Jinja2 template engine resolves template markers inside the snippet content.
+Controls whether the Qute template engine resolves template markers inside the snippet content.
 
 **When `true` (default):** Template variables in the snippet are resolved against the full template data map. This allows snippets to be dynamic:
 
 ```json
 {
   "name": "personalized_greeting",
-  "content": "Address the user as {{properties.preferred_name}} and respond in {{properties.preferred_language}}.",
+  "content": "Address the user as {properties.preferred_name} and respond in {properties.preferred_language}.",
   "templateEnabled": true
 }
 ```
 
-**When `false`:** Template markers (`{{`, `}}`) are treated as literal text. The content is wrapped in Jinja2 `{% raw %}...{% endraw %}` blocks automatically. This is useful for code examples or documentation snippets:
+**When `false`:** the content is wrapped in a Qute unparsed block (`{|...|}`) automatically, so `{...}` markers inside it reach the model literally instead of being resolved. This is useful for code examples or documentation snippets:
 
 ```json
 {
   "name": "code_example_instructions",
-  "content": "When showing code examples, use the format: {{variable_name}} for placeholders.",
+  "content": "When showing code examples, use the format: {variable_name} for placeholders.",
   "templateEnabled": false
 }
 ```
 
 ### Inline Override
 
-Even when `templateEnabled` is `true`, you can protect specific sections using Jinja2 raw blocks directly in the content:
+Even when `templateEnabled` is `true`, you can protect specific sections with a Qute unparsed block directly in the content:
 
 ```json
 {
   "name": "mixed_content",
-  "content": "Hello {{properties.name}}! {% raw %}Use {{placeholder}} in templates.{% endraw %}",
+  "content": "Hello {properties.name}! {|Use {placeholder} in templates.|}",
   "templateEnabled": true
 }
 ```
@@ -171,7 +171,7 @@ All endpoints require `eddi-admin` or `eddi-editor` role.
 }
 ```
 
-Usage: `{{snippets.cautious_mode}}`
+Usage: `{snippets.cautious_mode}`
 
 ### Persona — Formal Tone
 
@@ -193,7 +193,7 @@ Usage: `{{snippets.cautious_mode}}`
   "name": "gdpr_notice",
   "category": "compliance",
   "description": "GDPR-compliant data handling instructions",
-  "content": "DATA PRIVACY: You are operating under GDPR regulations. Never store or repeat personal data beyond the current conversation unless the user explicitly consents. If asked about data handling, refer to our privacy policy at {{properties.privacy_policy_url}}.",
+  "content": "DATA PRIVACY: You are operating under GDPR regulations. Never store or repeat personal data beyond the current conversation unless the user explicitly consents. If asked about data handling, refer to our privacy policy at {properties.privacy_policy_url}.",
   "tags": ["compliance", "gdpr", "eu"],
   "templateEnabled": true
 }
@@ -206,7 +206,7 @@ Usage: `{{snippets.cautious_mode}}`
   "name": "routing_context",
   "category": "custom",
   "description": "Injects department-specific instructions from properties",
-  "content": "You are handling inquiries for the {{properties.department}} department. Follow these department-specific guidelines:\n{{properties.department_guidelines}}",
+  "content": "You are handling inquiries for the {properties.department} department. Follow these department-specific guidelines:\n{properties.department_guidelines}",
   "tags": ["routing", "dynamic"],
   "templateEnabled": true
 }
@@ -219,18 +219,18 @@ Usage: `{{snippets.cautious_mode}}`
 Snippets give you full control over prompt composition order:
 
 ```
-{{snippets.tone_formal}}
+{snippets.tone_formal}
 
 You are a customer service agent for Acme Corp.
 
-{{snippets.cautious_mode}}
+{snippets.cautious_mode}
 
-{{snippets.gdpr_notice}}
+{snippets.gdpr_notice}
 
-Your specialization is {{properties.specialization}}.
+Your specialization is {properties.specialization}.
 
 Important context:
-{{snippets.routing_context}}
+{snippets.routing_context}
 ```
 
 The designer controls exactly where each snippet appears, enabling precise prompt engineering.

@@ -77,7 +77,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
-    public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
+    public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         try {
             String json = jsonSerialization.serialize(snapshot);
@@ -96,7 +96,16 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                     ps.setString(3, snapshot.getConversationState().name());
                     ps.setString(4, json);
                     ps.setString(5, conversationId);
-                    ps.executeUpdate();
+                    // No upsert on purpose: zero affected rows means the conversation was
+                    // deleted while the turn was running (GDPR erasure, retention sweep).
+                    // Discarding the count dropped the turn's memory silently and still
+                    // returned a normal response to the caller — surface the conflict
+                    // instead, exactly as the MongoDB store does.
+                    if (ps.executeUpdate() == 0) {
+                        throw new IResourceStore.ResourceStoreException(
+                                "Conversation '" + conversationId + "' no longer exists — the turn was NOT persisted. "
+                                        + "The conversation row was deleted concurrently (e.g. erasure or retention cleanup).");
+                    }
                 }
             } else {
                 // Insert new
@@ -474,7 +483,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
-    public IResourceStore.IResourceId create(ConversationMemorySnapshot content) {
+    public IResourceStore.IResourceId create(ConversationMemorySnapshot content) throws IResourceStore.ResourceStoreException {
         String id = storeConversationMemorySnapshot(content);
         return new IResourceStore.IResourceId() {
             @Override
@@ -495,7 +504,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
-    public Integer update(String id, Integer version, ConversationMemorySnapshot content) {
+    public Integer update(String id, Integer version, ConversationMemorySnapshot content) throws IResourceStore.ResourceStoreException {
         storeConversationMemorySnapshot(content);
         return 0;
     }

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService.ConversationLogResult;
@@ -82,7 +83,7 @@ class ConversationServiceReadLogTest {
                 cacheFactory, runtime, contextLogger, auditLedgerService, gdprComplianceService,
                 tenantQuotaService, scheduleStore, agentStore,
                 jsonSerialization,
-                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), 60);
+                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), new CallerIdentityContext(null, null), 60);
     }
 
     private ConversationMemorySnapshot createEmptySnapshot() {

@@ -107,6 +107,32 @@ class RestUtilitiesTest {
         assertNull(resourceId.getId(), "no usable id can be extracted from " + malformedUri);
     }
 
+    /**
+     * The parameterized case above feeds this same URI but only ever asserts the
+     * id, which is why the version loss went unnoticed: an authority-only URI has
+     * no '/' after the scheme, and discarding everything from that point took the
+     * query with it. The reported version then fell back to 0 — the value callers
+     * already use to mean "unspecified", so an explicit {@code ?version=1} was
+     * indistinguishable from no version at all.
+     */
+    @Test
+    void extractResourceId_withQueryButNoPath_stillReadsTheVersion() {
+        IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create("eddi://ai.labs.agent?version=1"));
+
+        assertNotNull(resourceId);
+        assertNull(resourceId.getId(), "an authority-only URI carries no id");
+        assertEquals(Integer.valueOf(1), resourceId.getVersion(), "the version query param must survive the missing path");
+    }
+
+    @Test
+    void extractResourceId_withNoPathAndNoQuery_reportsNoVersion() {
+        IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create("eddi://ai.labs.agent"));
+
+        assertNotNull(resourceId);
+        assertNull(resourceId.getId());
+        assertEquals(Integer.valueOf(0), resourceId.getVersion(), "no query means no version, which callers read as 'current'");
+    }
+
     @Test
     void extractResourceId_withTrailingSlash_handlesGracefully() {
         URI uri = URI.create("eddi://ai.labs.agents/agentsstore/agents/5262b802dc6c4008b54c7c0b58100f97/");

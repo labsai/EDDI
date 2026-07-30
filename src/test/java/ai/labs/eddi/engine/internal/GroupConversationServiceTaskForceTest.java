@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -85,7 +86,7 @@ class GroupConversationServiceTaskForceTest {
         service = new GroupConversationService(
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
-                new SimpleMeterRegistry(), null, null, null, null, null, "default", 3);
+                new SimpleMeterRegistry(), null, null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
     }
 
     // =================================================================
@@ -310,11 +311,13 @@ class GroupConversationServiceTaskForceTest {
 
         @BeforeEach
         void setUp() throws Exception {
+            // handleTaskFailure was split so the SSE listener callback is not made
+            // while holding the task-list monitor; recordTaskFailure is the
+            // document-mutating half these tests assert on.
             handleMethod = GroupConversationService.class.getDeclaredMethod(
-                    "handleTaskFailure",
+                    "recordTaskFailure",
                     GroupConversation.class, TaskItem.class, GroupMember.class,
                     String.class, int.class, DiscussionPhase.class,
-                    GroupDiscussionEventListener.class,
                     List.class, GroupDiscussionException.class);
             handleMethod.setAccessible(true);
         }
@@ -340,7 +343,7 @@ class GroupConversationServiceTaskForceTest {
             var errors = new ArrayList<GroupDiscussionException>();
             var ex = new GroupDiscussionException("LLM timeout");
 
-            handleMethod.invoke(service, gc, task, member, "LLM timeout", 1, phase, null, errors, ex);
+            handleMethod.invoke(service, gc, task, member, "LLM timeout", 1, phase, errors, ex);
 
             // Task should be FAILED
             assertEquals(TaskStatus.FAILED, gc.getTaskList().findById(task.id()).status());
@@ -375,7 +378,7 @@ class GroupConversationServiceTaskForceTest {
             var ex = new GroupDiscussionException("Second failure");
 
             // Should NOT throw even though task is already FAILED
-            assertDoesNotThrow(() -> handleMethod.invoke(service, gc, failedTask, member, "Second failure", 1, phase, null, errors, ex));
+            assertDoesNotThrow(() -> handleMethod.invoke(service, gc, failedTask, member, "Second failure", 1, phase, errors, ex));
 
             // Error still collected
             assertEquals(1, errors.size());

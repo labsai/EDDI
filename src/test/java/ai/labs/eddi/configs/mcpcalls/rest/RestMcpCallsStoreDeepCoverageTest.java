@@ -118,6 +118,9 @@ class RestMcpCallsStoreDeepCoverageTest {
         @DisplayName("delegates to restVersionInfo.update")
         void delegatesUpdate() throws Exception {
             var config = new McpCallsConfiguration();
+            // Valid URL: the write boundary refuses an unusable config before it
+            // reaches the store, and this test asserts the delegation, not the guard.
+            config.setMcpServerUrl("https://mcp.example.com/tools");
             doReturn(config).when(mcpCallsStore).read("id1", 1);
             restStore.updateMcpCalls("id1", 1, config);
             verify(mcpCallsStore).update("id1", 1, config);

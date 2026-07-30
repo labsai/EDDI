@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -41,7 +42,8 @@ import java.util.Map;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static dev.langchain4j.data.message.AiMessage.aiMessage;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -54,23 +56,31 @@ import static org.mockito.Mockito.when;
 import static org.mockito.MockitoAnnotations.openMocks;
 
 /**
- * Finding F10 — a tool-enabled task can never stream token-by-token: the agent
- * loop is synchronous and the whole answer is pushed through a single
- * {@code onToken}. From the client that is a long silence followed by one
- * enormous "token", indistinguishable from a slow stream, so the downgrade is
- * recorded as {@code streamingDowngraded} metadata plus a counter.
+ * Finding F10 — a tool-enabled task cannot stream token by token: the agent
+ * loop is synchronous and the finished answer is pushed through a single
+ * {@code onToken}. To the SSE client that is a long silence followed by one
+ * enormous token, indistinguishable from a slow stream.
  * <p>
- * The instrumentation was applied to the two non-cascade agent paths but NOT to
- * the multi-model-cascade agent path — which emits the whole agent answer as
- * one chunk in exactly the same way, and is the DEFAULT for a cascading agent
- * ({@code enableInAgentMode} defaults to true). These tests drive the real
- * {@code CascadingModelExecutor} so the cascade call site is pinned
- * independently of the other two.
+ * {@code recordStreamingDowngrade} makes it observable — a
+ * {@code streamingDowngraded} flag in {@code responseMetadata} (so an agent
+ * designer can branch on it via {@code responseMetadataObjectName}) plus an
+ * {@code eddi.llm.streaming.downgraded} counter for operators. The first group
+ * of tests below pins both on the two non-cascade agent call sites; deleting
+ * either call site or the method itself turns them red.
+ * <p>
+ * The second group pins the THIRD call site: the multi-model-cascade agent
+ * path, which emits the whole agent answer as one chunk in exactly the same way
+ * and is the DEFAULT for a cascading agent ({@code enableInAgentMode} defaults
+ * to true). Those tests drive the real {@code CascadingModelExecutor} so the
+ * cascade call site is pinned independently of the other two — and they assert
+ * the negative case as well, since a cascade LEGACY step also emits a single
+ * chunk but is not a {@code tools_enabled} downgrade.
  */
-@DisplayName("LlmTask — streaming downgrade signal (F10)")
+@DisplayName("LlmTask — streaming downgrade is observable (F10)")
 class LlmTaskStreamingDowngradeTest {
 
     private static final String METADATA_KEY = "llmMeta";
+    private static final String COUNTER = "eddi.llm.streaming.downgraded";
 
     @Mock
     private IResourceClientLibrary resourceClientLibrary;
@@ -109,6 +119,7 @@ class LlmTaskStreamingDowngradeTest {
     @Mock
     private ConversationEventSink eventSink;
 
+    private SimpleMeterRegistry meterRegistry;
     private LlmTask llmTask;
     private Map<String, Object> templateData;
 
@@ -116,6 +127,7 @@ class LlmTaskStreamingDowngradeTest {
     void setUp() throws Exception {
         openMocks(this);
 
+        meterRegistry = new SimpleMeterRegistry();
         templateData = new HashMap<>();
 
         lenient().when(promptSnippetService.getAll()).thenReturn(Map.of());
@@ -130,7 +142,7 @@ class LlmTaskStreamingDowngradeTest {
                 ragContextProvider, new TokenCounterFactory(), conversationSummarizer,
                 promptSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, agentOrchestrator, new ConversationHistoryBuilder(),
-                new SimpleMeterRegistry());
+                meterRegistry, new CallerIdentityContext(null, null));
 
         lenient().when(dataFactory.createData(anyString(), any())).thenAnswer(inv -> {
             IData<?> data = mock(IData.class);
@@ -156,11 +168,15 @@ class LlmTaskStreamingDowngradeTest {
         lenient().when(currentStep.<String>getLatestData("input")).thenReturn(inputData);
         lenient().when(inputData.getResult()).thenReturn("user input");
 
-        // SSE is active — this is the whole point of the downgrade signal.
+        // SSE is active — this is the whole point of the downgrade signal. Individual
+        // tests re-stub this (notably the no-sink case).
         lenient().when(memory.getEventSink()).thenReturn(eventSink);
+
+        lenient().when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
+                .thenReturn(new AgentOrchestrator.ExecutionResult("the whole agent answer", new ArrayList<>()));
     }
 
-    private LlmConfiguration.Task agentTask() {
+    private LlmConfiguration.Task toolTask() {
         var task = new LlmConfiguration.Task();
         task.setId("taskA");
         task.setType("openai");
@@ -193,13 +209,90 @@ class LlmTaskStreamingDowngradeTest {
         return captor.getValue();
     }
 
+    private double counterCount() {
+        var counter = meterRegistry.find(COUNTER).tag("reason", "tools_enabled").counter();
+        return counter != null ? counter.count() : 0.0;
+    }
+
+    // ---------------------------------------------------------------------
+    // The two non-cascade agent call sites.
+    // ---------------------------------------------------------------------
+
+    @Test
+    @DisplayName("tool mode + event sink → responseMetadata carries the downgrade flag and reason")
+    void toolModeWithSink_flagsDowngradeInMetadata() throws Exception {
+        when(memory.getEventSink()).thenReturn(eventSink);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(toolTask())));
+
+        var metadata = capturedMetadata();
+        assertEquals(Boolean.TRUE, metadata.get("streamingDowngraded"),
+                "an agent designer must be able to branch on the downgrade via responseMetadata");
+        assertEquals("tools_enabled", metadata.get("streamingDowngradeReason"));
+        // …and the whole answer really did arrive as ONE token event.
+        verify(eventSink).onToken("the whole agent answer");
+    }
+
+    @Test
+    @DisplayName("tool mode + event sink → the eddi.llm.streaming.downgraded counter is incremented")
+    void toolModeWithSink_incrementsCounter() throws Exception {
+        when(memory.getEventSink()).thenReturn(eventSink);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(toolTask())));
+
+        assertEquals(1.0, counterCount(), 0.0001,
+                "operators alert on this counter — one downgraded turn must count exactly once");
+    }
+
+    @Test
+    @DisplayName("skipCascade tool branch downgrades too (a second, separately-revertable call site)")
+    void skipCascadeToolMode_flagsDowngrade() throws Exception {
+        when(memory.getEventSink()).thenReturn(eventSink);
+
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEnableInAgentMode(false);
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("openai");
+        step.setTimeoutMs(5000L);
+        cascade.setSteps(List.of(step));
+
+        var task = toolTask();
+        task.setModelCascade(cascade);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(task)));
+
+        assertEquals(Boolean.TRUE, capturedMetadata().get("streamingDowngraded"),
+                "the skipCascade branch pushes the whole answer through one onToken as well");
+        assertEquals(1.0, counterCount(), 0.0001);
+    }
+
+    @Test
+    @DisplayName("no event sink → nothing was streamed, so nothing is flagged or counted")
+    void noSink_noDowngradeRecorded() throws Exception {
+        when(memory.getEventSink()).thenReturn(null);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(toolTask())));
+
+        var metadata = capturedMetadata();
+        assertNull(metadata.get("streamingDowngraded"),
+                "a non-streaming turn was never downgraded — flagging it would be a false alarm");
+        assertFalse(metadata.containsKey("streamingDowngradeReason"));
+        assertEquals(0.0, counterCount(), 0.0001);
+    }
+
+    // ---------------------------------------------------------------------
+    // The third call site: the multi-model-cascade agent path.
+    // ---------------------------------------------------------------------
+
     @Test
     @DisplayName("the cascade agent path records the downgrade when it emits the answer as one chunk")
     void cascadeAgentModeRecordsDowngrade() throws Exception {
         when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent answer", new ArrayList<>(), Map.of()));
 
-        var task = agentTask();
+        var task = toolTask();
         task.setModelCascade(agentModeCascade());
 
         llmTask.execute(memory, new LlmConfiguration(List.of(task)));
@@ -227,13 +320,13 @@ class LlmTaskStreamingDowngradeTest {
                 .metadata(ChatResponseMetadata.builder().tokenUsage(new TokenUsage(7, 3)).build())
                 .build());
 
-        var task = agentTask();
+        var task = toolTask();
         task.setModelCascade(agentModeCascade());
 
         llmTask.execute(memory, new LlmConfiguration(List.of(task)));
 
         Map<String, Object> metadata = capturedMetadata();
-        assertTrue(metadata.get("streamingDowngraded") == null,
+        assertNull(metadata.get("streamingDowngraded"),
                 "only the agent (tool-loop) path is a tools_enabled downgrade: " + metadata);
     }
 }

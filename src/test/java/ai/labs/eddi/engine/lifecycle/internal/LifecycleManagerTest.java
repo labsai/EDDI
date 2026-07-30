@@ -492,6 +492,84 @@ class LifecycleManagerTest {
                 Thread.interrupted();
             }
         }
+
+        /**
+         * The in-loop interrupt check only guards the transition INTO a task, so an
+         * interrupt that landed while the LAST task ran was never observed: the loop
+         * ran out and the turn returned as if it had completed cleanly. That matters
+         * because the runtime watchdog abandons a timed-out turn by interrupting the
+         * pipeline thread and nothing else — {@code AbandonableFuture#cancel} sets its
+         * own {@code abandoned} flag and interrupts, it never sets the memory's cancel
+         * flag — and then discards the completion, so the "clean" turn went on to
+         * commit long-term property writes for a conversation document that was thrown
+         * away.
+         */
+        @Test
+        @Timeout(15)
+        @DisplayName("an interrupt that lands WHILE the last task runs stops the turn (watchdog abandonment)")
+        void interruptDuringLastTaskIsObserved() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("ai.labs.output"));
+            when(task.getType()).thenReturn("output");
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+            // The abandonment path signals ONLY by interrupt — the cancel flag stays
+            // false, which is exactly why re-checking isCancelled() alone is not enough.
+            when(memory.isCancelled()).thenReturn(false);
+
+            var pipelineThread = Thread.currentThread();
+            var taskEntered = new CountDownLatch(1);
+
+            // The task returns only once the interrupt has actually landed — that is
+            // the interleaving under test and it makes the race deterministic without
+            // a sleep. It must NOT block interruptibly: an await() would consume the
+            // interrupt and clear the flag before the exit check reads it.
+            doAnswer(invocation -> {
+                taskEntered.countDown();
+                long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                while (!Thread.currentThread().isInterrupted()) {
+                    if (System.nanoTime() - deadlineNanos > 0) {
+                        fail("watchdog thread never interrupted the pipeline thread");
+                    }
+                    Thread.onSpinWait();
+                }
+                return null;
+            }).when(task).execute(any(), any());
+
+            var watchdog = new Thread(() -> {
+                try {
+                    assertTrue(taskEntered.await(10, TimeUnit.SECONDS), "task never started");
+                    pipelineThread.interrupt();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }, "watchdog-abandon");
+            watchdog.start();
+
+            boolean interruptFlagSurvived;
+            try {
+                assertThrows(LifecycleException.LifecycleInterruptedException.class,
+                        () -> lifecycleManager.executeLifecycle(memory, null));
+            } finally {
+                // Read (and thereby clear) the flag BEFORE joining: join() is itself
+                // interruptible, so on a still-interrupted thread it would throw and
+                // clear the flag before it could be asserted on.
+                interruptFlagSurvived = Thread.interrupted();
+                watchdog.join(10_000);
+            }
+
+            // The task ran to completion (an interrupt is not a kill), but the turn
+            // must not be reported as clean — and the flag must still be set on exit
+            // so the runtime's own abandonment check still sees it.
+            verify(task).execute(any(), any());
+            assertTrue(interruptFlagSurvived, "the exit check must not swallow the interrupt flag");
+        }
     }
 
     @Nested
@@ -1669,9 +1747,9 @@ class LifecycleManagerTest {
     }
 
     /**
-     * C5 — the component cache is keyed by the task's ABSOLUTE index in the
-     * workflow ({@code WorkflowStoreClientLibrary} writes
-     * {@code createComponentKey(id, version, indexInWorkflow)}), but a selective
+     * C5 — the component cache is keyed by the task's ABSOLUTE position in the task
+     * list ({@code WorkflowStoreClientLibrary} writes
+     * {@code createComponentKey(id, version, indexInTaskList)}), but a selective
      * execution hands the loop a SUBLIST, so the loop index is sublist-relative.
      * Building the lookup key from that relative index resolved a key that was
      * never written, the task ran with {@code component == null} and no-opped —

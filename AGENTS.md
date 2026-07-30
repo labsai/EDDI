@@ -18,7 +18,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 | --------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------ |
 | **EDDI** (this repo)                                            | Java 25, Quarkus, MongoDB  | Backend engine, REST API, lifecycle pipeline                 |
 | **[quarkus-eddi](https://github.com/quarkiverse/quarkus-eddi)** | Java 21, Quarkus Extension | Quarkus SDK — `@Inject EddiClient`, Dev Services, MCP bridge |
-| **EDDI-Manager**                                                | React 19, Vite, Tailwind   | Admin dashboard (served from EDDI at `/chat/production`)     |
+| **EDDI-Manager**                                                | React 19, Vite, Tailwind   | Admin dashboard (served from EDDI at `/manage`; `/` redirects to the `/welcome` chooser, `/workforce` is the group-conversation workspace) |
 | **eddi-chat-ui**                                                | React, TypeScript          | Standalone chat widget                                       |
 | **eddi-website**                                                | Astro, Starlight           | Marketing site + documentation at eddi.labs.ai               |
 
@@ -31,7 +31,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 - **Stateless tasks, stateful memory**: `ILifecycleTask` implementations are singletons; all state lives in `IConversationMemory`
 - **Action-based orchestration**: Tasks emit/listen for string-based actions, never call each other directly
 - **Self-contained platform**: EDDI is a closed platform, not a library consumed by third-party code. Internal interfaces (`IUserMemoryStore`, `IResourceStore`, etc.) have no external consumers. Deprecation and replacement of internal APIs is safe — the only backward-compat concern is old JSON configs stored in MongoDB or imported via ZIP.
-- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`v6.0.0-RC2` → `labsai/eddi:6.0.0-RC2`). Separate security workflows run CodeQL, Trivy, Gitleaks, ZAP, CycloneDX (SBOM), and Jazzer fuzzing.
+- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`6.2.0` → `labsai/eddi:6.2.0`) — the release job triggers on tags matching `[0-9]*`, so the tag must **not** be `v`-prefixed or nothing fires. Separate security workflows run CodeQL, Trivy, Gitleaks, ZAP, CycloneDX (SBOM), and Jazzer fuzzing.
 
 ### Build & Test Commands
 
@@ -155,6 +155,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | Test Coverage            | 12,000+ tests, >90% instruction / >80% branch coverage, OpenSSF Gold compliance                     |
 | —     | Security Hardening v6.0.2 | SSRF prevention, SafeHttpClient, auth guard, vault salt, security headers, CodeQL + Trivy CI       |
 | 9b    | HITL Framework           | Two human-approval gates (turn-level `PAUSE_CONVERSATION` + per-tool-call gating), timeout/no-progress policies, audit ledger, Slack + MCP approval surfaces, crash recovery — see [`docs/hitl.md`](docs/hitl.md) |
+| —     | OpenAI-Compatible API    | `/v1` adapter presenting deployed agents as OpenAI models for Open WebUI and OpenAI SDK clients; per-chat conversation isolation, streaming, multimodal, HITL-aware — see [`docs/open-webui-integration.md`](docs/open-webui-integration.md) |
 
 ### In Progress / Upcoming
 
@@ -230,14 +231,14 @@ When tasks process templates (system prompts, HTTP call bodies, property instruc
 
 | Key                | Type                                         | Source                                                                     | Example Access                                   |
 | ------------------ | -------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------ |
-| `context`          | `Map<String, Object>`                        | Input context variables set per turn                                       | `{{context.language}}`                           |
+| `context`          | `Map<String, Object>`                        | Input context variables set per turn                                       | `{context.language}`                           |
 | `properties`       | `Map<String, Object>`                        | Conversation properties — raw values from `ConversationProperties.toMap()` | `{properties.preferred_language}`                |
 | `memory`           | `Map` with `current`, `last`, `past`         | Conversation step data from the pipeline                                   | `{memory.current.output}`, `{memory.last.input}` |
-| `snippets`         | `Map<String, Object>`                        | Prompt Snippets — auto-injected from `PromptSnippetService`                | `{{snippets.cautious_mode}}`                     |
-| `vars`             | `Map<String, Object>`                        | Global Variables — deployment-wide config from `GlobalVariableResolver`    | `{{vars.default-model}}`                         |
-| `userInfo`         | `Map` with `userId`                          | Authenticated user identity                                                | `{{userInfo.userId}}`                            |
-| `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata                                                      | `{{conversationInfo.agentId}}`                   |
-| `conversationLog`  | `String`                                     | Formatted conversation history                                             | `{{conversationLog}}`                            |
+| `snippets`         | `Map<String, Object>`                        | Prompt Snippets — auto-injected from `PromptSnippetService`                | `{snippets.cautious_mode}`                     |
+| `vars`             | `Map<String, Object>`                        | Global Variables — deployment-wide config from `GlobalVariableResolver`    | `{vars.default-model}`                         |
+| `userInfo`         | `Map` with `userId`                          | Authenticated user identity                                                | `{userInfo.userId}`                            |
+| `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata                                                      | `{conversationInfo.agentId}`                   |
+| `conversationLog`  | `String`                                     | Formatted conversation history                                             | `{conversationLog}`                            |
 
 > **Key insight**: `longTerm` properties are loaded into `conversationProperties` at conversation init and are immediately available via `{properties.key}` in any template. You do NOT need a separate template namespace for persistent data — properties IS the namespace.
 
@@ -251,7 +252,7 @@ Properties have a well-defined lifecycle managed by `Conversation.java`:
        └─→ IUserMemoryStore.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries)
        └─→ Visibility scoping: self + group + global entries are loaded
        └─→ Converted to Property objects with scope=longTerm
-       └─→ Available as {{properties.key}} in all templates
+       └─→ Available as {properties.key} in all templates
 
 2. Pipeline runs
    └─→ PropertySetterTask sets properties based on actions
@@ -814,6 +815,38 @@ When embedding `{properties.x}` in HTTP call body templates, be aware:
 - Do NOT use `.orEmpty` on properties — it's for Qute iterables, not strings, and fails on `NOT_FOUND`
 - User-entered text containing `{` or `}` will be interpreted as Qute expressions, potentially eating content
 
+#### Calling an API as the signed-in user
+
+An HTTP call **header** may reference the authenticated caller, so the agent
+calls the API with that user's credentials instead of a static one:
+
+| Reference | Resolves to |
+| --------- | ----------- |
+| `${caller:token}` | The caller's raw bearer token |
+| `${caller:userId}` | The caller's principal name (not a secret) |
+
+```json
+"headers": { "Authorization": "Bearer ${caller:token}" }
+```
+
+Use this whenever the agent calls **EDDI's own API**. A static credential there
+expires within the hour, cannot be least-privilege, and attributes every action
+to one synthetic principal.
+
+Resolution is narrow and fails loudly rather than degrading quietly:
+- **Same origin only** — released only to the exact `scheme://host:port` the
+  caller addressed (read from the inbound request, not config), so a config
+  naming a third-party host cannot exfiltrate the token.
+- **Headers only** — `${caller:token}` in a query parameter is rejected.
+  `${caller:userId}` is allowed in headers and query parameters.
+- **Authenticated turns only** — scheduled jobs and triggers cannot satisfy it.
+- **Fails closed** — an unsatisfiable reference errors instead of sending
+  `"Bearer "` with an empty token.
+
+The token is never persisted: authorization headers are scrubbed before the
+request is written to conversation memory. Disable with
+`eddi.caller-identity.enabled=false`. Full reference: [`docs/httpcalls.md`](docs/httpcalls.md).
+
 #### Requesting specialized input fields from the UI
 
 The output system supports an `inputField` output type that tells the UI to switch its input control. Both **EDDI-Manager** (`SecretInputField` in `chat-panel.tsx`) and **eddi-chat-ui** (`SecretInput.tsx`) handle this natively.
@@ -889,7 +922,7 @@ Always use v6 canonical URIs in new configs:
 | `eddi://ai.labs.property`  | `eddi://ai.labs.property/...` | Optional — slot-filling     |
 | `eddi://ai.labs.httpcalls` | `eddi://ai.labs.apicalls/...` | Optional — API calls        |
 | `eddi://ai.labs.output`    | `eddi://ai.labs.output/...`   | Usually yes — user messages |
-| `eddi://ai.labs.langchain` | `eddi://ai.labs.llm/...`      | Optional — LLM interaction  |
+| `eddi://ai.labs.llm`       | `eddi://ai.labs.llm/...`      | Optional — LLM interaction  |
 
 ### 5.6 Reference Implementation
 

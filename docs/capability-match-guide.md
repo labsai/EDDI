@@ -86,14 +86,14 @@
 
 ## Template Variables
 
-Config values support **Jinja2 template expressions**, resolved against the conversation memory at evaluation time. This enables dynamic routing:
+Config values support **Qute template expressions**, resolved against the conversation memory at evaluation time. This enables dynamic routing:
 
 ```json
 {
   "type": "capabilityMatch",
   "configs": {
-    "skill": "{{properties.requiredSkill}}",
-    "strategy": "{{context.routingStrategy}}",
+    "skill": "{properties.requiredSkill}",
+    "strategy": "{context.routingStrategy}",
     "minResults": "1"
   }
 }
@@ -195,7 +195,7 @@ Use the discovered agents to dynamically compose a group conversation:
 **System prompt (LLM task triggered by `create_expert_group`):**
 ```
 The following agents have been identified as legal analysis experts:
-{{memory.current.capabilityMatch.results}}
+{memory.current.capabilityMatch.results}
 
 Use the createGroupConversation tool to assemble them into a discussion panel.
 ```
@@ -212,7 +212,7 @@ Use PropertySetter to capture the user's intent, then route dynamically:
     "actions": ["user_request_specialist"],
     "setProperties": [{
       "name": "requiredSkill",
-      "valueString": "{{memory.current.intent}}",
+      "valueString": "{memory.current.intent}",
       "scope": "conversation"
     }]
   }]
@@ -228,7 +228,7 @@ Use PropertySetter to capture the user's intent, then route dynamically:
     {
       "type": "capabilityMatch",
       "configs": {
-        "skill": "{{properties.requiredSkill}}",
+        "skill": "{properties.requiredSkill}",
         "strategy": "highest_confidence",
         "minResults": "1"
       }

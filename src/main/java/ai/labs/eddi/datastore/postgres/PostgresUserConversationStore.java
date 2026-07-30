@@ -19,6 +19,8 @@ import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * PostgreSQL implementation of {@link IUserConversationStore}.
  */
@@ -136,7 +138,10 @@ public class PostgresUserConversationStore implements IUserConversationStore {
             ps.setString(2, userId);
             ps.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.error("Failed to delete user conversation intent=" + intent, e);
+            // Sanitized: the intent embeds a caller-supplied chat key (the OpenAI
+            // adapter builds channel:openai:<agentId>:<chatKey> from a request
+            // header), so a newline in it could forge log entries.
+            LOGGER.error("Failed to delete user conversation intent=" + sanitize(intent), e);
         }
     }
     // === GDPR ===

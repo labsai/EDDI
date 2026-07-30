@@ -9,6 +9,7 @@ import com.mongodb.MongoCommandException;
 import com.mongodb.MongoNamespace;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.RenameCollectionOptions;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -124,8 +125,9 @@ public class V6RenameMigration {
         var conflicts = detectCollectionRenameConflicts();
         if (!conflicts.isEmpty()) {
             LOGGER.errorf("V6 rename migration aborted — these v5 collections and their v6 counterparts both contain "
-                    + "documents: %s. Merge them manually (or drop the empty-by-mistake target) and start again. "
-                    + "Nothing was changed and the migration was NOT marked complete.", String.join(", ", conflicts));
+                    + "documents: %s. Merge them manually and start again. An empty v6 counterpart is NOT a conflict "
+                    + "and is dropped automatically. Nothing was changed and the migration was NOT marked complete.",
+                    String.join(", ", conflicts));
             return;
         }
 
@@ -197,6 +199,25 @@ public class V6RenameMigration {
     }
 
     /**
+     * Exact document count, used for the one decision in this migration that
+     * destroys data: whether a rename may drop its target. {@code
+     * estimatedDocumentCount()} reads collection metadata that can be stale after
+     * an unclean shutdown, and a wrongly-zero estimate would drop a populated
+     * collection. Returns -1 when the count cannot be established, which callers
+     * must treat as "not provably empty".
+     * <p>
+     * Package-private for testing.
+     */
+    long exactDocumentCount(String collectionName) {
+        try {
+            return database.getCollection(collectionName).countDocuments();
+        } catch (Exception e) {
+            LOGGER.warnf("  Could not count documents in %s (%s) — treating it as non-empty", collectionName, e.getMessage());
+            return -1;
+        }
+    }
+
+    /**
      * Rename MongoDB collections from v5 names to v6 names. Each collection and its
      * ".history" counterpart are renamed. Safe to call if collections have already
      * been renamed (skips if old name doesn't exist).
@@ -221,6 +242,24 @@ public class V6RenameMigration {
 
     /**
      * Rename a single MongoDB collection if the old name exists.
+     * <p>
+     * MongoDB's {@code renameCollection} fails with NamespaceExists (48) whenever
+     * the target namespace merely <em>exists</em> — being empty does not help. EDDI
+     * creates those v6 namespaces itself (every {@code MongoResourceStorage}
+     * constructor calls {@code createIndex}, which implicitly creates the
+     * collection), so booting the v6 binary once against a v5 database before
+     * enabling this migration leaves empty {@code agents}, {@code workflows},
+     * {@code rulesets}, … behind. Without {@code dropTarget} that leftover would
+     * fail the rename, abort the run, and — because the app keeps booting and
+     * re-creating those namespaces — do so identically on every restart, so the
+     * migration could never complete.
+     * <p>
+     * We therefore drop a target we have just proven to be empty. Dropping an empty
+     * namespace loses nothing (its indexes are re-created by the store on the next
+     * boot), while a populated target is never dropped: it keeps
+     * {@code dropTarget=false}, still fails with 48, and is reported — that case is
+     * a real merge conflict which {@link #detectCollectionRenameConflicts()}
+     * refuses up front.
      *
      * @return true if the rename succeeded or was unnecessary (source missing or
      *         empty), false if documents are still sitting under the v5 name
@@ -234,68 +273,24 @@ public class V6RenameMigration {
             }
             String dbName = database.getName();
             MongoNamespace target = new MongoNamespace(dbName, newName);
-            oldCollection.renameCollection(target);
+            boolean targetIsProvablyEmpty = exactDocumentCount(newName) == 0;
+            oldCollection.renameCollection(target, new RenameCollectionOptions().dropTarget(targetIsProvablyEmpty));
             LOGGER.infof("  Renamed collection: %s → %s", oldName, newName);
             return true;
         } catch (MongoCommandException e) {
             if (e.getErrorCode() == NAMESPACE_EXISTS_ERROR_CODE) {
-                return renameOntoExistingTarget(oldName, newName);
+                // Target namespace already exists and holds documents, or its size could
+                // not be established (an existing target proven empty is dropped as part
+                // of the rename above) — this is not a skip we may shrug off, the v5
+                // documents would be lost to the migration.
+                LOGGER.errorf("  Cannot rename %s → %s: the target collection already exists and is not provably empty", oldName,
+                        newName);
+            } else {
+                LOGGER.warnf("  Failed to rename collection %s → %s: %s", oldName, newName, e.getMessage());
             }
-            LOGGER.warnf("  Failed to rename collection %s → %s: %s", oldName, newName, e.getMessage());
             return false;
         } catch (Exception e) {
             LOGGER.warnf("  Failed to rename collection %s → %s: %s", oldName, newName, e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Recover from MongoDB error 48 ("target namespace exists").
-     * <p>
-     * MongoDB refuses {@code renameCollection} onto ANY existing namespace, empty
-     * or not — and an empty v6 collection is the NORMAL state on a v5 database,
-     * because every store constructor creates its collection as a side effect of
-     * ensuring indexes during startup, and this migration runs shortly after.
-     * Treating that as a hard failure aborted the entire migration; because the
-     * abort also skips {@code createMigrationLog}, it then repeated on every
-     * subsequent start, forever, and no v5 database could ever be migrated.
-     * <p>
-     * So make this handler agree with {@link #detectCollectionRenameConflicts()},
-     * which already draws the only line that matters: an empty target holds nothing
-     * anyone can lose, so drop it and retry the rename; a populated one is
-     * genuinely ambiguous and must still stop the migration. If the target's size
-     * cannot be established we abort as well — an unreadable count is not
-     * permission to drop.
-     *
-     * @return true if the retried rename succeeded, false if the migration must
-     *         stop
-     */
-    private boolean renameOntoExistingTarget(String oldName, String newName) {
-        long targetCount;
-        try {
-            // countDocuments, not estimatedDocumentCount: this decides whether to DROP
-            // a collection, and metadata-based estimates can be stale after an unclean
-            // shutdown. The expected value is 0, so the scan costs nothing.
-            targetCount = database.getCollection(newName).countDocuments();
-        } catch (Exception e) {
-            LOGGER.errorf("  Cannot rename %s → %s: the target already exists and its document count could not be read (%s)", oldName,
-                    newName, e.getMessage());
-            return false;
-        }
-
-        if (targetCount > 0) {
-            LOGGER.errorf("  Cannot rename %s → %s: the target collection already holds %d document(s) and %s is not empty. "
-                    + "Merge them manually and start again.", oldName, newName, targetCount, oldName);
-            return false;
-        }
-
-        try {
-            database.getCollection(newName).drop();
-            database.getCollection(oldName).renameCollection(new MongoNamespace(database.getName(), newName));
-            LOGGER.infof("  Renamed collection: %s → %s (dropped the empty %s that startup had created)", oldName, newName, newName);
-            return true;
-        } catch (Exception e) {
-            LOGGER.errorf("  Cannot rename %s → %s: dropping the empty target and retrying failed (%s)", oldName, newName, e.getMessage());
             return false;
         }
     }

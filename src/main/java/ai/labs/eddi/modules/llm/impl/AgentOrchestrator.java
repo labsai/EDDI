@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
@@ -263,6 +264,11 @@ class AgentOrchestrator {
     // call it directly — untouched.
     @Inject
     volatile IAttachmentStore attachmentStore;
+
+    // Same reason. Handed to TeardownAgentTool so a deleted dynamic agent leaves
+    // no deployment record the runtime keeps trying to redeploy.
+    @Inject
+    volatile IDeploymentStore deploymentStore;
 
     @Inject
     volatile AttachmentTextExtractor attachmentTextExtractor;
@@ -2127,9 +2133,10 @@ class AgentOrchestrator {
                     // Findings F18/I4: the tool used to take only (service, userId) and
                     // consult no guardrails at all — allowDelegation was never read and
                     // nothing bounded delegation depth or target.
-                    tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, resolveDelegationDepth(memory)));
+                    int delegationDepth = resolveDelegationDepth(memory);
+                    tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth));
                     LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
-                            sanitize(parentAgentId), resolveDelegationDepth(memory));
+                            sanitize(parentAgentId), delegationDepth);
                 }
                 // Finding I4: allowRecruitment was documented as an enforced cap but was
                 // never read. Capability lookup is the recruitment entry point, so it is
@@ -2144,7 +2151,7 @@ class AgentOrchestrator {
                     }
                 }
                 if (whitelist.contains("teardown_agent") && agentFactory != null && agentStore != null) {
-                    tools.add(new TeardownAgentTool(agentFactory, agentStore, sharedCreatedIds, sharedRetainedIds));
+                    tools.add(new TeardownAgentTool(agentFactory, agentStore, deploymentStore, sharedCreatedIds, sharedRetainedIds));
                     LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
                     anyDynamicToolAdded = true;
                 }
@@ -2393,17 +2400,54 @@ class AgentOrchestrator {
     /**
      * Finding F18: how many delegation hops led to the current conversation.
      * {@code ConverseWithAgentTool} propagates this as a {@code delegationDepth}
-     * context variable when it starts the callee's conversation, mirroring the
-     * {@code groupDepth} mechanism. 0 when a human started the conversation.
+     * context variable on the callee's start context AND on every message it sends,
+     * mirroring the {@code groupDepth} mechanism. 0 when a human started the
+     * conversation.
+     * <p>
+     * The current step is consulted first — that is where the per-turn context
+     * lands. Earlier steps are the fallback: the start context materializes on step
+     * 0 only, and a turn issued without the delegation context (a resume, or any
+     * other caller saying into the delegated conversation) must not silently reset
+     * an already-delegated conversation back to depth 0. Without that fallback the
+     * guard is inert on exactly the turns that matter.
      */
     static int resolveDelegationDepth(IConversationMemory memory) {
+        String contextKey = "context:" + ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH;
+
         var currentStep = memory.getCurrentStep();
-        if (currentStep == null) {
-            return 0;
+        if (currentStep != null) {
+            Integer depth = parseDelegationDepth(currentStep.getLatestData(contextKey));
+            if (depth != null) {
+                return depth;
+            }
         }
-        IData<Object> contextData = currentStep.getLatestData("context:" + ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH);
+
+        var allSteps = memory.getAllSteps();
+        if (allSteps != null) {
+            List<IData<Object>> priorEntries = allSteps.getAllLatestData(contextKey);
+            if (priorEntries != null) {
+                int deepest = 0;
+                for (IData<Object> entry : priorEntries) {
+                    Integer depth = parseDelegationDepth(entry);
+                    if (depth != null) {
+                        deepest = Math.max(deepest, depth);
+                    }
+                }
+                return deepest;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * The hop count carried by a {@code context:delegationDepth} entry, or
+     * {@code null} when the entry is absent, not a {@link Context}, or carries a
+     * non-numeric value.
+     */
+    private static Integer parseDelegationDepth(IData<Object> contextData) {
         if (contextData == null || !(contextData.getResult() instanceof Context ctx)) {
-            return 0;
+            return null;
         }
         Object value = ctx.getValue();
         if (value instanceof Number number) {
@@ -2416,7 +2460,7 @@ class AgentOrchestrator {
                 LOGGER.debugf("Ignoring non-numeric delegationDepth context value '%s'", sanitize(text));
             }
         }
-        return 0;
+        return null;
     }
 
     /**

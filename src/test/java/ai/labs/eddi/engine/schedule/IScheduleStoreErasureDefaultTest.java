@@ -4,14 +4,18 @@
  */
 package ai.labs.eddi.engine.schedule;
 
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -71,8 +75,38 @@ class IScheduleStoreErasureDefaultTest {
 
         store.deleteSchedulesByUserId("user-1");
 
-        verify(store).readAllSchedules(IScheduleStore.ERASURE_SCAN_LIMIT);
-        assertTrue(IScheduleStore.ERASURE_SCAN_LIMIT > 0);
+        // Capture the argument actually passed rather than asserting on the constant:
+        // ERASURE_SCAN_LIMIT > 0 is compile-time constant-folded to `true`, so it
+        // asserts nothing. The captured value is a runtime Integer, so this genuinely
+        // fails if the limit is ever set to 0 — which would scan, and therefore erase,
+        // nothing while still reporting success.
+        var limit = ArgumentCaptor.forClass(Integer.class);
+        verify(store).readAllSchedules(limit.capture());
+        assertEquals(IScheduleStore.ERASURE_SCAN_LIMIT, limit.getValue());
+        assertTrue(limit.getValue() > 0, "erasure scan limit must be positive, otherwise erasure silently scans nothing");
+    }
+
+    /**
+     * A full page means the scan hit its ceiling, so schedules it never examined
+     * may still belong to this user. Returning a count there reports a complete
+     * erasure that is not one — the caller records the request as satisfied and the
+     * remaining schedules keep firing under the erased user's id.
+     */
+    @Test
+    @DisplayName("a scan that fills the page refuses to claim the erasure is complete")
+    void fullPageMeansIncompleteErasure() throws Exception {
+        List<ScheduleConfiguration> full = new ArrayList<>();
+        for (int i = 0; i < IScheduleStore.ERASURE_SCAN_LIMIT; i++) {
+            var sc = new ScheduleConfiguration();
+            sc.setId("s" + i);
+            sc.setUserId(i == 0 ? "user-1" : "someone-else");
+            full.add(sc);
+        }
+        when(store.readAllSchedules(anyInt())).thenReturn(full);
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.deleteSchedulesByUserId("user-1"));
+        assertTrue(thrown.getMessage().contains("Erasure incomplete"), thrown.getMessage());
     }
 
     @Test

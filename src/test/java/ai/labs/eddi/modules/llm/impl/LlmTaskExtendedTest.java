@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -114,7 +115,7 @@ class LlmTaskExtendedTest {
                 promptSnippetService, globalVariableResolver,
                 counterweightService, identityMaskingService,
                 mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),
-                new SimpleMeterRegistry());
+                new SimpleMeterRegistry(), new CallerIdentityContext(null, null));
     }
 
     private IConversationMemory createMemoryWithAction(String... actions) throws Exception {

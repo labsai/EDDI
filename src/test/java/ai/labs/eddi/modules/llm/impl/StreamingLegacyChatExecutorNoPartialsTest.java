@@ -11,7 +11,9 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import dev.langchain4j.model.output.FinishReason;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -116,6 +118,56 @@ class StreamingLegacyChatExecutorNoPartialsTest {
         assertNull(result.metadata().get("streamingNoPartials"));
         verify(eventSink).onToken("Hel");
         verify(eventSink).onToken("lo");
+    }
+
+    private static StreamingChatModel completeOnly(String text, FinishReason finishReason) {
+        return new StreamingChatModel() {
+            @Override
+            public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                handler.onCompleteResponse(ChatResponse.builder()
+                        .aiMessage(AiMessage.from(text))
+                        .metadata(ChatResponseMetadata.builder().finishReason(finishReason).build())
+                        .build());
+            }
+        };
+    }
+
+    @Test
+    @DisplayName("a no-partials provider that also truncated keeps warning=truncated")
+    void truncationWarningSurvivesTheNoPartialsFallback() {
+        var result = executor.execute(completeOnly("Half an ans", FinishReason.LENGTH), List.of(UserMessage.from("Hi")),
+                eventSink, null, JsonResponseFormatPolicy.DISABLED);
+
+        // LlmTask.applyResponseValidation dispatches ONLY on the "warning" string, so
+        // clobbering it with "streaming_no_partials" would make onTruncation
+        // unreachable.
+        assertEquals("truncated", result.metadata().get("warning"),
+                "the no-partials capability note must not overwrite the truncation signal");
+        assertEquals("LENGTH", result.metadata().get("finishReason"));
+        assertEquals(Boolean.TRUE, result.metadata().get("streamingNoPartials"),
+                "the downgrade is still recorded on its own key");
+        assertEquals("Half an ans", result.response());
+    }
+
+    @Test
+    @DisplayName("a no-partials provider that was content-filtered keeps warning=content_filter")
+    void contentFilterWarningSurvivesTheNoPartialsFallback() {
+        var result = executor.execute(completeOnly("Blocked-ish", FinishReason.CONTENT_FILTER), List.of(UserMessage.from("Hi")),
+                eventSink, null, JsonResponseFormatPolicy.DISABLED);
+
+        assertEquals("content_filter", result.metadata().get("warning"),
+                "the no-partials capability note must not overwrite the content-filter signal");
+        assertEquals(Boolean.TRUE, result.metadata().get("streamingNoPartials"));
+    }
+
+    @Test
+    @DisplayName("with a normal STOP finish the no-partials warning is still reported")
+    void noPartialsWarningStillSetWhenNoFinishReasonWarning() {
+        var result = executor.execute(completeOnly("All good", FinishReason.STOP), List.of(UserMessage.from("Hi")),
+                eventSink, null, JsonResponseFormatPolicy.DISABLED);
+
+        assertEquals("streaming_no_partials", result.metadata().get("warning"));
+        assertEquals(Boolean.TRUE, result.metadata().get("streamingNoPartials"));
     }
 
     @Test

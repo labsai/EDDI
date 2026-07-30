@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
@@ -102,7 +103,7 @@ class GroupConversationServiceHitlCoverage3Test {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                scheduleStore, nonceCacheService, null, DEFAULT_TENANT, MAX_DEPTH);
+                scheduleStore, nonceCacheService, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
     }
 
     // =================================================================
@@ -786,12 +787,15 @@ class GroupConversationServiceHitlCoverage3Test {
         var task = g.getTaskList().all().get(0);
 
         var errors = java.util.Collections.synchronizedList(new java.util.ArrayList<GroupDiscussionException>());
-        var m = method("handleTaskFailure", GroupConversation.class, TaskItem.class, GroupMember.class,
-                String.class, int.class, DiscussionPhase.class, GroupDiscussionEventListener.class,
+        // handleTaskFailure was split so the SSE listener callback is not made while
+        // holding the task-list monitor; recordTaskFailure is the document-mutating
+        // half these tests actually assert on.
+        var m = method("recordTaskFailure", GroupConversation.class, TaskItem.class, GroupMember.class,
+                String.class, int.class, DiscussionPhase.class,
                 List.class, GroupDiscussionException.class);
         var ex = new GroupDiscussionException("agent broke");
 
-        invoke(m, g, task, member(), "agent broke", 0, phase(PhaseType.EXECUTE), null, errors, ex);
+        invoke(m, g, task, member(), "agent broke", 0, phase(PhaseType.EXECUTE), errors, ex);
 
         assertEquals(TaskStatus.FAILED, g.getTaskList().all().get(0).status());
         assertEquals(1, errors.size());
@@ -814,12 +818,15 @@ class GroupConversationServiceHitlCoverage3Test {
         var task = g.getTaskList().all().get(0);
 
         var errors = java.util.Collections.synchronizedList(new java.util.ArrayList<GroupDiscussionException>());
-        var m = method("handleTaskFailure", GroupConversation.class, TaskItem.class, GroupMember.class,
-                String.class, int.class, DiscussionPhase.class, GroupDiscussionEventListener.class,
+        // handleTaskFailure was split so the SSE listener callback is not made while
+        // holding the task-list monitor; recordTaskFailure is the document-mutating
+        // half these tests actually assert on.
+        var m = method("recordTaskFailure", GroupConversation.class, TaskItem.class, GroupMember.class,
+                String.class, int.class, DiscussionPhase.class,
                 List.class, GroupDiscussionException.class);
 
         assertDoesNotThrow(() -> invoke(m, g, task, member(), "late fail", 0, phase(PhaseType.EXECUTE),
-                null, errors, new GroupDiscussionException("late fail")));
+                errors, new GroupDiscussionException("late fail")));
         assertEquals(1, errors.size(), "error is still collected even when task cannot transition");
     }
 

@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.IData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.Map;
 
@@ -87,13 +88,19 @@ class ConversationPropertiesMapContractTest {
     }
 
     @Test
-    @DisplayName("G10 — a step-scoped property is not mirrored into the persisted step data or output")
-    void stepScopedPropertyIsNotPersisted() {
+    @DisplayName("G10 — a step-scoped property skips the persisted step data but IS mirrored for this turn's templates")
+    void stepScopedPropertyIsMirroredButNotStoredAsStepData() {
         properties.put("transient", new Property("transient", "temp", Property.Scope.step));
 
+        // the persisted step Data<> is what leaked into later turns — skip it
         verify(currentStep, never()).storeData(any(IData.class));
-        verify(currentStep, never()).addConversationOutputMap(eq("properties"), anyMap());
-        // ...but it IS live for this turn's templates
+
+        // ...but {memory.current.properties.transient} must resolve DURING this turn
+        // (Conversation#removeOldInvalidProperties strips it again at the end of it)
+        ArgumentCaptor<Map<String, Object>> mirrored = ArgumentCaptor.forClass(Map.class);
+        verify(currentStep).addConversationOutputMap(eq("properties"), mirrored.capture());
+        assertEquals("temp", mirrored.getValue().get("transient"));
+
         assertEquals("temp", properties.toMap().get("transient"));
     }
 
@@ -104,5 +111,38 @@ class ConversationPropertiesMapContractTest {
 
         verify(currentStep).storeData(any(IData.class));
         verify(currentStep).addConversationOutputMap(eq("properties"), anyMap());
+    }
+
+    /**
+     * {@link Property} is deserialized from stored configuration and may legally
+     * carry a null name. {@code toMap()} has always fallen back to the map key; the
+     * mirror into the conversation output did not, so the two views of one property
+     * disagreed — the template resolved the value while the client-visible output
+     * carried a {@code null} key for the same entry.
+     */
+    @Test
+    @DisplayName("a property with no name is mirrored under the map key, matching toMap()")
+    void namelessPropertyIsMirroredUnderTheMapKey() {
+        properties.put("nickname", new Property(null, "Ali", Property.Scope.conversation));
+
+        ArgumentCaptor<Map<String, Object>> mirrored = ArgumentCaptor.forClass(Map.class);
+        verify(currentStep).addConversationOutputMap(eq("properties"), mirrored.capture());
+
+        assertEquals("Ali", mirrored.getValue().get("nickname"), "the mirror must key on the map key when the property has no name");
+        assertFalse(mirrored.getValue().containsKey(null), "a null key is unusable to a client and must never be emitted");
+        // The two views of the same property must agree.
+        assertEquals(properties.toMap().get("nickname"), mirrored.getValue().get("nickname"));
+    }
+
+    @Test
+    @DisplayName("an explicit property name still wins over the map key")
+    void explicitNameStillWins() {
+        properties.put("mapKey", new Property("realName", "Alice", Property.Scope.conversation));
+
+        ArgumentCaptor<Map<String, Object>> mirrored = ArgumentCaptor.forClass(Map.class);
+        verify(currentStep).addConversationOutputMap(eq("properties"), mirrored.capture());
+
+        assertEquals("Alice", mirrored.getValue().get("realName"));
+        assertFalse(mirrored.getValue().containsKey("mapKey"), "the fallback must not override an explicit name");
     }
 }

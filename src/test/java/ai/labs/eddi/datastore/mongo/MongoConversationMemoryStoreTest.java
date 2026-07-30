@@ -144,6 +144,32 @@ class MongoConversationMemoryStoreTest {
         void loadNonExistent() {
             assertNull(store.loadConversationMemorySnapshot("000000000000000000000000"));
         }
+
+        /**
+         * G12 against the REAL driver: {@code ConversationMemoryStoreResilienceTest}
+         * proves the branch with a mocked {@code UpdateResult}, which cannot
+         * substantiate the driver-semantics claim that a non-upserting
+         * {@code replaceOne} against a deleted document reports
+         * {@code matchedCount == 0} rather than silently re-inserting it.
+         */
+        @Test
+        @DisplayName("G12 — a conversation deleted mid-turn surfaces as an error, not silent loss")
+        void concurrentDeleteDuringTurnIsReported() throws IResourceStore.ResourceStoreException {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.IN_PROGRESS);
+            String id = store.storeConversationMemorySnapshot(snapshot);
+            snapshot.setId(id);
+            snapshot.setConversationId(id);
+
+            // the turn is still running when the document is erased
+            store.deleteConversationMemorySnapshot(id);
+
+            var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
+                    () -> store.storeConversationMemorySnapshot(snapshot));
+            assertTrue(thrown.getMessage().contains(id), thrown.getMessage());
+            assertTrue(thrown.getMessage().contains("NOT persisted"), thrown.getMessage());
+            assertNull(store.loadConversationMemorySnapshot(id),
+                    "the store must not resurrect the erased conversation");
+        }
     }
 
     // ─── State Management ───────────────────────────────────────

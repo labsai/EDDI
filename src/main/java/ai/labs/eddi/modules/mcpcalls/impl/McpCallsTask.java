@@ -83,6 +83,18 @@ public class McpCallsTask implements ILifecycleTask {
      */
     private static final String TOOL_SOURCE_MCP = "mcp";
 
+    /**
+     * Sentinel {@link ToolExecutionService#executeToolWrapped} returns instead of
+     * throwing when the per-conversation rate limit rejects the call.
+     */
+    private static final String RATE_LIMIT_ERROR_PREFIX = "Error: Rate limit exceeded for tool: ";
+
+    /**
+     * Sentinel {@link ToolExecutionService#executeToolWrapped} returns instead of
+     * propagating an exception raised inside the wrapper itself.
+     */
+    private static final String TOOL_ERROR_PREFIX = "Error executing tool: ";
+
     private final IResourceClientLibrary resourceClientLibrary;
     private final IMemoryItemConverter memoryItemConverter;
     private final IJsonSerialization jsonSerialization;
@@ -238,8 +250,7 @@ public class McpCallsTask implements ILifecycleTask {
             // directly bypassed all three.
             String conversationId = memory.getConversationId();
             String toolResult = RetryConfiguration.executeWithRetry(
-                    () -> toolExecutionService.executeToolWrapped(toolName, toolRequest.arguments(), null, conversationId,
-                            () -> executor.execute(toolRequest, null), true, false, true, defaultRateLimit),
+                    () -> executeMetered(toolName, toolRequest, executor, conversationId),
                     mcpCall.getRetry(),
                     "MCP call '" + callName + "'");
             LOGGER.infof("MCP call '%s' result: %d chars", callName, toolResult != null ? toolResult.length() : 0);
@@ -294,6 +305,84 @@ public class McpCallsTask implements ILifecycleTask {
                 throw e;
             }
             LOGGER.warnf("MCP call '%s' failed but continueOnError=true, proceeding", errorCallName);
+        }
+    }
+
+    /**
+     * Run the MCP executor through {@link ToolExecutionService} (rate limiting,
+     * cost tracking) <em>without</em> losing the failure signal.
+     * <p>
+     * {@code executeToolWrapped} catches every exception and <em>returns</em> an
+     * {@code "Error executing tool: …"} string. Trusting its return value would
+     * make {@link RetryConfiguration#executeWithRetry} never retry, the
+     * {@code <name>Error} memory entry never appear and {@code continueOnError}
+     * never be consulted — a failed MCP call would be stored as a successful
+     * response and {@code postResponse} would run with HTTP 200. So the executor's
+     * own throwable is captured inside the supplier and rethrown here, and a
+     * wrapper short-circuit (rate-limit rejection) is turned into a throwable too.
+     * Retry and the {@code catch (LifecycleException)} error path below then behave
+     * exactly as they did when the executor was called directly.
+     *
+     * @return the value the MCP tool actually returned (or a cached one)
+     */
+    private String executeMetered(String toolName, ToolExecutionRequest toolRequest, ToolExecutor executor, String conversationId) {
+        var outcome = new ToolOutcome();
+        String wrappedResult = toolExecutionService.executeToolWrapped(toolName, toolRequest.arguments(), null, conversationId,
+                () -> {
+                    outcome.executed = true;
+                    try {
+                        outcome.result = executor.execute(toolRequest, null);
+                        return outcome.result;
+                    } catch (RuntimeException e) {
+                        outcome.failure = e;
+                        throw e;
+                    }
+                }, true, false, true, defaultRateLimit);
+
+        if (outcome.failure != null) {
+            // The tool really failed — hand the ORIGINAL throwable back to the retry
+            // loop so retryability detection and the error path see the real cause.
+            throw outcome.failure;
+        }
+        if (outcome.executed) {
+            return outcome.result;
+        }
+        // The executor never ran, so the wrapper short-circuited. A rate-limit
+        // rejection (or a failure inside the wrapper itself) is a failure, not a
+        // response; only a cache hit may legitimately be returned as a result.
+        if (isMeteringFailure(wrappedResult, toolName)) {
+            throw new ToolMeteringException(wrappedResult);
+        }
+        return wrappedResult;
+    }
+
+    /**
+     * Recognise the sentinel strings {@link ToolExecutionService} returns when it
+     * refuses or fails a call it never dispatched to the executor.
+     */
+    private static boolean isMeteringFailure(String wrappedResult, String toolName) {
+        return wrappedResult != null
+                && (wrappedResult.equals(RATE_LIMIT_ERROR_PREFIX + toolName) || wrappedResult.startsWith(TOOL_ERROR_PREFIX));
+    }
+
+    /**
+     * Per-call capture of what the MCP executor actually did inside the metering
+     * wrapper. Method-local, so the task stays stateless.
+     */
+    private static final class ToolOutcome {
+        private boolean executed;
+        private String result;
+        private RuntimeException failure;
+    }
+
+    /**
+     * Raised when {@link ToolExecutionService} refused the call (rate limit) or
+     * failed before reaching the executor, so the refusal travels the failure path
+     * instead of being stored as a tool response.
+     */
+    static final class ToolMeteringException extends RuntimeException {
+        ToolMeteringException(String message) {
+            super(message);
         }
     }
 
@@ -369,17 +458,27 @@ public class McpCallsTask implements ILifecycleTask {
         URI uri = URI.create(uriObj.toString());
         try {
             McpCallsConfiguration config = resourceClientLibrary.getResource(uri, McpCallsConfiguration.class);
-            // Finding I3/A10: reject settings the engine cannot honour (unimplemented
-            // transport, non-http URL) at deploy time rather than accepting them and
-            // silently doing something else.
+            // Findings I3/A10: settings the engine cannot honour (unimplemented
+            // transport, non-http URL) must be surfaced instead of silently ignored —
+            // but NOT by failing the workflow build. A WorkflowConfigurationException
+            // escapes WorkflowStoreClientLibrary.createExecutableWorkflow, so a config
+            // already stored in MongoDB before these rules existed would take the whole
+            // agent down (parser, rules, output, LLM), not just its MCP step. Log it
+            // loudly at load time and keep the workflow loadable; the MCP step alone
+            // still fails closed, because McpToolProviderManager.createTransport
+            // re-validates URL and transport and discoverTools contains that throw.
+            // Strict rejection belongs on the write path (REST create/update, import).
             if (config != null) {
-                config.validate();
+                try {
+                    config.validate();
+                } catch (IllegalArgumentException e) {
+                    LOGGER.errorf("Invalid MCP calls configuration at %s: %s — the workflow still loads, but this MCP server "
+                            + "will not connect. Fix the configuration and redeploy.", uri, e.getMessage());
+                }
             }
             return config;
         } catch (ServiceException e) {
             throw new WorkflowConfigurationException(e.getLocalizedMessage(), e);
-        } catch (IllegalArgumentException e) {
-            throw new WorkflowConfigurationException("Invalid MCP calls configuration at " + uri + ": " + e.getMessage(), e);
         }
     }
 

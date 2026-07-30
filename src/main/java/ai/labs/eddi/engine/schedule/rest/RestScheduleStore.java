@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.runtime.internal.CronDescriber;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -51,8 +52,15 @@ public class RestScheduleStore implements IRestScheduleStore {
      * side-step the owner/admin/approver check on {@code /resume}) or disarm them
      * (defeating an ABORT/AUTO_REJECT deadline).
      */
-    private static final String HITL_TYPE_KEY = ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_KEY;
-    private static final String HITL_TYPE_TIMEOUT = ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_TIMEOUT;
+    private static final String HITL_TYPE_KEY = HitlSchedules.METADATA_TYPE_KEY;
+    private static final String HITL_TYPE_TIMEOUT = HitlSchedules.METADATA_TYPE_TIMEOUT;
+
+    /**
+     * Placeholder identity for schedules that act for the system rather than for a
+     * specific end user. It is not a real principal — {@code DreamService} refuses
+     * to consolidate memories for it — so ownership checks treat it as unowned.
+     */
+    private static final String SCHEDULER_USER_ID = "system:scheduler";
 
     @Inject
     IScheduleStore scheduleStore;
@@ -126,6 +134,13 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return bodyGuard;
             }
 
+            // A schedule runs AS its userId — refuse to mint one that acts as
+            // somebody else (see requireOwnUserId).
+            Response ownerGuard = requireOwnUserId(schedule != null ? schedule.getUserId() : null, "create");
+            if (ownerGuard != null) {
+                return ownerGuard;
+            }
+
             // Validate
             validateSchedule(schedule);
 
@@ -169,7 +184,43 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return guard;
             }
 
+            // BOTH sides matter, and checking only one is the bug this replaces.
+            //
+            // STORED userId — "may I touch this schedule at all?". Guarding only the
+            // body let a non-admin PUT over a schedule owned by victim-42 as long as
+            // the body left userId unset (or "system:scheduler", which is exempt):
+            // the guard passed and the update ran, so the caller could retarget the
+            // agent/cron/message or effectively disarm the victim's dream schedule.
+            // fireNow already checks the stored value for exactly this reason.
+            //
+            // BODY userId — "may I make it act as this identity?", i.e. the re-point
+            // path that would aim an otherwise harmless schedule at another user.
+            Response storedOwnerGuard = requireOwnUserIdOfStoredSchedule(scheduleId, "update");
+            if (storedOwnerGuard != null) {
+                return storedOwnerGuard;
+            }
+
+            Response ownerGuard = requireOwnUserId(schedule != null ? schedule.getUserId() : null, "update");
+            if (ownerGuard != null) {
+                return ownerGuard;
+            }
+
             validateSchedule(schedule);
+
+            // Same order as createSchedule, and for the same reason: PUT is a full
+            // replace, so a field the body omits must be defaulted rather than
+            // persisted empty. Update skipped this entirely, so an absent userId was
+            // stored as null instead of SCHEDULER_USER_ID — and because ownership
+            // treats null as unowned, an editor updating their OWN schedule silently
+            // made it writable by every other editor.
+            //
+            // (The blank-timeZone half of that report was a different bug in a
+            // different place: validateSchedule runs BEFORE this on both paths, and it
+            // was validateSchedule's own ZoneId.of that threw. Fixed in zoneOf().)
+            //
+            // Deliberately AFTER the ownership guards above, so they judge what the
+            // caller actually sent rather than what defaulting turned it into.
+            applyDefaults(schedule);
 
             // Recompute nextFire
             computeInitialNextFire(schedule);
@@ -243,6 +294,14 @@ public class RestScheduleStore implements IRestScheduleStore {
                                 + "Approve or reject via POST /agents/{conversationId}/resume, "
                                 + "or terminate via POST /agents/{conversationId}/cancel.")
                         .build();
+            }
+            // Checked on the STORED schedule: firing one that acts as another user is
+            // the step that actually executes as them — including the
+            // dreamType=dream_consolidation fast-path, which prunes and rewrites that
+            // user's persistent memories.
+            Response ownerGuard = requireOwnUserId(schedule.getUserId(), "fire");
+            if (ownerGuard != null) {
+                return ownerGuard;
             }
             ScheduleFireLog fireLog = fireExecutor.fire(schedule, pollerService.getInstanceId(), 1);
             return Response.ok(fireLog).build();
@@ -353,6 +412,92 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     /**
+     * A schedule's {@code userId} is the identity every fire ACTS AS: it becomes
+     * the owner of the conversation the fire starts, and for a
+     * {@code dreamType=dream_consolidation} schedule it is the user whose
+     * persistent memories {@code DreamService} prunes, rewrites and permanently
+     * deletes. The direct memory API ({@code IRestUserMemoryStore}) refuses a
+     * non-admin access to another user's memories on every method, so this surface
+     * must not become a back door around it: a non-admin may only create, re-point
+     * or manually fire a schedule that runs as themselves, or as the unowned
+     * {@value #SCHEDULER_USER_ID} placeholder (which Dream consolidation explicitly
+     * rejects).
+     * <p>
+     * Deliberately refuses instead of silently rewriting {@code userId} to the
+     * caller: a rewrite would hand back a schedule that does something other than
+     * what was asked for, and would hide the attempt. Blank/absent and placeholder
+     * identities are left alone, so existing stored schedules and system schedules
+     * keep working unchanged. All checks are no-ops when
+     * {@code authorization.enabled=false}.
+     *
+     * @param userId
+     *            the identity the schedule would run as (may be {@code null})
+     * @param operation
+     *            the operation name, for the log line and error message
+     * @return a 403 {@link Response} to short-circuit the caller, or {@code null}
+     *         when the operation may proceed
+     */
+    private Response requireOwnUserId(String userId, String operation) {
+        if (userId == null || userId.isBlank() || SCHEDULER_USER_ID.equals(userId)) {
+            return null; // no end-user identity to act as
+        }
+        if (ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, userId)) {
+            return null;
+        }
+        LOGGER.warnf("Refused %s of a schedule running as another user by a non-admin caller", sanitize(operation));
+        LOGGER.debugf("Schedule ownership detail: operation='%s', userId='%s'", sanitize(operation), sanitize(userId));
+        return Response.status(Response.Status.FORBIDDEN)
+                .entity("A schedule may only run as yourself: set userId to your own identity, or leave it "
+                        + "unset to run as the system scheduler. Only an administrator may " + operation
+                        + " a schedule that runs as another user.")
+                .build();
+    }
+
+    /**
+     * The other half of {@link #requireOwnUserId}: may this caller touch the
+     * schedule that is <em>already stored</em> under {@code scheduleId}?
+     * <p>
+     * Checking the request body alone is not enough. A body that simply omits
+     * {@code userId} is exempt (it means "run as the system scheduler"), so a
+     * body-only guard let a non-admin overwrite a schedule stored against another
+     * user — retargeting its agent, cron or message, or disarming it outright.
+     * {@code fireNow} reads the stored value for the same reason.
+     * <p>
+     * A missing schedule is left to the caller's own not-found handling rather than
+     * being reported as forbidden, so this guard cannot be used to probe which
+     * schedule ids exist.
+     * <p>
+     * "Not found" and "could not read it" are deliberately NOT the same outcome. An
+     * earlier version caught {@code Exception} and returned "allow" for both,
+     * collapsing two very different causes into one benign answer on a security
+     * check.
+     * <p>
+     * On the update path that was not actually exploitable —
+     * {@link #requireAdminForHitl} reads the same schedule first and already fails
+     * closed — but a guard whose safety depends on an unrelated guard running
+     * before it is one reordering away from being a hole, so this one fails closed
+     * on its own account. It mirrors that method's status and phrasing rather than
+     * inventing a second convention for the same condition.
+     */
+    private Response requireOwnUserIdOfStoredSchedule(String scheduleId, String operation) {
+        ScheduleConfiguration stored;
+        try {
+            stored = scheduleStore.readSchedule(scheduleId);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null; // no schedule to protect — let the downstream op surface its 404
+        } catch (Exception e) {
+            LOGGER.error("Failed to verify schedule ownership for " + sanitize(scheduleId) + " (" + sanitize(operation) + ")", e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity("Unable to verify schedule authorization; refusing to " + operation + " schedule.")
+                    .build();
+        }
+        if (stored == null) {
+            return null;
+        }
+        return requireOwnUserId(stored.getUserId(), operation);
+    }
+
+    /**
      * For mutating operations on a HITL timeout schedule, require the eddi-admin
      * role. Reads the STORED schedule so a request body cannot hide the marker. The
      * guard fails CLOSED: only a genuine not-found falls through (so the downstream
@@ -409,6 +554,23 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
     }
 
+    /**
+     * The schedule's time zone, or the configured default when it is absent.
+     * <p>
+     * "Absent" means null OR blank. The three {@code ZoneId.of} call sites used to
+     * disagree about this: one passed the raw value, two null-checked but not blank
+     * — and a blank string is non-null, so it reached {@code ZoneId.of("")} and
+     * threw {@code DateTimeException}. That surfaced as a 500 on both create and
+     * update for a body carrying {@code "timeZone": ""}, even though
+     * {@link #applyDefaults} treats blank as "use the default" and
+     * {@link #validateSchedule} deliberately skips validating a blank value. One
+     * accessor, one definition of absent.
+     */
+    private ZoneId zoneOf(ScheduleConfiguration schedule) {
+        String zone = schedule.getTimeZone();
+        return ZoneId.of(zone == null || zone.isBlank() ? defaultTimeZone : zone);
+    }
+
     private void applyDefaults(ScheduleConfiguration schedule) {
         // Infer trigger type from fields — must also handle the case where the
         // default CRON value is set but heartbeatIntervalSeconds indicates HEARTBEAT
@@ -424,7 +586,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             schedule.setEnvironment("production");
         }
         if (schedule.getUserId() == null || schedule.getUserId().isBlank()) {
-            schedule.setUserId("system:scheduler");
+            schedule.setUserId(SCHEDULER_USER_ID);
         }
         if (schedule.getConversationStrategy() == null || schedule.getConversationStrategy().isBlank()) {
             // Heartbeats default to persistent, cron to new
@@ -447,8 +609,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             // Heartbeat: first fire = now + interval
             schedule.setNextFire(Instant.now().plusSeconds(schedule.getHeartbeatIntervalSeconds()));
         } else if (schedule.getCronExpression() != null && !schedule.getCronExpression().isBlank()) {
-            ZoneId zoneId = ZoneId.of(schedule.getTimeZone());
-            Instant nextFire = CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneId);
+            Instant nextFire = CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneOf(schedule));
             schedule.setNextFire(nextFire);
         } else if (schedule.getOneTimeAt() != null && !schedule.getOneTimeAt().isBlank()) {
             schedule.setNextFire(Instant.parse(schedule.getOneTimeAt()));
@@ -460,8 +621,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             return Instant.now().plusSeconds(schedule.getHeartbeatIntervalSeconds());
         }
         if (schedule.getCronExpression() != null && !schedule.getCronExpression().isBlank()) {
-            ZoneId zoneId = ZoneId.of(schedule.getTimeZone() != null ? schedule.getTimeZone() : defaultTimeZone);
-            return CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneId);
+            return CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneOf(schedule));
         }
         return null;
     }
@@ -519,8 +679,7 @@ public class RestScheduleStore implements IRestScheduleStore {
                 CronParser.validate(schedule.getCronExpression());
 
                 // Enforce minimum interval
-                ZoneId zoneId = ZoneId.of(schedule.getTimeZone() != null ? schedule.getTimeZone() : defaultTimeZone);
-                long intervalSec = CronParser.computeMinIntervalSeconds(schedule.getCronExpression(), zoneId);
+                long intervalSec = CronParser.computeMinIntervalSeconds(schedule.getCronExpression(), zoneOf(schedule));
                 if (intervalSec < minIntervalSeconds) {
                     throw new IllegalArgumentException(String.format(
                             "Cron interval (%ds) is below minimum allowed (%ds). "

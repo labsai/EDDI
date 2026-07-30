@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
@@ -24,6 +25,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
+import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -77,12 +79,16 @@ import static org.mockito.Mockito.verify;
  * task back to IN_PROGRESS behind the reset sweep, stranding it forever.</li>
  * <li><b>C2</b> — the live {@code Collections.synchronizedList} transcript was
  * published by reference into every member conversation's context and then
- * iterated on the member's own thread.</li>
+ * iterated on the member's own thread. Both hand-off sites are covered: the
+ * parallel phase and the single-member follow-up.</li>
  * <li><b>C6</b> — the {@code maxTurns} budget was enforced with a
  * check-then-act on an {@code AtomicInteger} shared by N parallel agent
  * threads.</li>
  * <li><b>C8</b> — the parallel-phase timeout was applied serially, so N hanging
- * members cost N × timeout instead of one timeout.</li>
+ * members cost N × timeout instead of one timeout; the single batch deadline
+ * that replaced it must still cover one member's full attempt envelope, or the
+ * orchestrator cancels members that are inside their own budget and their
+ * configured retry never lands.</li>
  * </ul>
  */
 @DisplayName("GroupConversationService — concurrency regressions")
@@ -115,7 +121,7 @@ class GroupConversationServiceConcurrencyTest {
         service = new GroupConversationService(
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
-                new SimpleMeterRegistry(), null, null, null, null, null, "default", 3);
+                new SimpleMeterRegistry(), null, null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
 
         doReturn(agent).when(agentFactory).getLatestReadyAgent(any(), any());
         var convCounter = new AtomicInteger();
@@ -245,28 +251,55 @@ class GroupConversationServiceConcurrencyTest {
         }
         gc.setTaskList(taskList);
 
-        // Rendezvous inside the first turn of every member, so all 8 agent threads
-        // reach the budget check for their second task at the same moment. Once all
-        // 8 have arrived the latch stays open, so later turns pass straight through.
-        var rendezvous = new CountDownLatch(memberCount);
         doAnswer(inv -> {
-            rendezvous.countDown();
-            rendezvous.await(30, TimeUnit.SECONDS);
             handlerOf(inv.getArgument(8)).onComplete(snapshot("contribution"));
             return null;
         }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
 
+        // Park all 8 agent threads on a barrier at the last point the production code
+        // reaches BEFORE the contended budget check: the onSpeakerComplete callback of
+        // their first task. All 8 are released in the same instant and nothing but the
+        // loop back-edge stands between that release and the check for turn 9, so the
+        // adversarial interleaving is forced rather than hoped for. (The single-shot
+        // latch this test used before was reached during turn 1 and stood open by the
+        // time the threads got to the turn-2 check: they drifted apart across
+        // completeTask, and a split check-then-act budget would pass unnoticed.)
+        var atContendedCheck = new CyclicBarrier(memberCount);
+        var completions = new AtomicInteger();
+        var barrierFailure = new AtomicReference<Throwable>();
+        var listener = new GroupDiscussionEventListener() {
+            @Override
+            public void onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent event) {
+                // First turn of each member only: the increments 1..8 all happen before
+                // any thread is released, so a completion numbered > 8 belongs to the
+                // single winner of the race — which must not wait for seven threads
+                // that have already broken out of the loop.
+                if (completions.incrementAndGet() <= memberCount) {
+                    try {
+                        atContendedCheck.await(30, TimeUnit.SECONDS);
+                    } catch (Throwable t) {
+                        barrierFailure.compareAndSet(null, t);
+                    }
+                }
+            }
+        };
+
         var turnCounter = new AtomicInteger(0);
         invoke(executionPhaseMethod(), gc, config(members), members,
-                phase(PhaseType.EXECUTE, TurnOrder.PARALLEL), protocol(30), QUESTION, 0, null,
+                phase(PhaseType.EXECUTE, TurnOrder.PARALLEL), protocol(30), QUESTION, 0, listener,
                 turnCounter, maxTurns);
 
+        assertNull(barrierFailure.get(), () -> "the 8 threads never met at the contended check: " + barrierFailure.get());
         long completed = gc.getTaskList().all().stream()
                 .filter(t -> t.status() == TaskStatus.COMPLETED).count();
         assertEquals((long) maxTurns, completed, "only the turns the budget allows may run");
         assertEquals((long) (2 * memberCount - maxTurns), gc.getTaskList().all().stream()
                 .filter(t -> t.status() == TaskStatus.ASSIGNED).count(),
                 "the remaining tasks stay ASSIGNED — untouched, not half-executed");
+        assertEquals(0L, gc.getTaskList().all().stream()
+                .filter(t -> t.status() == TaskStatus.IN_PROGRESS).count(),
+                "a thread that loses the budget race must not have started a task — the check and "
+                        + "startTask are fused under the task-list monitor");
         assertEquals(maxTurns, turnCounter.get(), "the turn counter must land exactly on the budget");
         verify(conversationService, times(maxTurns))
                 .say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
@@ -388,12 +421,138 @@ class GroupConversationServiceConcurrencyTest {
 
         assertTrue(entered.await(30, TimeUnit.SECONDS), "all members should have been dispatched in parallel");
         assertTrue(elapsedMs >= 1500,
-                () -> "the batch must still honour its 2s deadline, took " + elapsedMs + "ms");
+                () -> "the batch must still honour its deadline (2s member budget + 1s grace), took " + elapsedMs + "ms");
         assertTrue(elapsedMs < 6000,
-                () -> "5 hanging members must not each restart the 2s budget (10s serial), took " + elapsedMs + "ms");
+                () -> "5 hanging members must not each restart the budget (10s serial), took " + elapsedMs + "ms");
         assertEquals(5L, gc.getTranscript().stream()
                 .filter(e -> e.type() == TranscriptEntryType.SKIPPED).count(),
                 "every hanging member is recorded as SKIPPED exactly once");
+    }
+
+    @Test
+    @Timeout(120)
+    @DisplayName("C8: the batch deadline covers the retries onAgentFailure=RETRY promises")
+    void parallelPhase_batchDeadline_coversTheMemberRetryEnvelope() throws Exception {
+        var gc = groupConversation("gc-batch-retry");
+
+        // 1s per attempt, RETRY with maxRetries=2 → the member is allowed three
+        // attempts, so the batch budget must be 3 × 1s (+ grace), not 1 × 1s. The
+        // member burns two full attempt timeouts before answering on the third, i.e.
+        // it finishes ~1s AFTER a one-attempt batch deadline however the orchestrator
+        // and the member thread interleave — sized at one attempt, the orchestrator
+        // cancels the batch and the retried answer is replaced by a SKIPPED "unknown".
+        var protocol = new ProtocolConfig(1, ProtocolConfig.MemberFailurePolicy.RETRY, 2,
+                ProtocolConfig.MemberUnavailablePolicy.SKIP);
+
+        var attempts = new AtomicInteger();
+        doAnswer(inv -> {
+            // Attempts 1 and 2 never answer: the member runs into its OWN timeout and
+            // takes executeAgentTurn's RETRY branch. Attempt 3 answers immediately.
+            if (attempts.incrementAndGet() >= 3) {
+                handlerOf(inv.getArgument(8)).onComplete(snapshot("retried answer"));
+            }
+            return null;
+        }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+
+        invoke(parallelPhaseMethod(), gc, config(List.of(member(0))), List.of(member(0)),
+                phase(PhaseType.OPINION, TurnOrder.PARALLEL), protocol, QUESTION, 0, null,
+                new AtomicInteger(0), 50);
+
+        assertEquals(3, attempts.get(), "the member must get all three attempts its failure policy grants");
+        assertEquals(1, gc.getTranscript().size(), "one speaker, one transcript entry");
+        TranscriptEntry entry = gc.getTranscript().get(0);
+        assertEquals("retried answer", entry.content(),
+                "the retried contribution must survive — a batch deadline sized for a single attempt "
+                        + "cancels the member before its configured retry can complete");
+        assertEquals("agent-0", entry.speakerAgentId(),
+                "the entry belongs to the member that answered, not to the orchestrator's \"unknown\" timeout entry");
+        assertEquals(TranscriptEntryType.OPINION, entry.type(), "a completed retry is a contribution, not a SKIP");
+    }
+
+    @Test
+    @DisplayName("C8: the batch budget is one member's attempt envelope, never the batch size")
+    void parallelBatchBudget_isDerivedFromOneMembersAttemptEnvelope() {
+        // The grace is max(1s, 10% of the per-attempt budget) — a flat second is a
+        // large share of a 2s timeout and a rounding error against a 180s one, and
+        // setup cost does not shrink just because the timeout is short. Whenever the
+        // grace is too small the orchestrator wins the race again and the member's
+        // own RETRY/ABORT/attributed-SKIP handling is unreachable, which is the whole
+        // defect this budget exists to avoid.
+        //
+        // SKIP / ABORT never retry: one attempt plus the grace (10 -> max(1, 1) = 1).
+        assertEquals(11L, GroupConversationService.parallelBatchBudgetSeconds(
+                new ProtocolConfig(10, ProtocolConfig.MemberFailurePolicy.SKIP, 2,
+                        ProtocolConfig.MemberUnavailablePolicy.SKIP)));
+        assertEquals(11L, GroupConversationService.parallelBatchBudgetSeconds(
+                new ProtocolConfig(10, ProtocolConfig.MemberFailurePolicy.ABORT, 2,
+                        ProtocolConfig.MemberUnavailablePolicy.SKIP)));
+        // RETRY: maxRetries + 1 attempts, so the batch cannot cut a retry short.
+        assertEquals(31L, GroupConversationService.parallelBatchBudgetSeconds(
+                new ProtocolConfig(10, ProtocolConfig.MemberFailurePolicy.RETRY, 2,
+                        ProtocolConfig.MemberUnavailablePolicy.SKIP)));
+        // A short timeout keeps the 1s FLOOR rather than 10% of 2s.
+        assertEquals(3L, GroupConversationService.parallelBatchBudgetSeconds(
+                new ProtocolConfig(2, ProtocolConfig.MemberFailurePolicy.SKIP, 0,
+                        ProtocolConfig.MemberUnavailablePolicy.SKIP)));
+        // Unset values fall back to the same defaults executeAgentTurn applies:
+        // 180s per attempt, 2 retries -> 540 + ceil(18) = 558.
+        assertEquals(558L, GroupConversationService.parallelBatchBudgetSeconds(
+                new ProtocolConfig(0, ProtocolConfig.MemberFailurePolicy.RETRY, 0,
+                        ProtocolConfig.MemberUnavailablePolicy.SKIP)));
+        // The grace itself: floor below 10s, proportional above it.
+        assertEquals(1L, GroupConversationService.parallelBatchGraceSeconds(2));
+        assertEquals(1L, GroupConversationService.parallelBatchGraceSeconds(10));
+        assertEquals(18L, GroupConversationService.parallelBatchGraceSeconds(180));
+        // An absurd config is capped instead of overflowing the deadline into the past.
+        assertEquals(TimeUnit.HOURS.toSeconds(24), GroupConversationService.parallelBatchBudgetSeconds(
+                new ProtocolConfig(Integer.MAX_VALUE, ProtocolConfig.MemberFailurePolicy.RETRY, Integer.MAX_VALUE,
+                        ProtocolConfig.MemberUnavailablePolicy.SKIP)));
+    }
+
+    // =================================================================
+    // C2 — the follow-up hand-off must snapshot too
+    // =================================================================
+
+    @Test
+    @Timeout(60)
+    @DisplayName("C2: a follow-up to one member publishes a transcript snapshot, never the live list")
+    @SuppressWarnings("unchecked")
+    void followUpWithMember_publishesTranscriptSnapshot_notTheLiveList() throws Exception {
+        var gc = groupConversation("gc-followup");
+        gc.setState(GroupConversationState.COMPLETED);
+        gc.setMemberConversationIds(Map.of("agent-0", "conv-followup"));
+        gc.addMemberDisplayName("agent-0", "Agent 0");
+        for (int i = 0; i < 5; i++) {
+            gc.getTranscript().add(transcriptEntry("seed-" + i));
+        }
+
+        doReturn(gc).when(conversationStore).read("gc-followup");
+        doReturn(true).when(conversationStore).compareAndSetState("gc-followup",
+                GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS);
+
+        var liveListPublished = new AtomicInteger(0);
+        var handedOver = new AtomicReference<List<TranscriptEntry>>();
+        doAnswer(inv -> {
+            InputData inputData = inv.getArgument(6);
+            Object published = inputData.getContext().get("groupTranscript").getValue();
+            if (published == gc.getTranscript()) {
+                liveListPublished.incrementAndGet();
+            }
+            handedOver.set((List<TranscriptEntry>) published);
+            handlerOf(inv.getArgument(8)).onComplete(snapshot("follow-up answer"));
+            return null;
+        }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+
+        service.followUpWithMember("gc-followup", "agent-0", "And what about X?");
+
+        assertEquals(0, liveListPublished.get(),
+                "the live synchronized transcript must never be handed to the member conversation by reference — "
+                        + "it is serialised on the member's thread while this one keeps appending");
+        assertNotNull(handedOver.get(), "the member must have received a groupTranscript");
+        assertEquals(6, handedOver.get().size(),
+                "the member sees the transcript as of its turn: 5 seed entries + the follow-up question");
+        assertEquals(7, gc.getTranscript().size(),
+                "the live transcript grew by the agent's answer afterwards — proof the member did not hold it");
     }
 
     // =================================================================

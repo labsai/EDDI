@@ -7,6 +7,8 @@ package ai.labs.eddi.engine.audit;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.Connection;
@@ -262,7 +264,8 @@ public class AuditLedgerService {
             if (current >= maxQueueSize) {
                 droppedCounter.increment();
                 LOGGER.warnv("Audit queue is full ({0} entries) — dropping entry for conversation {1}. "
-                        + "The audit store is not keeping up; raise eddi.audit.max-queue-size or fix the store.", maxQueueSize, conversationId);
+                        + "The audit store is not keeping up; raise eddi.audit.max-queue-size or fix the store.", maxQueueSize,
+                        sanitize(conversationId));
                 return false;
             }
             if (queueSize.compareAndSet(current, current + 1)) {
@@ -313,7 +316,7 @@ public class AuditLedgerService {
         } catch (Exception e) {
             // A failed seed must not fabricate a duplicate sequence — an unsequenced
             // entry still verifies, it just does not participate in the chain.
-            LOGGER.warnv("Could not seed audit sequence for conversation {0}: {1}", conversationId, e.getMessage());
+            LOGGER.warnv("Could not seed audit sequence for conversation {0}: {1}", sanitize(conversationId), e.getMessage());
             return AuditEntry.UNSEQUENCED;
         }
     }

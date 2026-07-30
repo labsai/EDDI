@@ -157,6 +157,144 @@ class RestAuditStoreTest {
         assertFalse(report.intact());
     }
 
+    /**
+     * skip is a query parameter, so a client can send a negative value. MongoDB
+     * ignores it; PostgreSQL rejects OFFSET -1 and the request becomes a 500. It is
+     * clamped rather than rejected, matching how an out-of-range limit is already
+     * handled.
+     */
+    @Test
+    @DisplayName("a negative skip is clamped, not passed to the store")
+    void negativeSkipIsClamped() {
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-1", 0)));
+        when(auditStore.countByConversation("conv-1")).thenReturn(1L);
+
+        restAuditStore.verifyConversation("conv-1", -5, 1000);
+
+        verify(auditStore).getEntries("conv-1", 0, 1000);
+        verify(auditStore, never()).getEntries(anyString(), intThat(i -> i < 0), anyInt());
+    }
+
+    /**
+     * An agent-scope sweep spans many conversations, so their sequences interleave
+     * and no single ascending run exists — the chain is deliberately reported
+     * NOT_APPLICABLE. Requiring INTACT made every clean agent sweep report
+     * intact=false, which makes the health bit worthless for the endpoint added for
+     * G16.
+     */
+    @Test
+    @DisplayName("a clean agent-scope sweep is intact despite NOT_APPLICABLE")
+    void cleanAgentSweepIsIntact() {
+        when(auditStore.getEntriesByAgent("agent-1", null, 0, 1000))
+                .thenReturn(List.of(entryAt("id-1", 0), entryAt("id-2", 7)));
+
+        var report = restAuditStore.verifyAgent("agent-1", null, 0, 1000);
+
+        assertEquals(ChainStatus.NOT_APPLICABLE, report.chainStatus());
+        assertEquals(0, report.invalid());
+        assertTrue(report.intact(), "every entry verified; the chain is simply not evaluated at agent scope");
+    }
+
+    /**
+     * An upgraded deployment has legacy rows with no sequence alongside new
+     * sequenced ones — and because the counter is seeded from countByConversation,
+     * which counts the legacy rows, the first sequenced entry starts above 0. With
+     * the origin anchor that looks exactly like a deleted prefix, so the ledger
+     * would accuse an untampered deployment of destroying records. A window that
+     * mixes the two simply cannot be judged.
+     */
+    @Test
+    @DisplayName("legacy unsequenced rows alongside sequenced ones report UNAVAILABLE, not BROKEN")
+    void mixedSequencedAndUnsequencedIsUnavailable() {
+        when(auditStore.getEntries("conv-1", 0, 1000))
+                .thenReturn(List.of(entryAt("legacy-1", -1), entryAt("id-6", 5), entryAt("id-7", 6)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(ChainStatus.UNAVAILABLE, report.chainStatus());
+        assertEquals(List.of(), report.missingSequences(), "0..4 were never assigned, not deleted");
+        assertFalse(report.intact(), "an unestablishable chain is not an intact one");
+    }
+
+    /**
+     * Deleting the FIRST entry leaves no gap behind: 1,2,3 is a perfectly gap-free
+     * run. Anchoring the expected range at the smallest sequence present therefore
+     * made a prefix deletion completely invisible — the easiest deletion to perform
+     * was the one the chain could not see.
+     */
+    @Test
+    @DisplayName("deleting the first entry is detected, not just a middle one")
+    void deletedFirstEntryIsDetected() {
+        // sequence 0 has been removed; the survivors still form an unbroken run
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-2", 1), entryAt("id-3", 2)));
+        when(auditStore.countByConversation("conv-1")).thenReturn(2L); // the window holds the whole conversation
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(0, report.invalid(), "every survivor still verifies — the hole is only visible via the sequence");
+        assertEquals(List.of(0L), report.missingSequences());
+        assertEquals(ChainStatus.BROKEN, report.chainStatus());
+        assertFalse(report.intact());
+    }
+
+    /**
+     * getEntries sorts newest-first, so skip == 0 is the most RECENT page, not the
+     * conversation's beginning. Using skip as the signal meant verifying the latest
+     * few entries of a long conversation anchored at 0 and reported the entire
+     * history below them as deleted. The window must be shown to hold the whole
+     * conversation before the origin can be assumed.
+     */
+    @Test
+    @DisplayName("a newest-first window that is not the whole conversation is judged on continuity only")
+    void partialNewestPageIsNotAnchoredAtOrigin() {
+        // the newest two entries of a conversation that holds 100
+        when(auditStore.getEntries("conv-1", 0, 2)).thenReturn(List.of(entryAt("id-98", 97), entryAt("id-99", 98)));
+        when(auditStore.countByConversation("conv-1")).thenReturn(100L);
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 2);
+
+        assertEquals(List.of(), report.missingSequences(), "0..96 are simply not in this window");
+        assertEquals(ChainStatus.INTACT, report.chainStatus());
+    }
+
+    /**
+     * The origin anchor must not fire on a paginated sweep: with skip > 0 the
+     * earlier entries were legitimately not fetched, so reporting them missing
+     * would cry wolf on every second page.
+     */
+    @Test
+    @DisplayName("a paginated window is judged on internal continuity only")
+    void paginatedWindowDoesNotReportTheSkippedPrefixAsMissing() {
+        when(auditStore.getEntries("conv-1", 5, 1000)).thenReturn(List.of(entryAt("id-6", 5), entryAt("id-7", 6)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 5, 1000);
+
+        assertEquals(List.of(), report.missingSequences(), "0..4 were skipped, not deleted");
+        assertEquals(ChainStatus.INTACT, report.chainStatus());
+    }
+
+    /**
+     * A gap is not the only way to break the chain. If two entries carry the SAME
+     * sequence number the chain is ambiguous — one of them may have been replaced,
+     * or an entry inserted — and the run has no gap to reveal it. checkChain used
+     * to collect duplicates and then decide purely on {@code missing.isEmpty()}, so
+     * this reported INTACT and handed an auditor a false assurance.
+     */
+    @Test
+    @DisplayName("duplicate sequence numbers break the chain even with no gap")
+    void duplicateSequenceIsDetected() {
+        when(auditStore.getEntries("conv-1", 0, 1000))
+                .thenReturn(List.of(entryAt("id-1", 0), entryAt("id-2", 1), entryAt("id-3", 1)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(0, report.invalid(), "each row still verifies on its own — the chain is what is compromised");
+        assertEquals(List.of(), report.missingSequences(), "there is no gap; only the duplicate reveals it");
+        assertEquals(List.of(1L), report.duplicateSequences());
+        assertEquals(ChainStatus.BROKEN, report.chainStatus());
+        assertFalse(report.intact(), "a chain with an ambiguous position must never report intact");
+    }
+
     @Test
     @DisplayName("unsequenced rows report the chain as unavailable, not broken")
     void unsequencedRowsReportUnavailable() {
@@ -229,6 +367,15 @@ class RestAuditStoreTest {
     @DisplayName("deleting the first entry of a conversation is detected")
     void deletedHeadEntryIsDetected() {
         when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-2", 1), entryAt("id-3", 2)));
+        // The head anchor engages only when the window provably covers the whole
+        // conversation. This test predates that rule — it was written against the
+        // earlier skip==0 heuristic, which was unsound because getEntries pages
+        // NEWEST-first, so skip==0 is the most recent page rather than the start.
+        // Without this stub Mockito returns 0, the anchor never engages, and the
+        // report comes back INTACT. Kept rather than deleted as a duplicate of
+        // deletedFirstEntryIsDetected because only this one asserts
+        // tamperingSuspected().
+        when(auditStore.countByConversation("conv-1")).thenReturn(2L);
 
         var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -128,15 +129,16 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                             // the raw map in place and warn.
                             Object rawType = map.get(KEY_TYPE);
                             if (rawType == null) {
-                                LOGGER.warnf("Conversation '%s': context entry '%s' has no '%s' field — left unconverted.", conversationId,
-                                        lifecycleTask.getKey(), KEY_TYPE);
+                                LOGGER.warnf("Conversation '%s': context entry '%s' has no '%s' field — left unconverted.",
+                                        LogSanitizer.sanitize(conversationId), LogSanitizer.sanitize(lifecycleTask.getKey()), KEY_TYPE);
                                 continue;
                             }
                             try {
                                 lifecycleTask.setResult(new Context(valueOf(rawType.toString()), map.get(KEY_VALUE)));
                             } catch (IllegalArgumentException e) {
-                                LOGGER.warnf("Conversation '%s': context entry '%s' has unknown %s '%s' — left unconverted.", conversationId,
-                                        lifecycleTask.getKey(), KEY_TYPE, rawType);
+                                LOGGER.warnf("Conversation '%s': context entry '%s' has unknown %s '%s' — left unconverted.",
+                                        LogSanitizer.sanitize(conversationId), LogSanitizer.sanitize(lifecycleTask.getKey()), KEY_TYPE,
+                                        LogSanitizer.sanitize(String.valueOf(rawType)));
                             }
                         }
                     }

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
@@ -12,6 +13,7 @@ import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.utils.LogSanitizer;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -97,10 +99,63 @@ public class GroupConversationService implements IGroupConversationService {
     private static final int DEFAULT_AGENT_TIMEOUT_SECONDS = 180;
 
     /**
+     * Default number of retries per member turn when not configured via
+     * {@code protocol.maxRetries}. Shared by the retry loop in
+     * {@code executeAgentTurn} and the batch budget a parallel phase derives from
+     * it, so the two cannot drift apart.
+     */
+    private static final int DEFAULT_MAX_RETRIES = 2;
+
+    /**
+     * Slack added on top of a member's own budget when a parallel phase arms its
+     * batch deadline. A member reaches its {@code responseFuture.get(timeout)} only
+     * after agent lookup, conversation start, attachment grants and prior-entry
+     * verification — several store round trips — so without a grace the
+     * orchestrator's deadline, armed the instant the batch is dispatched, expires
+     * while the member is still legitimately inside its own budget.
+     * <p>
+     * The floor is absolute, but it cannot be ONLY absolute: setup cost does not
+     * shrink with a short configured {@code agentTimeoutSeconds}, so a flat second
+     * is a large fraction of a 2s budget and a rounding error against a 180s one.
+     * The grace is therefore {@code max(floor, timeout * fraction)} — see
+     * {@link #parallelBatchGraceSeconds}.
+     */
+    private static final int PARALLEL_BATCH_GRACE_FLOOR_SECONDS = 1;
+
+    /**
+     * Fraction of a member's per-attempt budget also allowed for setup, so the
+     * grace scales instead of being swamped by a large timeout or dominating a
+     * small one.
+     */
+    private static final double PARALLEL_BATCH_GRACE_FRACTION = 0.1;
+
+    /**
+     * Ceiling on the derived parallel-batch budget, so an absurd
+     * {@code agentTimeoutSeconds} × {@code maxRetries} combination cannot overflow
+     * the nanosecond deadline into the past.
+     */
+    private static final long MAX_PARALLEL_BATCH_BUDGET_SECONDS = TimeUnit.HOURS.toSeconds(24);
+
+    /**
      * How long an aborting orchestrator waits for cooperatively cancelled member
-     * turns to unwind before reclaiming their tasks. Cancellation releases the
-     * turns at their await points immediately, so this is only a safety bound for a
-     * turn that is between two await points.
+     * turns to unwind before reclaiming their tasks.
+     * <p>
+     * This is NOT merely a safety bound, which is what an earlier version of this
+     * comment claimed. Cancellation releases the turn promptly at
+     * {@code responseFuture.get(...)}, but that is not a member turn's only await
+     * point, and the others do not observe the token:
+     * <ul>
+     * <li>{@code tryResolveMemberToolPause} blocks on a {@code resumeFuture} that
+     * was never registered against the cancellation token;</li>
+     * <li>a {@code MemberType.GROUP} member is dispatched into a nested synchronous
+     * {@code discuss(...)} with no token at all, under its own {@code activeTokens}
+     * entry.</li>
+     * </ul>
+     * For a turn parked at either of those, this timeout is the mechanism rather
+     * than the backstop: the orchestrator reclaims the task once it expires while
+     * the child work carries on. Making those paths cancellation-aware is tracked
+     * separately — until then this is a bound that can genuinely be hit, not an
+     * unreachable guard.
      */
     private static final int MEMBER_TURN_CANCEL_DRAIN_SECONDS = 5;
 
@@ -111,6 +166,7 @@ public class GroupConversationService implements IGroupConversationService {
     private final ITemplatingEngine templatingEngine;
     private final IJsonSerialization jsonSerialization;
     private final int maxDepth;
+    private final CallerIdentityContext callerIdentityContext;
     private final ExecutorService executorService;
     private final AgentSigningService agentSigningService;
     private final IAgentStore agentStore;
@@ -123,6 +179,11 @@ public class GroupConversationService implements IGroupConversationService {
     // materialize and share discussion attachments with member conversations.
     @Inject
     IAttachmentStore attachmentStore;
+
+    // Same reason. Ephemeral cleanup deletes the Agent directly, not via
+    // RestAgentStore, so it has to retire the deployment record itself.
+    @Inject
+    IDeploymentStore deploymentStore;
 
     // Incremental peer verification: tracks the last verified transcript index
     // per group conversation ID, so we only verify new entries each turn (O(N)
@@ -158,10 +219,11 @@ public class GroupConversationService implements IGroupConversationService {
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
             IAgentFactory agentFactory, ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, MeterRegistry meterRegistry,
             AgentSigningService agentSigningService, IAgentStore agentStore, IScheduleStore scheduleStore,
-            NonceCacheService nonceCacheService, AuditLedgerService auditLedgerService,
+            NonceCacheService nonceCacheService, AuditLedgerService auditLedgerService, CallerIdentityContext callerIdentityContext,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.groups.max-depth", defaultValue = "3") int maxDepth) {
         this.groupStore = groupStore;
+        this.callerIdentityContext = callerIdentityContext;
         this.conversationStore = conversationStore;
         this.conversationService = conversationService;
         this.agentFactory = agentFactory;
@@ -288,8 +350,12 @@ public class GroupConversationService implements IGroupConversationService {
 
         // Run the discussion in a virtual thread — reuse the same gc (no duplicate
         // creation)
+        // Captured on the REST thread: everything below runs on virtual threads with
+        // no request context, so a member agent's ${caller:token} apicall would
+        // otherwise fail closed for the whole discussion.
+        final var discussionCaller = callerIdentityContext.captureOrCurrent();
         try {
-            executorService.submit(() -> {
+            executorService.submit(callerIdentityContext.withIdentity(discussionCaller, () -> {
                 try {
                     executeDiscussion(gc, config, phases, question, listener, 0);
                 } catch (Exception e) {
@@ -301,7 +367,7 @@ public class GroupConversationService implements IGroupConversationService {
                                 "The group discussion could not be started."));
                     }
                 }
-            });
+            }));
         } catch (RuntimeException e) {
             // Executor saturated/shut down — no thread will ever run this
             // discussion. Fail it instead of leaving an IN_PROGRESS zombie.
@@ -1446,11 +1512,29 @@ public class GroupConversationService implements IGroupConversationService {
 
                 if (shouldDelete) {
                     agentStore.deleteAllPermanently(agentId);
+                    retireDeploymentRecords(agentId);
                     LOGGER.infof("Ephemeral cleanup: deleted agent '%s'", agentId);
                 }
             } catch (Exception e) {
                 LOGGER.warnf("Ephemeral cleanup failed for agent '%s': %s", agentId, e.getMessage());
             }
+        }
+    }
+
+    /**
+     * A deployment record left behind by a deleted ephemeral agent makes the
+     * runtime retry a doomed redeploy. Never fatal — the agent is already gone
+     * either way, and the startup sweep in AgentDeploymentManagement retires
+     * anything missed here.
+     */
+    private void retireDeploymentRecords(String agentId) {
+        if (deploymentStore == null) {
+            return;
+        }
+        try {
+            deploymentStore.deleteDeploymentInfos(agentId);
+        } catch (Exception e) {
+            LOGGER.warnf("Ephemeral cleanup: could not clear deployment record(s) for agent '%s': %s", agentId, e.getMessage());
         }
     }
 
@@ -1636,6 +1720,46 @@ public class GroupConversationService implements IGroupConversationService {
                 return true;
             }
         }
+    }
+
+    /**
+     * Wall-clock budget a parallel batch gets before the orchestrator gives up on
+     * the speakers still running.
+     * <p>
+     * It is derived from what ONE member turn may legitimately consume — its
+     * per-attempt {@code agentTimeoutSeconds} multiplied by the number of attempts
+     * {@code onAgentFailure} allows (only {@code RETRY} retries, and it retries at
+     * most {@code maxRetries} times) — plus {@link #parallelBatchGraceSeconds}. The
+     * normalisation of both protocol values is deliberately identical to
+     * {@code executeAgentTurn}'s: if the orchestrator's deadline is shorter than
+     * the member's own, the member's timeout handling (retry / abort / attributed
+     * SKIP) becomes unreachable.
+     *
+     * @return the batch budget in seconds, capped at
+     *         {@link #MAX_PARALLEL_BATCH_BUDGET_SECONDS}
+     */
+    static long parallelBatchBudgetSeconds(ProtocolConfig protocol) {
+        long timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
+        long attempts = protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY
+                ? (protocol.maxRetries() > 0 ? protocol.maxRetries() : DEFAULT_MAX_RETRIES) + 1L
+                : 1L;
+        return Math.min(timeout * attempts + parallelBatchGraceSeconds(timeout), MAX_PARALLEL_BATCH_BUDGET_SECONDS);
+    }
+
+    /**
+     * Setup slack for a parallel batch: the larger of an absolute floor and a
+     * fraction of the member's per-attempt budget.
+     * <p>
+     * A purely absolute grace loses the race again whenever setup outruns it, which
+     * is likeliest with a SHORT configured timeout — there one second is both a big
+     * share of the budget and quite possibly less than the store round trips take.
+     * Scaling with the timeout keeps the orchestrator's deadline behind the
+     * member's own in both directions, which is the property that makes
+     * {@code executeAgentTurn}'s retry / abort / attributed-SKIP branches reachable
+     * at all.
+     */
+    static long parallelBatchGraceSeconds(long perAttemptTimeoutSeconds) {
+        return Math.max(PARALLEL_BATCH_GRACE_FLOOR_SECONDS, (long) Math.ceil(perAttemptTimeoutSeconds * PARALLEL_BATCH_GRACE_FRACTION));
     }
 
     // =================================================================
@@ -1882,6 +2006,9 @@ public class GroupConversationService implements IGroupConversationService {
 
             // Execute agents in parallel, tasks per agent sequentially
             List<CompletableFuture<Void>> futures = new ArrayList<>();
+            // Task workers are a further fan-out of their own; without this every
+            // task wave loses ${caller:...}.
+            final var waveCaller = callerIdentityContext.captureOrCurrent();
 
             for (Map.Entry<String, List<TaskItem>> agentEntry : tasksByAgent.entrySet()) {
                 String agentId = agentEntry.getKey();
@@ -1893,7 +2020,7 @@ public class GroupConversationService implements IGroupConversationService {
                     continue;
                 }
 
-                CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                CompletableFuture<Void> future = CompletableFuture.runAsync(callerIdentityContext.withIdentity(waveCaller, () -> {
                     for (TaskItem task : agentTasks) {
                         try {
                             // Claim the turn budget and the task itself under the task-list
@@ -1952,29 +2079,63 @@ public class GroupConversationService implements IGroupConversationService {
                             // document alone; the reset sweep reclaims the task.
                             break;
                         } catch (GroupDiscussionException e) {
-                            if (cancellation.isCancelled()) {
-                                break; // no writes after the orchestrator gave up on this wave
-                            }
-                            // Quota errors are non-retryable — abort all tasks immediately
+                            // Quota errors are non-retryable — abort all tasks immediately.
+                            // Checked before the cancellation guard so a quota breach is still
+                            // reported even when the wave is already unwinding.
                             if (e.getCause() instanceof QuotaExceededException) {
                                 errors.add(e);
                                 return; // exit the entire agent's CompletableFuture
                             }
-                            handleTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, listener, errors, e);
+                            // The check AND the write go under the monitor, exactly like the
+                            // success path above.
+                            //
+                            // The tempting argument for reading the token unlocked is that
+                            // abortWave is cancel() THEN allOf(futures).get(...), so the reset
+                            // sweep cannot begin until every worker has returned. That argument
+                            // does NOT hold: the join is bounded by
+                            // MEMBER_TURN_CANCEL_DRAIN_SECONDS and proceeds to
+                            // resetStrandedInProgressTasks on timeout — and that timeout is
+                            // reachable, because a member parked in tryResolveMemberToolPause
+                            // or in a nested GROUP discuss() never observes the token (see
+                            // MEMBER_TURN_CANCEL_DRAIN_SECONDS). A late failure write can
+                            // therefore race the sweep, marking a task FAILED that the sweep
+                            // just reset and appending an error entry to a finished wave.
+                            // Only the monitor orders the two. Lock order: taskList -> transcript.
+                            boolean recorded;
+                            synchronized (taskList) {
+                                recorded = !cancellation.isCancelled();
+                                if (recorded) {
+                                    recordTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, errors, e);
+                                }
+                            }
+                            if (!recorded) {
+                                break; // no writes after the orchestrator gave up on this wave
+                            }
+                            // Outside the monitor: the listener is an SSE sink, and holding
+                            // taskList across a client write would stall sibling workers. The
+                            // success path emits its event outside the lock for the same reason.
+                            notifyTaskFailure(listener, member, e.getMessage(), phaseIdx, phase);
                             if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
                                 break;
                             }
                         } catch (IllegalStateException e) {
-                            if (cancellation.isCancelled()) {
-                                break; // see above
-                            }
                             // H5 fix: catch status transition errors (e.g., double completion)
                             LOGGER.warnf("Task state error for '%s': %s", task.subject(), e.getMessage());
-                            handleTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, listener, errors,
-                                    new GroupDiscussionException(e.getMessage(), e));
+                            boolean recorded;
+                            synchronized (taskList) { // see the reasoning above
+                                recorded = !cancellation.isCancelled();
+                                if (recorded) {
+                                    recordTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, errors,
+                                            new GroupDiscussionException(e.getMessage(), e));
+                                }
+                            }
+                            if (!recorded) {
+                                break;
+                            }
+                            notifyTaskFailure(listener, member, e.getMessage(), phaseIdx, phase);
                         }
                     }
-                }, executorService);
+                }), executorService);
                 futures.add(future);
             }
 
@@ -2433,9 +2594,17 @@ public class GroupConversationService implements IGroupConversationService {
      * Marks the task as failed, adds an error transcript entry, emits SSE events,
      * and collects the error for potential ABORT propagation.
      */
-    private void handleTaskFailure(GroupConversation gc, TaskItem task, GroupMember member,
+    /**
+     * The document-mutating half of a task failure: fail the task and append the
+     * error entry. Callers MUST hold the task-list monitor so this write is ordered
+     * against {@code abortWave}'s reset sweep — see the call sites for why the
+     * cancel-then-join ordering does not suffice on its own.
+     * <p>
+     * Split from {@link #notifyTaskFailure} deliberately: the listener is an SSE
+     * sink and must not be invoked while holding the monitor.
+     */
+    private void recordTaskFailure(GroupConversation gc, TaskItem task, GroupMember member,
                                    String errorMessage, int phaseIdx, DiscussionPhase phase,
-                                   GroupDiscussionEventListener listener,
                                    List<GroupDiscussionException> errors, GroupDiscussionException ex) {
         try {
             gc.getTaskList().failTask(task.id(), errorMessage);
@@ -2452,14 +2621,19 @@ public class GroupConversationService implements IGroupConversationService {
                     Instant.now(), null, null));
         }
 
-        // Emit error event so SSE clients see the failure
+        errors.add(ex);
+    }
+
+    /**
+     * Emit the failure to SSE clients. Called OUTSIDE the task-list monitor.
+     */
+    private void notifyTaskFailure(GroupDiscussionEventListener listener, GroupMember member,
+                                   String errorMessage, int phaseIdx, DiscussionPhase phase) {
         if (listener != null) {
             listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
                     member.agentId(), member.displayName(),
                     "[ERROR] " + errorMessage, phaseIdx, phase.name()));
         }
-
-        errors.add(ex);
     }
 
     private GroupMember findMember(List<GroupMember> members, String agentId) {
@@ -2529,6 +2703,21 @@ public class GroupConversationService implements IGroupConversationService {
 
         // SAFETY: Snapshot the transcript so parallel tasks each see a consistent view.
         // Iterating a Collections.synchronizedList requires holding its monitor.
+        //
+        // The bare gc.getTranscript().add(...) calls further down this method are NOT
+        // an oversight, and reviewers have asked about the asymmetry: GroupConversation
+        // guarantees the transcript is always a Collections.synchronizedList (both the
+        // field initializer and setTranscript wrap it — no path assigns a bare list),
+        // and that wrapper's mutex IS the wrapper object, i.e. exactly what this block
+        // locks. So add() and this snapshot already exclude one another; the explicit
+        // monitor is required only because List.copyOf ITERATES, which the wrapper
+        // cannot make atomic on its own. Wrapping every append would add lock scope
+        // without removing a race.
+        //
+        // This is deliberately the opposite conclusion from the taskList guard in the
+        // task-execution wave, where the asymmetry WAS a real bug: there the two sides
+        // were a cancellation read and a document write ordered only by the monitor,
+        // not two operations on one synchronized collection.
         List<TranscriptEntry> snapshotTranscript;
         synchronized (gc.getTranscript()) {
             snapshotTranscript = List.copyOf(gc.getTranscript());
@@ -2546,31 +2735,46 @@ public class GroupConversationService implements IGroupConversationService {
             }
         }
 
-        List<CompletableFuture<TranscriptEntry>> futures = batchSpeakers.stream().map(speaker -> CompletableFuture.supplyAsync(() -> {
-            try {
-                String input = buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null);
-                return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
-            } catch (MemberTurnCancelledException e) {
-                // The orchestrator stopped waiting for this batch — surface the
-                // cancellation instead of fabricating a contribution for it.
-                throw new java.util.concurrent.CompletionException(e);
-            } catch (GroupDiscussionException e) {
-                if (e.getCause() instanceof QuotaExceededException) {
-                    throw new java.util.concurrent.CompletionException(e);
-                }
-                LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
-                return errorEntry(speaker, phaseIdx, phase, e.getMessage());
-            } catch (Exception e) {
-                LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
-                return errorEntry(speaker, phaseIdx, phase, e.getMessage());
-            }
-        }, executorService)).toList();
+        // Each speaker fans out to a further virtual thread; a ThreadLocal does not
+        // follow, so carry the caller explicitly. captureOrCurrent, not current: a
+        // synchronous discuss() runs on the REST thread, where nothing has bound a
+        // caller yet and only the request can supply one.
+        final var phaseCaller = callerIdentityContext.captureOrCurrent();
+        List<CompletableFuture<TranscriptEntry>> futures = batchSpeakers.stream()
+                .map(speaker -> CompletableFuture.supplyAsync(callerIdentityContext.withIdentitySupplying(phaseCaller, () -> {
+                    try {
+                        String input = buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null);
+                        return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
+                    } catch (MemberTurnCancelledException e) {
+                        // The orchestrator stopped waiting for this batch — surface the
+                        // cancellation instead of fabricating a contribution for it.
+                        // Must stay ABOVE the Exception catch, which would otherwise
+                        // convert a cancellation into an error transcript entry.
+                        throw new java.util.concurrent.CompletionException(e);
+                    } catch (GroupDiscussionException e) {
+                        if (e.getCause() instanceof QuotaExceededException) {
+                            throw new java.util.concurrent.CompletionException(e);
+                        }
+                        LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
+                        return errorEntry(speaker, phaseIdx, phase, e.getMessage());
+                    } catch (Exception e) {
+                        LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
+                        return errorEntry(speaker, phaseIdx, phase, e.getMessage());
+                    }
+                }), executorService)).toList();
 
-        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
         // ONE deadline for the whole batch: these turns run concurrently, so giving
         // every get() the full budget in turn made the worst case N × timeout
-        // (10 members × 180s = 30 minutes) instead of the configured timeout.
-        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeout);
+        // (10 members × 180s = 30 minutes) instead of the configured timeout. The
+        // budget stays independent of the batch size — that is the point — but it has
+        // to cover what a SINGLE member is allowed to take: its per-attempt timeout
+        // times the attempts onAgentFailure grants it, plus a grace for the setup it
+        // does before reaching its own await point. Armed at exactly one attempt, the
+        // orchestrator won every race: it cancelled the batch while members were still
+        // inside their own budget, so executeAgentTurn's TimeoutException branch —
+        // which owns the RETRY and ABORT policies — was unreachable in parallel phases
+        // and every member timeout became an unattributed SKIPPED "unknown" entry.
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(parallelBatchBudgetSeconds(protocol));
         for (int i = 0; i < futures.size(); i++) {
             try {
                 long remainingNanos = Math.max(0, deadlineNanos - System.nanoTime());
@@ -2768,7 +2972,9 @@ public class GroupConversationService implements IGroupConversationService {
 
         // Call through ConversationService with retry
         int retries = 0;
-        int maxRetries = protocol.maxRetries() > 0 ? protocol.maxRetries() : 2;
+        // Keep both normalisations in step with parallelBatchBudgetSeconds(), which
+        // sizes the orchestrator's batch deadline from exactly these two values.
+        int maxRetries = protocol.maxRetries() > 0 ? protocol.maxRetries() : DEFAULT_MAX_RETRIES;
         int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
 
         while (true) {
@@ -4034,7 +4240,7 @@ public class GroupConversationService implements IGroupConversationService {
             }
         };
         try {
-            executorService.submit(resumeWork);
+            executorService.submit(callerIdentityContext.withIdentity(callerIdentityContext.captureOrCurrent(), resumeWork));
         } catch (RuntimeException e) {
             // Executor saturated/shut down — no thread will run the resume. The CAS
             // above already consumed the pause; restore it so the approval remains

@@ -83,6 +83,13 @@ public final class AuditHmac {
      * @return the deterministic pseudonym for that user
      */
     public static String pseudonymFor(String userId) {
+        // sha256Hex(null) throws an NPE deep inside the digest, which surfaces as an
+        // opaque 500 far from the caller. A null userId here means a REST path or
+        // query parameter was not what it was assumed to be, and saying so beats
+        // making someone read a stack trace to find out.
+        if (userId == null) {
+            throw new IllegalArgumentException("userId must not be null when deriving a GDPR pseudonym");
+        }
         return GDPR_PSEUDONYM_PREFIX + sha256Hex(userId);
     }
 

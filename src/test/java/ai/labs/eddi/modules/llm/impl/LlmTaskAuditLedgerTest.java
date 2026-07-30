@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -159,7 +160,7 @@ class LlmTaskAuditLedgerTest {
                 mock(RagContextProvider.class), new TokenCounterFactory(),
                 mock(ConversationSummarizer.class), promptSnippetService, globalVariableResolver,
                 counterweightService, identityMaskingService,
-                agentOrchestrator, new ConversationHistoryBuilder(), new SimpleMeterRegistry());
+                agentOrchestrator, new ConversationHistoryBuilder(), new SimpleMeterRegistry(), new CallerIdentityContext(null, null));
 
         wireMemory();
     }

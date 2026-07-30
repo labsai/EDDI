@@ -45,7 +45,6 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.MessageFormat;
@@ -82,6 +81,18 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     private static final Logger LOGGER = Logger.getLogger(RestExportService.class);
     private static final String SCHEDULE_EXT = "schedule";
+
+    /**
+     * Sub-directory of {@code tmp/} under which every export builds its own
+     * per-request scratch tree: {@code tmp/export/<uuid>/<agentId>/<version>/}.
+     * <p>
+     * The scratch tree deliberately does not live at {@code tmp/<agentId>/}: that
+     * directory is derived from a caller-supplied value and shares {@code tmp/}
+     * with the import staging root ({@code tmp/import}) and with finished export
+     * ZIPs awaiting download. Keying it on a per-request UUID means the cleanup in
+     * {@code finally} can only ever remove files this very invocation created.
+     */
+    private static final String EXPORT_SCRATCH_ROOT = "export";
 
     /**
      * Matches snippet references in template strings: {{snippets.name}} or
@@ -133,6 +144,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     @Override
     public Response exportAgent(String agentId, Integer agentVersion, String selectedResourceIds) {
+        Path scratchRoot = null;
         try {
             // Validate agentId early before any path construction (CodeQL
             // java/path-injection)
@@ -142,7 +154,12 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             Set<String> selectedIds = parseSelectedResourceIds(selectedResourceIds);
 
             AgentConfiguration agentConfig = agentStore.read(agentId, agentVersion);
-            Path agentPath = writeDirAndDocument(agentId, agentVersion, jsonSerialization.serialize(agentConfig), tmpPath, AGENT_EXT);
+
+            // Everything below is written into a scratch tree owned by this request
+            // alone, so the cleanup in `finally` cannot touch a concurrent export,
+            // the import staging root, or a ZIP awaiting download.
+            scratchRoot = createExportScratchRoot();
+            Path agentPath = writeDirAndDocument(agentId, agentVersion, jsonSerialization.serialize(agentConfig), scratchRoot, AGENT_EXT);
             Map<IResourceId, WorkflowConfiguration> workflowConfigurations = readConfigs(workflowStore, agentConfig.getWorkflows());
 
             DocumentDescriptor agentDocumentDescriptor = writeDocumentDescriptor(agentPath, agentId, agentVersion);
@@ -216,32 +233,43 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         } finally {
             // The ZIP is built at this point, so the loose files it was built from
             // are no longer needed. Without this every export permanently adds a
-            // tmp/<agentId>/ tree.
-            deleteExportScratchTree(agentId);
+            // scratch tree under tmp/.
+            deleteExportScratchTree(scratchRoot);
         }
     }
 
     /**
-     * Removes the scratch tree an export wrote under {@code tmp/<agentId>/}.
+     * Creates the scratch directory this export writes into:
+     * {@code tmp/export/<uuid>/}. A fresh UUID per request keeps concurrent exports
+     * — including two versions of the same agent — fully disjoint.
+     */
+    private Path createExportScratchRoot() throws IOException {
+        Path scratchRoot = Paths.get(tmpPath.toString(), EXPORT_SCRATCH_ROOT, UUID.randomUUID().toString());
+        return Files.createDirectories(scratchRoot).toAbsolutePath().normalize();
+    }
+
+    /**
+     * Removes the per-request scratch tree created by
+     * {@link #createExportScratchRoot()}. Only a directory this invocation created
+     * is ever passed in — a caller-supplied agentId never reaches this method — so
+     * cleanup cannot delete the import staging root, a finished ZIP awaiting
+     * download, or a concurrent export's files. {@code null} means the export
+     * failed before any scratch tree existed, so there is nothing to remove.
+     * <p>
      * Failures are logged, never thrown — cleanup must not turn a successful export
      * into an error response.
      */
-    private void deleteExportScratchTree(String agentId) {
-        if (isNullOrEmpty(agentId)) {
+    private void deleteExportScratchTree(Path scratchRoot) {
+        if (scratchRoot == null) {
             return;
         }
 
-        Path tmpDir = tmpPath.toAbsolutePath().normalize();
-        Path scratchDir;
-        try {
-            scratchDir = Paths.get(tmpPath.toString(), agentId).toAbsolutePath().normalize();
-        } catch (InvalidPathException e) {
-            return;
-        }
+        Path exportRoot = Paths.get(tmpPath.toString(), EXPORT_SCRATCH_ROOT).toAbsolutePath().normalize();
+        Path scratchDir = scratchRoot.toAbsolutePath().normalize();
 
-        // agentId is validated by sanitizePathComponent before any path is built —
-        // this re-check keeps the delete inside tmp/ even if that ever changes.
-        if (!scratchDir.startsWith(tmpDir) || scratchDir.equals(tmpDir) || !Files.exists(scratchDir)) {
+        // Defense in depth: never recursively delete anything that is not a
+        // directory strictly below tmp/export/.
+        if (!scratchDir.startsWith(exportRoot) || scratchDir.equals(exportRoot) || !Files.isDirectory(scratchDir)) {
             return;
         }
 

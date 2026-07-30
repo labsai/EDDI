@@ -1,5 +1,12 @@
 licenses/** linguist-generated
 
+# Chat UI bundles are built by the separate eddi-chat-ui repo and committed here
+# so the backend ships a matching widget. Reviewing minified output line by line
+# is meaningless -- review the source in eddi-chat-ui instead.
+src/main/resources/META-INF/resources/scripts/js/chat-ui.*.js linguist-generated
+src/main/resources/META-INF/resources/scripts/css/chat-ui.*.css linguist-generated
+src/main/resources/META-INF/resources/assets/** linguist-generated
+
 # Install scripts -- enforce correct line endings per platform
 *.sh text eol=lf
 *.ps1 text eol=crlf

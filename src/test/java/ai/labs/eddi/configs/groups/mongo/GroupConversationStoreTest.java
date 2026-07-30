@@ -408,7 +408,7 @@ class GroupConversationStoreTest {
         // Built up front: Mockito rejects a when(...) nested inside another when(...).
         var first = resourceFor("user-1");
         var second = resourceFor("user-1");
-        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), eq(0)))
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), anyInt()))
                 .thenReturn(List.of(resourceId("gc-1"), resourceId("gc-2")));
         when(storage.read("gc-1", 1)).thenReturn(first);
         when(storage.read("gc-2", 1)).thenReturn(second);
@@ -417,6 +417,71 @@ class GroupConversationStoreTest {
 
         verify(storage).removeAllPermanently("gc-1");
         verify(storage).removeAllPermanently("gc-2");
+    }
+
+    /**
+     * findResources caps a page at MAX_RESULT_LIMIT, and a limit &lt; 1 resolves to
+     * that cap rather than meaning "unbounded". A single query would therefore
+     * erase at most one page and report success, leaving the rest of the user's
+     * transcripts in the store — a partial erasure claiming to be complete. The
+     * erasure must page until a pass finds nothing.
+     */
+    @Test
+    @DisplayName("deleteAllForUser — keeps paging until no transcripts remain")
+    void deleteAllForUserPagesUntilExhausted() throws Exception {
+        var a = resourceFor("user-1");
+        var b = resourceFor("user-1");
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), anyInt()))
+                .thenReturn(List.of(resourceId("gc-1")))
+                .thenReturn(List.of(resourceId("gc-2")))
+                .thenReturn(List.of());
+        when(storage.read("gc-1", 1)).thenReturn(a);
+        when(storage.read("gc-2", 1)).thenReturn(b);
+
+        assertEquals(2, store.deleteAllForUser("user-1"), "both pages must be erased, not just the first");
+
+        verify(storage).removeAllPermanently("gc-1");
+        verify(storage).removeAllPermanently("gc-2");
+    }
+
+    /**
+     * A candidate that could not be processed must not be reported as a completed
+     * erasure. The query always runs at offset 0, so an undeletable row stays in
+     * the first page and would otherwise make a later pass look like "no new work"
+     * — ending the sweep with a partial count that claims success.
+     */
+    @Test
+    @DisplayName("deleteAllForUser — fails loudly when a matching transcript cannot be deleted")
+    void deleteAllForUserFailsOnUndeletableRow() throws Exception {
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), anyInt()))
+                .thenReturn(List.of(resourceId("gc-1")));
+        // The candidate's document cannot be deserialized, so we can never establish
+        // whether it belonged to this user — and therefore cannot claim it was erased.
+        IResourceStorage.IResource<GroupConversation> unreadable = mock(IResourceStorage.IResource.class);
+        when(unreadable.getData()).thenThrow(new IOException("corrupt document"));
+        when(storage.read("gc-1", 1)).thenReturn(unreadable);
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class, () -> store.deleteAllForUser("user-1"));
+        assertTrue(thrown.getMessage().contains("Erasure incomplete"), thrown.getMessage());
+        verify(storage, never()).removeAllPermanently(anyString());
+    }
+
+    /**
+     * If every candidate is rejected by the exact-match re-check, re-querying would
+     * return the same page forever. The loop must stop rather than spin.
+     */
+    @Test
+    @DisplayName("deleteAllForUser — stops instead of spinning when a pass deletes nothing")
+    void deleteAllForUserStopsWhenNoProgress() throws Exception {
+        var foreign = resourceFor("someone-else");
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), anyInt()))
+                .thenReturn(List.of(resourceId("gc-9")));
+        when(storage.read("gc-9", 1)).thenReturn(foreign);
+
+        assertEquals(0, store.deleteAllForUser("user-1"));
+
+        verify(storage, never()).removeAllPermanently(anyString());
+        verify(storage, atMost(3)).findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt());
     }
 
     /**
@@ -430,7 +495,7 @@ class GroupConversationStoreTest {
     void deleteAllForUserSkipsInexactMatches() throws Exception {
         var mine = resourceFor("user-1");
         var somebodyElses = resourceFor("user-10"); // over-broad regex hit
-        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), eq(0)))
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), anyInt()))
                 .thenReturn(List.of(resourceId("gc-1"), resourceId("gc-2")));
         when(storage.read("gc-1", 1)).thenReturn(mine);
         when(storage.read("gc-2", 1)).thenReturn(somebodyElses);
@@ -444,13 +509,15 @@ class GroupConversationStoreTest {
     @Test
     @DisplayName("deleteAllForUser — anchors and escapes the userId filter")
     void deleteAllForUserAnchorsTheFilter() throws Exception {
-        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), eq(0)))
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), anyInt()))
                 .thenReturn(List.of());
 
         store.deleteAllForUser("user.1+x");
 
         ArgumentCaptor<IResourceFilter.QueryFilters[]> captor = ArgumentCaptor.forClass(IResourceFilter.QueryFilters[].class);
-        verify(storage).findResources(captor.capture(), eq("lastModified"), eq(0), eq(0));
+        // an explicit full page, not 0 — a limit < 1 resolves to the same cap but
+        // reads like "unbounded", which is what made the erasure stop after one page
+        verify(storage).findResources(captor.capture(), eq("lastModified"), eq(0), eq(IResourceStorage.MAX_RESULT_LIMIT));
         var queryFilter = captor.getValue()[0].getQueryFilters().getFirst();
         assertEquals("userId", queryFilter.getField());
         assertEquals("^user\\.1\\+x$", queryFilter.getFilter().toString(),
