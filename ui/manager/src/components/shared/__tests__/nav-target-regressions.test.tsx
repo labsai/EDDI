@@ -93,6 +93,34 @@ describe("command palette agent results", () => {
   });
 });
 
+describe("command palette with a malformed agent resource", () => {
+  it("falls back to the agent list instead of throwing or building a dead route", async () => {
+    // parseResourceUri constructs a `new URL(...)`, which throws on input like
+    // this. Uncaught, selecting the row took the palette down.
+    server.use(
+      http.get("*/agentstore/agents/descriptors", () =>
+        HttpResponse.json([
+          {
+            resource: "http://[",
+            name: "Broken Agent",
+            description: "malformed resource",
+            createdOn: 0,
+            lastModifiedOn: 0,
+          },
+        ]),
+      ),
+    );
+
+    useCommandPalette.setState({ isOpen: true });
+    renderWithProviders(<CommandPalette />);
+
+    fireEvent.click(await screen.findByText("Broken Agent"));
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalled());
+    expect(mockNavigate.mock.calls[0]![0]).toBe("/manage/agents");
+  });
+});
+
 describe("create agent dialog", () => {
   it("navigates to /manage/agentview/:id after a successful create", async () => {
     server.use(

@@ -123,22 +123,6 @@ export function QuotasPage() {
 
       {loading ? (
         <LoadingSkeleton />
-      ) : quotaError && !quota ? (
-        /* getQuota() maps only 404 to local defaults ("not configured yet"), so
-           reaching here means a real failure (500/503/network) and `quota` is
-           undefined — which left `form` null and rendered the config and usage
-           cards with empty bodies. An operator could not tell "no policy set"
-           from "we could not read the policy".
-
-           Gated on `!quota`: TanStack Query keeps the last data, so a failed
-           background refetch would otherwise replace a populated policy form
-           with the full-page error — the destructive behaviour avoided on the
-           sibling pages. With data present, the inline notice below reports it. */
-        <ErrorState
-          message={t("common.error")}
-          onRetry={() => refetchQuota()}
-          retryLabel={t("common.retry")}
-        />
       ) : (
         <>
           {/* Policy loaded, but the newest read failed — keep the form usable. */}
@@ -188,7 +172,20 @@ export function QuotasPage() {
                 )}
               </div>
 
-              {form && (
+              {/* Quota and usage are independent queries. Scoping the failure to
+                  this card keeps a usage reading that loaded fine — and the Reset
+                  Counters action — on screen, instead of replacing the whole page.
+                  getQuota() maps only 404 to local defaults, so reaching here with
+                  no `quota` is a real failure (500/503/network), not "unset". */}
+              {quotaError && !quota ? (
+                <div data-testid="quotas-config-error">
+                  <ErrorState
+                    message={t("common.error")}
+                    onRetry={() => refetchQuota()}
+                    retryLabel={t("common.retry")}
+                  />
+                </div>
+              ) : form ? (
                 <div className="space-y-4">
                   <QuotaField
                     icon={<MessageSquare className="h-4 w-4 text-muted-foreground" />}
@@ -228,7 +225,7 @@ export function QuotasPage() {
                     dimmed={!form.enabled}
                   />
                 </div>
-              )}
+              ) : null}
             </div>
 
             {/* Usage Card */}

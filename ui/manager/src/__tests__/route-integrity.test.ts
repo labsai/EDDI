@@ -353,13 +353,24 @@ describe("route integrity", () => {
       expect(out).not.toContain("real");
     });
 
-    it("preserves every route path in the real app.tsx", () => {
-      // Direct regression guard: if the scanner ever desyncs (an unbalanced quote
-      // inside a regex literal would do it) this fails instead of the suite
-      // quietly checking a fraction of the app.
+    it("does not desync on a regex literal containing a quote", () => {
+      // The desync this guard exists for: an unbalanced quote inside a regex
+      // literal opens a string state that never closes, and everything after it
+      // is treated as string content, so targets stop being extracted.
+      const src = 'const re = /["\']/;\nconst x = <Link to="/manage/agents" />;';
+      expect(stripComments(src)).toContain('to="/manage/agents"');
+    });
+
+    it("does not swallow most of the real app.tsx", () => {
+      // A floor, deliberately NOT equality. Stripping a commented-out <Route> is
+      // this suite's contract (see parseRouteTree), so asserting the count is
+      // unchanged would fail the first time someone retires a route by
+      // commenting it out — a false alarm, not a desync. A desync drops dozens.
       const raw = readFileSync(APP, "utf8");
       const count = (s: string) => (s.match(/path="[^"]*"/g) ?? []).length;
-      expect(count(stripComments(raw))).toBe(count(raw));
+      const rawCount = count(raw);
+      expect(rawCount).toBeGreaterThan(30);
+      expect(count(stripComments(raw))).toBeGreaterThan(rawCount * 0.9);
     });
 
     it("handles an escaped quote without losing the rest of the line", () => {

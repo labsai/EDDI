@@ -120,14 +120,24 @@ describe("page error states", () => {
     await expectErrorNotEmpty("schedules-empty");
   });
 
-  it("Quotas shows an error instead of empty config and usage cards", async () => {
+  it("Quotas reports a config failure inside the config card, not over the page", async () => {
+    // Quota and usage are independent queries. Replacing the whole page hid a
+    // usage reading that had loaded fine, along with the Reset Counters action,
+    // so the failure is scoped to the card that actually failed.
     server.use(
-      http.get("*/administration/quotas/*", () =>
+      http.get("*/administration/quotas/:tenant", () =>
         HttpResponse.json({ message: "boom" }, { status: 500 }),
       ),
     );
     renderPage("/manage/quotas", <QuotasPage />, "/manage/quotas");
-    await expectErrorNotEmpty();
+
+    await waitFor(
+      () => expect(screen.getByTestId("quotas-config-error")).toBeInTheDocument(),
+      { timeout: 5000 },
+    );
+    // The usage card is still mounted rather than swept away with the page.
+    expect(screen.getByTestId("quotas-page")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^retry$/i }).length).toBeGreaterThan(0);
   });
 
   it("Quotas shows a usage error without hiding the still-working config form", async () => {

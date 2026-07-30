@@ -191,14 +191,19 @@ export function CommandPalette() {
                       // it: interpolating that produced
                       // /manage/agentview/eddi://… — the same dead route this
                       // fixed. Fall back to the agent list instead.
-                      const { id } = parseResourceUri(agent.resource);
-                      const usable = id && !id.includes("/") && !id.includes(":");
-                      handleSelect(
-                        usable
-                          ? `/manage/agentview/${encodeURIComponent(id)}`
-                          : "/manage/agents",
-                        agent.name,
-                      );
+                      // parseResourceUri builds a `new URL(...)`, which THROWS on
+                      // a malformed resource — uncaught, that took down the
+                      // palette on selection rather than just misrouting.
+                      let target = "/manage/agents";
+                      try {
+                        const { id } = parseResourceUri(agent.resource);
+                        if (id && !id.includes("/") && !id.includes(":")) {
+                          target = `/manage/agentview/${encodeURIComponent(id)}`;
+                        }
+                      } catch {
+                        /* fall through to the agent list */
+                      }
+                      handleSelect(target, agent.name);
                     }}
                     className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground transition-colors data-[selected=true]:bg-primary/10 data-[selected=true]:text-primary"
                   >
