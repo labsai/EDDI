@@ -85,6 +85,13 @@ headers are scrubbed before the request is recorded.
 
 Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
 
+The same reference works in an **MCP server's `apiKey`**, so a tool call reaches
+that server as the chatting user rather than as a standing service principal.
+Only the tool call carries the caller — the handshake and `tools/list` do not,
+because the client is cached and a session opened with one user's token would be
+reused by everyone after them. See
+[`mcp-server.md`](mcp-server.md#calling-an-mcp-server-as-the-chatting-user).
+
 ### Running behind a reverse proxy
 
 The origin is taken from the inbound request as EDDI sees it. Behind a

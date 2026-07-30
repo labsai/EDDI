@@ -68,7 +68,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | Tool               | Description                                                                                                                                                                                                                                         |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `setup_agent`      | Create a fully working agent in one call: creates behavior rules, LangChain config, optional output/greeting, package, agent, and deploys. Supports built-in tools, quick replies, and sentiment analysis. Default: `anthropic`/`claude-sonnet-4-6` |
-| `create_api_agent` | Create an agent from an OpenAPI 3.0/3.1 spec. Parses the spec, generates HttpCalls configs (grouped by API tag), creates the full pipeline, and deploys. Supports endpoint filtering, base URL override, and auth header propagation                 |
+| `create_api_agent` | Create an agent from an OpenAPI 3.0/3.1 spec. Parses the spec, generates HttpCalls configs (grouped by API tag), creates the full pipeline, and deploys. Supports endpoint filtering, base URL override, and auth header propagation. A generated write tool takes the whole request body as one `requestBody` parameter — see below |
 
 ### Schedule Management Tools (6)
 
@@ -650,12 +650,59 @@ External MCP servers are configured as **`mcpcalls` workflow extensions** — a 
 | ---------------- | ---------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `mcpServerUrl`   | string     | **Yes**  | —         | MCP server URL                                                                                                           |
 | `name`           | string     | No       | —         | Human-readable name for logging                                                                                          |
-| `transport`      | string     | No       | `"http"`  | Informational only today — `McpToolProviderManager` always connects via Streamable HTTP                                  |
-| `apiKey`         | string     | No       | —         | API key, sent as `Authorization: Bearer <key>`. Resolved through global variables and `${vault:key}` references           |
+| `transport`      | string     | No       | `"http"`  | Only Streamable HTTP is implemented; an unimplemented value is rejected as invalid configuration rather than silently substituted |
+| `apiKey`         | string     | No       | —         | API key, sent as `Authorization: Bearer <key>`. Resolved through global variables and `${vault:key}` references, or `${caller:token}` to call as the chatting user (see below) |
 | `timeoutMs`      | long       | No       | `30000`   | Connection and request timeout in milliseconds                                                                           |
 | `toolsWhitelist` | string[]   | No       | —         | If non-empty, only these tool names are exposed (names as returned by the server's `tools/list`)                          |
 | `toolsBlacklist` | string[]   | No       | —         | Tool names to exclude. Applied *after* the whitelist                                                                     |
 | `mcpCalls`       | object[]   | No       | —         | Deterministic, action-triggered tool bindings (see *Pipeline mode* below). Omit for agent-mode-only servers               |
+
+#### How `create_api_agent` builds a write tool's body
+
+A generated `POST`/`PUT`/`PATCH` tool takes the **entire request body as a single
+`requestBody` parameter**, whose description names the schema's properties, their
+types, and which are required. The model writes the JSON itself.
+
+It is worth knowing why, because the obvious alternative is worse. Decomposing the
+schema into one parameter per property means every one becomes *required* (an
+`ApiCall`'s parameter map has nowhere to record optionality), so a `PATCH` of one
+field forces the model to restate all the others and a partial update silently
+becomes a full overwrite. It also substitutes model-written values into JSON
+unescaped, so a value containing a quote can break the body or add fields the
+schema never declared.
+
+The whole-body form matters most under [HITL approval](hitl.md): the approval card
+shows tool **arguments**, so "what the approver sees is what gets sent" only holds
+while the body is one of them.
+
+#### Calling an MCP server as the chatting user
+
+Set `apiKey` to `${caller:token}` and the tool call carries the identity of the
+person chatting, instead of a standing service credential:
+
+```json
+{ "mcpServerUrl": "https://eddi.example/mcp", "apiKey": "${caller:token}" }
+```
+
+The same guarantees apply as for apicall headers — same origin only, fails
+closed rather than sending a placeholder, never persisted. See
+[`httpcalls.md`](httpcalls.md#calling-as-the-signed-in-user).
+
+Two behaviours worth knowing, because they are deliberate:
+
+- **Only tool calls carry the caller.** The `initialize` handshake and
+  `tools/list` are sent unauthenticated, because the client is cached: a session
+  opened with one user's token would be reused by everyone after them, and a
+  tool list reflecting one user's permissions would be offered to the next. If
+  your server requires authentication to *list* tools, use a static key.
+- **Clients are cached per credential, not per URL.** Two agents pointing at the
+  same server with different keys get separate clients. A caller-bound config
+  still yields one shared client — the credential is applied per request, so
+  there is no client per user.
+
+A `${caller:token}` key with `eddi.caller-identity.enabled=false` is rejected as
+invalid configuration when the server is validated, rather than failing on every
+tool call.
 
 **Step 2 — add an `mcpcalls` step to the agent's workflow**, before the LLM step:
 

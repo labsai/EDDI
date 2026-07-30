@@ -127,7 +127,7 @@ When an LLM is given access to tools, every argument it supplies must be treated
 
 ## Caller Identity Forwarding — `CallerIdentityResolver`
 
-**Applies to:** apicall headers that reference `${caller:token}` / `${caller:userId}`.
+**Applies to:** apicall headers, and an MCP server's `apiKey`, that reference `${caller:token}` / `${caller:userId}`.
 
 An agent that calls an API needs a credential. Baking a static one into the
 config is the wrong shape when the API is EDDI's own: an OIDC token expires

@@ -837,8 +837,10 @@ Resolution is narrow and fails loudly rather than degrading quietly:
 - **Same origin only** — released only to the exact `scheme://host:port` the
   caller addressed (read from the inbound request, not config), so a config
   naming a third-party host cannot exfiltrate the token.
-- **Headers only** — `${caller:token}` in a query parameter is rejected.
-  `${caller:userId}` is allowed in headers and query parameters.
+- **Headers only** — `${caller:token}` in a query parameter, request body or
+  path is rejected. `${caller:userId}` is allowed in headers and query
+  parameters. An MCP server's `apiKey` may also carry it, which sends the tool
+  call as the chatting user (see [`docs/mcp-server.md`](docs/mcp-server.md)).
 - **Authenticated turns only** — scheduled jobs and triggers cannot satisfy it.
 - **Fails closed** — an unsatisfiable reference errors instead of sending
   `"Bearer "` with an empty token.
