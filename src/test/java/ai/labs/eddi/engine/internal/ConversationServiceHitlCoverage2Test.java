@@ -46,6 +46,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -409,6 +410,35 @@ class ConversationServiceHitlCoverage2Test {
                     CONVERSATION_ID, ConversationState.EXECUTION_INTERRUPTED);
         }
 
+        @Test
+        @Timeout(10)
+        @DisplayName("B2: an interrupted wait restores the interrupt flag — after the state write, not before")
+        void interrupted_restoresFlagAfterStateWrite() throws Exception {
+            var queued = acceptTurnAndCaptureCallable();
+            doReturn(ConversationState.READY)
+                    .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            stubRuntimeInterrupted();
+
+            assertFalse(Thread.currentThread().isInterrupted(), "precondition: flag starts clear");
+            try {
+                queued.call();
+
+                // Future.get CLEARS the interrupt status when it throws
+                // InterruptedException, so this handler has to re-assert it — otherwise
+                // the executor thread's shutdown signal dies here.
+                assertTrue(Thread.currentThread().isInterrupted(),
+                        "waitForExecutionFinishOrTimeout must restore the interrupt flag that Future.get consumed");
+                // ...and it must be restored only AFTER the store round trips: a set flag
+                // aborts the sync Mongo driver, which would skip the very
+                // EXECUTION_INTERRUPTED write this branch exists to perform.
+                verify(conversationMemoryStore).setConversationState(
+                        CONVERSATION_ID, ConversationState.EXECUTION_INTERRUPTED);
+            } finally {
+                // Never let the flag leak into the next test on this thread.
+                Thread.interrupted();
+            }
+        }
+
         /**
          * Wires the happy say() path up to submit and returns the captured coordinator
          * callable. The runtime is NOT stubbed here — the caller stubs it (timeout).
@@ -487,6 +517,24 @@ class ConversationServiceHitlCoverage2Test {
             callable.call();
             Future<Object> future = mock(Future.class);
             doThrow(new TimeoutException("watchdog")).when(future).get(anyLong(), any(TimeUnit.class));
+            return future;
+        }).when(runtime).submitCallable(any(Callable.class), any(IRuntime.IFinishedExecution.class), any());
+    }
+
+    /**
+     * Runtime whose returned Future throws InterruptedException on get() — drives
+     * the B2 interrupt branch of waitForExecutionFinishOrTimeout. Mirrors the JDK
+     * contract: {@code Future.get} CLEARS the thread's interrupt status before it
+     * throws, so the handler is the only thing that can put it back.
+     */
+    @SuppressWarnings("unchecked")
+    private void stubRuntimeInterrupted() throws Exception {
+        doAnswer(invocation -> {
+            Callable<Object> callable = invocation.getArgument(0);
+            callable.call();
+            Future<Object> future = mock(Future.class);
+            doThrow(new InterruptedException("watchdog interrupted"))
+                    .when(future).get(anyLong(), any(TimeUnit.class));
             return future;
         }).when(runtime).submitCallable(any(Callable.class), any(IRuntime.IFinishedExecution.class), any());
     }

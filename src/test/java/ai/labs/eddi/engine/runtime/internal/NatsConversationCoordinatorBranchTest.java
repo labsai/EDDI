@@ -126,8 +126,18 @@ class NatsConversationCoordinatorBranchTest {
     @DisplayName("shutdown edge cases")
     class ShutdownEdgeCases {
 
+        /**
+         * B2: a drain that merely TIMED OUT is not an interrupt. Flagging the shutdown
+         * thread there aborts every remaining {@code @PreDestroy} step that performs a
+         * blocking/interruptible call (further drains, executor awaitTermination, the
+         * Mongo writes of the graceful-shutdown drain) with an immediate interrupt.
+         * Only the {@code InterruptedException} half of the shared catch may set the
+         * flag — see
+         * {@code NatsConversationCoordinatorExtendedTest.shutdown_interruptedException_setsInterruptFlag}
+         * for the positive case.
+         */
         @Test
-        @DisplayName("shutdown — TimeoutException is caught and logged")
+        @DisplayName("shutdown — a drain TimeoutException must NOT flag the shutdown thread")
         void shutdownTimeoutException() throws Exception {
             Connection mockConn = mock(Connection.class);
             when(mockConn.drain(any(Duration.class))).thenThrow(new TimeoutException("drain timeout"));
@@ -136,7 +146,20 @@ class NatsConversationCoordinatorBranchTest {
             connField.setAccessible(true);
             connField.set(coordinator, mockConn);
 
-            assertDoesNotThrow(() -> coordinator.shutdown());
+            try {
+                // Start from a known-clean state so the assertion below can only be
+                // about what shutdown() did.
+                Thread.interrupted();
+
+                assertDoesNotThrow(() -> coordinator.shutdown());
+
+                assertFalse(Thread.currentThread().isInterrupted(),
+                        "a drain timeout is not an interrupt and must not flag the shutdown thread — "
+                                + "the remaining @PreDestroy steps would abort mid-way");
+            } finally {
+                // Never leak the flag into whatever test runs next on this thread.
+                Thread.interrupted();
+            }
         }
     }
 

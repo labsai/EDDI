@@ -23,8 +23,12 @@ import java.util.concurrent.Callable;
  * </ul>
  *
  * <p>
- * Selected via config property {@code eddi.messaging.type} (default:
- * {@code in-memory}).
+ * Selected at <strong>build</strong> time, not at runtime: the in-memory
+ * coordinator is the {@code @DefaultBean} and the NATS one is gated on
+ * {@code @IfBuildProfile("nats")}, so only an artifact built with that profile
+ * contains it. The {@code eddi.messaging.type} property in
+ * {@code application.properties} is read by no Java code and does not switch
+ * implementations — this javadoc previously said it did.
  * </p>
  *
  * @author ginccc

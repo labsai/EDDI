@@ -25,6 +25,17 @@ import java.util.concurrent.TimeUnit;
  * Executes a scheduled fire by resolving the conversation strategy and calling
  * {@link IConversationService#say}.
  * <p>
+ * Two schedule kinds are recognised by their metadata and bypass the
+ * conversation path entirely, because neither is a conversation turn:
+ * <ul>
+ * <li>{@code hitlType=hitl_timeout} — HITL approval deadlines
+ * ({@code HitlTimeoutHandler})</li>
+ * <li>{@code dreamType=dream_consolidation} — background user-memory
+ * maintenance ({@link DreamService})</li>
+ * </ul>
+ * Both still run under the poller's cluster-wide claim, lease, retry/backoff
+ * and fire-log machinery.
+ * <p>
  * All existing guards apply automatically:
  * <ul>
  * <li>{@code TenantQuotaService} — API call and cost quotas</li>
@@ -48,6 +59,9 @@ public class ScheduleFireExecutor {
 
     @Inject
     ai.labs.eddi.engine.internal.HitlTimeoutHandler hitlTimeoutHandler;
+
+    @Inject
+    DreamService dreamService;
 
     /**
      * Execute a schedule fire. Returns the fire log entry.
@@ -89,12 +103,22 @@ public class ScheduleFireExecutor {
             return hitlFireLog;
         }
 
+        if (DreamService.isDreamSchedule(md)) {
+            // Dream consolidation fast-path — a maintenance job over the user's
+            // persistent memories, not a conversation turn, so it never goes
+            // through say(). Everything else the schedule machinery provides
+            // (cluster-wide CAS claim, lease, retry/backoff, dead-lettering, fire
+            // log) applies unchanged.
+            return fireDreamConsolidation(schedule, instanceId, attemptNumber);
+        }
+
         Instant startedAt = Instant.now();
         String fireLogId = UUID.randomUUID().toString();
         String conversationId = null;
         String errorMessage = null;
         String status;
         double cost = 0.0;
+        boolean interrupted = false;
 
         try {
             Environment env = resolveEnvironment(schedule.getEnvironment());
@@ -125,6 +149,13 @@ public class ScheduleFireExecutor {
                     schedule.getTriggerType(), schedule.getAgentId(), conversationId);
 
         } catch (Exception e) {
+            // B2: latch.await() above CLEARS the interrupt flag when it throws
+            // InterruptedException, and this broad catch would otherwise swallow the
+            // cancellation signal entirely. Only REMEMBER it here — re-asserting the
+            // flag now would break the fire log below (see the finally).
+            if (e instanceof InterruptedException) {
+                interrupted = true;
+            }
             status = ScheduleConfiguration.FireStatus.FAILED.name();
             errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
             LOGGER.warnf(e, "[SCHEDULE] Fire failed for schedule '%s' (id=%s): %s", schedule.getName(), schedule.getId(), errorMessage);
@@ -138,8 +169,88 @@ public class ScheduleFireExecutor {
             scheduleStore.logFire(fireLog);
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Failed to log fire for schedule %s", schedule.getId());
+        } finally {
+            restoreInterrupt(interrupted);
         }
 
+        return fireLog;
+    }
+
+    /**
+     * Re-assert an interrupt that was consumed by a blocking call inside this fire,
+     * so the cancellation signal still reaches the caller.
+     * <p>
+     * Ordering matters: this MUST run only after the store round trips this method
+     * owns. The synchronous MongoDB driver checks out a connection with
+     * {@code lockInterruptibly()} and aborts with {@code MongoInterruptedException}
+     * when the calling thread's flag is already set, so restoring the flag before
+     * {@code logFire} would destroy the FAILED fire log that the interrupt path
+     * exists to write — leaving the attempt invisible on exactly the path where it
+     * matters most.
+     */
+    private static void restoreInterrupt(boolean interrupted) {
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Run one Dream memory-consolidation cycle for the schedule's user and record
+     * the fire.
+     * <p>
+     * A rejected or failed cycle is logged FAILED rather than swallowed, so a
+     * misconfigured dream schedule surfaces in the fire log, retries with backoff
+     * and eventually dead-letters instead of appearing to run while doing nothing.
+     */
+    private ScheduleFireLog fireDreamConsolidation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status;
+        String errorMessage = null;
+        double cost = 0.0;
+        boolean interrupted = false;
+
+        try {
+            // userId is passed through unchanged — DreamService rejects a missing or
+            // placeholder identity loudly; defaulting it here would silently
+            // consolidate an empty memory set.
+            DreamService.DreamResult result = dreamService.processScheduledFire(
+                    schedule.getAgentId(), schedule.getAgentVersion(), schedule.getUserId());
+            cost = result.estimatedCostUsd();
+            if (result.isSuccess()) {
+                status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+                LOGGER.infof("[SCHEDULE] Dream consolidation for schedule '%s' (id=%s, agent=%s, user=%s): "
+                        + "pruned=%d, contradictions=%d, summarized=%d, estimatedCost=$%.4f", schedule.getName(), schedule.getId(),
+                        schedule.getAgentId(), schedule.getUserId(), result.entriesPruned(), result.contradictionsFound(),
+                        result.entriesSummarized(), cost);
+            } else {
+                status = ScheduleConfiguration.FireStatus.FAILED.name();
+                errorMessage = result.error();
+                LOGGER.errorf("[SCHEDULE] Dream consolidation failed for schedule '%s' (id=%s): %s", schedule.getName(), schedule.getId(),
+                        errorMessage);
+            }
+        } catch (Exception e) {
+            // Same B2 reasoning — and the same ordering — as fire() above, repeated here
+            // because this catch is just as broad: a blocking call inside Dream
+            // consolidation CLEARS the interrupt flag when it throws
+            // InterruptedException. Remember it and re-assert it in the finally below,
+            // AFTER the fire log is written.
+            if (e instanceof InterruptedException) {
+                interrupted = true;
+            }
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
+            LOGGER.errorf(e, "[SCHEDULE] Dream consolidation threw for schedule '%s' (id=%s)", schedule.getName(), schedule.getId());
+        }
+
+        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(), startedAt,
+                Instant.now(), status, instanceId, null, errorMessage, attemptNumber, cost);
+        try {
+            scheduleStore.logFire(fireLog);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Failed to log dream fire for schedule %s", schedule.getId());
+        } finally {
+            restoreInterrupt(interrupted);
+        }
         return fireLog;
     }
 

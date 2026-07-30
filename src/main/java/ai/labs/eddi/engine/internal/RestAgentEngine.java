@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
@@ -48,6 +49,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.engine.internal.RestAgentManagement.KEY_LANG;
@@ -247,6 +249,21 @@ public class RestAgentEngine implements IRestAgentEngine {
             response.resume(Response.status(TOO_MANY_REQUESTS)
                     .entity(Map.of("error", "quota_exceeded", "message", e.getMessage()))
                     .type(MediaType.APPLICATION_JSON).header("Retry-After", "60").build());
+        } catch (RejectedExecutionException e) {
+            // Same reason as the quota branch above: say() is resumed through an
+            // AsyncResponse, so RejectedExecutionExceptionMapper never runs and the
+            // generic handler below turned backpressure into a 500. Both sources —
+            // coordinator saturation and the graceful-shutdown gate
+            // (ConversationService#rejectIfShuttingDown, which fires on the request
+            // thread once a SIGTERM drain starts) — are retryable elsewhere, so the
+            // status/body/Retry-After mirror the mapper verbatim. Without this,
+            // POST /agents/{agentId}/conversations answered a draining node with 503
+            // while say()/rerun answered 500, and clients keyed on 503 never failed over.
+            LOGGER.warnf("Turn rejected for conversation %s: %s", sanitize(conversationId), e.getMessage());
+            response.resume(Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "capacity_exceeded",
+                            "message", e.getMessage() != null ? e.getMessage() : "Service temporarily unavailable"))
+                    .type(MediaType.APPLICATION_JSON).header("Retry-After", "5").build());
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("An internal error occurred");
@@ -312,8 +329,15 @@ public class RestAgentEngine implements IRestAgentEngine {
         validateConversationOwnership(conversationId, true);
         try {
             String cancelledBy = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
+            // GRACEFUL is deliberate and is the ONLY mode this endpoint offers: the
+            // REST contract (IRestAgentEngine#cancelConversation) takes no mode
+            // parameter and documents a graceful cancel, so there is no caller
+            // intent to downgrade here. On the regular surface CANCEL_IMMEDIATE has
+            // no implementation at all — ConversationService silently degrades it to
+            // graceful — which is why it is not, and must not be, reachable from
+            // this API until it either does something or is deleted from the enum.
             var outcome = conversationService.cancelConversation(conversationId,
-                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL, cancelledBy);
+                    ControlSignal.CANCEL_GRACEFUL, cancelledBy);
             // Plain-text, curated bodies: never reflect the raw conversationId (it is
             // a caller-supplied path param — echoing it is a reflected-XSS vector) and
             // never leak internal exception detail to the client.

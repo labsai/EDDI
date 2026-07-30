@@ -5,6 +5,82 @@
 
 ---
 
+## ⚙️ fix(runtime): code-review findings wave 3 — concurrency, lifecycle, cancellation, graceful shutdown, Dream wiring (2026-07-28)
+
+**Repo:** EDDI (`fix/code-review-concurrency`)
+
+Third wave of the 124-finding external review. **16 fixed, 1 partial.** This is the wave where the findings were hardest to fix correctly, because the bugs are non-deterministic and several of the obvious fixes are wrong.
+
+### Pre-merge review pass (2026-07-29)
+
+Like #618, this PR reached "approved" without CI or any review bot having seen it — a stacked base disables CodeRabbit, and a base retarget does not fire the CI trigger. A dedicated pass over the 37-file diff produced **6 findings that survived adversarial verification (12 of 18 were refuted) plus 22 from completeness/test critics**, and Copilot found four more once CI could finally run. The high refutation rate is the point: concurrency invites "this looks racy", and verifiers were required to name the interleaving or drop the claim.
+
+- **A destructive primitive behind a missing ownership check (HIGH).** The schedule REST surface never checked `schedule.userId`, which on its own was inert. This PR's `dreamType=dream_consolidation` dispatch armed it: any `eddi-editor` could create and fire a schedule that **bulk-deletes another user's persistent memories**. `RestScheduleStore` already injected `OwnershipValidator` and simply did not use it here. Now admin-or-self on create, update (the re-point path) and `fireNow` — refusing with 403 rather than silently rewriting `userId`, which would hand back a schedule that does something other than what was asked. `system:scheduler` and blank ids stay exempt so existing stored schedules and Manager round-trips keep working.
+- **Dream consolidation crossed agent boundaries.** `process()` read `getAllEntries(userId)` — userId-only, agent-unscoped — while every knob it obeyed came from *one* agent's config, so agent A's `pruneStaleAfterDays` deleted agent B's memories and A's model endpoint saw B's text. Cycles are now scoped to the firing agent's own `sourceAgentId` writes, with `crossAgentMaintenance: true` as an explicit opt-in. Newly reachable in this PR, which gave `process()` its first scheduled caller.
+- **A transient LLM blip permanently disabled a schedule.** A single failure aborted the whole cycle and marked the fire FAILED, so three consecutive 429s dead-lettered the user's dream schedule. Transient classes (429/timeout/5xx) now skip the group and continue.
+- **The B2 interrupt fix destroyed the bookkeeping it was protecting.** The restore in `fire()` ran *before* `logFire()`, and the sync Mongo driver throws `MongoInterruptedException` on connection checkout while the flag is set — so on exactly the interrupt the restore existed to handle, the FAILED fire log was lost and `failCount` never incremented. The flag is now parked and re-asserted in a `finally` after the store round trip, in both `fire()` and the Dream fast-path. The residual half was in `SchedulePollerService`, which ran `markFailed()` on the same still-interrupted thread: the schedule stayed CLAIMED with `nextFire` in the past, was re-claimed every lease expiry, and could never reach `maxRetries` — **an interrupt turned a failing schedule into an unbounded re-fire loop.**
+- **A draining node answered 500 instead of "retry elsewhere".** `RestAgentEngine.sayInternal`'s trailing `catch (Exception)` swallowed the `RejectedExecutionException` from the new shutdown gate and rethrew it as a generic 500 — defeating the point of the graceful-shutdown work in this same PR.
+- Also: the parallel-phase batch deadline was sized at one member *attempt*, so it always fired first and made the per-member RETRY/ABORT/attributed-SKIP branches unreachable; `maxSummarizationCalls` silently stopped being enforced for stored configs (now honoured as an explicit backstop, deprecated in favour of `maxCostPerRun`); `BaseRuntime` swallowed `onComplete` failures with no identifying context; and `WorkflowStoreClientLibrary` documented an invariant the code neither enforced nor detected — now the component key no longer depends on it at all.
+
+**Docs corrected against the code, not against intent** — the third and fourth instances of that error in this stack, so every claim was re-read out of the implementation: `architecture.md` told operators to create Dream schedules with the `create_schedule` MCP tool, which has **no `metadata` parameter** and therefore cannot set the marker the dispatcher matches on, so the documented procedure produced a schedule that never consolidated (REST is the only working route today, now written out with the two gotchas that bite: a `message` is required for CRON triggers even though the Dream path ignores it, and an unset `userId` defaults to `system:scheduler`, which `DreamService` refuses). `IEventBus` and `InMemoryConversationCoordinator` both claimed the coordinator is selected at runtime via `eddi.messaging.type`; it is `@IfBuildProfile("nats")`, a **build-time** condition, and that property is read by no Java code at all.
+
+**One disagreement adjudicated rather than deferred to severity.** The completeness critic rated the NATS C13/C10 parity gap CRITICAL; two independent verifiers refuted it because `@IfBuildProfile("nats")` keeps that class out of shipped artifacts. Both cannot be right. The code defect is real and was fixed, but the CRITICAL rating was not — it is unreachable unless someone builds with that profile, and the class now records why the two coordinators differ.
+
+**Two tests were relabelled rather than trusted.** The critics caught that both new `GracefulShutdownService` interrupt tests pass identically with and without the fix — `sleepQuietly` restores the flag, so the old code's next `sleep` threw immediately and it exited just as fast. That fix buys accurate logs (an interrupt was being reported as a 30-second timeout), not changed behaviour, and the tests now say so instead of implying coverage they do not have.
+
+### Cancellation that cancelled nothing (C1)
+
+`CompletableFuture.cancel(true)` does **not** interrupt a `runAsync`/`supplyAsync` body — the JDK documents `mayInterruptIfRunning` as having no effect there. Five call sites in `GroupConversationService` relied on it, so "cancelled" agent threads **kept mutating `gc.getTaskList()`, `gc.getTranscript()` and the errors list after the orchestrator had already persisted the document**. Replaced with a cooperative `MemberTurnCancellation` token checked at the agent turn's own await points, plus a bounded drain. This is also the root cause of C7 (`resetStrandedInProgressTasks` could strand the very task it exists to rescue, because a falsely-"cancelled" thread flips state between the snapshot and the mutate).
+
+### The ~100-turn scalability cliff (C4)
+
+`ConversationService` submitted the inner pipeline through the **same** bounded pool as the outer coordinator callable and then blocked on `future.get()`. With no `quarkus.thread-pool.*` overrides that is the 200-thread default: at ~100 concurrent turns every thread is a waiter, no inner task can ever be scheduled, and **every turn fails at the 60s watchdog**. A cliff, not a gradual degradation.
+
+Fixed by routing *nested* submissions to a virtual-thread executor via a `ThreadLocal` marker scoped to the callable body. Chosen over `CompletableFuture` composition deliberately: the coordinator's ordering contract is "the callable returns ⇒ the turn is done", so making the outer non-blocking would need an `IEventBus`/`IConversationCoordinator` SPI change **and** would let the next turn of the same conversation start while the previous one still ran. Virtual threads are safe here — there is not a single `@RequestScoped` bean in `src/main`, and three existing callers already drive the pipeline with no request context on virtual-thread executors. The marker is cleared before callbacks run, so `submitNext` still schedules on the managed executor exactly as before; watchdog and timeout semantics are unchanged.
+
+### Re-execution and lost turns (C3, C9, C10, C13)
+
+- **C9** — `onComplete` sat inside the `try` whose `catch (Throwable)` called `onFailure`, so **any unchecked throw on the completion path resubmitted the already-executed callable as a retry** — LLM calls, tool side effects and cost all running twice. Completion dispatch moved outside the guarded region *and* both callbacks gated behind a one-shot `AtomicBoolean`.
+- **C13** — The coordinator retried failed turns 3×. Because `onFailure` can only be raised from inside the executor task, every retry re-ran a turn that may already have called an LLM and spent money. Retry removed entirely; genuinely pre-execution failures surface as a synchronous throw and are handled by C10's rollback.
+- **C3** — A timed-out turn still persisted over a newer one, because the stale-completion guard used the interrupt flag and the pipeline cleared it via `Thread.interrupted()`. Replaced with a per-submission abandonment token set *before* delegating `cancel()`, so nothing the work itself does can clear it.
+- **C10** — A throwing `submit` left the callable queued with nothing scheduled to run it, wedging that conversation **permanently** and leaking the map entry for the JVM's lifetime.
+
+### No graceful shutdown existed at all (B3)
+
+`grep -rn ShutdownEvent src/main` matched nothing. A rolling deploy dropped every queued and in-flight turn with no drain and no readiness flip. Added `GracefulShutdownService` + `ShutdownReadinessHealthCheck`.
+
+### /rerun destroyed output and regenerated nothing (C5)
+
+Selective execution passes a sublist with `startIndex=0`, so the loop index is sublist-relative — but the component-cache **key** was built from that relative index while the cache **stores** under the absolute index. The output task then ran with `component == null` and no-op'd, *after* the prior output had already been deleted. `indexOffset` was already threaded in and used only for HITL bookkeeping.
+
+This one survived because **every existing `LifecycleManagerTest` stubs the component map empty** — the exact condition that hides it. The new test populates it at absolute indices and fails if the offset is removed.
+
+### B2: the finding's premise was inverted
+
+The review claimed "interrupt flags swallowed in 18 of 20 handlers". Auditing all 28 sites individually (27 explicit `catch (InterruptedException)` plus one hiding behind a broad `catch (Exception)`) found the opposite: **14 already restored the flag correctly and 9 rethrew; only 4 genuinely swallowed it.** Fixed those 4, plus:
+
+- **`ScheduleFireExecutor`** — a broad `catch (Exception)` swallowing `InterruptedException` from `latch.await(5, MINUTES)`, so the poller kept firing schedules after being interrupted for shutdown.
+- **`NatsConversationCoordinator`** — the *mirror* bug, not in the finding: it called `interrupt()` **unconditionally** on `catch (InterruptedException | TimeoutException)`, so a drain timeout left the shutdown thread flagged and would abort the `@PreDestroy` steps after it.
+
+One restore is deliberately placed in a `finally` after the store round trips rather than at the top of the catch: the sync Mongo driver aborts with `MongoInterruptedException` when the calling thread is flagged, so an early restore would skip the very `EXECUTION_INTERRUPTED` write that branch exists to perform.
+
+### Dream wired up (I1, G8)
+
+Per the repo owner's decision, `DreamService` is now registered with `ScheduleFireExecutor` rather than deleted, with its ceiling switched from `maxSummarizationCalls` to the dollar-based `maxCostPerRun` the project's own guidance prescribes. `docs/architecture.md`'s claim that it performs scheduled maintenance is now true.
+
+**G8 mattered much more once Dream actually runs**: consolidation upgraded `self` visibility to `global` whenever a group spanned multiple agents — and with `summarizeGroupBy` defaulting to `category` and `preserveAgentProvenance` defaulting to false, cross-agent grouping was the *default* path. Two agents' private memories became one entry every agent could read.
+
+### Partial
+
+**F6** — the REST/pipeline half is done (client disconnect now sets cancelled, and cancellation is checked at more points). The in-`modules/llm` half — cancellation checks inside the tool loop and the cascade — is deferred, since that module is owned by another workstream.
+
+> Disconnect is detected by testing `SseEventSink.isClosed()` before and around each send — **not** by a `ConnectionCallback`, which RESTEasy Reactive does not invoke on this path, as `RestAgentEngineStreaming` documents at the call site. An earlier draft of this entry named `ConnectionCallback`: it described the approach that was tried, not the one that shipped.
+
+### Verification
+
+Clean compile passed **first attempt**, with no repairs needed despite three cross-workstream signature changes. Full suite **as of the original wave-3 work**: 12,633 tests, **0 non-environmental failures** (308 listed failures/errors all carry a loopback/selector/event-loop signature; this machine cannot bind sockets). All four mutation checks bite — C1, C5, C9 and B2 each fail a test when reverted, verified against whole test classes and with surefire reports checked to confirm the new classes actually executed rather than being silently skipped.
+
+> The pre-merge review pass above re-ran the suite after its fixes: **12,912 tests**, failures confined to the same 15 known network-dependent classes. Both figures are real runs at different points — the earlier one is not superseded, it just predates ~280 added tests.
 ## 🔎 fix(llm): review follow-ups — workflow version parse, log sanitization (2026-07-29)
 
 **Repo:** EDDI (`fix/review-followup-workflow-version`)

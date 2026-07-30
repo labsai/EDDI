@@ -60,7 +60,6 @@ Enable advanced memory features (LLM tools, Dream consolidation, guardrails, rec
       "summarizeTargetEntries": 2,
       "summarizeGroupBy": "category",
       "preserveAgentProvenance": false,
-      "maxSummarizationCalls": 10,
       "maxCostPerRun": 0.50
     }
   },
@@ -100,9 +99,10 @@ Enable advanced memory features (LLM tools, Dream consolidation, guardrails, rec
 | `summarizeTargetEntries` | `int` | `2` | Target number of entries per group after consolidation |
 | `summarizeGroupBy` | `String` | `"category"` | Grouping strategy: `"category"` or `"all"` |
 | `preserveAgentProvenance` | `boolean` | `false` | Sub-group by `sourceAgentId` (preserves per-agent provenance) |
-| `maxSummarizationCalls` | `int` | `10` | Maximum LLM calls per dream cycle per user (bounds cost) |
+| `maxSummarizationCalls` | `int` | `10` | **Deprecated** — prefer `maxCostPerRun`. Still honoured as a secondary backstop *if you set it explicitly*, because silently dropping a bound an operator wrote is worse than enforcing a redundant one. A call count is a poor budget: consolidations differ wildly in cost. |
 | `summarizationPrompt` | `String` | *(built-in)* | Custom LLM instructions for consolidation |
-| `maxCostPerRun` | `double` | `0.50` | Maximum dollar cost per dream cycle |
+| `maxCostPerRun` | `double` | `0.50` | Maximum dollar cost per dream cycle — the primary ceiling |
+| `crossAgentMaintenance` | `boolean` | `false` | By default a dream cycle only touches memories the **firing agent** wrote (`sourceAgentId`). Set `true` to let it maintain the user's whole memory set across agents — otherwise agent A's retention setting would delete agent B's memories, and A's model endpoint would see B's private text. |
 | `llmProvider` | `String` | `"anthropic"` | LLM provider for dream operations |
 | `llmModel` | `String` | `"claude-sonnet-4-6"` | Model for dream operations |
 

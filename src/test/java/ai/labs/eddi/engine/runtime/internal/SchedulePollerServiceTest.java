@@ -279,6 +279,58 @@ class SchedulePollerServiceTest {
         verify(scheduleStore, never()).markFailed(any(), any());
     }
 
+    /**
+     * The residual half of the B2 interrupt work. {@code fire()} deliberately
+     * re-asserts the interrupt flag before returning, so the poller ran its
+     * bookkeeping on a still-interrupted thread — and {@code markFailed} is a Mongo
+     * write, which the sync driver aborts with {@code MongoInterruptedException} on
+     * connection checkout while that flag is set. {@code onFireFailed} swallows it,
+     * so {@code failCount} never incremented: the schedule stayed CLAIMED with
+     * {@code nextFire} in the past, was re-claimed on every lease expiry, and could
+     * never reach {@code maxRetries} or dead-letter. An interrupt turned a failing
+     * schedule into an unbounded re-fire loop.
+     * <p>
+     * The store stub reproduces the driver's actual interrupt sensitivity, which a
+     * plain Mockito mock cannot express — and which is exactly why this went
+     * unnoticed: {@code verify(markFailed)} passes either way, because under the
+     * bug the call still HAPPENS, it just fails. So the assertion is on whether the
+     * write COMPLETED, not on whether it was attempted.
+     * <p>
+     * The fire runs on the poller's own virtual thread, so this test cannot observe
+     * whether the flag survives back to the caller — that half is pinned in
+     * ScheduleFireExecutorTest, and this test deliberately claims no more than it
+     * checks.
+     */
+    @Test
+    void poll_fireInterrupted_stillRecordsTheFailure() throws Exception {
+        var schedule = makeCronSchedule("sched-int", "0 9 * * *", "Hello");
+        schedule.setFailCount(0);
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+
+        // fire() returns FAILED and leaves the interrupt flag set, as it now does.
+        when(fireExecutor.fire(any(), any(), anyInt())).thenAnswer(inv -> {
+            Thread.currentThread().interrupt();
+            return makeFireLog("sched-int", FireStatus.FAILED.name());
+        });
+
+        // markFailed behaves like the sync Mongo driver: refuses to run interrupted.
+        var markFailedCompleted = new java.util.concurrent.atomic.AtomicBoolean(false);
+        doAnswer(inv -> {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new IllegalStateException("interrupted during connection checkout");
+            }
+            markFailedCompleted.set(true);
+            return null;
+        }).when(scheduleStore).markFailed(any(), any());
+
+        poller.pollDueSchedules();
+
+        assertTrue(markFailedCompleted.get(),
+                "failCount was never incremented: the schedule stays CLAIMED with nextFire in the past and re-fires forever");
+        verify(scheduleStore).markFailed(eq("sched-int"), any());
+    }
+
     // --- Heartbeat scheduling ---
 
     @Test

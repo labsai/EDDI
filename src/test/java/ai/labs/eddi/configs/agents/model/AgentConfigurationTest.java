@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.model;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -291,6 +292,71 @@ class AgentConfigurationTest {
             dc.setMaxUsersPerRun(500);
             assertTrue(dc.isEnabled());
             assertEquals(10.0, dc.getMaxCostPerRun());
+        }
+
+        /**
+         * Ownership default: a dream cycle is configured by one agent, so it must not
+         * reach into other agents' memories unless the operator says so.
+         */
+        @Test
+        void crossAgentMaintenanceDefaultsToFalse() {
+            var dc = new AgentConfiguration.DreamConfig();
+            assertFalse(dc.isCrossAgentMaintenance());
+            dc.setCrossAgentMaintenance(true);
+            assertTrue(dc.isCrossAgentMaintenance());
+        }
+
+        /**
+         * Config-compat: {@code maxSummarizationCalls} is deprecated but still honoured
+         * as a backstop for the configs that declare it. That distinction rests
+         * entirely on the presence marker, which must be false for a config that never
+         * mentions the field and true for one that does — including after a JSON round
+         * trip, since stored agent JSON in MongoDB is the compatibility contract.
+         */
+        @Test
+        void maxSummarizationCallsMarkerTracksExplicitConfiguration() {
+            var untouched = new AgentConfiguration.DreamConfig();
+            assertFalse(untouched.isMaxSummarizationCallsSet());
+            assertEquals(10, untouched.getMaxSummarizationCalls(), "the default value itself is unchanged");
+
+            var configured = new AgentConfiguration.DreamConfig();
+            configured.setMaxSummarizationCalls(3);
+            assertTrue(configured.isMaxSummarizationCallsSet());
+            assertEquals(3, configured.getMaxSummarizationCalls());
+        }
+
+        @Test
+        void maxSummarizationCallsMarkerSurvivesJsonRoundTrip() throws Exception {
+            var mapper = new ObjectMapper();
+
+            var legacyStoredConfig = mapper.readValue("{\"enabled\":true,\"maxSummarizationCalls\":3}",
+                    AgentConfiguration.DreamConfig.class);
+            assertTrue(legacyStoredConfig.isMaxSummarizationCallsSet(), "a stored config that sets the ceiling must keep it enforced");
+            assertEquals(3, legacyStoredConfig.getMaxSummarizationCalls());
+
+            var withoutTheField = mapper.readValue("{\"enabled\":true}", AgentConfiguration.DreamConfig.class);
+            assertFalse(withoutTheField.isMaxSummarizationCallsSet(), "an absent field must not become a ceiling");
+
+            // The marker is derived, never written back into stored agent JSON
+            String serialized = mapper.writeValueAsString(legacyStoredConfig);
+            assertFalse(serialized.contains("maxSummarizationCallsSet"), "serialized: " + serialized);
+            assertTrue(serialized.contains("maxSummarizationCalls"));
+        }
+
+        @Test
+        void parametersDefaultToEmptyAndSetterIsNullSafe() {
+            var dc = new AgentConfiguration.DreamConfig();
+            assertNotNull(dc.getParameters());
+            assertTrue(dc.getParameters().isEmpty());
+
+            dc.setParameters(Map.of("apiKey", "${vault:dream-key}"));
+            assertEquals("${vault:dream-key}", dc.getParameters().get("apiKey"));
+
+            // A config that omits the block must never leave a null map behind for
+            // the summarizer to trip over
+            dc.setParameters(null);
+            assertNotNull(dc.getParameters());
+            assertTrue(dc.getParameters().isEmpty());
         }
     }
 
