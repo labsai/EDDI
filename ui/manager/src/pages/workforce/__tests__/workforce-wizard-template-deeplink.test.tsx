@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, fireEvent } from "@testing-library/react";
 import { renderPage } from "@/test/test-utils";
 import { WorkforceWizard } from "@/pages/workforce/workforce-wizard";
 
@@ -77,6 +77,38 @@ describe("wizard ?template= deep link", () => {
 
     renderWizard(`?template=${saved.id}`);
     await expectNext("enabled");
+  });
+
+  it("a manual pick clears the deep-linked saved template's style", async () => {
+    // savedTemplateConfig is only consulted for the "custom" build path, so if a
+    // manual selection did not clear it, arriving via a saved template and then
+    // choosing Custom would silently create the group with the saved template's
+    // style and round count instead of the CUSTOM/1 defaults.
+    const saved = {
+      id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      name: "Deep linked",
+      description: "has its own style",
+      style: "ROUND_TABLE",
+      members: [{ displayName: "Ana", role: "Research" }],
+      maxRounds: 5,
+      createdAt: new Date(0).toISOString(),
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([saved]));
+
+    renderWizard(`?template=${saved.id}`);
+    await expectNext("enabled");
+
+    // Pick a built-in card manually, then advance to the Team step where the
+    // board name is editable. handleTemplateSelect is what clears
+    // savedTemplateConfig, so seeing its other effect (the name switching to the
+    // built-in template's) confirms the handler ran on a manual pick — the path
+    // that used to leave the deep-linked style in place.
+    fireEvent.click(screen.getByText(/advisory board/i));
+    fireEvent.click(await nextButton());
+
+    await waitFor(() =>
+      expect(screen.queryByDisplayValue("Deep linked")).toBeNull(),
+    );
   });
 
   it("leaves the picker untouched for an unknown template id", async () => {

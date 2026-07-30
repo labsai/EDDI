@@ -120,6 +120,13 @@ function WorkforceWizard() {
   const handleTemplateSelect = useCallback(
     (key: string) => {
       setSelectedTemplate(key);
+      // A manual pick replaces whatever a ?template=<uuid> deep link applied.
+      // Without this, arriving via a saved template and then choosing another
+      // card — or "Custom" — kept that template's style and maxRounds, so the
+      // created group silently ran with settings the user had moved away from.
+      // The deep-link effect sets this AFTER its own selection, so the
+      // saved-template path is unaffected.
+      setSavedTemplateConfig(null);
 
       if (key === "custom") {
         setBoardName("");
