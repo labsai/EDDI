@@ -380,6 +380,23 @@ public class ConversationMemorySnapshot {
         this.conversationProperties = conversationProperties;
     }
 
+    /**
+     * Returns the live set, deliberately — do not "fix" this to return a copy or an
+     * unmodifiable view.
+     * <p>
+     * Static analysis flags this as exposing internal representation, which is true
+     * of every accessor on this Jackson DTO. Here the obvious remedy breaks
+     * persistence: {@code ConversationMemoryUtilities.convertConversationMemory}
+     * populates the field with
+     * {@code snapshot.getPendingLongTermWrites().addAll(memory.getPendingLongTermWrites())},
+     * so {@code Set.copyOf} would turn that into a <em>silent</em> no-op — the
+     * deferred writes would never reach the snapshot, reintroducing exactly the
+     * lost-{@code longTerm}-write bug (G6) this field was added to prevent — and
+     * {@code Collections.unmodifiableSet} would throw there instead.
+     * <p>
+     * Callers that must not alias take their own copy at the point it matters; see
+     * {@code Conversation.storePropertiesPermanently}.
+     */
     public Set<String> getPendingLongTermWrites() {
         return pendingLongTermWrites;
     }
