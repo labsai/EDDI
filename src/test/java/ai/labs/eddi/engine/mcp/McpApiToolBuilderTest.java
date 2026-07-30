@@ -236,6 +236,24 @@ class McpApiToolBuilderTest {
     }
 
     @Test
+    @DisplayName("a declared body with no schema still gets a variable")
+    void parseAndBuild_bodyWithNoSchemaStillDeclaresAVariable() {
+        // Returning "{}" and declaring nothing recreates the original bug for this
+        // spec shape: the model cannot fill a body and every write goes out empty.
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/things":{"post":{
+                "operationId":"createThing","tags":["things"],
+                "requestBody":{"content":{"application/json":{}}},
+                "responses":{"200":{"description":"ok"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall createThing = result.configsByGroup().get("things").getHttpCalls().get(0);
+
+        assertEquals("{" + McpApiToolBuilder.WHOLE_BODY_VARIABLE + "}", createThing.getRequest().getBody());
+        assertTrue(createThing.getParameters().containsKey(McpApiToolBuilder.WHOLE_BODY_VARIABLE));
+    }
+
+    @Test
     @DisplayName("the body description names the container the schema declares")
     void parseAndBuild_bodyDescriptionNamesTheRealContainer() {
         // Telling the model "a single JSON object" for an array body makes it wrap the

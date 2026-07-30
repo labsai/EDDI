@@ -87,9 +87,9 @@ public final class ToolApprovalPatterns {
             // is paired with an endpoint path, and an endpoint path always begins with
             // a slash (AgentOrchestrator#normalizeEndpointPath), so anything else here
             // is a pattern its author believes is protecting them.
-            if (!wildcardPrefix && target.startsWith("/") && !methodQualified) {
-                return Optional.of("pattern '" + pattern + "' targets an endpoint path but is not method-qualified, so it can never match"
-                        + " — endpoint patterns look like 'http.post:" + target + "'");
+            if (target.startsWith("/") && !methodQualified && !prefixCanMatchAnHttpEndpoint(prefix)) {
+                return Optional.of("pattern '" + pattern + "' targets an endpoint path but its prefix can never match one, so the pattern"
+                        + " matches nothing — endpoint patterns look like 'http.post:" + target + "'");
             }
             if (methodQualified && !target.startsWith("/") && !target.startsWith("*")) {
                 return Optional.of("pattern '" + pattern + "' is method-qualified, so its target is an endpoint path and must begin with '/'"
@@ -97,6 +97,26 @@ public final class ToolApprovalPatterns {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * Whether a prefix could match a real endpoint key, i.e. some
+     * {@code http.<method>}.
+     * <p>
+     * A wildcard prefix is not automatically fine: {@code mcp*} contains a
+     * {@code *} yet can never match {@code http.post}, so {@code mcp*:/x} would
+     * save and gate nothing. Rather than reason about glob shapes, compile the
+     * prefix and try it against every method EDDI actually emits — the same
+     * question the gate asks at runtime.
+     */
+    private static boolean prefixCanMatchAnHttpEndpoint(String prefix) {
+        Pattern compiled = compile(prefix);
+        for (String method : KNOWN_METHODS) {
+            if (compiled.matcher(HTTP_SOURCE + "." + method).matches()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

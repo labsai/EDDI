@@ -352,7 +352,11 @@ public final class McpApiToolBuilder {
 
     private static BodyTemplate buildBodyTemplate(Schema<?> schema) {
         if (schema == null) {
-            return new BodyTemplate("{}", Map.of());
+            // A declared body with no schema still needs a variable, or the model has
+            // no way to fill it and every write goes out empty — the exact failure the
+            // whole-body form exists to prevent.
+            return new BodyTemplate("{" + WHOLE_BODY_VARIABLE + "}",
+                    Map.of(WHOLE_BODY_VARIABLE, "The complete JSON request body. The spec declares no schema for it."));
         }
         // One variable carrying the whole body, always — never a per-property
         // template. Decomposing looks more helpful and is worse in three ways:

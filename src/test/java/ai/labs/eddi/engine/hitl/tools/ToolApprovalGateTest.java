@@ -87,7 +87,7 @@ class ToolApprovalGateTest {
         // Each of these saved cleanly and matched nothing: runtime emits
         // "http.<method>:/path", so a require-rule written any other way leaves the
         // call allowed while the config looks like protection.
-        for (String pattern : List.of("http:/agentstore/agents", "mcp:/x", "http.post:agents")) {
+        for (String pattern : List.of("http:/agentstore/agents", "mcp:/x", "http.post:agents", "mcp*:/x", "a2a*:/x")) {
             assertTrue(ToolApprovalPatterns.validate(pattern).isPresent(), pattern + " can never match, so it must not save");
         }
         // The forms that do match stay valid, including a wildcard method.

@@ -408,7 +408,7 @@ public class McpToolProviderManager {
         }
         try {
             var digest = MessageDigest.getInstance("SHA-256").digest(apiKey.getBytes(StandardCharsets.UTF_8));
-            return config.getUrl() + "|" + HexFormat.of().formatHex(digest, 0, 8);
+            return config.getUrl() + "|" + HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException e) {
             // SHA-256 is mandated by the platform; if it is truly absent, fall back to
             // isolating by identity so distinct credentials still cannot share.
@@ -464,6 +464,14 @@ public class McpToolProviderManager {
      * {@code INVALID_CONFIGURATION} where an operator will actually see it.
      */
     private void validateCallerBoundKey(McpServerConfig config) {
+        try {
+            // A bare {caller:token} or a typo like ${caller:tokn} is a config mistake.
+            // Left to createTransport it surfaces as CONNECTION_FAILURE and trips the
+            // circuit breaker, blaming the server for something the config did.
+            callerIdentityResolver.rejectUnsupportedReference(config.getApiKey());
+        } catch (CallerIdentityResolver.CallerIdentityException e) {
+            throw new IllegalArgumentException("apiKey: " + e.getMessage(), e);
+        }
         if (CallerIdentityResolver.containsReference(config.getApiKey()) && !callerIdentityResolver.isEnabled()) {
             throw new IllegalArgumentException("apiKey uses ${caller:...} but caller-identity forwarding is disabled "
                     + "(eddi.caller-identity.enabled=false) — set a static key or enable forwarding");
