@@ -12,13 +12,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -26,16 +24,19 @@ import static org.mockito.Mockito.when;
  * Finding I3 leftover: {@code chunkStrategy} has no reader — ingestion always
  * builds a {@code DocumentSplitters.recursive} splitter — so any other value
  * was accepted at save time and then silently ignored.
- * {@link RagConfiguration#validate()} knew that already but ran only at
- * retrieval time; the store now runs it on the write path.
  * <p>
- * The two values the docs actually advertised ({@code "paragraph"},
- * {@code "sentence"}) are normalised rather than rejected — they exist in
- * stored configs and in exported ZIPs, and they already behaved as
- * {@code "recursive"}. Rejecting them made those knowledge bases un-updatable
- * and failed the whole agent import they appeared in.
+ * What the store does on write is <strong>normalise, never reject</strong>. The
+ * two values the docs actually advertised ({@code "paragraph"},
+ * {@code "sentence"}) are rewritten to the {@code "recursive"} they always
+ * meant; anything else is stored verbatim. Rejecting here broke the three
+ * callers that replay an existing document — see the comment on
+ * {@link #createDoesNotRejectUnknownChunkStrategy()}.
+ * <p>
+ * The author-facing rejection is asserted in
+ * {@code RestRagStoreWriteValidationTest} (the write boundary) and the two
+ * layers are asserted together in {@code RagStoreLayeringTest}.
  */
-@DisplayName("RagStore — save-time chunkStrategy validation")
+@DisplayName("RagStore — save-time chunkStrategy normalisation")
 class RagStoreValidationTest {
 
     private IResourceStorage<RagConfiguration> resourceStorage;
@@ -66,22 +67,46 @@ class RagStoreValidationTest {
         return createdResource;
     }
 
+    /**
+     * These two cases previously asserted that the store <em>rejects</em> an
+     * unsupported strategy. That assertion was the bug: this hook runs on every
+     * write, including the three callers that replay a document which already
+     * exists — {@code duplicateRag}, {@code RestImportService.createNewRags} (a
+     * direct store write whose only catch is {@code ResourceStoreException}, so
+     * this exception aborted the entire agent import) and {@code UpgradeExecutor}.
+     * <p>
+     * Rejecting here silently contradicted {@code RestRagStore.duplicateRag}, which
+     * is documented <em>and tested</em> to tolerate an unsupported stored strategy.
+     * That test passed only because it mocks {@code IRagStore} and so never reached
+     * this method — neither test crossed the layer boundary, which is why the
+     * contradiction survived. {@code RagStoreLayeringTest} now wires the real store
+     * into the real resource to close that gap.
+     * <p>
+     * The author-facing rejection lives at the write boundary
+     * ({@code RestRagStore.prepareForWrite}, a 400), the only layer that can tell
+     * author input from a replayed document.
+     */
     @Test
-    @DisplayName("create rejects a chunkStrategy that never existed and names the supported ones")
-    void createRejectsUnknownChunkStrategy() throws Exception {
-        var thrown = assertThrows(IllegalArgumentException.class, () -> ragStore.create(knowledgeBase("semantic")));
+    @DisplayName("create accepts an unsupported strategy verbatim — rejection belongs at the write boundary")
+    void createDoesNotRejectUnknownChunkStrategy() throws Exception {
+        stubCreatableStorage();
 
-        assertTrue(thrown.getMessage().contains("semantic"), "the rejected value must appear in the message: " + thrown.getMessage());
-        assertTrue(thrown.getMessage().contains("recursive"), "the supported values must appear in the message: " + thrown.getMessage());
-        verify(resourceStorage, never()).newResource(any());
+        var config = knowledgeBase("semantic");
+        ragStore.create(config);
+
+        assertEquals("semantic", config.getChunkStrategy(),
+                "an unsupported value must be left verbatim, so a duplicate is a faithful copy of its original");
+        verify(resourceStorage).newResource(config);
     }
 
+    @SuppressWarnings("unchecked")
     @Test
-    @DisplayName("update rejects a chunkStrategy that never existed before touching storage")
-    void updateRejectsUnknownChunkStrategy() throws Exception {
-        assertThrows(IllegalArgumentException.class, () -> ragStore.update("kb1", 1, knowledgeBase("kmeans")));
+    @DisplayName("update accepts an unsupported strategy rather than aborting a replayed write")
+    void updateDoesNotRejectUnknownChunkStrategy() throws Exception {
+        var existing = mock(IResourceStorage.IResource.class);
+        when(resourceStorage.read(eq("kb1"), eq(1))).thenReturn(existing);
 
-        verify(resourceStorage, never()).read(any(), any());
+        assertDoesNotThrow(() -> ragStore.update("kb1", 1, knowledgeBase("kmeans")));
     }
 
     /**

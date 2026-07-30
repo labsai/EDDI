@@ -5,6 +5,40 @@
 
 ---
 
+## 🧩 fix(rag): two guards disagreed about chunkStrategy and neither test could tell (2026-07-30)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+`chunkStrategy` has no reader — ingestion always builds a `DocumentSplitters.recursive` splitter — so an unsupported value is inert. Rejecting it at save time so the author hears about it is right. It was implemented **twice**, at two layers, with opposite intentions:
+
+| Layer | Behaviour |
+| --- | --- |
+| `RestRagStore.prepareForWrite` (create/update) | normalise legacy aliases, else **400** — author-facing, correct |
+| `RestRagStore.duplicateRag` | normalise only, deliberately **no** rejection — "a copy of an existing document must not be refused just because the rules tightened after it was stored" |
+| `RagStore.validate` (store, every write) | normalise legacy aliases, else **throw** |
+
+The store hook runs on `create` and `update`, so it silently overrode the duplicate exemption one layer down. Two paths were broken:
+
+- **`duplicateRag`** — refused to copy a document the same store happily serves through `readRag`.
+- **ZIP import** — `RestImportService.createNewRags` writes through `createResourceDirect`, i.e. straight to the store with no REST layer in front, and catches only `ResourceStoreException`. An `IllegalArgumentException` escaped and rolled back the **entire agent import** over a field that changes nothing. (`UpgradeExecutor` replays documents the same way.)
+
+### Why the test suite couldn't see it
+
+This is the interesting part. Both layers were tested, and both tests passed:
+
+- `RestRagStoreWriteValidationTest.duplicateDoesNotRejectAnUnsupportedStoredStrategy` asserts duplicate returns 201 — but it builds `RestRagStore` with `mock(IRagStore.class)`, so `create` was a stub and the store's write hook never ran.
+- `RagStoreValidationTest.createRejectsUnknownChunkStrategy` asserted the store rejects that exact value.
+
+Neither test crossed the boundary, so the contradiction was invisible. **Demonstrated, not assumed:** with the store's `content.validate()` restored, the new cross-layer test fails 3 of 6 cases with the real `IllegalArgumentException`, while `RestRagStoreWriteValidationTest` stays completely green.
+
+### Fix
+
+The store now **normalises but never rejects**. Legacy aliases (`paragraph`, `sentence`) are still rewritten to the `recursive` they always meant — a data fix that is safe on every path, and it has to live in the store because import bypasses REST. An unsupported value is left **verbatim** rather than rewritten, so a duplicate is a faithful copy of its original. The author-facing 400 stays at `prepareForWrite`, the only layer that can tell "an author typed this" from "this document already exists" — the same layering decision made for `RestMcpCallsStore` in #619.
+
+New `RagStoreLayeringTest` wires the **real** `RagStore` behind the **real** `RestRagStore`, mocking only the storage layer, and pins the division of labour: author input 400s at the boundary; a stored document is duplicable; a direct store write (as import performs it) does not abort; legacy aliases normalise on *both* paths. `RagStoreValidationTest`'s two rejection cases are rewritten to assert leniency, with a comment recording that their original assertion was the defect.
+
+---
+
 ## 🩺 fix(configs): EDDI could not read the configs EDDI writes — 8 red ITs, 3 real breakages (2026-07-30)
 
 **Repo:** EDDI (`fix/code-review-validation`)
