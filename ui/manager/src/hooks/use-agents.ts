@@ -75,14 +75,32 @@ export function useAgentVersions(agentId: string) {
     queryKey: [...AGENTS_KEY, "versions", agentId],
     queryFn: () => getAgentDescriptorsWithVersions(agentId),
     enabled: !!agentId,
-    select: (descriptors) =>
-      descriptors
-        .map((d) => ({
-          version: parseResourceUri(d.resource).version,
-          lastModifiedOn: d.lastModifiedOn,
-          name: d.name,
-        }))
-        .sort((a, b) => b.version - a.version),
+    // `getAgentDescriptorsWithVersions` issues one descriptor query per version
+    // and flattens the results, and the backend's `filter=` is a TEXT match
+    // rather than an id lookup. Two consequences the four consumers of this hook
+    // all inherited:
+    //
+    //  - the same version can come back from more than one of those queries, so
+    //    the list held duplicates. Rendered as `key={v.version}` in the version
+    //    picker, React logged "Encountered two children with the same key" and
+    //    reserves the right to drop or duplicate those options.
+    //  - a different agent whose id merely CONTAINS this one as a substring
+    //    matches the filter, so its versions were offered in this agent's picker
+    //    and selecting one navigated to a version that does not exist here.
+    //
+    // Both are fixed by resolving the id alongside the version and keeping only
+    // this agent's, one entry per version.
+    select: (descriptors) => {
+      const byVersion = new Map<number, { version: number; lastModifiedOn: number; name: string }>();
+      for (const d of descriptors) {
+        const { id, version } = parseResourceUri(d.resource);
+        if (id !== agentId) continue;
+        if (!byVersion.has(version)) {
+          byVersion.set(version, { version, lastModifiedOn: d.lastModifiedOn, name: d.name });
+        }
+      }
+      return [...byVersion.values()].sort((a, b) => b.version - a.version);
+    },
   });
 }
 

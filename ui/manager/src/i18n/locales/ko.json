@@ -3007,7 +3007,9 @@
       "continuePlaceholder": "이 토론 계속하기…",
       "inputDisabledClosed": "이 토론은 닫혔습니다",
       "newDiscussion": "새 토론",
-      "noResponseGenerated": "응답이 생성되지 않았습니다"
+      "noResponseGenerated": "응답이 생성되지 않았습니다",
+      "awaitingApprovalHint": "이 토론은 사람의 승인을 기다리며 일시 중지되었습니다.",
+      "reviewInManager": "검토하기"
     },
     "thread": {
       "fileTooLarge": "파일은 20MB 미만이어야 합니다",
@@ -3048,7 +3050,11 @@
       "noLlm": "LLM 미구성",
       "noTools": "미구성"
     },
-    "dashboard": "대시보드"
+    "dashboard": "대시보드",
+    "settings": {
+      "hitlApprovalPointsNote": "이 설정은 승인 동작 방식을 제어합니다. 토론의 어느 지점에서 승인이 필요한지는 Manager에서 단계별로 구성합니다.",
+      "hitlOpenManager": "승인 지점 설정"
+    }
   },
   "operator": {
     "title": "플랫폼 오퍼레이터",

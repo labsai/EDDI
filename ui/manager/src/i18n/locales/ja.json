@@ -3007,7 +3007,9 @@
       "continuePlaceholder": "この議論を継続…",
       "inputDisabledClosed": "この議論は終了しました",
       "newDiscussion": "新しい議論",
-      "noResponseGenerated": "応答は生成されませんでした"
+      "noResponseGenerated": "応答は生成されませんでした",
+      "awaitingApprovalHint": "このディスカッションは人による承認を待って一時停止しています。",
+      "reviewInManager": "確認する"
     },
     "thread": {
       "fileTooLarge": "ファイルは20MB以下にしてください",
@@ -3048,7 +3050,11 @@
       "noLlm": "LLM未設定",
       "noTools": "未設定"
     },
-    "dashboard": "ダッシュボード"
+    "dashboard": "ダッシュボード",
+    "settings": {
+      "hitlApprovalPointsNote": "これらの設定は承認の挙動を制御します。ディスカッションのどの時点で承認が必要かは、Manager でフェーズごとに設定します。",
+      "hitlOpenManager": "承認ポイントを設定"
+    }
   },
   "operator": {
     "title": "プラットフォームオペレーター",

@@ -3007,7 +3007,9 @@
       "continuePlaceholder": "继续此讨论…",
       "inputDisabledClosed": "此讨论已关闭",
       "newDiscussion": "新建讨论",
-      "noResponseGenerated": "未生成响应"
+      "noResponseGenerated": "未生成响应",
+      "awaitingApprovalHint": "此讨论已暂停，等待人工审批。",
+      "reviewInManager": "去审批"
     },
     "thread": {
       "fileTooLarge": "文件必须小于20MB",
@@ -3048,7 +3050,11 @@
       "noLlm": "未配置 LLM",
       "noTools": "未配置"
     },
-    "dashboard": "仪表板"
+    "dashboard": "仪表板",
+    "settings": {
+      "hitlApprovalPointsNote": "这些设置控制审批的行为方式。讨论中哪些环节需要审批，是在 Manager 中按阶段配置的。",
+      "hitlOpenManager": "设置审批环节"
+    }
   },
   "operator": {
     "title": "平台操作员",

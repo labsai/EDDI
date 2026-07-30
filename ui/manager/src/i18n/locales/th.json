@@ -3007,7 +3007,9 @@
       "continuePlaceholder": "สานต่อการอภิปรายนี้…",
       "inputDisabledClosed": "การอภิปรายนี้ปิดแล้ว",
       "newDiscussion": "การอภิปรายใหม่",
-      "noResponseGenerated": "ไม่มีการสร้างคำตอบ"
+      "noResponseGenerated": "ไม่มีการสร้างคำตอบ",
+      "awaitingApprovalHint": "การสนทนานี้ถูกหยุดไว้เพื่อรอการอนุมัติจากมนุษย์",
+      "reviewInManager": "ตรวจสอบ"
     },
     "thread": {
       "fileTooLarge": "ไฟล์ต้องมีขนาดไม่เกิน 20MB",
@@ -3048,7 +3050,11 @@
       "noLlm": "ไม่ได้กำหนดค่า LLM",
       "noTools": "ไม่ได้กำหนดค่า"
     },
-    "dashboard": "แดชบอร์ด"
+    "dashboard": "แดชบอร์ด",
+    "settings": {
+      "hitlApprovalPointsNote": "การตั้งค่าเหล่านี้ควบคุมพฤติกรรมของการอนุมัติ ส่วนจุดใดในการสนทนาที่ต้องขออนุมัติจะกำหนดเป็นรายเฟสใน Manager",
+      "hitlOpenManager": "กำหนดจุดอนุมัติ"
+    }
   },
   "operator": {
     "title": "ผู้ดูแลแพลตฟอร์ม",

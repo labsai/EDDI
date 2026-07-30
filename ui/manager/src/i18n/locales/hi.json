@@ -3007,7 +3007,9 @@
       "continuePlaceholder": "इस चर्चा को जारी रखें…",
       "inputDisabledClosed": "यह चर्चा बंद है",
       "newDiscussion": "नई चर्चा",
-      "noResponseGenerated": "कोई प्रतिक्रिया उत्पन्न नहीं हुई"
+      "noResponseGenerated": "कोई प्रतिक्रिया उत्पन्न नहीं हुई",
+      "awaitingApprovalHint": "यह चर्चा मानव अनुमोदन के लिए रोकी गई है।",
+      "reviewInManager": "समीक्षा करें"
     },
     "thread": {
       "fileTooLarge": "फ़ाइल 20MB से कम होनी चाहिए",
@@ -3048,7 +3050,11 @@
       "noLlm": "कोई LLM कॉन्फ़िगर नहीं",
       "noTools": "कोई कॉन्फ़िगर नहीं"
     },
-    "dashboard": "डैशबोर्ड"
+    "dashboard": "डैशबोर्ड",
+    "settings": {
+      "hitlApprovalPointsNote": "ये सेटिंग्स नियंत्रित करती हैं कि अनुमोदन कैसे व्यवहार करता है। चर्चा के किन बिंदुओं पर अनुमोदन आवश्यक है, यह Manager में प्रति चरण कॉन्फ़िगर किया जाता है।",
+      "hitlOpenManager": "अनुमोदन बिंदु सेट करें"
+    }
   },
   "operator": {
     "title": "प्लेटफ़ॉर्म ऑपरेटर",

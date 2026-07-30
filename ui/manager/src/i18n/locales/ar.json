@@ -3031,7 +3031,9 @@
       "continuePlaceholder": "متابعة هذه المناقشة…",
       "inputDisabledClosed": "هذه المناقشة مغلقة",
       "newDiscussion": "مناقشة جديدة",
-      "noResponseGenerated": "لم يتم إنشاء استجابة"
+      "noResponseGenerated": "لم يتم إنشاء استجابة",
+      "awaitingApprovalHint": "هذه المناقشة متوقفة في انتظار موافقة بشرية.",
+      "reviewInManager": "مراجعتها"
     },
     "thread": {
       "fileTooLarge": "يجب أن يكون الملف أقل من 20 ميغابايت",
@@ -3072,7 +3074,11 @@
       "noLlm": "لم يتم تكوين LLM",
       "noTools": "لم يتم التكوين"
     },
-    "dashboard": "لوحة التحكم"
+    "dashboard": "لوحة التحكم",
+    "settings": {
+      "hitlApprovalPointsNote": "تتحكم هذه الإعدادات في كيفية عمل الموافقة. أما نقاط المناقشة التي تتطلب موافقة فيتم تكوينها لكل مرحلة في الـ Manager.",
+      "hitlOpenManager": "تحديد نقاط الموافقة"
+    }
   },
   "operator": {
     "title": "مُشغّل المنصة",

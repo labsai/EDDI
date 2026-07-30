@@ -3007,7 +3007,9 @@
       "continuePlaceholder": "Diese Diskussion fortsetzen…",
       "inputDisabledClosed": "Diese Diskussion ist geschlossen",
       "newDiscussion": "Neue Diskussion",
-      "noResponseGenerated": "Keine Antwort generiert"
+      "noResponseGenerated": "Keine Antwort generiert",
+      "awaitingApprovalHint": "Diese Diskussion ist für eine menschliche Genehmigung angehalten.",
+      "reviewInManager": "Prüfen"
     },
     "thread": {
       "fileTooLarge": "Datei muss kleiner als 20MB sein",
@@ -3048,7 +3050,11 @@
       "noLlm": "Kein LLM konfiguriert",
       "noTools": "Keine konfiguriert"
     },
-    "dashboard": "Übersicht"
+    "dashboard": "Übersicht",
+    "settings": {
+      "hitlApprovalPointsNote": "Diese Einstellungen bestimmen, wie eine Genehmigung abläuft. Welche Punkte einer Diskussion eine Genehmigung erfordern, wird pro Phase im Manager konfiguriert.",
+      "hitlOpenManager": "Genehmigungspunkte festlegen"
+    }
   },
   "operator": {
     "title": "Plattform-Operator",

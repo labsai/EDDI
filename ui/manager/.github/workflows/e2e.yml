@@ -8,9 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       run_fullstack:
-        description: "Run full-stack tests (requires EDDI Docker image)"
+        description: "Run full-stack tests (pulls the EDDI image from Docker Hub)"
         type: boolean
         default: false
+      eddi_image_tag:
+        description: "EDDI image tag to test against (e.g. 6.2.0-b764). Defaults to latest."
+        type: string
+        default: ""
 
 concurrency:
   group: e2e-${{ github.ref }}
@@ -73,21 +77,28 @@ jobs:
           node-version: 20
           cache: npm
 
-      # The EDDI Docker image must be available locally or in a registry.
-      # Options:
-      #   1. Push to GHCR from the EDDI repo CI and pull here
-      #   2. Build from source as a prior workflow step (requires EDDI checkout)
-      #   3. Use `docker load` from a cached artifact
-      - name: Verify EDDI Docker image is available
+      # This step used to assert the image was ALREADY on the runner, which is
+      # never true on a fresh one — so every push to main failed here before
+      # running a single test, and the E2E badge has been red for weeks while
+      # telling us nothing. `labsai/eddi` is published publicly, so pull it.
+      #
+      # `EDDI_IMAGE_TAG` lets a workflow_dispatch pin a specific build (e.g.
+      # 6.2.0-b764) instead of tracking `latest`.
+      - name: Pull EDDI backend image
+        env:
+          EDDI_IMAGE: labsai/eddi:${{ inputs.eddi_image_tag || 'latest' }}
         run: |
-          if ! docker image inspect labsai/eddi:latest >/dev/null 2>&1; then
-            echo "::error::labsai/eddi:latest not found locally."
-            echo "::error::Build it from the EDDI repo first:"
-            echo "::error::  cd EDDI && ./mvnw package -DskipTests -Dquarkus.container-image.build=true"
-            echo "::error::Or pull from your container registry."
+          echo "Pulling $EDDI_IMAGE"
+          if ! docker pull "$EDDI_IMAGE"; then
+            echo "::error::Could not pull $EDDI_IMAGE from Docker Hub."
+            echo "::error::Check the tag exists: https://hub.docker.com/r/labsai/eddi/tags"
             exit 1
           fi
-          echo "✅ labsai/eddi:latest found"
+          # The compose files reference labsai/eddi:latest, so alias a pinned tag.
+          if [ "$EDDI_IMAGE" != "labsai/eddi:latest" ]; then
+            docker tag "$EDDI_IMAGE" labsai/eddi:latest
+          fi
+          docker image inspect labsai/eddi:latest --format 'Using {{.RepoTags}} built {{.Created}}'
 
       - name: Start backend infrastructure (${{ matrix.database }})
         run: docker compose -f ${{ matrix.compose-file }} up -d --wait
