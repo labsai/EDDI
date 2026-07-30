@@ -256,6 +256,7 @@ public class SchedulePollerService {
      * error isolation for the concurrent dispatch depends on this.
      */
     private void fireClaimedSchedule(ScheduleConfiguration schedule) {
+        boolean wasInterrupted = false;
         try {
             // Fix #4: compute correct attempt number from schedule state
             int attemptNumber = schedule.getFailCount() + 1;
@@ -263,6 +264,17 @@ public class SchedulePollerService {
             // Fire the schedule
             fireCounter.increment();
             ScheduleFireLog fireLog = fireDurationTimer.record(() -> fireExecutor.fire(schedule, instanceId, attemptNumber));
+
+            // fire() deliberately re-asserts the interrupt flag before returning, so the
+            // signal is not lost. Park it for the duration of the bookkeeping below and
+            // restore it in the finally: markFailed()/markCompleted() are Mongo writes, and
+            // the sync driver throws MongoInterruptedException on connection checkout while
+            // the flag is set. onFireFailed() swallows that, so failCount would never
+            // increment — leaving the schedule CLAIMED with nextFire in the past,
+            // re-claimed
+            // on every lease expiry, and unable to ever reach maxRetries or dead-letter.
+            // An interrupt must not turn a failing schedule into an unbounded re-fire loop.
+            wasInterrupted = Thread.interrupted();
 
             // Handle result
             if (FireStatus.COMPLETED.name().equals(fireLog.status())) {
@@ -272,10 +284,16 @@ public class SchedulePollerService {
             }
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Error processing schedule %s", schedule.getId());
+            // Same reasoning as above: the bookkeeping write must not run under a set flag.
+            wasInterrupted |= Thread.interrupted();
             try {
                 onFireFailed(schedule);
             } catch (Exception nested) {
                 LOGGER.errorf(nested, "[SCHEDULE] Could not mark schedule %s as failed", schedule.getId());
+            }
+        } finally {
+            if (wasInterrupted) {
+                Thread.currentThread().interrupt();
             }
         }
     }

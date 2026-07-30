@@ -14,6 +14,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.RejectedExecutionException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -79,28 +80,85 @@ class InMemoryConversationCoordinatorTest {
         assertEquals(1, coordinator.getTotalProcessed());
     }
 
+    /**
+     * C13 — a post-execution failure is NOT retried. {@code onFailure} is only ever
+     * raised once the callable has started running, so the turn may already have
+     * called an LLM, executed tools and spent money; re-running it repeats those
+     * side effects. The task is dead-lettered on the first failure instead.
+     */
     @Test
     @SuppressWarnings("unchecked")
-    void shouldDeadLetterAfterMaxRetries() {
+    void shouldDeadLetterOnFirstFailureWithoutReExecutingTheTask() {
         Callable<Void> task = mock(Callable.class);
         coordinator.submitInOrder("conv-fail", task);
 
-        // Simulate 3 failures (MAX_RETRIES = 3)
-        for (int i = 0; i < 3; i++) {
-            ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
-            verify(runtime, times(i + 1)).submitCallable(eq(task), callbackCaptor.capture(), isNull());
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(runtime).submitCallable(eq(task), callbackCaptor.capture(), isNull());
 
-            List<IRuntime.IFinishedExecution<Void>> callbacks = callbackCaptor.getAllValues();
-            callbacks.get(i).onFailure(new RuntimeException("Test failure " + (i + 1)));
-        }
+        callbackCaptor.getValue().onFailure(new RuntimeException("Test failure"));
 
-        // Should be dead-lettered after 3 retries
+        // The already-executed callable must NEVER be handed to the runtime again.
+        verify(runtime, times(1)).submitCallable(eq(task), any(), isNull());
+
         assertEquals(1, coordinator.getTotalDeadLettered());
         assertEquals(1, coordinator.getDeadLetters().size());
 
         DeadLetterEntry entry = coordinator.getDeadLetters().get(0);
         assertEquals("conv-fail", entry.conversationId());
-        assertTrue(entry.error().contains("Test failure 3"));
+        assertTrue(entry.error().contains("Test failure"));
+    }
+
+    /**
+     * C10 — a submission the runtime rejects must not wedge the conversation. The
+     * offered task is rolled back off the queue (nothing is scheduled to run it),
+     * so the next turn on the same conversation is dispatched normally.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void rejectedSubmissionLeavesTheConversationUsable() {
+        Callable<Void> rejected = mock(Callable.class);
+        Callable<Void> followUp = mock(Callable.class);
+
+        doThrow(new RejectedExecutionException("pool saturated"))
+                .when(runtime).submitCallable(eq(rejected), any(), isNull());
+
+        assertThrows(RejectedExecutionException.class, () -> coordinator.submitInOrder("conv-wedge", rejected));
+
+        // The queue must not retain the task nobody is going to run, and the map
+        // entry must be gone (otherwise it leaks for the JVM's lifetime).
+        assertFalse(coordinator.getQueueDepths().containsKey("conv-wedge"),
+                "A rejected submission must not leave a task queued with nothing scheduled to run it");
+
+        // The conversation is still usable: the next turn is dispatched.
+        coordinator.submitInOrder("conv-wedge", followUp);
+        verify(runtime).submitCallable(eq(followUp), any(), isNull());
+    }
+
+    /**
+     * C10 (submitNext side) — a rejection while scheduling the NEXT queued task has
+     * no caller to propagate to. It must dead-letter and keep draining rather than
+     * leaving the queue populated with nothing scheduled to run it.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void rejectedSubmissionOfQueuedTaskDrainsInsteadOfWedging() {
+        Callable<Void> first = mock(Callable.class);
+        Callable<Void> second = mock(Callable.class);
+
+        coordinator.submitInOrder("conv-drain", first);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> captor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(runtime).submitCallable(eq(first), captor.capture(), isNull());
+
+        coordinator.submitInOrder("conv-drain", second);
+        doThrow(new RejectedExecutionException("pool saturated"))
+                .when(runtime).submitCallable(eq(second), any(), isNull());
+
+        // first completes → submitNext tries (and fails) to schedule second
+        captor.getValue().onComplete(null);
+
+        assertFalse(coordinator.getQueueDepths().containsKey("conv-drain"),
+                "The queue must drain even when the next task cannot be scheduled");
+        assertEquals(1, coordinator.getTotalDeadLettered());
     }
 
     // ==================== Dead-Letter CRUD ====================
@@ -334,13 +392,11 @@ class InMemoryConversationCoordinatorTest {
     private void causeDeadLetter(InMemoryConversationCoordinator coord, IRuntime rt, String conversationId, Callable<Void> task) {
         coord.submitInOrder(conversationId, task);
 
-        // Simulate MAX_RETRIES (3) failures
-        for (int i = 0; i < 3; i++) {
-            ArgumentCaptor<IRuntime.IFinishedExecution<Void>> captor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
-            verify(rt, atLeast(1)).submitCallable(eq(task), captor.capture(), isNull());
+        // A single post-execution failure dead-letters immediately (no retry — C13).
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> captor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(rt, atLeast(1)).submitCallable(eq(task), captor.capture(), isNull());
 
-            List<IRuntime.IFinishedExecution<Void>> callbacks = captor.getAllValues();
-            callbacks.get(callbacks.size() - 1).onFailure(new RuntimeException("forced failure"));
-        }
+        List<IRuntime.IFinishedExecution<Void>> callbacks = captor.getAllValues();
+        callbacks.get(callbacks.size() - 1).onFailure(new RuntimeException("forced failure"));
     }
 }
