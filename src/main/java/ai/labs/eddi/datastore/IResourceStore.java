@@ -23,7 +23,10 @@ import java.lang.annotation.Target;
  * Nested here because they belong to the contract rather than any one
  * implementation: {@link IResourceId} (the id/version pair), the checked
  * exceptions callers are expected to handle, and {@link ConfigurationUpdate},
- * the interceptor binding that fires when a store mutates a configuration.
+ * which marks the store methods that mutate a stored configuration. It is
+ * declared as an {@link InterceptorBinding}, but nothing implements that
+ * interceptor today, so the annotation has no runtime behaviour: it documents
+ * intent, and callers that need a cache refreshed invalidate it themselves.
  *
  * @param <T>
  *            the configuration model this store persists
