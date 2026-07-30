@@ -10,7 +10,21 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * @author ginccc
+ * Backend-facing half of the versioned store contract: raw persistence of
+ * resource revisions and their history, without the validation or interception
+ * {@link IResourceStore} adds on top.
+ * <p>
+ * Implementations are database-specific (MongoDB by default, PostgreSQL as an
+ * alternative) and are obtained through {@link IResourceStorageFactory} rather
+ * than injected directly. Reads are version-addressed, {@link #store} appends a
+ * revision, and history is written separately so a superseded revision stays
+ * retrievable.
+ * <p>
+ * {@link #MAX_RESULT_LIMIT} and {@link #resolveLimit} live here so every
+ * backend clamps unbounded queries identically.
+ *
+ * @param <T>
+ *            the configuration model being stored
  */
 public interface IResourceStorage<T> {
 

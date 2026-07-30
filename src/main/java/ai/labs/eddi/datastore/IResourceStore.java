@@ -11,7 +11,22 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * @author ginccc
+ * Versioned CRUD contract every configuration store in the project extends.
+ * <p>
+ * A resource is identified by an id plus an integer version: {@link #update}
+ * returns the new version rather than mutating in place, and {@link #read}
+ * takes the version it wants, so a conversation pinned to an older
+ * configuration keeps resolving that exact revision. {@link #delete} marks a
+ * version deleted and leaves it readable through {@link #readIncludingDeleted};
+ * only {@link #deleteAllPermanently} removes the history.
+ * <p>
+ * Nested here because they belong to the contract rather than any one
+ * implementation: {@link IResourceId} (the id/version pair), the checked
+ * exceptions callers are expected to handle, and {@link ConfigurationUpdate},
+ * the interceptor binding that fires when a store mutates a configuration.
+ *
+ * @param <T>
+ *            the configuration model this store persists
  */
 public interface IResourceStore<T> {
 

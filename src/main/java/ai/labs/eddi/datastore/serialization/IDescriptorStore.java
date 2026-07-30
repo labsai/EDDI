@@ -10,7 +10,17 @@ import ai.labs.eddi.datastore.IResourceStore;
 import java.util.List;
 
 /**
- * @author ginccc
+ * Store for the document descriptors that carry a resource's metadata — display
+ * name, description, timestamps and the user who last touched it — separately
+ * from the configuration document itself.
+ * <p>
+ * This is what the UI lists: browsing configurations reads descriptors rather
+ * than deserializing every underlying document. {@link #NO_LIMIT} and
+ * {@link #DEFAULT_LIMIT} keep paging intent explicit at the call site and
+ * aligned with the default the REST layer declares.
+ *
+ * @param <T>
+ *            the descriptor model this store persists
  */
 public interface IDescriptorStore<T> {
 
