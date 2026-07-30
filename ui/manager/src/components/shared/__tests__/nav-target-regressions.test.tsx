@@ -93,6 +93,37 @@ describe("command palette agent results", () => {
   });
 });
 
+describe("command palette page and action entries", () => {
+  /**
+   * Every entry is a navigation target, which is the bug class this branch keeps
+   * finding. route-integrity checks the literals statically; this checks the
+   * handlers actually fire with them, which static analysis cannot see.
+   */
+  const ENTRIES: Array<[RegExp, string]> = [
+    [/^Dashboard$/, "/manage"],
+    [/^Agents$/, "/manage/agents"],
+    [/^Workflows$/, "/manage/workflows"],
+    [/^Groups$/, "/manage/groups"],
+    [/^Resources$/, "/manage/resources"],
+    [/^Conversations$/, "/manage/conversations"],
+    [/^Logs$/, "/manage/logs"],
+    [/^Audit Trail$/, "/manage/audit"],
+    [/^User Data$/, "/manage/userdata"],
+    [/^Create New Agent$/, "/manage/agents?action=create"],
+    [/^Open Chat$/, "/manage/chat"],
+  ];
+
+  for (const [label, path] of ENTRIES) {
+    it(`"${label.source}" navigates to ${path}`, async () => {
+      useCommandPalette.setState({ isOpen: true });
+      renderWithProviders(<CommandPalette />);
+
+      fireEvent.click(await screen.findByText(label));
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith(path));
+    });
+  }
+});
+
 describe("command palette with a malformed agent resource", () => {
   it("falls back to the agent list instead of throwing or building a dead route", async () => {
     // parseResourceUri constructs a `new URL(...)`, which throws on input like
