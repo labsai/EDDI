@@ -50,6 +50,31 @@ All repos live under `c:\dev\git\`:
 - **Branch**: **NEVER commit directly to `main`.** Always create a feature branch (e.g. `feat/…`, `fix/…`) before making changes. If you find yourself on `main`, create and switch to a new branch first.
 - **Commit often** with conventional commits: `feat: description`
 
+### ⚠️ Dependency changes on Windows break CI's `npm ci`
+
+`@tailwindcss/oxide-wasm32-wasi` is an optional package that Windows skips, so npm
+on Windows never resolves its children and **prunes them from
+`package-lock.json`** on any `npm install` / `npm uninstall`. The Linux CI runner
+then fails before it runs anything:
+
+```
+npm error `npm ci` can only install packages when your package.json and
+npm error package-lock.json are in sync.
+npm error Missing: @emnapi/core@1.11.3 from lock file
+```
+
+Neither `npm install --package-lock-only` nor `--os=linux --cpu=x64` re-adds them.
+After changing any dependency on Windows, check the lock still carries all four:
+
+```bash
+node -e "const l=require('./package-lock.json');Object.keys(l.packages).filter(k=>k.includes('emnapi')||k.includes('wasm-runtime')).forEach(k=>console.log(k,l.packages[k].version))"
+```
+
+Expect `@emnapi/core`, `@emnapi/runtime`, `@emnapi/wasi-threads` and
+`@napi-rs/wasm-runtime` nested under
+`node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/`. If any are gone,
+restore them from the last lockfile CI accepted rather than regenerating.
+
 ### Quality Gates
 
 Every commit is validated by the pre-commit hook (`husky` + `lint-staged`):
