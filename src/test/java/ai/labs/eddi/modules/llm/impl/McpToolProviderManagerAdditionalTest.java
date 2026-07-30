@@ -297,6 +297,30 @@ class McpToolProviderManagerAdditionalTest {
         }
     }
 
+    @Nested
+    @DisplayName("discovery metrics")
+    class MetricsTests {
+
+        @Test
+        @DisplayName("outcomes are counted without leaking a URL or a credential")
+        void discoveryOutcomesAreCountedSafely() throws Exception {
+            var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+            manager.meterRegistry = registry;
+
+            var config = new McpServerConfig();
+            config.setUrl("http://unreachable-metrics-test:9999/mcp");
+            config.setApiKey("super-secret-literal-key");
+            manager.discoverTools(List.of(config));
+
+            var tagValues = registry.getMeters().stream().flatMap(m -> m.getId().getTags().stream())
+                    .map(io.micrometer.core.instrument.Tag::getValue).toList();
+            assertFalse(tagValues.contains("super-secret-literal-key"), "a credential must never become a metric tag");
+            assertFalse(tagValues.stream().anyMatch(v -> v.contains("unreachable-metrics-test")),
+                    "a server URL is unbounded cardinality and must not be a tag: " + tagValues);
+            assertFalse(registry.getMeters().isEmpty(), "the outcome should have been counted");
+        }
+    }
+
     // ==================== shutdown ====================
 
     @Nested

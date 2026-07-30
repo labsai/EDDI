@@ -19,6 +19,7 @@ import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.mcp.client.transport.http.StreamableHttpMcpTransport;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.service.tool.ToolProviderResult;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -113,6 +114,28 @@ public class McpToolProviderManager {
     private static final long CIRCUIT_WINDOW_SECONDS = 60;
     /** Recent failure timestamps per server URL. */
     private final Map<String, List<Instant>> failureTimestamps = new ConcurrentHashMap<>();
+
+    /**
+     * Field-injected so a directly constructed instance (tests, non-CDI callers)
+     * keeps working without one — {@link #count} is null-safe.
+     */
+    @Inject
+    MeterRegistry meterRegistry;
+
+    /**
+     * Count an MCP discovery outcome.
+     * <p>
+     * Tags are a fixed vocabulary and never carry a URL or a credential: a server
+     * URL is unbounded cardinality, and the credential is the thing the cache key
+     * goes to lengths to hash. A rising {@code circuit_open} or {@code failure}
+     * count is the signal worth alerting on.
+     */
+    private void count(String outcome) {
+        if (meterRegistry == null) {
+            return;
+        }
+        meterRegistry.counter("eddi.mcp.discovery", "outcome", outcome).increment();
+    }
 
     @Inject
     public McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
@@ -253,6 +276,7 @@ public class McpToolProviderManager {
             // Circuit breaker: skip servers that failed too often recently
             String circuitKey = cacheKey(serverConfig);
             if (isCircuitOpen(circuitKey)) {
+                count("circuit_open");
                 LOGGER.warnf("Circuit breaker OPEN for MCP server '%s' — skipping (>=%d failures in last %ds)",
                         sanitize(serverName), CIRCUIT_FAILURE_THRESHOLD, CIRCUIT_WINDOW_SECONDS);
                 failures.add(new McpServerFailure(serverName, url, McpFailureKind.CIRCUIT_OPEN,
@@ -267,6 +291,7 @@ public class McpToolProviderManager {
             CachedTools cached = toolCache.get(cacheKey(serverConfig));
             if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < toolCacheTtlMillis) {
                 LOGGER.debugf("Serving %d cached tools for MCP server '%s'", cached.toolSpecs().size(), sanitize(serverName));
+                count("cache_hit");
                 mergeServerTools(allSpecs, allExecutors, cached.toolSpecs(), cached.executors(), serverName);
                 continue;
             }
@@ -327,11 +352,13 @@ public class McpToolProviderManager {
 
                 // Success — clear failure history for this server
                 recordSuccess(circuitKey);
+                count("success");
 
             } catch (Exception e) {
                 LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", sanitize(serverName), e.getMessage());
                 failures.add(new McpServerFailure(serverName, url, McpFailureKind.CONNECTION_FAILURE, e.getMessage()));
                 recordFailure(circuitKey);
+                count("failure");
             }
         }
 
@@ -713,27 +740,27 @@ public class McpToolProviderManager {
     // ========================== Circuit Breaker ==========================
 
     /**
-     * Check whether the circuit breaker is open for a given server URL. The circuit
-     * opens when the server has failed {@value #CIRCUIT_FAILURE_THRESHOLD} or more
-     * times within the last {@value #CIRCUIT_WINDOW_SECONDS} seconds.
+     * Whether the circuit is open for a configured server. It opens when the server
+     * has failed {@value #CIRCUIT_FAILURE_THRESHOLD} or more times within the last
+     * {@value #CIRCUIT_WINDOW_SECONDS} seconds.
+     * <p>
+     * This is the contract callers want: the key is an implementation detail, and a
+     * credential-aware one, so asking by URL gives the wrong answer for a server
+     * configured twice with different credentials.
+     *
+     * @param config
+     *            the server whose circuit is in question
      */
+    boolean isCircuitOpen(McpServerConfig config) {
+        return isCircuitOpen(cacheKey(config));
+    }
+
     /**
      * @param circuitKey
      *            the credential-aware cache key, not the bare URL: two configs may
      *            point at one server with different credentials, and one of them
      *            failing to authenticate must not suppress discovery for the other
      */
-    /**
-     * Whether the circuit is open for a configured server.
-     * <p>
-     * The contract callers actually care about — the key is an implementation
-     * detail, and a credential-aware one, so asking by URL would give the wrong
-     * answer for a server configured twice with different credentials.
-     */
-    boolean isCircuitOpen(McpServerConfig config) {
-        return isCircuitOpen(cacheKey(config));
-    }
-
     boolean isCircuitOpen(String circuitKey) {
         List<Instant> failures = failureTimestamps.get(circuitKey);
         if (failures == null) {

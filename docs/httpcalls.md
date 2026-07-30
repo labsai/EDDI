@@ -71,9 +71,11 @@ than degrading quietly:
   inbound request, not from configuration, so a config naming a third-party host
   cannot exfiltrate a user's token — and no allow-list is needed for this to be
   safe by default.
-- **Headers only.** `${caller:token}` in a query parameter is rejected; tokens
-  in URLs leak through access logs, proxies and browser history.
-  `${caller:userId}` may be used in headers and query parameters.
+- **Headers only.** `${caller:token}` in a query parameter, request body or
+  request path is rejected. Tokens in URLs leak through access logs, proxies and
+  browser history, and nothing outside a header is substituted anyway — a
+  reference there would travel to the API as literal text. `${caller:userId}`
+  may be used in headers and query parameters.
 - **Authenticated turns only.** The identity comes from the request that drove
   the turn, so scheduled jobs and triggers cannot satisfy `${caller:token}`.
 - **Fails closed.** An unsatisfiable reference raises an error instead of

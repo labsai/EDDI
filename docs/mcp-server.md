@@ -684,7 +684,7 @@ person chatting, instead of a standing service credential:
 { "mcpServerUrl": "https://eddi.example/mcp", "apiKey": "${caller:token}" }
 ```
 
-The same guarantees apply as for apicall headers — same origin only, fails
+The same guarantees apply as for API call headers — same origin only, fails
 closed rather than sending a placeholder, never persisted. See
 [`httpcalls.md`](httpcalls.md#calling-as-the-signed-in-user).
 
