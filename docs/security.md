@@ -127,7 +127,7 @@ When an LLM is given access to tools, every argument it supplies must be treated
 
 ## Caller Identity Forwarding — `CallerIdentityResolver`
 
-**Applies to:** apicall headers that reference `${caller:token}` / `${caller:userId}`.
+**Applies to:** apicall headers, and an MCP server's `apiKey`, that reference `${caller:token}` / `${caller:userId}`.
 
 An agent that calls an API needs a credential. Baking a static one into the
 config is the wrong shape when the API is EDDI's own: an OIDC token expires
@@ -145,7 +145,7 @@ fails the call loudly rather than degrading quietly:
 | Control | Behaviour |
 | ------- | --------- |
 | **Same-origin only** | The token is released only when the outbound call targets the exact `scheme://host:port` the caller addressed. That origin comes from the inbound request, never from configuration — so an agent config naming a third-party host cannot exfiltrate the token, and no allow-list is required for this to hold by default. |
-| **Headers only** | `${caller:token}` in a query parameter is rejected. Tokens in URLs leak through access logs, proxies and browser history. `${caller:userId}` is not a secret and is also resolved in query parameters. |
+| **Headers only** | A token reference in a query parameter, request body or request path is rejected — only a header is ever substituted. `${caller:userId}` is permitted in headers and query parameters. |
 | **Authenticated turns only** | The identity is captured from the request driving the turn. Scheduled jobs and triggers have no caller and cannot satisfy the reference. |
 | **Fails closed** | An unsatisfiable reference throws rather than resolving to an empty string, which would send `Bearer ` and surface downstream as a confusing `401`. |
 | **Never persisted** | Resolution happens while building the request; `scrubSensitiveHeaders` strips authorization headers before the request is written to conversation memory. |

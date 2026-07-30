@@ -279,7 +279,32 @@ public final class McpApiToolBuilder {
             MediaType jsonMedia = content.get("application/json");
             if (jsonMedia != null) {
                 request.setContentType("application/json");
-                request.setBody(buildBodyTemplate(jsonMedia.getSchema()));
+                var body = buildBodyTemplate(jsonMedia.getSchema());
+                // The body template's variables must be declared as tool parameters,
+                // or the model has no documented way to fill them: the tool schema is
+                // built from getParameters() alone (AgentOrchestrator), and with
+                // strict-rendering off an undeclared variable renders as empty. The
+                // request would go out structurally valid and semantically empty.
+                //
+                // A path or query parameter of the same name wins — those are
+                // structural — so the body variable is RENAMED rather than dropped.
+                // Dropping it is the empty-body bug all over again, for a spec that
+                // happens to name a parameter "requestBody".
+                String bodyTemplate = body.template();
+                for (var variable : body.variables().entrySet()) {
+                    String variableName = variable.getKey();
+                    if (paramDescriptions.containsKey(variableName)) {
+                        String renamed = variableName;
+                        while (paramDescriptions.containsKey(renamed) || body.variables().containsKey(renamed)) {
+                            renamed = renamed + "Body";
+                        }
+                        bodyTemplate = bodyTemplate.replace("{" + variableName + "}", "{" + renamed + "}");
+                        paramDescriptions.put(renamed, variable.getValue());
+                    } else {
+                        paramDescriptions.put(variableName, variable.getValue());
+                    }
+                }
+                request.setBody(bodyTemplate);
             }
         }
 
@@ -323,42 +348,101 @@ public final class McpApiToolBuilder {
      * Note: Only handles flat schemas (direct properties). Nested objects and
      * arrays fall back to a single {@code {requestBody}} template variable.
      */
-    private static String buildBodyTemplate(Schema<?> schema) {
+    /**
+     * A request-body template together with the tool parameters the model must
+     * supply to fill it.
+     * <p>
+     * The two travel together on purpose. A template variable that is not also
+     * declared as a parameter is invisible to the model, and renders empty rather
+     * than failing, so the call succeeds and the body is wrong.
+     *
+     * @param template
+     *            the Qute body template
+     * @param variables
+     *            variable name to description, for {@code ApiCall.parameters}
+     */
+    private record BodyTemplate(String template, Map<String, String> variables) {
+    }
+
+    /** Name of the whole-body variable used when the schema has no properties. */
+    static final String WHOLE_BODY_VARIABLE = "requestBody";
+
+    private static BodyTemplate buildBodyTemplate(Schema<?> schema) {
         if (schema == null) {
-            return "{}";
+            // A declared body with no schema still needs a variable, or the model has
+            // no way to fill it and every write goes out empty — the exact failure the
+            // whole-body form exists to prevent.
+            return new BodyTemplate("{" + WHOLE_BODY_VARIABLE + "}",
+                    Map.of(WHOLE_BODY_VARIABLE, "The complete JSON request body. The spec declares no schema for it."));
         }
+        // One variable carrying the whole body, always — never a per-property
+        // template. Decomposing looks more helpful and is worse in three ways:
+        //
+        // 1. Every variable becomes a REQUIRED tool parameter (AgentOrchestrator
+        // builds the schema from ApiCall.parameters and marks all of them
+        // required, and a Map<String,String> has nowhere to record optionality),
+        // so a PATCH of one field forces the model to restate every other —
+        // turning a partial update into a full overwrite.
+        // 2. Values are substituted into the JSON unescaped: the templating engine
+        // runs in TEXT mode and escapes nothing, so a model-supplied value
+        // containing a quote can break the body or add fields the schema never
+        // declared. With the whole body in one variable there is no substitution
+        // boundary to cross.
+        // 3. It is what the approver sees. The HITL card shows tool arguments, so
+        // "the arguments are the request" only holds if the model wrote the body
+        // itself.
+        //
+        // The shape the model would have inferred from a decomposed template is
+        // preserved in the parameter description instead.
+        return new BodyTemplate("{" + WHOLE_BODY_VARIABLE + "}", Map.of(WHOLE_BODY_VARIABLE, describeBodySchema(schema)));
+    }
+
+    /**
+     * A one-line description of the body shape, for the tool parameter.
+     * <p>
+     * This is the model's only clue about what to write, so it names the properties
+     * and marks which are required. Types are included because the model must
+     * produce real JSON — an integer field unquoted, a string field quoted.
+     */
+    private static String describeBodySchema(Schema<?> schema) {
+        // Name the container the schema actually declares. Saying "a single JSON
+        // object" for a top-level array makes the model wrap the payload in braces,
+        // and the request is malformed in a way the API reports and the config does
+        // not explain.
+        var description = new StringBuilder("The complete JSON request body, as ").append(switch (schema.getType() == null ? "" : schema.getType()) {
+            case "array" -> "a JSON array.";
+            case "string" -> "a JSON string.";
+            case "integer", "number" -> "a JSON number.";
+            case "boolean" -> "a JSON boolean.";
+            default -> "a single JSON object.";
+        });
 
         @SuppressWarnings("rawtypes")
         Map<String, Schema> properties = schema.getProperties();
         if (properties == null || properties.isEmpty()) {
-            // No properties — use the raw template variable based on schema
-            return "{requestBody}";
+            return description.toString();
         }
 
-        var sb = new StringBuilder("{\n");
-        var entries = new ArrayList<>(properties.entrySet());
-        for (int i = 0; i < entries.size(); i++) {
-            var entry = entries.get(i);
-            String propName = entry.getKey();
-            Schema<?> propSchema = entry.getValue();
-
-            sb.append("  \"").append(propName).append("\": ");
-
-            String type = propSchema.getType();
-            if ("string".equals(type)) {
-                sb.append("\"{").append(propName).append("}\"");
-            } else {
-                // number, integer, boolean, object, array — unquoted template
-                sb.append("{").append(propName).append("}");
+        List<String> required = schema.getRequired() != null ? schema.getRequired() : List.of();
+        var parts = new ArrayList<String>();
+        for (var entry : properties.entrySet()) {
+            var propSchema = entry.getValue();
+            var part = new StringBuilder(entry.getKey());
+            if (propSchema.getType() != null) {
+                part.append(" (").append(propSchema.getType());
+                if (required.contains(entry.getKey())) {
+                    part.append(", required");
+                }
+                part.append(")");
+            } else if (required.contains(entry.getKey())) {
+                part.append(" (required)");
             }
-
-            if (i < entries.size() - 1) {
-                sb.append(",");
+            if (propSchema.getDescription() != null && !propSchema.getDescription().isBlank()) {
+                part.append(": ").append(propSchema.getDescription());
             }
-            sb.append("\n");
+            parts.add(part.toString());
         }
-        sb.append("}");
-        return sb.toString();
+        return description.append(" Properties — ").append(String.join("; ", parts)).append(".").toString();
     }
 
     /**

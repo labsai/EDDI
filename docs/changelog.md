@@ -5,6 +5,45 @@
 
 ---
 
+## 🔑 feat(operator): the foundation for an agent that can safely write (2026-07-29)
+
+**Repo:** EDDI (`feat/operator-write-foundation`)
+
+Groundwork for a workspace operator agent that manages a deployment — creating and updating agents and groups — while acting as the person chatting to it. Five commits, no new capability granted: the operator's endpoint allow-list is untouched and still read-only. What changes is that widening it is now safe, where before it was neither safe nor functional.
+
+**Generated writes did not work at all.** `McpApiToolBuilder.buildBodyTemplate` emitted Qute variables for a request body but registered none of them, and `AgentOrchestrator` builds the tool schema from `ApiCall.getParameters()` alone. So the model had no documented way to fill a body; with strict rendering off the variables rendered empty and every generated `POST`/`PUT`/`PATCH` went out structurally valid and semantically empty. Adding a write endpoint before this would have produced garbage requests that fail at the far end rather than at the config.
+
+**The body is now one model-written variable.** A per-property template looked more helpful and was worse three ways: every variable became a *required* tool parameter (a `Map<String,String>` has nowhere to record optionality, so a `PATCH` of one field forced the model to restate all the others); values were substituted into the JSON unescaped, since the templating engine runs in `TEXT` mode, so a value containing a quote could break the body or add fields the schema never declared; and the HITL card shows tool *arguments*, so "the arguments are the request" only holds if the body is one of them. The shape a decomposed template implied now lives in the parameter description, which names each property with its type and marks which are required.
+
+**Approval patterns can address the endpoint a tool calls.** Names come from `operationId` or a slug and drift when a spec changes, and `ToolApprovalGate` allows an unmatched call — so a renamed or newly generated write arrived ungated and silently. Method and path were available and discarded one line into registration; they now travel alongside, so a pattern may match a bare name, `source:name`, or `source.method:path`:
+
+```json
+{ "requireApproval": ["http.post:*", "http.put:*", "http.patch:*", "http.delete:*"],
+  "exempt": ["http.get:*"] }
+```
+
+gates every mutation without naming a tool, while `http.post:/agentstore/agents` addresses exactly one. Both speak the same `METHOD /path` vocabulary as the endpoint allow-list, so the two can be generated from one source instead of maintained in two. Documented in [`docs/hitl.md`](hitl.md).
+
+**Design decision — enumerate downward, never upward.** Whether something is gated stays in `requireApproval`/`exempt`; per-endpoint tuning may only *lower* friction. A missed exemption costs an approval prompt; a missed requirement is an ungated write. The same reasoning restricts the method qualifier to `http`: it is the only source whose tools record an endpoint, so `mcp.post:` is rejected at save time rather than saved as a pattern nothing could ever match.
+
+**MCP tool calls can now run as the chatting user.** They previously ran as whatever static credential the config named, and a `${caller:token}` there passed through the global-variable and secret resolvers untouched and was sent as the literal placeholder — failing silently rather than closed. The transport supported this all along: `customHeaders` has three overloads and EDDI used the constant one. The per-request `McpHeadersSupplier` overload makes the credential per-call while the client stays cached.
+
+**Discovery must be told apart from invocation explicitly.** The first version of this decided by asking whether a caller was bound to the thread — but discovery runs *inside* the turn, on a thread that is bound, so `initialize` and `tools/list` went out with the first caller's token. Since the client is cached, that session was then reused by everyone after them, and the tool list reflected one user's permissions while being offered to the next. langchain4j distinguishes the two — `DefaultMcpClient.listTools()` delegates with a null `InvocationContext` while `McpToolExecutor` always builds one — but it does not enforce anything; EDDI has to read `McpCallContext.invocationContext()` and act on it, which it now does. Only a tool call carries the caller; discovery goes unauthenticated on a caller-bound config and the server decides.
+
+**Fixed in passing — a privilege bug.** MCP clients were cached by URL alone, so two agents naming the same server with *different* credentials silently shared whichever client was constructed first. The key now includes a digest of the configured credential: a digest so a literal key never becomes a map key, taken unresolved so configs sharing a vault reference still share a client. This does not multiply clients per user — a caller-bound config yields one client whose supplier reads the caller per request.
+
+**Not solved, deliberately.** On an expired MCP session the transport retries `initialize()` on an HTTP callback thread where the caller binding does not exist. That path now sends the request unauthenticated rather than falling back to the static key under the caller's intent — a visible failure instead of the wrong authority.
+
+**Corrections to earlier analysis, recorded because they changed decisions.** `McpCallsConfiguration.toolsWhitelist` does *not* fail closed — `AgentOrchestrator` skips filtering when the list is empty, the same shape as the approval gate. `toolApprovals` is not agent-only: `LlmConfiguration` carries a per-task override that fully replaces the agent-level block. And a `PUT` on a config does not reach a running agent, because `HistorizedResourceStore.update` creates `version + 1` while agents pin a version — so self-modification takes a chain of write, re-point, redeploy, each independently gated. The thing to guard is whatever can re-point a version reference, not `PUT` in general.
+
+**Verification.** 566 tests pass on a clean build across the affected suites; checkstyle clean. Each fix mutation-checked by reverting it. Four tests written during this work were found vacuous by that check and rewritten — three asserted against a helper or state seeded through the very wrapper under test, one seeded a thread binding that the fix then restored, so it passed either way.
+
+**Next:** per-endpoint approval friction (`timeoutPolicy`, `approvalTimeout` and the pause message are still single scalars for every gated tool), agent-readable documentation (EDDI's MCP client never reads MCP *resources*, so `eddi://docs/*` is reachable from a desktop client but not from an agent), widening the allow-list, and the Manager scope picker and approval surface.
+
+---
+
+---
+
 ## ⚙️ fix(runtime): code-review findings wave 3 — concurrency, lifecycle, cancellation, graceful shutdown, Dream wiring (2026-07-28)
 
 **Repo:** EDDI (`fix/code-review-concurrency`)

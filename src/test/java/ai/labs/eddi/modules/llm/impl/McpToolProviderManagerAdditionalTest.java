@@ -5,6 +5,11 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import dev.langchain4j.mcp.client.McpCallContext;
+import dev.langchain4j.invocation.InvocationContext;
+import ai.labs.eddi.engine.security.CallerIdentityResolver;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.mcp.client.McpClient;
@@ -17,6 +22,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
 
@@ -69,7 +75,7 @@ class McpToolProviderManagerAdditionalTest {
         @DisplayName("closing cached client — removes and closes it")
         void closeCachedClient() throws Exception {
             McpClient mockClient = mock(McpClient.class);
-            getClientCache().put("http://test-server:8080", mockClient);
+            getClientCache().put("http://test-server:8080|anonymous", mockClient);
             assertEquals(1, manager.getActiveConnectionCount());
 
             manager.closeClient("http://test-server:8080");
@@ -83,10 +89,241 @@ class McpToolProviderManagerAdditionalTest {
         void closeClientWithException() throws Exception {
             McpClient mockClient = mock(McpClient.class);
             doThrow(new RuntimeException("close error")).when(mockClient).close();
-            getClientCache().put("http://error-server:8080", mockClient);
+            getClientCache().put("http://error-server:8080|anonymous", mockClient);
 
             assertDoesNotThrow(() -> manager.closeClient("http://error-server:8080"));
             assertEquals(0, manager.getActiveConnectionCount());
+        }
+    }
+
+    // ==================== credential isolation ====================
+
+    @Nested
+    @DisplayName("client cache keys on the credential, not just the URL")
+    class CredentialIsolationTests {
+
+        private McpServerConfig serverWith(String apiKey) {
+            var config = new McpServerConfig();
+            config.setUrl("http://shared-server:8080");
+            config.setApiKey(apiKey);
+            return config;
+        }
+
+        private String keyFor(McpServerConfig config) throws Exception {
+            var method = McpToolProviderManager.class.getDeclaredMethod("cacheKey", McpServerConfig.class);
+            method.setAccessible(true);
+            return (String) method.invoke(null, config);
+        }
+
+        @Test
+        @DisplayName("two credentials against one URL do not share a client")
+        void differentCredentialsGetDifferentKeys() throws Exception {
+            // Keying on the URL alone meant the second agent silently borrowed the
+            // first's authorization — a privilege boundary, not a caching detail.
+            assertNotEquals(keyFor(serverWith("key-alpha")), keyFor(serverWith("key-beta")));
+        }
+
+        @Test
+        @DisplayName("the same credential shares one client, so users do not multiply connections")
+        void sameCredentialSharesAKey() throws Exception {
+            assertEquals(keyFor(serverWith("${caller:token}")), keyFor(serverWith("${caller:token}")));
+        }
+
+        @Test
+        @DisplayName("the configured credential never appears in the key")
+        void keyDoesNotLeakTheCredential() throws Exception {
+            String key = keyFor(serverWith("super-secret-literal-key"));
+            assertFalse(key.contains("super-secret-literal-key"), "a heap dump or log line must not reveal it: " + key);
+            assertTrue(key.startsWith("http://shared-server:8080|"));
+        }
+
+        @Test
+        void aCredentiallessServerStillGetsAStableKey() throws Exception {
+            assertEquals(keyFor(serverWith(null)), keyFor(serverWith(null)));
+            assertTrue(keyFor(serverWith(null)).endsWith("|anonymous"));
+        }
+
+        @Test
+        @DisplayName("the lookup actually uses that key, not the bare URL")
+        void getOrCreateClientLooksUpByCredentialAwareKey() throws Exception {
+            // Asserting cacheKey() alone proves nothing about the call site: with the
+            // lookup reverted to config.getUrl() the key tests still pass. Seeding the
+            // credential-aware key and requiring a cache HIT is what pins it — a
+            // URL-keyed lookup misses and tries to build a real client instead.
+            var config = serverWith("key-alpha");
+            McpClient seeded = mock(McpClient.class);
+            getClientCache().put(keyFor(config), seeded);
+
+            var method = McpToolProviderManager.class.getDeclaredMethod("getOrCreateClient", McpServerConfig.class);
+            method.setAccessible(true);
+            assertSame(seeded, method.invoke(manager, config), "must resolve the client cached under the credential-aware key");
+            assertEquals(1, manager.getActiveConnectionCount(), "no second client should have been constructed");
+        }
+    }
+
+    // ==================== caller identity on the wire ====================
+
+    @Nested
+    @DisplayName("only a tool call carries the caller")
+    class CallerIdentityHeaderTests {
+
+        private final CallerIdentityContext context = new CallerIdentityContext(null, null);
+
+        private McpServerConfig callerBoundServer() {
+            var config = new McpServerConfig();
+            config.setUrl("https://eddi.example:443/mcp");
+            config.setApiKey("Bearer ${caller:token}");
+            return config;
+        }
+
+        /** A context shaped like a tools/call, i.e. carrying an invocation context. */
+        private McpCallContext toolCall() {
+            return new McpCallContext(InvocationContext.builder().chatMemoryId(null).build(), null);
+        }
+
+        /** A context shaped like tools/list, i.e. no invocation context. */
+        private McpCallContext discovery() {
+            return new McpCallContext(null, null);
+        }
+
+        private Map<String, String> headersFor(McpServerConfig config, McpCallContext callContext) throws Exception {
+            var manager = new McpToolProviderManager(globalVariableResolver, secretResolver,
+                    new CallerIdentityResolver(context, true), context, false, 1024, 300000L);
+            var method = McpToolProviderManager.class.getDeclaredMethod("authorizationHeader", String.class, McpServerConfig.class,
+                    boolean.class, McpCallContext.class);
+            method.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var headers = (Map<String, String>) method.invoke(manager, config.getApiKey(), config, true, callContext);
+            return headers;
+        }
+
+        @AfterEach
+        void unbind() {
+            context.clear();
+        }
+
+        @Test
+        @DisplayName("a tool call sends the caller's token")
+        void toolCallCarriesTheCaller() throws Exception {
+            context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+            assertEquals("Bearer alice-token", headersFor(callerBoundServer(), toolCall()).get("Authorization"));
+        }
+
+        @Test
+        @DisplayName("discovery does not, even on a thread that is bound")
+        void discoveryNeverCarriesTheCaller() throws Exception {
+            // The client is cached: a session established with alice's token would be
+            // reused by everyone after her, and a tool list reflecting her permissions
+            // would be offered to the next user.
+            context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+
+            assertTrue(headersFor(callerBoundServer(), discovery()).isEmpty(), "tools/list must not be authenticated as alice");
+            assertTrue(headersFor(callerBoundServer(), null).isEmpty(), "a transport-internal request has no caller either");
+        }
+
+        @Test
+        @DisplayName("a bare token gets the Bearer scheme, like the static path")
+        void callerTokenIsGivenTheBearerScheme() throws Exception {
+            // apiKey is documented as a key/token and the static path prefixes
+            // "Bearer ". A caller-bound key must match, or apiKey: "${caller:token}"
+            // would send a raw token with no scheme and the server would reject it.
+            context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+            var config = new McpServerConfig();
+            config.setUrl("https://eddi.example:443/mcp");
+            config.setApiKey("${caller:token}");
+
+            assertEquals("Bearer alice-token", headersFor(config, toolCall()).get("Authorization"));
+        }
+
+        @Test
+        @DisplayName("an author who spells the scheme out is not double-prefixed")
+        void anExplicitSchemeIsLeftAlone() throws Exception {
+            context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+            assertEquals("Bearer alice-token", headersFor(callerBoundServer(), toolCall()).get("Authorization"));
+        }
+
+        @Test
+        @DisplayName("an unbound tool call is refused rather than sent as a placeholder")
+        void unboundToolCallSendsNothing() throws Exception {
+            assertTrue(headersFor(callerBoundServer(), toolCall()).isEmpty(), "must not ship the literal ${caller:token}");
+        }
+
+        @Test
+        @DisplayName("a static key is unaffected and reaches every request")
+        void staticKeyStillWorks() throws Exception {
+            var config = new McpServerConfig();
+            config.setUrl("https://eddi.example:443/mcp");
+            config.setApiKey("static-key");
+
+            var manager = new McpToolProviderManager(globalVariableResolver, secretResolver,
+                    new CallerIdentityResolver(context, true), context, false, 1024, 300000L);
+            var method = McpToolProviderManager.class.getDeclaredMethod("authorizationHeader", String.class, McpServerConfig.class,
+                    boolean.class, McpCallContext.class);
+            method.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var onDiscovery = (Map<String, String>) method.invoke(manager, "static-key", config, false, discovery());
+            assertEquals("Bearer static-key", onDiscovery.get("Authorization"), "discovery keeps the service credential");
+        }
+    }
+
+    @Nested
+    @DisplayName("the circuit breaker isolates by credential")
+    class CircuitIsolationTests {
+
+        private McpServerConfig serverWith(String apiKey) {
+            var config = new McpServerConfig();
+            config.setUrl("http://shared-server:8080");
+            config.setApiKey(apiKey);
+            return config;
+        }
+
+        @Test
+        @DisplayName("one credential failing does not suppress discovery for another")
+        void oneCredentialsFailuresDoNotOpenTheCircuitForAnother() throws Exception {
+            // Keyed by bare URL, an agent whose key was revoked would take the other
+            // agent's working config down with it.
+            var failing = serverWith("revoked-key");
+            var working = serverWith("valid-key");
+
+            var record = McpToolProviderManager.class.getDeclaredMethod("recordFailure", String.class);
+            record.setAccessible(true);
+            var key = McpToolProviderManager.class.getDeclaredMethod("cacheKey", McpServerConfig.class);
+            key.setAccessible(true);
+            for (int i = 0; i < 3; i++) {
+                record.invoke(manager, key.invoke(null, failing));
+            }
+
+            assertTrue(manager.isCircuitOpen(failing), "the failing credential trips its own circuit");
+            assertFalse(manager.isCircuitOpen(working), "the other credential must still be discoverable");
+        }
+    }
+
+    @Nested
+    @DisplayName("discovery metrics")
+    class MetricsTests {
+
+        @Test
+        @DisplayName("outcomes are counted without leaking a URL or a credential")
+        void discoveryOutcomesAreCountedSafely() throws Exception {
+            var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+            // A spy with the network seam stubbed: pointing the real client at an
+            // unreachable host would make this test depend on DNS and wait out the
+            // 30-second default timeout.
+            var spied = spy(new McpToolProviderManager(globalVariableResolver, secretResolver));
+            doThrow(new RuntimeException("connection refused")).when(spied).fetchToolsFromServer(any());
+            spied.meterRegistry = registry;
+
+            var config = new McpServerConfig();
+            config.setUrl("http://unreachable-metrics-test:9999/mcp");
+            config.setApiKey("super-secret-literal-key");
+            spied.discoverTools(List.of(config));
+
+            var tagValues = registry.getMeters().stream().flatMap(m -> m.getId().getTags().stream())
+                    .map(io.micrometer.core.instrument.Tag::getValue).toList();
+            assertFalse(tagValues.contains("super-secret-literal-key"), "a credential must never become a metric tag");
+            assertFalse(tagValues.stream().anyMatch(v -> v.contains("unreachable-metrics-test")),
+                    "a server URL is unbounded cardinality and must not be a tag: " + tagValues);
+            assertFalse(registry.getMeters().isEmpty(), "the outcome should have been counted");
         }
     }
 

@@ -100,6 +100,17 @@ public class CallerIdentityResolver {
         this.enabled = enabled;
     }
 
+    /**
+     * Whether caller-identity forwarding is switched on for this deployment.
+     * <p>
+     * Exposed so a config that depends on it — an MCP server whose credential is a
+     * caller reference, say — can be rejected while it is being validated, rather
+     * than throwing once per request for the lifetime of the agent.
+     */
+    public boolean isEnabled() {
+        return enabled;
+    }
+
     /** Whether a value contains any {@code ${caller:...}} reference. */
     public static boolean containsReference(String value) {
         return value != null && CALLER_PATTERN.matcher(value).find();
