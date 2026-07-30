@@ -2506,6 +2506,13 @@ class AgentOrchestrator {
      */
     static String normalizeEndpointPath(String rawPath) {
         String path = rawPath.trim();
+        // Request.path defaults to "", and an empty path means the target server's
+        // root — ApiCallExecutor sends the request to targetServerUrl unchanged.
+        // Returning "" here would make the key "post:", which no pattern can match,
+        // so a root endpoint would be silently ungateable.
+        if (path.isEmpty()) {
+            return "/";
+        }
         // Only a real absolute URL, not merely a path that happens to begin "http".
         // ApiCallExecutor tests startsWith("http"), which is loose enough that a
         // relative path like "httpcalls/agents" would be parsed as a URI here — and an

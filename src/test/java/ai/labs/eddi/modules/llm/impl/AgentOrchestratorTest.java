@@ -974,6 +974,11 @@ class AgentOrchestratorTest {
         // is an ungated call.
         assertEquals("/", AgentOrchestrator.normalizeEndpointPath("https://eddi.example"));
         assertEquals("/", AgentOrchestrator.normalizeEndpointPath("https://eddi.example?x=1"));
+
+        // Request.path defaults to "" and means the target server's root, so it has
+        // to be gateable too — "" would make the key "post:" and match nothing.
+        assertEquals("/", AgentOrchestrator.normalizeEndpointPath(""));
+        assertEquals("/", AgentOrchestrator.normalizeEndpointPath("   "));
     }
 
     @Test
