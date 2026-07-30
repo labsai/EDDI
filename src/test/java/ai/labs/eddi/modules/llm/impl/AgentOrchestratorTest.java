@@ -968,6 +968,12 @@ class AgentOrchestratorTest {
 
         // A real absolute URL still contributes only its path, whatever its case.
         assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("HTTPS://eddi.example/agentstore/agents"));
+
+        // A URL with no path is the root, not nothing: an empty key ("post:") can be
+        // matched by no pattern expecting a slash, and an unmatched require-pattern
+        // is an ungated call.
+        assertEquals("/", AgentOrchestrator.normalizeEndpointPath("https://eddi.example"));
+        assertEquals("/", AgentOrchestrator.normalizeEndpointPath("https://eddi.example?x=1"));
     }
 
     @Test

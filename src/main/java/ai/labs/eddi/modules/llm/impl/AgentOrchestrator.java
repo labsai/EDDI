@@ -2514,7 +2514,11 @@ class AgentOrchestrator {
         if (lower.startsWith("http://") || lower.startsWith("https://")) {
             try {
                 String extracted = URI.create(path).getPath();
-                path = extracted != null ? extracted : "";
+                // A URL with no path ("https://host", "https://host?x=1") yields an
+                // empty path. Left empty the endpoint key would be "post:", which no
+                // pattern expecting a leading slash can match — and an unmatched
+                // require-pattern is an ungated call. A root endpoint is "/".
+                path = extracted == null || extracted.isEmpty() ? "/" : extracted;
             } catch (IllegalArgumentException e) {
                 // Not parseable as a URI — a templated host, most likely. Leave it be:
                 // matching something odd is better than throwing during discovery.

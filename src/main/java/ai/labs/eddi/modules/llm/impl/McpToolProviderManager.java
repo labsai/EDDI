@@ -622,8 +622,12 @@ public class McpToolProviderManager {
         if (value == null || value.isBlank()) {
             return value;
         }
+        // Trim before use, not just for the check: stray whitespace — a newline most
+        // of all — has no business reaching an Authorization header, and returning
+        // the untrimmed value would emit " Bearer …" for a padded config.
+        String trimmed = value.trim();
         // A scheme is one token followed by a space; anything else is a bare secret.
-        return value.trim().matches("(?i)(bearer|basic|token|apikey)\\s.+") ? value : "Bearer " + value;
+        return trimmed.matches("(?i)(bearer|basic|token|apikey)\\s.+") ? trimmed : "Bearer " + trimmed;
     }
 
     /**

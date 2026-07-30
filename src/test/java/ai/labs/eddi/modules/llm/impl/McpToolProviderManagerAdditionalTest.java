@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
 
@@ -305,12 +306,17 @@ class McpToolProviderManagerAdditionalTest {
         @DisplayName("outcomes are counted without leaking a URL or a credential")
         void discoveryOutcomesAreCountedSafely() throws Exception {
             var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
-            manager.meterRegistry = registry;
+            // A spy with the network seam stubbed: pointing the real client at an
+            // unreachable host would make this test depend on DNS and wait out the
+            // 30-second default timeout.
+            var spied = spy(new McpToolProviderManager(globalVariableResolver, secretResolver));
+            doThrow(new RuntimeException("connection refused")).when(spied).fetchToolsFromServer(any());
+            spied.meterRegistry = registry;
 
             var config = new McpServerConfig();
             config.setUrl("http://unreachable-metrics-test:9999/mcp");
             config.setApiKey("super-secret-literal-key");
-            manager.discoverTools(List.of(config));
+            spied.discoverTools(List.of(config));
 
             var tagValues = registry.getMeters().stream().flatMap(m -> m.getId().getTags().stream())
                     .map(io.micrometer.core.instrument.Tag::getValue).toList();
