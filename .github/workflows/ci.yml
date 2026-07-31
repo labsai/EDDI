@@ -387,6 +387,28 @@ jobs:
           chmod +x gitleaks
           ./gitleaks version
 
+      # On a pull request the checkout is the contributor's code, and that
+      # includes any .gitleaksignore or .gitleaks.toml it adds. Either file can
+      # switch findings off, so without this a fork could allowlist its own
+      # secret in the same pull request that introduces it. Taking both from
+      # the base branch means a config change takes effect once it is merged
+      # and reviewed, rather than while it is still being proposed.
+      - name: Take the gitleaks config from the base branch
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          for f in .gitleaksignore .gitleaks.toml; do
+            if git cat-file -e "$PR_BASE:$f" 2> /dev/null; then
+              git show "$PR_BASE:$f" > "$f"
+              echo "restored $f from the base branch"
+            elif [ -e "$f" ]; then
+              rm -f "$f"
+              echo "removed $f, which this pull request adds and the base branch does not have"
+            fi
+          done
+
       # Scan only the commits this event introduces, which is what
       # gitleaks-action did. A full-history scan reports 82 pre-existing
       # findings (curl Authorization examples in docs/gdpr-compliance.md and
