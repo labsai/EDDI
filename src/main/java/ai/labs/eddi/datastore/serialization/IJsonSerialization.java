@@ -7,7 +7,12 @@ package ai.labs.eddi.datastore.serialization;
 import java.io.IOException;
 
 /**
- * @author ginccc
+ * JSON serialization for model objects.
+ * <p>
+ * Thin, shared wrapper over the configured object mapper so serialization
+ * settings are declared once rather than per call site. Used wherever a model
+ * crosses a boundary as JSON — REST payloads, stored documents, and values
+ * handed to external systems.
  */
 public interface IJsonSerialization {
     String serialize(Object model) throws IOException;
