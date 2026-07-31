@@ -5,6 +5,44 @@
 
 ---
 
+## 🔓 fix(ci): secret scanning could never pass on a pull request from a fork (2026-07-31)
+
+**Repo:** EDDI (`ci/gitleaks-cli-for-forks`)
+
+The **Secret Scanning** job failed on every pull request opened from a fork. On #623 it was the *only* failing check: twelve passed and seven were skipped. Nothing downstream was blocked: two jobs list `gitleaks` in `needs:` and neither is stopped by it. `docker` is gated on `github.event_name == 'push'` and skips on pull requests; `notify-slack` runs `if: always()` and reads `needs.gitleaks.result` only to pick a status icon, so every fork pull request posted a Slack card with a red Secret Scan marker. The cost is narrower than a blocked pipeline but not harmless: an outside contributor cannot get a green run, a permanently red check trains reviewers to ignore that check, and it cannot be made a required status without blocking every fork.
+
+**Two causes, stacked.** `gitleaks/gitleaks-action` requires a paid `GITLEAKS_LICENSE` for repositories owned by an organization, and GitHub deliberately withholds repository secrets from `pull_request` runs that originate in a fork. So the license was absent by design, not by misconfiguration, and no amount of secret management on this side would have supplied it. The failure is structural rather than incidental, and the open pull requests are a natural experiment. Of the 21 open, 12 come from forks: all 9 that have a Secret Scanning result failed it, and the other 3 never ran it. Of the 9 from branches in this repository, 7 passed, 1 has no result, and 1 (#430, a Dependabot bump last updated in May) failed — its logs have since expired, so that one is unattributed rather than explained. Dependabot is not the discriminator: five other Dependabot pull requests pass.
+
+**The scanner and its wrapper have different licenses.** The `gitleaks` CLI itself is MIT and needs no key at all — only the Action wrapper is commercially licensed. Running the binary directly restores coverage on forks, which is precisely where an unreviewed secret is most likely to arrive. The two alternatives both lose that: dropping the job to `continue-on-error` keeps it green while scanning nothing, and gating it on `github.event.pull_request.head.repo.fork` skips forks outright.
+
+**Pinned by version and checksum, following the existing convention.** This repository already installs a third-party binary this way: `PREFLIGHT_VERSION` and `PREFLIGHT_SHA256` sit in the workflow-level `env:` block and the install step pipes the recorded hash through `sha256sum -c -`. `GITLEAKS_VERSION` and `GITLEAKS_SHA256` join them there and the install step mirrors that shape, so a retagged or substituted release fails the step rather than executing. This is stronger than the commit-pinned Action it replaces: the Action pin covers the wrapper, not the binary the wrapper downloads at runtime. Output is redacted with `--redact=100`, so a real finding never prints the secret into a public log.
+
+**Design decision — scan the event's commits, never the full history.** A whole-repository scan reports **82 findings**, and all 82 are false positives that predate this change: 45 `curl-auth-header` hits in `docs/gdpr-compliance.md` where the documentation shows an `Authorization: Bearer` example, 36 `generic-api-key` hits in test fixtures, and one in a planning document, spread across 9 commits. Adopting full-history scope would have turned a job that is currently red only for forks into one that is red for everyone, for reasons no contributor could fix. Scoping to the event range keeps the same scope `gitleaks-action` used, so this is not a coverage change. Those 82 are worth triaging into `.gitleaksignore` separately; this change neither fixes nor worsens them.
+
+**Design decision — a range that cannot be resolved is an error, not an empty scan.** On a pull request the step requires both `base.sha` and `head.sha` to exist in the checkout and exits non-zero with a `::error::` annotation if either is missing. The tempting fallback is to narrow the range and carry on, but that converts a broken fetch into a scan that passes without having looked at anything — the failure mode that is worst here, because it is invisible. Only the push path falls back, to the tip commit, and it logs that it did. `fetch-depth: 0` on the checkout is what makes both SHAs reachable and is now load-bearing rather than incidental.
+
+**Verification.** Both steps were extracted from the committed YAML and executed verbatim against this repository with the real 8.30.1 binary. Nine scan cases and three install cases:
+
+| Case | Expected | Result |
+| --- | --- | --- |
+| Pull request, valid range, no secrets | pass | exit 0 |
+| Pull request, `base.sha` unresolvable | fail loudly | exit 1, `::error::`, scanner never invoked |
+| Pull request, `head.sha` unresolvable | fail loudly | exit 1, `::error::`, scanner never invoked |
+| Pull request, empty range | pass | 0 commits scanned, exit 0 |
+| Pull request with a planted `Authorization: Bearer <40 hex>` | fail | `leaks found: 1`, exit 1 |
+| Push, valid `before` | pass | exit 0 |
+| Push, `before` all zeros (new branch) | tip commit, logged | exit 0 |
+| Push, `before` absent from the checkout | tip commit, logged | exit 0 |
+| Event that is neither push nor pull request | tip commit, logged | exit 0 |
+| Install, correct version | pass | checksum `OK`, ELF x86-64 extracted |
+| Install, tampered tarball | reject | `sha256sum -c` exit 1 |
+| Install, nonexistent version tag | fail, leave nothing behind | exit 22, no binary written |
+
+The detection test matters because the first attempt at it used the AWS documentation example key, which gitleaks allowlists — it reported clean, which would have made a scanner that detects nothing look correct. The planted-secret case is what proves the job is not vacuous.
+
+**Files:** `.github/workflows/ci.yml` (the `gitleaks` job only; no other job, and no application code, is touched).
+
+
 ## 🔑 feat(operator): the foundation for an agent that can safely write (2026-07-29)
 
 **Repo:** EDDI (`feat/operator-write-foundation`)
