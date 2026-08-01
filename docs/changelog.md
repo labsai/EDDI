@@ -5,6 +5,24 @@
 
 ---
 
+## 🧩 refactor(groups): extract GroupHitlCoordinator from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R1 step 7 of `planning/group-collaboration-improvements-plan.md` §3.1 — the second-largest extraction after step 6: unites two textually non-adjacent HITL regions (~800 lines total) into a new `ai.labs.eddi.engine.internal.groups.GroupHitlCoordinator`. Cluster 1 (pause commit, task-state fingerprint/no-progress guard, cancel-signal races, timeout scheduling) sat right after `executeDiscussion`; cluster 2 (`activeTokens`, `cancelDiscussion`, `resumeDiscussion` — 327 lines, restore-pause, HITL audit, cleanup, timeout deletion) sat at the very end of the file. The bare-token sweep before writing any code showed the two clusters call directly into each other (cluster 1's `failDiscussionNoProgress` calls cluster 2's `cleanupAfterTerminalState`; cluster 2's `resumeDiscussion` calls cluster 1's `removeTokenAndConvertIfSignalled`) — confirming they had to move together, exactly as the plan anticipated.
+
+**Heaviest delegator ratio of any R1 step so far.** Unlike prior extractions where only reflected methods needed a facade delegator, `executeDiscussion` (the ~320-line phase loop, staying on the facade — out of this step's scope per the plan) calls directly into nearly every cluster-1 helper, and `deleteGroupConversation` calls into two cluster-2 helpers. Checking call sites (not just test reflection) found 14 of the 16 moved methods needed a delegator; only `auditHitlDecision` and the `GROUP_HITL_REARM_GRACE` constant had zero external callers and zero reflection, so those moved with no delegator left behind.
+
+**Circular self-reference, same pattern as `MemberTurnExecutor` (step 4).** `resumeDiscussion` re-enters the phase loop via `executeDiscussion` and reads `resolvePhases`; `cleanupAfterTerminalState` needs `cleanupEphemeralAgents` — all three stay on the facade (not in this step's scope) and were widened to `public` so `GroupHitlCoordinator` can call back through a `GroupConversationService` reference passed as `this`, constructed last in the facade's constructor after every field it depends on.
+
+**Deliberately did not split `resumeDiscussion`'s 327 lines into validate/rebuild/route sub-methods**, even though the plan's own prose for this step suggests it. Consistent with the step-5 decision not to build the plan's speculative `PhaseExecutor` interface early: this step's job is the pure move, and restructuring the method's internals is a separate, later decision — bundling it in here would have doubled the risk surface of an already-large step for no test-visible benefit.
+
+Full 24-class group test battery (683 tests, including the new `GroupHitlCoordinatorTest`) green on the first run after compile succeeded — every reflection-based characterization test that targets a delegator (`GroupConversationServiceHitlCoverageTest`, `...HitlCoverage2Test`, the `activeTokens` field reflection in `...HitlTest`) passed unmodified, and `GroupConversationServiceConcurrencyTest` (the cancel/resume race suite) passed without any changes to its own code. One self-caught bug in the new `GroupHitlCoordinatorTest`: four `persistedTerminalOverride` tests stubbed `conversationStore` *before* calling the `coordinator()` helper that actually assigns that mock field — the same field-ordering mistake made in step 6's `TaskForceEngineTest`, caught immediately by Mockito's strict-stubbing `NullInsteadOfMock` check on the first run. Fixed by constructing the coordinator first in every affected test.
+
+Added a focused `GroupHitlCoordinatorTest` (13 tests) for the class's pure-function and simple store-facing methods (`notifyCancelled`, `taskPauseFingerprint`, `persistedTerminalOverride`, `scheduleGroupHitlTimeout`); `cancelDiscussion`/`resumeDiscussion` and the rest of the pause/resume machinery are already thoroughly covered by the existing reflection-based characterization suites and weren't worth duplicating. `GroupConversationService`: 2,594 → 1,885 lines (709 lines net). 7 of R1's 10 extraction steps done.
+
+---
+
 ## 🔍 review(groups): independent review of R1 steps 4-6 before step 7 (2026-08-01)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
