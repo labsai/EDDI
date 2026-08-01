@@ -5,6 +5,24 @@
 
 ---
 
+## 🧩 refactor(groups): extract PhaseExecutionEngine from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R1 step 5 of `planning/group-collaboration-improvements-plan.md` §3.1 — the debate-style turn-order executors: `executeSequentialPhase`, `executeParallelPhase`, `executePeerTargetedPhase` (~190 lines) into a new `ai.labs.eddi.engine.internal.groups.PhaseExecutionEngine`. TASK_FORCE's PLAN/EXECUTE/VERIFY routing is a separate cluster staying on the facade for now (R1 step 6, `TaskForceEngine`).
+
+**Deliberately did not build the plan's speculative `PhaseExecutor`/`PhaseOutcome`/`PhaseExitSignal` interface abstraction.** The plan's §3.1 description of this step is written with hindsight of the *final* shape after F2 (speaker-level `ResumePoint`) and I2 (convergence detection) land — neither exists yet; R1 runs before Wave 0/1 in the plan's own sequencing. Building that interface now would be exactly the "design for hypothetical future requirements" AGENTS.md warns against. Moved the three methods as concrete methods on a plain class instead; the interface can be introduced later, when F2/I2 actually need it, as its own decision.
+
+Two shared-resource wrinkles, same pattern as step 4: `PhaseExecutionEngine` takes the facade's `ExecutorService` **by reference, not ownership** — `TaskForceEngine`'s not-yet-extracted execution waves submit to the same virtual-thread executor, and `GroupConversationService` keeps the `@PreDestroy` shutdown hook regardless of how many collaborators use it. `parallelBatchBudgetSeconds(ProtocolConfig)` (reads the same `DEFAULT_AGENT_TIMEOUT_SECONDS`/`DEFAULT_MAX_RETRIES` constants `MemberTurnExecutor` was given by value in step 4) stays on the facade, widened to `public static`, called back cross-package — confirmed via search that only `executeParallelPhase` itself uses it, so no other stranded caller.
+
+**The reflection sweep methodology needed fixing, not just re-running.** `GroupConversationServiceConcurrencyTest` reflects into `executeParallelPhase` through a *third* distinct local helper-wrapper name (`phaseMethod(name)` — neither the `method(name)` convention most files use nor a bare `getDeclaredMethod` call), which a case-sensitive grep for `method("executeParallelPhase"` genuinely cannot distinguish from `phaseMethod("executeParallelPhase")` — `Method(` capitalized inside `phaseMethod(` doesn't match a lowercase `method(` pattern. First test run failed with `NoSuchMethodException` on exactly this. Fixed by re-sweeping with a bare-token grep (`executeParallelPhase` anywhere in the test tree, no assumption about the calling convention) instead of guessing at wrapper names — this is now the standard first move for future extraction steps, not the fallback. `executeSequentialPhase`/`executePeerTargetedPhase` confirmed clean by the same bare-token search and were fully inlined at their one call site each (no delegator needed, unlike every other extraction so far).
+
+Also caught in my own new `PhaseExecutionEngineTest`, before it ever touched CI: a mock stub that hardcoded `targetAgentId=null` in its canned response instead of threading through the actual argument, which the peer-targeted test then correctly flagged as wrong (`expected: <b> but was: <null>`) — a bug in the test double, not production code. Fixed by reading the real argument in the stub's `thenAnswer`.
+
+Full 12-class group suite + `DynamicAgentTrackingPropagationTest` + 5 focused collaborator test classes green (540 tests). `GroupConversationService`: 3,605 → 3,432 lines. 5 of R1's 10 extraction steps done.
+
+---
+
 ## 🧩 refactor(groups): extract MemberTurnExecutor from GroupConversationService (2026-08-01)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

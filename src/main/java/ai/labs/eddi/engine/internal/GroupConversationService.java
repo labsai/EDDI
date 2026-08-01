@@ -45,6 +45,7 @@ import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
 import ai.labs.eddi.engine.internal.groups.GroupSigningGuard;
 import ai.labs.eddi.engine.internal.groups.MemberTurnExecutor;
+import ai.labs.eddi.engine.internal.groups.PhaseExecutionEngine;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
@@ -178,6 +179,7 @@ public class GroupConversationService implements IGroupConversationService {
     private final GroupContextBuilder contextBuilder;
     private final GroupSigningGuard signingGuard;
     private final MemberTurnExecutor memberTurnExecutor;
+    private final PhaseExecutionEngine phaseExecutionEngine;
 
     // Field-injected so the direct-construction unit tests stay unchanged; used to
     // materialize and share discussion attachments with member conversations.
@@ -257,6 +259,7 @@ public class GroupConversationService implements IGroupConversationService {
         // completes.
         this.memberTurnExecutor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, contextBuilder, this,
                 counterGroupMemberPauseSkipped, DEFAULT_AGENT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES);
+        this.phaseExecutionEngine = new PhaseExecutionEngine(memberTurnExecutor, contextBuilder, executorService, callerIdentityContext);
     }
 
     @PreDestroy
@@ -547,11 +550,14 @@ public class GroupConversationService implements IGroupConversationService {
                     if (phase.type() == PhaseType.PLAN || phase.type() == PhaseType.EXECUTE || phase.type() == PhaseType.VERIFY) {
                         executeTaskPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
                     } else if (phase.targetEachPeer()) {
-                        executePeerTargetedPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+                        phaseExecutionEngine.executePeerTargetedPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener,
+                                turnCounter,
+                                maxTurns);
                     } else if (phase.turnOrder() == TurnOrder.PARALLEL) {
                         executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
                     } else {
-                        executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+                        phaseExecutionEngine.executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter,
+                                maxTurns);
                     }
 
                     // #27/#45: a cross-pod cancel/ABORT flips the persisted state to
@@ -1616,7 +1622,7 @@ public class GroupConversationService implements IGroupConversationService {
         }
 
         /** Signal cancellation and release every member turn currently waiting. */
-        void cancel() {
+        public void cancel() {
             cancelled.set(true);
             for (var future : awaited) {
                 future.completeExceptionally(new MemberTurnCancelledException());
@@ -1680,7 +1686,7 @@ public class GroupConversationService implements IGroupConversationService {
      * @return the batch budget in seconds, capped at
      *         {@link #MAX_PARALLEL_BATCH_BUDGET_SECONDS}
      */
-    static long parallelBatchBudgetSeconds(ProtocolConfig protocol) {
+    public static long parallelBatchBudgetSeconds(ProtocolConfig protocol) {
         long timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : DEFAULT_AGENT_TIMEOUT_SECONDS;
         long attempts = protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY
                 ? (protocol.maxRetries() > 0 ? protocol.maxRetries() : DEFAULT_MAX_RETRIES) + 1L
@@ -2603,199 +2609,20 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     // =================================================================
-    // Phase execution (debate styles)
+    // Phase execution (debate styles) — delegates to PhaseExecutionEngine
     // =================================================================
 
-    private void executeSequentialPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
-                                        ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
-                                        java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns)
-            throws GroupDiscussionException {
-        for (GroupMember speaker : speakers) {
-            if (turnCounter.get() >= maxTurns) {
-                break;
-            }
-            turnCounter.incrementAndGet();
-            if (listener != null) {
-                listener.onSpeakerStart(
-                        new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
-            }
-            String input = buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null);
-            TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
-            gc.getTranscript().add(entry);
-            if (listener != null) {
-                listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
-                        entry.content(), phaseIdx, phase.name()));
-            }
-        }
-    }
-
+    // executeSequentialPhase/executePeerTargetedPhase have no test dependency
+    // and were inlined at their call sites. executeParallelPhase is kept as a
+    // declared delegator: GroupConversationServiceConcurrencyTest reaches it
+    // via reflection (its own local "phaseMethod" helper, not the "method"
+    // helper most other test classes use — grep for the bare method name, not
+    // just one calling convention, when sweeping for these).
     private void executeParallelPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
                                       ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
                                       java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
-
-        // Cap batch size to remaining turn budget
-        int remainingTurns = maxTurns > 0 ? Math.max(0, maxTurns - turnCounter.get()) : speakers.size();
-        if (remainingTurns == 0) {
-            return;
-        }
-        List<GroupMember> batchSpeakers = maxTurns > 0
-                ? speakers.subList(0, Math.min(speakers.size(), remainingTurns))
-                : speakers;
-
-        // SAFETY: Snapshot the transcript so parallel tasks each see a consistent view.
-        // Iterating a Collections.synchronizedList requires holding its monitor.
-        //
-        // The bare gc.getTranscript().add(...) calls further down this method are NOT
-        // an oversight, and reviewers have asked about the asymmetry: GroupConversation
-        // guarantees the transcript is always a Collections.synchronizedList (both the
-        // field initializer and setTranscript wrap it — no path assigns a bare list),
-        // and that wrapper's mutex IS the wrapper object, i.e. exactly what this block
-        // locks. So add() and this snapshot already exclude one another; the explicit
-        // monitor is required only because List.copyOf ITERATES, which the wrapper
-        // cannot make atomic on its own. Wrapping every append would add lock scope
-        // without removing a race.
-        //
-        // This is deliberately the opposite conclusion from the taskList guard in the
-        // task-execution wave, where the asymmetry WAS a real bug: there the two sides
-        // were a cancellation read and a document write ordered only by the monitor,
-        // not two operations on one synchronized collection.
-        List<TranscriptEntry> snapshotTranscript;
-        synchronized (gc.getTranscript()) {
-            snapshotTranscript = List.copyOf(gc.getTranscript());
-        }
-
-        // Cooperative cancellation for this batch — cancel(true) does not stop a
-        // supplyAsync body, so a "cancelled" speaker would otherwise keep running.
-        var cancellation = new MemberTurnCancellation();
-
-        // Notify all speakers starting (parallel)
-        if (listener != null) {
-            for (GroupMember speaker : batchSpeakers) {
-                listener.onSpeakerStart(
-                        new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
-            }
-        }
-
-        // Each speaker fans out to a further virtual thread; a ThreadLocal does not
-        // follow, so carry the caller explicitly. captureOrCurrent, not current: a
-        // synchronous discuss() runs on the REST thread, where nothing has bound a
-        // caller yet and only the request can supply one.
-        final var phaseCaller = callerIdentityContext.captureOrCurrent();
-        List<CompletableFuture<TranscriptEntry>> futures = batchSpeakers.stream()
-                .map(speaker -> CompletableFuture.supplyAsync(callerIdentityContext.withIdentitySupplying(phaseCaller, () -> {
-                    try {
-                        String input = buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null);
-                        return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
-                    } catch (MemberTurnCancelledException e) {
-                        // The orchestrator stopped waiting for this batch — surface the
-                        // cancellation instead of fabricating a contribution for it.
-                        // Must stay ABOVE the Exception catch, which would otherwise
-                        // convert a cancellation into an error transcript entry.
-                        throw new java.util.concurrent.CompletionException(e);
-                    } catch (GroupDiscussionException e) {
-                        if (e.getCause() instanceof QuotaExceededException) {
-                            throw new java.util.concurrent.CompletionException(e);
-                        }
-                        LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
-                        return errorEntry(speaker, phaseIdx, phase, e.getMessage());
-                    } catch (Exception e) {
-                        LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
-                        return errorEntry(speaker, phaseIdx, phase, e.getMessage());
-                    }
-                }), executorService)).toList();
-
-        // ONE deadline for the whole batch: these turns run concurrently, so giving
-        // every get() the full budget in turn made the worst case N × timeout
-        // (10 members × 180s = 30 minutes) instead of the configured timeout. The
-        // budget stays independent of the batch size — that is the point — but it has
-        // to cover what a SINGLE member is allowed to take: its per-attempt timeout
-        // times the attempts onAgentFailure grants it, plus a grace for the setup it
-        // does before reaching its own await point. Armed at exactly one attempt, the
-        // orchestrator won every race: it cancelled the batch while members were still
-        // inside their own budget, so executeAgentTurn's TimeoutException branch —
-        // which owns the RETRY and ABORT policies — was unreachable in parallel phases
-        // and every member timeout became an unattributed SKIPPED "unknown" entry.
-        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(parallelBatchBudgetSeconds(protocol));
-        for (int i = 0; i < futures.size(); i++) {
-            try {
-                long remainingNanos = Math.max(0, deadlineNanos - System.nanoTime());
-                TranscriptEntry entry = futures.get(i).get(remainingNanos, TimeUnit.NANOSECONDS);
-                gc.getTranscript().add(entry);
-                if (listener != null) {
-                    listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(entry.speakerAgentId(), entry.speakerDisplayName(),
-                            entry.content(), phaseIdx, phase.name()));
-                }
-            } catch (TimeoutException e) {
-                // The batch deadline passed — release every speaker still waiting on a
-                // response, not just this one.
-                cancellation.cancel();
-                gc.getTranscript().add(new TranscriptEntry("unknown", "Unknown", null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                        Instant.now(), "Timeout", null));
-            } catch (ExecutionException e) {
-                // Unwrap: CompletionException → GroupDiscussionException →
-                // QuotaExceededException
-                Throwable cause = e.getCause();
-                if (cause instanceof java.util.concurrent.CompletionException ce) {
-                    cause = ce.getCause();
-                }
-                if (cause instanceof MemberTurnCancelledException) {
-                    // Already released by the batch deadline above — same outcome as a
-                    // speaker whose own get() timed out.
-                    gc.getTranscript().add(new TranscriptEntry("unknown", "Unknown", null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                            Instant.now(), "Timeout", null));
-                    continue;
-                }
-                if (cause instanceof GroupDiscussionException gde
-                        && gde.getCause() instanceof QuotaExceededException) {
-                    // Release the remaining speakers and propagate
-                    cancellation.cancel();
-                    throw gde;
-                }
-                gc.getTranscript().add(errorEntry(null, phaseIdx, phase, e.getMessage()));
-            } catch (Exception e) {
-                gc.getTranscript().add(errorEntry(null, phaseIdx, phase, e.getMessage()));
-            }
-        }
-        // Count all completed turns for this batch (parallel turns are atomic batches)
-        turnCounter.addAndGet(batchSpeakers.size());
-    }
-
-    /**
-     * Peer-targeted phase: each speaker addresses each OTHER speaker individually
-     * (N×(N-1) turns). Used for CRITIQUE style.
-     */
-    private void executePeerTargetedPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
-                                          ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
-                                          java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns)
-            throws GroupDiscussionException {
-
-        // Collect all non-moderator members as targets
-        List<GroupMember> allMembers = config.getMembers().stream()
-                .sorted(Comparator.comparing(m -> m.speakingOrder() != null ? m.speakingOrder() : Integer.MAX_VALUE)).toList();
-
-        outer : for (GroupMember speaker : speakers) {
-            for (GroupMember target : allMembers) {
-                if (speaker.agentId().equals(target.agentId())) {
-                    continue; // Don't critique yourself
-                }
-                if (turnCounter.get() >= maxTurns) {
-                    break outer;
-                }
-                turnCounter.incrementAndGet();
-                if (listener != null) {
-                    listener.onSpeakerStart(
-                            new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
-                }
-                String input = buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target);
-                TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId(), listener);
-                gc.getTranscript().add(entry);
-                if (listener != null) {
-                    listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
-                            entry.content(), phaseIdx, phase.name(), target.agentId(), target.displayName()));
-                }
-            }
-        }
+        phaseExecutionEngine.executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
     }
 
     // =================================================================
