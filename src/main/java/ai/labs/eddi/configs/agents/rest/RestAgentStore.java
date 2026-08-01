@@ -142,7 +142,17 @@ public class RestAgentStore implements IRestAgentStore {
     @Override
     public Response updateResourceInAgent(String id, Integer version, URI resourceURI) {
         String resourceURIString = resourceURI.toString();
-        String resourceURIWithoutVersion = resourceURIString.substring(0, resourceURIString.lastIndexOf("?"));
+        int queryStart = resourceURIString.lastIndexOf('?');
+        if (queryStart < 0) {
+            // substring(0, -1) would throw and turn a caller's malformed input into a
+            // 500. This endpoint sits on the re-point cascade that an approval-gated
+            // agent has to walk to finish an edit, so its failure mode is one an LLM
+            // will hit and has to be able to act on.
+            return Response.status(BAD_REQUEST)
+                    .entity("resourceURI must carry a version, e.g. '...?version=2'")
+                    .type(MediaType.TEXT_PLAIN).build();
+        }
+        String resourceURIWithoutVersion = resourceURIString.substring(0, queryStart);
 
         boolean updated = false;
         AgentConfiguration agentConfig = readAgent(id, version);

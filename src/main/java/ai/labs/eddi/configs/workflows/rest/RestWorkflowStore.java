@@ -96,7 +96,15 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     @Override
     public Response updateResourceInWorkflow(String id, Integer version, URI resourceURI) {
         String resourceURIString = resourceURI.toString();
-        String resourceURIWithoutVersion = resourceURIString.substring(0, resourceURIString.lastIndexOf("?"));
+        int queryStart = resourceURIString.lastIndexOf('?');
+        if (queryStart < 0) {
+            // substring(0, -1) would throw and turn a caller's malformed input into a
+            // 500 — same guard as the agent-store variant, which shares this shape.
+            return Response.status(BAD_REQUEST)
+                    .entity("resourceURI must carry a version, e.g. '...?version=2'")
+                    .type(MediaType.TEXT_PLAIN).build();
+        }
+        String resourceURIWithoutVersion = resourceURIString.substring(0, queryStart);
 
         boolean updated = false;
         WorkflowConfiguration workflowConfig = readWorkflow(id, version);

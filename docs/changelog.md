@@ -62,6 +62,14 @@ Mutation-checked: dropping the up-front validation, dropping `setHitlConfig`, an
 
 **A redundant guard was found and made non-redundant.** Mutating away the name shape-check (`/`, `\`, `..`) killed nothing: `readDoc` also verifies the resolved path still sits under the docs directory, which subsumes it. The shape check is worth keeping — it is what lets the MCP surface answer "invalid name" rather than "not found" — but `McpDocResources` had *restated the predicate* to pick that message, i.e. two copies of a security check. It is now one shared `DocsService.isValidDocName`, and mutating it kills five tests. The REST surface deliberately returns a bare `404` for both cases instead, so an attacker-supplied traversal string is never echoed back.
 
+### `updateResourceUri` verified as the gate-immune re-point path (2026-08-01)
+
+`PUT /agentstore/agents/{id}` and `PUT /llmstore/llms/{id}` are permanently unbound for an approval-gated operator, because the gate lives in those documents and one approved write there removes all subsequent gating. That leaves editing an agent apparently impossible: changing a behaviour rule means rules v2 → workflow re-points at rules v2 → agent re-points at workflow v2, and the last two steps are document writes. The escape hatch is `PUT /{id}/updateResourceUri` on the agent and workflow stores — but it is only safe to bind if it *provably* cannot drop the gate, so this was checked rather than assumed.
+
+**It holds, for two independent reasons.** The caller cannot *supply* a `hitlConfig`: the request body is `text/plain` and is a single URI. And the implementation *preserves* the stored one — `updateResourceInAgent` reads the current document, mutates only the workflow URI list, and writes the whole document back, so the gate survives by round-trip rather than by the endpoint happening to ignore it. Both variants go through the normal `update` path, so `HistorizedResourceStore` writes `version + 1` as usual. Asserted by capturing the written `AgentConfiguration`: the gate is intact and only the URI list changed. Mutation-checked by nulling `hitlConfig` before the write.
+
+**One defect found and fixed on that path.** Both variants computed `resourceURIString.substring(0, resourceURIString.lastIndexOf("?"))`, which throws `StringIndexOutOfBoundsException` on a URI carrying no `?version=` — turning malformed caller input into a 500. That matters more here than it usually would: this is the endpoint an approval-gated operator has to walk to finish an edit, so its failure mode is one an LLM will hit and must be able to act on. Now an actionable 400.
+
 ---
 
 ## 🔑 feat(operator): the foundation for an agent that can safely write (2026-07-29)

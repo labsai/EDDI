@@ -206,6 +206,26 @@ class RestWorkflowStoreCrudTest {
         }
 
         @Test
+        @DisplayName("a URI without ?version is a 400, not a 500")
+        void uriWithoutVersionIsRejected() throws Exception {
+            // Same defect as the agent-store variant: substring(0, lastIndexOf('?'))
+            // throws when there is no '?'. Both sit on the re-point cascade an
+            // approval-gated agent must walk, so a caller has to get an actionable 400.
+            var config = new WorkflowConfiguration();
+            var step = new WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.rules"));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/111111111111111111111111?version=1")));
+            config.getWorkflowSteps().add(step);
+            lenient().when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
+
+            URI noVersion = URI.create("eddi://ai.labs.rules/rulestore/rulesets/111111111111111111111111");
+            Response response = sut.updateResourceInWorkflow(WORKFLOW_ID, 1, noVersion);
+
+            assertEquals(400, response.getStatus());
+            verify(workflowStore, never()).update(eq(WORKFLOW_ID), eq(1), any());
+        }
+
+        @Test
         @DisplayName("should update resource URI in extension element config")
         void updatesExtensionConfigUri() throws Exception {
             var config = new WorkflowConfiguration();
