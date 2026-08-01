@@ -44,7 +44,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
-import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
+import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
@@ -175,6 +175,7 @@ public class GroupConversationService implements IGroupConversationService {
     private final NonceCacheService nonceCacheService;
     private final AuditLedgerService auditLedgerService;
     private final String defaultTenantId;
+    private final GroupContextBuilder contextBuilder;
 
     // Field-injected so the direct-construction unit tests stay unchanged; used to
     // materialize and share discussion attachments with member conversations.
@@ -237,6 +238,7 @@ public class GroupConversationService implements IGroupConversationService {
         this.nonceCacheService = nonceCacheService;
         this.auditLedgerService = auditLedgerService;
         this.defaultTenantId = defaultTenantId;
+        this.contextBuilder = new GroupContextBuilder(templatingEngine);
         // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -3250,164 +3252,26 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     // =================================================================
-    // Phase-specific input construction
+    // Phase-specific input construction — delegates to GroupContextBuilder
     // =================================================================
 
     private String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
                                    GroupMember target) {
-
-        String template = phase.inputTemplate() != null ? phase.inputTemplate() : selectDefaultTemplate(phase, transcript, phaseIdx);
-
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("question", question);
-        data.put("displayName", speaker.displayName());
-        data.put("phaseIndex", phaseIdx);
-        data.put("phaseName", phase.name());
-
-        // Phase-type specific variables
-        switch (phase.type()) {
-            case OPINION -> {
-                List<Map<String, Object>> prev = filterByScope(transcript, phase.contextScope(), phaseIdx, speaker);
-                data.put("previousResponses", prev);
-            }
-            case CRITIQUE -> {
-                if (target != null) {
-                    data.put("targetName", target.displayName());
-                    String targetResponse = findLatestResponse(transcript, target.agentId());
-                    data.put("targetResponse", targetResponse != null ? targetResponse : "(no response)");
-                }
-            }
-            case REVISION -> {
-                String originalResponse = findLatestResponse(transcript, speaker.agentId());
-                data.put("originalResponse", originalResponse != null ? originalResponse : "(no response)");
-                // Feedback addressed TO this speaker
-                List<Map<String, Object>> feedback = transcript.stream()
-                        .filter(e -> e.type() == TranscriptEntryType.CRITIQUE && speaker.agentId().equals(e.targetAgentId())).map(e -> {
-                            Map<String, Object> fb = new LinkedHashMap<>();
-                            fb.put("reviewer", e.speakerDisplayName());
-                            fb.put("content", e.content());
-                            return fb;
-                        }).collect(Collectors.toList());
-                data.put("feedbackReceived", feedback);
-            }
-            case CHALLENGE -> {
-                List<Map<String, Object>> opinions = transcript.stream().filter(e -> e.type() == TranscriptEntryType.OPINION && e.content() != null)
-                        .map(e -> {
-                            Map<String, Object> o = new LinkedHashMap<>();
-                            o.put("speaker", e.speakerDisplayName());
-                            o.put("content", e.content());
-                            return o;
-                        }).collect(Collectors.toList());
-                data.put("allOpinions", opinions);
-            }
-            case DEFENSE -> {
-                String originalResponse = findLatestResponse(transcript, speaker.agentId());
-                data.put("originalResponse", originalResponse != null ? originalResponse : "(no response)");
-                List<Map<String, Object>> challenges = transcript.stream()
-                        .filter(e -> e.type() == TranscriptEntryType.CHALLENGE && e.content() != null).map(e -> {
-                            Map<String, Object> c = new LinkedHashMap<>();
-                            c.put("speaker", e.speakerDisplayName());
-                            c.put("content", e.content());
-                            return c;
-                        }).collect(Collectors.toList());
-                data.put("challenges", challenges);
-            }
-            case ARGUE, REBUTTAL -> {
-                String role = speaker.role();
-                data.put("teamSide", "PRO".equalsIgnoreCase(role) ? "FOR" : "AGAINST");
-                // Opposing arguments (filtered by different speaker, not role label)
-                List<Map<String, Object>> opposing = transcript.stream()
-                        .filter(e -> (e.type() == TranscriptEntryType.ARGUMENT || e.type() == TranscriptEntryType.REBUTTAL) && e.content() != null)
-                        .filter(e -> !e.speakerAgentId().equals(speaker.agentId())).map(e -> {
-                            Map<String, Object> a = new LinkedHashMap<>();
-                            a.put("speaker", e.speakerDisplayName());
-                            a.put("content", e.content());
-                            return a;
-                        }).collect(Collectors.toList());
-                data.put("opposingArguments", opposing);
-            }
-            case SYNTHESIS -> {
-                List<Map<String, Object>> fullTranscript = transcript.stream()
-                        .filter(e -> e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
-                                && e.type() != TranscriptEntryType.QUESTION)
-                        .map(e -> {
-                            Map<String, Object> t = new LinkedHashMap<>();
-                            t.put("speaker", e.speakerDisplayName());
-                            t.put("content", e.content());
-                            t.put("phaseName", e.phaseName() != null ? e.phaseName() : "");
-                            return t;
-                        }).collect(Collectors.toList());
-                data.put("transcript", fullTranscript);
-                data.put("totalPhases", phaseIdx);
-            }
-            case PLAN -> {
-                // Provide member list for planning template
-                List<Map<String, Object>> memberList = new ArrayList<>();
-                // Note: speaker list should be the full member list for planning
-                data.put("members", memberList); // populated by caller via template data
-            }
-            case EXECUTE -> {
-                // Task-specific context populated by executeTaskPhase
-            }
-            case VERIFY -> {
-                // Completed tasks populated by executeTaskPhase
-            }
-            default -> {
-                // All PhaseType values handled above; default required by checkstyle
-            }
-        }
-
-        try {
-            return templatingEngine.processTemplate(template, data, ITemplatingEngine.TemplateMode.TEXT);
-        } catch (ITemplatingEngine.TemplateEngineException e) {
-            LOGGER.warnf("Template processing failed for phase '%s', " + "using plain text: %s", phase.name(), e.getMessage());
-            return buildPlainTextFallback(phase, speaker, question, transcript);
-        }
+        return contextBuilder.buildPhaseInput(phase, speaker, question, transcript, phaseIdx, target);
     }
 
+    // Kept as a declared delegator (not inlined into buildPhaseInput's call
+    // site) since a characterization test reaches it via reflection.
     private String selectDefaultTemplate(DiscussionPhase phase, List<TranscriptEntry> transcript, int phaseIdx) {
-        if (phase.type() == PhaseType.OPINION) {
-            // Use independent template if no context, or context template if
-            // there are prior responses
-            if (phase.contextScope() == ContextScope.NONE) {
-                return DiscussionStylePresets.TEMPLATE_OPINION_INDEPENDENT;
-            }
-            if (phase.contextScope() == ContextScope.ANONYMOUS) {
-                return DiscussionStylePresets.TEMPLATE_OPINION_ANONYMOUS;
-            }
-            return DiscussionStylePresets.TEMPLATE_OPINION_WITH_CONTEXT;
-        }
-        return DiscussionStylePresets.defaultTemplate(phase.type());
+        return contextBuilder.selectDefaultTemplate(phase, transcript, phaseIdx);
     }
 
     // =================================================================
-    // Context filtering by scope
+    // Context filtering by scope — delegates to GroupContextBuilder
     // =================================================================
 
     private List<Map<String, Object>> filterByScope(List<TranscriptEntry> transcript, ContextScope scope, int currentPhaseIdx, GroupMember speaker) {
-        if (scope == null || scope == ContextScope.NONE) {
-            return List.of();
-        }
-
-        return transcript.stream().filter(e -> e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
-                && e.type() != TranscriptEntryType.QUESTION).filter(e -> switch (scope) {
-                    case FULL -> true;
-                    case LAST_PHASE -> e.phaseIndex() >= currentPhaseIdx - 1;
-                    case ANONYMOUS -> true; // Content included, attribution stripped
-                    case OWN_FEEDBACK -> speaker.agentId().equals(e.targetAgentId());
-                    case NONE -> false;
-                    case TASK_ONLY, TASK_WITH_DEPS -> false; // Handled by task-specific logic
-                }).map(e -> {
-                    Map<String, Object> entry = new LinkedHashMap<>();
-                    if (scope == ContextScope.ANONYMOUS) {
-                        entry.put("speaker", "Anonymous");
-                    } else {
-                        entry.put("speaker", e.speakerDisplayName());
-                    }
-                    entry.put("content", e.content());
-                    entry.put("phaseName", e.phaseName() != null ? e.phaseName() : "");
-                    return entry;
-                }).collect(Collectors.toList());
+        return contextBuilder.filterByScope(transcript, scope, currentPhaseIdx, speaker);
     }
 
     // =================================================================
@@ -3434,28 +3298,17 @@ public class GroupConversationService implements IGroupConversationService {
         return gc;
     }
 
+    // findLatestResponse/mapPhaseToEntryType kept as thin delegators (not just
+    // inlined at call sites): several characterization tests reach them via
+    // GroupConversationService.class.getDeclaredMethod(...) reflection, which
+    // requires the method to be declared directly on this class.
+
     private String findLatestResponse(List<TranscriptEntry> transcript, String agentId) {
-        return transcript.stream()
-                .filter(e -> agentId.equals(e.speakerAgentId()) && e.content() != null && e.type() != TranscriptEntryType.ERROR
-                        && e.type() != TranscriptEntryType.SKIPPED)
-                .reduce((first, second) -> second) // last match
-                .map(TranscriptEntry::content).orElse(null);
+        return contextBuilder.findLatestResponse(transcript, agentId);
     }
 
     private TranscriptEntryType mapPhaseToEntryType(PhaseType type) {
-        return switch (type) {
-            case OPINION -> TranscriptEntryType.OPINION;
-            case CRITIQUE -> TranscriptEntryType.CRITIQUE;
-            case REVISION -> TranscriptEntryType.REVISION;
-            case CHALLENGE -> TranscriptEntryType.CHALLENGE;
-            case DEFENSE -> TranscriptEntryType.DEFENSE;
-            case ARGUE -> TranscriptEntryType.ARGUMENT;
-            case REBUTTAL -> TranscriptEntryType.REBUTTAL;
-            case SYNTHESIS -> TranscriptEntryType.SYNTHESIS;
-            case PLAN -> TranscriptEntryType.PLAN;
-            case EXECUTE -> TranscriptEntryType.TASK_RESULT;
-            case VERIFY -> TranscriptEntryType.VERIFICATION;
-        };
+        return contextBuilder.mapPhaseToEntryType(type);
     }
 
     /**
@@ -3640,23 +3493,19 @@ public class GroupConversationService implements IGroupConversationService {
 
     /**
      * Extracts the human-readable text from a conversation memory snapshot.
-     * Delegates to the shared {@link ConversationOutputExtractor} utility.
+     * Delegates to {@link GroupContextBuilder}, kept as a declared method here (not
+     * inlined at call sites) since a characterization test reaches it via
+     * reflection.
      */
     private String extractResponse(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
-        String result = ConversationOutputExtractor.extractResponse(snapshot);
-        // Convert null to empty string for backward compatibility with GCS callers
-        // that check for empty-string (pipeline metadata-only snapshots still return
-        // null).
-        return result != null ? result : "";
+        return contextBuilder.extractResponse(snapshot);
     }
 
+    // buildPlainTextFallback is now private to GroupContextBuilder (only ever
+    // called internally by its buildPhaseInput); kept here as a thin delegator
+    // only because a characterization test reaches it via reflection.
     private String buildPlainTextFallback(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript) {
-        var sb = new StringBuilder();
-        sb.append("Discussion phase: ").append(phase.name()).append("\n\n");
-        sb.append("Question: \"").append(question).append("\"\n\n");
-        sb.append("As ").append(speaker.displayName());
-        sb.append(", please contribute to this phase of the discussion.");
-        return sb.toString();
+        return contextBuilder.buildPlainTextFallback(phase, speaker, question, transcript);
     }
 
     /**

@@ -5,6 +5,18 @@
 
 ---
 
+## 🧩 refactor(groups): extract GroupContextBuilder from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`claude/group-collaboration-plan-9bca77`)
+
+R1 step 2 of `planning/group-collaboration-improvements-plan.md` §3.1: moved the phase-input-construction and scope-filtering cluster (`buildPhaseInput`, `selectDefaultTemplate`, `filterByScope`, `findLatestResponse`, `mapPhaseToEntryType`, `extractResponse`, `buildPlainTextFallback` — ~280 lines) into a new `ai.labs.eddi.engine.internal.groups.GroupContextBuilder`, constructed once in `GroupConversationService`'s constructor (its only dependency, `templatingEngine`, is never reassigned post-construction, unlike the attachments step's field-injected `attachmentStore`).
+
+**A wrinkle this step surfaced that step 1 didn't:** four characterization test classes (`GroupConversationServiceTest`, `GroupConversationServiceHitlCoverage3Test`, `GroupConversationServiceUncoveredBranchTest`) reach several of these methods via `GroupConversationService.class.getDeclaredMethod(...)` reflection, which requires the method to be *declared directly on that class* — a delegator that's merely inlined at call sites doesn't satisfy it. All seven extracted methods are kept as thin private delegators on `GroupConversationService` for this reason (confirmed by an exhaustive grep for every `getDeclaredMethod("...")` / `method("...")` reflection lookup across the test package before deleting anything — one, `findLatestResponse`, is now reachable only via reflection since its one production call site moved into `GroupContextBuilder` too; left as documented dead-from-production-code, not deleted, since removing it would break the pinned characterization test).
+
+Added a new focused `GroupContextBuilderTest` (17 tests, direct construction, no reflection) alongside the untouched characterization suites, per the plan's rule 5. Full 12-class group suite + both new focused test classes: 470 original tests + 12 (step 1) + 17 (step 2), all green; clean compile; formatter/Checkstyle clean.
+
+---
+
 ## 🧩 refactor(groups): extract GroupAttachmentBinder from GroupConversationService (2026-08-01)
 
 **Repo:** EDDI (`claude/group-collaboration-plan-9bca77`)
