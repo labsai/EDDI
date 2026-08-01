@@ -70,6 +70,16 @@ Mutation-checked: dropping the up-front validation, dropping `setHitlConfig`, an
 
 **One defect found and fixed on that path.** Both variants computed `resourceURIString.substring(0, resourceURIString.lastIndexOf("?"))`, which throws `StringIndexOutOfBoundsException` on a URI carrying no `?version=` — turning malformed caller input into a 500. That matters more here than it usually would: this is the endpoint an approval-gated operator has to walk to finish an edit, so its failure mode is one an LLM will hit and must be able to act on. Now an actionable 400.
 
+### Review pass over the above (2026-08-01)
+
+A critical read-back of the whole branch, which found three things worth recording:
+
+- **`GET /administration/docs` would have 403'd an admin.** It was written as `@RolesAllowed("eddi-viewer")` — the role the plan named and the one the MCP surface uses. But EDDI has **no role hierarchy**: JAX-RS `@RolesAllowed` and the MCP layer's `McpToolUtils.requireRole` are both literal `hasRole` checks, and `eddi-viewer` appears in *no other* REST endpoint. An `eddi-admin` principal — what an operator agent actually runs as — would have been refused by the one endpoint built for it. Now the read tier is enumerated like every other REST resource here.
+- **A javadoc was silently reassigned.** The new `recordRuleMatches` was inserted directly above `recordPauseCapGuard`, leaving two consecutive javadoc blocks: the original doc detached from its method and `recordPauseCapGuard` ended up undocumented. Method moved.
+- **One more sound validation.** A `rules[].match` string-identical to an `exempt` pattern is provably dead config — an exempt call is never gated, so no rule is ever resolved for it — and is now refused, in the same spirit as the existing "in both requireApproval and exempt" check. Deliberately *only* exact equality: a broader rule may legitimately overlap an exemption while still covering gated calls, and deciding that in general would mean reasoning about globs over an unknown tool set.
+
+Also verified rather than assumed: `PendingToolCallBatch.effectiveRule` round-trips through the snapshot serializer (asserted in `PendingToolCallBatchSnapshotTest`). If it did not, a paused conversation would render the rule's pending message and the resume would recompute the scalar one — leaving the placeholder stranded, since `dropPendingApprovalPlaceholder` removes it by recomputing that exact string. And the null-`callId` branch in `ToolApprovalRules.matchByCallId` is unreachable in production: `AgentOrchestrator.normalizeToolCallIds` assigns a synthetic id to every request whenever the gate is active, so its test documents defensive behaviour rather than a live path.
+
 ---
 
 ## 🔑 feat(operator): the foundation for an agent that can safely write (2026-07-29)

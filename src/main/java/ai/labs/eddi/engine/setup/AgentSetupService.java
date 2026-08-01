@@ -255,12 +255,11 @@ public class AgentSetupService {
             throw new AgentSetupException("llmBaseUrl must be a valid http(s) URL");
         }
         // Validate the HITL config HERE, before a single resource exists.
-        // AgentStore.create
-        // validates it too, but that runs at step 7 — so an unusable approval pattern
-        // would surface only after the apicalls, parser, behaviour, LLM and workflow
-        // had
-        // all been created and would leave every one of them orphaned. The caller sees
-        // the same actionable message either way; only the debris differs.
+        // AgentStore.create validates it too, but only at step 7 — so an unusable
+        // approval pattern would surface after the apicalls, parser, behaviour, LLM
+        // and workflow had all been created, leaving every one of them orphaned.
+        // The caller gets the same actionable message either way; only the debris
+        // differs.
         try {
             HitlConfigValidation.validate(request.hitlConfig());
         } catch (IllegalArgumentException e) {
@@ -329,8 +328,7 @@ public class AgentSetupService {
             createdResources.put("langchainLocation", langchainLocation);
             patchDescriptor(extractIdFromLocation(langchainLocation), extractVersionFromLocation(langchainLocation), request.agentName());
 
-            // --- Step 5b: Create MCP Calls Configurations (if MCP server URLs provided)
-            // ---
+            // --- Step 5b: Create MCP Calls Configurations (if MCP URLs provided) ---
             List<String> mcpCallsLocations = createMcpCallsResources(request.mcpServerUrls(), request.agentName(), createdResources);
 
             // --- Step 6: Create Workflow (with httpcalls in pipeline) ---

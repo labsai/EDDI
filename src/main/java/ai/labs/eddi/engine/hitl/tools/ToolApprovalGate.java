@@ -19,9 +19,11 @@ import java.util.regex.Pattern;
  * allowed calls.
  * <p>
  * Precedence: (P1) exempt always beats requireApproval; (P2) any pattern match
- * suffices; (P3) empty/absent requireApproval = gate fully inactive. Patterns
- * are tested against {@code "source:name"} first, then the bare dispatch name —
- * fail-safe: a tool with unknown source still matches bare-name patterns.
+ * suffices; (P3) empty/absent requireApproval = gate fully inactive. Each call
+ * is tested against the forms in {@link #addressesOf} —
+ * {@code source.method:path}, then {@code source:name}, then the bare dispatch
+ * name — fail-safe: a tool with an unknown source still matches bare-name
+ * patterns.
  */
 public class ToolApprovalGate {
 

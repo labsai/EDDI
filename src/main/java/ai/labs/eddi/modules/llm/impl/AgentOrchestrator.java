@@ -1786,6 +1786,25 @@ class AgentOrchestrator {
         return Math.max(1, Math.min(10, cfg.getMaxPausesPerTurn()));
     }
 
+    /**
+     * Counts which friction rules actually fire, tagged by the CONFIGURED pattern —
+     * never a URL, credential, tool argument or user id, so cardinality is bounded
+     * by the size of the agent's {@code rules} list. Deduplicated per pause: a
+     * batch where three calls match {@code http.delete:*} increments once, so the
+     * counter reads "how often did this rule govern a review", not "how many calls
+     * did the model happen to bundle". Best-effort, like the other guard metrics: a
+     * failure here must never break the LLM loop.
+     */
+    private void recordRuleMatches(Collection<ToolApprovalsConfig.ApprovalRule> matched) {
+        try {
+            matched.stream().filter(Objects::nonNull).map(ToolApprovalsConfig.ApprovalRule::getMatch)
+                    .filter(Objects::nonNull).distinct()
+                    .forEach(match -> Metrics.globalRegistry.counter("eddi.hitl.rule.matched", "match", match).increment());
+        } catch (Exception e) {
+            LOGGER.debugf("hitl rule metric emit failed: %s", e.getMessage());
+        }
+    }
+
     /** Names activated in LAZY mode (for resume reactivation); empty otherwise. */
     private static List<String> activatedToolNames(boolean isLazy, List<ToolSpecification> activeSpecs) {
         if (!isLazy) {
@@ -2013,24 +2032,6 @@ class AgentOrchestrator {
      * {@code ConversationService} on the say/resume paths). Best-effort: any
      * failure is swallowed so guard bookkeeping never breaks the LLM loop.
      */
-    /**
-     * Counts which friction rules actually fire, tagged by the CONFIGURED pattern —
-     * never a URL, credential, tool argument or user id, so cardinality is bounded
-     * by the size of the agent's {@code rules} list. Deduplicated per pause: a
-     * batch where three calls match {@code http.delete:*} increments once, so the
-     * counter reads "how often did this rule govern a review", not "how many calls
-     * did the model happen to bundle".
-     */
-    private void recordRuleMatches(Collection<ToolApprovalsConfig.ApprovalRule> matched) {
-        try {
-            matched.stream().filter(Objects::nonNull).map(ToolApprovalsConfig.ApprovalRule::getMatch)
-                    .filter(Objects::nonNull).distinct()
-                    .forEach(match -> Metrics.globalRegistry.counter("eddi.hitl.rule.matched", "match", match).increment());
-        } catch (Exception e) {
-            LOGGER.debugf("hitl rule metric emit failed: %s", e.getMessage());
-        }
-    }
-
     private void recordPauseCapGuard(IConversationMemory memory, String fingerprint) {
         try {
             Metrics.globalRegistry.counter("eddi_hitl_tool_guard_count", "guard", "pause_cap").increment();

@@ -294,7 +294,7 @@ Resolution (`ToolApprovalRules`):
 
 The governing rule is resolved **at gate time** and persisted on the pending batch (`PendingToolCallBatch.effectiveRule`), because the persisted batch keeps tool names and sources but no endpoints — an endpoint-addressed rule could not be re-matched after the pause. Each gated call also records the rule that tuned it (`matchedRule`), so an approver can tell which call brought the batch's policy.
 
-Validation mirrors `requireApproval`: `match` goes through the same `ToolApprovalPatterns.validate`, duplicates are refused, `rules` without `requireApproval` is refused, and a finite `timeoutPolicy` with no duration at either level is refused. The counter `eddi.hitl.rule.matched{match="<pattern>"}` records which rules actually fire (deduplicated per pause; the tag is the configured pattern, never a URL or argument).
+Validation mirrors `requireApproval`: `match` goes through the same `ToolApprovalPatterns.validate`, duplicates are refused, `rules` without `requireApproval` is refused, a finite `timeoutPolicy` with no duration at either level is refused, and a `match` string-identical to an `exempt` pattern is refused — an exempt call is never gated, so such a rule could never apply. Only *exact* equality is refused: a broader rule may legitimately overlap an exemption (`http.*:*` alongside an exempt `http.get:*`) while still covering gated calls. The counter `eddi.hitl.rule.matched{match="<pattern>"}` records which rules actually fire (deduplicated per pause; the tag is the configured pattern, never a URL or argument).
 
 ### Pattern language
 

@@ -79,6 +79,33 @@ class ToolApprovalRulesValidationTest {
     }
 
     @Test
+    @DisplayName("a rule whose match is also an exempt pattern is refused — it could never apply")
+    void ruleMatchingAnExemptPatternIsRefused() {
+        // An exempt call is never gated, and a rule only tunes a gated call — so this
+        // rule is dead config that reads as if it were doing something.
+        var cfg = new ToolApprovalsConfig();
+        cfg.setRequireApproval(List.of("http.post:*"));
+        cfg.setExempt(List.of("http.get:*"));
+        cfg.setRules(List.of(rule("http.get:*")));
+
+        assertTrue(messageOf(() -> HitlConfigValidation.validateToolApprovals(cfg, "cfg.toolApprovals"))
+                .contains("can never apply"));
+    }
+
+    @Test
+    @DisplayName("a rule merely OVERLAPPING an exempt pattern still saves")
+    void ruleOverlappingAnExemptPatternSaves() {
+        // Only exact equality is provably dead. A broader rule can still cover gated
+        // calls, and refusing it would be a false positive.
+        var cfg = new ToolApprovalsConfig();
+        cfg.setRequireApproval(List.of("http.post:*"));
+        cfg.setExempt(List.of("http.get:*"));
+        cfg.setRules(List.of(rule("http.*:*")));
+
+        assertDoesNotThrow(() -> HitlConfigValidation.validateToolApprovals(cfg, "cfg.toolApprovals"));
+    }
+
+    @Test
     @DisplayName("rules without requireApproval are refused — a rule never gates")
     void rulesWithoutRequireApprovalAreRefused() {
         var cfg = new ToolApprovalsConfig();

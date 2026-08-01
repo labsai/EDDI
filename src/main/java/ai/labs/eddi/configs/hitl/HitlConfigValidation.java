@@ -139,6 +139,18 @@ public final class HitlConfigValidation {
                 throw new IllegalArgumentException("duplicate rule match '" + rule.getMatch() + "' in " + fieldPath
                         + ".rules — only one would ever apply; merge them");
             }
+            // A rule whose pattern is string-identical to an exempt pattern is provably
+            // dead: any call it could match is exempt, so it is never gated, so no rule
+            // is ever resolved for it. Only the exact-equality case is checked — a rule
+            // may legitimately OVERLAP an exempt pattern while still covering gated
+            // calls (e.g. 'http.*:*' alongside an exempt 'http.get:*'), and deciding
+            // that in general would mean reasoning about globs over an unknown tool
+            // set. Exact equality needs no such reasoning.
+            if (cfg.getExempt() != null && cfg.getExempt().contains(rule.getMatch())) {
+                throw new IllegalArgumentException(rulePath + ".match '" + rule.getMatch()
+                        + "' is also an exempt pattern, so it can never apply — an exempt call is never gated, and a"
+                        + " rule only tunes a gated call. Remove the rule or the exemption");
+            }
             // Format only — the "a finite policy needs a duration" check is rule-scoped
             // below, because a rule may legitimately inherit the enclosing timeout.
             validateApprovalTimeout(rule.getApprovalTimeout(), false);
