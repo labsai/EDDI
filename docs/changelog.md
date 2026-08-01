@@ -5,6 +5,20 @@
 
 ---
 
+## 🧩 refactor(groups): extract GroupAttachmentBinder from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`claude/group-collaboration-plan-9bca77`)
+
+Added `planning/group-collaboration-improvements-plan.md` — the Rev 2.1 implementation plan for group-conversation collaboration features (cost ceilings, convergence detection, voting, negotiation, standing teams, shared artifacts, and more), re-aligned against `main` post-merge of `e20d510a6`. It opens with a **Wave R refactoring workstream**: `GroupConversationService` (4,417 lines), `AgentOrchestrator` (2,725 lines) and `ConversationService` (2,698 lines) are decomposed into focused collaborator classes before any feature work lands, so the ~18 planned items don't pile onto three already-oversized files. Verified the plan's structural claims against the actual repo before starting: line counts, section-banner count (10), and the 12-class/470-test characterization net for `GroupConversationService` all matched exactly.
+
+**This commit is R1 step 1 of that plan** — the first, smallest extraction (the plan's own ordering: static/pure-move clusters first). Moved the attachment-handling cluster (`materializeAttachments`, `rehydrateAttachmentsFromStore`, `grantAndInjectAttachments` — previously ~112 lines inline in `GroupConversationService`) into a new `ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder`, a plain class (not a CDI bean — see the plan's rule 3.0-4: the 12 existing test classes construct `GroupConversationService` directly, and `attachmentStore` is field-injected specifically to keep that compiling, so the extracted collaborator must not force a constructor-signature change). `GroupConversationService` now constructs a `GroupAttachmentBinder(attachmentStore, defaultTenantId)` per call site and delegates — a pure move, no logic changes.
+
+The dedicated `Attachments` nested test class (12 tests) moved from `GroupConversationServiceTest` to a new focused `GroupAttachmentBinderTest`, testing the extracted class directly instead of through the facade. Baselined the full 12-class/470-test `GroupConversationService*Test` suite before touching any code (all green; JaCoCo: 82% instruction / 72% branch on the class) — that is this refactor's regression budget going forward. Re-ran the same suite plus the new test class after the extraction: still all green, 470 tests total (458 in the `GroupConversationService` family + 12 in the new class), `./mvnw clean compile` clean, formatter + Checkstyle clean.
+
+**What's next:** R1 steps 2–10 (extract `GroupContextBuilder`, `GroupSigningGuard`, `MemberTurnExecutor`, `PhaseExecutionEngine`, `TaskForceEngine`, `GroupHitlCoordinator`, `GroupLifecycleOps`, then the graceful-shutdown wiring commit) per `planning/group-collaboration-improvements-plan.md` §3.1, each its own commit. R2 (`AgentOrchestrator` tool-source SPI) and R3 (`ConversationService` HITL split) follow. Full sequencing in the plan's §7 dependency graph.
+
+---
+
 ## 🔎 test(configs): sweep the config JSON the ITs build inline, not just the files (2026-08-01)
 
 **Repo:** EDDI (`fix/code-review-validation`)
