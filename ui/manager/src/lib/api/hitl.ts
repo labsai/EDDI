@@ -182,6 +182,27 @@ export interface ToolApprovalsConfig {
   pendingMessage?: string | null;
   /** Behavior inside group turns — REJECT only in v1 (INBOX reserved). */
   inGroupTurns?: HitlInGroupTurns | null;
+  /**
+   * Per-tool friction, most-specific-pattern-first. Mirrors the backend
+   * `ToolApprovalsConfig.rules` (EDDI PR "per-endpoint approval friction").
+   * A rule tunes HOW a gated call is reviewed — it never decides WHETHER one is
+   * gated; that stays in `requireApproval`/`exempt` above.
+   */
+  rules?: ApprovalRule[] | null;
+}
+
+/**
+ * One per-tool override in `ToolApprovalsConfig.rules`. Every field but `match`
+ * falls back individually to the enclosing `ToolApprovalsConfig` scalar.
+ */
+export interface ApprovalRule {
+  /** Pattern selecting the calls this rule applies to. Same language as
+   *  `requireApproval` — bare name, "source:name", or "source.method:path". */
+  match: string;
+  timeoutPolicy?: HitlTimeoutPolicy | null;
+  approvalTimeout?: string | null;
+  pauseReason?: string | null;
+  pendingMessage?: string | null;
 }
 
 /** Agent-level HITL configuration. */

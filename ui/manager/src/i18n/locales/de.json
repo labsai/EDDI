@@ -3113,6 +3113,7 @@
       "provisioning": "Operator-Agent wird erstellt …",
       "resolving-version": "Agent-Version wird ermittelt …",
       "saving": "Konfiguration wird gespeichert …",
+      "verifying-gate": "Die Freigabesperre wird überprüft…",
       "done": "Fertig",
       "canary": "Es wird geprüft, ob der Operator Ihre Plattform erreicht …"
     },
@@ -3135,7 +3136,12 @@
       "deactivateConfirmBody": "Der Operator wird undeployt und antwortet nicht mehr. Seine Konfiguration bleibt erhalten, sodass Sie ihn später wieder aktivieren können.",
       "resetConfirmTitle": "Plattform-Operator löschen?",
       "resetConfirmBody": "Der Operator-Agent und alle für ihn erstellten Ressourcen werden dauerhaft gelöscht, ebenso seine gespeicherte Konfiguration. Dies kann nicht rückgängig gemacht werden.",
-      "connectionCheck": "Verbindung prüfen"
+      "connectionCheck": "Verbindung prüfen",
+      "gateChecking": "Sperre wird überprüft…",
+      "gateUnknown": "Sperre nicht geprüft",
+      "gateVerified": "Sperre verifiziert",
+      "gateNotVerified": "Sperre nicht verifiziert",
+      "gateUnverifiedHelp": "Die Freigabesperre konnte im Dokument dieses Agenten nicht verifiziert werden."
     },
     "chat": {
       "empty": "Fragen Sie nach Ihrer Installation. Der Operator schlägt nach und zeigt Ihnen jeden Aufruf, den er macht.",

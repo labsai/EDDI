@@ -3113,6 +3113,7 @@
       "provisioning": "正在创建操作员智能体……",
       "resolving-version": "正在解析智能体版本……",
       "saving": "正在保存配置……",
+      "verifying-gate": "正在验证审批门禁…",
       "done": "完成",
       "canary": "正在检查操作员能否访问你的平台……"
     },
@@ -3135,7 +3136,12 @@
       "deactivateConfirmBody": "操作员将被取消部署并停止响应。其配置会保留，你可以稍后重新启用。",
       "resetConfirmTitle": "删除平台操作员？",
       "resetConfirmBody": "操作员智能体及为其创建的所有资源，连同已保存的配置，都会被永久删除。此操作无法撤销。",
-      "connectionCheck": "检查连接"
+      "connectionCheck": "检查连接",
+      "gateChecking": "正在验证门禁…",
+      "gateUnknown": "门禁未检查",
+      "gateVerified": "门禁已验证",
+      "gateNotVerified": "门禁未验证",
+      "gateUnverifiedHelp": "无法在该代理的文档上验证审批门禁。"
     },
     "chat": {
       "empty": "来问问你的部署。操作员会去查，并向你展示它发出的每一次调用。",

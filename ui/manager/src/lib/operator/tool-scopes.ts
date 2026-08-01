@@ -57,17 +57,76 @@ export const READ_ENDPOINTS: readonly string[] = [
 export const WRITE_ENDPOINTS: readonly string[] = [] as const;
 
 /**
+ * The tool-approval gate installed on every operator agent, read_only included.
+ *
+ * Every write method is gated broadly (`http.post:*` etc.), every read is
+ * exempt — the same shape the backend itself documents and recommends
+ * (`docs/hitl.md`), so the gate needs no separate maintenance as `WRITE_ENDPOINTS`
+ * grows: a pattern addressed by HTTP method covers a new write endpoint the
+ * moment it is allow-listed, with no parallel list to remember to update. That
+ * is the "enumerate downward" invariant applied to the gate itself — gate
+ * broadly, exempt narrowly, so a missed update costs an approval prompt rather
+ * than an ungated write.
+ *
+ * Sent for `read_only` too. Today that gates zero real tools (no write endpoint
+ * is allow-listed), but it installs a REAL, verifiable document — `read_write`
+ * later reuses the identical config unchanged, and every operator agent this
+ * screen has ever created is provably running the same gate shape from day one,
+ * not just the ones activated after writes shipped.
+ *
+ * `timeoutPolicy` is hardcoded to `WAIT_INDEFINITELY` and not exposed as a
+ * parameter: the operator must never be configurable into `AUTO_APPROVE`, which
+ * would execute a gated write with nobody watching. A per-endpoint override
+ * (backend `toolApprovals.rules`) can tighten this later without this function
+ * ever being able to loosen it.
+ */
+export function buildToolApprovals(): import("@/lib/api/hitl").ToolApprovalsConfig {
+  return {
+    requireApproval: ["http.post:*", "http.put:*", "http.patch:*", "http.delete:*"],
+    exempt: ["http.get:*"],
+    timeoutPolicy: "WAIT_INDEFINITELY",
+  };
+}
+
+/**
+ * Verified facts `isWriteScopeAvailable` requires — never an optimistic flag a
+ * caller can set to unblock the UI. Each fact names the specific thing that has
+ * to be independently true; a caller that cannot honestly assert one leaves it
+ * `false` rather than approximating.
+ */
+export interface WriteScopeFacts {
+  /** setup-api accepted a `hitlConfig` and it round-trips on read-back — not
+   *  merely that the request didn't 400. */
+  backendAcceptsHitlConfig: boolean;
+  /** Every version of the agent document was read back and the gate verified
+   *  present and sane on each — not just the version most recently deployed. */
+  gateVerifiedOnEveryVersion: boolean;
+  /** Tool calls must run as the real caller. `"none"` cannot support attributed
+   *  approval decisions or self-approval prevention. */
+  authMode: "none" | "caller-identity";
+  /** An approval surface capable of actually resolving a pause is mounted —
+   *  otherwise a gated write pauses forever with no way to unblock it. */
+  approvalSurfaceMounted: boolean;
+}
+
+/**
  * Whether the `read_write` scope can be offered.
  *
- * This is the approval seam. It is a function, not a constant, so that the
- * invariant "no writes without an approval handler" is enforced at the one place
- * scope is chosen, rather than restated in the UI. It stays `false` until both a
- * handler is registered and write endpoints exist.
+ * This is the approval seam. It is a function, not a constant, so the
+ * invariant "no writes without a verified gate" is enforced at the one place
+ * scope is chosen, rather than restated in the UI. Every fact must hold, and
+ * `WRITE_ENDPOINTS` must be non-empty — so this returns `false` unconditionally
+ * until a future change deliberately populates the write allow-list, whatever
+ * the caller passes in.
  */
-export function isWriteScopeAvailable(
-  hasApprovalHandler = false,
-): boolean {
-  return hasApprovalHandler && WRITE_ENDPOINTS.length > 0;
+export function isWriteScopeAvailable(facts: WriteScopeFacts): boolean {
+  return (
+    WRITE_ENDPOINTS.length > 0 &&
+    facts.backendAcceptsHitlConfig &&
+    facts.gateVerifiedOnEveryVersion &&
+    facts.authMode === "caller-identity" &&
+    facts.approvalSurfaceMounted
+  );
 }
 
 /** Resolve the endpoint list for a scope. */

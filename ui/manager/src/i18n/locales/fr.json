@@ -3119,6 +3119,7 @@
       "provisioning": "Création de l'agent opérateur…",
       "resolving-version": "Résolution de la version de l'agent…",
       "saving": "Enregistrement de la configuration…",
+      "verifying-gate": "Vérification de la barrière d'approbation…",
       "done": "Terminé",
       "canary": "Vérification que l'opérateur atteint votre plateforme…"
     },
@@ -3141,7 +3142,12 @@
       "deactivateConfirmBody": "L'opérateur est retiré du déploiement et cesse de répondre. Sa configuration est conservée, vous pourrez le réactiver plus tard.",
       "resetConfirmTitle": "Supprimer l'opérateur de plateforme ?",
       "resetConfirmBody": "L'agent opérateur et toutes les ressources créées pour lui sont définitivement supprimés, ainsi que sa configuration enregistrée. Cette action est irréversible.",
-      "connectionCheck": "Vérifier la connexion"
+      "connectionCheck": "Vérifier la connexion",
+      "gateChecking": "Vérification de la barrière…",
+      "gateUnknown": "Barrière non vérifiée",
+      "gateVerified": "Barrière vérifiée",
+      "gateNotVerified": "Barrière non vérifiée",
+      "gateUnverifiedHelp": "La barrière d'approbation n'a pas pu être vérifiée sur le document de cet agent."
     },
     "chat": {
       "empty": "Interrogez votre déploiement. L'opérateur fait les recherches et vous montre chaque appel qu'il effectue.",

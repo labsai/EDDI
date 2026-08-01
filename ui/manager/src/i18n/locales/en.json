@@ -3140,6 +3140,7 @@
       "provisioning": "Creating the operator agent…",
       "resolving-version": "Resolving the agent version…",
       "saving": "Saving configuration…",
+      "verifying-gate": "Verifying the approval gate…",
       "done": "Done",
       "canary": "Checking the operator can reach your platform…"
     },
@@ -3162,7 +3163,12 @@
       "deactivateConfirmBody": "The operator is undeployed and stops responding. Its configuration is kept, so you can turn it back on later.",
       "resetConfirmTitle": "Delete the Platform Operator?",
       "resetConfirmBody": "The operator agent and all the resources created for it are permanently deleted, along with its saved configuration. This cannot be undone.",
-      "connectionCheck": "Check connection"
+      "connectionCheck": "Check connection",
+      "gateChecking": "Verifying gate…",
+      "gateUnknown": "Gate not checked",
+      "gateVerified": "Gate verified",
+      "gateNotVerified": "Gate not verified",
+      "gateUnverifiedHelp": "The approval gate could not be verified on this agent's document."
     },
     "chat": {
       "empty": "Ask about your deployment. The operator looks things up and shows you every call it makes.",

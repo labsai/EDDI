@@ -14,13 +14,16 @@ import {
   reactivateOperator,
   assertProvisioned,
   runOperatorCanary,
+  verifyGateInstalled,
+  gateLooksInstalled,
   OPERATOR_VARIABLE_KEY,
   CALLER_TOKEN_API_AUTH,
   type OperatorConfig,
   type FetchedSpec,
 } from "../operator";
 import { OPERATOR_SAFETY_PREAMBLE } from "@/lib/operator/system-prompt";
-import { READ_ENDPOINTS } from "@/lib/operator/tool-scopes";
+import { READ_ENDPOINTS, buildToolApprovals } from "@/lib/operator/tool-scopes";
+import type { Agent } from "../agents";
 
 const BASE = "*/variablestore/variables/default";
 
@@ -284,6 +287,157 @@ describe("provisionOperator", () => {
     await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test", spec: fetchedSpec() });
     expect(captured?.apiBaseUrl).toBe("https://eddi.example");
     expect(captured?.llmBaseUrl).toBeUndefined();
+  });
+
+  it("sends the tool-approval gate even for read_only", async () => {
+    // The whole point of installing it now: read_only proves the pipeline
+    // end-to-end at zero risk, and read_write later reuses the identical config.
+    await provisionOperator({
+      agentName: "Op",
+      config: config({ scope: "read_only" }),
+      apiKey: "sk-test",
+      spec: fetchedSpec(),
+    });
+    const hitlConfig = captured?.hitlConfig as { toolApprovals?: unknown } | undefined;
+    expect(hitlConfig?.toolApprovals).toEqual(buildToolApprovals());
+  });
+
+  it("never sends an AUTO_APPROVE timeout policy", async () => {
+    await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test", spec: fetchedSpec() });
+    const hitlConfig = captured?.hitlConfig as
+      | { timeoutPolicy?: string; toolApprovals?: { timeoutPolicy?: string } }
+      | undefined;
+    expect(hitlConfig?.timeoutPolicy).not.toBe("AUTO_APPROVE");
+    expect(hitlConfig?.toolApprovals?.timeoutPolicy).not.toBe("AUTO_APPROVE");
+  });
+});
+
+describe("gateLooksInstalled", () => {
+  function agentWithGate(overrides: Partial<NonNullable<Agent["hitlConfig"]>> = {}): Agent {
+    return {
+      hitlConfig: {
+        toolApprovals: buildToolApprovals(),
+        ...overrides,
+      },
+    };
+  }
+
+  it("accepts what buildToolApprovals actually produces", () => {
+    expect(gateLooksInstalled(agentWithGate()).ok).toBe(true);
+  });
+
+  it("rejects an agent with no hitlConfig at all", () => {
+    const result = gateLooksInstalled({});
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/hitlConfig is absent/);
+  });
+
+  it("rejects hitlConfig with no toolApprovals", () => {
+    const result = gateLooksInstalled({ hitlConfig: {} });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/toolApprovals is absent/);
+  });
+
+  it("rejects an empty requireApproval — the gate would be inactive", () => {
+    const result = gateLooksInstalled(
+      agentWithGate({ toolApprovals: { ...buildToolApprovals(), requireApproval: [] } }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/requireApproval is empty/);
+  });
+
+  it("rejects agent-level AUTO_APPROVE", () => {
+    const result = gateLooksInstalled(agentWithGate({ timeoutPolicy: "AUTO_APPROVE" }));
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/hitlConfig.timeoutPolicy is AUTO_APPROVE/);
+  });
+
+  it("rejects tool-level AUTO_APPROVE", () => {
+    const result = gateLooksInstalled(
+      agentWithGate({ toolApprovals: { ...buildToolApprovals(), timeoutPolicy: "AUTO_APPROVE" } }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/toolApprovals.timeoutPolicy is AUTO_APPROVE/);
+  });
+
+  it.each(["http.post:*", "http.put:*", "http.patch:*", "http.delete:*", "*", "http.*", "http.*:*"])(
+    "rejects an exempt pattern that would swallow a gated write: %s",
+    (overbroad) => {
+      const result = gateLooksInstalled(
+        agentWithGate({ toolApprovals: { ...buildToolApprovals(), exempt: [overbroad] } }),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain(overbroad);
+    },
+  );
+
+  it("does not flag the narrow exempt pattern buildToolApprovals actually uses", () => {
+    expect(gateLooksInstalled(agentWithGate()).ok).toBe(true);
+  });
+});
+
+describe("verifyGateInstalled", () => {
+  function mockAgentVersions(agentId: string, versions: Record<number, Agent>, currentVersion: number) {
+    server.use(
+      http.get(`*/agentstore/agents/${agentId}/currentversion`, () => HttpResponse.json(currentVersion)),
+      http.get(`*/agentstore/agents/${agentId}`, ({ request }) => {
+        const url = new URL(request.url);
+        const version = Number(url.searchParams.get("version") ?? "0");
+        const agent = versions[version];
+        if (!agent) return new HttpResponse(null, { status: 404 });
+        return HttpResponse.json(agent);
+      }),
+    );
+  }
+
+  it("verifies when the single version carries a sane gate", async () => {
+    const gated: Agent = { hitlConfig: { toolApprovals: buildToolApprovals() } };
+    mockAgentVersions("agent-1", { 1: gated }, 1);
+    const result = await verifyGateInstalled("agent-1");
+    expect(result.verified).toBe(true);
+    expect(result.checkedVersions).toEqual([1]);
+  });
+
+  it("refuses when an EARLIER version lacks the gate, even though the latest has it", async () => {
+    // The whole reason to check every version: a redeploy can reach any
+    // previously-created version, not just the one currently live.
+    const gated: Agent = { hitlConfig: { toolApprovals: buildToolApprovals() } };
+    const ungated: Agent = {};
+    mockAgentVersions("agent-1", { 1: ungated, 2: gated }, 2);
+    const result = await verifyGateInstalled("agent-1");
+    expect(result.verified).toBe(false);
+    expect(result.reason).toMatch(/^version 1:/);
+    expect(result.checkedVersions).toEqual([1]);
+  });
+
+  it("checks every version up to current, in order, stopping at the first failure", async () => {
+    const gated: Agent = { hitlConfig: { toolApprovals: buildToolApprovals() } };
+    mockAgentVersions("agent-1", { 1: gated, 2: gated, 3: {} }, 3);
+    const result = await verifyGateInstalled("agent-1");
+    expect(result.verified).toBe(false);
+    expect(result.checkedVersions).toEqual([1, 2, 3]);
+    expect(result.reason).toMatch(/^version 3:/);
+  });
+
+  it("reports a network failure as unverified rather than throwing", async () => {
+    server.use(
+      http.get("*/agentstore/agents/agent-1/currentversion", () =>
+        HttpResponse.json({ message: "boom" }, { status: 500 }),
+      ),
+    );
+    await expect(verifyGateInstalled("agent-1")).resolves.toMatchObject({
+      verified: false,
+      checkedVersions: [],
+    });
+  });
+
+  it("reports an unresolvable version as unverified", async () => {
+    server.use(
+      http.get("*/agentstore/agents/agent-1/currentversion", () => HttpResponse.json(0)),
+    );
+    const result = await verifyGateInstalled("agent-1");
+    expect(result.verified).toBe(false);
+    expect(result.checkedVersions).toEqual([]);
   });
 });
 

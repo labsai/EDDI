@@ -22,6 +22,7 @@ import {
   useDeactivateOperator,
   useResetOperator,
   useOperatorCanary,
+  useVerifyOperatorGate,
   seedConfig,
   type ActivationStage,
 } from "@/hooks/use-operator";
@@ -59,6 +60,7 @@ export function OperatorPage() {
   const canary = useOperatorCanary();
 
   const status = useOperatorStatus(config);
+  const gate = useVerifyOperatorGate(config);
   const chat = useOperatorChat(config);
 
   const handleActivate = useCallback(
@@ -312,6 +314,8 @@ export function OperatorPage() {
           config={config!}
           status={status.data}
           statusLoading={status.isLoading}
+          gate={gate.data}
+          gateLoading={gate.isLoading}
           onReconfigure={() => setShowActivation(true)}
           onDeactivate={handleDeactivate}
           onReset={handleReset}

@@ -3119,6 +3119,7 @@
       "provisioning": "A criar o agente operador…",
       "resolving-version": "A determinar a versão do agente…",
       "saving": "A guardar a configuração…",
+      "verifying-gate": "A verificar a barreira de aprovação…",
       "done": "Concluído",
       "canary": "A verificar se o operador consegue aceder à sua plataforma…"
     },
@@ -3141,7 +3142,12 @@
       "deactivateConfirmBody": "O operador é retirado da implantação e deixa de responder. A sua configuração é mantida, para que o possa reativar mais tarde.",
       "resetConfirmTitle": "Eliminar o operador da plataforma?",
       "resetConfirmBody": "O agente operador e todos os recursos criados para ele são eliminados permanentemente, juntamente com a sua configuração guardada. Esta ação não pode ser anulada.",
-      "connectionCheck": "Verificar ligação"
+      "connectionCheck": "Verificar ligação",
+      "gateChecking": "A verificar barreira…",
+      "gateUnknown": "Barreira não verificada",
+      "gateVerified": "Barreira verificada",
+      "gateNotVerified": "Barreira não verificada",
+      "gateUnverifiedHelp": "Não foi possível verificar a barreira de aprovação no documento deste agente."
     },
     "chat": {
       "empty": "Pergunte sobre a sua instalação. O operador consulta e mostra-lhe cada chamada que faz.",

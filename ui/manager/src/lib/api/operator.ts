@@ -11,10 +11,13 @@ import {
   undeployAgent,
   deployAgent,
   getDeploymentStatus,
+  getAgent,
+  type Agent,
 } from "./agents";
 import { startConversation, sendMessageStreaming, endConversation } from "./chat";
 import {
   buildEndpointFilter,
+  buildToolApprovals,
   parseEndpoint,
   type OperatorScope,
 } from "@/lib/operator/tool-scopes";
@@ -241,6 +244,14 @@ export async function provisionOperator(
     endpoints: buildEndpointFilter(config.scope),
     deploy: true,
     environment: config.environment,
+    // Sent unconditionally — including for read_only. See buildToolApprovals:
+    // installing the real gate now, on v1, is what verifyGateInstalled proves
+    // and what read_write reuses unchanged later. hitlConfig.timeoutPolicy is
+    // left unset deliberately: the per-tool toolApprovals.timeoutPolicy already
+    // pins WAIT_INDEFINITELY, and Task 10 on the backend demotes an *inherited*
+    // AUTO_APPROVE to WAIT_INDEFINITELY for tool pauses anyway — setting it here
+    // too would only be redundant, not safer.
+    hitlConfig: { toolApprovals: buildToolApprovals() },
   });
 }
 
@@ -301,6 +312,102 @@ export function parseVersionFromLocation(location: string): number | null {
   if (!match) return null;
   const value = Number(match[1]);
   return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/* ─── Gate verification ─── */
+
+/** Write patterns `buildToolApprovals` gates. An `exempt` entry equal to any of
+ *  these — or broad enough to subsume one — would exempt a write outright. */
+const GATED_WRITE_PATTERNS = ["http.post:*", "http.put:*", "http.patch:*", "http.delete:*"] as const;
+
+/** `exempt` patterns broad enough to swallow a gated write pattern above. */
+const OVERBROAD_EXEMPT_PATTERNS = ["*", "http.*", "http.*:*", ...GATED_WRITE_PATTERNS] as const;
+
+export interface GateVerificationResult {
+  verified: boolean;
+  /** Human-readable cause of the first failure found; undefined when verified. */
+  reason?: string;
+  /** Agent versions actually inspected, 1..currentVersion. */
+  checkedVersions: number[];
+}
+
+/**
+ * Judges a single fetched agent document against what `buildToolApprovals`
+ * installs. Exported for direct unit testing without a network round trip.
+ */
+export function gateLooksInstalled(agent: Agent): { ok: boolean; reason?: string } {
+  const hitl = agent.hitlConfig;
+  if (!hitl) return { ok: false, reason: "hitlConfig is absent" };
+  if (hitl.timeoutPolicy === "AUTO_APPROVE") {
+    return { ok: false, reason: "hitlConfig.timeoutPolicy is AUTO_APPROVE" };
+  }
+  const toolApprovals = hitl.toolApprovals;
+  if (!toolApprovals) return { ok: false, reason: "hitlConfig.toolApprovals is absent" };
+  if (!toolApprovals.requireApproval || toolApprovals.requireApproval.length === 0) {
+    return { ok: false, reason: "toolApprovals.requireApproval is empty — the gate is inactive" };
+  }
+  if (toolApprovals.timeoutPolicy === "AUTO_APPROVE") {
+    return { ok: false, reason: "toolApprovals.timeoutPolicy is AUTO_APPROVE" };
+  }
+  const exempt = toolApprovals.exempt ?? [];
+  const overbroadExempt = exempt.find((pattern) =>
+    (OVERBROAD_EXEMPT_PATTERNS as readonly string[]).includes(pattern),
+  );
+  if (overbroadExempt) {
+    return { ok: false, reason: `exempt pattern '${overbroadExempt}' would exempt a gated write` };
+  }
+  return { ok: true };
+}
+
+/**
+ * Reads EVERY version of the agent document back and refuses unless the gate
+ * is verifiably installed and sane on each one.
+ *
+ * Checking only the currently-deployed version is not enough: version skew is
+ * real (a newer Manager against an older backend can have `hitlConfig` silently
+ * dropped from the request it sent, or an older, ungated version can still be
+ * reachable by a future redeploy), and the only defence is reading the actual
+ * stored documents back rather than trusting what was requested or what is
+ * currently live.
+ *
+ * `agentId` alone, not a config snapshot — the caller must not be able to
+ * short-circuit this with cached state.
+ */
+export async function verifyGateInstalled(agentId: string): Promise<GateVerificationResult> {
+  let currentVersion: number;
+  try {
+    currentVersion = (await api.get<number>(`/agentstore/agents/${agentId}/currentversion`)) ?? 0;
+  } catch (error) {
+    return {
+      verified: false,
+      reason: `could not resolve the current version: ${error instanceof Error ? error.message : String(error)}`,
+      checkedVersions: [],
+    };
+  }
+  if (currentVersion < 1) {
+    return { verified: false, reason: "no version of this agent could be resolved", checkedVersions: [] };
+  }
+
+  const versions = Array.from({ length: currentVersion }, (_, i) => i + 1);
+  const checkedVersions: number[] = [];
+  for (const version of versions) {
+    let agent: Agent;
+    try {
+      agent = await getAgent(agentId, version);
+    } catch (error) {
+      return {
+        verified: false,
+        reason: `version ${version} could not be read back: ${error instanceof Error ? error.message : String(error)}`,
+        checkedVersions,
+      };
+    }
+    checkedVersions.push(version);
+    const judged = gateLooksInstalled(agent);
+    if (!judged.ok) {
+      return { verified: false, reason: `version ${version}: ${judged.reason}`, checkedVersions };
+    }
+  }
+  return { verified: true, checkedVersions };
 }
 
 /* ─── Canary ─── */

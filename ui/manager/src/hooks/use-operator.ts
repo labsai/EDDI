@@ -14,6 +14,8 @@ import {
   fetchOpenApiSpec,
   findMissingEndpoints,
   defaultOperatorConfig,
+  verifyGateInstalled,
+  type GateVerificationResult,
   type OperatorConfig,
 } from "@/lib/api/operator";
 import { undeployAgent, deleteAgent } from "@/lib/api/agents";
@@ -27,6 +29,7 @@ export const operatorKeys = {
   config: ["operator", "config"] as const,
   status: (agentId: string, version: number) =>
     ["operator", "status", agentId, version] as const,
+  gate: (agentId: string) => ["operator", "gate", agentId] as const,
 };
 
 /* ─── Config ─── */
@@ -68,13 +71,15 @@ export type ActivationStage =
   | "provisioning"
   | "resolving-version"
   | "saving"
+  | "verifying-gate"
   | "canary"
   | "done";
 
-/** What activation returns: the saved config plus the probe outcome. */
+/** What activation returns: the saved config plus the probe outcomes. */
 export interface ActivationOutcome {
   config: OperatorConfig;
   canary: CanaryResult;
+  gate: GateVerificationResult;
 }
 
 export interface ActivateParams {
@@ -142,13 +147,22 @@ export function useActivateOperator() {
         }
       }
 
+      // Read the gate back from the document we just created — never trust that
+      // sending hitlConfig means it landed. This is what actually proves
+      // isWriteScopeAvailable's "backend accepts hitlConfig" fact; a caught
+      // exception here still resolves (not throws) so a read_only activation
+      // that failed only its verification step is reported, not treated as a
+      // failed provision.
+      onStage?.("verifying-gate");
+      const gate = await verifyGateInstalled(result.agentId);
+
       // A READY badge only proves the config loaded. Run one real read so a
       // deployed-but-unreachable operator is reported as such, not as success.
       onStage?.("canary");
       const canary = await runOperatorCanary(next);
 
       onStage?.("done");
-      return { config: next, canary };
+      return { config: next, canary, gate };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: operatorKeys.all });
@@ -188,6 +202,28 @@ export function useReactivateOperator() {
 export function useOperatorCanary() {
   return useMutation({
     mutationFn: (config: OperatorConfig) => runOperatorCanary(config),
+  });
+}
+
+/**
+ * Continuously re-verifies the tool-approval gate on the live agent document.
+ *
+ * Verification is continuous, not one-time: `eddi.hitl.tool.enabled=false` (or
+ * any other deployment-level change) can be flipped after activation and
+ * nothing else would report it. `staleTime: 0` makes every mount — i.e. every
+ * time the operator page is opened — re-check rather than serve a cached
+ * "verified" from a stale mount. A failed or inconclusive result must drop any
+ * write-scope offer; this hook only reports the fact, callers are responsible
+ * for failing closed on it (see `isWriteScopeAvailable`).
+ */
+export function useVerifyOperatorGate(config: OperatorConfig | null | undefined) {
+  const agentId = config?.agentId ?? "";
+  const ready = Boolean(config?.enabled && agentId);
+  return useQuery({
+    queryKey: operatorKeys.gate(agentId),
+    queryFn: () => verifyGateInstalled(agentId),
+    enabled: ready,
+    staleTime: 0,
   });
 }
 

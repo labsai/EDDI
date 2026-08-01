@@ -3113,6 +3113,7 @@
       "provisioning": "オペレーターエージェントを作成しています…",
       "resolving-version": "エージェントのバージョンを確認しています…",
       "saving": "設定を保存しています…",
+      "verifying-gate": "承認ゲートを確認しています…",
       "done": "完了",
       "canary": "オペレーターが環境に到達できるか確認しています…"
     },
@@ -3135,7 +3136,12 @@
       "deactivateConfirmBody": "オペレーターはデプロイ解除され、応答を停止します。設定は保持されるため、後で再度有効にできます。",
       "resetConfirmTitle": "プラットフォームオペレーターを削除しますか？",
       "resetConfirmBody": "オペレーターエージェントと、そのために作成されたすべてのリソース、保存された設定が完全に削除されます。この操作は取り消せません。",
-      "connectionCheck": "接続を確認"
+      "connectionCheck": "接続を確認",
+      "gateChecking": "ゲートを確認中…",
+      "gateUnknown": "ゲート未確認",
+      "gateVerified": "ゲート確認済み",
+      "gateNotVerified": "ゲート未確認",
+      "gateUnverifiedHelp": "このエージェントのドキュメントで承認ゲートを確認できませんでした。"
     },
     "chat": {
       "empty": "ご自身の環境について質問してください。オペレーターが調べ、行ったすべての呼び出しを表示します。",

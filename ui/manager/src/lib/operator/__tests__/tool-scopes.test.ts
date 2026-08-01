@@ -4,9 +4,21 @@ import {
   WRITE_ENDPOINTS,
   endpointsForScope,
   buildEndpointFilter,
+  buildToolApprovals,
   parseEndpoint,
   isWriteScopeAvailable,
+  type WriteScopeFacts,
 } from "../tool-scopes";
+
+function allFacts(overrides: Partial<WriteScopeFacts> = {}): WriteScopeFacts {
+  return {
+    backendAcceptsHitlConfig: true,
+    gateVerifiedOnEveryVersion: true,
+    authMode: "caller-identity",
+    approvalSurfaceMounted: true,
+    ...overrides,
+  };
+}
 
 describe("tool-scopes", () => {
   describe("the allow-list itself", () => {
@@ -51,17 +63,65 @@ describe("tool-scopes", () => {
       expect(WRITE_ENDPOINTS).toEqual([]);
     });
 
-    // The approval seam: writes must be unreachable, not merely discouraged.
-    it("is unavailable without an approval handler", () => {
-      expect(isWriteScopeAvailable(false)).toBe(false);
+    it("never contains a read verb", () => {
+      // The gate classifies by HTTP method (GET exempt, everything else
+      // required). A mutating GET in this list would sail through ungated.
+      const looksLikeARead = WRITE_ENDPOINTS.filter((e) => e.startsWith("GET "));
+      expect(looksLikeARead).toEqual([]);
     });
 
-    it("stays unavailable even with a handler while no write endpoints exist", () => {
-      expect(isWriteScopeAvailable(true)).toBe(false);
+    // The approval seam: writes must be unreachable, not merely discouraged.
+    it("is unavailable with no verified facts", () => {
+      expect(
+        isWriteScopeAvailable({
+          backendAcceptsHitlConfig: false,
+          gateVerifiedOnEveryVersion: false,
+          authMode: "none",
+          approvalSurfaceMounted: false,
+        }),
+      ).toBe(false);
+    });
+
+    it("stays unavailable even with every fact true, while no write endpoints exist", () => {
+      expect(isWriteScopeAvailable(allFacts())).toBe(false);
+    });
+
+    it.each([
+      ["backendAcceptsHitlConfig", { backendAcceptsHitlConfig: false }],
+      ["gateVerifiedOnEveryVersion", { gateVerifiedOnEveryVersion: false }],
+      ["approvalSurfaceMounted", { approvalSurfaceMounted: false }],
+    ] as const)("stays unavailable when only %s is false", (_name, override) => {
+      expect(isWriteScopeAvailable(allFacts(override))).toBe(false);
+    });
+
+    it("stays unavailable when authMode is 'none', even if every other fact holds", () => {
+      // 'none' cannot support attributed approval decisions or self-approval
+      // prevention, so it must never be treated as good enough on its own.
+      expect(isWriteScopeAvailable(allFacts({ authMode: "none" }))).toBe(false);
     });
 
     it("grants no extra endpoints even if read_write is somehow requested", () => {
       expect(endpointsForScope("read_write")).toEqual([...READ_ENDPOINTS]);
+    });
+  });
+
+  describe("buildToolApprovals", () => {
+    it("gates every write method and exempts reads", () => {
+      const config = buildToolApprovals();
+      expect(config.requireApproval).toEqual(
+        expect.arrayContaining(["http.post:*", "http.put:*", "http.patch:*", "http.delete:*"]),
+      );
+      expect(config.exempt).toEqual(["http.get:*"]);
+    });
+
+    it("never allows AUTO_APPROVE", () => {
+      expect(buildToolApprovals().timeoutPolicy).toBe("WAIT_INDEFINITELY");
+    });
+
+    it("is the same shape whatever the caller asks for — read_write reuses it unchanged", () => {
+      // buildToolApprovals takes no scope parameter on purpose: the gate must not
+      // need updating the day WRITE_ENDPOINTS stops being empty.
+      expect(buildToolApprovals()).toEqual(buildToolApprovals());
     });
   });
 
