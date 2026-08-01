@@ -7,13 +7,24 @@ package ai.labs.eddi.engine.internal.groups;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration.AgentIdentity;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.SecurityConfig;
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
+import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.datastore.IResourceStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -21,11 +32,13 @@ import static org.mockito.Mockito.*;
 /**
  * Focused unit tests for {@link GroupSigningGuard}, extracted from
  * {@code GroupConversationService} during the Wave R (R1 step 3) refactor.
- * Covers the guard-clause branches directly; the full sign → self-verify →
- * nonce-validate happy path requires real Ed25519 key material and is exercised
- * by {@code AgentSigningService}'s own tests plus the characterization suites
- * this extraction preserved ({@code GroupConversationServiceHitlCoverage3Test},
- * {@code GroupConversationServiceBranchCoverageTest}).
+ * Covers the guard-clause branches and the key-rotation-correctness fix
+ * directly; the full sign → self-verify → nonce-validate happy path requires
+ * real Ed25519 key material and is exercised by {@code AgentSigningService}'s
+ * own tests plus {@code GroupConversationServiceBranchCoverageTest}'s
+ * {@code SigningPaths} suite ({@code GroupConversationServiceHitlCoverage3Test}
+ * only exercises {@code verifyPriorEntriesIfRequired}'s guard clauses, not the
+ * signing happy path).
  *
  * @author tests
  */
@@ -175,6 +188,99 @@ class GroupSigningGuardTest {
     }
 
     // =================================================================
+    // Key-rotation correctness: lookups must use the exact key version an
+    // entry/envelope declares, not "whichever key happens to be valid right
+    // now" — during a rotation overlap window those can disagree.
+    // =================================================================
+
+    private static final String KEY_V1_B64 = "old-key-b64";
+    private static final String KEY_V2_B64 = "new-key-b64";
+
+    @Test
+    void verifyPriorEntriesIfRequired_keyRotationOverlap_eachEntryVerifiedWithItsOwnKeyVersion() throws Exception {
+        var receiverResId = mockResourceId();
+        var receiverConfig = new AgentConfiguration();
+        var receiverSecurity = new SecurityConfig();
+        receiverSecurity.setRequirePeerVerification(true);
+        receiverConfig.setSecurity(receiverSecurity);
+        when(agentStore.getCurrentResourceId("receiver")).thenReturn(receiverResId);
+        when(agentStore.read("receiver", receiverResId.getVersion())).thenReturn(receiverConfig);
+
+        // Both keys are simultaneously valid (no expiry) — an overlap window
+        // where naively picking "the highest valid version" would pick v2 for
+        // an entry that was actually signed with v1.
+        var speakerResId = mockResourceId();
+        var speakerConfig = new AgentConfiguration();
+        var identity = new AgentIdentity();
+        identity.setKeys(List.of(
+                new AgentPublicKey(1, KEY_V1_B64, 0L, 0L),
+                new AgentPublicKey(2, KEY_V2_B64, 0L, 0L)));
+        speakerConfig.setIdentity(identity);
+        when(agentStore.getCurrentResourceId(AGENT_A)).thenReturn(speakerResId);
+        when(agentStore.read(AGENT_A, speakerResId.getVersion())).thenReturn(speakerConfig);
+
+        when(agentSigningService.verifyEnvelope(any(SignedEnvelope.class), anyString())).thenReturn(true);
+
+        long now = Instant.now().toEpochMilli();
+        var entrySignedWithV1 = new TranscriptEntry(AGENT_A, "A", "hello", 0, "P", TranscriptEntryType.OPINION,
+                Instant.now(), null, null, "sig-1", "nonce-1", now, 1);
+        var entrySignedWithV2 = new TranscriptEntry(AGENT_A, "A", "world", 0, "P", TranscriptEntryType.OPINION,
+                Instant.now(), null, null, "sig-2", "nonce-2", now, 2);
+        var g = gc();
+        g.getTranscript().add(entrySignedWithV1);
+        g.getTranscript().add(entrySignedWithV2);
+
+        guard().verifyPriorEntriesIfRequired("receiver", g);
+
+        var keyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(agentSigningService, times(2)).verifyEnvelope(any(SignedEnvelope.class), keyCaptor.capture());
+        // The buggy getKeyValidAt(timestamp) lookup, cached per-agent-only,
+        // would resolve BOTH entries to the higher-version key (v2) — the
+        // second entry's own declared version would never even be consulted.
+        assertEquals(List.of(KEY_V1_B64, KEY_V2_B64), keyCaptor.getAllValues(),
+                "entry signed with key v1 must be verified against key v1, and the v2 entry against key v2 — "
+                        + "not both collapsed onto whichever key is newest");
+    }
+
+    @Test
+    void signOutgoingMessage_selfVerify_usesExactSignedKeyVersion_notWhicheverIsValidNow() throws Exception {
+        var resId = mockResourceId();
+        var config = new AgentConfiguration();
+        var security = new SecurityConfig();
+        security.setSignInterAgentMessages(true);
+        config.setSecurity(security);
+
+        // v2 is the highest version (so it's the one signOutgoingMessage signs
+        // with) but is NOT yet valid at "now" — v1 is the only key currently
+        // valid. A self-verify that asks "what's valid now" would wrongly use
+        // v1 to check a signature made with v2.
+        var identity = new AgentIdentity();
+        long farFuture = Instant.now().toEpochMilli() + 10_000_000L;
+        identity.setKeys(List.of(
+                new AgentPublicKey(1, KEY_V1_B64, 0L, 0L),
+                new AgentPublicKey(2, KEY_V2_B64, farFuture, 0L)));
+        config.setIdentity(identity);
+
+        when(agentStore.getCurrentResourceId(AGENT_A)).thenReturn(resId);
+        when(agentStore.read(AGENT_A, resId.getVersion())).thenReturn(config);
+
+        var signed = new SignedEnvelope(AGENT_A, GROUP_ID, Map.of("content", "hi", "phase", "OPINION"),
+                "nonce-xyz", Instant.now().toEpochMilli(), "sig-xyz", 2);
+        when(agentSigningService.signEnvelope(eq(TENANT), eq(AGENT_A), any(), eq(2))).thenReturn(signed);
+        when(agentSigningService.verifyEnvelope(eq(signed), eq(KEY_V2_B64))).thenReturn(true);
+        when(agentSigningService.verifyEnvelope(eq(signed), eq(KEY_V1_B64))).thenReturn(false);
+        when(nonceCacheService.validate("nonce-xyz", signed.timestampMs()))
+                .thenReturn(NonceCacheService.NonceValidation.VALID);
+
+        var result = guard().signOutgoingMessage(AGENT_A, GROUP_ID, "hi", "OPINION");
+
+        assertNotEquals(GroupSigningGuard.SigningResult.UNSIGNED, result,
+                "self-verify must look up key v2 (what it actually signed with), not whatever's valid "
+                        + "'now' — otherwise a signature made just before a key's validFrom is wrongly discarded");
+        assertEquals("sig-xyz", result.signature());
+    }
+
+    // =================================================================
     // forgetConversation
     // =================================================================
 
@@ -190,8 +296,8 @@ class GroupSigningGuardTest {
         return g;
     }
 
-    private ai.labs.eddi.datastore.IResourceStore.IResourceId mockResourceId() {
-        return new ai.labs.eddi.datastore.IResourceStore.IResourceId() {
+    private IResourceStore.IResourceId mockResourceId() {
+        return new IResourceStore.IResourceId() {
             @Override
             public String getId() {
                 return AGENT_A;

@@ -1034,7 +1034,8 @@ public class GroupConversationService implements IGroupConversationService {
             // cancel-of-paused. executeDiscussion's finally deliberately skipped
             // cleanup while AWAITING_APPROVAL, so without this the armed timeout
             // schedule fires against a deleted conversation, ephemeral dynamic
-            // agents stay deployed forever, and the lastVerifiedIndex entry leaks.
+            // agents stay deployed forever, and the signing guard's verification
+            // cursor leaks.
             if (gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
                 deleteGroupHitlTimeoutSchedule(groupConversationId);
                 cleanupAfterTerminalState(gc);
@@ -3419,9 +3420,10 @@ public class GroupConversationService implements IGroupConversationService {
         return contextBuilder.extractResponse(snapshot);
     }
 
-    // buildPlainTextFallback is now private to GroupContextBuilder (only ever
-    // called internally by its buildPhaseInput); kept here as a thin delegator
-    // only because a characterization test reaches it via reflection.
+    // buildPlainTextFallback's only real caller is GroupContextBuilder's own
+    // buildPhaseInput (it's public there only because this cross-package
+    // delegator needs to call it); kept here as a thin delegator only because
+    // a characterization test reaches it via reflection.
     private String buildPlainTextFallback(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript) {
         return contextBuilder.buildPlainTextFallback(phase, speaker, question, transcript);
     }
@@ -3939,8 +3941,9 @@ public class GroupConversationService implements IGroupConversationService {
      * Releases resources held across an HITL pause once the conversation reaches a
      * terminal state OUTSIDE the executeDiscussion finally block (cancel-of-paused,
      * REJECTED resume). executeDiscussion skips cleanup while AWAITING_APPROVAL —
-     * without this, ephemeral dynamic agents stay deployed and lastVerifiedIndex
-     * entries leak forever on every paused-then-terminal path.
+     * without this, ephemeral dynamic agents stay deployed and the signing guard's
+     * verification cursor (see {@link GroupSigningGuard#forgetConversation}) leaks
+     * forever on every paused-then-terminal path.
      */
     private void cleanupAfterTerminalState(GroupConversation gc) {
         signingGuard.forgetConversation(gc.getId());

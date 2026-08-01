@@ -5,6 +5,27 @@
 
 ---
 
+## 🔍 fix(groups): key-rotation-safe signature verification, plus review-comment cleanup (2026-08-01)
+
+**Repo:** EDDI (`claude/group-collaboration-plan-9bca77`)
+
+Before pushing the three R1 extraction commits, ran a thorough independent review: 5 parallel agents (AGENTS.md compliance, shallow bug scan, git blame/history context, prior-PR-comment context via `gh`, code-comment-vs-code consistency), each reading the diff fresh with no access to the extraction session's own reasoning. Zero regressions from the extraction itself — all three "pure move" claims held up to line-by-line, argument-by-argument scrutiny. Six real findings surfaced; five were doc/comment fixes, one was a genuine pre-existing bug worth fixing in place.
+
+**Real bug fixed — key-rotation-unsafe signature lookups in `GroupSigningGuard`.** Pre-existing on `main` (carried over unchanged by the pure-move extraction; originally flagged by CodeRabbit on PR #494, never fixed). Two call sites resolved a signer's public key via `AgentIdentity.getKeyValidAt(timestamp)` — "whichever key is valid right now" — instead of `getKeyForVersion(exactVersion)`, even though the exact key version used to sign is recorded and available in both cases:
+
+- **Self-verify at signing time** (`signOutgoingMessage`): could self-discard a just-created, perfectly good signature if the signing key's validity window doesn't yet cover "now" by the time self-verify runs.
+- **Peer verify on receipt** (`verifyPriorEntriesIfRequired`): during a rotation overlap window (both old and new key simultaneously valid — the exact scenario `AgentPublicKey`'s own Javadoc says the system is designed to support), every entry was verified against the *newest* valid key regardless of which key actually signed it. Worse, the per-speaker public-key cache was keyed by agent ID alone, so once the first entry from an agent resolved a (possibly wrong) key, every later entry from that same agent — even ones signed with a different key version — silently reused the same cached key without ever consulting its own `signatureKeyVersion`.
+
+Fixed both call sites to use `getKeyForVersion`; changed the verify-side cache key to `agentId#keyVersion` so entries signed with different key versions get independently resolved and cached. Added two regression tests (`GroupSigningGuardTest`) that construct an overlapping-validity two-key identity and assert (via `ArgumentCaptor`) the exact key material passed to `verifyEnvelope` at each call — mutation-checked by temporarily reverting the production fix (`git stash` on just that file) and confirming both new tests fail, and only those two, before restoring it.
+
+**Doc/comment fixes (no behavior change):** an inline fully-qualified name in `GroupSigningGuardTest` (AGENTS.md §4.4 — the only such occurrence across all six new files, everything else in the extraction was already clean); a stale "is now private" comment about `GroupContextBuilder.buildPlainTextFallback`, which is actually `public` (necessarily, for the cross-package delegator call); two Javadoc comments in `GroupConversationService` still naming `lastVerifiedIndex`, a field that moved entirely into `GroupSigningGuard` two commits ago; a `GroupSigningGuardTest` class-Javadoc claim that overstated which characterization suite exercises the signing happy path.
+
+**Two real findings deliberately NOT fixed here** — both pre-existing, both security-relevant, both genuinely delicate rather than mechanical: (1) `verifyPriorEntriesIfRequired` never consults `NonceCacheService` for replay detection, but the sender already calls `validate()` once at signing time (a mutating "mark as seen" op) — naively calling it again on the receive side would make every signature immediately register as "replayed," which is worse than today's gap; needs a non-mutating check method and a decision about what "replay" means on the receive side. (2) `requirePeerVerification=true` is audit-only — a failed verification only logs, the turn proceeds and the receiving agent gets the content anyway; fixing this is a product decision (fail the turn? quarantine the entry? configurable policy?) not a bug fix. Both filed as background follow-up tasks with full context rather than folded into this refactor PR.
+
+Full 15-class group suite green (470 + 12 + 17 + 14, including the 2 new regression tests); clean compile; formatter/Checkstyle clean.
+
+---
+
 ## 🧩 refactor(groups): extract GroupSigningGuard from GroupConversationService (2026-08-01)
 
 **Repo:** EDDI (`claude/group-collaboration-plan-9bca77`)

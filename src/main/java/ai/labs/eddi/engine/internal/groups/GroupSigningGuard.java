@@ -23,7 +23,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * Signs outgoing group-transcript entries and verifies incoming ones when
  * inter-agent signing (Ed25519 envelopes) is configured on the speaking or
  * receiving agent. Extracted from {@code GroupConversationService} (Wave R, R1
- * step 3) as a pure move — no behavior change.
+ * step 3); {@code verifyPriorEntriesIfRequired} and the
+ * {@code lastVerifiedIndex} cursor moved verbatim, {@code signOutgoingMessage}
+ * was reshaped from nested mutable locals into early-return guard clauses
+ * returning a {@link SigningResult}. Both key lookups (self-verify at signing
+ * time, peer verify on receipt) were changed to resolve the exact key version
+ * an entry/envelope declares via {@code getKeyForVersion}, instead of
+ * "whichever key is valid right now" via {@code getKeyValidAt} — during a
+ * key-rotation overlap window those can disagree, which previously could
+ * self-discard a good signature or fail to verify one signed just before a
+ * rotation.
  * <p>
  * Owns {@code lastVerifiedIndex}, the in-JVM cursor of how far each group
  * conversation's transcript has been incrementally peer-verified. This is a
@@ -100,9 +109,12 @@ public class GroupSigningGuard {
 
             // Immediate self-verification: sanity-check the signature.
             // If this fails, the signature is broken — do NOT store it.
+            // Look up the EXACT key version just signed with, not "whatever's
+            // currently valid" — during a rotation overlap window the two can
+            // differ, which would self-verify against the wrong key and discard
+            // a perfectly good signature.
             String publicKey = agentConfig.getIdentity() != null
-                    ? agentConfig.getIdentity()
-                            .getKeyValidAt(signedEnvelope.timestampMs())
+                    ? agentConfig.getIdentity().getKeyForVersion(keyVersion)
                     : null;
             if (publicKey != null) {
                 boolean valid = agentSigningService.verifyEnvelope(signedEnvelope, publicKey);
@@ -200,7 +212,10 @@ public class GroupSigningGuard {
             int failed = 0;
             int unsigned = 0;
 
-            // Cache public keys per speaker to avoid redundant agentStore reads
+            // Cache public keys per (speaker, key version) to avoid redundant
+            // agentStore reads. Keying by speaker alone would collapse two
+            // entries from the same agent signed with different key versions
+            // (e.g. either side of a rotation) onto a single cached key.
             Map<String, String> publicKeyCache = new HashMap<>();
 
             for (int i = startIdx; i < totalEntries; i++) {
@@ -225,9 +240,16 @@ public class GroupSigningGuard {
                         entry.signatureNonce(), entry.signatureTimestampMs(),
                         entry.signature(), entry.signatureKeyVersion());
 
-                // Get speaker's public key (cached per speaker)
+                // Get speaker's public key (cached per speaker + key version). Look
+                // up the exact version the entry declares it was signed with —
+                // not "whatever's valid at the entry's timestamp" — since key
+                // rotation can leave two keys simultaneously valid at that
+                // instant, and picking the wrong one of the two is exactly the
+                // "key rotation issue" the failure log below already anticipates.
+                String cacheKey = entry.speakerAgentId() + "#" + entry.signatureKeyVersion();
                 try {
-                    String publicKey = publicKeyCache.computeIfAbsent(entry.speakerAgentId(), agentId -> {
+                    String publicKey = publicKeyCache.computeIfAbsent(cacheKey, ignored -> {
+                        String agentId = entry.speakerAgentId();
                         try {
                             var speakerResourceId = agentStore.getCurrentResourceId(agentId);
                             if (speakerResourceId == null) {
@@ -235,8 +257,7 @@ public class GroupSigningGuard {
                             }
                             var speakerConfig = agentStore.read(agentId, speakerResourceId.getVersion());
                             return speakerConfig.getIdentity() != null
-                                    ? speakerConfig.getIdentity()
-                                            .getKeyValidAt(entry.signatureTimestampMs())
+                                    ? speakerConfig.getIdentity().getKeyForVersion(entry.signatureKeyVersion())
                                     : null;
                         } catch (Exception e) {
                             LOGGER.warnf("Error loading public key for agent '%s': %s",
