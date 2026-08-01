@@ -5,6 +5,22 @@
 
 ---
 
+## 🧩 feat(orchestrator): add A2AToolsProvider, not yet wired (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 continued — third of 8 providers, and structurally different from the first two. A2A discovery was never a separate named method on `AgentOrchestrator` — it's a five-line config-gated block inline at the top of `buildToolSetup` (`a2aAgents == null/empty → null` else `a2aToolProviderManager.discoverTools(a2aAgents)`), so there was no reflected delegator to preserve and nothing to extract *from* in the usual sense.
+
+**Landed as new, tested, standalone code — `buildToolSetup`'s inline block is untouched.** Same choice as R2 step 1 (the SPI itself): add the capability, defer wiring it in. Threading a `ToolAssemblyContext` through `buildToolSetup` just to call this one provider, ahead of the other seven, would touch the shared method for an isolated, low-value partial migration — the real payoff is one rewiring commit that switches all 8 providers on together, once they all exist. `AgentOrchestrator` gets no changes at all in this commit; `A2AToolsProvider` is exercised only by its own new test suite for now.
+
+Considered and rejected keeping this one in a separate package since — unlike the HTTP/MCP providers — it has no `WorkflowTraversal` dependency forcing same-package placement. Splitting one provider out from its seven siblings for a reason that won't apply to most of them is not a real improvement; kept in `ai.labs.eddi.modules.llm.impl` for uniformity.
+
+Added `A2AToolsProviderTest` (4 tests): source tag, empty/null agent list short-circuits without calling the manager, and a configured agent delegates and wraps the result. `A2AToolProviderManager`'s own discovery logic is untouched and remains covered by its existing suites.
+
+Full 13-class test battery (279 tests) green; zero production files changed besides the new provider itself.
+
+---
+
 ## 🧩 refactor(orchestrator): extract McpToolsProvider (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
