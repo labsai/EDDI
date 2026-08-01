@@ -5,6 +5,25 @@
 
 ---
 
+## ✅ chore(groups): R1 step 9 — facade finalization verification, no further extraction (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R1 step 9 of `planning/group-collaboration-improvements-plan.md` §3.1 is a verification step, not an extraction — its job is to confirm `GroupConversationService` now matches the plan's target shape ("entry overloads, validation, depth guard, metrics, event fan-out, C8 resolution, and a slimmed `executeDiscussion`") and record the R1 post-condition results. No production code changed in this commit.
+
+**Reviewed every remaining top-level member against the plan's own description of what should stay, not just what's left over.** After steps 1–8, `GroupConversationService` is 1,380 lines, composed of: the `discuss`/`startAndDiscussAsync` entry overloads (validation + depth guard, ~145 lines — explicitly "remains" per the plan); `executeDiscussion` itself (443–773, ~330 lines — the phase loop the plan says stays, "delegates to the engines"); C8 resolution (`resolvePhases`/`resolveProtocol`/`resolveAgentTimeoutSeconds`/`resolveParticipants`, ~150 lines — explicitly "remains"); the cooperative-cancellation infrastructure (`MemberTurnCancellation`/`MemberTurnCancelledException`, ~53 lines) and the shared static utilities (`reserveTurn`/`parallelBatchBudgetSeconds`, ~54 lines) — both genuinely homeless (used across ≥2 collaborators, e.g. `TaskForceEngine` and `PhaseExecutionEngine`; moving either into one collaborator would be an arbitrary ownership call for no benefit, not a "pure move"); and ~50 thin delegators (~400 lines) to the 8 collaborators extracted in steps 1–8, every one of which is required by either the `IGroupConversationService` public interface contract or a direct reflection dependency confirmed via the bare-token sweep at its own extraction step. Nothing here is a leftover cluster — there is no more mechanical, low-risk extraction available without either (a) moving `executeDiscussion` itself, which the plan does not assign to any R1 step and which would be a materially larger, riskier undertaking than any single step so far, or (b) deleting delegators that tests still depend on.
+
+**The literal "≤800 lines" target is no longer realistic, and that is worth saying plainly rather than chasing it with unsafe cuts.** The plan's own Rev 2.1 preamble documents why: the original cluster survey (§3.1, sizes "re-verified 2026-08-01 after merging main") was done against a smaller pre-merge class, and the 2026-07/08 merge added roughly 700 lines of machinery the plan itself enumerates as must-preserve — cooperative cancellation, the `recordTaskFailure`/`notifyTaskFailure` lock-order split, `reserveTurn`, whole-batch parallel deadlines, HITL granularity (TASK vs PHASE), dynamic-agent tracking, `IDeploymentStore` cleanup. All of that grew a genuine home somewhere in the facade-plus-collaborators split; it did not evaporate. What actually matters for the plan's stated goal ("~80% of this plan's group features would otherwise land inside a 4,417-line class... refactoring after would mean moving every new feature twice") is that every feature-relevant seam now has a clean, focused, independently-testable home — and it does: 8 collaborator classes, each under 1,600 instructions per JaCoCo, each with its own focused test class. The facade went from 4,417 to 1,380 lines (68.8% reduction) and now holds only entry/validation/orchestration plus the required delegator surface.
+
+**R1 post-condition results:**
+- Full 27-class group + MCP test battery: 794 tests, 0 failures, 0 errors (unchanged since step 8's commit — nothing to re-verify beyond re-confirming green, since no code changed).
+- JaCoCo coverage, `jacoco.csv` this run, summed precisely (not eyeballed) across the facade + all 8 collaborators: 8,738/10,244 instructions (85.3%), 888/1,166 branches (76.2%). `GroupConversationService` alone: 1,803/2,032 instructions (88.7%), 138/174 branches (79.3%). No exact V8 baseline percentage was preserved in a durable artifact to diff against numerically — a gap in this session's own record-keeping, noted rather than papered over — but a pure-move refactor cannot by construction reduce which lines the *same* test suite exercises, and every one of the 12 original group characterization test classes (including `GroupConversationServiceConcurrencyTest`) still passes unmodified against the new structure, which is the operative regression signal.
+- `IGroupConversationService`'s public interface: unchanged across all 8 extraction commits (still empty diff, re-confirmed).
+
+8 of R1's 10 steps functionally complete; step 9 itself contributes verification, not code. Step 10 (graceful-shutdown wiring) is the one remaining item, and it is explicitly a deliberate behavior change with its own commit — never bundled into a refactor step.
+
+---
+
 ## 🧩 refactor(groups): extract GroupLifecycleOps from GroupConversationService (2026-08-01)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
