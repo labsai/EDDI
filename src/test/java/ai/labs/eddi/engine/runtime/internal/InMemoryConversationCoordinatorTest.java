@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.model.DeadLetterEntry;
+import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,6 +16,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -124,10 +127,15 @@ class InMemoryConversationCoordinatorTest {
 
         assertThrows(RejectedExecutionException.class, () -> coordinator.submitInOrder("conv-wedge", rejected));
 
-        // The queue must not retain the task nobody is going to run, and the map
-        // entry must be gone (otherwise it leaks for the JVM's lifetime).
+        // The queue must not retain the task nobody is going to run…
         assertFalse(coordinator.getQueueDepths().containsKey("conv-wedge"),
                 "A rejected submission must not leave a task queued with nothing scheduled to run it");
+        // …and the MAP ENTRY must be gone too, otherwise it leaks for the JVM's
+        // lifetime. getQueueDepths() cannot see that: it filters out size==0
+        // queues, so an orphaned empty queue is invisible to it. Only the raw
+        // map size distinguishes "cleaned up" from "leaked".
+        assertEquals(0, coordinator.activeConversationCount(),
+                "the rolled-back submission must not leave an orphaned (empty) queue in the map");
 
         // The conversation is still usable: the next turn is dispatched.
         coordinator.submitInOrder("conv-wedge", followUp);
@@ -158,6 +166,91 @@ class InMemoryConversationCoordinatorTest {
 
         assertFalse(coordinator.getQueueDepths().containsKey("conv-drain"),
                 "The queue must drain even when the next task cannot be scheduled");
+        assertEquals(0, coordinator.activeConversationCount(),
+                "a fully drained conversation must not leave an orphaned (empty) queue in the map");
+        assertEquals(1, coordinator.getTotalDeadLettered());
+    }
+
+    /**
+     * C10 + C11 — a task the coordinator DROPS is never invoked, so the release
+     * block inside its own body never runs. Without the discard hook the turn's
+     * in-flight metrics reference leaks forever and the HTTP caller waits for a
+     * response that can never arrive: exactly the leak the release block exists to
+     * prevent, re-created by the drop.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aDroppedQueuedTaskIsToldItWasDiscardedInsteadOfSilentlyVanishing() {
+        Callable<Void> first = mock(Callable.class);
+        AtomicInteger called = new AtomicInteger();
+        AtomicInteger discarded = new AtomicInteger();
+        AtomicReference<Throwable> discardCause = new AtomicReference<>();
+
+        IDiscardableTask second = new IDiscardableTask() {
+            @Override
+            public Void call() {
+                called.incrementAndGet();
+                return null;
+            }
+
+            @Override
+            public void onDiscarded(Throwable cause) {
+                discarded.incrementAndGet();
+                discardCause.set(cause);
+            }
+        };
+
+        coordinator.submitInOrder("conv-discard", first);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> captor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(runtime).submitCallable(eq(first), captor.capture(), isNull());
+
+        coordinator.submitInOrder("conv-discard", second);
+        RejectedExecutionException rejection = new RejectedExecutionException("pool saturated");
+        doThrow(rejection).when(runtime).submitCallable(eq(second), any(), isNull());
+
+        // first completes → submitNext tries (and fails) to schedule second
+        captor.getValue().onComplete(null);
+
+        assertEquals(1, discarded.get(), "a dropped task must be told exactly once that it will never run");
+        assertSame(rejection, discardCause.get(), "the discard hook must receive the reason the task could not be scheduled");
+        assertEquals(0, called.get(), "a dropped task must NOT be executed — that is what makes the hook necessary");
+        assertEquals(0, coordinator.activeConversationCount());
+    }
+
+    /**
+     * The hook is best effort: a throwing implementation must not break the drain
+     * of the rest of the queue or escape into the completion callback.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aThrowingDiscardHookDoesNotBreakTheDrain() {
+        Callable<Void> first = mock(Callable.class);
+        AtomicInteger discarded = new AtomicInteger();
+
+        IDiscardableTask exploding = new IDiscardableTask() {
+            @Override
+            public Void call() {
+                return null;
+            }
+
+            @Override
+            public void onDiscarded(Throwable cause) {
+                discarded.incrementAndGet();
+                throw new IllegalStateException("hook blew up");
+            }
+        };
+
+        coordinator.submitInOrder("conv-hook-boom", first);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> captor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(runtime).submitCallable(eq(first), captor.capture(), isNull());
+
+        coordinator.submitInOrder("conv-hook-boom", exploding);
+        doThrow(new RejectedExecutionException("pool saturated")).when(runtime).submitCallable(eq(exploding), any(), isNull());
+
+        captor.getValue().onComplete(null);
+
+        assertEquals(1, discarded.get());
+        assertEquals(0, coordinator.activeConversationCount(), "the queue must still be cleaned up after a failing hook");
         assertEquals(1, coordinator.getTotalDeadLettered());
     }
 
@@ -333,6 +426,10 @@ class InMemoryConversationCoordinatorTest {
         // After completion, queue should be removed (eager cleanup)
         assertFalse(coordinator.getQueueDepths().containsKey("conv-cleanup"),
                 "Queue should be removed after draining via eager cleanup");
+        // getQueueDepths() hides empty-but-present queues, so it cannot tell an
+        // eagerly-removed entry from a leaked one. The map size can.
+        assertEquals(0, coordinator.activeConversationCount(),
+                "the drained queue's MAP ENTRY must be removed, not just emptied");
     }
 
     /**

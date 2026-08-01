@@ -36,6 +36,16 @@ public class ConversationMemorySnapshot {
     private PendingToolCallBatch hitlPendingToolCalls;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private Map<String, Property> conversationProperties = new LinkedHashMap<>();
+    /**
+     * Keys of {@code longTerm} properties whose user-memory write is still owed
+     * because the turn that set them never reached its post-conversation tasks
+     * (HITL pause, error, cancel). Absent in documents written before 6.2.0, which
+     * deserialize to an empty set — the next completed turn simply falls back to
+     * the value diff, exactly as before.
+     *
+     * @see ai.labs.eddi.engine.memory.IConversationMemory#getPendingLongTermWrites()
+     */
+    private Set<String> pendingLongTermWrites = new LinkedHashSet<>();
     private List<ConversationStepSnapshot> conversationSteps = new LinkedList<>();
     private Stack<ConversationStepSnapshot> redoCache = new Stack<>();
 
@@ -368,6 +378,31 @@ public class ConversationMemorySnapshot {
 
     public void setConversationProperties(Map<String, Property> conversationProperties) {
         this.conversationProperties = conversationProperties;
+    }
+
+    /**
+     * Returns the live set, deliberately — do not "fix" this to return a copy or an
+     * unmodifiable view.
+     * <p>
+     * Static analysis flags this as exposing internal representation, which is true
+     * of every accessor on this Jackson DTO. Here the obvious remedy breaks
+     * persistence: {@code ConversationMemoryUtilities.convertConversationMemory}
+     * populates the field with
+     * {@code snapshot.getPendingLongTermWrites().addAll(memory.getPendingLongTermWrites())},
+     * so {@code Set.copyOf} would turn that into a <em>silent</em> no-op — the
+     * deferred writes would never reach the snapshot, reintroducing exactly the
+     * lost-{@code longTerm}-write bug (G6) this field was added to prevent — and
+     * {@code Collections.unmodifiableSet} would throw there instead.
+     * <p>
+     * Callers that must not alias take their own copy at the point it matters; see
+     * {@code Conversation.storePropertiesPermanently}.
+     */
+    public Set<String> getPendingLongTermWrites() {
+        return pendingLongTermWrites;
+    }
+
+    public void setPendingLongTermWrites(Set<String> pendingLongTermWrites) {
+        this.pendingLongTermWrites = pendingLongTermWrites == null ? new LinkedHashSet<>() : pendingLongTermWrites;
     }
 
     public List<ConversationStepSnapshot> getConversationSteps() {

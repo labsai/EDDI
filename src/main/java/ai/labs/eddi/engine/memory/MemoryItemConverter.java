@@ -14,6 +14,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.prepareContext;
 import static ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
@@ -95,13 +96,21 @@ public class MemoryItemConverter implements IMemoryItemConverter {
      * Adds the {@code snippets} and {@code vars} namespaces. Never lets a snippet /
      * variable lookup failure break a conversation turn — a missing namespace
      * renders empty, exactly as it did before it was injected here.
+     * <p>
+     * <strong>Never overwrites an existing key.</strong> The context map is
+     * flattened onto the top level before this runs, so a plain {@code put} let a
+     * deployment-wide global-variable set silently replace a client-supplied
+     * context variable literally named {@code vars} (or {@code snippets}) — a
+     * template that resolved the caller's data before this namespace was injected
+     * would suddenly resolve the deployment's. Explicit per-turn context wins, as
+     * it always did.
      */
     private void addSnippetsAndVars(Map<String, Object> conversationDataObjects) {
         if (promptSnippetService != null) {
             try {
                 Map<String, Object> snippets = promptSnippetService.getAll();
                 if (!snippets.isEmpty()) {
-                    conversationDataObjects.put(KEY_SNIPPETS, snippets);
+                    putNamespaceIfAbsent(conversationDataObjects, KEY_SNIPPETS, snippets);
                 }
             } catch (RuntimeException e) {
                 LOGGER.warnf("Could not resolve prompt snippets for template data: %s", LogSanitizer.sanitize(e.getMessage()));
@@ -112,11 +121,31 @@ public class MemoryItemConverter implements IMemoryItemConverter {
             try {
                 Map<String, Object> globalVars = globalVariableResolver.getTemplateData();
                 if (!globalVars.isEmpty()) {
-                    conversationDataObjects.put(KEY_VARS, globalVars);
+                    putNamespaceIfAbsent(conversationDataObjects, KEY_VARS, globalVars);
                 }
             } catch (RuntimeException e) {
                 LOGGER.warnf("Could not resolve global variables for template data: %s", LogSanitizer.sanitize(e.getMessage()));
             }
+        }
+    }
+
+    /**
+     * Namespaces already reported as shadowed, so the warning is emitted once per
+     * process rather than once per turn.
+     * <p>
+     * Shadowing is a legitimate (if awkward) client choice: a caller may genuinely
+     * send a context variable named {@code vars} or {@code snippets}. Warning on
+     * every turn would then produce a line per request for the lifetime of that
+     * integration, which buries the warnings that do need acting on. Bounded by
+     * construction — there are only two namespace keys — so this cannot grow.
+     */
+    private static final Set<String> shadowedNamespacesWarned = ConcurrentHashMap.newKeySet();
+
+    private static void putNamespaceIfAbsent(Map<String, Object> conversationDataObjects, String key, Map<String, Object> namespace) {
+        if (conversationDataObjects.putIfAbsent(key, namespace) != null && shadowedNamespacesWarned.add(key)) {
+            LOGGER.warnf("Template namespace '%s' is shadowed by a context variable of the same name — "
+                    + "the context value wins; rename the context variable to reach the '%s' namespace. "
+                    + "This is reported once per process.", key, key);
         }
     }
 

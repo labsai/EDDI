@@ -176,6 +176,11 @@ The `contextmatcher` is used to match `context` data that has been handed over t
 (...)
 ```
 
+### Limitations
+
+- The runtime `context` you hand over to EDDI may declare `"type": "array"`, but `contextmatcher` only understands `expressions`, `object` and `string`. **An array context can never match any `contextmatcher`** — the condition always fails and the engine logs a warning naming the context key. Send the data as an `object` (and match with `objectKeyPath`) if you need to match into it.
+- The configured `contextType` must equal the runtime type of the context. A `contextmatcher` configured for `string` never matches an `expressions` context, and vice versa; the mismatch is logged at DEBUG level.
+
 ### Connector
 
 The `connector` is there to all logical `OR` conditions within rules. By default all conditions are `AND` `conditions`, but in some cases it might be suitable to connect conditions with a logical `OR`.
@@ -204,6 +209,11 @@ The `connector` is there to all logical `OR` conditions within rules. By default
   ]
 (...)
 ```
+
+Two edge cases are worth knowing (they mirror the `negation` rules below):
+
+- A `connector` **must** declare at least one nested condition. An empty `connector` is rejected at configuration validation time — an `AND` over zero conditions would succeed unconditionally and make the surrounding rule fire on every turn.
+- If a child reports `NOT_EXECUTED` (e.g. a `sizematcher` where every bound is `-1`), the `AND` branch treats it as a failure, exactly like a condition placed directly on the rule. A misconfigured condition therefore decides a rule the same way whether or not it is wrapped in a `connector`.
 
 ### Negation
 
@@ -256,6 +266,8 @@ Defines the occurrence/frequency of an action in a `Behavior Rule`.
 }
 (...)
 ```
+
+`behaviorRuleName` and at least one of `minTimesOccurred` / `maxTimesOccurred` are **required** — both are validated when the ruleset is loaded. Without a rule name there is nothing to count, and without a bound the condition matches as soon as any behavior rule has ever succeeded, which is almost never what was intended.
 
 ### Dependency
 

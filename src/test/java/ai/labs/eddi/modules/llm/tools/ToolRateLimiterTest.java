@@ -317,4 +317,83 @@ class ToolRateLimiterTest {
             assertTrue(rateLimiter.tryAcquire("tool2", 1));
         }
     }
+
+    /**
+     * Buckets are per (conversation, tool) and the store holds up to 100,000 of
+     * them, while the per-tool Micrometer gauge calls {@code getRemaining} on every
+     * scrape. Deriving the tightest bucket by iterating the WHOLE store made
+     * metrics scraping O(tools × live conversations) and took every bucket's
+     * monitor on the way, contending with the live {@code tryAcquire} path.
+     * <p>
+     * The results are identical either way — only the cost differs — so the
+     * per-tool index has to be asserted directly.
+     */
+    @Nested
+    @DisplayName("per-tool reads do not scan the whole bucket store")
+    class PerToolIndex {
+
+        @Test
+        @DisplayName("a per-tool read examines only that tool's buckets")
+        void scanIsProportionalToTheToolNotTheStore() {
+            for (int i = 0; i < 500; i++) {
+                rateLimiter.tryAcquire("conv-" + i, "noisyNeighbour", 100);
+            }
+            rateLimiter.tryAcquire("conv-a", "target", 100);
+            rateLimiter.tryAcquire("conv-b", "target", 100);
+
+            assertEquals(502, rateLimiter.bucketCount(), "sanity: the store really does hold every bucket");
+            assertEquals(2, rateLimiter.scanCandidateCount("target"),
+                    "a read for 'target' must not walk the other 500 buckets");
+            assertEquals(500, rateLimiter.scanCandidateCount("noisyNeighbour"));
+        }
+
+        @Test
+        @DisplayName("an unknown tool has nothing to scan")
+        void unknownToolScansNothing() {
+            rateLimiter.tryAcquire("conv-a", "target", 100);
+            assertEquals(0, rateLimiter.scanCandidateCount("neverSeen"));
+        }
+
+        @Test
+        @DisplayName("the indexed scan still reports the tightest bucket, unaffected by other tools")
+        void stillReportsTheTightestBucket() {
+            // A different tool, fully exhausted — it must NOT influence 'target'.
+            for (int i = 0; i < 5; i++) {
+                rateLimiter.tryAcquire("conv-noisy", "otherTool", 5);
+            }
+            // Two conversations on 'target': one busy (2 left), one idle (9 left).
+            for (int i = 0; i < 8; i++) {
+                rateLimiter.tryAcquire("conv-busy", "target", 10);
+            }
+            rateLimiter.tryAcquire("conv-idle", "target", 10);
+
+            assertEquals(2, rateLimiter.getRemaining("target"),
+                    "the gauge reports the caller closest to being limited, for THIS tool only");
+            assertEquals(0, rateLimiter.getRemaining("otherTool"));
+        }
+
+        @Test
+        @DisplayName("reset(tool) empties the index so the next read falls back to the default")
+        void resetClearsTheIndex() {
+            rateLimiter.tryAcquire("conv-a", "target", 10);
+            assertEquals(1, rateLimiter.scanCandidateCount("target"));
+
+            rateLimiter.reset("target");
+
+            assertEquals(0, rateLimiter.scanCandidateCount("target"),
+                    "a stale index entry would make the next read consult a bucket that no longer exists");
+        }
+
+        @Test
+        @DisplayName("resetAll empties the index for every tool")
+        void resetAllClearsTheIndex() {
+            rateLimiter.tryAcquire("conv-a", "toolA", 10);
+            rateLimiter.tryAcquire("conv-b", "toolB", 10);
+
+            rateLimiter.resetAll();
+
+            assertEquals(0, rateLimiter.scanCandidateCount("toolA"));
+            assertEquals(0, rateLimiter.scanCandidateCount("toolB"));
+        }
+    }
 }

@@ -6,11 +6,13 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import io.quarkus.runtime.ShutdownEvent;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.lang.annotation.Annotation;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -110,13 +112,112 @@ class GracefulShutdownServiceTest {
 
         GracefulShutdownService shutdownService = service(coordinator, 150);
 
+        TimedDrain timed = timeDrain(shutdownService);
+        long elapsedMillis = timed.elapsedMillis();
+
+        assertFalse(timed.drained(), "a drain that times out must report failure");
+        assertTrue(shutdownService.isShuttingDown(), "the accept gate stays closed even when the drain times out");
+        // Proportional to the CONFIGURED 150 ms budget (~13x slack for a slow CI
+        // box), not an arbitrary 20 s ceiling: a bound that loose would happily
+        // accept a drain that ignores the timeout and hardcodes 10 s.
+        assertTrue(elapsedMillis < 2_000, "the drain must be bounded by its configured budget, took " + elapsedMillis + " ms");
+    }
+
+    /**
+     * B3's drain budget is CONFIGURABLE, and the configured value has to be the
+     * actual deadline. A drain that hardcodes its own timeout still "is bounded"
+     * and still "reports failure" — the only thing that catches it is measuring
+     * that a larger budget waits proportionally longer.
+     */
+    @Test
+    @Timeout(60)
+    @DisplayName("the configured drain timeout IS the deadline — a larger budget waits proportionally longer")
+    void drainHonoursTheConfiguredTimeoutAsItsDeadline() {
+        IConversationCoordinator coordinator = mock(IConversationCoordinator.class);
+        when(coordinator.getQueueDepths()).thenReturn(Map.of("conv-hung", 1));
+
+        long shortBudgetElapsed = timeDrain(service(coordinator, 100)).elapsedMillis();
+        long longBudgetElapsed = timeDrain(service(coordinator, 1_500)).elapsedMillis();
+
+        assertTrue(shortBudgetElapsed >= 100,
+                "a 100 ms budget must actually be waited out, took " + shortBudgetElapsed + " ms");
+        assertTrue(shortBudgetElapsed < 900,
+                "a 100 ms budget must not wait anywhere near a second, took " + shortBudgetElapsed + " ms");
+        assertTrue(longBudgetElapsed >= 1_400,
+                "a 1500 ms budget must be waited out in full, took " + longBudgetElapsed + " ms");
+        assertTrue(longBudgetElapsed - shortBudgetElapsed > 500,
+                "the deadline must scale with eddi.shutdown.drain-timeout-seconds — measured "
+                        + shortBudgetElapsed + " ms vs " + longBudgetElapsed + " ms");
+    }
+
+    /**
+     * The SHIPPED defaults have to fit inside the termination grace period of the
+     * manifests this repo ships ({@code terminationGracePeriodSeconds: 30} in
+     * {@code k8s/base/eddi-deployment.yaml}, {@code k8s/quickstart.yaml} and
+     * {@code helm/eddi/templates/deployment.yaml}). A budget that exceeds it means
+     * the pod is SIGKILLed part-way through the drain, so the drain B3 promises
+     * never actually happens.
+     * <p>
+     * Asserted against the {@code @ConfigProperty} defaults themselves — the
+     * millisecond constructor the other tests use bypasses them entirely.
+     */
+    @Test
+    @DisplayName("the shipped drain budget fits inside the manifests' terminationGracePeriodSeconds: 30")
+    void defaultDrainBudgetFitsTheKubernetesTerminationGracePeriod() throws Exception {
+        int drainSeconds = configuredDefault("eddi.shutdown.drain-timeout-seconds");
+        int graceSeconds = configuredDefault("eddi.shutdown.readiness-grace-seconds");
+
+        assertTrue(drainSeconds > 0, "the shipped drain budget must actually drain something");
+        assertTrue(graceSeconds + drainSeconds <= MAX_SHUTDOWN_BUDGET_SECONDS,
+                "readiness grace (" + graceSeconds + " s) + drain (" + drainSeconds + " s) = "
+                        + (graceSeconds + drainSeconds) + " s must stay at or below " + MAX_SHUTDOWN_BUDGET_SECONDS
+                        + " s so the rest of the Quarkus shutdown still fits inside the manifests' "
+                        + MANIFEST_TERMINATION_GRACE_SECONDS + " s termination grace period");
+    }
+
+    /**
+     * terminationGracePeriodSeconds shipped by this repo's k8s + helm manifests.
+     */
+    private static final int MANIFEST_TERMINATION_GRACE_SECONDS = 30;
+
+    /**
+     * Ceiling for readiness-grace + drain: leaves 5 s of the grace period for the
+     * remainder of the Quarkus shutdown sequence (executor shutdown, Mongo client
+     * close, JVM exit).
+     */
+    private static final int MAX_SHUTDOWN_BUDGET_SECONDS = MANIFEST_TERMINATION_GRACE_SECONDS - 5;
+
+    /**
+     * Reads the {@code defaultValue} of a {@code @ConfigProperty} constructor
+     * parameter.
+     */
+    private static int configuredDefault(String propertyName) throws NoSuchMethodException {
+        var constructor = GracefulShutdownService.class.getDeclaredConstructor(
+                IConversationCoordinator.class, int.class, int.class, long.class);
+        for (Annotation[] parameterAnnotations : constructor.getParameterAnnotations()) {
+            for (Annotation annotation : parameterAnnotations) {
+                if (annotation instanceof ConfigProperty configProperty && propertyName.equals(configProperty.name())) {
+                    try {
+                        return Integer.parseInt(configProperty.defaultValue());
+                    } catch (NumberFormatException e) {
+                        throw new AssertionError("@ConfigProperty " + propertyName + " has a non-numeric defaultValue '"
+                                + configProperty.defaultValue() + "'", e);
+                    }
+                }
+            }
+        }
+        throw new AssertionError("No @ConfigProperty named " + propertyName + " on the injectable constructor");
+    }
+
+    /** Outcome of a drain plus how long it actually took. */
+    private record TimedDrain(boolean drained, long elapsedMillis) {
+    }
+
+    /** Runs the drain and measures its wall-clock duration. */
+    private static TimedDrain timeDrain(GracefulShutdownService shutdownService) {
         long start = System.nanoTime();
         boolean drained = shutdownService.drain();
-        long elapsedMillis = (System.nanoTime() - start) / 1_000_000L;
-
-        assertFalse(drained, "a drain that times out must report failure");
-        assertTrue(shutdownService.isShuttingDown(), "the accept gate stays closed even when the drain times out");
-        assertTrue(elapsedMillis < 20_000, "the drain must be bounded, took " + elapsedMillis + " ms");
+        return new TimedDrain(drained, (System.nanoTime() - start) / 1_000_000L);
     }
 
     @Test

@@ -4,12 +4,15 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
@@ -26,7 +29,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -196,6 +204,65 @@ class AgentOrchestratorToolGovernanceTest {
         void malformedDepthIsZero() {
             assertEquals(0, AgentOrchestrator.resolveDelegationDepth(memoryWithDepth("not-a-number")));
         }
+
+        /**
+         * Mutation guard: the two halves of F18 — {@code resolveDelegationDepth} above
+         * and {@code ConverseWithAgentTool}'s own guardrails — were each covered, but
+         * nothing pinned the WIRING between them. Hard-coding the depth argument at the
+         * construction site to 0 left the whole suite green.
+         * <p>
+         * This drives the real {@code collectEnabledTools} path and then exercises the
+         * tool it produced: at a resolved depth of 5, with the permissive default
+         * {@code maxDelegationDepth=3}, delegation must be refused. A hard-coded 0 lets
+         * it through to {@code startConversation}.
+         */
+        @Test
+        @DisplayName("the resolved depth is actually handed to the constructed ConverseWithAgentTool")
+        void constructionSitePassesResolvedDepth() throws Exception {
+            IConversationService conversationService = mock(IConversationService.class);
+            lenient().when(conversationService.startConversation(any(), anyString(), any(), any()))
+                    .thenReturn(new ConversationResult("conv-should-not-happen", null));
+
+            AgentOrchestrator orchestrator = orchestratorWith(conversationService);
+
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("converse_with_agent"));
+
+            var memory = memoryWithDepth("5");
+
+            List<Object> tools = orchestrator.collectEnabledTools(task, memory);
+
+            ConverseWithAgentTool converseTool = tools.stream()
+                    .filter(ConverseWithAgentTool.class::isInstance)
+                    .map(ConverseWithAgentTool.class::cast)
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("converse_with_agent was not built: " + tools));
+
+            String result = converseTool.converseWithAgent("agent-b", "hi", null);
+
+            assertTrue(result.contains("Maximum delegation depth"),
+                    "the tool must have been constructed with the resolved depth 5, not 0; got: " + result);
+            verify(conversationService, never()).startConversation(any(), anyString(), any(), any());
+        }
+    }
+
+    /**
+     * An orchestrator wired with nothing but the conversation service — every other
+     * collaborator is irrelevant to the whitelist path under test and stays null.
+     */
+    private static AgentOrchestrator orchestratorWith(IConversationService conversationService) {
+        return new AgentOrchestrator(
+                null, null, null, null,
+                null, null, null, null,
+                null,
+                null, null, null,
+                null, null, null,
+                null, null, null,
+                null, null, null,
+                null,
+                null, null, conversationService, null, null,
+                null, null, null);
     }
 
     @Test

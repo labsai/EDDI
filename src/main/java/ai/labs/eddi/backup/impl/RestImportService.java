@@ -39,6 +39,7 @@ import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -429,8 +430,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
         var targetDirPath = targetDir.getPath();
 
-        // Import snippets (global resources, not workflow-embedded)
-        importSnippets(Paths.get(targetDirPath), isMerge);
+        // Import snippets (global resources, not workflow-embedded). They are
+        // recorded on the transaction like everything else — a snippet this import
+        // created is just as much an orphan as a workflow when a later resource
+        // blows up.
+        importSnippets(Paths.get(targetDirPath), isMerge, transaction);
 
         URI lastAgentUri = null;
         try (var directoryStream = Files.newDirectoryStream(Paths.get(targetDirPath), path -> path.toString().endsWith(AGENT_FILE_ENDING))) {
@@ -944,7 +948,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     // ==================== Snippet Import ====================
 
-    private void importSnippets(Path targetDirPath, boolean isMerge) {
+    private void importSnippets(Path targetDirPath, boolean isMerge, ImportTransaction transaction) {
         try {
             // Look for snippets directory — could be inside the agent subdirectory
             Path snippetsDir = findSnippetsDir(targetDirPath);
@@ -1003,6 +1007,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // Create new snippet
                         Response createResp = restSnippetStore.createSnippet(snippet);
                         checkIfCreatedResponse(createResp);
+                        recordCreatedSnippet(createResp, transaction);
                         importedCount++;
                         LOGGER.debugf("Created new snippet '%s'", snippetName);
                     } catch (Exception e) {
@@ -1016,6 +1021,30 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         } catch (Exception e) {
             LOGGER.warnf("Failed to import snippets: %s", e.getMessage());
         }
+    }
+
+    /**
+     * Records a snippet this import just created so a later failure can delete it
+     * again — without this, {@link #rollbackCreatedResources} never sees snippets
+     * and a partial import leaves them behind, contradicting the guarantee
+     * {@link #importAgentZipFile} advertises.
+     * <p>
+     * The id is read from the {@code X-Resource-URI} header rather than
+     * {@code Response.getLocation()}, which JAX-RS reports as {@code null} for the
+     * {@code eddi://} scheme on an in-process call. A snippet that was only
+     * <em>updated</em> during a merge is deliberately not recorded: it already
+     * existed and is not an orphan.
+     */
+    private void recordCreatedSnippet(Response createResponse, ImportTransaction transaction) {
+        if (createResponse.getStatus() != 201) {
+            return;
+        }
+        String createdUri = createResponse.getHeaderString("X-Resource-URI");
+        if (createdUri == null) {
+            LOGGER.warn("Created snippet carries no resource URI — it cannot be rolled back if the import fails");
+            return;
+        }
+        transaction.recordCreated(IPromptSnippetStore.class, RestUtilities.extractResourceId(URI.create(createdUri)));
     }
 
     /**

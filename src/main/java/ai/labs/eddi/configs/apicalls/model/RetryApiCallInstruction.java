@@ -13,7 +13,8 @@ public class RetryApiCallInstruction {
     /**
      * Upper bound for a single backoff delay in milliseconds. A retry waits on the
      * conversation thread, so the engine additionally clamps this to its own hard
-     * ceiling — configuring a larger value has no effect.
+     * ceiling of 30 seconds ({@code ApiCallExecutor.MAX_BACKOFF_MILLIS}) —
+     * configuring a larger value has no effect.
      */
     private Integer maxBackoffDelayInMillis;
     private List<Integer> retryOnHttpCodes = Arrays.asList(502, 503);

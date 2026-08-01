@@ -537,6 +537,13 @@ public class LlmTask implements ILifecycleTask {
             // emitted here as a single chunk, matching the standard (non-cascade) agent
             // path.
             if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse && !cascadeResult.streamedLive()) {
+                // F10: this is the same single-chunk downgrade the two non-cascade agent
+                // paths record. Agent mode is the DEFAULT here (enableInAgentMode defaults
+                // to true), so leaving it uninstrumented meant the most common streaming
+                // downgrade in the product was the one nobody could observe.
+                if (cascadeResult.agentResult() != null) {
+                    recordStreamingDowngrade(responseMetadata, task, responseContent);
+                }
                 eventSink.onToken(responseContent);
             }
 
@@ -1188,6 +1195,42 @@ public class LlmTask implements ILifecycleTask {
         effective.setMaxRecallTurns(configured.getMaxRecallTurns());
         effective.setSummarizationPrompt(configured.getSummarizationPrompt());
         return effective;
+    }
+
+    /**
+     * Coarse-grained predecessor of
+     * {@link #resolveInheritedSummaryParameters(Map, String, String)}: it answers
+     * the same F13 question — may the parent task's resolved parameters reach the
+     * summarizer? — but on a mismatch it drops the map wholesale instead of
+     * dropping only the provider-bound keys.
+     * <p>
+     * The live call site uses
+     * {@link #resolveInheritedSummaryParameters(Map, String, String)}, which is
+     * strictly better: it isolates credentials and endpoint coordinates while
+     * letting vendor-neutral tuning (temperature, maxTokens, timeout, …) carry
+     * over, so a cross-provider summary config still honours the task's tuning.
+     * This method is retained only because it is still directly asserted on by
+     * {@code LlmTaskPromptBoundsTest}; it is not on any production path.
+     *
+     * @return {@code processedParams} for the same-provider case, {@code null} when
+     *         the summary config names a different provider (it must then carry its
+     *         own credentials, which {@code ChatModelRegistry} resolves from the
+     *         provider defaults)
+     */
+    static Map<String, String> inheritableSummaryParameters(LlmConfiguration.ConversationSummaryConfig effective, String parentProvider,
+                                                            Map<String, String> processedParams, String conversationId) {
+        if (effective == null) {
+            return null;
+        }
+        String summaryProvider = effective.getLlmProvider();
+        if (isNullOrEmpty(summaryProvider) || isNullOrEmpty(parentProvider)
+                || summaryProvider.trim().equalsIgnoreCase(parentProvider.trim())) {
+            return processedParams;
+        }
+        LOGGER.infof("[SUMMARY] conversationSummary.llmProvider='%s' differs from the task provider '%s' for conversation '%s' — "
+                + "the parent task's credentials are NOT inherited; the summary config must carry its own apiKey/baseUrl.",
+                summaryProvider, parentProvider, sanitize(conversationId));
+        return null;
     }
 
     /**

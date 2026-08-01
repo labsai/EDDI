@@ -351,6 +351,30 @@ public class ContextMatcherTest {
         Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
     }
 
+    /**
+     * A runtime context type that the matcher cannot express is not a plain
+     * mismatch — no configuration can ever match it, so it is reported instead of
+     * being swallowed at DEBUG level. This test also guards the enum pair: adding a
+     * value to {@link Context.ContextType} without teaching contextmatcher about it
+     * fails here.
+     */
+    @Test
+    public void unsupportedRuntimeContextTypesAreKnown() {
+        List<String> unsupported = Arrays.stream(Context.ContextType.values()).filter(type -> !ContextMatcher.isSupportedContextType(type))
+                .map(Enum::name).toList();
+
+        Assertions.assertEquals(List.of(Context.ContextType.array.name()), unsupported,
+                "'array' is the only runtime context type contextmatcher cannot evaluate");
+    }
+
+    @Test
+    public void everyConfigurableContextTypeIsSupportedAtRuntime() {
+        for (ContextMatcher.ContextType configurable : ContextMatcher.ContextType.values()) {
+            Assertions.assertTrue(ContextMatcher.isSupportedContextType(Context.ContextType.valueOf(configurable.name())),
+                    "configurable type '" + configurable + "' must be evaluable at runtime");
+        }
+    }
+
     @Test
     public void executeWithNullContextValue_returnsFail() {
         setupValuesWithString();

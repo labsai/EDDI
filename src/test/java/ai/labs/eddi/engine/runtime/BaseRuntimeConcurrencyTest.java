@@ -163,7 +163,14 @@ class BaseRuntimeConcurrencyTest {
                 "a turn abandoned by the watchdog must be routed to onFailure, never onComplete");
         assertEquals(1, failureCount.get());
         synchronized (failures) {
-            assertInstanceOf(InterruptedException.class, failures.get(0));
+            // The DEDICATED abandonment type, not a bare InterruptedException:
+            // completion callbacks decide "discard this zombie result, the watchdog
+            // already recorded the outcome" from this type alone. Signalling a plain
+            // InterruptedException makes it indistinguishable from a real
+            // interruption of the body, and callers then silently swallow genuine
+            // failures instead of recording them.
+            assertInstanceOf(ExecutionAbandonedException.class, failures.get(0),
+                    "an abandoned turn must be reported with the dedicated abandonment type");
         }
         assertEquals(1, onCompleteCalled.getCount(),
                 "onComplete must not fire for an abandoned turn — it would persist stale state over a newer turn");

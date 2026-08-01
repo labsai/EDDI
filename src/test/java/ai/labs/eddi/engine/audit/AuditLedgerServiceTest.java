@@ -13,6 +13,7 @@ import org.mockito.MockitoAnnotations;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -208,14 +209,17 @@ class AuditLedgerServiceTest {
      * flush re-offered its whole batch back into it — so a store that stopped
      * accepting writes grew the heap without limit and fed its own failure. Entries
      * past the bound are now dropped and counted instead.
+     * <p>
+     * This covers the submit side only; the retry/dead-letter side is driven by
+     * {@link #failedFlushDeadLettersWhatNoLongerFits()}. (It used to stub a
+     * throwing {@code appendBatch} here, which was dead weight: nothing in this
+     * test ever calls {@code flush()}.)
      */
     @Test
     @DisplayName("a stalled store cannot grow the queue past its bound")
     void stalledStoreDoesNotGrowTheQueueWithoutLimit() {
         var svc = AuditLedgerService.createForTesting(auditStore, true, 60, null, meterRegistry, 5);
         svc.init();
-        // The store has stopped accepting writes; entries keep arriving.
-        doThrow(new RuntimeException("store down")).when(auditStore).appendBatch(anyList());
 
         for (int i = 0; i < 200; i++) {
             svc.submit(entry("id-" + i, "conv-1", "agent-1"));
@@ -224,6 +228,94 @@ class AuditLedgerServiceTest {
         assertEquals(5, svc.getQueueSize(), "the queue must stay at its bound instead of accumulating every entry");
         assertEquals(195.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
                 "dropped entries must be counted, not silently lost");
+        verify(auditStore, never()).appendBatch(anyList());
+    }
+
+    // ==================== G18 x G20: drops must not forge a tamper verdict ====
+
+    /**
+     * The collision the two guarantees used to create: G18 puts a signed, gap-free
+     * per-conversation sequence on every entry, G20 drops entries once the queue is
+     * full. Consuming the sequence first meant a dropped entry burned a chain
+     * position, so {@code /auditstore/verify} reported {@code ChainStatus.BROKEN} —
+     * the ledger accusing the deployment of deleting a record the ledger itself had
+     * thrown away.
+     */
+    @Test
+    @DisplayName("an entry the ledger drops never consumes a chain position")
+    @SuppressWarnings("unchecked")
+    void droppedEntryDoesNotConsumeAChainPosition() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation("conv-1")).thenReturn(0L);
+        var svc = AuditLedgerService.createForTesting(auditStore, true, 60, "master-key-1234567890", meterRegistry, 1);
+        svc.init();
+
+        svc.submit(entry("id-1", "conv-1", "agent-1")); // queued → sequence 0
+        svc.submit(entry("id-2", "conv-1", "agent-1")); // queue full → dropped
+        svc.flush(); // store accepts, queue drains
+        svc.submit(entry("id-3", "conv-1", "agent-1")); // queued → must be sequence 1
+        svc.flush();
+
+        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(auditStore, times(2)).appendBatch(captor.capture());
+        List<Long> writtenSequences = ((List<List<AuditEntry>>) (List<?>) captor.getAllValues()).stream().flatMap(List::stream)
+                .map(AuditEntry::sequence).toList();
+
+        assertEquals(List.of(0L, 1L), writtenSequences,
+                "the dropped entry must not burn sequence 1 — that hole makes /auditstore/verify report BROKEN");
+        assertEquals(1.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count());
+        assertTrue(svc.undeliveredSequences("conv-1").isEmpty(),
+                "nothing was abandoned mid-chain, so there is nothing to attribute");
+    }
+
+    /**
+     * The retry path's dead-letter branch: the flush drains the queue, the store
+     * refuses the batch, and by the time it is re-offered the queue has refilled.
+     * Those entries already own chain positions, so the positions must be recorded
+     * — otherwise the gap is indistinguishable from a deletion.
+     */
+    @Test
+    @DisplayName("a re-offer that no longer fits is dead-lettered and its chain positions are recorded")
+    void failedFlushDeadLettersWhatNoLongerFits() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation("conv-1")).thenReturn(0L);
+        var svc = AuditLedgerService.createForTesting(auditStore, true, 60, "master-key-1234567890", meterRegistry, 2);
+        svc.init();
+
+        // The store is down, and while the flush is in flight the queue it just
+        // drained fills back up — so the failed batch no longer fits on retry.
+        doAnswer(invocation -> {
+            svc.submit(entry("late-1", "conv-1", "agent-1"));
+            svc.submit(entry("late-2", "conv-1", "agent-1"));
+            throw new RuntimeException("store down");
+        }).when(auditStore).appendBatch(anyList());
+
+        svc.submit(entry("id-1", "conv-1", "agent-1")); // sequence 0
+        svc.submit(entry("id-2", "conv-1", "agent-1")); // sequence 1
+        svc.flush();
+
+        assertEquals(2, svc.getQueueSize(), "the retry re-offer must respect the bound");
+        assertEquals(Set.of(0L, 1L), svc.undeliveredSequences("conv-1"),
+                "positions the ledger abandoned must be recorded, or verify() reports them as deletions");
+        assertEquals(2.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count());
+    }
+
+    @Test
+    @DisplayName("a batch abandoned after MAX_FLUSH_RETRIES records its chain positions")
+    void abandonedBatchRecordsItsChainPositions() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation("conv-1")).thenReturn(0L);
+        service = createService(true, "master-key-1234567890");
+        doThrow(new RuntimeException("db error")).when(auditStore).appendBatch(anyList());
+
+        service.submit(entry("id-1", "conv-1", "agent-1"));
+        service.flush(); // failure 1 — requeue
+        service.flush(); // failure 2 — requeue
+        service.flush(); // failure 3 — dead-letter
+
+        assertEquals(0, service.getQueueSize());
+        assertEquals(Set.of(0L), service.undeliveredSequences("conv-1"));
+        assertTrue(service.undeliveredSequences("conv-other").isEmpty());
     }
 
     @Test

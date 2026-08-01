@@ -222,18 +222,25 @@ class RestAgentEngineStreamingExtendedTest {
             verify(eventSink).close();
         }
 
+        /**
+         * A12: the error frame is a fixed message plus a correlation id — the raw
+         * exception text never reaches the client, so it cannot carry quotes, newlines
+         * or (the actual concern) deployment internals into the stream.
+         */
         @Test
-        @DisplayName("onError escapes special characters in error message")
-        void onErrorEscapesMessage() throws Exception {
+        @DisplayName("onError does not echo the exception message into the stream")
+        void onErrorDoesNotEchoTheExceptionMessage() throws Exception {
             invokeSayStreaming();
             var handler = captureHandler();
 
-            handler.onError(new RuntimeException("Error with \"quotes\" and\nnewlines"));
+            handler.onError(new RuntimeException("Error with \"quotes\" and\nnewlines on host mongo-3.internal"));
 
             var dataCaptor = ArgumentCaptor.forClass(String.class);
             verify(eventBuilder).data(eq(String.class), dataCaptor.capture());
             String data = dataCaptor.getValue();
-            assertFalse(data.contains("\n")); // newline should be escaped
+            assertFalse(data.contains("\n")); // must never break the SSE framing
+            assertFalse(data.contains("mongo-3.internal"), "the raw exception text must not reach the client");
+            assertTrue(data.contains("correlationId"));
         }
     }
 

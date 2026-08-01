@@ -124,6 +124,16 @@ public class OutputTemplateTask implements ILifecycleTask {
      * The HTML check has to come first: "output:html:..." also starts with
      * "output", so testing the generic prefix first made every output TEXT mode and
      * left the HTML branch unreachable.
+     * <p>
+     * Note on reachability: output keys are built by {@code OutputGenerationTask}
+     * as {@code output:<outputItemType>:<action>}, and none of the currently
+     * registered {@link OutputItem} subtypes ({@code text}, {@code image},
+     * {@code agentFace}, {@code quickReply}, {@code inputField},
+     * {@code applicationLink}, {@code button}, {@code other}) is named
+     * {@code html}. The HTML branch is therefore forward-looking infrastructure for
+     * a future markup output type — it is deliberately kept correct and covered so
+     * that adding such a type does not silently ship unescaped conversation data
+     * into markup.
      */
     private TemplateMode resolveTemplateMode(String outputKey) {
         if (outputKey.startsWith(OUTPUT_HTML)) {

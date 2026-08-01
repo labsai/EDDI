@@ -76,8 +76,13 @@ public class Connector implements IRuleCondition {
 
             for (IRuleCondition condition : conditions) {
                 var executionState = condition.execute(memory, trace);
-                if (executionState == ExecutionState.FAIL || executionState == ExecutionState.ERROR) {
-                    state = executionState;
+                // Mirrors Rule#execute: a child that could not evaluate itself
+                // (NOT_EXECUTED, e.g. a sizematcher without min/max/equal) must not be
+                // counted as a pass, otherwise the very same misconfigured condition
+                // decides a rule differently depending on whether it is wrapped in a
+                // connector or not.
+                if (executionState != ExecutionState.SUCCESS) {
+                    state = executionState == ExecutionState.NOT_EXECUTED ? ExecutionState.FAIL : executionState;
                     break;
                 }
             }
@@ -86,8 +91,21 @@ public class Connector implements IRuleCondition {
         return state;
     }
 
+    /**
+     * A connector without children is never intentional: an AND over zero
+     * conditions succeeds unconditionally, which turns the surrounding rule into an
+     * always-firing rule. Rejected by {@link #validateConfiguration()}.
+     */
     public boolean isEmpty() {
         return conditions.isEmpty();
+    }
+
+    @Override
+    public void validateConfiguration() {
+        if (isEmpty()) {
+            throw new IllegalArgumentException(String.format("'%s' requires at least one nested condition"
+                    + " — an empty connector would match every conversation.", ID));
+        }
     }
 
     @Override

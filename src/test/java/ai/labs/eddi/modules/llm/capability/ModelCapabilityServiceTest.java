@@ -142,6 +142,58 @@ class ModelCapabilityServiceTest {
             assertFalse(service.supportsImageUrl("azure-openai", "my-custom-deployment"));
         }
 
+        /**
+         * Azure's "model name" is the operator-chosen {@code deploymentName} (see
+         * {@code LlmTask.resolveModelName}), not a canonical family name — so an
+         * allow-list keyed on the punctuated token denies vision to deployments that
+         * are plainly the model in question. Before separator-insensitive matching, a
+         * deployment called {@code gpt4o-prod} failed the {@code "gpt-4o"} substring
+         * test and lost vision AND image-URL forwarding, with no signal to the
+         * operator: attachments simply stopped arriving.
+         */
+        @Nested
+        class AzureDeploymentNames {
+
+            @ParameterizedTest
+            @ValueSource(strings = {"gpt4o", "gpt4o-prod", "gpt_4o_eu", "GPT4O-PROD", "prod-gpt4turbo", "gpt41-mini"})
+            void aDeploymentNamedAfterAVisionFamilyKeepsVision(String deploymentName) {
+                assertTrue(service.supportsVision("azure-openai", deploymentName),
+                        deploymentName + " is plainly a vision deployment and must not lose vision to punctuation");
+                assertTrue(service.supportsImageUrl("azure-openai", deploymentName),
+                        "image-URL forwarding follows vision for Azure");
+            }
+
+            @Test
+            void punctuationInsensitiveMatchingAppliesToPlainOpenAiToo() {
+                assertTrue(service.supportsVision("openai", "gpt4o"));
+            }
+
+            /**
+             * The veto has to be separator-insensitive for the same reason the allow-list
+             * is: a deployment called {@code gpt35-turbo-vision-preview} matches the
+             * {@code "vision"} family token, so without a compacted {@code gpt35} veto it
+             * would be declared multimodal.
+             */
+            @Test
+            void aTextOnlyDeploymentIsStillVetoedDespiteAVisionLookingName() {
+                assertFalse(service.supportsVision("azure-openai", "gpt35-turbo-vision-preview"),
+                        "gpt-3.5 is text-only however the deployment is spelled");
+            }
+
+            @Test
+            void anUnrecognisableDeploymentNameStillFailsClosed() {
+                assertFalse(service.supportsVision("azure-openai", "prod-chat-eu"),
+                        "a name that names no family at all must still fail closed — the operator sets the override");
+            }
+
+            @Test
+            void theDeploymentOverrideStillWins() {
+                config.put("eddi.multimodal.azure-openai.vision", "on");
+                assertTrue(service.supportsVision("azure-openai", "prod-chat-eu"),
+                        "the documented escape hatch must work for an unrecognisable deployment name");
+            }
+        }
+
         @Test
         void unknownModelHasNoNativeDocuments() {
             assertFalse(service.supportsDocuments("anthropic", "mystery-model-v9"));

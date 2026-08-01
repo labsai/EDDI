@@ -65,6 +65,13 @@ public class Conversation implements IConversation {
      * ({@code Agent#continueConversation}), so the constructor snapshot is exactly
      * "state at the start of this turn"; {@code init()} re-captures after the store
      * load.
+     * <p>
+     * <strong>The baseline alone is NOT proof of persistence.</strong> It is taken
+     * from the conversation properties, which are restored from the conversation
+     * document — and that document also contains longTerm values a previous turn
+     * set but never wrote (HITL pause, error, cancel). Those are tracked separately
+     * as {@link IConversationMemory#getPendingLongTermWrites() deferred writes} and
+     * are persisted regardless of the diff.
      */
     private final Map<String, Property> longTermBaseline = new HashMap<>();
 
@@ -438,6 +445,15 @@ public class Conversation implements IConversation {
                 pauseConversation(e);
                 paused = true;
             }
+        } finally {
+            // BEFORE the persist decision below, and on every exit including the
+            // exception path: note which longTerm properties this turn changed. If the
+            // turn does not reach storePropertiesPermanently (pause / error / cancel)
+            // the marker travels with the conversation document and the next completed
+            // turn writes them. Without it the write is lost forever — the next turn's
+            // baseline comes from the same document and therefore already contains the
+            // un-persisted value.
+            recordPendingLongTermWrites();
         }
         // A turn whose outcome is discarded must not commit its side effects.
         // ConversationService discards the snapshot of a cancelled or abandoned turn,
@@ -566,9 +582,12 @@ public class Conversation implements IConversation {
      * active user. Only differing values are written now.
      * <p>
      * A property set during a turn that FAILS before the post-conversation tasks
-     * run is not persisted — the same deliberate choice the resume path already
-     * makes (it skips this method on ERROR so a failed turn cannot upsert partial
-     * state).
+     * run is not persisted by THAT turn — the same deliberate choice the resume
+     * path already makes (it skips this method on ERROR so a failed turn cannot
+     * upsert partial state). The write is not lost though: the failed turn records
+     * the key in {@link IConversationMemory#getPendingLongTermWrites()}, which
+     * travels with the conversation document, and the next turn that completes
+     * cleanly writes it even though the value now equals its baseline.
      */
     private void storePropertiesPermanently() throws IResourceStore.ResourceStoreException {
         IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
@@ -591,24 +610,66 @@ public class Conversation implements IConversation {
             }
         }
 
-        for (Map.Entry<String, Property> propertyEntry : conversationMemory.getConversationProperties().entrySet()) {
-            Property property = propertyEntry.getValue();
-            if (property == null || property.getScope() != Scope.longTerm) {
-                continue;
+        // Writes owed by an earlier turn that never reached this method. They are
+        // indistinguishable from "unchanged" by value, so they are driven by the
+        // marker instead. Entries are removed one by one as the store accepts them,
+        // and whatever is left is written back — a store failure halfway through the
+        // loop therefore retries only the keys that were not written.
+        Set<String> pending = new LinkedHashSet<>(conversationMemory.getPendingLongTermWrites());
+        try {
+            for (Map.Entry<String, Property> propertyEntry : conversationMemory.getConversationProperties().entrySet()) {
+                Property property = propertyEntry.getValue();
+                if (property == null || property.getScope() != Scope.longTerm) {
+                    continue;
+                }
+                boolean writeOwed = pending.contains(propertyEntry.getKey());
+                if (!writeOwed && property.equals(longTermBaseline.get(propertyEntry.getKey()))) {
+                    // Unchanged since the turn started AND nothing owed — already
+                    // persisted, skip the write.
+                    continue;
+                }
+                // Apply visibility at persistence boundary only
+                Visibility vis = property.getVisibility() != null ? property.getVisibility() : configDefault;
+                UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis);
+                store.upsert(entry);
+                pending.remove(propertyEntry.getKey());
             }
-            if (property.equals(longTermBaseline.get(propertyEntry.getKey()))) {
-                // Unchanged since the turn started — already persisted, skip the write.
-                continue;
-            }
-            // Apply visibility at persistence boundary only
-            Visibility vis = property.getVisibility() != null ? property.getVisibility() : configDefault;
-            UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis);
-            store.upsert(entry);
+            // Every live longTerm property has been considered, so a leftover marker
+            // refers to a property that no longer exists — there is nothing to write.
+            pending.clear();
+        } finally {
+            conversationMemory.setPendingLongTermWrites(pending);
         }
 
         // The turn's writes are now the new baseline — a resume that persists twice
         // within the same Conversation must not rewrite them a second time.
         captureLongTermBaseline();
+    }
+
+    /**
+     * Marks every longTerm property that differs from this turn's baseline as a
+     * write the user-memory store is still owed, unioned with whatever was already
+     * owed. Called on EVERY exit of a turn (see
+     * {@link #executeConversationStep}/{@link #resume}) — on the clean path
+     * {@link #storePropertiesPermanently()} immediately consumes and clears the
+     * marker; on a pause/error/cancel it survives on the conversation document and
+     * the next completed turn honours it.
+     */
+    private void recordPendingLongTermWrites() {
+        if (conversationMemory == null) {
+            return;
+        }
+        IConversationProperties properties = conversationMemory.getConversationProperties();
+        if (properties == null) {
+            return;
+        }
+        Set<String> pending = new LinkedHashSet<>(conversationMemory.getPendingLongTermWrites());
+        properties.forEach((key, property) -> {
+            if (property != null && property.getScope() == Scope.longTerm && !property.equals(longTermBaseline.get(key))) {
+                pending.add(key);
+            }
+        });
+        conversationMemory.setPendingLongTermWrites(pending);
     }
 
     /**
@@ -952,6 +1013,10 @@ public class Conversation implements IConversation {
             if (conversationMemory.getHitlPendingToolCalls() != null && finalState != ConversationState.AWAITING_HUMAN) {
                 clearToolPauseState();
             }
+            // Same contract as the say path: note the owed writes BEFORE deciding
+            // whether to persist, so a re-pause / ERROR / cancel carries them to the
+            // next turn instead of dropping them.
+            recordPendingLongTermWrites();
             // Persist long-term properties only on a clean outcome. Skip on a
             // re-pause (AWAITING_HUMAN — the pause is not the end of the turn), on
             // ERROR, and on a discarded turn (cancelled, or abandoned by the watchdog

@@ -17,11 +17,13 @@ import org.mockito.ArgumentCaptor;
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -231,6 +233,153 @@ class PostgresUserMemoryStoreUnitTest {
         verify(connection).createArrayOf(eq("varchar"), incrementedIds.capture());
         assertArrayEquals(new Object[]{"shared"}, incrementedIds.getValue(),
                 "a row appearing in both passes must be incremented once, not twice");
+    }
+
+    @Test
+    void getVisibleEntries_mostAccessed_incrementsAccessCount() throws Exception {
+        // given
+        var byAccessCount = queryReturning("entry-1");
+        var byRecency = queryReturning();
+        var update = mock(PreparedStatement.class);
+        stubStatementsByOrdering(byAccessCount, byRecency, update);
+
+        // when
+        List<UserMemoryEntry> entries = sut.getVisibleEntries("user1", "agent1", null, "most_accessed", 50);
+
+        // then — the recalled ids are incremented by ONE set-based statement
+        assertEquals(1, entries.size());
+        ArgumentCaptor<Object[]> incrementedIds = ArgumentCaptor.forClass(Object[].class);
+        verify(connection).createArrayOf(eq("varchar"), incrementedIds.capture());
+        assertArrayEquals(new Object[]{"entry-1"}, incrementedIds.getValue());
+        verify(update, times(1)).executeUpdate();
+    }
+
+    /**
+     * The reserved recency slice is the whole point of the split — without it
+     * {@code most_accessed} is self-reinforcing and a freshly written entry (access
+     * count 0) can never enter a full window. The MongoDB store reserves it; the
+     * PostgreSQL store used to issue one plain {@code ORDER BY access_count} query,
+     * so the same recall order returned a different entry set per backend.
+     */
+    @Test
+    void getVisibleEntries_mostAccessed_alsoQueriesByRecencyForTheReservedSlots() throws Exception {
+        var byAccessCount = queryReturning("popular");
+        var byRecency = queryReturning("brand-new");
+        var update = mock(PreparedStatement.class);
+        stubStatementsByOrdering(byAccessCount, byRecency, update);
+
+        List<UserMemoryEntry> entries = sut.getVisibleEntries("user1", "agent1", null, "most_accessed", 50);
+
+        assertEquals(List.of("popular", "brand-new"), entries.stream().map(UserMemoryEntry::id).toList());
+        // 50 entries → 40 by access count, 10 reserved for recency.
+        verify(byAccessCount).setInt(3, 40);
+        verify(byRecency).setInt(3, 10);
+    }
+
+    /**
+     * An entry that tops both orderings must be returned once and incremented once.
+     */
+    @Test
+    void getVisibleEntries_mostAccessed_deduplicatesAcrossTheTwoPasses() throws Exception {
+        var byAccessCount = queryReturning("entry-1");
+        var byRecency = queryReturning("entry-1");
+        var update = mock(PreparedStatement.class);
+        stubStatementsByOrdering(byAccessCount, byRecency, update);
+
+        List<UserMemoryEntry> entries = sut.getVisibleEntries("user1", "agent1", null, "most_accessed", 50);
+
+        assertEquals(1, entries.size());
+        ArgumentCaptor<Object[]> incrementedIds = ArgumentCaptor.forClass(Object[].class);
+        verify(connection).createArrayOf(eq("varchar"), incrementedIds.capture());
+        assertArrayEquals(new Object[]{"entry-1"}, incrementedIds.getValue(),
+                "a row appearing in both passes must be incremented once, not twice");
+        verify(update, times(1)).executeUpdate();
+    }
+
+    /**
+     * With a window of one, reserving a recency slot leaves ZERO slots for access
+     * count — {@code most_accessed} would silently degrade into "most recent", the
+     * exact opposite of the requested ordering.
+     */
+    @Test
+    void getVisibleEntries_mostAccessed_windowOfOne_stillRanksByAccessCount() throws Exception {
+        var byAccessCount = queryReturning("popular");
+        var byRecency = queryReturning("brand-new");
+        var update = mock(PreparedStatement.class);
+        stubStatementsByOrdering(byAccessCount, byRecency, update);
+
+        List<UserMemoryEntry> entries = sut.getVisibleEntries("user1", "agent1", null, "most_accessed", 1);
+
+        assertEquals(List.of("popular"), entries.stream().map(UserMemoryEntry::id).toList());
+        verify(byAccessCount).setInt(3, 1);
+        // A zero-slot budget must not issue a query at all.
+        verify(byRecency, never()).executeQuery();
+    }
+
+    /**
+     * maxEntries <= 0 means "no limit" to the MongoDB store. Binding it straight
+     * into {@code LIMIT ?} makes PostgreSQL return nothing (LIMIT 0) or raise an
+     * error (negative LIMIT), so the unlimited recall must omit the LIMIT clause
+     * altogether rather than bind a non-positive value.
+     */
+    @Test
+    void getVisibleEntries_unlimitedWindow_doesNotBindZeroOrNegativeLimit() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.getVisibleEntries("user1", "agent1", null, "most_recent", 0);
+
+        ArgumentCaptor<String> executedSql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(executedSql.capture());
+        assertFalse(executedSql.getValue().contains("LIMIT"),
+                "an unlimited recall must not carry a LIMIT clause at all: " + executedSql.getValue());
+        verify(preparedStatement, never()).setInt(anyInt(), anyInt());
+    }
+
+    /**
+     * Routes the two recall queries and the increment to distinct mocks so each
+     * one's bound limit can be asserted independently.
+     */
+    private void stubStatementsByOrdering(PreparedStatement byAccessCount, PreparedStatement byRecency, PreparedStatement update)
+            throws Exception {
+        when(connection.prepareStatement(anyString())).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            if (sql.startsWith("UPDATE")) {
+                return update;
+            }
+            return sql.contains("ORDER BY access_count DESC") ? byAccessCount : byRecency;
+        });
+    }
+
+    /**
+     * A PreparedStatement whose result set yields one row per supplied entry id.
+     */
+    private PreparedStatement queryReturning(String... entryIds) throws Exception {
+        PreparedStatement ps = mock(PreparedStatement.class);
+        ResultSet rs = mock(ResultSet.class);
+        if (entryIds.length == 0) {
+            when(rs.next()).thenReturn(false);
+        } else {
+            when(rs.next()).thenReturn(true, buildTail(entryIds.length));
+            when(rs.getString("id")).thenReturn(entryIds[0], Arrays.copyOfRange(entryIds, 1, entryIds.length));
+        }
+        when(rs.getString("user_id")).thenReturn("user1");
+        when(rs.getString("key")).thenReturn("fav_color");
+        when(rs.getString("value")).thenReturn("\"blue\"");
+        when(rs.getString("category")).thenReturn("preference");
+        when(rs.getString("visibility")).thenReturn("self");
+        when(rs.getString("source_agent_id")).thenReturn("agent1");
+        when(rs.getString("group_ids")).thenReturn("[]");
+        when(rs.getString("source_conversation_id")).thenReturn("conv1");
+        when(ps.executeQuery()).thenReturn(rs);
+        return ps;
+    }
+
+    /** {@code next()} answers: one more TRUE per remaining row, then FALSE. */
+    private static Boolean[] buildTail(int rowCount) {
+        Boolean[] tail = new Boolean[rowCount];
+        Arrays.fill(tail, Boolean.TRUE);
+        tail[rowCount - 1] = Boolean.FALSE;
+        return tail;
     }
 
     @Test

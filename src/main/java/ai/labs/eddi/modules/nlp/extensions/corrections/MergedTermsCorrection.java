@@ -28,7 +28,7 @@ public class MergedTermsCorrection implements ICorrection {
         String tmpWord = word;
         for (int i = tmpWord.length(); i > 0; i--) {
             part = tmpWord.substring(0, i);
-            List<IDictionary.IFoundWord> match = matchWord(part, temporaryDictionaries);
+            List<IDictionary.IFoundWord> match = matchWord(part, userLanguage, temporaryDictionaries);
             if (match.size() > 0) {
                 possibleTerms.addAll(match);
                 tmpWord = tmpWord.substring(i);
@@ -40,7 +40,7 @@ public class MergedTermsCorrection implements ICorrection {
             possibleTerms.clear();
             for (int i = 0; i < tmpWord.length(); i++) {
                 part = tmpWord.substring(i);
-                List<IDictionary.IFoundWord> match = matchWord(part, temporaryDictionaries);
+                List<IDictionary.IFoundWord> match = matchWord(part, userLanguage, temporaryDictionaries);
                 if (match.size() > 0) {
                     possibleTerms.addAll(match);
                     tmpWord = tmpWord.substring(0, i);
@@ -57,13 +57,15 @@ public class MergedTermsCorrection implements ICorrection {
         }
     }
 
-    private List<IDictionary.IFoundWord> matchWord(String part, List<IDictionary> temporaryDictionaries) {
+    private List<IDictionary.IFoundWord> matchWord(String part, String userLanguage, List<IDictionary> temporaryDictionaries) {
         List<IDictionary> allDictionaries = new LinkedList<>();
         allDictionaries.addAll(temporaryDictionaries);
         allDictionaries.addAll(dictionaries);
 
-        return allDictionaries.stream().map(dictionary -> dictionary.lookupTerm(part)).filter(result -> result.size() > 0).findFirst()
-                .orElse(IDictionary.NO_WORDS_FOUND);
+        // Same language gate as the parser's direct lookup — a dictionary that is
+        // skipped for a lookup must not sneak back in through a correction.
+        return allDictionaries.stream().filter(dictionary -> IDictionary.appliesToLanguage(dictionary.getLanguageCode(), userLanguage))
+                .map(dictionary -> dictionary.lookupTerm(part)).filter(result -> result.size() > 0).findFirst().orElse(IDictionary.NO_WORDS_FOUND);
 
     }
 

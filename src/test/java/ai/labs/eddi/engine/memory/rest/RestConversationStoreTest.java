@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.ConversationStatus;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import io.quarkus.security.ForbiddenException;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.BadRequestException;
@@ -250,6 +251,72 @@ class RestConversationStoreTest {
 
             assertNotNull(roles, "permanentlyDeleteEndedConversationLogs must declare @RolesAllowed");
             assertEquals(List.of("eddi-admin"), Arrays.asList(roles.value()));
+        }
+    }
+
+    /**
+     * The interface javadoc claims the per-conversation operations are owner-scoped
+     * through {@code ConversationAccessGuard}. These pin that claim: none of the
+     * three may touch the stores when the guard denies, and each must consult the
+     * guard on every call. Without the guard any authenticated caller could read
+     * (raw memory document included) or permanently delete any conversation whose
+     * id they learned.
+     */
+    @Nested
+    @DisplayName("per-conversation operations are owner-scoped")
+    class PerConversationOwnerScoping {
+
+        @Test
+        @DisplayName("readRawConversationLog denies a foreign conversation and never loads it")
+        void rawReadIsGuarded() throws Exception {
+            doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
+                    .when(conversationAccessGuard).requireConversationOwner("conv-of-user-a");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restConversationStore.readRawConversationLog("conv-of-user-a"));
+
+            verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(anyString());
+        }
+
+        @Test
+        @DisplayName("readSimpleConversationLog denies a foreign conversation and never loads it")
+        void simpleReadIsGuarded() throws Exception {
+            doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
+                    .when(conversationAccessGuard).requireConversationOwner("conv-of-user-a");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restConversationStore.readSimpleConversationLog("conv-of-user-a", false, false, null));
+
+            verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(anyString());
+        }
+
+        @Test
+        @DisplayName("deleteConversationLog denies a foreign conversation and deletes nothing")
+        void deleteIsGuarded() {
+            doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
+                    .when(conversationAccessGuard).requireConversationOwner("conv-of-user-a");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restConversationStore.deleteConversationLog("conv-of-user-a", true));
+
+            verifyNoInteractions(conversationMemoryStore);
+            verifyNoInteractions(conversationDescriptorStore);
+            verifyNoInteractions(conversationService);
+        }
+
+        @Test
+        @DisplayName("the owner check runs on every per-conversation call")
+        void guardIsConsultedOnEveryCall() throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setConversationSteps(new ArrayList<>());
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshot);
+
+            restConversationStore.readRawConversationLog("conv-1");
+            restConversationStore.readSimpleConversationLog("conv-1", false, false, null);
+            restConversationStore.deleteConversationLog("conv-1", false);
+
+            verify(conversationAccessGuard, times(3)).requireConversationOwner("conv-1");
         }
     }
 

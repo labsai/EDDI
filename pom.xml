@@ -143,6 +143,14 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-cache</artifactId>
         </dependency>
+        <!-- Bean Validation (Jakarta Validation / Hibernate Validator). Enables
+             declarative constraints on JAX-RS request bodies so an invalid body is
+             rejected at the boundary with a field-level 400 instead of being carried
+             into the engine. Version is managed by the Quarkus BOM — do not pin. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-hibernate-validator</artifactId>
+        </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j</artifactId>
