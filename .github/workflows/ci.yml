@@ -394,7 +394,7 @@ jobs:
       # the base branch means a config change takes effect once it is merged
       # and reviewed, rather than while it is still being proposed.
       - name: Take the gitleaks config from the base branch
-        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
+        if: github.event_name == 'pull_request'
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
@@ -410,10 +410,10 @@ jobs:
           done
 
       # Scan only the commits this event introduces, which is what
-      # gitleaks-action did. A full-history scan reports 82 pre-existing
-      # findings (curl Authorization examples in docs/gdpr-compliance.md and
-      # dummy keys in test fixtures), so scanning everything would fail the
-      # build on day one for reasons no PR author can fix.
+      # gitleaks-action did. A full-depth scan reports 61 pre-existing findings
+      # across 16 commits dated 2016 to 2026, most of them in files deleted
+      # years ago, so scanning everything would fail the build on day one for
+      # reasons no PR author can fix.
       - name: Scan commits in this event
         env:
           EVENT: ${{ github.event_name }}
@@ -427,7 +427,7 @@ jobs:
 
           have() { git cat-file -e "$1^{commit}" 2> /dev/null; }
 
-          if [ "$EVENT" = "pull_request" ] || [ "$EVENT" = "pull_request_target" ]; then
+          if [ "$EVENT" = "pull_request" ]; then
             # Both ends must resolve. Quietly narrowing the range here would
             # turn a fetch problem into a scan that passes without looking.
             for sha in "$PR_BASE" "$PR_HEAD"; do
