@@ -37,8 +37,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * peer-targeted) over a phase's resolved speaker list. Extracted from
  * {@code GroupConversationService} (Wave R, R1 step 5) as a pure move — no
  * behavior change. TASK_FORCE's PLAN/EXECUTE/VERIFY phase routing is a separate
- * cluster (slated for R1 step 6, {@code TaskForceEngine}) and stays on the
- * facade for now.
+ * cluster, extracted into {@link TaskForceEngine} in R1 step 6.
  * <p>
  * Shares the facade's single virtual-thread {@link ExecutorService} (passed in,
  * not owned here — {@code GroupConversationService} keeps the

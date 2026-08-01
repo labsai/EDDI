@@ -5,6 +5,22 @@
 
 ---
 
+## 🔍 review(groups): independent review of R1 steps 4-6 before step 7 (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Before starting R1 step 7 (`GroupHitlCoordinator`), ran a second independent review — 6 parallel agents, each reading the full 7-commit/16-file branch diff fresh with no access to the extraction sessions' own reasoning, focused on the three steps that hadn't yet had dedicated review: `MemberTurnExecutor` (step 4), `PhaseExecutionEngine` (step 5), `TaskForceEngine` (step 6). Lenses: AGENTS.md compliance, shallow bug scan, git history/blame (confirming every historical bug-fix marker — H2-H6, C4, NEW-3, R2 — survived the moves intact), concurrency-adversarial, delegator argument-order cross-check across all 32 delegators and 6 collaborator constructors, and comment-accuracy.
+
+**Exceptionally clean result — one stale comment, one pre-existing test-coverage gap, nothing else.** 5 of 6 agents reported no issues; `IGroupConversationService.java`'s public interface has a completely empty diff across all 7 commits, as required for a pure facade decomposition.
+
+**Fixed:** `PhaseExecutionEngine.java`'s class-Javadoc still said TASK_FORCE routing was "slated for R1 step 6 ... and stays on the facade for now" — written during step 5, before step 6 existed, and never updated once `TaskForceEngine` actually landed two commits later. Corrected to reference `{@link TaskForceEngine}` directly.
+
+**Flagged, not fixed inline — pre-existing concurrency-test-coverage gap.** The concurrency-adversarial agent confirmed the `TaskForceEngine` extraction itself is byte-identical to the pre-extraction code (not a regression), but surfaced that no test actually races `recordTaskFailure` (must execute under the `taskList` monitor, ordered against `abortWave` → `resetStrandedInProgressTasks`'s reset sweep) against that sweep concurrently — `GroupConversationServiceConcurrencyTest`'s one EXECUTE-wave test only exercises the no-write cancellation branch, and the two direct `recordTaskFailure` tests in `GroupConversationServiceHitlCoverage3Test` call it single-threaded via reflection. A future edit that moved the call outside its `synchronized(taskList)` block would pass every existing test. This is pre-existing risk (not introduced by the refactor) and closing it properly needs real thread-orchestration engineering — the codebase's own `CyclicBarrier`-based concurrency test elsewhere in the suite is the right model, not a quick latch-based approximation. Spawned as a standalone follow-up task rather than rushed inline, per the "too difficult or delicate to fix inline" carve-out.
+
+Full 23-class group test battery (16 `GroupConversationService*`/`RestGroupConversation*` classes + `DynamicAgentTrackingPropagationTest` + all 6 focused collaborator test classes, 670 tests) green after the fix. `./mvnw clean compile` and `formatter:format validate` both clean.
+
+---
+
 ## 🧩 refactor(groups): extract TaskForceEngine from GroupConversationService (2026-08-01)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
