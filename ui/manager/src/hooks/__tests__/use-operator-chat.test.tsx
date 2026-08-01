@@ -13,6 +13,9 @@ const h = vi.hoisted(() => ({
   sendError: null as { status: number; message: string } | null,
   conversationLogs: [] as Array<Partial<SimpleConversationMemorySnapshot>>,
   resumeCalls: [] as Array<{ conversationId: string; decision: unknown }>,
+  /** Runs inside a conversation-log read, before it resolves — lets a test act
+   *  while the read is genuinely in flight. */
+  duringLogRead: null as null | (() => void),
 }));
 
 vi.mock("@/lib/api/chat", async (importOriginal) => {
@@ -34,6 +37,7 @@ vi.mock("@/lib/api/conversations", async (importOriginal) => {
     getSimpleConversationLog: vi.fn(async () => {
       const next = h.conversationLogs.shift();
       if (!next) throw new Error("test bug: ran out of mocked conversation logs");
+      h.duringLogRead?.();
       return next as SimpleConversationMemorySnapshot;
     }),
   };
@@ -76,6 +80,7 @@ beforeEach(() => {
   h.sendError = null;
   h.conversationLogs = [];
   h.resumeCalls = [];
+  h.duringLogRead = null;
   sessionStorage.clear();
 });
 
@@ -162,11 +167,12 @@ describe("resolveApproval — reconciling the resumed turn", () => {
    * Pauses the hook via a streamed done event, returning its result handle.
    *
    * The snapshot carries exactly ONE conversationOutput, which is what the
-   * backend actually sends: both `/stream` and `getSimpleConversationLog`
-   * default `returnCurrentStepOnly=true`, and `ConversationMemoryUtilities`
-   * collapses conversationOutputs to `List.of(getLast())` in that mode. A
-   * fixture with two outputs would be testing a response shape the API cannot
-   * produce.
+   * backend actually sends: `/stream` defaults `returnCurrentStepOnly` to true
+   * and the hook passes it explicitly on every `getSimpleConversationLog` call,
+   * and `ConversationMemoryUtilities` collapses conversationOutputs to
+   * `List.of(getLast())` in that mode. A fixture with two outputs at the TOP
+   * level would be testing a response shape the API cannot produce (several
+   * parts *within* the one output is a different thing, and is real).
    */
   async function pausedHook() {
     h.frames = [
@@ -252,6 +258,61 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     const agentMessages = result.current.messages.filter((m) => m.role === "agent");
     expect(agentMessages).toHaveLength(1);
     expect(agentMessages[0]?.content).toBe("Now waiting on batch two…");
+  });
+
+  it("discards the resumed turn when the conversation was reset while polling", async () => {
+    // `pollUntilSettled` can only see an abort between polls — the reads
+    // themselves take no signal — so clearing the chat mid-read leaves this
+    // continuation running against a conversation the user has thrown away.
+    // Writing its answer into the emptied transcript would resurrect a
+    // conversation that no longer exists, complete with its pause.
+    const { result } = await pausedHook();
+    h.conversationLogs = [
+      { conversationState: "READY", conversationOutputs: [textOutput("Answer nobody is waiting for.")] },
+    ];
+    h.duringLogRead = () => result.current.reset();
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    expect(result.current.messages).toHaveLength(0);
+    expect(result.current.isPaused).toBe(false);
+    expect(result.current.conversationId).toBeNull();
+  });
+
+  it("tracks the LAST bubble of a multi-part re-pause as the next placeholder", async () => {
+    // A pending message that renders as several bubbles still has exactly one
+    // tail. Tracking its head instead would make the next decision overwrite
+    // the opening line and strand the remainder *after* the final answer.
+    const { result } = await pausedHook();
+    h.conversationLogs = [
+      {
+        conversationState: "AWAITING_HUMAN",
+        hitlPausedAt: "2026-08-01T10:05:00Z",
+        hitlPauseReason: "Batch two",
+        conversationOutputs: [
+          { output: [{ type: "text", text: "Part one." }, { type: "text", text: "Part two." }] },
+        ],
+      },
+    ];
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+    expect(result.current.messages.map((m) => m.content)).toEqual(["do a thing", "Part one.", "Part two."]);
+
+    h.conversationLogs = [
+      { conversationState: "READY", conversationOutputs: [textOutput("Final answer.")] },
+    ];
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    expect(result.current.messages.map((m) => m.content)).toEqual([
+      "do a thing",
+      "Part one.",
+      "Final answer.",
+    ]);
   });
 
   it("renders every part when the resumed step emits several outputs", async () => {

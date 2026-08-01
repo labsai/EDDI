@@ -391,6 +391,34 @@ describe("gateLooksInstalled", () => {
     },
   );
 
+  it.each([
+    "http.post:/agentstore/agents",
+    "http.put:/llmstore/llms/{id}",
+    "http.patch:/descriptorstore/descriptors/{id}",
+    "http.delete:/schedulestore/schedules/{scheduleId}",
+    "http.*:/agentstore/agents",
+  ])("rejects a NARROW exempt that un-gates one write: %s", (narrow) => {
+    // The dangerous direction is not only the obviously-broad pattern. An
+    // exempt naming a single write endpoint reads as a targeted allowance and
+    // is strictly worse than an AUTO_APPROVE rule for the same call:
+    // ToolApprovalGate.classify tests `exempt` first and short-circuits, so the
+    // call never pauses at all rather than pausing and self-approving.
+    // `http.*:` is included because the method segment is a wildcard, and the
+    // compiled glob turns `*` into `.*` — it matches the POST address too.
+    const result = gateLooksInstalled(
+      agentWithGate({ toolApprovals: { ...buildToolApprovals(), exempt: [narrow] } }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain(narrow);
+  });
+
+  it("still accepts the read exemption buildToolApprovals actually writes", () => {
+    // Guards the fix above from over-reaching: `http.get:*` shares the `http.`
+    // prefix with every gated write pattern and must not be swept up.
+    expect(gateLooksInstalled(agentWithGate({ toolApprovals: { ...buildToolApprovals(), exempt: ["http.get:*"] } })).ok).toBe(true);
+    expect(gateLooksInstalled(agentWithGate({ toolApprovals: { ...buildToolApprovals(), exempt: ["http.get:/administration/logs"] } })).ok).toBe(true);
+  });
+
   it("rejects a per-tool rule that AUTO_APPROVEs a gated write endpoint", () => {
     // The scalar toolApprovals.timeoutPolicy looks safe (buildToolApprovals
     // never sets it to AUTO_APPROVE) — but ToolApprovalRules.governing on the

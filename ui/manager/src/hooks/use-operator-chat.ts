@@ -210,8 +210,9 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
    * and its optimistic bubbles were dropped).
    *
    * Reconciliation is by THIS id, not by counting outputs. Both reads available
-   * here — the streamed `done` snapshot and `getSimpleConversationLog` — run with
-   * the backend's `returnCurrentStepOnly` default of `true`, and
+   * here run with `returnCurrentStepOnly` on — the streamed `done` snapshot by
+   * the backend's own default, `getSimpleConversationLog` because every call
+   * below passes `true` explicitly (its wrapper defaults to `false`) — and
    * `ConversationMemoryUtilities` collapses `conversationOutputs` to exactly one
    * element in that mode. Any "did the step advance?" comparison of those two
    * lengths is therefore always 1 vs 1, i.e. an answer that looks computed but
@@ -439,8 +440,8 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
    * re-read immediately after would race it — hence `pollUntilSettled`.
    *
    * Reconciliation is by the placeholder's ID. Every read available here runs
-   * under the backend's `returnCurrentStepOnly` default, which collapses
-   * `conversationOutputs` to the current step alone — so the response carries
+   * with `returnCurrentStepOnly` on (see `pausedPlaceholderIdRef`), which
+   * collapses `conversationOutputs` to the current step alone — so the response carries
    * the resumed turn's answer and nothing else, and there is no step-advance to
    * detect. When we own a placeholder bubble (the pause arrived on a turn we
    * streamed) it is replaced in place; when we do not (a 409 pause, whose
@@ -458,6 +459,13 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
       try {
         await resumeConversation(conversationId, { verdict, note, toolDecisions });
         const snapshot = await pollUntilSettled(conversationId, controller.signal, pausedAtRef.current);
+        // `pollUntilSettled` can only observe an abort between polls — the reads
+        // themselves take no signal. So a `reset()` during the wait (the chat's
+        // own clear button, or deactivating the operator) leaves this
+        // continuation running against a conversation the user has discarded,
+        // and without this guard it would write that conversation's answer back
+        // into the freshly-emptied transcript and re-raise `isPaused`.
+        if (controller.signal.aborted) return;
 
         const outputs = snapshot.conversationOutputs ?? [];
         const lastOutput = outputs[outputs.length - 1];
@@ -494,7 +502,11 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
                 ...rest,
                 ...messages.slice(placeholderIdx + 1),
               ];
-              renderedId = messages[placeholderIdx]!.id;
+              // The LAST bubble rendered, matching the append branch below: on a
+              // re-pause this becomes the next placeholder, and a multi-part
+              // pending message must leave the next decision replacing its tail
+              // rather than overwriting its opening and stranding the remainder.
+              renderedId = rest.length > 0 ? rest[rest.length - 1]!.id : messages[placeholderIdx]!.id;
             } else {
               messages = [...messages, ...newBubbles];
               renderedId = newBubbles[newBubbles.length - 1]!.id;

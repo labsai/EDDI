@@ -335,14 +335,30 @@ const OVERBROAD_EXEMPT_PATTERNS = ["*", "http.*", "http.*:*", ...GATED_WRITE_PAT
  * The method-qualified prefixes above, with the trailing `*` stripped —
  * `["http.post:", "http.put:", "http.patch:", "http.delete:"]`.
  *
- * Used to catch a `toolApprovals.rules` entry that AUTO_APPROVEs a write. The
- * blanket gate patterns already match every call of that method, so any rule
- * whose `match` starts with one of these prefixes — narrow
- * (`http.post:/agentstore/agents`) or equally broad (`http.post:*`) — targets a
- * strict subset of what the blanket pattern gates. No glob-intersection logic
+ * The blanket gate patterns already match every call of that method, so any
+ * pattern starting with one of these prefixes — narrow
+ * (`http.post:/agentstore/agents`) or equally broad (`http.post:*`) — addresses
+ * a strict subset of what the blanket pattern gates. No glob-intersection logic
  * is needed: prefix membership alone is sufficient to prove overlap.
  */
 const GATED_WRITE_PREFIXES = GATED_WRITE_PATTERNS.map((pattern) => pattern.slice(0, -1));
+
+/**
+ * Exempt prefixes that can match a write call.
+ *
+ * `http.*:` is included because the method segment is itself a wildcard, and
+ * `ToolApprovalPatterns.compile` turns `*` into `.*` — so an exempt of
+ * `http.*:/agentstore/agents` matches the address `http.post:/agentstore/agents`
+ * exactly as readily as the GET its author had in mind.
+ *
+ * Known limit: a pattern addressing a tool by its bare dispatch name (an exempt
+ * of `deployAgent`) also exempts a write, and cannot be recognised from the
+ * config alone — `ToolApprovalGate.addressesOf` matches bare names too, but the
+ * name-to-method mapping lives in the fetched spec, not here. The method-
+ * qualified forms below are what `buildToolApprovals` writes and what a hand
+ * edit realistically reaches for.
+ */
+const WRITE_EXEMPT_PREFIXES = [...GATED_WRITE_PREFIXES, "http.*:"] as const;
 
 export interface GateVerificationResult {
   verified: boolean;
@@ -370,9 +386,18 @@ export function gateLooksInstalled(agent: Agent): { ok: boolean; reason?: string
   if (toolApprovals.timeoutPolicy === "AUTO_APPROVE") {
     return { ok: false, reason: "toolApprovals.timeoutPolicy is AUTO_APPROVE" };
   }
+  // `exempt` is the more dangerous of the two lists: ToolApprovalGate.classify
+  // tests it FIRST and short-circuits to `allowed`, so a matching entry means
+  // the call never pauses at all — strictly worse than an AUTO_APPROVE rule,
+  // which at least records a pause. It therefore gets the same prefix test the
+  // rules check below uses, not just an exact-match list: an exempt of
+  // `http.post:/agentstore/agents` is narrower than `http.post:*` and every bit
+  // as effective at un-gating that write.
   const exempt = toolApprovals.exempt ?? [];
-  const overbroadExempt = exempt.find((pattern) =>
-    (OVERBROAD_EXEMPT_PATTERNS as readonly string[]).includes(pattern),
+  const overbroadExempt = exempt.find(
+    (pattern) =>
+      (OVERBROAD_EXEMPT_PATTERNS as readonly string[]).includes(pattern) ||
+      WRITE_EXEMPT_PREFIXES.some((prefix) => pattern.startsWith(prefix)),
   );
   if (overbroadExempt) {
     return { ok: false, reason: `exempt pattern '${overbroadExempt}' would exempt a gated write` };
