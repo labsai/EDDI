@@ -5,6 +5,26 @@
 
 ---
 
+## 🧩 refactor(groups): extract GroupLifecycleOps from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R1 step 8 of `planning/group-collaboration-improvements-plan.md` §3.1: post-discussion lifecycle operations (`followUpWithMember`, `continueDiscussion`, `closeGroupConversation`, `readGroupConversation`, `deleteGroupConversation`, `listGroupConversations`, `listGroupPendingApprovals`, `cleanupEphemeralAgents`, `failConversation`, `propagateDynamicAgentTracking`) into a new `ai.labs.eddi.engine.internal.groups.GroupLifecycleOps`. `GroupConversationService`: 1,885 → 1,380 lines.
+
+**A genuine CDI-timing bug in my own first draft, caught before compiling.** `deploymentStore` is `@Inject`-field-injected on the facade — not yet populated when the facade's own constructor runs — so `GroupLifecycleOps` cannot be constructed once eagerly like `GroupHitlCoordinator`/`MemberTurnExecutor` were; it needs the same per-call construction `GroupAttachmentBinder` already uses via `attachmentBinder()` (R1 step 1). Added a matching `lifecycleOps()` helper that builds a fresh instance per facade call, reading `this.deploymentStore` at call time. That in turn created a second, sharper bug I caught while writing it: `operationsInProgress` (the in-flight-operation guard `followUpWithMember`/`continueDiscussion`/`closeGroupConversation`/`deleteGroupConversation` all serialize against) would have been re-created empty on every `GroupLifecycleOps` instantiation if declared as a field *inside* the new class — silently defeating the mutual-exclusion guarantee between concurrent calls, since each call would race against its own private empty set instead of a shared one. Fixed by keeping `operationsInProgress` declared on the facade (unchanged) and passing it into `GroupLifecycleOps` by reference, exactly like `activeTokens` already is.
+
+**Every eligible method needed a facade delegator — the highest ratio yet.** Nine of the ten extracted methods are called back into by code that stays on the facade: seven are the `IGroupConversationService` public interface surface (can never be anything but a delegator), `cleanupEphemeralAgents` is called from `executeDiscussion`'s finally block plus (since step 7) `GroupHitlCoordinator`, and `failConversation` is called from three sites inside `executeDiscussion`. Only `cleanupEphemeralAgentsForGroup`/`retireDeploymentRecords`/`isTerminalState` (internal-only helpers, confirmed via bare-token sweep against both the test tree and the production file) moved with no delegator.
+
+**`propagateDynamicAgentTracking` — reversed the step-4 deferral, on schedule.** Step 4's changelog explicitly deferred this static method ("slated to relocate to `GroupLifecycleOps` in a later R1 step") because `DynamicAgentTrackingPropagationTest` calls it by hard compile-time class reference (not reflection) in 20+ places, and `MemberTurnExecutor` calls it the same way in 2 places. Moved the body to `GroupLifecycleOps` as a `public static` method (it needs no instance state) and left a one-line `public static` delegator on the facade forwarding to it — every one of those 22+ call sites compiles and passes unchanged, in either class.
+
+**Self-caught transcription error, same failure mode as step 6's `...ForTest` invention:** while wiring `deleteGroupConversation`'s delegator calls to `GroupHitlCoordinator`'s HITL-cleanup methods, first wrote `deleteGroupHitlTimeoutScheduleForTest`/`cleanupAfterTerminalStateForTest` — plausible-looking names that don't exist. Caught before compiling by re-reading the diff against the actual facade method names (`deleteGroupHitlTimeoutSchedule`/`cleanupAfterTerminalState`, both already `private` delegators from step 7 — widened to `public` here since `GroupLifecycleOps` now calls them cross-package, same as `resolveAgentTimeoutSeconds` and `extractResponse` needed widening for `followUpWithMember`'s callbacks).
+
+Added `GroupLifecycleOpsTest` (11 tests) for `cleanupEphemeralAgents`'s lifecycle-policy branches and `failConversation`'s terminal-state alignment — genuinely new coverage exercising the class directly rather than through the old facade's reflection path. `propagateDynamicAgentTracking` already has 20+ dedicated tests in `DynamicAgentTrackingPropagationTest` (now calling through the facade's static delegator into this class, unchanged) and wasn't duplicated; the post-discussion entry points are already thoroughly covered by the existing reflection-based characterization suites and the MCP group/HITL tool suites.
+
+Full 27-class group + MCP test battery (794 tests) green after both self-caught fixes. 8 of R1's 10 extraction steps done; facade at 1,380 lines, still above the ≤800-line target step 9 needs to close.
+
+---
+
 ## 🧩 refactor(groups): extract GroupHitlCoordinator from GroupConversationService (2026-08-01)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
