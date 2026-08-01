@@ -100,6 +100,74 @@ public final class HitlConfigValidation {
 
         checkReasonLength(cfg.getPauseReason(), fieldPath + ".pauseReason");
         checkReasonLength(cfg.getPendingMessage(), fieldPath + ".pendingMessage");
+
+        validateRules(cfg, fieldPath);
+    }
+
+    /**
+     * Validates {@code toolApprovals.rules} — the per-tool friction overrides.
+     * <p>
+     * {@code match} goes through the same {@link ToolApprovalPatterns#validate} as
+     * a gating pattern, so a rule that could never match is refused rather than
+     * saved. That matters less here than for {@code requireApproval} (an
+     * unmatchable rule costs the designer their intended friction, not the gate
+     * itself), but the failure looks identical from the outside — a config that
+     * reads as if it were protecting something — so it is refused the same way.
+     */
+    private static void validateRules(ToolApprovalsConfig cfg, String fieldPath) {
+        List<ToolApprovalsConfig.ApprovalRule> rules = cfg.getRules();
+        if (rules == null || rules.isEmpty()) {
+            return;
+        }
+        if (cfg.getRequireApproval() == null || cfg.getRequireApproval().isEmpty()) {
+            throw new IllegalArgumentException(fieldPath
+                    + ".rules has no effect without requireApproval patterns — rules tune the friction on a gated"
+                    + " call, they never gate one");
+        }
+        Set<String> seen = new HashSet<>();
+        for (int i = 0; i < rules.size(); i++) {
+            String rulePath = fieldPath + ".rules[" + i + "]";
+            ToolApprovalsConfig.ApprovalRule rule = rules.get(i);
+            if (rule == null) {
+                throw new IllegalArgumentException(rulePath + " must not be null");
+            }
+            Optional<String> error = ToolApprovalPatterns.validate(rule.getMatch());
+            if (error.isPresent()) {
+                throw new IllegalArgumentException(rulePath + ".match: " + error.get());
+            }
+            if (!seen.add(rule.getMatch())) {
+                throw new IllegalArgumentException("duplicate rule match '" + rule.getMatch() + "' in " + fieldPath
+                        + ".rules — only one would ever apply; merge them");
+            }
+            // A rule whose pattern is string-identical to an exempt pattern is provably
+            // dead: any call it could match is exempt, so it is never gated, so no rule
+            // is ever resolved for it. Only the exact-equality case is checked — a rule
+            // may legitimately OVERLAP an exempt pattern while still covering gated
+            // calls (e.g. 'http.*:*' alongside an exempt 'http.get:*'), and deciding
+            // that in general would mean reasoning about globs over an unknown tool
+            // set. Exact equality needs no such reasoning.
+            if (cfg.getExempt() != null && cfg.getExempt().contains(rule.getMatch())) {
+                throw new IllegalArgumentException(rulePath + ".match '" + rule.getMatch()
+                        + "' is also an exempt pattern, so it can never apply — an exempt call is never gated, and a"
+                        + " rule only tunes a gated call. Remove the rule or the exemption");
+            }
+            // Format only — the "a finite policy needs a duration" check is rule-scoped
+            // below, because a rule may legitimately inherit the enclosing timeout.
+            validateApprovalTimeout(rule.getApprovalTimeout(), false);
+            boolean finitePolicy = rule.getTimeoutPolicy() != null
+                    && rule.getTimeoutPolicy() != HitlTimeoutPolicy.WAIT_INDEFINITELY;
+            if (finitePolicy && isNullOrBlank(rule.getApprovalTimeout()) && isNullOrBlank(cfg.getApprovalTimeout())) {
+                throw new IllegalArgumentException(rulePath + ".timeoutPolicy is " + rule.getTimeoutPolicy()
+                        + ", which never fires without a duration — set " + rulePath + ".approvalTimeout (ISO-8601,"
+                        + " e.g. \"PT5M\") or " + fieldPath + ".approvalTimeout for the rule to inherit");
+            }
+            checkReasonLength(rule.getPauseReason(), rulePath + ".pauseReason");
+            checkReasonLength(rule.getPendingMessage(), rulePath + ".pendingMessage");
+        }
+    }
+
+    private static boolean isNullOrBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private static Set<String> validatePatternList(List<String> patterns, String fieldPath) {

@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -1046,10 +1047,44 @@ class AgentOrchestratorCoverageTest {
     // ═══════════════════════════════════════════════════════════════════
 
     private String buildPauseReason(ToolApprovalsConfig cfg, ToolApprovalGate.GateResult gr) throws Exception {
+        return buildPauseReason(cfg, gr, null);
+    }
+
+    private String buildPauseReason(ToolApprovalsConfig cfg, ToolApprovalGate.GateResult gr,
+                                    ToolApprovalsConfig.ApprovalRule rule)
+            throws Exception {
         Method m = AgentOrchestrator.class.getDeclaredMethod("buildPauseReason",
-                ToolApprovalsConfig.class, ToolApprovalGate.GateResult.class);
+                ToolApprovalsConfig.class, ToolApprovalGate.GateResult.class, ToolApprovalsConfig.ApprovalRule.class);
         m.setAccessible(true);
-        return (String) m.invoke(null, cfg, gr);
+        return (String) m.invoke(null, cfg, gr, rule);
+    }
+
+    @Test
+    void buildPauseReason_governingRuleBeatsTheScalar() throws Exception {
+        // The approval card is where per-endpoint friction is actually felt: the
+        // approver must read why THIS write is different, not the blanket text.
+        var cfg = new ToolApprovalsConfig();
+        cfg.setPauseReason("Generic: {toolNames}");
+        var rule = new ToolApprovalsConfig.ApprovalRule();
+        rule.setMatch("http.post:/agentstore/agents");
+        rule.setPauseReason("Creating a new agent — review the whole config ({toolNames})");
+        var gr = gateResult(ToolExecutionRequest.builder().id("c1").name("createAgent").arguments("{}").build());
+
+        String reason = buildPauseReason(cfg, gr, rule);
+
+        assertEquals("Creating a new agent — review the whole config (createAgent)", reason);
+    }
+
+    @Test
+    void buildPauseReason_ruleSilentOnReason_fallsBackToTheScalar() throws Exception {
+        var cfg = new ToolApprovalsConfig();
+        cfg.setPauseReason("Generic: {toolNames}");
+        var rule = new ToolApprovalsConfig.ApprovalRule();
+        rule.setMatch("http.post:*");
+        rule.setTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
+        var gr = gateResult(ToolExecutionRequest.builder().id("c1").name("createAgent").arguments("{}").build());
+
+        assertEquals("Generic: createAgent", buildPauseReason(cfg, gr, rule));
     }
 
     private ToolApprovalGate.GateResult gateResult(ToolExecutionRequest... gated) {
@@ -1134,6 +1169,49 @@ class AgentOrchestratorCoverageTest {
         assertEquals("calculate", batch.getCalls().get(0).getGateReason());
         assertEquals("builtin", batch.getCalls().get(0).getSource());
         assertFalse(batch.isTranscriptOmitted());
+    }
+
+    @Test
+    void buildPendingBatch_persistsTheGoverningRuleAndThePerCallMatch() {
+        // The rule is resolved at gate time and must SURVIVE the pause: the persisted
+        // batch keeps names and sources but no endpoints, so an endpoint-addressed
+        // rule could never be re-derived by the post-pause resolvers.
+        var deploy = ToolExecutionRequest.builder().id("c1").name("deployAgent").arguments("{}").build();
+        var delete = ToolExecutionRequest.builder().id("c2").name("deleteAgent").arguments("{}").build();
+        var gr = new ToolApprovalGate.GateResult(List.of(deploy, delete), List.of(),
+                Map.of("c1", "http.post:*", "c2", "http.delete:*"));
+        List<ChatMessage> msgs = List.of(UserMessage.from("hi"), AiMessage.from(List.of(deploy, delete)));
+
+        var deployRule = new ToolApprovalsConfig.ApprovalRule();
+        deployRule.setMatch("http.post:/administration/{environment}/deploy/{agentId}");
+        var deleteRule = new ToolApprovalsConfig.ApprovalRule();
+        deleteRule.setMatch("http.delete:*");
+        deleteRule.setTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
+
+        var batch = orchestrator.buildPendingBatch(msgs, gr, twoToolTask(), memory, 0,
+                List.of(), new ArrayList<>(), 1, 0, Map.of("deployAgent", "http", "deleteAgent", "http"),
+                gateCalculate(), PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT,
+                Map.of("c1", deployRule, "c2", deleteRule), deleteRule);
+
+        assertNotNull(batch.getEffectiveRule());
+        assertEquals("http.delete:*", batch.getEffectiveRule().getMatch());
+        // Per call: which rule tuned THIS call, so an approver can tell which one
+        // brought the batch's policy.
+        assertEquals("http.post:/administration/{environment}/deploy/{agentId}", batch.getCalls().get(0).getMatchedRule());
+        assertEquals("http.delete:*", batch.getCalls().get(1).getMatchedRule());
+    }
+
+    @Test
+    void buildPendingBatch_withoutRules_leavesTheBatchExactlyAsBefore() {
+        var gated = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"x\":1}").build();
+        var gr = new ToolApprovalGate.GateResult(List.of(gated), List.of(), Map.of("c1", "calculate"));
+        List<ChatMessage> msgs = List.of(UserMessage.from("hi"), AiMessage.from(List.of(gated)));
+
+        var batch = orchestrator.buildPendingBatch(msgs, gr, twoToolTask(), memory, 0,
+                List.of(), new ArrayList<>(), 1, 0, Map.of("calculate", "builtin"), gateCalculate());
+
+        assertNull(batch.getEffectiveRule(), "no rules configured must persist no rule");
+        assertNull(batch.getCalls().get(0).getMatchedRule());
     }
 
     @Test

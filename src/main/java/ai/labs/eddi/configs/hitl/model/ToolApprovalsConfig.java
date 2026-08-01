@@ -54,6 +54,90 @@ public class ToolApprovalsConfig {
      * REJECT (default) | INBOX (reserved, 400 in v1) — behavior inside group turns.
      */
     private String inGroupTurns;
+    /**
+     * Optional per-tool friction, most-specific-first. See {@link ApprovalRule} —
+     * rules tune HOW a gated call is reviewed, never WHETHER it is gated.
+     */
+    private List<ApprovalRule> rules;
+
+    /**
+     * Per-tool override of the approval scalars above, addressed by the same
+     * pattern language as {@code requireApproval} (see
+     * {@code ToolApprovalPatterns}): a bare tool name, {@code source:name}, or —
+     * for httpcall tools — {@code source.method:path}, e.g.
+     * {@code http.post:/agentstore/agents}.
+     * <p>
+     * <b>A rule tunes friction; it never gates or ungates.</b> Whether a call needs
+     * approval is decided solely by {@code requireApproval}/{@code exempt}. A rule
+     * able to ungate would mean a config could grant capability by adding an entry,
+     * i.e. enumerating upward — the opposite of the gate's design, which allows an
+     * unmatched call and therefore only ever survives by gating broadly and
+     * exempting narrowly.
+     * <p>
+     * Every field is optional and falls back <i>individually</i> to the enclosing
+     * {@link ToolApprovalsConfig} scalar, so a rule that sets only
+     * {@code pauseReason} still inherits the configured timeout policy.
+     */
+    public static class ApprovalRule {
+        /** Pattern selecting the tool calls this rule applies to. Required. */
+        private String match;
+        /** Overrides {@link ToolApprovalsConfig#getTimeoutPolicy()} for this rule. */
+        private HitlTimeoutPolicy timeoutPolicy;
+        /** Overrides {@link ToolApprovalsConfig#getApprovalTimeout()}. */
+        private String approvalTimeout;
+        /** Overrides {@link ToolApprovalsConfig#getPauseReason()}. ≤500 chars. */
+        private String pauseReason;
+        /** Overrides {@link ToolApprovalsConfig#getPendingMessage()}. ≤500 chars. */
+        private String pendingMessage;
+
+        public String getMatch() {
+            return match;
+        }
+
+        public void setMatch(String match) {
+            this.match = match;
+        }
+
+        public HitlTimeoutPolicy getTimeoutPolicy() {
+            return timeoutPolicy;
+        }
+
+        public void setTimeoutPolicy(HitlTimeoutPolicy timeoutPolicy) {
+            this.timeoutPolicy = timeoutPolicy;
+        }
+
+        public String getApprovalTimeout() {
+            return approvalTimeout;
+        }
+
+        public void setApprovalTimeout(String approvalTimeout) {
+            this.approvalTimeout = approvalTimeout;
+        }
+
+        public String getPauseReason() {
+            return pauseReason;
+        }
+
+        public void setPauseReason(String pauseReason) {
+            this.pauseReason = pauseReason;
+        }
+
+        public String getPendingMessage() {
+            return pendingMessage;
+        }
+
+        public void setPendingMessage(String pendingMessage) {
+            this.pendingMessage = pendingMessage;
+        }
+    }
+
+    public List<ApprovalRule> getRules() {
+        return rules;
+    }
+
+    public void setRules(List<ApprovalRule> rules) {
+        this.rules = rules;
+    }
 
     public List<String> getRequireApproval() {
         return requireApproval;

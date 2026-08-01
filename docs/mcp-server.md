@@ -68,7 +68,9 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | Tool               | Description                                                                                                                                                                                                                                         |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `setup_agent`      | Create a fully working agent in one call: creates behavior rules, LangChain config, optional output/greeting, package, agent, and deploys. Supports built-in tools, quick replies, and sentiment analysis. Default: `anthropic`/`claude-sonnet-4-6` |
-| `create_api_agent` | Create an agent from an OpenAPI 3.0/3.1 spec. Parses the spec, generates HttpCalls configs (grouped by API tag), creates the full pipeline, and deploys. Supports endpoint filtering, base URL override, and auth header propagation. A generated write tool takes the whole request body as one `requestBody` parameter — see below |
+| `create_api_agent` | Create an agent from an OpenAPI 3.0/3.1 spec. Parses the spec, generates HttpCalls configs (grouped by API tag), creates the full pipeline, and deploys. Supports endpoint filtering, base URL override, auth header propagation, and `mcpServerUrls` to add an MCP server's tools alongside the generated ones. A generated write tool takes the whole request body as one `requestBody` parameter — see below |
+
+> **The approval gate is not settable over MCP.** `POST /administration/agents/setup-api` accepts a `hitlConfig` on the request body, so a caller can provision an agent whose write tools are gated from v1 onward. The MCP `create_api_agent` tool deliberately has **no** such parameter and always passes `null`: it already provisions an agent with a caller-chosen endpoint filter, so letting the caller also choose the gate would make it a complete escape from whatever allow-list governs the agent doing the calling. Provisioning a gated agent goes through REST (`eddi-admin`).
 
 ### Schedule Management Tools (6)
 
@@ -163,6 +165,23 @@ EDDI also exposes its documentation as MCP **resources**, allowing AI agents to 
 | `eddi://docs/{name}` | Read a specific doc (e.g., `eddi://docs/getting-started`) |
 
 Configure the docs path with: `eddi.docs.path` (default: `docs/`, in Docker: `/deployments/docs`).
+
+### The same docs over REST
+
+> **MCP resources do not reach an EDDI agent.** A resource is only usable by a client that asks for it, and EDDI's own MCP client never calls `resources/read` — it consumes *tools*. So `eddi://docs/*` made EDDI's documentation readable by a desktop MCP client and not by an agent running on EDDI, which is precisely backwards for an agent whose job is to explain the platform.
+
+The same doc set is therefore served read-only over REST, where an agent generated from EDDI's OpenAPI spec picks it up as ordinary tools:
+
+| Endpoint | Role | Returns |
+| -------- | ---- | ------- |
+| `GET /administration/docs` | any of `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver`, `eddi-viewer` | JSON array of page names, without the `.md` suffix |
+| `GET /administration/docs/{name}` | same | The page's markdown source as `text/plain`; `404` if absent |
+
+> **Roles are enumerated, not inherited.** EDDI has no role hierarchy — JAX-RS `@RolesAllowed` and the MCP layer's `requireRole` are both literal `hasRole` checks — so `eddi-viewer` alone would refuse an `eddi-admin`. The widest read tier is spelled out because these are published documentation pages.
+
+Both surfaces delegate to `DocsService`, which owns the filesystem access and the path-traversal guard.
+
+> **The runtime doc set is smaller than the repository's.** The container image copies only top-level `docs/*.md` (non-recursive, so nothing under `docs/agent-configs/` or `docs/templates/` is reachable) and then removes `changelog.md`, `code-review-standards.md`, `incident-response.md` and `SUMMARY.md`. Call the index and read from it — do not assume a particular page exists.
 
 ## Quick Start
 

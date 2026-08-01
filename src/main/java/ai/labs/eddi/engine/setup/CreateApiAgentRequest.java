@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.setup;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
@@ -23,5 +24,27 @@ public record CreateApiAgentRequest(@JsonProperty(required = true) String agentN
          * Appended last so the positional constructor used by McpSetupTools stays
          * unambiguous.
          */
-        String llmBaseUrl) {
+        String llmBaseUrl,
+        /*
+         * HITL configuration for the created agent, including the tool-approval gate
+         * (hitlConfig.toolApprovals). Without this the wizard could only ever build a
+         * bare AgentConfiguration, so EVERY agent it created had hitlConfig == null and
+         * an inert gate — no caller could provision a gated agent through setup-api at
+         * all.
+         *
+         * Deliberately NOT exposed on the MCP create_api_agent tool: that tool
+         * provisions an agent with an arbitrary endpoint filter, so letting a model
+         * also choose the gate would make it a complete escape from any allow-list.
+         * McpSetupTools passes null.
+         *
+         * Appended last for the same positional-constructor reason as llmBaseUrl.
+         */
+        AgentConfiguration.HitlConfig hitlConfig,
+        /*
+         * Comma-separated MCP server URLs, as on the setup_agent path. An API agent
+         * could previously only hold tools generated from the OpenAPI spec, so an agent
+         * needing both — REST endpoints the spec describes AND an MCP server's tools —
+         * was unreachable through this wizard and had to be assembled by hand.
+         */
+        String mcpServerUrls) {
 }

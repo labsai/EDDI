@@ -19,9 +19,11 @@ import java.util.regex.Pattern;
  * allowed calls.
  * <p>
  * Precedence: (P1) exempt always beats requireApproval; (P2) any pattern match
- * suffices; (P3) empty/absent requireApproval = gate fully inactive. Patterns
- * are tested against {@code "source:name"} first, then the bare dispatch name —
- * fail-safe: a tool with unknown source still matches bare-name patterns.
+ * suffices; (P3) empty/absent requireApproval = gate fully inactive. Each call
+ * is tested against the forms in {@link #addressesOf} —
+ * {@code source.method:path}, then {@code source:name}, then the bare dispatch
+ * name — fail-safe: a tool with an unknown source still matches bare-name
+ * patterns.
  */
 public class ToolApprovalGate {
 
@@ -75,16 +77,12 @@ public class ToolApprovalGate {
                 allowed.add(request);
                 continue;
             }
-            String source = toolSources.get(request.name());
-            String qualified = source != null ? source + ":" + request.name() : null;
-            // e.g. "http" + "." + "post:/agentstore/agents"
-            String endpoint = toolEndpoints.get(request.name());
-            String endpointQualified = source != null && endpoint != null ? source + "." + endpoint : null;
-            if (firstMatch(exempt, qualified, endpointQualified, request.name()) != null) {
+            List<String> addresses = addressesOf(request.name(), toolSources, toolEndpoints);
+            if (firstMatch(exempt, addresses) != null) {
                 allowed.add(request);
                 continue;
             }
-            CompiledPattern match = firstMatch(require, qualified, endpointQualified, request.name());
+            CompiledPattern match = firstMatch(require, addresses);
             if (match != null) {
                 gated.add(request);
                 if (request.id() != null) {
@@ -97,6 +95,39 @@ public class ToolApprovalGate {
         return new GateResult(gated, allowed, reasons);
     }
 
+    /**
+     * The forms a pattern may address one tool call by, in the order they are
+     * tried: {@code source.method:path} (httpcall tools only), {@code source:name},
+     * and the bare {@code name}.
+     * <p>
+     * Extracted and public so that <em>everything</em> matching a configured
+     * pattern against a tool call — the gate itself and {@link ToolApprovalRules},
+     * which picks the per-tool friction rule — asks the identical question. A
+     * second, independent copy of this derivation would drift silently, and since
+     * the gate allows an unmatched call, drift here is an ungated write.
+     * <p>
+     * Entries that cannot be derived are omitted, so the result is empty for a null
+     * name (a malformed provider tool call) and matches nothing.
+     */
+    public static List<String> addressesOf(String name, Map<String, String> toolSources,
+                                           Map<String, String> toolEndpoints) {
+        if (name == null) {
+            return List.of();
+        }
+        String source = toolSources.get(name);
+        // e.g. "http" + "." + "post:/agentstore/agents"
+        String endpoint = toolEndpoints.get(name);
+        List<String> addresses = new ArrayList<>(3);
+        if (source != null && endpoint != null) {
+            addresses.add(source + "." + endpoint);
+        }
+        if (source != null) {
+            addresses.add(source + ":" + name);
+        }
+        addresses.add(name);
+        return addresses;
+    }
+
     private record CompiledPattern(String raw, Pattern pattern) {
     }
 
@@ -107,20 +138,23 @@ public class ToolApprovalGate {
         return globs.stream().map(g -> new CompiledPattern(g, ToolApprovalPatterns.compile(g))).toList();
     }
 
-    private static CompiledPattern firstMatch(List<CompiledPattern> patterns, String qualified, String endpointQualified, String bare) {
+    /**
+     * Pattern order dominates address order: the first configured pattern matching
+     * <em>any</em> address wins.
+     * <p>
+     * {@code addresses} is empty for a null tool name (langchain4j's
+     * {@code ToolExecutionRequest} does not guarantee one — some providers emit
+     * malformed tool calls), so such a call matches nothing and flows to
+     * {@code allowed}; the gate stays inert for it and the downstream dispatch
+     * degrades gracefully to "tool not found", as it did pre-HITL, instead of
+     * failing the whole turn.
+     */
+    private static CompiledPattern firstMatch(List<CompiledPattern> patterns, List<String> addresses) {
         for (CompiledPattern cp : patterns) {
-            if (endpointQualified != null && cp.pattern().matcher(endpointQualified).matches()) {
-                return cp;
-            }
-            // bare (= request.name()) can be null: langchain4j's ToolExecutionRequest
-            // does not guarantee a non-null name (some providers emit malformed tool
-            // calls). Guard both matchers so a null name matches nothing and the call
-            // flows to `allowed` — the gate stays inert for it and the downstream tool
-            // dispatch degrades gracefully to "tool not found", as it did pre-HITL,
-            // instead of NPEing and failing the whole turn.
-            if ((qualified != null && cp.pattern().matcher(qualified).matches())
-                    || (bare != null && cp.pattern().matcher(bare).matches())) {
-                return cp;
+            for (String address : addresses) {
+                if (cp.pattern().matcher(address).matches()) {
+                    return cp;
+                }
             }
         }
         return null;
