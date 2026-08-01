@@ -2803,6 +2803,9 @@
     "outcomeUnknown": "이전 승인이 실행 도중 중단되었습니다 — 결과를 알 수 없으니 재시도 전에 외부에서 확인하세요.",
     "outcomeUnknownShort": "결과 불명",
     "toolApprovalHint": "승인은 호출별 선택을 적용합니다(변경하지 않은 호출은 승인됩니다). 거부는 전체 배치를 거부합니다.",
+    "toolApprovalHintExplicit": "배치를 승인하려면 각 호출마다 개별적으로 승인 또는 거부해야 합니다. 거부는 전체 배치를 거부합니다.",
+    "explicitReviewMissing": "승인하기 전에 위의 모든 호출을 검토하세요.",
+    "redactionCaveat": "아래에 표시된 인수는 마스킹되어 있습니다 — 비밀 값은 생략되지 않고 \"[REDACTED]\"로 표시됩니다.",
     "gateReason": "일치한 패턴",
     "argsTruncated": "인수 잘림",
     "amendArguments": "인수 수정 (선택 사항)",
@@ -3146,10 +3149,14 @@
     "chat": {
       "empty": "배포에 대해 물어보세요. 오퍼레이터가 찾아보고, 수행한 모든 호출을 보여줍니다.",
       "placeholder": "에이전트, 대화, 배포, 로그에 대해 물어보세요…",
+      "pausedPlaceholder": "위의 결정을 기다리는 중이라 운영자가 계속할 수 없습니다…",
       "send": "보내기",
       "stop": "중지",
       "newConversation": "새 대화 시작",
       "transcript": "오퍼레이터 대화"
+    },
+    "approval": {
+      "reconstructedEndpoint": "{{method}} {{path}} (재구성됨)"
     },
     "starters": {
       "whatsDeployed": "지금 무엇이 배포되어 있나요?",

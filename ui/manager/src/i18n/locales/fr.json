@@ -2809,6 +2809,9 @@
     "outcomeUnknown": "Une approbation précédente a été interrompue en cours d'exécution — son effet est inconnu ; vérifiez-le en externe avant de réessayer.",
     "outcomeUnknownShort": "résultat inconnu",
     "toolApprovalHint": "Approuver applique vos choix par appel (les appels que vous n'avez pas modifiés sont approuvés). Rejeter rejette l'ensemble du lot.",
+    "toolApprovalHintExplicit": "Chaque appel doit être approuvé ou rejeté individuellement avant de pouvoir approuver le lot. Rejeter rejette l'ensemble du lot.",
+    "explicitReviewMissing": "Examinez chaque appel ci-dessus avant d'approuver.",
+    "redactionCaveat": "Les arguments affichés ci-dessous sont expurgés — une valeur secrète apparaît comme « [REDACTED] », pas omise.",
     "gateReason": "Motif correspondant",
     "argsTruncated": "arguments tronqués",
     "amendArguments": "Modifier les arguments (facultatif)",
@@ -3152,10 +3155,14 @@
     "chat": {
       "empty": "Interrogez votre déploiement. L'opérateur fait les recherches et vous montre chaque appel qu'il effectue.",
       "placeholder": "Agents, conversations, déploiements, journaux…",
+      "pausedPlaceholder": "En attente d'une décision ci-dessus avant que l'opérateur ne puisse continuer…",
       "send": "Envoyer",
       "stop": "Arrêter",
       "newConversation": "Démarrer une nouvelle conversation",
       "transcript": "Conversation avec l'opérateur"
+    },
+    "approval": {
+      "reconstructedEndpoint": "{{method}} {{path}} (reconstruit)"
     },
     "starters": {
       "whatsDeployed": "Qu'est-ce qui est déployé actuellement ?",

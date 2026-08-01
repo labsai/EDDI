@@ -2809,6 +2809,9 @@
     "outcomeUnknown": "Una aprobación anterior se interrumpió durante la ejecución — su efecto es desconocido; verifícalo externamente antes de reintentar.",
     "outcomeUnknownShort": "resultado desconocido",
     "toolApprovalHint": "Aprobar aplica tus elecciones por llamada (las que no modificaste quedan aprobadas). Rechazar rechaza todo el lote.",
+    "toolApprovalHintExplicit": "Cada llamada necesita su propia aprobación o rechazo antes de poder aprobar el lote. Rechazar rechaza todo el lote.",
+    "explicitReviewMissing": "Revisa cada llamada de arriba antes de aprobar.",
+    "redactionCaveat": "Los argumentos que se muestran abajo están redactados — un valor secreto aparece como «[REDACTED]», no se omite.",
     "gateReason": "Patrón coincidente",
     "argsTruncated": "argumentos truncados",
     "amendArguments": "Modificar argumentos (opcional)",
@@ -3152,10 +3155,14 @@
     "chat": {
       "empty": "Pregunta sobre tu instalación. El operador lo consulta y te muestra cada llamada que hace.",
       "placeholder": "Pregunta por agentes, conversaciones, despliegues, registros…",
+      "pausedPlaceholder": "Esperando una decisión arriba antes de que el operador pueda continuar…",
       "send": "Enviar",
       "stop": "Detener",
       "newConversation": "Iniciar una conversación nueva",
       "transcript": "Conversación con el operador"
+    },
+    "approval": {
+      "reconstructedEndpoint": "{{method}} {{path}} (reconstruido)"
     },
     "starters": {
       "whatsDeployed": "¿Qué hay desplegado ahora mismo?",

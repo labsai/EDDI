@@ -1,11 +1,13 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Send, Square, RotateCcw, AlertTriangle, Bot, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatActivity } from "@/components/chat/chat-activity";
+import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { OPERATOR_STARTER_PROMPTS } from "@/lib/operator/system-prompt";
 import type { ChatMessage } from "@/lib/api/chat";
 import type { PipelineEvent } from "@/hooks/use-debug-events";
+import type { HitlVerdict, PauseDetails, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
 import { cn } from "@/lib/utils";
 
 interface OperatorChatProps {
@@ -18,6 +20,20 @@ interface OperatorChatProps {
   onSend: (input: string) => void;
   onStop: () => void;
   onReset: () => void;
+  /** Whether the conversation is currently AWAITING_HUMAN. */
+  isPaused: boolean;
+  pauseReason: string | null;
+  /** Structured RULE/TOOL_CALL detail from GET …/approval-status. `undefined`
+   *  while it is still loading — distinct from `null` (nothing to show). */
+  pauseDetails?: PauseDetails | null;
+  /** Whether a submitted decision is being resumed and awaited. */
+  isResolvingPause: boolean;
+  /** Set only when resuming or awaiting the resumed turn's outcome failed. */
+  resolveError: string | null;
+  onDecide: (verdict: HitlVerdict, note?: string, toolDecisions?: Record<string, ToolCallDecision>) => void;
+  /** Rendered per gated call above its redacted arguments — see
+   *  `ApprovalBannerProps.renderCallExtra`. */
+  renderCallExtra?: (call: PendingToolCallView) => ReactNode;
 }
 
 export function OperatorChat({
@@ -29,6 +45,13 @@ export function OperatorChat({
   onSend,
   onStop,
   onReset,
+  isPaused,
+  pauseReason,
+  pauseDetails,
+  isResolvingPause,
+  resolveError,
+  onDecide,
+  renderCallExtra,
 }: OperatorChatProps) {
   const { t } = useTranslation();
   const [input, setInput] = useState("");
@@ -40,7 +63,7 @@ export function OperatorChat({
 
   function submit(text: string) {
     const value = text.trim();
-    if (!value || isStreaming) return;
+    if (!value || isStreaming || isPaused) return;
     onSend(value);
     setInput("");
   }
@@ -126,6 +149,33 @@ export function OperatorChat({
           </div>
         )}
 
+        {/* Inline in the transcript, same placement as a group discussion's
+            pause (discussion-transcript.tsx) — the decision belongs where the
+            conversation that is waiting on it is, not on a separate page. */}
+        {isPaused && (
+          <ApprovalBanner
+            surface="regular"
+            pauseReason={pauseReason ?? undefined}
+            pauseDetails={pauseDetails ?? null}
+            pauseDetailsPending={pauseDetails === undefined}
+            isSubmitting={isResolvingPause}
+            requireExplicitPerCall
+            renderCallExtra={renderCallExtra}
+            onDecide={(verdict, note, _taskApprovals, toolDecisions) => onDecide(verdict, note, toolDecisions)}
+          />
+        )}
+
+        {resolveError && (
+          <div
+            className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+            data-testid="operator-resolve-error"
+            role="alert"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{resolveError}</span>
+          </div>
+        )}
+
         <div ref={endRef} />
       </div>
 
@@ -139,9 +189,14 @@ export function OperatorChat({
               submit(input);
             }
           }}
-          placeholder={t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")}
+          disabled={isPaused}
+          placeholder={
+            isPaused
+              ? t("operator.chat.pausedPlaceholder", "Awaiting a decision above before the operator can continue…")
+              : t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")
+          }
           aria-label={t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")}
-          className="h-10 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+          className="h-10 flex-1 rounded-md border border-input bg-background px-3 text-sm disabled:opacity-50"
           data-testid="operator-input"
         />
         {isStreaming ? (
@@ -152,7 +207,7 @@ export function OperatorChat({
           <Button
             size="icon"
             onClick={() => submit(input)}
-            disabled={!input.trim()}
+            disabled={!input.trim() || isPaused}
             title={t("operator.chat.send", "Send")}
             aria-label={t("operator.chat.send", "Send")}
             data-testid="operator-send"

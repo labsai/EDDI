@@ -2803,6 +2803,9 @@
     "outcomeUnknown": "Eine vorherige Freigabe wurde mitten in der Ausführung unterbrochen — ihre Wirkung ist unbekannt; vor einem erneuten Versuch extern prüfen.",
     "outcomeUnknownShort": "Ergebnis unbekannt",
     "toolApprovalHint": "Freigeben wendet deine Auswahl je Aufruf an (nicht geänderte Aufrufe werden freigegeben). Ablehnen lehnt den gesamten Stapel ab.",
+    "toolApprovalHintExplicit": "Jeder Aufruf braucht eine eigene Freigabe oder Ablehnung, bevor du den Stapel freigeben kannst. Ablehnen lehnt den gesamten Stapel ab.",
+    "explicitReviewMissing": "Prüfe jeden Aufruf oben, bevor du freigibst.",
+    "redactionCaveat": "Die unten angezeigten Argumente sind geschwärzt — ein geheimer Wert erscheint als „[REDACTED]“, nicht weggelassen.",
     "gateReason": "Übereinstimmendes Muster",
     "argsTruncated": "Argumente gekürzt",
     "amendArguments": "Argumente ändern (optional)",
@@ -3146,10 +3149,14 @@
     "chat": {
       "empty": "Fragen Sie nach Ihrer Installation. Der Operator schlägt nach und zeigt Ihnen jeden Aufruf, den er macht.",
       "placeholder": "Fragen Sie nach Agenten, Konversationen, Deployments, Logs …",
+      "pausedPlaceholder": "Wartet auf eine Entscheidung oben, bevor der Operator fortfahren kann…",
       "send": "Senden",
       "stop": "Stoppen",
       "newConversation": "Neue Konversation beginnen",
       "transcript": "Operator-Konversation"
+    },
+    "approval": {
+      "reconstructedEndpoint": "{{method}} {{path}} (rekonstruiert)"
     },
     "starters": {
       "whatsDeployed": "Was ist derzeit deployt?",

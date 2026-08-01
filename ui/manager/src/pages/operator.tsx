@@ -1,5 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Sparkles,
@@ -27,8 +28,11 @@ import {
   type ActivationStage,
 } from "@/hooks/use-operator";
 import { useOperatorChat } from "@/hooks/use-operator-chat";
+import { useApprovalStatus } from "@/hooks/use-hitl";
 import { getErrorMessage } from "@/lib/api-client";
-import type { OperatorConfig } from "@/lib/api/operator";
+import { fetchOpenApiSpec, type OperatorConfig } from "@/lib/api/operator";
+import { buildOperationIdIndex, reconstructEndpoint } from "@/lib/operator/reconstruct-endpoint";
+import type { PendingToolCallView } from "@/lib/api/hitl";
 
 export function OperatorPage() {
   const { t } = useTranslation();
@@ -62,6 +66,39 @@ export function OperatorPage() {
   const status = useOperatorStatus(config);
   const gate = useVerifyOperatorGate(config);
   const chat = useOperatorChat(config);
+
+  // Structured RULE/TOOL_CALL pause detail — the streamed `done` snapshot only
+  // carries the generic bookmark fields, not per-call tool names/arguments.
+  const approvalStatus = useApprovalStatus(chat.conversationId ?? undefined, chat.isPaused);
+
+  // Fetched once a pause needs it, cached for the tab: reconstructing "METHOD
+  // /path" for display is the same lookup on every pause, and the spec does
+  // not change between them.
+  const specQuery = useQuery({
+    queryKey: ["operator", "openapi-spec-for-reconstruction"],
+    queryFn: fetchOpenApiSpec,
+    enabled: chat.isPaused,
+    staleTime: Infinity,
+  });
+  const operationIdIndex = useMemo(
+    () => (specQuery.data ? buildOperationIdIndex(specQuery.data) : {}),
+    [specQuery.data],
+  );
+  const renderCallExtra = useCallback(
+    (call: PendingToolCallView) => {
+      const endpoint = reconstructEndpoint(call.toolName, operationIdIndex);
+      if (!endpoint) return null;
+      return (
+        <p className="mb-1.5 font-mono text-[11px] text-muted-foreground" data-testid={`tool-endpoint-${call.callId}`}>
+          {t("operator.approval.reconstructedEndpoint", "{{method}} {{path}} (reconstructed)", {
+            method: endpoint.method,
+            path: endpoint.path,
+          })}
+        </p>
+      );
+    },
+    [operationIdIndex, t],
+  );
 
   const handleActivate = useCallback(
     (next: OperatorConfig, apiKey: string, baseUrl?: string) => {
@@ -309,6 +346,13 @@ export function OperatorPage() {
           onSend={chat.send}
           onStop={chat.stop}
           onReset={chat.reset}
+          isPaused={chat.isPaused}
+          pauseReason={chat.pauseReason}
+          pauseDetails={chat.isPaused ? approvalStatus.data?.pauseDetails : undefined}
+          isResolvingPause={chat.isResolvingPause}
+          resolveError={chat.resolveError}
+          onDecide={chat.resolveApproval}
+          renderCallExtra={renderCallExtra}
         />
         <OperatorStatusPanel
           config={config!}

@@ -337,5 +337,102 @@ describe("ApprovalBanner", () => {
       expect(screen.queryByTestId("tool-call-approvals")).not.toBeInTheDocument();
       expect(screen.getByTestId("approval-banner")).toHaveAttribute("data-pause-type", "RULE");
     });
+
+    it("always shows the redaction caveat, regardless of requireExplicitPerCall", () => {
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} />,
+      );
+      expect(screen.getByTestId("redaction-caveat")).toHaveTextContent("[REDACTED]");
+    });
+
+    it("renders renderCallExtra content for each call", () => {
+      renderWithProviders(
+        <ApprovalBanner
+          surface="regular"
+          pauseDetails={toolPause()}
+          onDecide={vi.fn()}
+          renderCallExtra={(call) => <span data-testid={`extra-${call.callId}`}>POST /agentstore/agents</span>}
+        />,
+      );
+      expect(screen.getByTestId("extra-c1")).toBeInTheDocument();
+      expect(screen.getByTestId("extra-c2")).toBeInTheDocument();
+    });
+  });
+
+  describe("requireExplicitPerCall", () => {
+    it("disables Approve until every call has an explicit verdict", () => {
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} requireExplicitPerCall />,
+      );
+      expect(screen.getByTestId("approve-button")).toBeDisabled();
+      expect(screen.getByTestId("explicit-review-missing")).toBeInTheDocument();
+    });
+
+    it("enables Approve once EVERY call has been explicitly toggled", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} requireExplicitPerCall />,
+      );
+      fireEvent.click(screen.getByTestId("tool-approve-c1"));
+      // Still missing c2 — must stay disabled.
+      expect(screen.getByTestId("approve-button")).toBeDisabled();
+
+      fireEvent.click(screen.getByTestId("tool-approve-c2"));
+      expect(screen.getByTestId("approve-button")).not.toBeDisabled();
+      expect(screen.queryByTestId("explicit-review-missing")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("approve-button"));
+      confirmInDialog("Approve");
+      expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, {
+        c1: { verdict: "APPROVED" },
+        c2: { verdict: "APPROVED" },
+      });
+    });
+
+    it("un-reviewing a call (toggling it back off) re-disables Approve", () => {
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} requireExplicitPerCall />,
+      );
+      fireEvent.click(screen.getByTestId("tool-approve-c1"));
+      fireEvent.click(screen.getByTestId("tool-approve-c2"));
+      expect(screen.getByTestId("approve-button")).not.toBeDisabled();
+
+      // Toggling an already-selected verdict off is the existing "un-toggle"
+      // behavior (see the onToggle handler) — Approve must track it live.
+      fireEvent.click(screen.getByTestId("tool-approve-c2"));
+      expect(screen.getByTestId("approve-button")).toBeDisabled();
+    });
+
+    it("Reject stays available regardless — rejecting the batch needs no per-call review", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} requireExplicitPerCall />,
+      );
+      expect(screen.getByTestId("reject-button")).not.toBeDisabled();
+      fireEvent.click(screen.getByTestId("reject-button"));
+      confirmInDialog("Reject");
+      expect(onDecide).toHaveBeenCalledWith("REJECTED", undefined, undefined, undefined);
+    });
+
+    it("does not affect a RULE pause, which has no per-call state to require", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner
+          surface="regular"
+          pauseDetails={{ type: "RULE", reason: "x", actions: [] }}
+          onDecide={onDecide}
+          requireExplicitPerCall
+        />,
+      );
+      expect(screen.getByTestId("approve-button")).not.toBeDisabled();
+    });
+
+    it("defaults to off — existing callers (conversation-detail, discussion-transcript) keep sweep-approve", () => {
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} />,
+      );
+      expect(screen.getByTestId("approve-button")).not.toBeDisabled();
+      expect(screen.queryByTestId("explicit-review-missing")).not.toBeInTheDocument();
+    });
   });
 });

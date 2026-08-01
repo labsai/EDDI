@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   CheckCircle2,
@@ -60,6 +60,24 @@ interface ApprovalBannerProps {
   ) => void;
   /** Called when the user cancels. */
   onCancel?: () => void;
+  /**
+   * On a TOOL_CALL pause, disables top-level Approve until every gated call has
+   * an explicit per-call verdict — an untouched call otherwise inherits the
+   * top-level verdict silently (see the hint text below the call list). Regular
+   * conversation and group review intentionally keep that default; this exists
+   * for a surface where a swept-in call executes an unreviewed write against the
+   * platform itself (the Platform Operator), so "I clicked Approve" must mean
+   * "I looked at every call", not "I looked at the batch".
+   */
+  requireExplicitPerCall?: boolean;
+  /**
+   * Rendered per call, above the redacted arguments — e.g. the reconstructed
+   * "METHOD /path" a generated tool actually calls, which `PendingToolCallView`
+   * does not carry (only the operationId-derived tool name does). Kept as a
+   * render prop rather than a new required field so this stays optional for
+   * every other caller.
+   */
+  renderCallExtra?: (call: PendingToolCallView) => ReactNode;
 }
 
 /** Whether a date string parses to a real instant. */
@@ -125,6 +143,8 @@ export function ApprovalBanner({
   pauseDetailsPending,
   onDecide,
   onCancel,
+  requireExplicitPerCall = false,
+  renderCallExtra,
 }: ApprovalBannerProps) {
   const { t } = useTranslation();
   const [note, setNote] = useState("");
@@ -153,6 +173,14 @@ export function ApprovalBanner({
 
   const toolPause = pauseDetails?.type === "TOOL_CALL" ? pauseDetails : null;
   const isToolCall = !!toolPause;
+
+  // Every gated call must carry an explicit verdict before Approve is offered.
+  // Checked against callStates directly (not toolDecisions, which is built only
+  // at submit time) so the button reflects the CURRENT review state live.
+  const explicitReviewMissing =
+    requireExplicitPerCall &&
+    isToolCall &&
+    toolPause!.calls.some((call) => callStates[call.callId]?.verdict === undefined);
 
   const setCall = (callId: string, patch: Partial<CallState>) => {
     setCallStates((prev) => ({ ...prev, [callId]: { ...prev[callId], ...patch } }));
@@ -373,12 +401,22 @@ export function ApprovalBanner({
           <p className="text-xs font-medium text-muted-foreground">
             {t("hitl.toolCallsAwaiting", "Tool calls awaiting approval")}
           </p>
+          {/* The backend never sends raw arguments to a client — only the
+              redacted, size-capped form. A secret inside the payload reads as
+              the literal text "[REDACTED]" here, which is correct, but an
+              approver who doesn't know that can mistake it for "nothing
+              sensitive was in this call" rather than "something was, and it was
+              hidden from you". */}
+          <p className="text-[11px] text-muted-foreground" data-testid="redaction-caveat">
+            {t("hitl.redactionCaveat", "Arguments shown below are redacted — a secret value appears as \"[REDACTED]\", not omitted.")}
+          </p>
           {toolPause.calls.map((call) => (
             <ToolCallRow
               key={call.callId}
               call={call}
               state={callStates[call.callId] ?? {}}
               outcomeUnknown={outcomeUnknown.has(call.callId)}
+              extra={renderCallExtra?.(call)}
               onToggle={(verdict) =>
                 setCall(call.callId, {
                   verdict: callStates[call.callId]?.verdict === verdict ? undefined : verdict,
@@ -400,8 +438,16 @@ export function ApprovalBanner({
             </p>
           )}
           <p className="text-[11px] text-muted-foreground">
-            {t("hitl.toolApprovalHint", "Approve applies your per-call choices (calls you didn't change are approved). Reject rejects the whole batch.")}
+            {requireExplicitPerCall
+              ? t("hitl.toolApprovalHintExplicit", "Every call needs its own Approve or Reject before you can approve the batch. Reject rejects the whole batch.")
+              : t("hitl.toolApprovalHint", "Approve applies your per-call choices (calls you didn't change are approved). Reject rejects the whole batch.")}
           </p>
+          {explicitReviewMissing && (
+            <p className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400" data-testid="explicit-review-missing">
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("hitl.explicitReviewMissing", "Review every call above before approving.")}
+            </p>
+          )}
         </div>
       )}
 
@@ -521,7 +567,7 @@ export function ApprovalBanner({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          disabled={isSubmitting || pauseDetailsPending}
+          disabled={isSubmitting || pauseDetailsPending || explicitReviewMissing}
           onClick={() => setConfirmAction("APPROVED")}
           className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
           data-testid="approve-button"
@@ -578,6 +624,7 @@ function ToolCallRow({
   call,
   state,
   outcomeUnknown,
+  extra,
   onToggle,
   onToggleAmend,
   onAmendChange,
@@ -585,6 +632,9 @@ function ToolCallRow({
   call: PendingToolCallView;
   state: CallState;
   outcomeUnknown: boolean;
+  /** Optional caller-supplied content rendered above the arguments block —
+   *  see `ApprovalBannerProps.renderCallExtra`. */
+  extra?: ReactNode;
   onToggle: (verdict: HitlVerdict) => void;
   onToggleAmend: () => void;
   onAmendChange: (amend: string) => void;
@@ -656,6 +706,7 @@ function ToolCallRow({
           </button>
         </div>
       </div>
+      {extra}
       {call.arguments && (
         <pre
           className="max-h-40 overflow-auto rounded bg-muted/60 p-2 text-[11px] leading-relaxed text-foreground"

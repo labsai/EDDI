@@ -2803,6 +2803,9 @@
     "outcomeUnknown": "前回の承認が実行中に中断されました。その影響は不明です。再試行する前に外部で確認してください。",
     "outcomeUnknownShort": "結果不明",
     "toolApprovalHint": "「承認」は呼び出しごとの選択を適用します（変更していない呼び出しは承認されます）。「拒否」はバッチ全体を拒否します。",
+    "toolApprovalHintExplicit": "バッチを承認する前に、各呼び出しごとに個別の承認または拒否が必要です。「拒否」はバッチ全体を拒否します。",
+    "explicitReviewMissing": "承認する前に、上記のすべての呼び出しを確認してください。",
+    "redactionCaveat": "以下に表示される引数はマスク済みです — 秘密の値は省略されるのではなく「[REDACTED]」と表示されます。",
     "gateReason": "一致したパターン",
     "argsTruncated": "引数は切り詰められました",
     "amendArguments": "引数を修正（任意）",
@@ -3146,10 +3149,14 @@
     "chat": {
       "empty": "ご自身の環境について質問してください。オペレーターが調べ、行ったすべての呼び出しを表示します。",
       "placeholder": "エージェント、会話、デプロイ、ログについて質問…",
+      "pausedPlaceholder": "上の判断待ちのため、オペレーターは続行できません…",
       "send": "送信",
       "stop": "停止",
       "newConversation": "新しい会話を開始",
       "transcript": "オペレーターとの会話"
+    },
+    "approval": {
+      "reconstructedEndpoint": "{{method}} {{path}}（再構築）"
     },
     "starters": {
       "whatsDeployed": "今は何がデプロイされていますか？",

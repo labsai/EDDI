@@ -2803,6 +2803,9 @@
     "outcomeUnknown": "上一次审批在执行过程中被中断——其影响未知；重试前请在外部核实。",
     "outcomeUnknownShort": "结果未知",
     "toolApprovalHint": "批准将应用你对每次调用的选择（未更改的调用将被批准）。拒绝将拒绝整批调用。",
+    "toolApprovalHintExplicit": "每次调用都需要单独批准或拒绝，然后才能批准整批。拒绝将拒绝整批调用。",
+    "explicitReviewMissing": "在批准之前，请先审查上面的每一次调用。",
+    "redactionCaveat": "下方显示的参数已脱敏 — 敏感值会显示为“[REDACTED]”，而不是被省略。",
     "gateReason": "匹配的模式",
     "argsTruncated": "参数已截断",
     "amendArguments": "修改参数（可选）",
@@ -3146,10 +3149,14 @@
     "chat": {
       "empty": "来问问你的部署。操作员会去查，并向你展示它发出的每一次调用。",
       "placeholder": "询问智能体、会话、部署、日志……",
+      "pausedPlaceholder": "正在等待上方的决定，之后操作员才能继续…",
       "send": "发送",
       "stop": "停止",
       "newConversation": "开始新会话",
       "transcript": "操作员对话"
+    },
+    "approval": {
+      "reconstructedEndpoint": "{{method}} {{path}}（重建）"
     },
     "starters": {
       "whatsDeployed": "现在部署了哪些内容？",
