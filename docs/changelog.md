@@ -5,6 +5,24 @@
 
 ---
 
+## 🚦 feat(groups): wire group discussions into graceful shutdown (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R1 step 10 of `planning/group-collaboration-improvements-plan.md` §3.1 — the last R1 item, and per the plan's own ground rule 3.0-1 a **deliberate behavior change**, not a refactor: it gets its own commit and tests rather than riding along with an extraction. Before this, `GroupConversationService` did not participate in graceful shutdown at all — its `@PreDestroy` unconditionally tore down the executor with no drain, while `ConversationService` has rejected new turns and drained in-flight ones since the 2026-07/08 merge (`GracefulShutdownService`).
+
+**Two additive pieces, both reusing existing machinery rather than inventing new drain logic.** (1) `rejectIfShuttingDown()` — copied verbatim in spirit from `ConversationService`'s method of the same name, field-injects the same `GracefulShutdownService` bean (same pattern as `attachmentStore`/`deploymentStore`: `null` in the direct-construction unit tests, which then never reject) and throws `RejectedExecutionException` — already globally mapped to HTTP 503 by the pre-existing `RejectedExecutionExceptionMapper`, so no REST-layer change was needed. Called from the three entry points that start or resume a discussion: `discuss`, `startAndDiscussAsync`, `resumeDiscussion`. (2) A new `onShutdown(@Observes ShutdownEvent)` handler that signals every currently-active discussion's control token `ControlSignal.CANCEL_GRACEFUL` — the exact signal `cancelDiscussion` already exposes over REST/MCP, so `executeDiscussion`'s existing top-of-phase check stops scheduling new phase work with zero new cancellation logic.
+
+**Deliberately did not re-implement `GracefulShutdownService`'s bounded wait.** Every dispatched member turn already runs through the shared `IConversationCoordinator` via `IConversationService#say`, so `GracefulShutdownService#drain()` already waits for whatever member turn is currently in flight — that half of "let the drain await in-flight discussions" was already true before this commit, a side effect of shared infrastructure, not something to duplicate. What the drain had no way to do was stop the group orchestration loop from queuing *more* phase work while it waited (a multi-round DELPHI or TASK_FORCE discussion can run well past the default 20s drain timeout); `CANCEL_GRACEFUL` closes exactly that gap.
+
+**Observer-ordering risk caught before writing a single test — not left to be discovered by one failing intermittently.** CDI does not guarantee firing order between independent `@Observes ShutdownEvent` methods on different beans. `GracefulShutdownService`'s own observer calls `drain()` synchronously and blocks for up to ~23s; if it fired *before* this new observer, the graceful-cancel signals would only go out after the drain had already finished waiting — useless for the shutdown they were meant to help, and only for the *first* shutdown a deployment ever exercises (the kind of bug that hides until a slow discussion is actually in flight during a rolling deploy). Fixed by giving the new observer `@Priority(Interceptor.Priority.APPLICATION - 100)`, which CDI guarantees runs before the default-priority, unprioritized observer.
+
+**Tests** (new `GroupConversationServiceGracefulShutdownTest`, 8 tests, mirroring `ConversationServiceProcessingGaugeTest`'s established pattern of constructing a real `GracefulShutdownService` via its public constructor with an overridden `isShuttingDown()` rather than mocking the final drain logic): all three gated entry points throw `RejectedExecutionException` while shutting down; `discuss` proceeds normally (falls through to its ordinary not-shutting-down code path) when the gate is false or unset; `onShutdown` sets `CANCEL_GRACEFUL` on every token in `activeTokens`; a no-active-discussions shutdown is a no-op; one troublesome entry's exception during signalling does not stop the others from being signalled (proven by making the mocked store throw and asserting every remaining token was still touched).
+
+Full 28-class group + MCP test battery (802 tests) green. This closes out R1 — all 10 steps of `GroupConversationService`'s decomposition are now complete. `AgentOrchestrator` (R2) and `ConversationService` (R3) are next.
+
+---
+
 ## ✅ chore(groups): R1 step 9 — facade finalization verification, no further extraction (2026-08-01)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
