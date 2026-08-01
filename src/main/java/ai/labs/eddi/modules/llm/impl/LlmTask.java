@@ -1441,11 +1441,13 @@ public class LlmTask implements ILifecycleTask {
      * providers use different keys: OpenAI uses "modelName", Ollama uses "model",
      * Bedrock/HuggingFace use "modelId", Azure uses "deploymentName".
      * <p>
-     * Package-private rather than private so {@code AgentOrchestrator} can resolve
-     * the same model name when it picks a token estimator for the in-turn
-     * tool-context budget — one resolution table, not two that can drift.
+     * Public rather than private so {@code ToolContextBudget}
+     * ({@code ai.labs.eddi.modules.llm.impl.orchestration}, extracted from
+     * {@code AgentOrchestrator} in R2 step 3) can resolve the same model name when
+     * it picks a token estimator for the in-turn tool-context budget — one
+     * resolution table, not two that can drift.
      */
-    static String resolveModelName(Map<String, String> processedParams) {
+    public static String resolveModelName(Map<String, String> processedParams) {
         String name = processedParams.get("modelName");
         if (name != null)
             return name;

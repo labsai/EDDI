@@ -5,6 +5,30 @@
 
 ---
 
+## 🧩 refactor(orchestrator): extract ToolContextBudget from AgentOrchestrator (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 3 of `planning/group-collaboration-improvements-plan.md` §3.2 — the first step of the second monolith decomposition, `AgentOrchestrator` (2,725 lines, 30 constructor params, no interface). Deliberately started with the plan's step 3 (the static token-budget cluster) rather than its step 1 (the `ToolSourceProvider` SPI) — same reasoning as Wave R's own ground rule 7 ("static clusters extract first, they are pure moves"): a small, self-contained, dependency-light piece to validate the methodology against an unfamiliar file before the much larger SPI introduction.
+
+**Full structural map built before touching anything.** Used a research agent to page through all 2,725 lines and produce an exhaustive method/dependency inventory (confirmed against the plan's own anchors) rather than grepping piecemeal as I went — `AgentOrchestrator` was unfamiliar territory this session, unlike `GroupConversationService` after 8 R1 extractions. Confirmed: only the 9-arg `executeIfToolsEnabled` and 7-arg `resumeToolLoop` are ever reached from production code (`LlmTask`, `CascadingModelExecutor`); every shorter overload exists purely for tests. Also surfaced a small inaccuracy in the plan doc itself: it says "12 orchestrator test classes" in two places, but 13 files construct `AgentOrchestrator` directly — noted for whoever next relies on that count as a gate.
+
+Moved `resolveToolContextEstimator`, `enforceToolContextBudget`, `findToolExchanges`, `tokensOf`, `sumTokens`, `sumInt`, `tokenUsageMap` plus the `DEFAULT_MAX_TOOL_CONTEXT_TOKENS`/`TOKEN_USAGE_FIELDS` constants into a new `ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget` — a new subpackage sibling to `AgentOrchestrator` (the plan names `ai.labs.eddi.modules.llm.tools.spi` for the *SPI* specifically; the SPI's own provider implementations will likely live under `tools.providers` when that step lands, but this cluster is orchestrator-internal machinery, not a tool source, so it stays adjacent to `impl` — same `parent` → `parent.subpackage` shape as Wave R's `engine.internal` → `engine.internal.groups`).
+
+**A naming collision the bare-token sweep alone wouldn't have caught, since it's not a reflection issue at all.** `runToolCallLoop` already declares a local `int toolContextBudget` (the resolved token ceiling) in the exact scope where the new collaborator field would have been referenced. Naming the field `toolContextBudget` to match the class name — the obvious first choice — would have shadowed the local and silently miscompiled (or refused to compile, since `int` has no methods) at the one call site needing the instance. Caught by re-reading the diff in context before compiling, not by the compiler; fixed by naming the field `toolContextBudgetGuard` instead, isolating the fix to code this commit added rather than renaming the pre-existing local.
+
+**Two package-private cross-class dependencies widened to public** — `LlmTask.resolveModelName` and `TokenCounterFactory.extractText` — both already carried comments explaining *why* they were package-private-not-private (so `AgentOrchestrator`, same package, could call them); updated both comments to name `ToolContextBudget` instead now that the caller has moved to a different package. Same category of change as every prior step's visibility widenings, just crossing sibling classes instead of a facade/collaborator pair.
+
+**Delegator ratio:** 7 of 9 units needed a facade delegator (four are hard class-qualified references from tests — `AgentOrchestrator.DEFAULT_MAX_TOOL_CONTEXT_TOKENS`/`enforceToolContextBudget`/`sumTokens`/`tokenUsageMap` — and `tokenUsageMap`/`TOKEN_USAGE_FIELDS` are also referenced directly by production code in `LegacyChatExecutor`/`CascadingModelExecutor`/`LlmTask`, which is why those two got constant-alias/method-delegator treatment rather than a call-site rewrite). Only `findToolExchanges`/`tokensOf` (internal-only, called solely by `enforceToolContextBudget`) and `sumInt` (internal-only, called solely by `sumTokens`) moved with no delegator. `resolveToolContextEstimator` — not reflected — moved with no delegator either; its one remaining caller (`runToolCallLoop`, staying on the facade) was updated to call `toolContextBudgetGuard.resolveToolContextEstimator(task)` directly.
+
+**Self-caught dead-code bug from an imprecise `Edit` match**, before compiling: the first pass at replacing `tokenUsageMap`'s body left the original `return map;` statement behind after the new `return ToolContextBudget.tokenUsageMap(usage);` line — an unreachable-statement compile error. Caught by re-reading the edited region immediately after applying it, fixed before the first compile attempt.
+
+Added a focused `ToolContextBudgetTest` (6 tests) covering `resolveToolContextEstimator` directly — it has no reflection dependency in the existing suite and was previously only exercised indirectly through the full tool-call loop, so this is genuinely new coverage — plus light sanity coverage of `sumTokens`/`tokenUsageMap`. `enforceToolContextBudget`'s eviction logic (the bulk of this cluster) is already exhaustively covered by the pre-existing 462-line `AgentOrchestratorToolContextBudgetTest`, re-verified green through the facade's delegator rather than duplicated.
+
+Full 20-class test battery (382 tests: all 14 `AgentOrchestrator*` suites + `JsonResponseFormatThreadingTest` + `LlmTaskAgentModeMetadataTest` + the new `ToolContextBudgetTest` + key `CascadingModelExecutor*`/`LegacyChatExecutor*` suites, covering every production cross-reference found during the structural mapping) green. `AgentOrchestrator`: 2,725 → 2,542 lines. First of R2's ~7 steps done.
+
+---
+
 ## 🚦 feat(groups): wire group discussions into graceful shutdown (2026-08-01)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

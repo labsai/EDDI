@@ -64,8 +64,13 @@ public class TokenCounterFactory {
      * {@code text()} and every result message hit the {@code default} arm — which
      * made the entire in-turn tool context weigh zero tokens to every caller of
      * this class.
+     * <p>
+     * Public rather than package-private so {@code ToolContextBudget}
+     * ({@code ai.labs.eddi.modules.llm.impl.orchestration}, extracted from
+     * {@code AgentOrchestrator} in R2 step 3) can meter the same text this class
+     * counts.
      */
-    static String extractText(ChatMessage message) {
+    public static String extractText(ChatMessage message) {
         return switch (message) {
             case SystemMessage sm -> sm.text();
             case AiMessage am -> aiMessageText(am);
