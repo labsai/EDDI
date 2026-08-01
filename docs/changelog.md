@@ -5,6 +5,24 @@
 
 ---
 
+## 🧩 refactor(groups): extract TaskForceEngine from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R1 step 6 of `planning/group-collaboration-improvements-plan.md` §3.1 — the largest and most concurrency-sensitive extraction in Wave R: the entire TASK_FORCE-style PLAN/EXECUTE/VERIFY cluster (~840 lines) into a new `ai.labs.eddi.engine.internal.groups.TaskForceEngine`. This is the code `GroupConversationServiceConcurrencyTest` exists specifically to pin — the documented lock order (`taskList` → `transcript`), the `recordTaskFailure`/`notifyTaskFailure` split (document write under the monitor, SSE emission outside it), and `resetStrandedInProgressTasks`'s compare-and-set-under-monitor sweep all had to move verbatim, byte-for-byte, with zero reordering.
+
+**The reflection-sweep lesson from step 5 paid for itself immediately.** Doing the bare-token sweep *first* this time (before writing a line of the new class) surfaced 12 of the cluster's 16 methods as test-reflected — far more than any prior step — including two that a pattern-based (not bare-token) grep would have missed entirely: `formatVerificationForDisplay` and three others are reflected via a direct multi-line `GroupConversationService.class.getDeclaredMethod(...)` call split across two source lines, which a single-line regex can't see. All 12 kept as thin delegators; the other 4 (`executeTaskPlanPhase`, `abortWave`, `stringOrNull`, `notifyTaskFailure`) had zero bare-token matches anywhere in the test tree and were fully inlined.
+
+**A 13th reflected method was hiding just outside the cluster's own banner.** `reserveTurn` — the CAS-loop turn-budget reservation `executeTaskExecutionPhase` calls — is textually declared in the *previous* banner section ("Cooperative cancellation of in-flight member turns"), not under "Task-oriented phase execution" at all, and `GroupConversationServiceConcurrencyTest` reflects into it as a **static** method (`invoke(null, ...)`). Initially missed because the search was scoped to the TASK_FORCE cluster's own line range; caught before compiling by checking every method actually *called from* the code being moved, not just what a banner's boundaries claim it contains. Moved to `TaskForceEngine` (its only real call site) with a static delegator left behind on the facade, same pattern as `propagateDynamicAgentTracking` in step 4.
+
+Two bugs caught and fixed before any of this reached CI:
+1. **My own transcription error** — while wiring the facade's delegators, I invented non-existent `...ForTest`-suffixed method names instead of matching `TaskForceEngine`'s actual (correct) method names. Caught immediately by re-reading my own diff before compiling, not by the compiler — the names were plausible enough that autocomplete-shaped review wouldn't have caught it either.
+2. **A stale-object bug in the new `TaskForceEngineTest`**: `TaskItem` is an immutable record, so calling `completeTask(id, ...)` on a `SharedTaskList` returns a *new* instance rather than mutating the one already held in a local variable — a test that captured the pre-completion `TaskItem` and passed it into `tryParseVerificationJson` was silently checking `status == COMPLETED` against a `PENDING` snapshot. Test failure (`expected: <true> but was: <false>`), not a production bug, but the fix (re-fetch via `findById` after each mutation) is the same one anyone writing against this record-based API needs.
+
+Full 12-class group suite + `DynamicAgentTrackingPropagationTest` + all 6 focused collaborator test classes green (555 tests) — including `GroupConversationServiceConcurrencyTest` (8/8) and `GroupConversationServiceTaskForceTest` (20/20), the two suites this extraction had the most power to silently break. `GroupConversationService`: 3,432 → 2,594 lines (838 lines moved — the single biggest reduction of any R1 step so far). 6 of R1's 10 extraction steps done; `GroupConversationService` is now smaller than `AgentOrchestrator` (2,725) and `ConversationService` (2,698), the two classes R2/R3 will decompose next.
+
+---
+
 ## 🧩 refactor(groups): extract PhaseExecutionEngine from GroupConversationService (2026-08-01)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
