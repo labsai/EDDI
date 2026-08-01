@@ -11,7 +11,6 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
-import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
@@ -42,7 +41,6 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
-import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
@@ -111,8 +109,6 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 @ApplicationScoped
 class AgentOrchestrator {
     private static final Logger LOGGER = Logger.getLogger(AgentOrchestrator.class);
-    private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
-    private static final String MCPCALLS_TYPE = "eddi://ai.labs.mcpcalls";
 
     /** Well-known data keys for dynamic agent lifecycle tracking. */
     public static final String KEY_DYNAMIC_CREATED_AGENT_IDS = "dynamic:created_agent_ids";
@@ -316,6 +312,11 @@ class AgentOrchestrator {
      */
     private final HttpCallToolsProvider httpCallToolsProvider;
 
+    /**
+     * MCP tool discovery, extracted to {@link McpToolsProvider} (R2 step 2).
+     */
+    private final McpToolsProvider mcpToolsProvider;
+
     @Inject
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
@@ -362,6 +363,7 @@ class AgentOrchestrator {
         this.toolContextBudgetGuard = new ToolContextBudget(tokenCounterFactory);
         this.httpCallToolsProvider = new HttpCallToolsProvider(restAgentStore, restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter);
+        this.mcpToolsProvider = new McpToolsProvider(restAgentStore, restWorkflowStore, resourceClientLibrary, mcpToolProviderManager);
     }
 
     /**
@@ -2334,65 +2336,11 @@ class AgentOrchestrator {
         return new HttpCallToolsResult(contribution.specs(), contribution.executors(), contribution.toolEndpoints());
     }
 
-    // --- McpCalls auto-discovery from workflow ---
-
-    /**
-     * Discovers mcpcalls configurations from the workflow and creates filtered
-     * ToolSpecification + ToolExecutor pairs via McpToolProviderManager.
-     * <p>
-     * Traverses: memory → agentId/version → AgentConfiguration → workflows →
-     * WorkflowConfiguration → filter mcpCalls steps → load McpCallsConfiguration →
-     * apply whitelist/blacklist → return filtered tools.
-     */
+    // Kept as a declared delegator (not inlined). Logic extracted to
+    // McpToolsProvider (R2 step 2); buildToolSetup's merge flow is unchanged, so
+    // this still returns the legacy McpToolsResult shape.
     McpToolProviderManager.McpToolsResult discoverMcpCallTools(IConversationMemory memory) {
-        List<ToolSpecification> toolSpecs = new ArrayList<>();
-        Map<String, ToolExecutor> executors = new HashMap<>();
-
-        try {
-            LOGGER.infof("Discovering mcpcalls tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
-
-            var stepConfigs = WorkflowTraversal.discoverConfigs(memory, MCPCALLS_TYPE, McpCallsConfiguration.class, restAgentStore, restWorkflowStore,
-                    resourceClientLibrary);
-
-            for (var stepConfig : stepConfigs) {
-                McpCallsConfiguration mcpCallsConfig = stepConfig.config();
-
-                // Build server config from McpCallsConfiguration
-                McpServerConfig serverConfig = new McpServerConfig();
-                serverConfig.setUrl(mcpCallsConfig.getMcpServerUrl());
-                serverConfig.setName(mcpCallsConfig.getName());
-                serverConfig.setTransport(mcpCallsConfig.getTransport());
-                serverConfig.setApiKey(mcpCallsConfig.getApiKey());
-                serverConfig.setTimeoutMs(mcpCallsConfig.getTimeoutMs());
-
-                // Discover tools from this MCP server
-                McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(serverConfig));
-
-                // Apply whitelist/blacklist filtering
-                List<String> whitelist = mcpCallsConfig.getToolsWhitelist();
-                List<String> blacklist = mcpCallsConfig.getToolsBlacklist();
-
-                for (ToolSpecification spec : result.toolSpecs()) {
-                    String name = spec.name();
-                    if (whitelist != null && !whitelist.isEmpty() && !whitelist.contains(name))
-                        continue;
-                    if (blacklist != null && blacklist.contains(name))
-                        continue;
-
-                    toolSpecs.add(spec);
-                    ToolExecutor executor = result.executors().get(name);
-                    if (executor != null) {
-                        executors.put(name, executor);
-                    }
-                }
-            }
-
-            LOGGER.info("Discovered " + toolSpecs.size() + " mcpcalls tools from workflow");
-        } catch (Exception e) {
-            LOGGER.warn("Failed to discover mcpcalls tools from workflow", e);
-        }
-
-        return new McpToolProviderManager.McpToolsResult(toolSpecs, executors);
+        return mcpToolsProvider.discover(memory);
     }
 
     // Kept as a declared delegator (not inlined) since it's reflected in tests.

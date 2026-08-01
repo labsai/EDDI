@@ -5,6 +5,20 @@
 
 ---
 
+## 🧩 refactor(orchestrator): extract McpToolsProvider (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 continued — second of 8 providers, same pattern as `HttpCallToolsProvider`: moved `discoverMcpCallTools` into a new `McpToolsProvider implements ToolSourceProvider`, same package as `AgentOrchestrator` (needs `WorkflowTraversal`), delegator kept on the facade returning the legacy `McpToolProviderManager.McpToolsResult` shape, `buildToolSetup` unchanged. Simpler than the HTTP provider — no endpoint tracking, no template-argument merging, just per-server discovery plus whitelist/blacklist filtering.
+
+**Found, and flagged rather than fixed, a pre-existing diagnostic gap while reading the method closely enough to move it.** `McpToolProviderManager.discoverTools(...)` returns a `McpToolsResult` carrying `failures()` — structured per-server rejection reasons, specifically added (per its own Javadoc) so a caller can distinguish "server misconfigured" from "server has no tools." `discoverMcpCallTools` (and now `McpToolsProvider.discover`, unchanged by this move) reads only `.toolSpecs()`/`.executors()` from that result — `failures()` is computed and discarded every time, meaning a misconfigured MCP server silently contributes zero tools with no signal above whatever `McpToolProviderManager` itself logs internally. Preserved exactly as-is (pure move, not the place to fix a pre-existing gap), but the new `ToolContribution.failures()` field this session added specifically to carry this kind of thing (R2 step 1) makes the gap more visible than it was before — `McpToolsProvider.contribute()` currently passes an empty list rather than mapping the discovery result's real failures into it. Spawned as a standalone follow-up rather than expanded inline, since surfacing it properly (trace entry vs. metric vs. both) is a design decision belonging with the later step that rewires `buildToolSetup` to actually consume `ToolContribution.failures()`, not this pure-move commit.
+
+Added `McpToolsProviderTest` (4 tests) for `contribute`'s enable/disable gate — same genuinely-new-surface reasoning as the HTTP provider's test. Discovery itself remains covered by `AgentOrchestratorExtendedTest` plus the six unchanged `McpToolProviderManager*Test` suites (not re-run — orthogonal to this move, since `McpToolProviderManager` itself wasn't touched).
+
+Full 15-class test battery (313 tests) green; 2 unused imports removed. `AgentOrchestrator`: 2,404 → 2,352 lines.
+
+---
+
 ## 🧩 refactor(orchestrator): extract HttpCallToolsProvider, first SPI-conformant provider (2026-08-01)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
