@@ -5,6 +5,20 @@
 
 ---
 
+## 🧩 refactor(groups): extract GroupSigningGuard from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`claude/group-collaboration-plan-9bca77`)
+
+R1 step 3 of `planning/group-collaboration-improvements-plan.md` §3.1: moved the Ed25519 inter-agent signing cluster into a new `ai.labs.eddi.engine.internal.groups.GroupSigningGuard` — `verifyPriorEntriesIfRequired` (receiver-side incremental verification), the signing-creation block that was inline inside `executeAgentTurn` (sign → self-verify → nonce-validate, falling back to unsigned on any failure), and the `lastVerifiedIndex` cursor map that both share.
+
+The signing-creation block previously set four loose local variables (`signature`, `signatureNonce`, `signatureTimestampMs`, `signatureKeyVersion`) that fed straight into a `TranscriptEntry` constructor call; extracted as `signOutgoingMessage(...)` returning a `SigningResult` record (with an `UNSIGNED` singleton for the "not signed, for any reason" case — crypto infra absent, signing not configured, self-verification failed, nonce validation failed), destructured back into the same four constructor args at the call site. `verifyPriorEntriesIfRequired` and the two `lastVerifiedIndex.remove(...)` cleanup call sites (end of a discussion leg; terminal-state cleanup) became one-line delegations.
+
+Repeated the reflection sweep from step 2 before touching anything: `verifyPriorEntriesIfRequired` is reached via `GroupConversationServiceHitlCoverage3Test`'s reflection helper, so it stays a declared delegator on `GroupConversationService` (same pattern as step 2's seven methods). Added a focused `GroupSigningGuardTest` covering the guard-clause branches directly (12 tests) — the full sign → self-verify → nonce-validate happy path needs real Ed25519 key material and stays covered by the untouched characterization suites instead of being re-mocked here.
+
+Full 12-class group suite + all three new focused test classes: 470 + 12 + 17 + 12, all green; clean compile; formatter/Checkstyle clean. `GroupConversationService` is now 4,186 → 3,977 lines; 3 of R1's 10 extraction steps done.
+
+---
+
 ## 🧩 refactor(groups): extract GroupContextBuilder from GroupConversationService (2026-08-01)
 
 **Repo:** EDDI (`claude/group-collaboration-plan-9bca77`)
