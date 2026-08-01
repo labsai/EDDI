@@ -618,7 +618,7 @@ class AgentSetupServiceTest {
         void nullAgentName() {
             var request = new CreateApiAgentRequest(
                     null, "prompt", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("Agent name is required"));
@@ -629,7 +629,7 @@ class AgentSetupServiceTest {
         void blankSystemPrompt() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "   ", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("System prompt is required"));
@@ -640,7 +640,7 @@ class AgentSetupServiceTest {
         void blankOpenApiSpec() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("OpenAPI spec is required"));
@@ -651,10 +651,64 @@ class AgentSetupServiceTest {
         void cloudProviderNoApiKey() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
-                    null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("API key is required"));
+        }
+
+        @Test
+        @DisplayName("an unusable approval pattern is refused BEFORE any resource is created")
+        void invalidHitlConfigRefusedBeforeAnyResourceIsCreated() throws Exception {
+            // AgentStore.create validates hitlConfig too — but that runs at step 7, so
+            // without the up-front check a bad pattern would surface only after the
+            // apicalls, parser, behaviour, LLM and workflow had been created, leaving
+            // all five orphaned. Asserted by proving no store was even asked for.
+            var restInterfaceFactory = mock(IRestInterfaceFactory.class);
+            var guardedService = new AgentSetupService(restInterfaceFactory,
+                    mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
+
+            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
+            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            // 'mcp' tools carry no endpoint, so this pattern can never match — it would
+            // save as a gate that gates nothing.
+            toolApprovals.setRequireApproval(List.of("mcp:/agentstore/agents"));
+            hitl.setToolApprovals(toolApprovals);
+
+            var request = new CreateApiAgentRequest(
+                    "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
+                    "sk-key", null, null, null, null, null, null, null, null, hitl, null);
+
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                    () -> guardedService.createApiAgent(request));
+            assertTrue(ex.getMessage().startsWith("Invalid hitlConfig:"), ex.getMessage());
+            org.mockito.Mockito.verify(restInterfaceFactory, org.mockito.Mockito.never()).get(any());
+        }
+
+        @Test
+        @DisplayName("a valid hitlConfig passes the up-front check and reaches resource creation")
+        void validHitlConfigPassesTheUpFrontCheck() throws Exception {
+            // Mutation guard for the test above: the guard must reject only what is
+            // actually invalid. A valid gate proceeds past validation into the REST
+            // calls (which fail here for want of a store — a different failure).
+            var restInterfaceFactory = mock(IRestInterfaceFactory.class);
+            var guardedService = new AgentSetupService(restInterfaceFactory,
+                    mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
+
+            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
+            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.delete:*"));
+            toolApprovals.setExempt(List.of("http.get:*"));
+            hitl.setToolApprovals(toolApprovals);
+
+            var request = new CreateApiAgentRequest(
+                    "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
+                    "sk-key", null, null, null, null, null, null, null, null, hitl, null);
+
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                    () -> guardedService.createApiAgent(request));
+            assertFalse(ex.getMessage().startsWith("Invalid hitlConfig:"),
+                    "a valid gate must not be refused by the up-front check; got: " + ex.getMessage());
         }
     }
 

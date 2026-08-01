@@ -6,6 +6,9 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.engine.setup.CreateApiAgentRequest;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
@@ -783,7 +786,7 @@ class McpSetupToolsTest {
         when(agentAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
 
         String result = tools.createApIAgent("API Agent", "You are an API assistant", SIMPLE_SPEC, "anthropic", "claude-sonnet-4-6", "sk-test", null,
-                "Bearer api-key", null, null, null, true, null, null);
+                "Bearer api-key", null, null, null, true, null, null, null);
 
         assertNotNull(result);
 
@@ -806,14 +809,14 @@ class McpSetupToolsTest {
 
     @Test
     void createApiAgent_missingSpec_returnsError() {
-        String result = tools.createApIAgent("Agent", "prompt", null, null, null, "key", null, null, null, null, null, null, null, null);
+        String result = tools.createApIAgent("Agent", "prompt", null, null, null, "key", null, null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("OpenAPI spec is required"));
     }
 
     @Test
     void createApiAgent_missingApiKey_returnsError() {
-        String result = tools.createApIAgent("Agent", "prompt", SIMPLE_SPEC, null, null, null, null, null, null, null, null, null, null, null);
+        String result = tools.createApIAgent("Agent", "prompt", SIMPLE_SPEC, null, null, null, null, null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("API key is required"));
     }
@@ -827,7 +830,7 @@ class McpSetupToolsTest {
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
-        tools.createApIAgent("Agent", "prompt", SIMPLE_SPEC, null, null, "key", null, null, null, null, null, false, null, null);
+        tools.createApIAgent("Agent", "prompt", SIMPLE_SPEC, null, null, "key", null, null, null, null, null, false, null, null, null);
 
         var packageCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
         verify(WorkflowStore).createWorkflow(packageCaptor.capture());
@@ -840,5 +843,72 @@ class McpSetupToolsTest {
         assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getWorkflowSteps().get(2).getType());
         assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getWorkflowSteps().get(3).getType());
         assertEquals(URI.create("eddi://ai.labs.llm"), pkgConfig.getWorkflowSteps().get(4).getType());
+    }
+
+    // --- setup-api can now provision the approval gate (iteration 2) ---
+
+    @Test
+    void createApiAgent_installsTheHitlGateOnV1OfTheAgentDocument() throws Exception {
+        // Before this, createApiAgent built a bare AgentConfiguration, so EVERY agent
+        // the wizard produced had hitlConfig == null and an inert gate — no caller
+        // could provision a gated agent through setup-api at all. It must land on v1:
+        // a later PUT would write version + 1 and leave the ungated v1 redeployable.
+        stubApiAgentStores();
+
+        var hitl = new AgentConfiguration.HitlConfig();
+        var toolApprovals = new ToolApprovalsConfig();
+        toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.patch:*", "http.delete:*"));
+        toolApprovals.setExempt(List.of("http.get:*"));
+        hitl.setToolApprovals(toolApprovals);
+
+        service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
+                null, null, null, null, null, false, null, null, hitl, null));
+
+        var agentCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
+        verify(AgentStore).createAgent(agentCaptor.capture());
+        var created = agentCaptor.getValue().getHitlConfig();
+        assertNotNull(created, "the gate must be created WITH the agent, not added afterwards");
+        assertEquals(List.of("http.post:*", "http.put:*", "http.patch:*", "http.delete:*"),
+                created.getToolApprovals().getRequireApproval());
+        assertEquals(List.of("http.get:*"), created.getToolApprovals().getExempt());
+    }
+
+    @Test
+    void createApiAgent_withoutHitlConfig_leavesTheAgentExactlyAsBefore() throws Exception {
+        stubApiAgentStores();
+
+        service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
+                null, null, null, null, null, false, null, null, null, null));
+
+        var agentCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
+        verify(AgentStore).createAgent(agentCaptor.capture());
+        assertNull(agentCaptor.getValue().getHitlConfig());
+    }
+
+    @Test
+    void createApiAgent_withMcpServerUrls_addsAnMcpStepAlongsideTheGeneratedHttpcalls() throws Exception {
+        // "REST plus MCP" was unreachable through this wizard: createApiAgent passed
+        // null for the MCP locations, so an agent needing both had to be hand-built.
+        stubApiAgentStores();
+        when(mcpCallsStore.createMcpCalls(any()))
+                .thenReturn(Response.created(URI.create("/mcpcallstore/mcpcalls/mcp-1?version=1")).build());
+
+        service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
+                null, null, null, null, null, false, null, null, null, "https://mcp.example.com/sse"));
+
+        var packageCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
+        verify(WorkflowStore).createWorkflow(packageCaptor.capture());
+        var stepTypes = packageCaptor.getValue().getWorkflowSteps().stream().map(s -> s.getType().toString()).toList();
+        assertTrue(stepTypes.contains("eddi://ai.labs.mcpcalls"), "expected an MCP step, got: " + stepTypes);
+        assertTrue(stepTypes.contains("eddi://ai.labs.httpcalls"), "the generated httpcalls must survive: " + stepTypes);
+    }
+
+    private void stubApiAgentStores() {
+        when(httpCallsStore.createApiCalls(any())).thenReturn(Response.created(URI.create("/apicallstore/apicalls/hc-1?version=1")).build())
+                .thenReturn(Response.created(URI.create("/apicallstore/apicalls/hc-2?version=1")).build());
+        when(behaviorStore.createRuleSet(any())).thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1")).build());
+        when(langchainStore.createLlm(any())).thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1")).build());
+        when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
     }
 }

@@ -38,6 +38,20 @@ First of the follow-ups named at the end of [#622](#-featoperator-the-foundation
 
 Documented in [`docs/hitl.md`](hitl.md).
 
+### setup-api can now install the gate (2026-08-01)
+
+**`CreateApiAgentRequest` had no HITL field and `AgentSetupService.createApiAgent` built a bare `AgentConfiguration`, so every agent the wizard has ever created has `hitlConfig == null` and an inert gate.** Nothing could provision a gated agent through setup-api at all — which is the blocker for anything downstream that wants to *offer* write capability, because there was no way to install the thing that makes writes safe.
+
+`hitlConfig` is now the last-but-one component of the request record (appended, so the positional constructor `McpSetupTools` uses keeps its existing meaning) and is set at step 7, **on v1 of the agent document**. Creating it with the agent rather than `PUT`-ing it afterwards matters: `HistorizedResourceStore.update` writes `version + 1` and leaves the ungated v1 reachable by a redeploy, so a two-step provision would ship an agent that can be returned to an ungated state.
+
+**Validated before the first resource exists.** `AgentStore.create` validates `hitlConfig` too ([`AgentStore.java:48`](../src/main/java/ai/labs/eddi/configs/agents/mongo/AgentStore.java)) — but that runs at step 7, so an unusable approval pattern surfaced only after the apicalls, parser, behaviour, LLM and workflow had all been created, leaving five orphaned resources behind. The up-front check gives the caller the same actionable message and no debris; the test asserts it by proving no REST store was even requested.
+
+**Deliberately not on the MCP tool.** `create_api_agent` passes `null` and has no `@ToolArg` for it. That tool already provisions an agent with a caller-chosen endpoint filter; letting the caller also choose the gate would turn it into a complete escape from whatever allow-list governs the agent doing the calling. Gated provisioning goes through `POST /administration/agents/setup-api` (`eddi-admin`).
+
+**Also on setup-api: `mcpServerUrls`.** An API agent could previously hold only the tools generated from its OpenAPI spec — `createApiAgent` passed `null` for the MCP locations — so "REST endpoints *and* an MCP server" was unreachable through the wizard and had to be assembled by hand. The per-URL creation loop is now shared with `setupAgent` rather than duplicated.
+
+Mutation-checked: dropping the up-front validation, dropping `setHitlConfig`, and reverting the workflow to `null` MCP locations each kill their test.
+
 ---
 
 ## 🔑 feat(operator): the foundation for an agent that can safely write (2026-07-29)
