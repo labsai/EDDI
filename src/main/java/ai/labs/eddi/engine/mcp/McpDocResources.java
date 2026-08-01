@@ -4,18 +4,14 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.docs.DocsService;
 import io.quarkiverse.mcp.server.Resource;
 import io.quarkiverse.mcp.server.ResourceTemplate;
 import io.quarkiverse.mcp.server.ResourceTemplateArg;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import jakarta.inject.Inject;
 
-import java.io.IOException;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.*;
+import java.util.List;
 
 /**
  * Expose EDDI documentation as MCP resources.
@@ -23,19 +19,23 @@ import java.util.*;
  * AI agents can browse and read the 40+ markdown docs via MCP resources/list
  * and resources/read.
  * <p>
- * Docs are loaded from the filesystem at a configurable path (default:
- * {@code docs/} relative to working directory). In Docker, docs must be copied
- * into the container.
+ * Thin delegate over {@link DocsService}, which owns the filesystem access and
+ * the path-traversal guard. The same doc set is served over REST at
+ * {@code /administration/docs} — MCP <em>resources</em> only reach clients that
+ * ask for them, and EDDI's own MCP client never does, so this surface alone
+ * left EDDI's docs readable by a desktop client and not by an EDDI agent.
  *
  * @author ginccc
  */
 @ApplicationScoped
 public class McpDocResources {
 
-    private static final Logger LOGGER = Logger.getLogger(McpDocResources.class);
+    private final DocsService docsService;
 
-    @ConfigProperty(name = "eddi.docs.path", defaultValue = "docs")
-    String docsPath;
+    @Inject
+    public McpDocResources(DocsService docsService) {
+        this.docsService = docsService;
+    }
 
     /**
      * Read a specific doc by name. Example URI: eddi://docs/getting-started
@@ -47,34 +47,20 @@ public class McpDocResources {
     @ResourceTemplate(uriTemplate = "eddi://docs/{name}", name = "eddi-doc", description = "Read an EDDI documentation page by name. "
             + "Pass the doc name without .md extension, " + "e.g. 'getting-started', 'architecture', 'langchain'")
     public String readDoc(@ResourceTemplateArg(name = "name") String name) {
-        // Path traversal protection: reject names with directory separators or parent
-        // refs
-        if (name == null || name.isEmpty() || name.contains("/") || name.contains("\\") || name.contains("..")) {
+        String content = docsService.readDoc(name);
+        if (content != null) {
+            return content;
+        }
+        // MCP resources have no error channel here, so the two failure modes stay
+        // distinguishable in the returned text, exactly as before the extraction:
+        // a rejected name reads as invalid, an accepted-but-absent one as not found.
+        // The predicate comes from DocsService rather than being restated here — two
+        // copies of a security check drift, and this one decides which message a
+        // traversal attempt gets.
+        if (!DocsService.isValidDocName(name)) {
             return "Invalid document name: " + name;
         }
-
-        Path docsDir = Path.of(docsPath).toAbsolutePath().normalize();
-        Path docFile = docsDir.resolve(name + ".md").normalize();
-
-        // Defense-in-depth: verify resolved path is within docs directory
-        if (!docFile.startsWith(docsDir)) {
-            LOGGER.warnf("Path traversal attempt blocked: %s", name);
-            return "Invalid document name: " + name;
-        }
-
-        if (!Files.isRegularFile(docFile)) {
-            // Try without adding .md in case the name already has it
-            docFile = docsDir.resolve(name).normalize();
-            if (!docFile.startsWith(docsDir) || !Files.isRegularFile(docFile)) {
-                return "Document not found: " + name;
-            }
-        }
-        try {
-            return Files.readString(docFile);
-        } catch (IOException e) {
-            LOGGER.error("Failed to read doc: " + name, e);
-            return "Error reading document: " + e.getMessage();
-        }
+        return "Document not found: " + name;
     }
 
     /**
@@ -83,22 +69,10 @@ public class McpDocResources {
      */
     @Resource(uri = "eddi://docs/index", name = "eddi-docs-index", description = "List of all available EDDI documentation pages")
     public String listDocs() {
-        Path docsDir = Path.of(docsPath);
-        if (!Files.isDirectory(docsDir)) {
-            return "Docs directory not found: " + docsPath;
+        if (!docsService.isAvailable()) {
+            return "Docs directory not found: " + docsService.docsDirectory();
         }
-
-        var docs = new TreeSet<String>();
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(docsDir, "*.md")) {
-            for (Path entry : stream) {
-                String filename = entry.getFileName().toString();
-                docs.add(filename.substring(0, filename.length() - 3)); // remove .md
-            }
-        } catch (IOException e) {
-            LOGGER.error("Failed to list docs", e);
-            return "Error listing documents: " + e.getMessage();
-        }
-
+        List<String> docs = docsService.listDocs();
         var sb = new StringBuilder();
         sb.append("# EDDI Documentation Index\n\n");
         sb.append("Available documents (").append(docs.size()).append("):\n\n");

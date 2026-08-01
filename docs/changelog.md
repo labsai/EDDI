@@ -52,6 +52,16 @@ Documented in [`docs/hitl.md`](hitl.md).
 
 Mutation-checked: dropping the up-front validation, dropping `setHitlConfig`, and reverting the workflow to `null` MCP locations each kill their test.
 
+### EDDI's docs are now readable by an EDDI agent (2026-08-01)
+
+**An MCP resource does not reach an EDDI agent.** A resource is only usable by a client that asks for it, and EDDI's own MCP client never calls `resources/read` — it consumes *tools*. So `eddi://docs/*` made EDDI's documentation readable by a desktop MCP client and not by an agent running on EDDI, which is exactly backwards for an agent whose job is to explain the platform.
+
+`DocsService` is extracted from `McpDocResources` (filesystem access plus the path-traversal guard) and served over REST at `GET /administration/docs` and `GET /administration/docs/{name}`, both `eddi-viewer` — the docs are published documentation, so anyone who may look at the deployment may read them. `McpDocResources` becomes a thin delegate, and its pre-existing test class is kept assertion-for-assertion as the evidence that no MCP client sees a different response than before.
+
+**Runtime doc set ≠ repo doc set,** and this is now written down where a caller will see it. The image copies only top-level `docs/*.md` (non-recursive) and then removes `changelog.md`, `code-review-standards.md`, `incident-response.md` and `SUMMARY.md` — so a caller must read the index rather than assume a page exists. The REST list endpoint is what makes that practical.
+
+**A redundant guard was found and made non-redundant.** Mutating away the name shape-check (`/`, `\`, `..`) killed nothing: `readDoc` also verifies the resolved path still sits under the docs directory, which subsumes it. The shape check is worth keeping — it is what lets the MCP surface answer "invalid name" rather than "not found" — but `McpDocResources` had *restated the predicate* to pick that message, i.e. two copies of a security check. It is now one shared `DocsService.isValidDocName`, and mutating it kills five tests. The REST surface deliberately returns a bare `404` for both cases instead, so an attacker-supplied traversal string is never echoed back.
+
 ---
 
 ## 🔑 feat(operator): the foundation for an agent that can safely write (2026-07-29)

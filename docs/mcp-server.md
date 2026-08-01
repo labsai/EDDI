@@ -166,6 +166,21 @@ EDDI also exposes its documentation as MCP **resources**, allowing AI agents to 
 
 Configure the docs path with: `eddi.docs.path` (default: `docs/`, in Docker: `/deployments/docs`).
 
+### The same docs over REST
+
+> **MCP resources do not reach an EDDI agent.** A resource is only usable by a client that asks for it, and EDDI's own MCP client never calls `resources/read` — it consumes *tools*. So `eddi://docs/*` made EDDI's documentation readable by a desktop MCP client and not by an agent running on EDDI, which is precisely backwards for an agent whose job is to explain the platform.
+
+The same doc set is therefore served read-only over REST, where an agent generated from EDDI's OpenAPI spec picks it up as ordinary tools:
+
+| Endpoint | Role | Returns |
+| -------- | ---- | ------- |
+| `GET /administration/docs` | `eddi-viewer` | JSON array of page names, without the `.md` suffix |
+| `GET /administration/docs/{name}` | `eddi-viewer` | The page's markdown source as `text/plain`; `404` if absent |
+
+Both surfaces delegate to `DocsService`, which owns the filesystem access and the path-traversal guard.
+
+> **The runtime doc set is smaller than the repository's.** The container image copies only top-level `docs/*.md` (non-recursive, so nothing under `docs/agent-configs/` or `docs/templates/` is reachable) and then removes `changelog.md`, `code-review-standards.md`, `incident-response.md` and `SUMMARY.md`. Call the index and read from it — do not assume a particular page exists.
+
 ## Quick Start
 
 ### Client Configuration
