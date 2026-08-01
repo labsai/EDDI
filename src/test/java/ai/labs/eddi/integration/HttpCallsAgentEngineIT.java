@@ -120,7 +120,6 @@ public class HttpCallsAgentEngineIT extends BaseIntegrationIT {
         // Dictionary: "fetch" → fetch_data, "secure" → secure_data
         String dictionary = """
                 {
-                  "language": "en",
                   "words": [
                     {"word": "fetch", "expressions": "fetch_data(fetch)", "frequency": 0},
                     {"word": "secure", "expressions": "secure_data(secure)", "frequency": 0},

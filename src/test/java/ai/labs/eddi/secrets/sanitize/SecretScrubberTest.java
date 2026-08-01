@@ -235,12 +235,21 @@ class SecretScrubberTest {
     @Test
     @DisplayName("a secret in a secret-named field is still redacted")
     void scrubJson_structuralExemption_doesNotWeakenSecretFieldNames() {
-        String secret = "sk-aB3cD4eF5gH6iJ7kL8mN9oP0qR";
-        String json = String.format("{\"type\": \"httpcall\", \"apiKey\": \"%s\", \"someConfig\": \"%s\"}", secret, secret);
+        // Deliberately LOW entropy, so only the field-name check (check 1) can redact
+        // it. That isolates the property under test — the structural exemption must
+        // not weaken field-name detection — instead of letting the entropy heuristic
+        // pass the test for the wrong reason. It also keeps a key-shaped literal out
+        // of the source tree, which the repository's secret scanner flags on sight.
+        String credential = "aaaaaaaaaaaaaaaaaaaa";
+        String json = String.format("{\"type\": \"httpcall\", \"apiKey\": \"%s\", \"someConfig\": \"%s\"}", credential, credential);
 
         String scrubbed = scrubber.scrubJson(json);
 
-        assertFalse(scrubbed.contains(secret), "the credential must not survive export: " + scrubbed);
-        assertTrue(scrubbed.contains("httpcall"), "the structural discriminator must survive: " + scrubbed);
+        assertTrue(scrubbed.contains("\"apiKey\":\"${vault:REDACTED}\""),
+                "a credential in a secret-named field must still be redacted: " + scrubbed);
+        assertTrue(scrubbed.contains("\"type\":\"httpcall\""),
+                "the structural discriminator must survive: " + scrubbed);
+        assertTrue(scrubbed.contains("\"someConfig\":\"" + credential + "\""),
+                "redaction must be driven by the field name, not applied blanket: " + scrubbed);
     }
 }

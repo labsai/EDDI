@@ -385,7 +385,6 @@ public class HitlToolPauseResumeIT extends BaseIntegrationIT {
     private ResourceId setupAndDeployToolGatedAgent() throws Exception {
         String dictionary = """
                 {
-                  "language": "en",
                   "words": [
                     {"word": "calculate", "expressions": "do_calc(calculate)", "frequency": 0},
                     {"word": "hello", "expressions": "greeting(hello)", "frequency": 0},

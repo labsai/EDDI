@@ -148,7 +148,6 @@ public class ComplexRulesAgentEngineIT extends BaseIntegrationIT {
         // Dictionary: "hello" → greeting, "check" → status_check
         String dictionary = """
                 {
-                  "language": "en",
                   "words": [
                     {"word": "hello", "expressions": "greeting(hello)", "frequency": 0},
                     {"word": "check", "expressions": "status_check(check)", "frequency": 0}

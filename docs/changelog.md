@@ -5,6 +5,32 @@
 
 ---
 
+## 🔎 test(configs): sweep the config JSON the ITs build inline, not just the files (2026-08-01)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+The `SecretScrubber` fix worked — `ImportMergeIT` went green — but the Integration Tests job only moved 18 → 17. The same five classes still 400'd, and the reason is worth recording: **the outer `type` was never their only problem.**
+
+`PropertySetterAgentEngineIT:217` is the *dictionary* create, not the output one. These ITs build their dictionaries inline too, and every one carried `"language": "en"` — the key the model does not declare (it declares `lang`), removed from every `.json` fixture two commits ago and still sitting hardcoded in five Java text blocks. Deleted rather than renamed, for the same reason as the fixtures: `appliesToLanguage` is `isNullOrEmpty(dictLang) || dictLang.equals(userLanguage)`, so a null `lang` applies to every language while `"en"` applies only when the turn's user language is exactly `"en"`, which these tests never set.
+
+### The real fix is the guard, not the six deleted lines
+
+This is the **third** time the same defect class has been fixed and reappeared somewhere the sweep could not look — fixtures, then inline output bodies, now inline dictionary bodies. Each round trip cost a full CI run to learn something the unit suite could have named in seconds.
+
+`StrictBoundaryInlineItBodiesTest` closes it: it pairs each `String NAME = """ … """` text block with the `createResource(NAME, "/somestore/something")` call that posts it — the call site is what identifies the model — and strict-parses the body against it. 42 inline bodies checked. The 21 it reports as unpaired are variables loaded from files (`load("agentengine/dictionary.json")`), which have no inline body and are covered by the file sweep instead; the count is printed so that gap stays visible rather than being mistaken for coverage.
+
+Mutation-checked: reintroducing `"language"` into one IT fails it with *"'language' is not a known field of DictionaryConfiguration — known: [words, phrases, regExs, lang]"*.
+
+Coverage is now: file bodies → `StrictBoundaryShippedConfigsTest` (32 documents, ZIP entries included), inline bodies → this sweep (42), model round-trip → `StrictBoundaryRoundTripTest`.
+
+### Secret Scanning
+
+The same CI run also went red on Gitleaks: `generic-api-key` at `SecretScrubberTest.java:238`, from a key-shaped literal in the test added for the scrubber fix. gitleaks-action scans a PR's new commits, so the identical literal that has sat in that file for ages stayed green while the new line was flagged.
+
+Fixed by removing the literal rather than suppressing the finding: the test is about **field-name** detection, so it now uses a deliberately low-entropy value. That is a better test as well as a quieter one — with a key-shaped value the entropy heuristic could have redacted it and the assertion would have passed for the wrong reason. A third assertion pins that a non-secret field keeps the same value, so the check is provably field-name-driven rather than blanket.
+
+---
+
 ## 🧨 fix(secrets): export was corrupting the configs it exported (2026-07-30)
 
 **Repo:** EDDI (`fix/code-review-validation`)

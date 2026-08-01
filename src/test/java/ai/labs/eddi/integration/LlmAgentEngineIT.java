@@ -204,7 +204,6 @@ public class LlmAgentEngineIT extends BaseIntegrationIT {
         // Dictionary: "ask" → ask_llm(ask)
         String dictionary = """
                 {
-                  "language": "en",
                   "words": [
                     {"word": "ask", "expressions": "ask_llm(ask)", "frequency": 0},
                     {"word": "hello", "expressions": "greeting(hello)", "frequency": 0}
@@ -282,7 +281,6 @@ public class LlmAgentEngineIT extends BaseIntegrationIT {
         // Dictionary: "calculate" → do_calc(calculate)
         String dictionary = """
                 {
-                  "language": "en",
                   "words": [
                     {"word": "calculate", "expressions": "do_calc(calculate)", "frequency": 0},
                     {"word": "hello", "expressions": "greeting(hello)", "frequency": 0}

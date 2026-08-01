@@ -118,7 +118,6 @@ public class PropertySetterAgentEngineIT extends BaseIntegrationIT {
         // Dictionary: "hello" → greeting, "config" → set_config
         String dictionary = """
                 {
-                  "language": "en",
                   "words": [
                     {"word": "hello", "expressions": "greeting(hello)", "frequency": 0},
                     {"word": "config", "expressions": "set_config(config)", "frequency": 0}
