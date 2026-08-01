@@ -5,6 +5,20 @@
 
 ---
 
+## 🧩 feat(orchestrator): introduce the ToolSourceProvider SPI (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 1 of `planning/group-collaboration-improvements-plan.md` §3.2 — new types only, zero behavior change, nothing wired up yet. `ai.labs.eddi.modules.llm.tools.spi` (package named directly per the plan's own text) now has: `ToolContribution` (unifies the three bespoke per-source result shapes `AgentOrchestrator` carries today — `HttpCallToolsResult` with `endpoints`, `McpToolProviderManager.McpToolsResult` with `failures`, `A2AToolProviderManager.A2AToolsResult` with neither — into one 5-component record every provider returns); `ProviderFailure` (generalizes `McpToolProviderManager.McpServerFailure` from MCP-only to any source); `ToolAssemblyContext` (what a provider needs to decide its contribution — memory, task, whitelist, resolved `DynamicAgentConfig`, caller identity, plus the `groupConversationId` Wave 2's group-aware providers will read); `ToolSourceProvider` (the one-method contract).
+
+**This is deliberately the safest possible increment, not a shortcut.** `buildToolSetup` still calls its three original discovery methods and the original `collectAllBuiltInTools` if-chain — this commit adds a contract nothing implements or calls yet. The actual migration (converting `discoverHttpCallTools`/`discoverMcpCallTools`/A2A discovery to return `ToolContribution`, then extracting `collectAllBuiltInTools`'s ~130-line whitelist/dynamic-agent-tool logic — including the V7 defect area — into `BuiltinToolsProvider`/`DynamicAgentToolsProvider`, then restructuring `buildToolSetup` itself to iterate a provider list instead of hand-merging three named results) is a materially larger, riskier change than introducing the contract those providers will implement: it changes control flow, not just code location, unlike every extraction so far in Wave R/R2. Landing the SPI on its own lets that follow-on work compile and test against a stable contract instead of co-evolving both at once.
+
+Added `ToolAssemblyContextTest` (7 tests) for the two records' helper methods (`isWhitelisted`/`hasNoWhitelist`, the convenience constructors, `ProviderFailure`'s field carriage) — everything currently testable, since nothing calls this SPI in production yet.
+
+Full clean compile + this package's own tests green. Provider extraction (R2 step 2, the SPI's actual payoff) is next.
+
+---
+
 ## 🧩 refactor(orchestrator): extract ToolContextBudget from AgentOrchestrator (2026-08-01)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

@@ -1,0 +1,65 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.modules.llm.tools.spi;
+
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
+import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+
+import java.util.List;
+
+/**
+ * Everything a {@link ToolSourceProvider} needs to decide what it contributes
+ * this turn (R2 step 1). Carries what {@code AgentOrchestrator#buildToolSetup}
+ * already assembles before tool discovery: the conversation memory, the
+ * configured task, its built-in-tools whitelist, the resolved dynamic-agent
+ * config, and the caller's identity — plus, for the group-aware providers Wave
+ * 2 adds (I5's {@code GroupTaskToolsProvider}, I17's
+ * {@code ArtifactToolsProvider}), the group context vars already injected into
+ * member conversations.
+ *
+ * @param memory
+ *            the live conversation memory for this turn
+ * @param task
+ *            the configured LLM task driving this turn
+ * @param builtInToolsWhitelist
+ *            {@code task.getBuiltInToolsWhitelist()}, or {@code null} when
+ *            unset (no whitelist — providers fall back to their own default
+ *            enablement rule); never an empty list with different meaning than
+ *            {@code null} — callers normalize that upstream
+ * @param dynamicAgentConfig
+ *            resolved once per turn (never {@code null} — a disabled config
+ *            when dynamic agents are off), shared by every provider that reads
+ *            it so they see one consistent snapshot
+ * @param userId
+ *            the authenticated caller's user id
+ * @param agentId
+ *            the agent running this turn (the parent, for dynamic-agent
+ *            purposes)
+ * @param groupConversationId
+ *            the {@code groupConversationId} context var, or {@code null}
+ *            outside a group discussion
+ */
+public record ToolAssemblyContext(IConversationMemory memory, LlmConfiguration.Task task,
+        List<String> builtInToolsWhitelist, DynamicAgentConfig dynamicAgentConfig, String userId, String agentId,
+        String groupConversationId) {
+
+    /**
+     * @return true if a whitelist is configured and names this tool key; false when
+     *         no whitelist is configured (nothing is excluded) or the key is absent
+     *         from a configured one
+     */
+    public boolean isWhitelisted(String toolKey) {
+        return builtInToolsWhitelist != null && builtInToolsWhitelist.contains(toolKey);
+    }
+
+    /**
+     * @return true if no whitelist is configured — every default-enabled tool
+     *         applies
+     */
+    public boolean hasNoWhitelist() {
+        return builtInToolsWhitelist == null || builtInToolsWhitelist.isEmpty();
+    }
+}
