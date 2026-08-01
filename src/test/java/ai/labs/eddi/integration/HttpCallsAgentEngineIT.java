@@ -173,17 +173,17 @@ public class HttpCallsAgentEngineIT extends BaseIntegrationIT {
                     {
                       "action": "welcome",
                       "timesOccurred": 0,
-                      "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "Welcome to API test"}]}]
+                      "outputs": [{"valueAlternatives": [{"type": "text", "text": "Welcome to API test"}]}]
                     },
                     {
                       "action": "api_get_data",
                       "timesOccurred": 0,
-                      "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "API response received"}]}]
+                      "outputs": [{"valueAlternatives": [{"type": "text", "text": "API response received"}]}]
                     },
                     {
                       "action": "api_get_secure",
                       "timesOccurred": 0,
-                      "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "Secure API response received"}]}]
+                      "outputs": [{"valueAlternatives": [{"type": "text", "text": "Secure API response received"}]}]
                     }
                   ]
                 }

@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets.sanitize;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -186,5 +187,60 @@ class SecretScrubberTest {
     void shannonEntropy_highEntropyString_returnsHighValue() {
         double entropy = SecretScrubber.shannonEntropy("aB3cD4eF5gH6iJ7kL8m");
         assertTrue(entropy > 3.5, "Expected high entropy but got: " + entropy);
+    }
+
+    // ==================== structural fields must survive export
+    // ====================
+
+    /**
+     * The entropy heuristic cannot tell a long identifier from a long key, and this
+     * scrubber runs on the export path — so before the structural-field exemption
+     * it rewrote ordinary configuration values to {@code ${vault:REDACTED}} and
+     * produced ZIPs EDDI could not import again.
+     * <p>
+     * Every value below is taken verbatim from the exported weather-agent fixture
+     * and scores over the 3.5 bits/char threshold. The condition {@code type} is
+     * the one that failed loudly — {@code RuleDeserialization} could not resolve a
+     * class for {@code ${vault:REDACTED}} and {@code ImportMergeIT} got a 400. The
+     * other three failed silently: the rule, property name and memory path were
+     * simply gone.
+     */
+    @Test
+    @DisplayName("structural identifiers survive scrubbing, however random they look")
+    void scrubJson_structuralFields_notScrubbedByEntropy() {
+        String json = """
+                {
+                  "type": "dynamicvaluematcher",
+                  "name": "currentWeatherDescription",
+                  "fromObjectPath": "memory.current.httpCalls.currentWeatherDescription",
+                  "toObjectPath": "properties.count+1"
+                }
+                """;
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("REDACTED"),
+                "export must not rewrite schema-fixed identifiers; a redacted condition type makes the "
+                        + "exported agent unimportable: " + scrubbed);
+        assertTrue(scrubbed.contains("dynamicvaluematcher"));
+        assertTrue(scrubbed.contains("currentWeatherDescription"));
+        assertTrue(scrubbed.contains("memory.current.httpCalls.currentWeatherDescription"));
+        assertTrue(scrubbed.contains("properties.count+1"));
+    }
+
+    /**
+     * The exemption is by field name only. A credential is still redacted when it
+     * sits in a field that names one, so the security control is intact.
+     */
+    @Test
+    @DisplayName("a secret in a secret-named field is still redacted")
+    void scrubJson_structuralExemption_doesNotWeakenSecretFieldNames() {
+        String secret = "sk-aB3cD4eF5gH6iJ7kL8mN9oP0qR";
+        String json = String.format("{\"type\": \"httpcall\", \"apiKey\": \"%s\", \"someConfig\": \"%s\"}", secret, secret);
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains(secret), "the credential must not survive export: " + scrubbed);
+        assertTrue(scrubbed.contains("httpcall"), "the structural discriminator must survive: " + scrubbed);
     }
 }

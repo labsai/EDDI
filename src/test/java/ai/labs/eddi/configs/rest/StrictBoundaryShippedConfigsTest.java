@@ -28,6 +28,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -143,29 +145,21 @@ class StrictBoundaryShippedConfigsTest {
                 continue;
             }
             try (Stream<Path> walk = Files.walk(root)) {
-                for (Path p : walk.filter(Files::isRegularFile)
-                        .filter(f -> f.getFileName().toString().endsWith(".json"))
-                        .toList()) {
-                    Class<?> model = modelFor(p);
-                    if (model == null) {
-                        skipped.add(root.relativize(p).toString());
-                        continue;
-                    }
-                    checked.add(root.relativize(p).toString());
-                    String body = Files.readString(p, StandardCharsets.UTF_8);
-                    try {
-                        mapper.readValue(body, model);
-                    } catch (UnrecognizedPropertyException e) {
-                        failures.put(p.toString(), "'%s' is not a known field of %s — known: %s"
-                                .formatted(e.getPropertyName(),
-                                        e.getReferringClass() == null
-                                                ? model.getSimpleName()
-                                                : e.getReferringClass().getSimpleName(),
-                                        e.getKnownPropertyIds()));
-                    } catch (IOException e) {
-                        // Malformed JSON or a wrong value type is a different defect and
-                        // not what the interceptor rejects; the regular reader still
-                        // reports it. Not this test's business.
+                for (Path p : walk.filter(Files::isRegularFile).toList()) {
+                    String name = p.getFileName().toString();
+                    if (name.endsWith(".json")) {
+                        Class<?> model = modelFor(p);
+                        if (model == null) {
+                            skipped.add(root.relativize(p).toString());
+                            continue;
+                        }
+                        checked.add(root.relativize(p).toString());
+                        check(mapper, p.toString(), Files.readString(p, StandardCharsets.UTF_8), model, failures);
+                    } else if (name.endsWith(".zip")) {
+                        // ZIP fixtures are imported wholesale by RestImportService, so a
+                        // single unknown key inside one aborts the entire agent import.
+                        // Sweeping only loose .json files left that path unguarded.
+                        checkZip(mapper, root, p, checked, skipped, failures);
                     }
                 }
             }
@@ -183,5 +177,48 @@ class StrictBoundaryShippedConfigsTest {
                 + failures.entrySet().stream()
                         .map(e -> "  " + e.getKey() + "\n      " + e.getValue())
                         .reduce("", (a, b) -> a + b + "\n"));
+    }
+
+    /** Strict-parses one document, recording the offending key on rejection. */
+    private static void check(ObjectMapper mapper, String label, String body, Class<?> model,
+                              Map<String, String> failures) {
+        try {
+            mapper.readValue(body, model);
+        } catch (UnrecognizedPropertyException e) {
+            failures.put(label, "'%s' is not a known field of %s — known: %s"
+                    .formatted(e.getPropertyName(),
+                            e.getReferringClass() == null ? model.getSimpleName() : e.getReferringClass().getSimpleName(),
+                            e.getKnownPropertyIds()));
+        } catch (IOException e) {
+            // Malformed JSON or a wrong value type is a different defect and not what
+            // the interceptor rejects; the regular reader still reports it.
+        }
+    }
+
+    /**
+     * Sweeps the configuration documents inside an agent ZIP, as import would read
+     * them.
+     */
+    private static void checkZip(ObjectMapper mapper, Path root, Path zip, List<String> checked, List<String> skipped,
+                                 Map<String, String> failures)
+            throws IOException {
+        try (ZipFile archive = new ZipFile(zip.toFile())) {
+            for (var entries = archive.entries(); entries.hasMoreElements();) {
+                ZipEntry entry = entries.nextElement();
+                if (entry.isDirectory() || !entry.getName().endsWith(".json")) {
+                    continue;
+                }
+                String label = root.relativize(zip) + "!" + entry.getName();
+                Class<?> model = modelFor(Path.of(entry.getName()));
+                if (model == null) {
+                    skipped.add(label);
+                    continue;
+                }
+                checked.add(label);
+                try (var in = archive.getInputStream(entry)) {
+                    check(mapper, label, new String(in.readAllBytes(), StandardCharsets.UTF_8), model, failures);
+                }
+            }
+        }
     }
 }

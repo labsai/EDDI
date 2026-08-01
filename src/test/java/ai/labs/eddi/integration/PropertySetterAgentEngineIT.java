@@ -169,17 +169,17 @@ public class PropertySetterAgentEngineIT extends BaseIntegrationIT {
                     {
                       "action": "welcome",
                       "timesOccurred": 0,
-                      "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "Welcome to property test"}]}]
+                      "outputs": [{"valueAlternatives": [{"type": "text", "text": "Welcome to property test"}]}]
                     },
                     {
                       "action": "greet",
                       "timesOccurred": 0,
-                      "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "Hello! Properties set."}]}]
+                      "outputs": [{"valueAlternatives": [{"type": "text", "text": "Hello! Properties set."}]}]
                     },
                     {
                       "action": "set_config",
                       "timesOccurred": 0,
-                      "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "Config properties set."}]}]
+                      "outputs": [{"valueAlternatives": [{"type": "text", "text": "Config properties set."}]}]
                     }
                   ]
                 }

@@ -52,6 +52,14 @@ public class SecretScrubber {
     /** Pattern matching strings that look like API keys / tokens */
     private static final Pattern KEY_LIKE_PATTERN = Pattern.compile("[a-zA-Z0-9_.+/~$\\-]{14,1022}");
 
+    /**
+     * Fields whose value is a schema-fixed identifier — a discriminator, a name, or
+     * a memory path — and therefore never a credential. Exempt from the entropy
+     * heuristic; see {@link #isStructuralFieldName(String)} for why.
+     */
+    private static final Set<String> STRUCTURAL_FIELD_NAMES = Set.of("type", "subtype", "name", "action", "actions", "expressions",
+            "fromobjectpath", "toobjectpath", "behaviorrulename", "scope", "uri", "occurrence");
+
     /** Known secret field names (case-insensitive matching) */
     private static final Set<String> SECRET_FIELD_NAMES = Set.of("apikey", "api_key", "apitoken", "api_token", "password", "passwd", "secret",
             "secretkey", "secret_key", "token", "accesstoken", "access_token", "authorization", "auth", "credential", "credentials", "privatekey",
@@ -110,8 +118,10 @@ public class SecretScrubber {
                         continue;
                     }
 
-                    // Check 2: Shannon entropy on key-like strings
-                    if (textValue.length() >= MIN_ENTROPY_LENGTH && KEY_LIKE_PATTERN.matcher(textValue).matches()
+                    // Check 2: Shannon entropy on key-like strings — but never on a
+                    // field whose meaning is fixed by the configuration schema.
+                    if (!isStructuralFieldName(fieldName) && textValue.length() >= MIN_ENTROPY_LENGTH
+                            && KEY_LIKE_PATTERN.matcher(textValue).matches()
                             && shannonEntropy(textValue) > ENTROPY_THRESHOLD) {
                         objectNode.set(fieldName, new TextNode(REDACTED));
                         continue;
@@ -129,6 +139,29 @@ public class SecretScrubber {
 
     private static boolean isSecretFieldName(String fieldName) {
         return SECRET_FIELD_NAMES.contains(fieldName.toLowerCase().replaceAll("[\\-.]", ""));
+    }
+
+    /**
+     * Whether this field's meaning is fixed by the configuration schema, so its
+     * value cannot be a credential no matter how random it looks.
+     * <p>
+     * The entropy heuristic cannot tell a long identifier from a long key —
+     * {@code dynamicvaluematcher} scores 3.68 bits/char and
+     * {@code currentWeatherDescription} 3.57, both over the 3.5 threshold. Because
+     * this scrubber runs on the export path, that silently rewrote structural
+     * values to {@code ${vault:REDACTED}} and produced ZIPs EDDI could not import:
+     * a behaviour condition whose {@code type} no longer resolves to any condition
+     * class, property names and {@code fromObjectPath} expressions replaced by a
+     * vault reference. Export → import is the one round trip that must be lossless.
+     * <p>
+     * These names are discriminators and identifiers the engine resolves — a
+     * condition {@code type} names a class, {@code fromObjectPath} names a memory
+     * path — so exempting them costs no secret coverage. Field-name detection
+     * (check 1) still runs first, so a field actually called {@code token} or
+     * {@code apiKey} is redacted regardless of what this returns.
+     */
+    private static boolean isStructuralFieldName(String fieldName) {
+        return STRUCTURAL_FIELD_NAMES.contains(fieldName.toLowerCase().replaceAll("[\\-.]", ""));
     }
 
     /**

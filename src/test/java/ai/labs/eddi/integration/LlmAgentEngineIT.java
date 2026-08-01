@@ -246,7 +246,7 @@ public class LlmAgentEngineIT extends BaseIntegrationIT {
                   "outputSet": [{
                     "action": "welcome",
                     "timesOccurred": 0,
-                    "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "Welcome to LLM test"}]}]
+                    "outputs": [{"valueAlternatives": [{"type": "text", "text": "Welcome to LLM test"}]}]
                   }]
                 }
                 """;
@@ -324,7 +324,7 @@ public class LlmAgentEngineIT extends BaseIntegrationIT {
                   "outputSet": [{
                     "action": "welcome",
                     "timesOccurred": 0,
-                    "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "Welcome to calculator test"}]}]
+                    "outputs": [{"valueAlternatives": [{"type": "text", "text": "Welcome to calculator test"}]}]
                   }]
                 }
                 """;

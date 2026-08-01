@@ -5,6 +5,41 @@
 
 ---
 
+## 🧨 fix(secrets): export was corrupting the configs it exported (2026-07-30)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+The Integration Tests job went from **156 failures + 14 errors down to 18 failures, 0 errors** after the fixture and round-trip fixes. The remaining 18 split two ways, and the second one is the serious find.
+
+### 15 of them: the same outer `type`, hardcoded inline
+
+`ComplexRulesAgentEngineIT`, `HitlToolPauseResumeIT`, `HttpCallsAgentEngineIT`, `LlmAgentEngineIT` and `PropertySetterAgentEngineIT` build their output configs as inline JSON strings rather than loading fixtures, and every one of them wrote `"outputs": [{"type": "text", …}]` — the key `OutputConfiguration.Output` never declared. The file sweep could not see them because they are Java string literals. Removed; the inner `valueAlternatives[].type` (a real field) is untouched.
+
+### The other 3: `SecretScrubber` corrupts exported agents
+
+`ImportMergeIT` imports the ZIP **EDDI itself exported** one test earlier, and it 400'd with:
+
+```
+No condition for type ${vault:REDACTED} was created (ai.labs.behavior.conditions.${vault:REDACTED})
+```
+
+`SecretScrubber` runs on the export path and replaces suspected secrets with `${vault:REDACTED}`. Its second heuristic — Shannon entropy > 3.5 bits/char on any string ≥ 14 chars — cannot tell a long identifier from a long key. Simulating it against the weather-agent export, it rewrites **four ordinary configuration values**:
+
+| Value | Field | Entropy |
+| --- | --- | --- |
+| `dynamicvaluematcher` | a behaviour condition `type` | 3.68 |
+| `currentWeatherDescription` | a property `name` | 3.57 |
+| `properties.count+1` | a `fromObjectPath` | 3.61 |
+| `memory.current.httpCalls.currentWeatherDescription` | a `fromObjectPath` | 3.87 |
+
+So **export → import was never lossless**: exported agents came back with a condition that resolves to no class, and property names and memory paths replaced by a vault reference.
+
+**This is pre-existing — `SecretScrubber` is byte-identical to `main`, and `main` is green.** It was invisible because nothing validated a ruleset on write: the corrupt condition stored happily, the rule silently never matched, and the import returned 201. #620's write-time rule validation is what turned a silent corruption into a loud 400. The validation is doing exactly its job.
+
+The fix exempts schema-fixed field names (`type`, `name`, `fromObjectPath`, `toObjectPath`, `expressions`, `actions`, …) from the **entropy** heuristic only. A condition `type` names a Java class and a `fromObjectPath` names a memory path — neither can be a credential, so the exemption costs no secret coverage, and field-name detection still runs first, so a field actually called `apiKey` or `token` is redacted regardless. Mutation-checked: with the exemption removed the new test fails with all four values rewritten to `${vault:REDACTED}`.
+
+---
+
 ## 🔀 chore(merge): main (#622, caller-bound MCP) into the wave-4a branch (2026-07-30)
 
 **Repo:** EDDI (`fix/code-review-validation`)

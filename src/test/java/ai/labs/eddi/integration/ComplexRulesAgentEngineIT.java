@@ -235,22 +235,22 @@ public class ComplexRulesAgentEngineIT extends BaseIntegrationIT {
                     {
                       "action": "welcome",
                       "timesOccurred": 0,
-                      "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "Welcome to complex rules test"}]}]
+                      "outputs": [{"valueAlternatives": [{"type": "text", "text": "Welcome to complex rules test"}]}]
                     },
                     {
                       "action": "greet",
                       "timesOccurred": 0,
-                      "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "Simple greeting"}]}]
+                      "outputs": [{"valueAlternatives": [{"type": "text", "text": "Simple greeting"}]}]
                     },
                     {
                       "action": "full_greeting",
                       "timesOccurred": 0,
-                      "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "Full greeting with context!"}]}]
+                      "outputs": [{"valueAlternatives": [{"type": "text", "text": "Full greeting with context!"}]}]
                     },
                     {
                       "action": "not_greeted",
                       "timesOccurred": 0,
-                      "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "You haven't greeted yet!"}]}]
+                      "outputs": [{"valueAlternatives": [{"type": "text", "text": "You haven't greeted yet!"}]}]
                     }
                   ]
                 }
