@@ -4,13 +4,16 @@
  */
 package ai.labs.eddi.modules.nlp.extensions.dictionaries;
 
+import ai.labs.eddi.modules.nlp.IInputParser;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
+import ai.labs.eddi.modules.nlp.extensions.corrections.DamerauLevenshteinCorrection;
 import ai.labs.eddi.modules.nlp.internal.InputParser;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Modifier;
 import java.util.Collections;
 import java.util.List;
 
@@ -62,6 +65,37 @@ class RegularDictionaryLanguageCodeTest {
         List<RawSolution> solutions = parser.parse("hallo", "en", Collections.emptyList());
 
         assertFalse(expressionNames(solutions).contains("greeting"), "the German dictionary must not be consulted for an English turn");
+    }
+
+    /**
+     * The test above builds a parser without corrections, which cannot see the
+     * corrections bypass at all: a mismatched dictionary used to come back through
+     * {@code iterateCorrections} at distance 0 as soon as the token was otherwise
+     * unknown. The documented parser setup has at least one correction configured,
+     * so that is what this test uses.
+     */
+    @Test
+    @DisplayName("a German dictionary does not match an English turn even when a correction is configured")
+    void germanDictionaryIsSkippedOnEnglishTurnWithCorrections() throws Exception {
+        var dictionary = germanDictionary();
+        var correction = new DamerauLevenshteinCorrection();
+        correction.init(List.of(dictionary));
+        var parser = new InputParser(Collections.emptyList(), List.of(dictionary), List.of(correction), new IInputParser.Config());
+
+        List<RawSolution> solutions = parser.parse("hallo", "en", Collections.emptyList());
+
+        assertFalse(expressionNames(solutions).contains("greeting"),
+                "the German dictionary must not be reachable through the corrections path either");
+    }
+
+    @Test
+    @DisplayName("the word cache is volatile — dictionaries are shared across conversation threads")
+    void allWordsCacheIsSafelyPublished() throws Exception {
+        var field = RegularDictionary.class.getDeclaredField("allWordsCache");
+
+        assertTrue(Modifier.isVolatile(field.getModifiers()),
+                "a lazily initialised field on an object shared by concurrent conversations must be volatile,"
+                        + " otherwise the cached list is published without a happens-before edge");
     }
 
     @Test

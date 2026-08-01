@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.model;
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
@@ -495,15 +496,33 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * enableHttpCallTools is NOT a standalone trigger — it only enhances agent mode
          * when already triggered by tools, builtInTools, or a2aAgents. Httpcall and
          * mcpcall auto-discovery is checked at execution time.
+         * <p>
+         * {@code @JsonIgnore} because this is derived state, not stored state: it is a
+         * pure function of {@code tools}, {@code enableBuiltInTools} and
+         * {@code a2aAgents}. Without it Jackson wrote an {@code agentMode} key that no
+         * setter or field could read back, so every LLM configuration document EDDI
+         * serializes became unreadable by EDDI once
+         * {@code StrictConfigurationBodyInterceptor} began rejecting unknown keys —
+         * breaking the agent setup wizard on its own generated config, any EDDI-Manager
+         * GET → edit → PUT, and export → ZIP import. Ignoring it also stops persisting
+         * a value that is recomputed on every read anyway, and lets documents already
+         * carrying {@code agentMode} load without complaint.
          */
+        @JsonIgnore
         public boolean isAgentMode() {
             return (tools != null && !tools.isEmpty()) || (enableBuiltInTools != null && enableBuiltInTools)
                     || (a2aAgents != null && !a2aAgents.isEmpty());
         }
 
         /**
-         * Gets the system message from parameters (legacy support)
+         * Gets the system message from parameters (legacy support).
+         * <p>
+         * {@code @JsonIgnore} for the same reason as {@link #isAgentMode()}: this is a
+         * read-through of {@code parameters.systemMessage}, not a field. Serializing it
+         * duplicated the prompt at the top level of every stored task and, once unknown
+         * keys became a 400, made EDDI's own serialized LLM configs unreadable by EDDI.
          */
+        @JsonIgnore
         public String getSystemMessage() {
             return parameters != null ? parameters.get("systemMessage") : null;
         }
@@ -1105,7 +1124,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /** Optional display name for this MCP server */
         private String name;
 
-        /** Transport type: "http" (default) or "sse" */
+        /**
+         * Transport type. Only StreamableHTTP is implemented, so the accepted values
+         * are {@code "http"} (default), {@code "https"}, {@code "streamable-http"} and
+         * {@code "streamablehttp"}. {@code "sse"} was previously documented here but
+         * was never implemented — it is still accepted as a deprecated alias for
+         * StreamableHTTP so existing configs keep working, with a warning. Anything
+         * else is rejected by {@code McpToolProviderManager.validateTransport}.
+         */
         private String transport = "http";
 
         /** Optional API key or vault reference (e.g., "${vault:my-api-key}") */

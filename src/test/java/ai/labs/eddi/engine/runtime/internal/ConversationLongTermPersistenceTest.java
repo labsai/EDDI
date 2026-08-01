@@ -8,10 +8,13 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -114,25 +117,78 @@ class ConversationLongTermPersistenceTest {
         verify(userMemoryStore, times(1)).upsert(any(UserMemoryEntry.class));
     }
 
+    /** A workflow whose lifecycle does {@code action} and nothing else. */
+    private IExecutableWorkflow workflowThat(ThrowingAction action) throws Exception {
+        IExecutableWorkflow workflow = mock(IExecutableWorkflow.class);
+        ILifecycleManager lifecycleManager = mock(ILifecycleManager.class);
+        when(workflow.getWorkflowId()).thenReturn("wf1");
+        when(workflow.getLifecycleManager()).thenReturn(lifecycleManager);
+        doAnswer(invocation -> {
+            action.run();
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        return workflow;
+    }
+
+    @FunctionalInterface
+    private interface ThrowingAction {
+        void run() throws Exception;
+    }
+
+    private Conversation turnWith(IExecutableWorkflow workflow) {
+        return new Conversation(List.of(workflow), memory, propertiesHandler,
+                (IConversation.IConversationOutputRenderer) null);
+    }
+
+    private static HitlDecision approved() {
+        var decision = new HitlDecision();
+        decision.setVerdict(HitlVerdict.APPROVED);
+        return decision;
+    }
+
+    @Test
+    @DisplayName("a longTerm property set by a turn that PAUSES for approval is still written on resume")
+    void longTermWriteSurvivesAHitlPause() throws Exception {
+        IExecutableWorkflow pausing = workflowThat(() -> {
+            memory.getConversationProperties().put("dietary_restriction",
+                    new Property("dietary_restriction", "vegan", Scope.longTerm));
+            throw new ConversationPauseException("wf1", 2, "needs approval");
+        });
+
+        turnWith(pausing).say("I am vegan", new LinkedHashMap<>());
+
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
+
+        // The human approves. ConversationService builds a NEW Conversation over the
+        // memory it reloaded from the conversation document — which already carries
+        // the un-persisted property, so a value diff alone can never see it as changed.
+        turnWith(pausing).resume(approved());
+
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(entry.capture());
+        assertEquals("dietary_restriction", entry.getValue().key());
+        assertEquals("vegan", entry.getValue().value());
+    }
+
     /**
      * The baseline must model what the USER MEMORY STORE holds, not what the
      * conversation document holds. A HITL pause persists the document (properties
      * included) without ever upserting, so a resume that re-captured the document
      * as its baseline would see "unchanged" and drop the property forever.
+     * <p>
+     * Same scenario as {@link #longTermWriteSurvivesAHitlPause()}, but resumed with
+     * a REJECTED verdict — the owed write must not depend on the verdict.
      */
     @Test
     @DisplayName("G6 — a longTerm property set in a turn that HITL-pauses is still persisted on resume")
     void longTermPropertySetBeforeAPauseIsPersistedOnResume() throws Exception {
-        IExecutableWorkflow workflow = mock(IExecutableWorkflow.class);
-        ILifecycleManager lifecycleManager = mock(ILifecycleManager.class);
-        when(workflow.getWorkflowId()).thenReturn("wf1");
-        when(workflow.getLifecycleManager()).thenReturn(lifecycleManager);
-        // The turn sets the property and THEN trips the human-approval gate.
-        doAnswer(invocation -> {
+        IExecutableWorkflow workflow = workflowThat(() -> {
+            // The turn sets the property and THEN trips the human-approval gate.
             memory.getConversationProperties().put("dietary_restriction",
                     new Property("dietary_restriction", "vegan", Scope.longTerm));
             throw new ConversationPauseException("wf1", 2, "needs approval");
-        }).when(lifecycleManager).executeLifecycle(any(), any());
+        });
 
         turnWith(workflow).say("I am vegan", new LinkedHashMap<>());
 
@@ -144,13 +200,33 @@ class ConversationLongTermPersistenceTest {
         // Resume: a FRESH Conversation over the hydrated memory, as
         // Agent#continueConversation builds for the resume request.
         HitlDecision decision = new HitlDecision();
-        decision.setVerdict(HitlDecision.HitlVerdict.REJECTED);
+        decision.setVerdict(HitlVerdict.REJECTED);
         turnWith(workflow).resume(decision);
 
         ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(entry.capture());
         assertEquals("dietary_restriction", entry.getValue().key());
         assertEquals("vegan", entry.getValue().value());
+    }
+
+    @Test
+    @DisplayName("a longTerm property set by a turn that ERRORS is still written by the next completed turn")
+    void longTermWriteSurvivesAFailedTurn() throws Exception {
+        IExecutableWorkflow failing = workflowThat(() -> {
+            memory.getConversationProperties().put("allergy", new Property("allergy", "peanuts", Scope.longTerm));
+            throw new LifecycleException("task blew up");
+        });
+
+        Conversation errored = turnWith(failing);
+        assertThrows(LifecycleException.class, () -> errored.say("I am allergic to peanuts", new LinkedHashMap<>()));
+        assertEquals(ConversationState.ERROR, memory.getConversationState());
+        verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
+
+        nextTurn().say("ok", new LinkedHashMap<>());
+
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(entry.capture());
+        assertEquals("allergy", entry.getValue().key());
     }
 
     /**
@@ -171,9 +247,23 @@ class ConversationLongTermPersistenceTest {
         assertEquals("blue", entry.getValue().value());
     }
 
-    private Conversation turnWith(IExecutableWorkflow workflow) {
-        return new Conversation(List.of(workflow), memory, propertiesHandler,
-                (IConversation.IConversationOutputRenderer) null);
+    @Test
+    @DisplayName("an owed write that the store rejects is retried by the following turn, not swallowed")
+    void failedUpsertIsRetriedOnTheNextTurn() throws Exception {
+        doThrow(new ResourceStoreException("mongo down"))
+                .when(userMemoryStore).upsert(any(UserMemoryEntry.class));
+
+        Conversation first = nextTurn();
+        memory.getConversationProperties().put("home_city", new Property("home_city", "Vienna", Scope.longTerm));
+        assertThrows(LifecycleException.class, () -> first.say("I live in Vienna", new LinkedHashMap<>()));
+
+        reset(userMemoryStore);
+
+        nextTurn().say("thanks", new LinkedHashMap<>());
+
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(entry.capture());
+        assertEquals("home_city", entry.getValue().key());
     }
 
     /**
@@ -187,18 +277,12 @@ class ConversationLongTermPersistenceTest {
     @Test
     @DisplayName("G10 — a step-scoped property resolves via {memory.current.properties.X} during its turn only")
     void stepScopedPropertyIsMirroredForTheTurnAndUnmirroredAfterIt() throws Exception {
-        IExecutableWorkflow workflow = mock(IExecutableWorkflow.class);
-        ILifecycleManager lifecycleManager = mock(ILifecycleManager.class);
-        when(workflow.getWorkflowId()).thenReturn("wf1");
-        when(workflow.getLifecycleManager()).thenReturn(lifecycleManager);
-
         Map<String, Object> visibleDuringTurn = new LinkedHashMap<>();
-        doAnswer(invocation -> {
+        IExecutableWorkflow workflow = workflowThat(() -> {
             memory.getConversationProperties().put("tmp", new Property("tmp", "scratch", Scope.step));
             memory.getConversationProperties().put("keep", new Property("keep", "kept", Scope.conversation));
             visibleDuringTurn.putAll(mirroredProperties());
-            return null;
-        }).when(lifecycleManager).executeLifecycle(any(), any());
+        });
 
         turnWith(workflow).say("hi", new LinkedHashMap<>());
 

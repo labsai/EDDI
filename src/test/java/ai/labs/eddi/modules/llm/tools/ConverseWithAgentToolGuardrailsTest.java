@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.model.InputData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -137,6 +139,54 @@ class ConverseWithAgentToolGuardrailsTest {
         Context depth = captor.getValue().get(ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH);
         assertTrue(depth != null, "delegation depth must be propagated; without it the cycle guard cannot work");
         assertEquals("2", String.valueOf(depth.getValue()));
+    }
+
+    /**
+     * The depth must ride on the turn that carries the MESSAGE, not only on
+     * conversation creation. {@code AgentOrchestrator.resolveDelegationDepth} reads
+     * {@code context:delegationDepth} out of the CURRENT step, and
+     * {@code Conversation} only materialises context data from the contexts handed
+     * to that turn — so a context attached to {@code startConversation} alone sits
+     * on step 0 while the delegated question travels on step 1 with an empty
+     * context. The callee then reads depth 0 and the guard is inert.
+     */
+    @Test
+    @DisplayName("the hop count also rides on the say() turn — otherwise the callee reads depth 0")
+    void propagatesDepthOnTheMessageTurn() throws Exception {
+        var tool = new ConverseWithAgentTool(conversationService, "user-1", config(true, 5, 5, null), 1);
+
+        tool.converseWithAgent("agent-b", "hello", null);
+
+        ArgumentCaptor<InputData> captor = ArgumentCaptor.forClass(InputData.class);
+        verify(conversationService).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(),
+                captor.capture(), anyBoolean(), any());
+
+        Map<String, Context> sentContext = captor.getValue().getContext();
+        assertNotNull(sentContext, "the message turn must carry a context");
+        Context depth = sentContext.get(ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH);
+        assertNotNull(depth, "delegationDepth must be on the message turn; the callee reads it from the CURRENT step");
+        assertEquals("2", String.valueOf(depth.getValue()));
+    }
+
+    @Test
+    @DisplayName("continuing an existing conversation still carries the hop count")
+    void propagatesDepthWhenReusingConversationId() throws Exception {
+        var tool = new ConverseWithAgentTool(conversationService, "user-1", config(true, 5, 5, null), 2);
+
+        tool.converseWithAgent("agent-b", "follow-up", "conv-existing");
+
+        // No conversation is created on this branch, so say() is the ONLY carrier.
+        verify(conversationService, never()).startConversation(any(), anyString(), any(), any());
+
+        ArgumentCaptor<InputData> captor = ArgumentCaptor.forClass(InputData.class);
+        verify(conversationService).say(any(), anyString(), eq("conv-existing"), anyBoolean(), anyBoolean(), any(),
+                captor.capture(), anyBoolean(), any());
+
+        Map<String, Context> sentContext = captor.getValue().getContext();
+        assertNotNull(sentContext, "the reuse branch must not send an empty context");
+        Context depth = sentContext.get(ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH);
+        assertNotNull(depth, "delegationDepth must be propagated on the conversationId-reuse branch too");
+        assertEquals("3", String.valueOf(depth.getValue()));
     }
 
     @Test

@@ -385,7 +385,6 @@ public class HitlToolPauseResumeIT extends BaseIntegrationIT {
     private ResourceId setupAndDeployToolGatedAgent() throws Exception {
         String dictionary = """
                 {
-                  "language": "en",
                   "words": [
                     {"word": "calculate", "expressions": "do_calc(calculate)", "frequency": 0},
                     {"word": "hello", "expressions": "greeting(hello)", "frequency": 0},
@@ -441,11 +440,11 @@ public class HitlToolPauseResumeIT extends BaseIntegrationIT {
                 {
                   "outputSet": [
                     {"action": "welcome", "timesOccurred": 0,
-                     "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "Welcome to the tool-gated HITL test agent."}]}]},
+                     "outputs": [{"valueAlternatives": [{"type": "text", "text": "Welcome to the tool-gated HITL test agent."}]}]},
                     {"action": "greet", "timesOccurred": 0,
-                     "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "Hello!"}]}]},
+                     "outputs": [{"valueAlternatives": [{"type": "text", "text": "Hello!"}]}]},
                     {"action": "ask_supervisor", "timesOccurred": 0,
-                     "outputs": [{"type": "text", "valueAlternatives": [{"type": "text", "text": "Escalation handled after approval."}]}]}
+                     "outputs": [{"valueAlternatives": [{"type": "text", "text": "Escalation handled after approval."}]}]}
                   ]
                 }
                 """;

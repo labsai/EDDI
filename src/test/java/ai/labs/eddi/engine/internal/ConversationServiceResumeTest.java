@@ -36,7 +36,9 @@ import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
+import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
@@ -53,6 +55,8 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -739,6 +743,114 @@ class ConversationServiceResumeTest {
             // ended) and the unconditional full store is never used on the resume path.
             verify(scheduleStore, never()).createSchedule(any());
             verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+        }
+    }
+
+    // =========================================================================
+    // B3 shutdown gate + C10 dropped-resume rollback
+    // =========================================================================
+
+    @Nested
+    @DisplayName("resumeConversation — shutdown gate and dropped submissions")
+    class ShutdownAndDroppedSubmissions {
+
+        private AtomicBoolean signalled;
+
+        @BeforeEach
+        void closeableGate() {
+            IConversationCoordinator gateCoordinator = mock(IConversationCoordinator.class);
+            lenient().when(gateCoordinator.getQueueDepths()).thenReturn(Map.of());
+            signalled = new AtomicBoolean(false);
+            conversationService.gracefulShutdownService = new GracefulShutdownService(gateCoordinator, 1, 0, 1L) {
+                @Override
+                public boolean isShuttingDown() {
+                    return signalled.get();
+                }
+            };
+        }
+
+        private HitlDecision approve() {
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setDecidedBy("reviewer-shutdown");
+            return decision;
+        }
+
+        /**
+         * B3 — a resume enqueues a FULL turn through the very coordinator the shutdown
+         * drain is waiting on, so one admitted during the drain both extends the drain
+         * and can be SIGKILLed halfway. It must be refused, and refused BEFORE the
+         * AWAITING_HUMAN-&gt;IN_PROGRESS CAS so the pause is not consumed and the
+         * approval survives for another node.
+         */
+        @Test
+        @DisplayName("B3: a resume is rejected once shutdown has been signalled, without consuming the pause")
+        void resumeIsRejectedOnceShutdownHasBeenSignalled() throws Exception {
+            signalled.set(true);
+
+            assertThrows(RejectedExecutionException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, approve(), null));
+
+            verify(conversationMemoryStore, never()).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            verify(conversationCoordinator, never()).submitInOrder(eq(CONVERSATION_ID), any());
+        }
+
+        /**
+         * The gate must only bite while shutting down — with it open the resume
+         * proceeds past it and reaches the normal CAS.
+         */
+        @Test
+        @DisplayName("with the gate open the resume proceeds to the pause-consuming CAS")
+        void resumeProceedsWhileTheGateIsOpen() throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            doReturn(createResumeSnapshot()).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            IAgent agent = mock(IAgent.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            doReturn(mock(IConversation.class)).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+
+            conversationService.resumeConversation(CONVERSATION_ID, approve(), null);
+
+            verify(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
+        }
+
+        /**
+         * C10 — the coordinator can DROP a queued resume (it could not hand it to the
+         * runtime and, draining from a completion callback, has no caller to propagate
+         * to). The pause's STATE was already consumed by the CAS, so without a rollback
+         * the conversation is wedged IN_PROGRESS forever with nothing left to move it.
+         */
+        @Test
+        @DisplayName("C10: a resume the coordinator dropped restores the pause instead of wedging it IN_PROGRESS")
+        void aDroppedResumeRestoresThePause() throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            doReturn(createResumeSnapshot()).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            IAgent agent = mock(IAgent.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            doReturn(mock(IConversation.class)).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+            // The rollback CAS wins — the conversation goes back to AWAITING_HUMAN.
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+
+            conversationService.resumeConversation(CONVERSATION_ID, approve(), null);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Callable<Void>> callableCaptor = ArgumentCaptor.forClass(Callable.class);
+            verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), callableCaptor.capture());
+
+            Callable<Void> queuedResume = callableCaptor.getValue();
+            assertInstanceOf(IDiscardableTask.class, queuedResume,
+                    "the coordinator must be able to tell a queued resume that it was dropped without running");
+
+            ((IDiscardableTask) queuedResume).onDiscarded(new RejectedExecutionException("pool saturated"));
+
+            verify(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+            verify(conversationStateCache).put(CONVERSATION_ID, ConversationState.AWAITING_HUMAN);
         }
     }
 

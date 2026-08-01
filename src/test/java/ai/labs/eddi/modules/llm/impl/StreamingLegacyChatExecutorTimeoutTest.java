@@ -129,6 +129,53 @@ class StreamingLegacyChatExecutorTimeoutTest {
             assertEquals(120L, StreamingLegacyChatExecutor.resolveTimeoutSeconds(task("0")));
         }
 
+        /**
+         * F11's "your timeout does not shorten the backstop" warning sits on the
+         * PER-REQUEST path — {@code resolveTimeoutSeconds} runs once per streaming turn
+         * and again per cascade step. Emitted unconditionally it fires on every single
+         * turn, forever, for a config that will never change. {@code ChatModelRegistry}
+         * makes the same distinction explicitly (build path only, never on a cache
+         * hit).
+         */
+        @Test
+        @DisplayName("the below-backstop warning is emitted once per task, not once per turn")
+        void shortTimeoutWarningIsNotPerRequest() {
+            StreamingLegacyChatExecutor.resetShortTimeoutWarnings();
+            var task = task("5000");
+
+            for (int turn = 0; turn < 20; turn++) {
+                assertEquals(120L, StreamingLegacyChatExecutor.resolveTimeoutSeconds(task));
+            }
+
+            assertEquals(1, StreamingLegacyChatExecutor.shortTimeoutWarningCount(),
+                    "20 turns of the same task must not produce 20 WARN lines");
+        }
+
+        @Test
+        @DisplayName("a different task still gets its own warning")
+        void eachTaskIsWarnedAboutSeparately() {
+            StreamingLegacyChatExecutor.resetShortTimeoutWarnings();
+            var first = task("5000");
+            var second = task("7000");
+            second.setId("otherTask");
+
+            StreamingLegacyChatExecutor.resolveTimeoutSeconds(first);
+            StreamingLegacyChatExecutor.resolveTimeoutSeconds(first);
+            StreamingLegacyChatExecutor.resolveTimeoutSeconds(second);
+            StreamingLegacyChatExecutor.resolveTimeoutSeconds(second);
+
+            assertEquals(2, StreamingLegacyChatExecutor.shortTimeoutWarningCount(),
+                    "suppression must be per task, not global");
+        }
+
+        @Test
+        @DisplayName("a backstop-or-longer timeout is never warned about at all")
+        void longTimeoutIsNotWarned() {
+            StreamingLegacyChatExecutor.resetShortTimeoutWarnings();
+            StreamingLegacyChatExecutor.resolveTimeoutSeconds(task("300000"));
+            assertEquals(0, StreamingLegacyChatExecutor.shortTimeoutWarningCount());
+        }
+
         @Test
         @DisplayName("a task with no parameters map at all resolves to the default")
         void noParameters_usesDefault() {

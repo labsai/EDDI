@@ -302,6 +302,10 @@ public class RestConversationStore implements IRestConversationStore {
     @Override
     public ConversationMemorySnapshot readRawConversationLog(String conversationId) {
         checkNotNull(conversationId, "conversationId");
+        // Owner-or-admin, the same gate RestAgentEngine/RestAttachmentUpload apply.
+        // Without it any authenticated caller could read any conversation by id — the
+        // raw surface returns the full memory document, properties included.
+        conversationAccessGuard.requireConversationOwner(conversationId);
 
         try {
             // Project the pending tool-call batch down to names-only before returning:
@@ -322,6 +326,7 @@ public class RestConversationStore implements IRestConversationStore {
         checkNotNull(conversationId, "conversationId");
         checkNotNull(returnDetailed, "returnDetailed");
         checkNotNull(returnCurrentStepOnly, "returnCurrentStepOnly");
+        conversationAccessGuard.requireConversationOwner(conversationId);
 
         try {
             return convertSimpleConversationMemory(conversationMemoryStore.loadConversationMemorySnapshot(conversationId), returnDetailed,
@@ -336,6 +341,10 @@ public class RestConversationStore implements IRestConversationStore {
     public void deleteConversationLog(String conversationId, Boolean deletePermanently)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         checkNotNull(conversationId, "conversationId");
+        // Deletion is irreversible, so the gate runs before anything is touched —
+        // including the soft-delete path, whose DocumentDescriptorInterceptor marks
+        // the descriptor deleted even when deletePermanently is false.
+        conversationAccessGuard.requireConversationOwner(conversationId);
 
         if (deletePermanently) {
             // If the conversation is a live pending approval, resolve the HITL state

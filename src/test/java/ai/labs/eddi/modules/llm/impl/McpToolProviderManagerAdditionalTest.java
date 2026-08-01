@@ -12,7 +12,9 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.mcp.client.McpClient;
+import dev.langchain4j.service.tool.ToolExecutor;
 import org.junit.jupiter.api.*;
 import org.mockito.Mock;
 
@@ -508,6 +510,96 @@ class McpToolProviderManagerAdditionalTest {
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
             assertTrue(result.executors().isEmpty());
+        }
+    }
+
+    // ==================== F12 — discovered-tools TTL cache ====================
+
+    /**
+     * Finding F12: only the CONNECTION was cached, so every conversation turn
+     * issued a live {@code tools/list} RPC to every configured MCP server. The TTL
+     * cache added for it had no test at all — this pins both halves of the
+     * freshness decision.
+     * <p>
+     * SSRF protection is on and the URL is loopback, so the moment the cache is NOT
+     * used the request is rejected before any connection is attempted. That makes
+     * "served from cache" and "went to the server" distinguishable with no network
+     * and no socket.
+     */
+    @Nested
+    @DisplayName("F12 — discovered-tools cache TTL")
+    class ToolCacheTtl {
+
+        private static final String URL = "http://127.0.0.1:9/mcp";
+
+        private McpToolProviderManager sealedManager() {
+            return new McpToolProviderManager(globalVariableResolver, secretResolver, true,
+                    McpToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS,
+                    McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS);
+        }
+
+        @SuppressWarnings("unchecked")
+        /**
+         * Seeds the cache under the key production actually looks up, derived by
+         * calling {@code cacheKey} itself rather than reconstructing it here.
+         * <p>
+         * This used to seed the bare URL. The tool cache later became credential scoped
+         * ({@code url|<digest of apiKey>}, or {@code url|anonymous}), so the seeded
+         * entry no longer matched the lookup — which broke
+         * {@code freshEntryIsServedFromCache} loudly and, worse, made
+         * {@code staleEntryIsNotServed} pass <em>vacuously</em>: nothing was served
+         * because nothing matched, not because the entry was stale. Deriving the key
+         * from the production method means the next change to the key shape carries
+         * these tests along instead of silently hollowing them out.
+         */
+        private void seedToolCache(McpToolProviderManager target, long timestamp) throws Exception {
+            Field field = McpToolProviderManager.class.getDeclaredField("toolCache");
+            field.setAccessible(true);
+            var cache = (Map<String, McpToolProviderManager.CachedTools>) field.get(target);
+            var spec = ToolSpecification.builder().name("cached_tool").description("from the cache").build();
+            ToolExecutor executor = (request, memoryId) -> "cached";
+            cache.put(productionCacheKey(config()),
+                    new McpToolProviderManager.CachedTools(List.of(spec), Map.of("cached_tool", executor), timestamp));
+        }
+
+        private String productionCacheKey(McpServerConfig config) throws Exception {
+            var method = McpToolProviderManager.class.getDeclaredMethod("cacheKey", McpServerConfig.class);
+            method.setAccessible(true);
+            return (String) method.invoke(null, config);
+        }
+
+        private McpServerConfig config() {
+            var config = new McpServerConfig();
+            config.setUrl(URL);
+            config.setName("cached-server");
+            return config;
+        }
+
+        @Test
+        @DisplayName("a fresh entry is served from the cache without contacting the server")
+        void freshEntryIsServedFromCache() throws Exception {
+            var target = sealedManager();
+            seedToolCache(target, System.currentTimeMillis());
+
+            var result = target.discoverTools(List.of(config()));
+
+            assertEquals(1, result.toolSpecs().size(), "the cached tool list must be returned");
+            assertEquals("cached_tool", result.toolSpecs().get(0).name());
+            assertTrue(result.executors().containsKey("cached_tool"));
+            assertEquals(1, target.getCachedToolServerCount());
+            assertFalse(target.isCircuitOpen(URL), "no connection was attempted, so no failure was recorded");
+        }
+
+        @Test
+        @DisplayName("an entry older than the TTL is NOT served — discovery goes back to the server")
+        void staleEntryIsNotServed() throws Exception {
+            var target = sealedManager();
+            seedToolCache(target, System.currentTimeMillis() - (2 * McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS));
+
+            var result = target.discoverTools(List.of(config()));
+
+            assertTrue(result.toolSpecs().isEmpty(),
+                    "a stale entry must not be served; discovery re-contacted the (rejected) server instead");
         }
     }
 

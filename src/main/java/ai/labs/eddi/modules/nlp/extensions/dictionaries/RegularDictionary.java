@@ -27,18 +27,28 @@ public class RegularDictionary implements IDictionary {
      * corrections (e.g. Damerau-Levenshtein), so rebuilding the whole list on every
      * call allocated the entire dictionary per token. Mutating the dictionary drops
      * the cache.
+     * <p>
+     * {@code volatile} because the dictionary instance is created once per workflow
+     * (see {@code WorkflowStoreClientLibrary#createExecutableWorkflow}) and then
+     * read by every concurrent conversation. Recomputing the list twice under a
+     * race is harmless; publishing the inner list without a happens-before edge is
+     * not.
      */
-    private List<IWord> allWordsCache;
+    private volatile List<IWord> allWordsCache;
 
     @Override
     public List<IWord> getWords() {
-        if (allWordsCache == null) {
+        // Read the volatile field once: a concurrent mutation could otherwise null it
+        // between the check and the return.
+        List<IWord> cached = allWordsCache;
+        if (cached == null) {
             List<IWord> allWords = new LinkedList<>(words.values());
             phrases.stream().map(IPhrase::getWords).forEach(allWords::addAll);
-            allWordsCache = Collections.unmodifiableList(allWords);
+            cached = Collections.unmodifiableList(allWords);
+            allWordsCache = cached;
         }
 
-        return allWordsCache;
+        return cached;
     }
 
     @Override

@@ -30,11 +30,12 @@ public class ApiCall {
      */
     private Integer timeoutInMillis;
     /**
-     * Maximum accepted response size for this call in bytes. Larger responses are
-     * rejected by the http client and, should one still get through, truncated
-     * before being written to conversation memory. {@code null} falls back to the
-     * deployment-wide default
-     * ({@code eddi.httpcalls.default-max-response-size-bytes}).
+     * How much of the response body is kept in conversation memory, in bytes. A
+     * larger body is <em>truncated</em> at this size (with a warning) rather than
+     * failing the call — the call itself only fails if the response exceeds the
+     * engine's much higher transport ceiling, which no configuration can lower.
+     * {@code null} falls back to the deployment-wide default
+     * ({@code eddi.httpcalls.default-max-response-size-bytes}, 2 MB).
      */
     private Integer maxResponseSizeInBytes;
     private HttpPreRequest preRequest;

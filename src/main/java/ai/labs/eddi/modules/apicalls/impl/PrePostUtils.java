@@ -42,6 +42,19 @@ public class PrePostUtils {
     private static final String KEY_EXPRESSIONS = "expressions";
 
     /**
+     * Template data keys under which the per-invocation field/row delimiters are
+     * handed to Qute. They deliberately live in the template <em>data</em> and not
+     * in the template <em>text</em>: {@code ITemplatingEngine} caches compiled
+     * templates keyed on the template string, so a nonce baked into the text would
+     * make every single execution a cache miss (and churn the bounded cache).
+     * Keeping the text stable and the values random preserves both properties — the
+     * compiled template is reused, and upstream content still cannot forge a
+     * delimiter it cannot guess.
+     */
+    private static final String KEY_FIELD_DELIMITER = "eddiFieldDelimiter";
+    private static final String KEY_ROW_DELIMITER = "eddiRowDelimiter";
+
+    /**
      * Used to assemble output items / quick replies as a JSON object tree. Building
      * them by string concatenation is unsafe: the values are rendered from upstream
      * API responses, and a double quote in such a value would escape its JSON
@@ -290,6 +303,11 @@ public class PrePostUtils {
      * separated by delimiters carrying a per-invocation random nonce instead of
      * being rendered into a hand-concatenated JSON document. Upstream content
      * cannot forge such a delimiter, so no value can break out of its field.
+     * <p>
+     * The nonce is passed as template <em>data</em> ({@link #KEY_FIELD_DELIMITER} /
+     * {@link #KEY_ROW_DELIMITER}), never concatenated into the template text, so
+     * the generated template string is identical for every execution of the same
+     * instruction and stays reusable from the compiled-template cache.
      *
      * @return one list of rendered values per iterated element, each with the same
      *         size and order as {@code valueTemplates}
@@ -312,18 +330,25 @@ public class PrePostUtils {
 
         for (int i = 0; i < valueTemplates.size(); i++) {
             if (i > 0) {
-                template.append(fieldDelimiter);
+                template.append('{').append(KEY_FIELD_DELIMITER).append('}');
             }
             template.append(valueTemplates.get(i));
         }
-        template.append(rowDelimiter);
+        template.append('{').append(KEY_ROW_DELIMITER).append('}');
 
         if (filtered) {
             template.append("{/if}");
         }
         template.append("{/for}");
 
-        var rendered = templatingEngine.processTemplate(template.toString(), templateDataObjects);
+        // Render against a copy so the caller's template data model is not polluted
+        // with the delimiters — and so a stale delimiter can never leak into a later
+        // render.
+        Map<String, Object> renderData = templateDataObjects == null ? new HashMap<>() : new HashMap<>(templateDataObjects);
+        renderData.put(KEY_FIELD_DELIMITER, fieldDelimiter);
+        renderData.put(KEY_ROW_DELIMITER, rowDelimiter);
+
+        var rendered = templatingEngine.processTemplate(template.toString(), renderData);
         if (isNullOrEmpty(rendered)) {
             return List.of();
         }

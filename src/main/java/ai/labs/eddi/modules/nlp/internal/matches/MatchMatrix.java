@@ -83,12 +83,29 @@ public class MatchMatrix implements Iterable<Suggestion> {
         return null;
     }
 
-    private List<List<MatchingResult>> matchingResultsByIndex() {
+    /**
+     * The memoized positional view itself. Package-private so the caching can be
+     * asserted directly: {@link #getMatchingResults(int)} hands out the shared
+     * inner list either way, so only the identity of the <em>outer</em> view
+     * distinguishes a cached lookup from one that copies the whole collection per
+     * call.
+     */
+    List<List<MatchingResult>> matchingResultsByIndex() {
         if (matchingResultsByIndex == null) {
-            matchingResultsByIndex = new ArrayList<>(mappedMatchMatrix.values());
+            matchingResultsByIndex = buildPositionalView();
         }
 
         return matchingResultsByIndex;
+    }
+
+    /**
+     * The (expensive) rebuild the cache exists to avoid — copying the whole match
+     * collection. Package-private and overridable so a test can count how often it
+     * actually happens; an assertion on the returned value alone cannot tell a
+     * cached lookup from a rebuilt one.
+     */
+    List<List<MatchingResult>> buildPositionalView() {
+        return new ArrayList<>(mappedMatchMatrix.values());
     }
 
     @Override

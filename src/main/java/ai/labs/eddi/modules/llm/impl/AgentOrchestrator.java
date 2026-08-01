@@ -2413,16 +2413,24 @@ class AgentOrchestrator {
 
     /**
      * Finding F17: the agent IDs already created in this conversation, so
-     * {@code maxCreatedAgentsPerDiscussion} bounds the discussion instead of a
-     * single turn.
+     * {@code maxCreatedAgentsPerDiscussion} bounds every turn of a conversation
+     * rather than a single turn. The list used to start EMPTY on every
+     * {@code buildToolList} call — i.e. once per LLM task execution — so a 5-member
+     * × 3-phase discussion with the default cap of 5 could deploy up to 75 agents.
      * <p>
      * Two sources are consulted, in order:
      * <ol>
-     * <li>a {@code dynamicCreatedAgentIds} context variable, so an orchestrator
-     * that owns the true discussion-wide total (the group conversation) can inject
-     * it;</li>
+     * <li>a {@code dynamicCreatedAgentIds} context variable — an injection point
+     * for an orchestrator that owns the true discussion-wide total. <b>Nothing in
+     * {@code src/main} writes it today</b>: {@code GroupConversationService}
+     * propagates member → group ({@code propagateDynamicAgentTracking}) but does
+     * not inject the running total back into the per-turn member context alongside
+     * {@code groupId}/{@code groupDepth}. Until it does, the cap bounds each MEMBER
+     * conversation across the whole discussion, not the discussion total across
+     * members;</li>
      * <li>every {@code dynamic:created_agent_ids} entry already written to this
-     * conversation's memory by an earlier turn.</li>
+     * conversation's memory by an earlier turn — the source that actually carries
+     * the count today.</li>
      * </ol>
      * Returns a de-duplicated list, never null.
      */

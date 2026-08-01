@@ -19,6 +19,7 @@ import jakarta.enterprise.inject.Vetoed;
 import org.jboss.logging.Logger;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -159,7 +160,7 @@ public class ConverseWithAgentTool {
             // which is the step AgentOrchestrator.resolveDelegationDepth reads. Without the
             // per-turn context the callee always resolves depth 0 and the cycle guard below
             // can never fire. Continuing an existing conversation (conversationId supplied)
-            // needs it for the same reason.
+            // never goes through startConversation at all and needs it for the same reason.
             Map<String, Context> delegationContext = Map.of(CONTEXT_DELEGATION_DEPTH,
                     new Context(Context.ContextType.string, String.valueOf(currentDepth + 1)));
 
@@ -180,9 +181,16 @@ public class ConverseWithAgentTool {
             }
 
             // --- Send message and wait for response ---
+            // The context rides on the MESSAGE turn too — this is the turn the callee's
+            // AgentOrchestrator actually builds its tool list for, and the branch that
+            // reuses an existing conversationId never went through startConversation at
+            // all.
             InputData inputData = new InputData();
             inputData.setInput(message);
-            inputData.setContext(delegationContext);
+            // Mutable copy: the immutable Map.of above is shared with the
+            // startConversation call, and downstream turn processing may add context
+            // entries of its own.
+            inputData.setContext(new HashMap<>(delegationContext));
 
             CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
             final java.util.concurrent.atomic.AtomicBoolean skipped = new java.util.concurrent.atomic.AtomicBoolean();

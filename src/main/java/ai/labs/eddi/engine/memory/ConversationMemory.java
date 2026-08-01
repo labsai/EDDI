@@ -17,8 +17,10 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 import java.util.Stack;
 
 /**
@@ -233,6 +235,24 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public boolean isCancelled() {
         return cancelled;
+    }
+
+    /**
+     * Deferred user-memory writes. {@code transient} only exempts the field from
+     * Java serialization of this live object — it IS persisted, via
+     * {@code ConversationMemoryUtilities} onto {@code ConversationMemorySnapshot}
+     * (same mechanism as the HITL bookmark below).
+     */
+    private transient Set<String> pendingLongTermWrites = new LinkedHashSet<>();
+
+    @Override
+    public Set<String> getPendingLongTermWrites() {
+        return pendingLongTermWrites;
+    }
+
+    @Override
+    public void setPendingLongTermWrites(Set<String> keys) {
+        this.pendingLongTermWrites = keys == null ? new LinkedHashSet<>() : new LinkedHashSet<>(keys);
     }
 
     // === HITL pause bookmark ===

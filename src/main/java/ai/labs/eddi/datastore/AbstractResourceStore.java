@@ -59,8 +59,35 @@ public abstract class AbstractResourceStore<T> implements IResourceStore<T> {
         return resourceStore.readIncludingDeleted(id, version);
     }
 
+    /**
+     * Write-time validation hook, invoked by {@link #create(Object)} and
+     * {@link #update(String, Integer, Object)} before anything is persisted.
+     * <p>
+     * The default implementation does nothing, so no existing store changes
+     * behaviour unless it opts in by overriding this method.
+     * <p>
+     * Overrides exist to make a structurally broken configuration fail at
+     * <em>save</em> time rather than at agent-deploy time or, worse, mid
+     * conversation. Throw {@link IllegalArgumentException} with a message that
+     * names the offending field (and the rule/entry it came from) and lists the
+     * legal values — {@code IllegalArgumentExceptionMapper} turns that into a 400
+     * carrying the message, which is what the agent author actually needs.
+     * <p>
+     * Read paths deliberately do <b>not</b> call this: a document already in the
+     * database must keep loading even if the rules tightened since it was written.
+     *
+     * @param content
+     *            the document about to be written
+     * @throws IllegalArgumentException
+     *             if the document cannot be honoured as written
+     */
+    protected void validate(T content) {
+        // no constraints by default
+    }
+
     @Override
     public IResourceId create(T content) throws ResourceStoreException {
+        validate(content);
         return resourceStore.create(content);
     }
 
@@ -72,6 +99,7 @@ public abstract class AbstractResourceStore<T> implements IResourceStore<T> {
     @Override
     @ConfigurationUpdate
     public Integer update(String id, Integer version, T content) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
+        validate(content);
         return resourceStore.update(id, version, content);
     }
 

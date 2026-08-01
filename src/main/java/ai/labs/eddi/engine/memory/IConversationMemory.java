@@ -234,6 +234,38 @@ public interface IConversationMemory extends Serializable {
     default void setHitlResumeDecision(ai.labs.eddi.engine.lifecycle.model.HitlDecision decision) {
     }
 
+    // === Deferred user-memory writes ===
+
+    /**
+     * Keys of {@code longTerm} properties that were written during a turn which
+     * never reached its post-conversation tasks (HITL pause, error, cancel), so the
+     * value was never handed to
+     * {@link ai.labs.eddi.configs.properties.IUserMemoryStore}.
+     * <p>
+     * <strong>Why this is persisted:</strong> a new {@code Conversation} is built
+     * per turn and takes its "already persisted" baseline from the conversation
+     * properties it loads. Those properties come from the conversation document,
+     * which ALREADY contains the un-persisted value — so without an explicit marker
+     * the write looks unchanged forever and is dropped permanently. This set is the
+     * marker: {@code storePropertiesPermanently} writes a key that is listed here
+     * even when it equals the baseline, and removes it once the store accepted it.
+     *
+     * @since 6.2.0
+     */
+    default Set<String> getPendingLongTermWrites() {
+        return Set.of();
+    }
+
+    /**
+     * Replaces the deferred user-memory write set. See
+     * {@link #getPendingLongTermWrites()}.
+     *
+     * @since 6.2.0
+     */
+    default void setPendingLongTermWrites(Set<String> keys) {
+        // no-op by default
+    }
+
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);
 

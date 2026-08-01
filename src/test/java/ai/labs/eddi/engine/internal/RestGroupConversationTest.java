@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.api.IRestGroupConversation.AttachmentRef;
 import ai.labs.eddi.engine.api.IRestGroupConversation.DiscussRequest;
 import ai.labs.eddi.engine.api.IRestGroupConversation.FollowUpRequest;
@@ -677,6 +678,91 @@ class RestGroupConversationTest {
             assertEquals(404, response.getStatus());
             assertFalse(String.valueOf(response.getEntity()).contains("group-1"),
                     "the caller-supplied groupId must not be reflected back (CodeQL reflected-value)");
+        }
+    }
+
+    /**
+     * The request-body ceilings are declared as Bean Validation constraints on the
+     * JAX-RS <em>interface</em> ({@code IRestGroupConversation}), and nothing in
+     * this repo can prove Quarkus wires interface-declared parameter constraints
+     * onto the implementing resource without booting the HTTP layer. These pin the
+     * resource's own enforcement, so the ceilings hold whether or not the
+     * interceptor fires: a group question is fanned out to every member agent in
+     * every phase, so an unbounded one is an amplification surface, and a null body
+     * used to NPE straight into a 500.
+     */
+    @Nested
+    @DisplayName("request-body ceilings are enforced by the resource itself")
+    class RequestBodyCeilings {
+
+        private String oversizedQuestion() {
+            return "x".repeat(IRestGroupConversation.MAX_QUESTION_CHARS + 1);
+        }
+
+        @Test
+        @DisplayName("discuss rejects an oversized question with 400 and never starts a discussion")
+        void discussRejectsOversizedQuestion() {
+            Response response = restGroupConversation.discuss("group-1",
+                    new DiscussRequest(oversizedQuestion(), "user-1"));
+
+            assertEquals(400, response.getStatus());
+            verifyNoInteractions(groupService);
+        }
+
+        @Test
+        @DisplayName("discuss accepts a question exactly at the ceiling")
+        void discussAcceptsQuestionAtTheCeiling() throws Exception {
+            String atCeiling = "x".repeat(IRestGroupConversation.MAX_QUESTION_CHARS);
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            when(groupService.discuss("group-1", atCeiling, "user-1", 0)).thenReturn(gc);
+
+            Response response = restGroupConversation.discuss("group-1", new DiscussRequest(atCeiling, "user-1"));
+
+            assertEquals(201, response.getStatus(), "the bound is inclusive — it must not reject legitimate input");
+        }
+
+        @Test
+        @DisplayName("discuss rejects a null body with 400 rather than NPE-ing into a 500")
+        void discussRejectsNullBody() {
+            Response response = restGroupConversation.discuss("group-1", null);
+
+            assertEquals(400, response.getStatus());
+            verifyNoInteractions(groupService);
+        }
+
+        @Test
+        @DisplayName("discuss rejects an oversized userId")
+        void discussRejectsOversizedUserId() {
+            Response response = restGroupConversation.discuss("group-1",
+                    new DiscussRequest("Q", "u".repeat(IRestGroupConversation.MAX_IDENTIFIER_CHARS + 1)));
+
+            assertEquals(400, response.getStatus());
+            verifyNoInteractions(groupService);
+        }
+
+        @Test
+        @DisplayName("continueDiscussion rejects an oversized question")
+        void continueRejectsOversizedQuestion() {
+            Response response = restGroupConversation.continueDiscussion("group-1", "gc-1",
+                    new DiscussRequest(oversizedQuestion(), "user-1"));
+
+            assertEquals(400, response.getStatus());
+            verifyNoInteractions(groupService);
+        }
+
+        @Test
+        @DisplayName("followUpWithMember rejects an oversized question and an oversized targetAgentId")
+        void followUpRejectsOversizedFields() {
+            Response oversizedQuestion = restGroupConversation.followUpWithMember("group-1", "gc-1",
+                    new FollowUpRequest(oversizedQuestion(), "Analyst", "user-1"));
+            assertEquals(400, oversizedQuestion.getStatus());
+
+            Response oversizedTarget = restGroupConversation.followUpWithMember("group-1", "gc-1",
+                    new FollowUpRequest("Q", "a".repeat(IRestGroupConversation.MAX_IDENTIFIER_CHARS + 1), "user-1"));
+            assertEquals(400, oversizedTarget.getStatus());
+
+            verifyNoInteractions(groupService);
         }
     }
 }

@@ -4,9 +4,12 @@
  */
 package ai.labs.eddi.engine.memory.rest;
 
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import io.quarkus.security.ForbiddenException;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
@@ -66,6 +69,7 @@ public class RestAttachmentUpload {
 
     private final IAttachmentStore attachmentStore;
     private final ConversationAccessGuard conversationAccessGuard;
+    private final IConversationDescriptorStore conversationDescriptorStore;
     private final ManagedExecutor managedExecutor;
     private final long maxUploadBytes;
     private final long maxForwardBytes;
@@ -73,6 +77,7 @@ public class RestAttachmentUpload {
     @Inject
     public RestAttachmentUpload(IAttachmentStore attachmentStore,
             ConversationAccessGuard conversationAccessGuard,
+            IConversationDescriptorStore conversationDescriptorStore,
             ManagedExecutor managedExecutor,
             @ConfigProperty(name = "eddi.attachments.max-size-bytes",
                             defaultValue = "20971520") long maxUploadBytes,
@@ -80,9 +85,55 @@ public class RestAttachmentUpload {
                             defaultValue = "10485760") long maxForwardBytes) {
         this.attachmentStore = attachmentStore;
         this.conversationAccessGuard = conversationAccessGuard;
+        this.conversationDescriptorStore = conversationDescriptorStore;
         this.managedExecutor = managedExecutor;
         this.maxUploadBytes = maxUploadBytes;
         this.maxForwardBytes = maxForwardBytes;
+    }
+
+    /**
+     * Ownership gate for every attachment endpoint. Always invoked on the REQUEST
+     * thread, before any async hop — {@link ConversationAccessGuard} reads the
+     * request-scoped {@code SecurityIdentity}, which is gone once the work moves
+     * onto {@link ManagedExecutor}.
+     * <p>
+     * Two things must hold, and both are asserted here:
+     * <ol>
+     * <li><strong>The CALLER owns the conversation</strong> (finding A2).
+     * {@code IAttachmentStore} only verifies that the conversation NAMED in the
+     * path owns the blob, and the caller picks that name, so that check is
+     * self-satisfying and says nothing about who is asking.
+     * {@link ConversationAccessGuard#requireExistingConversationOwner} is the
+     * shared gate for this.</li>
+     * <li><strong>The conversation actually exists</strong> (fail-closed). Plain
+     * {@link ConversationAccessGuard#requireConversationOwner} deliberately admits
+     * a conversation whose descriptor is missing: on {@code RestAgentEngine} that
+     * is harmless because the operation itself then 404s, and the leniency exists
+     * for legacy conversations that predate ownership stamping. The attachment
+     * store has no such backstop — it happily CREATES a record for any id and
+     * serves it back — so an unknown conversationId turned these endpoints into a
+     * shared, cross-user blob namespace: user A uploads under an invented id, user
+     * B reads it back from the same invented id. A conversation that was never
+     * created is not a legacy conversation; it is a 404.</li>
+     * </ol>
+     * The guard's {@code requireExistingConversationOwner} already folds the
+     * existence check in, so the local descriptor read below is a deliberate second
+     * gate: it keeps the fail-closed behaviour anchored in this endpoint rather
+     * than depending on which guard method a future edit happens to call.
+     */
+    private void requireExistingConversationOwner(String conversationId) {
+        conversationAccessGuard.requireExistingConversationOwner(conversationId);
+        try {
+            if (conversationDescriptorStore.readDescriptor(conversationId, 0) == null) {
+                throw new NotFoundException("Conversation '" + sanitize(conversationId) + "' not found");
+            }
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NotFoundException("Conversation '" + sanitize(conversationId) + "' not found");
+        } catch (IResourceStore.ResourceStoreException e) {
+            LOGGER.warnf("Could not verify conversation '%s' for an attachment operation: %s",
+                    sanitize(conversationId), e.getMessage());
+            throw new ForbiddenException("Access denied: unable to verify conversation");
+        }
     }
 
     @POST
@@ -113,7 +164,7 @@ public class RestAttachmentUpload {
 
         // On the request thread, before the async hop: the guard reads the caller's
         // SecurityIdentity, which is request-scoped.
-        conversationAccessGuard.requireExistingConversationOwner(conversationId);
+        requireExistingConversationOwner(conversationId);
 
         CompletableFuture.runAsync(() -> {
             try {
@@ -205,7 +256,7 @@ public class RestAttachmentUpload {
                                 @Parameter(description = "Conversation ID to list attachments for.")
                                 @PathParam("conversationId") String conversationId,
                                 @Suspended AsyncResponse asyncResponse) {
-        conversationAccessGuard.requireExistingConversationOwner(conversationId);
+        requireExistingConversationOwner(conversationId);
 
         CompletableFuture.runAsync(() -> {
             try {
@@ -236,7 +287,7 @@ public class RestAttachmentUpload {
                                    @Parameter(description = "Storage reference of the attachment.")
                                    @PathParam("storageRef") String storageRef,
                                    @Suspended AsyncResponse asyncResponse) {
-        conversationAccessGuard.requireExistingConversationOwner(conversationId);
+        requireExistingConversationOwner(conversationId);
 
         CompletableFuture.runAsync(() -> {
             try {
@@ -292,7 +343,7 @@ public class RestAttachmentUpload {
                                  @Parameter(description = "Storage reference of the attachment.")
                                  @PathParam("storageRef") String storageRef,
                                  @Suspended AsyncResponse asyncResponse) {
-        conversationAccessGuard.requireExistingConversationOwner(conversationId);
+        requireExistingConversationOwner(conversationId);
 
         CompletableFuture.runAsync(() -> {
             try {
@@ -331,7 +382,7 @@ public class RestAttachmentUpload {
                                   @Parameter(description = "Conversation ID to delete attachments for.")
                                   @PathParam("conversationId") String conversationId,
                                   @Suspended AsyncResponse asyncResponse) {
-        conversationAccessGuard.requireExistingConversationOwner(conversationId);
+        requireExistingConversationOwner(conversationId);
 
         CompletableFuture.runAsync(() -> {
             try {

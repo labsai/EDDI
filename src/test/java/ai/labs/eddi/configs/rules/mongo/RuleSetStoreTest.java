@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.modules.rules.impl.IRuleDeserialization;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -45,7 +46,7 @@ class RuleSetStoreTest {
         when(storageFactory.create(eq("rulesets"), any(), eq(RuleSetConfiguration.class), any(String[].class)))
                 .thenReturn(resourceStorage);
 
-        ruleSetStore = new RuleSetStore(storageFactory, documentBuilder);
+        ruleSetStore = new RuleSetStore(storageFactory, documentBuilder, mock(IRuleDeserialization.class));
     }
 
     private RuleSetConfiguration ruleSetWithActions(String... actions) {

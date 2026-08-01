@@ -57,8 +57,8 @@ public class DamerauLevenshteinCorrection implements ICorrection {
         List<WordDistanceWrapper> foundWords = new LinkedList<>();
         var lowerCaseLookup = lookup.toLowerCase();
 
-        collectCandidates(lowerCaseLookup, temporaryDictionaries, foundWords);
-        collectCandidates(lowerCaseLookup, dictionaries, foundWords);
+        collectCandidates(lowerCaseLookup, temporaryDictionaries, userLanguage, foundWords);
+        collectCandidates(lowerCaseLookup, dictionaries, userLanguage, foundWords);
 
         // Best (i.e. lowest) distance first, then keep only the top candidates —
         // everything beyond is noise that would multiply the parser's search space.
@@ -68,12 +68,21 @@ public class DamerauLevenshteinCorrection implements ICorrection {
                 .collect(Collectors.toList());
     }
 
-    private void collectCandidates(String lowerCaseLookup, List<IDictionary> dictionariesToScan, List<WordDistanceWrapper> foundWords) {
+    private void collectCandidates(String lowerCaseLookup, List<IDictionary> dictionariesToScan, String userLanguage,
+                                   List<WordDistanceWrapper> foundWords) {
+
         if (dictionariesToScan == null) {
             return;
         }
 
         for (IDictionary dictionary : dictionariesToScan) {
+            // Same language gate as the parser's direct lookup. Without it a
+            // language-mismatched dictionary still matched every token that was
+            // otherwise unknown — at distance 0, i.e. accuracy 1.0.
+            if (!IDictionary.appliesToLanguage(dictionary.getLanguageCode(), userLanguage)) {
+                continue;
+            }
+
             for (IDictionary.IWord word : dictionary.getWords()) {
                 final int distance = calculateDistance(lowerCaseLookup, word.getValue().toLowerCase());
 

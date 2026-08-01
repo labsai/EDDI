@@ -34,6 +34,15 @@ public class RestAuditStore implements IRestAuditStore {
     /** Hard ceiling on one verification sweep, whatever the caller asks for. */
     static final int MAX_VERIFY_LIMIT = 10_000;
 
+    /**
+     * Page size used when the caller supplies no usable {@code limit}. Mirrors the
+     * {@code @DefaultValue("1000")} on {@link IRestAuditStore}: a non-positive
+     * limit falls back to the documented default, it does NOT mean "give me the
+     * hard maximum" — that sentinel reading is the same footgun
+     * {@code RestConversationStore.MIN_RETENTION_DAYS} was introduced to remove.
+     */
+    static final int DEFAULT_VERIFY_LIMIT = 1_000;
+
     private final IAuditStore auditStore;
     private final AuditLedgerService auditLedgerService;
 
@@ -80,7 +89,7 @@ public class RestAuditStore implements IRestAuditStore {
     }
 
     private static int clampLimit(int limit) {
-        return limit < 1 ? MAX_VERIFY_LIMIT : Math.min(limit, MAX_VERIFY_LIMIT);
+        return limit < 1 ? DEFAULT_VERIFY_LIMIT : Math.min(limit, MAX_VERIFY_LIMIT);
     }
 
     /**
@@ -119,11 +128,23 @@ public class RestAuditStore implements IRestAuditStore {
         }
 
         var missing = new ArrayList<Long>();
+        var undelivered = new ArrayList<Long>();
         var duplicates = new ArrayList<Long>();
-        ChainStatus chainStatus = checkChain ? checkChain(entries, missing, duplicates, expectRunFromOrigin) : ChainStatus.NOT_APPLICABLE;
+        ChainStatus chainStatus = checkChain
+                ? checkChain(entries, missing, undelivered, duplicates, expectRunFromOrigin, undeliveredFor(scopeId))
+                : ChainStatus.NOT_APPLICABLE;
 
-        return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, invalid, unsigned, chainStatus, missing, duplicates,
-                problems, Instant.now());
+        return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, invalid, unsigned, chainStatus, missing,
+                undelivered, duplicates, problems, Instant.now());
+    }
+
+    /**
+     * Chain positions this deployment knows it never persisted. Null-tolerant so a
+     * stubbed ledger service cannot turn the sweep into an NPE.
+     */
+    private Set<Long> undeliveredFor(String conversationId) {
+        Set<Long> known = auditLedgerService.undeliveredSequences(conversationId);
+        return known == null ? Set.of() : known;
     }
 
     private static final Logger LOGGER = Logger.getLogger(RestAuditStore.class);
@@ -150,8 +171,21 @@ public class RestAuditStore implements IRestAuditStore {
      * removed row — nothing is left to fail verification — but the sequence is
      * inside the signed payload, so the surviving entries cannot be renumbered to
      * close the gap without invalidating their own HMACs.
+     * <p>
+     * Two refinements keep the verdict honest in both directions:
+     * <ul>
+     * <li>When {@code expectRunFromOrigin}, the expected run is anchored at
+     * {@link #SEQUENCE_ORIGIN} rather than at the lowest surviving sequence —
+     * otherwise deleting the <em>first</em> entries of a conversation simply moves
+     * the anchor and reads as {@code INTACT}.</li>
+     * <li>A gap the ledger itself caused (queue overflow / dead-lettered batch,
+     * reported by {@code AuditLedgerService.undeliveredSequences}) is listed
+     * separately and downgrades the verdict to {@code INCOMPLETE} instead of
+     * accusing the deployment of deletion.</li>
+     * </ul>
      */
-    private static ChainStatus checkChain(List<AuditEntry> entries, List<Long> missing, List<Long> duplicates, boolean expectRunFromOrigin) {
+    private static ChainStatus checkChain(List<AuditEntry> entries, List<Long> missing, List<Long> undelivered, List<Long> duplicates,
+                                          boolean expectRunFromOrigin, Set<Long> knownUndelivered) {
         if (entries.isEmpty()) {
             return ChainStatus.INTACT;
         }
@@ -194,7 +228,14 @@ public class RestAuditStore implements IRestAuditStore {
         // is all a report needs. Anything beyond that is noise the caller cannot act
         // on individually.
         for (long expected = first; expected <= last && missing.size() < MAX_REPORTED_MISSING; expected++) {
-            if (!seen.contains(expected)) {
+            if (seen.contains(expected)) {
+                continue;
+            }
+            // A hole the ledger itself recorded as never persisted is this
+            // deployment's own gap, not evidence that a row was deleted.
+            if (knownUndelivered.contains(expected)) {
+                undelivered.add(expected);
+            } else {
                 missing.add(expected);
             }
         }
@@ -207,6 +248,11 @@ public class RestAuditStore implements IRestAuditStore {
         // make the chain ambiguous, which defeats the very property the sequence
         // exists to provide: that a deletion or reordering is detectable. Reporting
         // INTACT here would hand an auditor a false assurance.
-        return missing.isEmpty() && duplicates.isEmpty() ? ChainStatus.INTACT : ChainStatus.BROKEN;
+        if (!missing.isEmpty() || !duplicates.isEmpty()) {
+            return ChainStatus.BROKEN;
+        }
+        // Nothing unaccounted for is missing. Gaps the ledger itself caused leave the
+        // record incomplete without being evidence of deletion.
+        return undelivered.isEmpty() ? ChainStatus.INTACT : ChainStatus.INCOMPLETE;
     }
 }

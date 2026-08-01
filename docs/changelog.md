@@ -82,6 +82,280 @@ Also verified rather than assumed: `PendingToolCallBatch.effectiveRule` round-tr
 
 ---
 
+## 🔎 test(configs): sweep the config JSON the ITs build inline, not just the files (2026-08-01)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+The `SecretScrubber` fix worked — `ImportMergeIT` went green — but the Integration Tests job only moved 18 → 17. The same five classes still 400'd, and the reason is worth recording: **the outer `type` was never their only problem.**
+
+`PropertySetterAgentEngineIT:217` is the *dictionary* create, not the output one. These ITs build their dictionaries inline too, and every one carried `"language": "en"` — the key the model does not declare (it declares `lang`), removed from every `.json` fixture two commits ago and still sitting hardcoded in five Java text blocks. Deleted rather than renamed, for the same reason as the fixtures: `appliesToLanguage` is `isNullOrEmpty(dictLang) || dictLang.equals(userLanguage)`, so a null `lang` applies to every language while `"en"` applies only when the turn's user language is exactly `"en"`, which these tests never set.
+
+### The real fix is the guard, not the six deleted lines
+
+This is the **third** time the same defect class has been fixed and reappeared somewhere the sweep could not look — fixtures, then inline output bodies, now inline dictionary bodies. Each round trip cost a full CI run to learn something the unit suite could have named in seconds.
+
+`StrictBoundaryInlineItBodiesTest` closes it: it pairs each `String NAME = """ … """` text block with the `createResource(NAME, "/somestore/something")` call that posts it — the call site is what identifies the model — and strict-parses the body against it. 42 inline bodies checked. The 21 it reports as unpaired are variables loaded from files (`load("agentengine/dictionary.json")`), which have no inline body and are covered by the file sweep instead; the count is printed so that gap stays visible rather than being mistaken for coverage.
+
+Mutation-checked: reintroducing `"language"` into one IT fails it with *"'language' is not a known field of DictionaryConfiguration — known: [words, phrases, regExs, lang]"*.
+
+Coverage is now: file bodies → `StrictBoundaryShippedConfigsTest` (32 documents, ZIP entries included), inline bodies → this sweep (42), model round-trip → `StrictBoundaryRoundTripTest`.
+
+### Secret Scanning
+
+The same CI run also went red on Gitleaks: `generic-api-key` at `SecretScrubberTest.java:238`, from a key-shaped literal in the test added for the scrubber fix. gitleaks-action scans a PR's new commits, so the identical literal that has sat in that file for ages stayed green while the new line was flagged.
+
+Fixed by removing the literal rather than suppressing the finding: the test is about **field-name** detection, so it now uses a deliberately low-entropy value. That is a better test as well as a quieter one — with a key-shaped value the entropy heuristic could have redacted it and the assertion would have passed for the wrong reason. A third assertion pins that a non-secret field keeps the same value, so the check is provably field-name-driven rather than blanket.
+
+---
+
+## 🧨 fix(secrets): export was corrupting the configs it exported (2026-07-30)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+The Integration Tests job went from **156 failures + 14 errors down to 18 failures, 0 errors** after the fixture and round-trip fixes. The remaining 18 split two ways, and the second one is the serious find.
+
+### 15 of them: the same outer `type`, hardcoded inline
+
+`ComplexRulesAgentEngineIT`, `HitlToolPauseResumeIT`, `HttpCallsAgentEngineIT`, `LlmAgentEngineIT` and `PropertySetterAgentEngineIT` build their output configs as inline JSON strings rather than loading fixtures, and every one of them wrote `"outputs": [{"type": "text", …}]` — the key `OutputConfiguration.Output` never declared. The file sweep could not see them because they are Java string literals. Removed; the inner `valueAlternatives[].type` (a real field) is untouched.
+
+### The other 3: `SecretScrubber` corrupts exported agents
+
+`ImportMergeIT` imports the ZIP **EDDI itself exported** one test earlier, and it 400'd with:
+
+```
+No condition for type ${vault:REDACTED} was created (ai.labs.behavior.conditions.${vault:REDACTED})
+```
+
+`SecretScrubber` runs on the export path and replaces suspected secrets with `${vault:REDACTED}`. Its second heuristic — Shannon entropy > 3.5 bits/char on any string ≥ 14 chars — cannot tell a long identifier from a long key. Simulating it against the weather-agent export, it rewrites **four ordinary configuration values**:
+
+| Value | Field | Entropy |
+| --- | --- | --- |
+| `dynamicvaluematcher` | a behaviour condition `type` | 3.68 |
+| `currentWeatherDescription` | a property `name` | 3.57 |
+| `properties.count+1` | a `fromObjectPath` | 3.61 |
+| `memory.current.httpCalls.currentWeatherDescription` | a `fromObjectPath` | 3.87 |
+
+So **export → import was never lossless**: exported agents came back with a condition that resolves to no class, and property names and memory paths replaced by a vault reference.
+
+**This is pre-existing — `SecretScrubber` is byte-identical to `main`, and `main` is green.** It was invisible because nothing validated a ruleset on write: the corrupt condition stored happily, the rule silently never matched, and the import returned 201. #620's write-time rule validation is what turned a silent corruption into a loud 400. The validation is doing exactly its job.
+
+The fix exempts schema-fixed field names (`type`, `name`, `fromObjectPath`, `toObjectPath`, `expressions`, `actions`, …) from the **entropy** heuristic only. A condition `type` names a Java class and a `fromObjectPath` names a memory path — neither can be a credential, so the exemption costs no secret coverage, and field-name detection still runs first, so a field actually called `apiKey` or `token` is redacted regardless. Mutation-checked: with the exemption removed the new test fails with all four values rewritten to `${vault:REDACTED}`.
+
+---
+
+## 🔀 chore(merge): main (#622, caller-bound MCP) into the wave-4a branch (2026-07-30)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+`main` moved by 16 commits while #620 was open (#622, the operator-write foundation, plus caller-bound MCP credentials and HITL endpoint patterns), which put the PR into `CONFLICTING`. Worth recording because a conflicting PR has **no computable merge ref, so no workflow can run at all** — the `Integration Tests` failure GitHub was still showing on #620 was a stale result from before the fixes that address it. Resolving the conflict is what lets CI produce a real answer.
+
+Git reported exactly one textual conflict — `docs/changelog.md`, a pure union of entries — and silently auto-merged three code files: `McpToolProviderManager`, `AgentOrchestrator`, and `McpToolProviderManagerAdditionalTest`. The auto-merges were the part worth checking, and one of them was wrong.
+
+### The silent breakage
+
+#622 made the MCP **tool** cache credential-scoped, not just the client cache: `toolCache` is now keyed on `cacheKey(config)` (`url|<sha-256 of apiKey>`, or `url|anonymous`) so a tool list discovered with one credential can never be served to another. Our F12 TTL tests seeded that cache under the bare URL. After the merge the seeded entry no longer matched the lookup, and the two tests failed *differently*:
+
+- `freshEntryIsServedFromCache` failed loudly — `expected: <1> but was: <0>`.
+- `staleEntryIsNotServed` kept **passing, vacuously**. Nothing was served because nothing matched the key, not because the entry was stale. It would have gone on "passing" while testing nothing.
+
+The second is the reason this is in the changelog: a green suite after a merge is not evidence that the merge is correct.
+
+The helper now derives the key by reflectively calling the production `cacheKey` rather than reconstructing it — the same idiom #622's own tests use — so the next change to the key shape carries these tests along instead of hollowing them out. Production was correct throughout; only the test was stale.
+
+`AgentOrchestrator`'s side of the merge was javadoc-only on our branch and merged cleanly; `McpToolProviderManager`'s validation block interleaved coherently (`validateServerUrl` + our `validateTransport` + #622's `validateCallerBoundKey` in one guard, with our one-time deprecated-transport warning after it). Our URL-keyed `deprecatedTransportWarned` set is unaffected by credential scoping, which is right: the transport is a property of the server, not of the credential.
+
+---
+
+## 🧩 fix(rag): two guards disagreed about chunkStrategy and neither test could tell (2026-07-30)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+`chunkStrategy` has no reader — ingestion always builds a `DocumentSplitters.recursive` splitter — so an unsupported value is inert. Rejecting it at save time so the author hears about it is right. It was implemented **twice**, at two layers, with opposite intentions:
+
+| Layer | Behaviour |
+| --- | --- |
+| `RestRagStore.prepareForWrite` (create/update) | normalise legacy aliases, else **400** — author-facing, correct |
+| `RestRagStore.duplicateRag` | normalise only, deliberately **no** rejection — "a copy of an existing document must not be refused just because the rules tightened after it was stored" |
+| `RagStore.validate` (store, every write) | normalise legacy aliases, else **throw** |
+
+The store hook runs on `create` and `update`, so it silently overrode the duplicate exemption one layer down. Two paths were broken:
+
+- **`duplicateRag`** — refused to copy a document the same store happily serves through `readRag`.
+- **ZIP import** — `RestImportService.createNewRags` writes through `createResourceDirect`, i.e. straight to the store with no REST layer in front, and catches only `ResourceStoreException`. An `IllegalArgumentException` escaped and rolled back the **entire agent import** over a field that changes nothing. (`UpgradeExecutor` replays documents the same way.)
+
+### Why the test suite couldn't see it
+
+This is the interesting part. Both layers were tested, and both tests passed:
+
+- `RestRagStoreWriteValidationTest.duplicateDoesNotRejectAnUnsupportedStoredStrategy` asserts duplicate returns 201 — but it builds `RestRagStore` with `mock(IRagStore.class)`, so `create` was a stub and the store's write hook never ran.
+- `RagStoreValidationTest.createRejectsUnknownChunkStrategy` asserted the store rejects that exact value.
+
+Neither test crossed the boundary, so the contradiction was invisible. **Demonstrated, not assumed:** with the store's `content.validate()` restored, the new cross-layer test fails 3 of 6 cases with the real `IllegalArgumentException`, while `RestRagStoreWriteValidationTest` stays completely green.
+
+### Fix
+
+The store now **normalises but never rejects**. Legacy aliases (`paragraph`, `sentence`) are still rewritten to the `recursive` they always meant — a data fix that is safe on every path, and it has to live in the store because import bypasses REST. An unsupported value is left **verbatim** rather than rewritten, so a duplicate is a faithful copy of its original. The author-facing 400 stays at `prepareForWrite`, the only layer that can tell "an author typed this" from "this document already exists" — the same layering decision made for `RestMcpCallsStore` in #619.
+
+New `RagStoreLayeringTest` wires the **real** `RagStore` behind the **real** `RestRagStore`, mocking only the storage layer, and pins the division of labour: author input 400s at the boundary; a stored document is duplicable; a direct store write (as import performs it) does not abort; legacy aliases normalise on *both* paths. `RagStoreValidationTest`'s two rejection cases are rewritten to assert leniency, with a comment recording that their original assertion was the defect.
+
+---
+
+## 🩺 fix(configs): EDDI could not read the configs EDDI writes — 8 red ITs, 3 real breakages (2026-07-30)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+The Integration Tests job went red on this branch with eight failures across `AgentConfigurationIT`, `AgentDeploymentComponentIT` and `AgentEngineIT`, every one of them nothing but:
+
+```
+Expected status code <201> but was <400>.
+```
+
+No field name, no constraint, no violation message anywhere in the job log. `main` was green, so the branch caused it. The cause turned out to be **two different mechanisms**, and the second one breaks production, not just tests.
+
+### Mechanism 1 — unknown keys became fatal, and EDDI's own fixtures had three
+
+This branch added `StrictConfigurationBodyInterceptor`, which re-parses inbound configuration bodies with `FAIL_ON_UNKNOWN_PROPERTIES` and 400s on any key the model does not declare. That is the right call for a config-driven engine — a typo'd key in `behavior.json` is a behavioural bug, not something to discard silently — and it immediately earned its keep by catching three keys EDDI had been ignoring for years:
+
+| Key | Reality |
+| --- | --- |
+| `language` on dictionaries | The model declares **`lang`**. Every shipped dictionary fixture set `language`, so `lang` was always null. |
+| `type` on `outputs[]` items | `OutputConfiguration.Output` declares only `valueAlternatives`. The outer `type` was never read. |
+| `maxOccurrence: "ever"` | Obsolete pre-v6 key. The current `Occurrence` reads `maxTimesOccurred`/`minTimesOccurred`, so the condition had **no bound at all** — which this branch's new `Occurrence` check now (correctly) refuses. |
+
+All three are corrected in the fixtures. `language` is **deleted, not renamed to `lang`** — renaming looks like the fix the original author intended, but it is a behaviour change: `IDictionary.appliesToLanguage` is `isNullOrEmpty(dictLang) || dictLang.equals(userLanguage)`, so a null `lang` applies to every language while `"en"` applies only when the turn's user language is exactly `"en"`. The ITs never set one, so renaming would have silently switched off the correction dictionaries these tests assert on. Deleting preserves the asserted behaviour exactly; opting those fixtures into language scoping is a separate, deliberate change.
+
+`maxOccurrence: "ever"` becomes `minTimesOccurred: "1"` inside its enclosing `negation` — `NOT(occurred ≥ 1)` is exactly the `maxTimesOccurred: 0` that `agentengine/rules.json` already uses to express the same "not yet welcomed" rule.
+
+### Mechanism 2 — EDDI serialized three keys it could not read back
+
+The setup wizard's 400 had a different cause, and finding it mattered more than the fixtures. `AgentSetupService` does not write to the stores directly: it builds each config as an object and posts it through EDDI's own internal typed REST clients. So every generated config crosses the same strict boundary — and `LlmConfiguration.Task` **serialized `agentMode`, which nothing could deserialize**. `isAgentMode()` is a derived getter (a pure function of `tools`, `enableBuiltInTools`, `a2aAgents`) with no field or setter behind it.
+
+A sweep for the same shape found three in total, now all `@JsonIgnore`:
+
+- `LlmConfiguration.Task.isAgentMode()` — derived from tools/builtInTools/a2aAgents
+- `LlmConfiguration.Task.getSystemMessage()` — a read-through of `parameters.systemMessage`, so it also duplicated the prompt into every stored task
+- `AgentConfiguration.MemoryPolicy.isEffectivelyEnabled()` — derived from `strictWriteDiscipline`
+
+**This was never only a test problem.** Three paths hand EDDI-serialized configs straight back to EDDI's REST boundary: the setup wizard, EDDI-Manager's GET → edit → PUT, and export → ZIP import. All three would have 400'd on any LLM or agent configuration in production. Ignoring the derived keys also stops persisting values that are recomputed on every read.
+
+### And one silently inert config, six years old
+
+`HttpPostResponse.retryApiCallInstruction` was renamed from `retryHttpCallInstruction` in the v6 http→api sweep **with no `@JsonAlias`**. Jackson discarded the old key, so every config written before the rename lost its retry policy without a word in the logs — including EDDI's own documented reference agent, where the Agent Father's `create_agent` call declares `maxRetries: 3` on 502/503 and has been running with no retry at all. The alias is added: stored and exported JSON configs are the one backward-compatibility contract EDDI keeps, and without it those documents would now 400 outright.
+
+### Four guards, because none of this was reachable from the unit suite
+
+ITs need Docker and so only fail in CI; the strict boundary and the round-trip asymmetry are both checkable in seconds without it.
+
+- **`StrictBoundaryShippedConfigsTest`** — sweeps `src/test/resources/tests` and `docs/agent-configs`, strict-parsing every config against its model (26 checked). Sweeps the tree rather than listing files, so a fixture added later is covered automatically, and prints what it skipped so "passed" can never quietly mean "looked at nothing".
+- **`StrictBoundaryRoundTripTest`** — asserts no config model serializes a property it cannot deserialize.
+- **`RuleSetStoreShippedRulesetsTest`** — runs every shipped ruleset, and the wizard's generated one, through the real save-time validation.
+- **`SetupWizardConfigsPassStrictBoundaryTest`** — round-trips each config the wizard generates, so the wizard can never again 400 on its own output with the cause buried in `"Failed to set up agent: …"`.
+
+**Two of these guards were wrong before they were right, and both mistakes are worth recording:**
+
+- The round-trip test was first written by instantiating each model from `{}` and re-parsing. It **passed on `LlmConfiguration` while the `agentMode` bug sat in its nested `Task`** — a default instance has an empty `tasks` list, so the nested model was never reached. It now uses Jackson introspection to compare serializable against deserializable property sets and walks into property types, and carries a second test asserting the traversal actually reaches `Task` — otherwise the sweep could silently regress to checking only the twelve roots.
+- The ruleset sweep initially reported that the setup wizard generates an invalid ruleset: `'inputmatcher' requires a non-empty 'expressions'`. That was **the test's fault** — `IExpressionProvider` was mocked, so every `expressions` value parsed to empty and every `inputmatcher` in every ruleset "failed". With a real `ExpressionProvider` the wizard's ruleset passes. Reported as a product bug it would have been a wild goose chase.
+
+---
+
+## 🧹 fix(llm): bound the streaming warn-suppression key set (2026-07-30)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+`StreamingLegacyChatExecutor` suppressed its "configured timeout is below the default" warning by remembering keys in a static `Set`, with a comment claiming it was "bounded because a config edit re-keys the entry". That reasoning is backwards: re-keying **adds** a key and leaves the previous one behind, so config edits were precisely what made the set grow. Keyed on `(taskId, timeoutMs)`, the key space is unbounded over the lifetime of a process.
+
+Now bounded by an explicit `MAX_WARNED_TIMEOUT_KEYS` (1 000) size check that clears on overflow.
+
+**Two decisions worth recording, because the obvious implementations are both wrong here:**
+
+- **Not a Caffeine cache.** This is read on the per-request path — once per streaming turn, again per cascade step — and putting cache machinery there measurably slowed it: two timing-sensitive tests failed against their 66 ms budget when it was tried. A plain key set plus an O(1) size check costs nothing per call. (Isolated by reverting: the same tests pass with the set restored.)
+- **Clear on overflow, not refuse to add.** A hard cap would silently stop warning about genuinely *new* misconfigurations — the exact failure this warning exists to prevent. The worst case after a clear is that an already-warned task warns a second time: noise, not silence.
+
+The misleading comment is replaced with the corrected reasoning rather than deleted, so the next reader does not re-derive the same wrong conclusion.
+
+---
+
+## 🔍 fix(all): critical re-review of the applied code-review fixes — 61 defects closed, 11 theatre tests made real (2026-07-29)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+After ~120 findings from the external review had been applied across four waves, seven reviewers re-read the whole cumulative diff adversarially — explicitly assuming the previous agents got things wrong — and a mutation runner proved, empirically, which tests would actually fail if their fix were reverted.
+
+**They found 64 defects (4 critical, 10 high) and 11 tests that pass with the fix removed.** Several of the defects were regressions introduced by the fixes themselves; one was worse than the bug it replaced. **61 closed, all 11 mutations now bite.**
+
+### The critical four
+
+- **`PostgresResourceStorage` — the D1 fix broke what it repaired.** The rewritten reverse-lookup emitted the jsonpath operator `@?` unescaped, and pgjdbc parses a bare `?` as a bind placeholder — so on a real PostgreSQL the queries now *threw* where before D1 they merely returned empty. This shipped in the wave-1 merge and was live on `main`.
+- **`RestWorkflowStore`** — consequence of the above: cascade-delete of workflow extensions was a permanent no-op on PostgreSQL, and "which agents use this workflow" returned 500.
+- **`ConverseWithAgentTool` — F18's delegation guard was inert.** The depth context was attached to `startConversation` only, while the delegated question travelled through `say()` with an empty context — so the callee always read depth 0 and the A→B→A cycle still recursed unbounded. The fix mirrors the `groupDepth` pattern groups already use: attach the context to *every* turn, including the branch that reuses an existing conversationId.
+- **`Conversation` — G6 silently dropped data.** Changed-only upserts permanently lost a `longTerm` write whenever the turn that set it never reached teardown (HITL pause, error, cancel), because the next turn's baseline already contained the un-persisted value.
+
+### The one that mattered most
+
+**G2's secret fail-closed was incomplete.** `scrubSecretInput` only rewrote `input:initial` and the `input` output — but `InputParserTask` has already written the plaintext to `input:normalized` in the same step, and every `IData` of a step is serialized into the persisted document. Worse, the scrub was a silent no-op whenever a normalizer was configured, because `{memory.current.input}` resolves to the *normalized* text, not the raw. A secret could still persist despite the fix reporting success.
+
+### Fixes that broke stored configs or existing deployments
+
+- **B7's `modelID` → `modelId` rename** had no legacy fallback, so every stored `gemini-vertex` config using the previously-working spelling silently built a **nameless model**. AGENTS.md is explicit that stored MongoDB/ZIP configs must keep working. Now reads both, preferring the canonical spelling, with a deprecation warning.
+- **I3 hard-rejected the MCP `sse` transport** that the config's own javadoc advertised — and in the agent path the throw was swallowed, so an existing agent silently lost *every* tool from that server and burned circuit-breaker budget each turn.
+- **B14's fail-closed migration aborted forever.** It refused to proceed whenever the v6 collection merely *existed* — the normal state, since every store constructor creates its collection — and never marked itself complete, so it retried and aborted indefinitely. Now distinguishes "exists and empty" from "exists with data".
+- **B9's fail-closed capability table disabled vision on Azure OpenAI**, where the model name is an operator-chosen deployment name that rarely reproduces canonical punctuation (`gpt4o-prod` failed the `gpt-4o` substring test).
+
+### Fixes that quietly negated each other
+
+**E19 and E8 collided.** E19's per-invocation random nonce was embedded in the Qute template *text*, and E8's compiled-template cache is keyed on that text — giving the httpcall output path a **100% cache miss rate** and unbounded churn through a bounded cache. E19's injection-safety is kept; the cache key is now stable.
+
+**G18 and G20 collided.** An entry the ledger dropped locally had already consumed its sequence number, so a store outage or full queue permanently made verification report `BROKEN` — the ledger accusing the deployment of deleting records it had dropped itself.
+
+### The 11 tests that were theatre
+
+A test that passes with its fix reverted is not coverage. The mutation runner proved these did exactly that, and all 11 now fail when the fix is removed — among them: the F18 delegation-depth wiring (the guardrail tests covered the *tool* and the *resolver* but nothing pinned the call site, so hard-coding the depth to 0 left all 11 green), the C10 map-entry removal, B3's configurable drain timeout (a hardcoded 10s passed it), the E19 nonce's unguessability — the actual security property — and three separate holes in the audit ledger's drop/dead-letter accounting.
+
+### Verification
+
+Clean `test-compile`, full suite with **0 non-environmental failures**, and all 11 recorded mutations re-run and confirmed biting. Not verifiable here and left to CI: anything needing Docker or a bound socket — in particular a Testcontainers test executing the corrected JSONB path against a real PostgreSQL, which is what would have caught the `@?` regression in the first place.
+
+---
+
+## ✅ fix(configs): code-review findings wave 4a — write-time config validation (E6) and request-body validation (A11) (2026-07-29)
+
+**Repo:** EDDI (`fix/code-review-validation`)
+
+E6 is the highest-leverage item in the whole review: it converts most of workstream E from *silently wrong* into *loudly wrong at save time*. For a config-driven engine, silent acceptance of invalid config is the worst available failure mode — the agent author gets no feedback and the agent looks healthy while behaving wrongly.
+
+### E6 — the prescribed fix was unsafe, and was not applied as written
+
+The review said: "enable `FAIL_ON_UNKNOWN_PROPERTIES` on the REST mapper only (never the persistence mapper — it needs schema-evolution tolerance)". That instruction assumes a REST-only surface exists. **It does not.**
+
+`SerializationCustomizer.configureObjectMapper` is the shared recipe behind the CDI mapper, the `@PersistenceMapper` mapper *and* the Postgres JSONB mapper. `customize()` is not REST-only either — `PersistenceModule.buildMongoClientOptions` calls `new SerializationCustomizer(false).customize(objectMapper)` on the **MongoDB BSON mapper**, so flipping the flag there would have made **Mongo document reads strict** and broken loading of any stored document written by a newer version. The CDI mapper is also injected into the MicroProfile REST client and ~15 services that parse *third-party* JSON (Slack, web search, Dream, rule deserialization), none of which control their input's shape.
+
+So instead of the flag flip, this adds `StrictConfigurationBodyInterceptor` — a JAX-RS `ReaderInterceptor` scoped to inbound JSON bodies whose target type is a first-party configuration model. It re-parses with a strict *copy* of the REST mapper and translates only `UnrecognizedPropertyException` into a 400 naming the field, its JSON path and the known fields. Every other parse failure falls through unchanged, and an empty body keeps its original stream.
+
+A comment in `SerializationCustomizer` now records why that flag must stay `false`, so the next person doesn't "fix" it.
+
+### E6 — the validation hook
+
+`AbstractResourceStore` gained `protected void validate(T)`, defaulting to a no-op and invoked from `create()`/`update()` before anything reaches storage. Read paths deliberately do **not** call it, so stored documents keep loading.
+
+`RuleSetStore.validate` hoists the wave-1 condition checks to save time **without duplicating them**: it serializes and runs the result through the very same `IRuleDeserialization` the deploy path uses. That covers empty action/input matchers, unknown `occurrence` values, context-type mismatches, empty negations and unknown condition types — each naming the offending rule. Previously all of these surfaced only at agent-deploy time, with a message naming neither rule nor group.
+
+`RagStore.validate` closes the I3 leftover: `RagConfiguration.validate()` already rejected unimplemented `chunkStrategy` values, but its only caller ran at *retrieval* time, so a POST with `"paragraph"` returned 201 and the field was silently ignored.
+
+### A11 — request-body validation
+
+There was **zero** `jakarta.validation` usage in the repo and no validator in `pom.xml`. Added `quarkus-hibernate-validator` (unpinned, via the BOM) and constrained the bodies that actually matter: `DiscussRequest.question` (unbounded free text passed straight to an LLM) and `AttachmentRef.data` (unbounded inline base64, now bounded by a validator deriving its ceiling from configuration rather than a hardcoded magic number).
+
+### Verification
+
+Clean `test-compile` green first attempt. Full suite: 12,688 tests, **0 real failures** — every one of the 308 failures/errors was classified programmatically from the surefire XML against the known environmental markers (this machine cannot bind loopback sockets), not eyeballed. **All six mutation checks bite.**
+
+Because E6 makes previously-accepted input fail, the upgrade path was verified beyond the suite: the bundled `initial-agents` Agent Father config passes the new save-time validation (22 actionmatchers, 23 inputmatchers, 2 negations, all occurrences legal), and the import/export round-trip still works — `RestImportService` writes rulesets through the same store path the new hook guards.
+
+### Known limits, stated plainly
+
+- The interceptor's **JAX-RS provider registration** cannot be verified locally (no loopback sockets); its logic is fully unit-tested but CI is the gate for the wiring.
+- `McpCallsConfiguration.validate()` and `LlmConfiguration.validate()` still run at conversation/execution time rather than save time — the same defect class, now trivially fixable via the new hook. Left for a follow-up rather than widened into this change.
+
 ## 🔑 feat(operator): the foundation for an agent that can safely write (2026-07-29)
 
 **Repo:** EDDI (`feat/operator-write-foundation`)

@@ -25,10 +25,12 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.runtime.ExecutionAbandonedException;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
+import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -220,6 +222,94 @@ class ConversationServiceProcessingGaugeTest {
 
         assertEquals(1.0, gauge(),
                 "the still-running first turn must remain counted — a rejected turn shares its metrics key");
+    }
+
+    /**
+     * C10 + C11 — the coordinator can DROP a queued turn: when handing it to the
+     * runtime is rejected while draining the queue there is no caller left to roll
+     * back to, so the task is dead-lettered and its body is never invoked. The
+     * release inside that body therefore never runs.
+     *
+     * <p>
+     * Without a discard hook this re-creates exactly the leak C11 removed — the
+     * gauge entry survives for the JVM's lifetime — AND leaves the HTTP caller
+     * waiting for a response that can never arrive.
+     * </p>
+     */
+    @Test
+    @Timeout(30)
+    @DisplayName("a turn the coordinator dropped releases the gauge and completes the caller")
+    void aDroppedTurnReleasesTheGaugeAndCompletesTheCaller() throws Exception {
+        stubHealthySay();
+
+        ConversationResponseHandler handler = mock(ConversationResponseHandler.class);
+        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                new InputData("hello", Map.of()), false, handler);
+
+        assertEquals(1.0, gauge(), "an admitted turn must be counted while it is in flight");
+
+        Callable<Void> queued = captureQueuedTurn();
+        assertInstanceOf(IDiscardableTask.class, queued,
+                "the coordinator must be able to tell a queued turn that it was dropped without running");
+
+        // The coordinator could not schedule it and dead-letters it — the body is
+        // NEVER called.
+        ((IDiscardableTask) queued).onDiscarded(new RejectedExecutionException("pool saturated"));
+
+        assertEquals(0.0, gauge(),
+                "a dropped turn must release its in-flight reference — its own finally block never runs");
+        verify(handler).onSkipped(any());
+        verify(handler, never()).onComplete(any());
+    }
+
+    /**
+     * C3 — a GENUINE {@code InterruptedException} out of the callable body means
+     * the turn never finished and no watchdog recorded anything, so it must leave
+     * an ERROR record. Matching the bare {@code InterruptedException} type
+     * conflated it with the abandonment signal and silently swallowed real failures
+     * at WARN.
+     */
+    @Test
+    @Timeout(30)
+    @DisplayName("C3: a genuine InterruptedException from the body is recorded as an error")
+    void genuineInterruptedExceptionIsRecordedAsAnError() throws Exception {
+        runTurnThenFailWith(new InterruptedException("pipeline thread interrupted"));
+
+        verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+    }
+
+    /**
+     * C3 (the other half) — the abandonment signal must NOT be flipped to ERROR:
+     * the watchdog already persisted the accurate EXECUTION_INTERRUPTED, and a late
+     * ERROR write from the zombie turn is the stale overwrite the token exists to
+     * prevent.
+     */
+    @Test
+    @Timeout(30)
+    @DisplayName("C3: an abandoned turn that completed anyway is not recorded as an error")
+    void anAbandonedTurnIsNotRecordedAsAnError() throws Exception {
+        runTurnThenFailWith(new ExecutionAbandonedException("Execution completed after cancellation — result discarded"));
+
+        verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+    }
+
+    /**
+     * Runs a queued turn to the point where the inner execution reports failure,
+     * then raises {@code failure} on the captured completion callback.
+     */
+    @SuppressWarnings("unchecked")
+    private void runTurnThenFailWith(Throwable failure) throws Exception {
+        stubHealthySay();
+
+        Future<Void> innerExecution = mock(Future.class);
+        doReturn(innerExecution).when(runtime).submitCallable(any(Callable.class), any(IRuntime.IFinishedExecution.class), isNull());
+
+        say();
+        captureQueuedTurn().call();
+
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(runtime).submitCallable(any(Callable.class), callbackCaptor.capture(), isNull());
+        callbackCaptor.getValue().onFailure(failure);
     }
 
     @Test

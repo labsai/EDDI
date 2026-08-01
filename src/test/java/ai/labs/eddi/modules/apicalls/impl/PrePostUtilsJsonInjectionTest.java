@@ -16,23 +16,29 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
+import io.quarkus.qute.Engine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -46,6 +52,13 @@ import static org.mockito.Mockito.when;
 class PrePostUtilsJsonInjectionTest {
 
     private static final String INJECTION_PAYLOAD = "pwned\",\"x\":\"y\"}],\"type\":\"text\"},{\"type\":\"text\"";
+
+    /** Mirrors the template data keys used by {@link PrePostUtils}. */
+    private static final String KEY_FIELD_DELIMITER = "eddiFieldDelimiter";
+    private static final String KEY_ROW_DELIMITER = "eddiRowDelimiter";
+
+    /** A nonce baked into the template text — exactly what must not happen. */
+    private static final Pattern NONCE_IN_TEMPLATE = Pattern.compile("eddi(Field|Row)[0-9a-f]{32}");
 
     private PrePostUtils prePostUtils;
     private ITemplatingEngine templatingEngine;
@@ -74,16 +87,7 @@ class PrePostUtilsJsonInjectionTest {
     void quoteLadenTextCannotInjectOutputItems() throws Exception {
         stubIterationRender(List.of(List.of(INJECTION_PAYLOAD)));
 
-        var outputInstruction = new OutputBuildingInstruction();
-        outputInstruction.setHttpCodeValidator(new HttpCodeValidator(List.of(200), List.of()));
-        outputInstruction.setOutputType("text");
-        outputInstruction.setIterationObjectName("item");
-        outputInstruction.setPathToTargetArray("items");
-        outputInstruction.setOutputValue("{item.text}");
-        var postResponse = new PostResponse();
-        postResponse.setOutputBuildInstructions(List.of(outputInstruction));
-
-        prePostUtils.runPostResponse(memory, postResponse, new HashMap<>(), 200, false);
+        prePostUtils.runPostResponse(memory, outputPostResponse(), new HashMap<>(), 200, false);
 
         List<Object> output = capturedContextValue("context:output");
         assertEquals(1, output.size(), "a crafted value must not add output items");
@@ -100,16 +104,7 @@ class PrePostUtilsJsonInjectionTest {
         var text = "line one\nline two\\end \"quoted\"";
         stubIterationRender(List.of(List.of(text)));
 
-        var outputInstruction = new OutputBuildingInstruction();
-        outputInstruction.setHttpCodeValidator(new HttpCodeValidator(List.of(200), List.of()));
-        outputInstruction.setOutputType("text");
-        outputInstruction.setIterationObjectName("item");
-        outputInstruction.setPathToTargetArray("items");
-        outputInstruction.setOutputValue("{item.text}");
-        var postResponse = new PostResponse();
-        postResponse.setOutputBuildInstructions(List.of(outputInstruction));
-
-        prePostUtils.runPostResponse(memory, postResponse, new HashMap<>(), 200, false);
+        prePostUtils.runPostResponse(memory, outputPostResponse(), new HashMap<>(), 200, false);
 
         List<Object> output = capturedContextValue("context:output");
         var valueAlternatives = asList(asMap(output.getFirst()).get("valueAlternatives"));
@@ -144,6 +139,97 @@ class PrePostUtilsJsonInjectionTest {
     void oneOutputItemPerIteratedElement() throws Exception {
         stubIterationRender(List.of(List.of("first"), List.of("second"), List.of("third")));
 
+        prePostUtils.runPostResponse(memory, outputPostResponse(), new HashMap<>(), 200, false);
+
+        List<Object> output = capturedContextValue("context:output");
+        assertEquals(3, output.size());
+        assertEquals("second", asMap(asList(asMap(output.get(1)).get("valueAlternatives")).getFirst()).get("text"));
+    }
+
+    // ==================== delimiter nonce — the actual security property
+    // ====================
+
+    @Test
+    @DisplayName("the delimiters are freshly randomised on every invocation")
+    void delimitersAreUnguessableAndDifferPerInvocation() throws Exception {
+        stubIterationRender(List.of(List.of("only")));
+
+        prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
+        prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
+
+        List<Map<String, Object>> renders = capturedRenderData();
+        assertEquals(2, renders.size());
+
+        for (var render : renders) {
+            for (var key : List.of(KEY_FIELD_DELIMITER, KEY_ROW_DELIMITER)) {
+                String delimiter = String.valueOf(render.get(key));
+                assertTrue(delimiter.matches("eddi(Field|Row)[0-9a-f]{32}"),
+                        "a delimiter must carry a 128-bit random nonce that upstream content cannot guess, but was: " + delimiter);
+            }
+        }
+
+        assertNotEquals(renders.get(0).get(KEY_ROW_DELIMITER), renders.get(1).get(KEY_ROW_DELIMITER),
+                "a constant row delimiter would be forgeable by upstream content");
+        assertNotEquals(renders.get(0).get(KEY_FIELD_DELIMITER), renders.get(1).get(KEY_FIELD_DELIMITER),
+                "a constant field delimiter would be forgeable by upstream content");
+        assertNotEquals(renders.get(0).get(KEY_FIELD_DELIMITER), renders.get(0).get(KEY_ROW_DELIMITER),
+                "field and row delimiter must not collide");
+    }
+
+    @Test
+    @DisplayName("the generated template text carries no nonce, so it stays a stable cache key")
+    void templateTextIsIdenticalAcrossInvocations() throws Exception {
+        stubIterationRender(List.of(List.of("only")));
+
+        prePostUtils.buildIterationValues("item", "items", "item.active", new HashMap<>());
+        prePostUtils.buildIterationValues("item", "items", "item.active", new HashMap<>());
+
+        List<String> templates = capturedTemplates();
+        assertEquals(2, templates.size());
+        assertEquals(templates.get(0), templates.get(1),
+                "the same instruction must produce the same template string — otherwise the compiled-template cache misses every time");
+        assertTrue(templates.getFirst().contains("{" + KEY_ROW_DELIMITER + "}"),
+                "the delimiter must be referenced as template data, not inlined: " + templates.getFirst());
+        assertFalse(NONCE_IN_TEMPLATE.matcher(templates.getFirst()).find(),
+                "no nonce may leak into the template text: " + templates.getFirst());
+    }
+
+    // ==================== real Qute engine ====================
+
+    @Test
+    @DisplayName("a real Qute render round-trips unsafe upstream values and compiles the template once")
+    void realQuteRenderRoundTripsUnsafeValuesAndReusesTheCompiledTemplate() throws Exception {
+        Engine realEngine = Engine.builder().addDefaults().strictRendering(false).build();
+        Engine countingEngine = mock(Engine.class);
+        when(countingEngine.parse(anyString())).thenAnswer(invocation -> realEngine.parse(invocation.getArgument(0, String.class)));
+
+        var realPrePostUtils = new PrePostUtils(mock(IJsonSerialization.class), mock(IMemoryItemConverter.class),
+                new TemplatingEngine(countingEngine), dataFactory);
+
+        var texts = List.of("say \"hi\"", "line one\nline two", "back\\slash", "eddiRow0000");
+        List<Map<String, String>> items = texts.stream().map(text -> Map.of("text", text)).toList();
+
+        for (int run = 0; run < 3; run++) {
+            var templateData = new HashMap<String, Object>();
+            templateData.put("items", items);
+
+            realPrePostUtils.runPostResponse(memory, outputPostResponse(), templateData, 200, false);
+        }
+
+        var captor = ArgumentCaptor.forClass(Context.class);
+        verify(dataFactory, times(3)).createData(eq("context:output"), captor.capture());
+        List<Object> output = asList(captor.getValue().getValue());
+
+        assertEquals(texts.size(), output.size(), "one output item per iterated element");
+        for (int i = 0; i < texts.size(); i++) {
+            var valueAlternatives = asList(asMap(output.get(i)).get("valueAlternatives"));
+            assertEquals(texts.get(i), asMap(valueAlternatives.getFirst()).get("text"), "value must round-trip verbatim through a real Qute render");
+        }
+
+        verify(countingEngine, times(1)).parse(anyString());
+    }
+
+    private static PostResponse outputPostResponse() {
         var outputInstruction = new OutputBuildingInstruction();
         outputInstruction.setHttpCodeValidator(new HttpCodeValidator(List.of(200), List.of()));
         outputInstruction.setOutputType("text");
@@ -152,18 +238,28 @@ class PrePostUtilsJsonInjectionTest {
         outputInstruction.setOutputValue("{item.text}");
         var postResponse = new PostResponse();
         postResponse.setOutputBuildInstructions(List.of(outputInstruction));
-
-        prePostUtils.runPostResponse(memory, postResponse, new HashMap<>(), 200, false);
-
-        List<Object> output = capturedContextValue("context:output");
-        assertEquals(3, output.size());
-        assertEquals("second", asMap(asList(asMap(output.get(1)).get("valueAlternatives")).getFirst()).get("text"));
+        return postResponse;
     }
 
     private List<Object> capturedContextValue(String dataKey) {
         var captor = ArgumentCaptor.forClass(Context.class);
         verify(dataFactory).createData(eq(dataKey), captor.capture());
         return asList(captor.getValue().getValue());
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private List<Map<String, Object>> capturedRenderData() throws Exception {
+        ArgumentCaptor<Map> captor = ArgumentCaptor.forClass(Map.class);
+        verify(templatingEngine, times(2)).processTemplate(anyString(), captor.capture());
+        List<Map<String, Object>> renders = new ArrayList<>();
+        captor.getAllValues().forEach(render -> renders.add((Map<String, Object>) render));
+        return renders;
+    }
+
+    private List<String> capturedTemplates() throws Exception {
+        var captor = ArgumentCaptor.forClass(String.class);
+        verify(templatingEngine, times(2)).processTemplate(captor.capture(), any());
+        return captor.getAllValues();
     }
 
     @SuppressWarnings("unchecked")
@@ -180,14 +276,16 @@ class PrePostUtilsJsonInjectionTest {
 
     /**
      * Stand in for the templating engine: read the per-invocation delimiters back
-     * out of the generated Qute template and emit the given rows with them, exactly
-     * as a real render of upstream content would.
+     * out of the template DATA — that is where they live, because the template text
+     * has to stay nonce-free to remain a stable compiled-template cache key — and
+     * emit the given rows with them, exactly as a real render of upstream content
+     * would.
      */
     private void stubIterationRender(List<List<String>> renderedRows) throws Exception {
         when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(invocation -> {
-            String template = invocation.getArgument(0);
-            String rowDelimiter = extractDelimiter(template, "eddiRow");
-            String fieldDelimiter = extractDelimiter(template, "eddiField");
+            Map<String, Object> renderData = invocation.getArgument(1);
+            String rowDelimiter = String.valueOf(renderData.get(KEY_ROW_DELIMITER));
+            String fieldDelimiter = String.valueOf(renderData.get(KEY_FIELD_DELIMITER));
 
             var rendered = new StringBuilder();
             for (var row : renderedRows) {
@@ -195,10 +293,5 @@ class PrePostUtilsJsonInjectionTest {
             }
             return rendered.toString();
         });
-    }
-
-    private static String extractDelimiter(String template, String prefix) {
-        Matcher matcher = Pattern.compile(prefix + "[0-9a-f]{32}").matcher(template);
-        return matcher.find() ? matcher.group() : "";
     }
 }

@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
+import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -72,6 +73,13 @@ import java.util.concurrent.atomic.AtomicLong;
  * runtime throws, the task is taken back off the queue (and the map entry
  * dropped when it was the head), so a rejected submission cannot wedge the
  * conversation.</li>
+ * <li><b>A dropped task is told it was dropped</b>: when the rejection happens
+ * while scheduling the NEXT queued task there is no caller left to roll back,
+ * so the task is dead-lettered. A task implementing {@link IDiscardableTask}
+ * gets its {@code onDiscarded} hook invoked in that case — without it the
+ * turn's own cleanup (releasing the in-flight metrics reference, completing the
+ * caller's response handler) would never run, because its body is never
+ * invoked.</li>
  * </ul>
  *
  * @author ginccc
@@ -260,34 +268,71 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
     }
 
     private void submitNext(String conversationId, BlockingQueue<Callable<Void>> queue) {
-        synchronized (queue) {
-            if (queue.isEmpty()) {
-                return;
-            }
-            queue.remove(); // drop the task that just finished
-
-            while (!queue.isEmpty()) {
-                try {
-                    execute(conversationId, queue, queue.element());
+        // Collected under the queue monitor, notified after releasing it: the hook
+        // completes an HTTP response handler and must not run while a
+        // per-conversation lock is held.
+        List<DiscardedTask> discarded = List.of();
+        try {
+            synchronized (queue) {
+                if (queue.isEmpty()) {
                     return;
-                } catch (RuntimeException | Error e) {
-                    // C10 (submitNext side): there is no caller to propagate to here —
-                    // this runs from a completion callback. Dropping out would leave
-                    // the queue non-empty with nothing scheduled to drain it, wedging
-                    // the conversation forever. Dead-letter the task we could not
-                    // schedule and try the next one.
-                    log.errorf(e, "Failed to schedule the next queued task (conversationId=%s) — dead-lettering it "
-                            + "so the conversation queue keeps draining", sanitize(conversationId));
-                    routeToDeadLetter(conversationId, e);
-                    totalProcessed.incrementAndGet();
-                    queue.remove();
                 }
-            }
+                queue.remove(); // drop the task that just finished
 
-            // Eager cleanup: remove empty queue to prevent memory leaks.
-            // Uses remove(key, value) to avoid removing a new queue that was
-            // just created by a concurrent submitInOrder call.
-            conversationQueues.remove(conversationId, queue);
+                while (!queue.isEmpty()) {
+                    Callable<Void> next = queue.element();
+                    try {
+                        execute(conversationId, queue, next);
+                        return;
+                    } catch (RuntimeException | Error e) {
+                        // C10 (submitNext side): there is no caller to propagate to here —
+                        // this runs from a completion callback. Dropping out would leave
+                        // the queue non-empty with nothing scheduled to drain it, wedging
+                        // the conversation forever. Dead-letter the task we could not
+                        // schedule and try the next one.
+                        log.errorf(e, "Failed to schedule the next queued task (conversationId=%s) — dead-lettering it "
+                                + "so the conversation queue keeps draining", sanitize(conversationId));
+                        routeToDeadLetter(conversationId, e);
+                        totalProcessed.incrementAndGet();
+                        queue.remove();
+                        // The callable is gone WITHOUT having been invoked, so its own
+                        // finally-block cleanup (releasing the in-flight metrics
+                        // reference, completing the caller's response handler) never
+                        // runs. Tell the task so it can do that itself — otherwise
+                        // dropping it here re-creates exactly the leak the release
+                        // block exists to prevent, and the HTTP caller waits forever.
+                        if (next instanceof IDiscardableTask discardable) {
+                            if (discarded.isEmpty()) {
+                                discarded = new ArrayList<>(1);
+                            }
+                            discarded.add(new DiscardedTask(discardable, e));
+                        }
+                    }
+                }
+
+                // Eager cleanup: remove empty queue to prevent memory leaks.
+                // Uses remove(key, value) to avoid removing a new queue that was
+                // just created by a concurrent submitInOrder call.
+                conversationQueues.remove(conversationId, queue);
+            }
+        } finally {
+            for (DiscardedTask task : discarded) {
+                notifyDiscarded(conversationId, task);
+            }
+        }
+    }
+
+    /** A queued task that was dropped before it ever ran, plus the reason. */
+    private record DiscardedTask(IDiscardableTask task, Throwable cause) {
+    }
+
+    private void notifyDiscarded(String conversationId, DiscardedTask discarded) {
+        try {
+            discarded.task().onDiscarded(discarded.cause());
+        } catch (RuntimeException | Error hookFailure) {
+            // The hook is best effort — a failing one must never break the drain
+            // of the remaining queue.
+            log.errorf(hookFailure, "Discard hook failed for conversationId=%s", sanitize(conversationId));
         }
     }
 
@@ -296,6 +341,21 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
     @Override
     public String getCoordinatorType() {
         return "in-memory";
+    }
+
+    /**
+     * Number of conversations with a live queue entry in the map — INCLUDING
+     * entries whose queue is currently empty, which {@link #getQueueDepths()}
+     * deliberately filters out.
+     * <p>
+     * This is the leak-visible count: an orphaned empty queue never shows up in
+     * {@code getQueueDepths()}, so only this accessor can tell "the map entry was
+     * cleaned up" from "the map entry leaked". Package-private for the tests that
+     * pin the C10 cleanup; the gauge {@code eddi.coordinator.active_conversations}
+     * reports the same number.
+     */
+    int activeConversationCount() {
+        return conversationQueues.size();
     }
 
     @Override

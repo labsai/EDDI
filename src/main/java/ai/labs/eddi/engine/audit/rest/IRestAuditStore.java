@@ -88,9 +88,13 @@ public interface IRestAuditStore {
      *            the conversation to verify
      * @param skip
      *            number of entries to skip (pagination). A non-zero skip makes the
-     *            chain check report the range's own continuity only
+     *            chain check report the range's own continuity only — the run can
+     *            then not be anchored at sequence 0, so a deleted <em>first</em>
+     *            entry is invisible on a paginated sweep
      * @param limit
-     *            maximum entries to verify (default: 1000)
+     *            maximum entries to verify (default: 1000, hard ceiling 10 000). A
+     *            non-positive value falls back to the default, it does not mean
+     *            "unbounded"
      * @return per-entry HMAC status plus the chain verdict
      */
     @GET
@@ -113,7 +117,8 @@ public interface IRestAuditStore {
      * @param skip
      *            number of entries to skip
      * @param limit
-     *            maximum entries to verify (default: 1000)
+     *            maximum entries to verify (default: 1000, hard ceiling 10 000). A
+     *            non-positive value falls back to the default
      * @return per-entry HMAC status
      */
     @GET

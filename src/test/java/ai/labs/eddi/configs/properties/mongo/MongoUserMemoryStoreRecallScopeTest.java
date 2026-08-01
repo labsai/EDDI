@@ -183,6 +183,33 @@ class MongoUserMemoryStoreRecallScopeTest {
     }
 
     @Test
+    @DisplayName("G5 — a one-slot window is spent on access count, not swallowed by the recency reservation")
+    void mostAccessedWithAWindowOfOneStillRanksByAccessCount() throws Exception {
+        Instant old = Instant.parse("2024-01-01T00:00:00Z");
+        findResults.add(List.of(memoryDoc(new ObjectId(), "popular", AGENT_A, old)));
+        findResults.add(List.of(memoryDoc(new ObjectId(), "brand-new", AGENT_A, Instant.parse("2026-07-01T00:00:00Z"))));
+        stubFind();
+        stubBatchedIncrement();
+
+        store.getVisibleEntries(TEST_USER, AGENT_A, null, "most_accessed", 1);
+
+        // An unconditional Math.max(1, maxEntries / 5) reserved the ONLY slot for
+        // recency, leaving zero access slots — the access-count query was then
+        // skipped entirely and `most_accessed` silently returned the most RECENT
+        // entry instead. maxEntries reaches 1 from the agent's maxRecallEntries, the
+        // REST query param and the MCP tool argument.
+        assertEquals(List.of("accessCount"), sortedFields(), "the single slot must be spent ranking by access count");
+        assertEquals(List.of(1), capturedLimits);
+    }
+
+    /** The leading sort key of each issued query, in order. */
+    private List<String> sortedFields() {
+        return capturedSorts.stream()
+                .map(sort -> sort.toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).getFirstKey())
+                .toList();
+    }
+
+    @Test
     @DisplayName("G5 — the access-count increments are a single batched write, issued only after the cursors are drained")
     void mostAccessedBatchesIncrementsOutsideTheCursor() throws Exception {
         Instant old = Instant.parse("2024-01-01T00:00:00Z");
