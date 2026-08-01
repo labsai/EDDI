@@ -371,6 +371,74 @@ describe("gateLooksInstalled", () => {
     },
   );
 
+  it("rejects a per-tool rule that AUTO_APPROVEs a gated write endpoint", () => {
+    // The scalar toolApprovals.timeoutPolicy looks safe (buildToolApprovals
+    // never sets it to AUTO_APPROVE) — but ToolApprovalRules.governing on the
+    // backend lets a matching rule override it for the calls it addresses. A
+    // check that only reads the scalar would pass this document while one
+    // endpoint actually auto-executes unreviewed.
+    const result = gateLooksInstalled(
+      agentWithGate({
+        toolApprovals: {
+          ...buildToolApprovals(),
+          rules: [{ match: "http.post:/agentstore/agents", timeoutPolicy: "AUTO_APPROVE" }],
+        },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("http.post:/agentstore/agents");
+    expect(result.reason).toMatch(/AUTO_APPROVE/);
+  });
+
+  it.each(["http.post:*", "http.put:/llmstore/llms/{id}", "http.patch:*", "http.delete:*"])(
+    "catches AUTO_APPROVE on a broad or narrow rule targeting a write method: %s",
+    (match) => {
+      const result = gateLooksInstalled(
+        agentWithGate({ toolApprovals: { ...buildToolApprovals(), rules: [{ match, timeoutPolicy: "AUTO_APPROVE" }] } }),
+      );
+      expect(result.ok).toBe(false);
+    },
+  );
+
+  it("does not flag a rule that names a write endpoint but keeps it strict", () => {
+    const result = gateLooksInstalled(
+      agentWithGate({
+        toolApprovals: {
+          ...buildToolApprovals(),
+          rules: [{ match: "http.delete:*", timeoutPolicy: "WAIT_INDEFINITELY" }],
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("does not flag an AUTO_APPROVE rule that targets a READ, not a write", () => {
+    // Auto-approving a GET is a friction choice, not a safety hole — GET is
+    // exempt from the gate entirely, so this rule can never fire on anything
+    // requireApproval would have gated in the first place.
+    const result = gateLooksInstalled(
+      agentWithGate({
+        toolApprovals: {
+          ...buildToolApprovals(),
+          rules: [{ match: "http.get:*", timeoutPolicy: "AUTO_APPROVE" }],
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("does not flag a rule with no timeoutPolicy (message/reason-only rules are fine)", () => {
+    const result = gateLooksInstalled(
+      agentWithGate({
+        toolApprovals: {
+          ...buildToolApprovals(),
+          rules: [{ match: "http.post:/agentstore/agents", pauseReason: "Creating a new agent" }],
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
   it("does not flag the narrow exempt pattern buildToolApprovals actually uses", () => {
     expect(gateLooksInstalled(agentWithGate()).ok).toBe(true);
   });

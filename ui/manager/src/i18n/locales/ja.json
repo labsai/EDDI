@@ -3141,7 +3141,7 @@
       "resetConfirmBody": "オペレーターエージェントと、そのために作成されたすべてのリソース、保存された設定が完全に削除されます。この操作は取り消せません。",
       "connectionCheck": "接続を確認",
       "gateChecking": "ゲートを確認中…",
-      "gateUnknown": "ゲート未確認",
+      "gateUnknown": "ゲート未チェック",
       "gateVerified": "ゲート確認済み",
       "gateNotVerified": "ゲート未確認",
       "gateUnverifiedHelp": "このエージェントのドキュメントで承認ゲートを確認できませんでした。"

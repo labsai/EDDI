@@ -3147,7 +3147,7 @@
       "resetConfirmBody": "L'agent opérateur et toutes les ressources créées pour lui sont définitivement supprimés, ainsi que sa configuration enregistrée. Cette action est irréversible.",
       "connectionCheck": "Vérifier la connexion",
       "gateChecking": "Vérification de la barrière…",
-      "gateUnknown": "Barrière non vérifiée",
+      "gateUnknown": "Barrière non contrôlée",
       "gateVerified": "Barrière vérifiée",
       "gateNotVerified": "Barrière non vérifiée",
       "gateUnverifiedHelp": "La barrière d'approbation n'a pas pu être vérifiée sur le document de cet agent."

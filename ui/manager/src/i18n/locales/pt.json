@@ -3147,7 +3147,7 @@
       "resetConfirmBody": "O agente operador e todos os recursos criados para ele são eliminados permanentemente, juntamente com a sua configuração guardada. Esta ação não pode ser anulada.",
       "connectionCheck": "Verificar ligação",
       "gateChecking": "A verificar barreira…",
-      "gateUnknown": "Barreira não verificada",
+      "gateUnknown": "Barreira ainda não verificada",
       "gateVerified": "Barreira verificada",
       "gateNotVerified": "Barreira não verificada",
       "gateUnverifiedHelp": "Não foi possível verificar a barreira de aprovação no documento deste agente."

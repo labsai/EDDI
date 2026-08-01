@@ -323,6 +323,19 @@ const GATED_WRITE_PATTERNS = ["http.post:*", "http.put:*", "http.patch:*", "http
 /** `exempt` patterns broad enough to swallow a gated write pattern above. */
 const OVERBROAD_EXEMPT_PATTERNS = ["*", "http.*", "http.*:*", ...GATED_WRITE_PATTERNS] as const;
 
+/**
+ * The method-qualified prefixes above, with the trailing `*` stripped —
+ * `["http.post:", "http.put:", "http.patch:", "http.delete:"]`.
+ *
+ * Used to catch a `toolApprovals.rules` entry that AUTO_APPROVEs a write. The
+ * blanket gate patterns already match every call of that method, so any rule
+ * whose `match` starts with one of these prefixes — narrow
+ * (`http.post:/agentstore/agents`) or equally broad (`http.post:*`) — targets a
+ * strict subset of what the blanket pattern gates. No glob-intersection logic
+ * is needed: prefix membership alone is sufficient to prove overlap.
+ */
+const GATED_WRITE_PREFIXES = GATED_WRITE_PATTERNS.map((pattern) => pattern.slice(0, -1));
+
 export interface GateVerificationResult {
   verified: boolean;
   /** Human-readable cause of the first failure found; undefined when verified. */
@@ -355,6 +368,24 @@ export function gateLooksInstalled(agent: Agent): { ok: boolean; reason?: string
   );
   if (overbroadExempt) {
     return { ok: false, reason: `exempt pattern '${overbroadExempt}' would exempt a gated write` };
+  }
+  // A per-tool rule takes precedence over the toolApprovals-level scalar for any
+  // call it matches (the backend's ToolApprovalRules.governing — most specific
+  // statement wins), so a safe-looking top-level WAIT_INDEFINITELY does not
+  // guarantee the effective policy for a write endpoint actually IS
+  // WAIT_INDEFINITELY. Checking only the scalar above would let a rule such as
+  // { match: "http.post:/agentstore/agents", timeoutPolicy: "AUTO_APPROVE" }
+  // pass verification while that one endpoint auto-executes unreviewed.
+  const autoApproveWriteRule = (toolApprovals.rules ?? []).find(
+    (rule) =>
+      rule.timeoutPolicy === "AUTO_APPROVE" &&
+      GATED_WRITE_PREFIXES.some((prefix) => rule.match.startsWith(prefix)),
+  );
+  if (autoApproveWriteRule) {
+    return {
+      ok: false,
+      reason: `rule '${autoApproveWriteRule.match}' sets timeoutPolicy AUTO_APPROVE on a gated write`,
+    };
   }
   return { ok: true };
 }
