@@ -5,6 +5,28 @@
 
 ---
 
+## 🧩 refactor(groups): extract MemberTurnExecutor from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R1 step 4 of `planning/group-collaboration-improvements-plan.md` §3.1 — the biggest and riskiest extraction yet, and correctly so: it's the code `GroupConversationServiceConcurrencyTest` exists specifically to pin. Moved both `executeAgentTurn` overloads, `tryResolveMemberToolPause`, `handleMemberPause`, `executeGroupMemberTurn`, `handleAgentFailure`, and `errorEntry` (~430 lines) into a new `ai.labs.eddi.engine.internal.groups.MemberTurnExecutor`.
+
+Scoped this properly before touching code (see the prior session's status update) and it paid off — three real design decisions surfaced that a naive move would have gotten wrong or would have silently broken:
+
+1. **Circular self-reference.** `executeGroupMemberTurn` (nested `GROUP`-type members) calls back into the facade's own public `discuss(...)`/`cancelDiscussion(...)`. Resolved by passing `this` into `MemberTurnExecutor`'s constructor, typed as the concrete `GroupConversationService` (constructed last in the facade's own constructor, after every field it depends on — safe because `MemberTurnExecutor`'s constructor only stores the reference, never invokes it during construction).
+2. **`propagateDynamicAgentTracking` stays put.** `DynamicAgentTrackingPropagationTest` calls `GroupConversationService.propagateDynamicAgentTracking(...)` directly by class name — a hard compile-time reference, not reflection. Moving it would have forced rewriting ~22 tests in that file for no benefit, and the plan already assigns this method to a later step (`GroupLifecycleOps`, R1 step 8) regardless. Widened to `public static` so `MemberTurnExecutor` can call it cross-package; left declared exactly where it was.
+3. **Attachment granting reaches back to the facade.** Rather than giving `MemberTurnExecutor` its own `IAttachmentStore` and duplicating the facade's per-call `GroupAttachmentBinder` construction (needed because `attachmentStore` is field-injected and test-mutable — see the R1-step-1 changelog entry), `grantAndInjectAttachments` was widened to `public` on the facade and `MemberTurnExecutor` calls back through its self-reference. One dependency, not two overlapping ones.
+
+Also widened `MemberTurnCancellation`/`MemberTurnCancelledException` (the cooperative-cancellation types) from package-private to `public`, since `MemberTurnExecutor` lives in a different package and needs to reference them in its own method signatures.
+
+The reflection sweep for this step needed a second pass: my first pass only grepped for the literal `getDeclaredMethod("..."` pattern and came up empty across 5 of the 7 remaining group test classes — which was wrong. This codebase's actual convention is a shared `method("name", ...)` test helper wrapping `getDeclaredMethod`, and grepping for *that* pattern found real dependencies in two files (`GroupConversationServiceHitlCoverage2Test`: `handleMemberPause`, `tryResolveMemberToolPause`, `errorEntry`, `handleAgentFailure`; `GroupConversationServiceHitlCoverage3Test`: `executeGroupMemberTurn`, `executeAgentTurn`) that the first pass missed entirely. All six methods kept as thin delegators as a result — same pattern as steps 2–3, just a reminder to grep for both patterns every time, not just the one that happened to work on the first three files.
+
+Also caught and fixed during self-review before committing: an early draft of `executeGroupMemberTurn`'s move replaced `Collectors.joining("\n\n")` with a hand-rolled `.reduce(...)` purely to dodge one import — behaviorally equivalent but an unjustified deviation from "pure move, no logic changes" for zero benefit. Reverted to the exact original before running any tests.
+
+Full 12-class group suite + `DynamicAgentTrackingPropagationTest` (22 tests, unmodified) + all 4 focused collaborator test classes green on the first run after compile succeeded — including `GroupConversationServiceConcurrencyTest` (8/8), the strongest possible signal that the cooperative-cancellation contracts survived intact. Added a modest `MemberTurnExecutorTest` (5 tests) for the class's pure-function methods; the complex async/cancellation/HITL paths are already thoroughly covered by the reflection-based characterization suites and weren't worth duplicating. `GroupConversationService`: 3,977 → 3,605 lines. 4 of R1's 10 extraction steps done.
+
+---
+
 ## 🔍 fix(groups): key-rotation-safe signature verification, plus review-comment cleanup (2026-08-01)
 
 **Repo:** EDDI (`claude/group-collaboration-plan-9bca77`)
