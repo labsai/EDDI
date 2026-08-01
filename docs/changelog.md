@@ -136,7 +136,7 @@ The **Secret Scanning** job failed on every pull request opened from a fork. On 
 
 **Design decision — a range that cannot be resolved is an error, not an empty scan.** On a pull request the step requires both `base.sha` and `head.sha` to exist in the checkout and exits non-zero with a `::error::` annotation if either is missing. The tempting fallback is to narrow the range and carry on, but that converts a broken fetch into a scan that passes without having looked at anything — the failure mode that is worst here, because it is invisible. Only the push path falls back, to the tip commit, and it logs that it did. `fetch-depth: 0` on the checkout is what makes both SHAs reachable and is now load-bearing rather than incidental.
 
-**Verification.** Both steps were extracted from the committed YAML and executed verbatim against this repository with the real 8.30.1 binary. Nine scan cases and three install cases:
+**Verification.** Both steps were extracted from the committed YAML and executed verbatim against this repository with the real 8.30.1 binary. Nine scan cases, three install cases and two configuration-bypass cases:
 
 | Case | Expected | Result |
 | --- | --- | --- |
