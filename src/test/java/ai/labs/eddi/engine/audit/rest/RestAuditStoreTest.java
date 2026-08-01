@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -337,8 +338,118 @@ class RestAuditStoreTest {
     void verificationLimitIsClamped() {
         restAuditStore.verifyConversation("conv-1", 0, Integer.MAX_VALUE);
         verify(auditStore).getEntries("conv-1", 0, RestAuditStore.MAX_VERIFY_LIMIT);
+    }
 
+    /**
+     * {@code ?limit=0} used to mean "give me the hard maximum" — ten times the
+     * documented default, from a caller who asked for nothing. A non-positive limit
+     * falls back to the declared {@code @DefaultValue}.
+     */
+    @Test
+    @DisplayName("a non-positive limit falls back to the documented default, not the hard ceiling")
+    void nonPositiveLimitFallsBackToTheDefault() {
         restAuditStore.verifyConversation("conv-2", 0, 0);
-        verify(auditStore).getEntries("conv-2", 0, RestAuditStore.MAX_VERIFY_LIMIT);
+        verify(auditStore).getEntries("conv-2", 0, RestAuditStore.DEFAULT_VERIFY_LIMIT);
+
+        restAuditStore.verifyConversation("conv-3", 0, -5);
+        verify(auditStore).getEntries("conv-3", 0, RestAuditStore.DEFAULT_VERIFY_LIMIT);
+
+        // Pinned as values, not as a relational compare: both are compile-time
+        // constants, so `DEFAULT < MAX` can never fail and asserts nothing. The
+        // property that matters is that the fallback stays below the hard ceiling,
+        // and pinning both numbers makes changing either a deliberate act.
+        assertEquals(1_000, RestAuditStore.DEFAULT_VERIFY_LIMIT);
+        assertEquals(10_000, RestAuditStore.MAX_VERIFY_LIMIT);
+    }
+
+    /**
+     * Deriving the expected run from the surviving rows made head deletion free:
+     * dropping sequence 0 from {@code [0,1,2]} left {@code [1,2]}, whose own range
+     * is gap-free. When the swept page provably starts at the beginning of the
+     * conversation, the run is anchored at 0 instead.
+     */
+    @Test
+    @DisplayName("deleting the first entry of a conversation is detected")
+    void deletedHeadEntryIsDetected() {
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-2", 1), entryAt("id-3", 2)));
+        // The head anchor engages only when the window provably covers the whole
+        // conversation. This test predates that rule — it was written against the
+        // earlier skip==0 heuristic, which was unsound because getEntries pages
+        // NEWEST-first, so skip==0 is the most recent page rather than the start.
+        // Without this stub Mockito returns 0, the anchor never engages, and the
+        // report comes back INTACT. Kept rather than deleted as a duplicate of
+        // deletedFirstEntryIsDetected because only this one asserts
+        // tamperingSuspected().
+        when(auditStore.countByConversation("conv-1")).thenReturn(2L);
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(ChainStatus.BROKEN, report.chainStatus());
+        assertEquals(List.of(0L), report.missingSequences());
+        assertTrue(report.tamperingSuspected());
+    }
+
+    /**
+     * The head anchor may only be applied when the page provably covers the start
+     * of the conversation. A paginated sweep (non-zero skip) starts wherever the
+     * store's newest-first window lands, so anchoring at 0 there would report the
+     * whole preceding history as deleted.
+     */
+    @Test
+    @DisplayName("a paginated sweep does not anchor the run at zero")
+    void paginatedSweepDoesNotAnchorAtZero() {
+        when(auditStore.getEntries("conv-1", 10, 1000)).thenReturn(List.of(entryAt("id-11", 10), entryAt("id-12", 11)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 10, 1000);
+
+        assertEquals(ChainStatus.INTACT, report.chainStatus());
+        assertTrue(report.missingSequences().isEmpty());
+    }
+
+    @Test
+    @DisplayName("a full page does not anchor the run at zero either")
+    void fullPageDoesNotAnchorAtZero() {
+        when(auditStore.getEntries("conv-1", 0, 2)).thenReturn(List.of(entryAt("id-8", 8), entryAt("id-9", 9)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 2);
+
+        assertEquals(ChainStatus.INTACT, report.chainStatus());
+        assertTrue(report.missingSequences().isEmpty());
+    }
+
+    /**
+     * The G18/G20 collision: the ledger's own back-pressure drops consume chain
+     * positions, and without attribution the resulting hole reads exactly like a
+     * deleted row. A gap the ledger admits to is {@code INCOMPLETE}, not
+     * {@code BROKEN} — the report must not accuse the deployment of tampering for
+     * entries the deployment never got to write.
+     */
+    @Test
+    @DisplayName("a gap the ledger itself caused is reported as INCOMPLETE, not BROKEN")
+    void selfInflictedGapIsNotReportedAsTampering() {
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-1", 0), entryAt("id-3", 2)));
+        when(auditLedgerService.undeliveredSequences("conv-1")).thenReturn(Set.of(1L));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(ChainStatus.INCOMPLETE, report.chainStatus());
+        assertEquals(List.of(1L), report.undeliveredSequences());
+        assertTrue(report.missingSequences().isEmpty(), "an entry the ledger dropped is not a deleted entry");
+        assertFalse(report.tamperingSuspected());
+        assertFalse(report.intact(), "the record is still incomplete");
+    }
+
+    @Test
+    @DisplayName("an unattributed gap alongside an attributed one still reports BROKEN")
+    void unattributedGapStillBreaksTheChain() {
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-1", 0), entryAt("id-4", 3)));
+        when(auditLedgerService.undeliveredSequences("conv-1")).thenReturn(Set.of(1L));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(ChainStatus.BROKEN, report.chainStatus());
+        assertEquals(List.of(2L), report.missingSequences());
+        assertEquals(List.of(1L), report.undeliveredSequences());
+        assertTrue(report.tamperingSuspected());
     }
 }

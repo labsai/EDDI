@@ -20,9 +20,12 @@ import org.jboss.logging.Logger;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -201,6 +204,70 @@ class StreamingLegacyChatExecutor {
      * Qute-templated value cannot be resolved here and simply leaves the default in
      * place — the pre-existing behaviour, never a shorter bound.
      */
+    /**
+     * Tasks already warned about a below-backstop {@code timeout}, keyed by task id
+     * and configured value.
+     * <p>
+     * {@link #resolveTimeoutSeconds} runs on the PER-REQUEST path (once per
+     * streaming turn, and again per cascade step via
+     * {@code CascadingModelExecutor.resolveStreamingStepTimeoutMs}), so an
+     * unconditional warning fires on every single turn for the whole lifetime of a
+     * config that will never change. {@code ChatModelRegistry} makes the same
+     * distinction deliberately — it warns on the build path only, never on a cache
+     * hit.
+     * <p>
+     * Explicitly bounded. An earlier comment claimed it was "bounded because a
+     * config edit re-keys the entry", which is backwards: re-keying ADDS a key and
+     * leaves the old one behind, so config edits are exactly what made this grow.
+     * Keyed on (taskId, timeoutMs), the key space is unbounded over the life of a
+     * process.
+     * <p>
+     * Bounded with a size check and a clear, NOT with a Caffeine cache: this is
+     * read on the per-request path (once per streaming turn, again per cascade
+     * step), and putting cache machinery there measurably slowed it — two
+     * timing-sensitive tests failed on a 66ms budget when it was tried. A plain key
+     * set plus an O(1) size check costs nothing per call.
+     * <p>
+     * Clearing on overflow rather than refusing to add: a hard cap would silently
+     * stop warning about genuinely new misconfigurations, which is the failure mode
+     * this warning exists to prevent. Worst case here is that an already-warned
+     * task warns once more — noise, not silence.
+     */
+    private static final Set<String> shortTimeoutWarned = ConcurrentHashMap.newKeySet();
+
+    /** Upper bound on retained warn-suppression keys. */
+    private static final int MAX_WARNED_TIMEOUT_KEYS = 1_000;
+
+    /**
+     * Record that {@code key} has been warned about, returning true when this call
+     * is the one that should emit the warning.
+     */
+    private static boolean rememberWarned(String key) {
+        if (shortTimeoutWarned.size() >= MAX_WARNED_TIMEOUT_KEYS) {
+            shortTimeoutWarned.clear();
+        }
+        return shortTimeoutWarned.add(key);
+    }
+
+    /** How many below-backstop warnings have actually been emitted. */
+    private static final AtomicInteger shortTimeoutWarnings = new AtomicInteger();
+
+    private static String warnKey(LlmConfiguration.Task task, long millis) {
+        String id = task != null && task.getId() != null ? task.getId() : "<unnamed>";
+        return id + '@' + millis;
+    }
+
+    /** Test hook: emitted below-backstop warnings since the last reset. */
+    static int shortTimeoutWarningCount() {
+        return shortTimeoutWarnings.get();
+    }
+
+    /** Test hook: forget which tasks have been warned about. */
+    static void resetShortTimeoutWarnings() {
+        shortTimeoutWarned.clear();
+        shortTimeoutWarnings.set(0);
+    }
+
     static long resolveTimeoutSeconds(LlmConfiguration.Task task) {
         if (task == null) {
             return DEFAULT_TIMEOUT_SECONDS;
@@ -223,7 +290,8 @@ class StreamingLegacyChatExecutor {
             // Finding F11: the raise-only floor is deliberate (see the javadoc above),
             // but it used to be silent — an operator configuring timeout=5000 still
             // waited the full 120s with nothing in the log explaining why. Say so.
-            if (seconds < DEFAULT_TIMEOUT_SECONDS) {
+            if (seconds < DEFAULT_TIMEOUT_SECONDS && rememberWarned(warnKey(task, millis))) {
+                shortTimeoutWarnings.incrementAndGet();
                 LOGGER.warnf("The 'timeout' parameter (%dms ≈ %ds) is SHORTER than the %ds streaming backstop and does NOT shorten it — "
                         + "the provider's own client timeout still applies, but this executor will wait up to %ds. "
                         + "Set 'streamingTimeoutSeconds' to lower the backstop.", millis, seconds, DEFAULT_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);

@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import jakarta.annotation.security.RolesAllowed;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -67,15 +69,19 @@ public interface IRestAgentGroupStore extends IRestVersionInfo {
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update group configuration.")
+    @APIResponse(responseCode = "400", description = "Invalid group configuration (see the violation report).")
     Response updateGroup(@PathParam("id") String id,
                          @Parameter(name = "version", required = true, example = "1")
                          @QueryParam("version") Integer version,
-                         AgentGroupConfiguration groupConfiguration);
+                         @NotNull
+                         @Valid AgentGroupConfiguration groupConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Create group configuration.")
-    Response createGroup(AgentGroupConfiguration groupConfiguration);
+    @APIResponse(responseCode = "400", description = "Invalid group configuration (see the violation report).")
+    Response createGroup(@NotNull
+    @Valid AgentGroupConfiguration groupConfiguration);
 
     @POST
     @Path("/{id}")

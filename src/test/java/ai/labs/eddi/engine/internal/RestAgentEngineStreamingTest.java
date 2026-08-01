@@ -15,12 +15,14 @@ import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
@@ -271,6 +273,83 @@ class RestAgentEngineStreamingTest {
     }
 
     /**
+     * A12 — the non-streaming surfaces stopped echoing raw exception text
+     * (correlation id + fixed message instead), because a sneaky-thrown
+     * {@code ResourceStoreException} from the store layer names collections, hosts
+     * and replica-set members. The SSE twin kept pushing {@code error.getMessage()}
+     * straight down a channel a browser renders — the same reconnaissance, over a
+     * different pipe.
+     */
+    @Nested
+    @DisplayName("A12 — SSE error events are opaque")
+    class OpaqueErrorEvents {
+
+        private static final String LEAKY = "Command failed on replica-set member mongo-3.internal:27017, "
+                + "db=eddi, collection=conversationmemories";
+
+        /** Captures the JSON body of every SSE frame the endpoint emitted. */
+        private List<String> sentPayloads(OutboundSseEvent.Builder eventBuilder) {
+            var payloads = ArgumentCaptor.forClass(String.class);
+            verify(eventBuilder, atLeastOnce()).data(any(Class.class), payloads.capture());
+            return payloads.getAllValues();
+        }
+
+        private OutboundSseEvent.Builder wire(Sse sse) {
+            var eventBuilder = mock(OutboundSseEvent.Builder.class);
+            var sseEvent = mock(OutboundSseEvent.class);
+            when(sse.newEventBuilder()).thenReturn(eventBuilder);
+            when(eventBuilder.name(anyString())).thenReturn(eventBuilder);
+            when(eventBuilder.data(any(Class.class), anyString())).thenReturn(eventBuilder);
+            when(eventBuilder.build()).thenReturn(sseEvent);
+            return eventBuilder;
+        }
+
+        @Test
+        @DisplayName("a startup failure does not leak the store's exception text")
+        void startupFailureIsOpaque() throws Exception {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
+            var eventBuilder = wire(sse);
+            when(eventSink.isClosed()).thenReturn(false);
+
+            doThrow(new RuntimeException(LEAKY))
+                    .when(conversationService).sayStreaming(anyString(), any(), any(), any(), any(), any());
+
+            var inputData = new InputData();
+            inputData.setInput("Hello");
+            streaming.sayStreaming("conv-1", false, false, List.of(), inputData, eventSink, sse);
+
+            String errorFrame = sentPayloads(eventBuilder).getLast();
+            assertFalse(errorFrame.contains("mongo-3.internal"), "the SSE error frame must not name deployment internals");
+            assertFalse(errorFrame.contains("conversationmemories"));
+            assertTrue(errorFrame.contains("correlationId"), "the caller needs a handle to quote in a support ticket");
+        }
+
+        @Test
+        @DisplayName("a mid-stream failure does not leak the store's exception text")
+        void midStreamFailureIsOpaque() throws Exception {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
+            var eventBuilder = wire(sse);
+            when(eventSink.isClosed()).thenReturn(false);
+
+            var inputData = new InputData();
+            inputData.setInput("Hello");
+            streaming.sayStreaming("conv-1", false, false, List.of(), inputData, eventSink, sse);
+
+            var captor = ArgumentCaptor.forClass(IConversationService.StreamingResponseHandler.class);
+            verify(conversationService).sayStreaming(eq("conv-1"), any(), any(), any(), any(), captor.capture());
+
+            captor.getValue().onError(new IllegalStateException(LEAKY));
+
+            String errorFrame = sentPayloads(eventBuilder).getLast();
+            assertFalse(errorFrame.contains("mongo-3.internal"), "the SSE error frame must not name deployment internals");
+            assertFalse(errorFrame.contains("conversationmemories"));
+            assertTrue(errorFrame.contains("correlationId"));
+        }
+    }
+
+    /**
      * F6 — the streaming endpoint receives only {@link SseEventSink}/{@link Sse}
      * and never signalled cancellation, so closing the tab at token 5 of 4000 still
      * streamed (and billed) the whole completion, possibly escalating through the
@@ -388,6 +467,56 @@ class RestAgentEngineStreamingTest {
             handler.onComplete(readySnapshot());
 
             verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
+        }
+
+        /**
+         * A cancelled turn is DISCARDED, not saved: ConversationService deliberately
+         * skips persistence for a cancelled turn, so the user's own message and
+         * everything produced so far are lost and the conversation settles on
+         * EXECUTION_INTERRUPTED. On flaky networks (proxy idle timeouts, a phone
+         * switching from Wi-Fi to cellular) that trades a saved exchange for a saved
+         * completion — which is the wrong trade for some deployments, hence the switch.
+         */
+        @Test
+        @DisplayName("with eddi.streaming.cancel-on-client-disconnect off, a disconnect lets the turn finish and persist")
+        void disconnectDoesNotCancelWhenTheSwitchIsOff() throws Exception {
+            streaming = new RestAgentEngineStreaming(conversationService, conversationAccessGuard, false);
+
+            var handler = start("conv-6");
+            when(eventSink.isClosed()).thenReturn(true);
+
+            handler.onToken("tok-5");
+            handler.onToken("tok-6");
+            handler.onTaskComplete(new TaskId("ai.labs.llm"), "langchain", 5L, Map.of());
+
+            verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
+        }
+
+        /**
+         * The behaviour is operator-configurable through a real config key — not a
+         * hardcoded constant with a doc comment. Pins the key name and the shipped
+         * default so neither can drift away from the documented semantics.
+         */
+        @Test
+        @DisplayName("the disconnect cancel is bound to eddi.streaming.cancel-on-client-disconnect, defaulting to on")
+        void disconnectCancelIsBoundToAConfigProperty() throws Exception {
+            var constructor = RestAgentEngineStreaming.class.getDeclaredConstructor(
+                    IConversationService.class, ConversationAccessGuard.class, boolean.class);
+
+            String defaultValue = null;
+            for (Annotation[] parameterAnnotations : constructor.getParameterAnnotations()) {
+                for (Annotation annotation : parameterAnnotations) {
+                    if (annotation instanceof ConfigProperty configProperty
+                            && "eddi.streaming.cancel-on-client-disconnect".equals(configProperty.name())) {
+                        defaultValue = configProperty.defaultValue();
+                    }
+                }
+            }
+
+            assertNotNull(defaultValue,
+                    "the disconnect cancel must be bound to eddi.streaming.cancel-on-client-disconnect so operators can turn it off");
+            assertTrue(Boolean.parseBoolean(defaultValue),
+                    "the shipped default must keep the cost-saving cancel enabled");
         }
     }
 }

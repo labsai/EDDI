@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.tools;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.RemovalCause;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import jakarta.annotation.PostConstruct;
@@ -76,6 +77,27 @@ public class ToolRateLimiter {
     }
 
     /**
+     * Index from tool name to the keys of that tool's live buckets.
+     * <p>
+     * Every per-tool read ({@link #getRemaining}, {@link #getInfo},
+     * {@link #getResetTimeMs}) needs the tightest bucket for ONE tool, and the
+     * Micrometer gauge calls {@link #getRemaining} on every scrape. Deriving that
+     * by iterating the whole 100,000-entry store made metrics scraping O(tools ×
+     * live conversations) and took every bucket's monitor on the way, contending
+     * with the live {@link #tryAcquire} path. The index keeps the scan proportional
+     * to the tool's own buckets.
+     * <p>
+     * Declared before {@link #buckets} on purpose — the cache's removal listener
+     * writes to it, so it must already be initialised.
+     * <p>
+     * Entries are never removed, only emptied: the key set is the set of tool
+     * names, which is bounded by the deployment's configured tools, whereas
+     * removing an emptied set would race with a concurrent {@code bucketFor} adding
+     * to the very set being dropped.
+     */
+    private final Map<String, Set<BucketKey>> bucketKeysByTool = new ConcurrentHashMap<>();
+
+    /**
      * Buckets are now keyed per conversation, so the store has to be bounded.
      * <p>
      * Idle expiry is safe rather than merely convenient: a bucket refills
@@ -88,6 +110,14 @@ public class ToolRateLimiter {
     private final Cache<BucketKey, RateLimitBucket> buckets = Caffeine.newBuilder()
             .maximumSize(100_000)
             .expireAfterAccess(Duration.ofMillis(2 * WINDOW_MS))
+            .removalListener((BucketKey key, RateLimitBucket value, RemovalCause cause) -> {
+                if (key != null) {
+                    Set<BucketKey> keys = bucketKeysByTool.get(key.toolName());
+                    if (keys != null) {
+                        keys.remove(key);
+                    }
+                }
+            })
             .build();
 
     /** Tool names whose {@code remaining} gauge has already been registered. */
@@ -284,13 +314,16 @@ public class ToolRateLimiter {
     }
 
     private RateLimitBucket bucketFor(String scope, String toolName, int limit) {
-        return buckets.asMap().compute(new BucketKey(scope, toolName), (key, existing) -> {
+        BucketKey bucketKey = new BucketKey(scope, toolName);
+        RateLimitBucket bucket = buckets.asMap().compute(bucketKey, (key, existing) -> {
             if (existing == null) {
                 return new RateLimitBucket(limit);
             }
             existing.updateLimit(limit);
             return existing;
         });
+        bucketKeysByTool.computeIfAbsent(toolName, tool -> ConcurrentHashMap.newKeySet()).add(bucketKey);
+        return bucket;
     }
 
     /**
@@ -311,21 +344,46 @@ public class ToolRateLimiter {
         }
     }
 
+    /** The keys {@link #mostConstrained} examines — this tool's buckets only. */
+    private Set<BucketKey> scanCandidates(String toolName) {
+        Set<BucketKey> keys = bucketKeysByTool.get(toolName);
+        return keys != null ? keys : Set.of();
+    }
+
+    /**
+     * How many buckets a per-tool read will examine. The test hook that pins the
+     * index: a regression to the full-store scan makes the work proportional to
+     * EVERY tool's buckets again, which no return value can reveal — the results
+     * are identical either way, only the cost differs.
+     */
+    int scanCandidateCount(String toolName) {
+        return scanCandidates(toolName).size();
+    }
+
     /**
      * The bucket for this tool with the least headroom, or {@code null} when the
      * tool has no live bucket.
      */
     private RateLimitBucket mostConstrained(String toolName) {
+        Set<BucketKey> candidates = scanCandidates(toolName);
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        Map<BucketKey, RateLimitBucket> live = buckets.asMap();
         RateLimitBucket tightest = null;
         int tightestRemaining = Integer.MAX_VALUE;
-        for (Map.Entry<BucketKey, RateLimitBucket> entry : buckets.asMap().entrySet()) {
-            if (!entry.getKey().toolName().equals(toolName)) {
+        for (BucketKey key : candidates) {
+            RateLimitBucket bucket = live.get(key);
+            if (bucket == null) {
+                // Evicted or expired between the removal listener firing and now —
+                // drop the stale key rather than reporting a bucket that is gone.
+                candidates.remove(key);
                 continue;
             }
-            int remaining = entry.getValue().getRemaining();
+            int remaining = bucket.getRemaining();
             if (remaining < tightestRemaining) {
                 tightestRemaining = remaining;
-                tightest = entry.getValue();
+                tightest = bucket;
             }
         }
         return tightest;
@@ -352,6 +410,12 @@ public class ToolRateLimiter {
      */
     public void reset(String toolName) {
         buckets.asMap().keySet().removeIf(key -> key.toolName().equals(toolName));
+        // The removal listener also clears these, but it may run asynchronously —
+        // reset() must be observable immediately to its caller.
+        Set<BucketKey> keys = bucketKeysByTool.get(toolName);
+        if (keys != null) {
+            keys.clear();
+        }
         LOGGER.info("Reset rate limit for tool: " + sanitize(toolName));
     }
 
@@ -361,6 +425,7 @@ public class ToolRateLimiter {
     public void resetAll() {
         buckets.invalidateAll();
         buckets.cleanUp();
+        bucketKeysByTool.clear();
         LOGGER.info("Reset all tool rate limits");
     }
 

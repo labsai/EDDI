@@ -20,10 +20,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -32,6 +34,13 @@ import static org.mockito.Mockito.*;
 
 @SuppressWarnings("unchecked")
 class PrePostUtilsTest {
+
+    /** Mirrors the template data keys used by {@link PrePostUtils}. */
+    private static final String KEY_FIELD_DELIMITER = "eddiFieldDelimiter";
+    private static final String KEY_ROW_DELIMITER = "eddiRowDelimiter";
+
+    /** A nonce baked into the template text — exactly what must not happen. */
+    private static final Pattern NONCE_IN_TEMPLATE = Pattern.compile("eddi(Field|Row)[0-9a-f]{32}");
 
     private PrePostUtils prePostUtils;
     private IJsonSerialization jsonSerialization;
@@ -424,17 +433,54 @@ class PrePostUtilsTest {
 
             assertEquals(List.of(unsafe), result);
         }
+
+        @Test
+        @DisplayName("the row delimiter is re-randomised for every invocation")
+        void rowDelimiterIsRandomisedPerInvocation() throws Exception {
+            stubIterationRender(List.of(List.of("value")));
+
+            prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
+            prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
+
+            @SuppressWarnings("rawtypes")
+            ArgumentCaptor<Map> captor = ArgumentCaptor.forClass(Map.class);
+            verify(templatingEngine, times(2)).processTemplate(anyString(), captor.capture());
+
+            var first = String.valueOf(captor.getAllValues().get(0).get(KEY_ROW_DELIMITER));
+            var second = String.valueOf(captor.getAllValues().get(1).get(KEY_ROW_DELIMITER));
+
+            assertTrue(first.matches("eddiRow[0-9a-f]{32}"), "delimiter must carry a 128-bit random nonce, was: " + first);
+            assertNotEquals(first, second, "a constant nonce makes the delimiter forgeable by upstream content");
+        }
+
+        @Test
+        @DisplayName("the template text is nonce-free, so it stays a stable compiled-template cache key")
+        void templateTextStaysStableAcrossInvocations() throws Exception {
+            stubIterationRender(List.of(List.of("value")));
+
+            prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
+            prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
+
+            ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+            verify(templatingEngine, times(2)).processTemplate(captor.capture(), any());
+
+            assertEquals(captor.getAllValues().get(0), captor.getAllValues().get(1),
+                    "a nonce inside the template text makes every execution a compiled-template cache miss");
+            assertFalse(NONCE_IN_TEMPLATE.matcher(captor.getAllValues().getFirst()).find(),
+                    "no nonce may leak into the template text: " + captor.getAllValues().getFirst());
+        }
     }
 
     /**
      * Stand in for the templating engine: read the per-invocation delimiters back
-     * out of the generated Qute template and emit the given rows with them.
+     * out of the template DATA (the template text is deliberately nonce-free) and
+     * emit the given rows with them.
      */
     private void stubIterationRender(List<List<String>> renderedRows) throws Exception {
         when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(invocation -> {
-            String template = invocation.getArgument(0);
-            String rowDelimiter = extractDelimiter(template, "eddiRow");
-            String fieldDelimiter = extractDelimiter(template, "eddiField");
+            Map<String, Object> renderData = invocation.getArgument(1);
+            String rowDelimiter = String.valueOf(renderData.get(KEY_ROW_DELIMITER));
+            String fieldDelimiter = String.valueOf(renderData.get(KEY_FIELD_DELIMITER));
 
             var rendered = new StringBuilder();
             for (var row : renderedRows) {
@@ -442,10 +488,5 @@ class PrePostUtilsTest {
             }
             return rendered.toString();
         });
-    }
-
-    private static String extractDelimiter(String template, String prefix) {
-        var matcher = java.util.regex.Pattern.compile(prefix + "[0-9a-f]{32}").matcher(template);
-        return matcher.find() ? matcher.group() : "";
     }
 }

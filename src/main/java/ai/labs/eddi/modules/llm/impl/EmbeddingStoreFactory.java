@@ -63,15 +63,27 @@ public class EmbeddingStoreFactory {
     private static final Pattern UNSAFE_IDENTIFIER_CHARS = Pattern.compile("[^a-z0-9_]");
     private static final Pattern TRAILING_UNDERSCORES = Pattern.compile("_+$");
 
+    /** Ceiling on cached embedding stores across every knowledge base. */
+    static final int MAX_STORES = 50;
+
     /**
      * Ceiling on distinct MongoDB deployments a single EDDI instance keeps clients
-     * for. Generous relative to any realistic number of Atlas clusters behind one
-     * deployment's knowledge bases, which is what makes size-based eviction safe:
-     * it only fires in the pathological case the bound exists to contain.
+     * for.
+     * <p>
+     * Deliberately LARGER than {@link #MAX_STORES}. A size eviction here closes the
+     * client, and a live {@code MongoDbEmbeddingStore} built from it keeps using it
+     * — every distinct connection string reachable from the store cache therefore
+     * needs a client slot, or the crude fallback breaks the very stores it is
+     * bounding. With one client per store at worst, the bound cannot bite until
+     * more distinct deployments exist than the store cache can hold stores.
+     * <p>
+     * This was 20 against a 50-entry store cache, i.e. a bound that fires while 30
+     * cached stores still hold clients.
      */
-    static final int MAX_MONGO_CLIENTS = 20;
+    static final int MAX_MONGO_CLIENTS = MAX_STORES + 14;
 
-    private final Cache<String, EmbeddingStore<TextSegment>> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30))
+    private final Cache<String, EmbeddingStore<TextSegment>> cache = Caffeine.newBuilder().maximumSize(MAX_STORES)
+            .expireAfterAccess(Duration.ofMinutes(30))
             .build();
 
     /**
@@ -89,10 +101,25 @@ public class EmbeddingStoreFactory {
      * store <em>build</em> path, so an actively used store would not refresh it,
      * and an expiring entry would close a client that a live
      * {@code MongoDbEmbeddingStore} still holds.
+     * <p>
+     * Size eviction has exactly the same hazard — it also closes a client a live
+     * store may still hold; the bound is not "safe" where a TTL is not. What makes
+     * it tolerable is that it is unreachable in normal operation:
+     * {@link #MAX_MONGO_CLIENTS} exceeds {@link #MAX_STORES}, so it cannot fire
+     * while every client is reachable from a cached store. Reaching it at all is
+     * logged, because the symptom otherwise is an inexplicable "state should be:
+     * open" from a store that used to work.
      */
     private final Cache<String, MongoClient> mongoClientCache = Caffeine.newBuilder()
             .maximumSize(MAX_MONGO_CLIENTS)
-            .removalListener((String key, MongoClient client, RemovalCause cause) -> closeQuietly(client))
+            .removalListener((String key, MongoClient client, RemovalCause cause) -> {
+                if (cause == RemovalCause.SIZE) {
+                    LOGGER.warnf("Closing a pooled MongoClient because more than %d distinct MongoDB deployments are in use by "
+                            + "vector stores. Any embedding store still holding this client will start failing; reduce the number of "
+                            + "distinct connection strings across knowledge bases.", MAX_MONGO_CLIENTS);
+                }
+                closeQuietly(client);
+            })
             .build();
 
     private final GlobalVariableResolver globalVariableResolver;

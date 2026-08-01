@@ -5,14 +5,17 @@
 package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IData;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class OccurrenceTest {
 
@@ -67,6 +70,53 @@ class OccurrenceTest {
         assertNotSame(occ, cloned);
         assertEquals("occurrence", cloned.getId());
         assertEquals("test", cloned.getConfigs().get("behaviorRuleName"));
+    }
+
+    @Test
+    void validateConfiguration_withoutBehaviorRuleName_isRejected() {
+        var occ = new Occurrence();
+        occ.setConfigs(Map.of("maxTimesOccurred", "3"));
+
+        var thrown = assertThrows(IllegalArgumentException.class, occ::validateConfiguration);
+        assertTrue(thrown.getMessage().contains("behaviorRuleName"), thrown.getMessage());
+    }
+
+    @Test
+    void validateConfiguration_withoutAnyBound_isRejected() {
+        var occ = new Occurrence();
+        occ.setConfigs(Map.of("behaviorRuleName", "greet"));
+
+        var thrown = assertThrows(IllegalArgumentException.class, occ::validateConfiguration);
+        assertTrue(thrown.getMessage().contains("minTimesOccurred"), thrown.getMessage());
+    }
+
+    @Test
+    void validateConfiguration_withNameAndBound_passes() {
+        var occ = new Occurrence();
+        occ.setConfigs(Map.of("behaviorRuleName", "greet", "minTimesOccurred", "1"));
+
+        assertDoesNotThrow(occ::validateConfiguration);
+    }
+
+    /**
+     * Rulesets stored before the validation existed can still carry an unnamed
+     * occurrence — counting must yield 0 rather than throwing on the conversation
+     * thread.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void execute_withoutBehaviorRuleName_countsNothingInsteadOfThrowing() {
+        var occ = new Occurrence();
+        occ.setConfigs(Map.of("minTimesOccurred", "1"));
+
+        var memory = mock(IConversationMemory.class);
+        var allSteps = mock(IConversationMemory.IConversationStepStack.class);
+        IData<Object> data = mock(IData.class);
+        when(data.getResult()).thenReturn(List.of("greet"));
+        when(memory.getAllSteps()).thenReturn(allSteps);
+        when(allSteps.<Object>getAllData("behavior_rules:success")).thenReturn(List.of(List.of(data)));
+
+        assertEquals(IRuleCondition.ExecutionState.FAIL, occ.execute(memory, new LinkedList<>()));
     }
 
     @Test

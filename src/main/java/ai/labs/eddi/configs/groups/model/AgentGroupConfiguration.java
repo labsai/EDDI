@@ -7,6 +7,8 @@ package ai.labs.eddi.configs.groups.model;
 import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlRejectionPolicy;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Size;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,11 +23,38 @@ import java.util.Objects;
  * @author ginccc
  */
 public class AgentGroupConfiguration {
+
+    /**
+     * Upper bound on {@link #members}. Every member is one LLM call per phase, so
+     * the member list sizes the discussion's fan-out directly. 100 is far beyond
+     * any deliberated group (the dynamic-agent guardrails default to 5 created / 10
+     * recruited members) while still bounding a pathological list.
+     */
+    public static final int MAX_MEMBERS = 100;
+
+    /**
+     * Upper bound on {@link #maxRounds}. {@code DiscussionStylePresets.expand}
+     * multiplies this into concrete phases for ROUND_TABLE and DELPHI, and every
+     * phase fans out to every member — so this value alone multiplies the LLM cost
+     * of a single discussion. 50 rounds against even a small group is already
+     * hundreds of model calls; nothing legitimate goes near it, and without the
+     * bound a config could ask for millions of phases.
+     * <p>
+     * Deliberately only an upper bound: {@code expand()} already clamps the low
+     * side with {@code Math.max(maxRounds, 1)}, so rejecting 0 would break configs
+     * that legitimately leave it unset for round-less styles such as DEBATE.
+     */
+    public static final int MAX_DISCUSSION_ROUNDS = 50;
+
     private String name;
     private String description;
+
+    @Size(max = MAX_MEMBERS, message = "'members' must contain at most {max} entries")
     private List<GroupMember> members = new ArrayList<>();
     private String moderatorAgentId;
     private DiscussionStyle style;
+
+    @Max(value = MAX_DISCUSSION_ROUNDS, message = "'maxRounds' must be at most {value}")
     private int maxRounds = 2;
     private List<DiscussionPhase> phases;
     private ProtocolConfig protocol;

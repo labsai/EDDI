@@ -381,4 +381,31 @@ class EmbeddingStoreFactoryTest {
                     "two different clusters must never share one client");
         }
     }
+
+    /**
+     * The MongoClient cache rules out an idle TTL precisely because expiry would
+     * close a client a live {@code MongoDbEmbeddingStore} still holds — but a SIZE
+     * eviction closes it just the same. The bound was 20 against a 50-entry store
+     * cache, so 30 cached stores could be holding a client the client cache had
+     * already closed.
+     */
+    @Nested
+    @DisplayName("pooled MongoClient bound")
+    class MongoClientBound {
+
+        @Test
+        @DisplayName("more client slots than store slots, so eviction cannot close a client a cached store holds")
+        void clientBoundExceedsStoreBound() {
+            // MAX_MONGO_CLIENTS is DEFINED as MAX_STORES + 14, so asserting the
+            // inequality can never fail — it is guaranteed by construction, which is
+            // exactly why it asserts nothing. Pin the two bounds and the headroom
+            // instead: if someone redefines either as a bare literal, or shrinks the
+            // gap, this fails and they have to think about whether eviction can still
+            // close a client that a cached store is holding.
+            assertEquals(50, EmbeddingStoreFactory.MAX_STORES);
+            assertEquals(64, EmbeddingStoreFactory.MAX_MONGO_CLIENTS);
+            assertEquals(14, EmbeddingStoreFactory.MAX_MONGO_CLIENTS - EmbeddingStoreFactory.MAX_STORES,
+                    "client slots must exceed store slots, or evicting a client can close one a cached store holds");
+        }
+    }
 }

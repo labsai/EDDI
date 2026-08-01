@@ -95,8 +95,16 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
     @Override
     public Response updateResourceInWorkflow(String id, Integer version, URI resourceURI) {
-        String resourceURIString = resourceURI.toString();
-        String resourceURIWithoutVersion = resourceURIString.substring(0, resourceURIString.lastIndexOf("?"));
+        // Must carry a real version, not merely a '?' — same guard and same reason as
+        // the agent-store variant: a stored reference is matched by everything before
+        // the query and then replaced by this URI, so '...?other=2' would overwrite a
+        // versioned reference with a versionless one.
+        String resourceURIWithoutVersion = RestUtilities.pathWithoutVersionQuery(resourceURI);
+        if (resourceURIWithoutVersion == null) {
+            return Response.status(BAD_REQUEST)
+                    .entity("resourceURI must carry a version, e.g. '...?version=2'")
+                    .type(MediaType.TEXT_PLAIN).build();
+        }
 
         boolean updated = false;
         WorkflowConfiguration workflowConfig = readWorkflow(id, version);

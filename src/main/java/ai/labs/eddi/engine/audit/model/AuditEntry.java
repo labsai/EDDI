@@ -144,8 +144,16 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
     }
 
     /**
-     * Return a copy of this entry with the user identifier replaced. The sole
-     * permitted content mutation (GDPR Art. 17(3)(e) pseudonymisation).
+     * Return a copy of this entry with the user identifier replaced — the in-memory
+     * mirror of the single mutation GDPR Art. 17(3)(e) permits on the ledger.
+     * <p>
+     * <strong>Not the production erasure path.</strong> Real pseudonymisation is a
+     * server-side bulk update ({@code IAuditStore.pseudonymizeByUserId}); nothing
+     * in {@code src/main} calls this. It exists so tests can reproduce a
+     * pseudonymised row and assert that it still verifies — which is the property
+     * that stops every routine erasure from manufacturing rows indistinguishable
+     * from tampered ones. Keep it aligned with what the store's {@code updateMany}
+     * does, or those tests stop proving anything about production.
      */
     public AuditEntry withUserId(String newUserId) {
         return new AuditEntry(id, conversationId, agentId, agentVersion, newUserId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,

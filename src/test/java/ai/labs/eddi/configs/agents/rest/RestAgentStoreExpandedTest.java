@@ -256,6 +256,84 @@ class RestAgentStoreExpandedTest {
 
             assertEquals(400, response.getStatus());
         }
+
+        @Test
+        @DisplayName("preserves hitlConfig — the approval gate survives a re-point")
+        void preservesHitlConfig() throws Exception {
+            // This endpoint is the ONLY way an approval-gated agent can be re-pointed at
+            // a new workflow version, because the full PUT /agentstore/agents/{id} is
+            // permanently unbound (the gate lives in that document, so one approved write
+            // there would remove all subsequent gating). It is safe to bind only if it
+            // provably cannot drop the gate: the caller cannot SUPPLY a hitlConfig — the
+            // body is a text/plain URI — and the implementation must PRESERVE the stored
+            // one. The signature guarantees the first; this asserts the second.
+            var config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1"))));
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.delete:*"));
+            toolApprovals.setExempt(List.of("http.get:*"));
+            hitl.setToolApprovals(toolApprovals);
+            config.setHitlConfig(hitl);
+
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
+            when(agentStore.update(eq(AGENT_ID), eq(1), any())).thenReturn(2);
+
+            URI newUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=2");
+            assertEquals(200, sut.updateResourceInAgent(AGENT_ID, 1, newUri).getStatus());
+
+            var captor = org.mockito.ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(agentStore).update(eq(AGENT_ID), eq(1), captor.capture());
+            var written = captor.getValue();
+            assertNotNull(written.getHitlConfig(), "the gate must survive a re-point");
+            assertEquals(List.of("http.post:*", "http.put:*", "http.delete:*"),
+                    written.getHitlConfig().getToolApprovals().getRequireApproval());
+            assertEquals(List.of("http.get:*"), written.getHitlConfig().getToolApprovals().getExempt());
+            // ...and ONLY the URI list changed.
+            assertEquals(List.of(newUri), written.getWorkflows());
+        }
+
+        @Test
+        @DisplayName("a URI without ?version is a 400, not a 500")
+        void uriWithoutVersionIsRejected() throws Exception {
+            // resourceURI.toString().substring(0, lastIndexOf("?")) throws
+            // StringIndexOutOfBoundsException when there is no '?', turning a caller's
+            // malformed input into a 500. That matters here more than usual: this
+            // endpoint is on the re-point cascade an approval-gated operator has to walk
+            // to finish editing an agent, so its failure mode is one an LLM will hit and
+            // has to be able to act on.
+            var config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1"))));
+            lenient().when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
+
+            URI noVersion = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID);
+            Response response = sut.updateResourceInAgent(AGENT_ID, 1, noVersion);
+
+            assertEquals(400, response.getStatus());
+            verify(agentStore, never()).update(eq(AGENT_ID), eq(1), any());
+        }
+
+        @Test
+        @DisplayName("a query without a version parameter cannot unpin the stored reference")
+        void queryWithoutVersionParameterIsRejected() throws Exception {
+            // Guarding on the presence of a '?' alone is not enough: the stored reference
+            // is matched by everything BEFORE the query and then replaced by the supplied
+            // URI, so '?other=2' would match the versioned reference and overwrite it
+            // with a versionless one — silently unpinning the workflow the agent resolves
+            // at runtime.
+            var config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1"))));
+            lenient().when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
+
+            for (String query : List.of("?other=2", "?version=", "?version=abc", "?versionx=2", "?")) {
+                URI bad = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + query);
+                assertEquals(400, sut.updateResourceInAgent(AGENT_ID, 1, bad).getStatus(), "must refuse: " + query);
+            }
+            verify(agentStore, never()).update(eq(AGENT_ID), eq(1), any());
+        }
     }
 
     // ─── duplicateAgent ────────────────────────────────────────────────────────

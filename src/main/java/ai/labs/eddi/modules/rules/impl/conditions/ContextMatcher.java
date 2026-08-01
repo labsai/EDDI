@@ -203,6 +203,14 @@ public class ContextMatcher implements IRuleCondition {
             return false;
         }
 
+        if (!isSupportedContextType(context.getType())) {
+            // Not a plain type mismatch: no contextmatcher configuration can ever match
+            // this context, so the author's rule silently never fires. Worth a warning.
+            log.warnf("Context '%s' is of runtime type '%s', which '%s' cannot evaluate (supported types: %s)."
+                    + " This condition can never match.", contextKey, context.getType(), ID, Arrays.toString(ContextType.values()));
+            return false;
+        }
+
         if (!context.getType().toString().equals(contextType)) {
             log.debugf("Context '%s' is of type '%s' but '%s' is configured for type '%s' — treated as non-match.", contextKey,
                     context.getType(), ID, contextType);
@@ -210,6 +218,17 @@ public class ContextMatcher implements IRuleCondition {
         }
 
         return true;
+    }
+
+    /**
+     * Whether a runtime context of this type can be evaluated by a contextmatcher
+     * at all. {@link Context.ContextType} carries one value more than
+     * {@link ContextType} — {@code array} — and a configured {@code contextType}
+     * can only ever be one of the latter, so an array context is unmatchable by
+     * construction rather than merely mismatched.
+     */
+    static boolean isSupportedContextType(Context.ContextType runtimeType) {
+        return runtimeType != null && Arrays.stream(ContextType.values()).anyMatch(supported -> supported.name().equals(runtimeType.name()));
     }
 
     private Object findObjectValue(String contextObjectAsJson) {

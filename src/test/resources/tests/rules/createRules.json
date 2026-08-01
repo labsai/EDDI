@@ -15,7 +15,7 @@
                 {
                   "type": "occurrence",
                   "configs": {
-                    "maxOccurrence": "ever",
+                    "minTimesOccurred": "1",
                     "behaviorRuleName": "Welcome"
                   }
                 }

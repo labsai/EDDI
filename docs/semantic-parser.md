@@ -270,11 +270,18 @@ eddi://ai.labs.dictionary/dictionarystore/dictionaries/DICT_ID?version=1
 
 **Key Points:**
 
-- `lang`: ISO language code (e.g., `"en"`, `"de"`, `"fr"`)
+- `lang`: ISO language code (e.g., `"en"`, `"de"`, `"fr"`) — **this is a filter, not just an annotation** (see the upgrade note below)
 - `word`: The actual word to match
 - `expressions`: Classification/routing information (can have multiple, comma-separated)
 - `frequency`: Usage frequency (0 = common, higher = less common)
 - `phrases`: Multi-word expressions treated as single units
+
+> **Upgrade note — `lang` now gates the dictionary.** In earlier releases `lang` was recorded but never evaluated: every dictionary was consulted for every turn. From v6.x on, a dictionary whose `lang` is set is only consulted when it matches the conversation's language — on the direct lookup **and** on the corrections path (Levenshtein, phonetic, merged terms), so a mismatched dictionary can no longer sneak back in through a typo correction.
+>
+> The conversation language comes from the `lang` conversation property and defaults to `"en"` when that property is not set. So a deployment with, say, a `"de"` dictionary and no `lang` property recognises nothing after the upgrade. Two ways to keep the pre-upgrade behaviour:
+>
+> - leave `lang` unset (or empty) on the dictionary — an unset language means "applies to every language"; or
+> - set the `lang` conversation property (e.g. via a property setter or the request context) to the dictionary's language.
 
 ### Step 2: Create a Parser Configuration
 
@@ -375,8 +382,10 @@ eddi://ai.labs.parser/parserstore/parsers/PARSER_ID?version=1
 | Punctuation    | `eddi://ai.labs.parser.dictionaries.punctuation`   | Matches common punctuation: `!` (exclamation_mark), `?` (question_mark), `.` (dot), `,` (comma), `:` (colon), `;` (semicolon) | `"!"` → `punctuation(exclamation_mark)`          |
 | Email          | `eddi://ai.labs.parser.dictionaries.email`         | Matches email addresses                                                                                                       | `"user@example.com"` → `email(user@example.com)` |
 | Time           | `eddi://ai.labs.parser.dictionaries.time`          | Matches 24-hour clock formats only: `13:43`, `13:43:23`, `01h20`, `22h`. **No am/pm parsing** — `"3pm"` is not a time.       | `"13:43"` → `time(<epoch-millis>)`               |
-| Ordinal Number | `eddi://ai.labs.parser.dictionaries.ordinalNumber` | Ordinal numbers in English: 1st, 2nd, 3rd, etc.                                                                               | `"1st"` → `ordinal_number(1)`                    |
+| Ordinal Number | `eddi://ai.labs.parser.dictionaries.ordinalNumber` | Ordinal numbers, either in English suffix notation (1st, 2nd, 3rd, …) or in dot notation (`3.`, at most two digits)         | `"1st"` → `ordinal_number(1)`, `"3."` → `ordinal_number(3)` |
 | Regular        | `eddi://ai.labs.parser.dictionaries.regular`       | Custom dictionary for agent routing                                                                                           | `"billing"` → `category(billing)`                |
+
+> **Dot notation affects sentence-final numbers.** Because `"5."` is an ordinal number, an English sentence ending in a number — `"I want 5."` — now yields `ordinal_number(5)` for the last token where it previously yielded `unknown`. Conversely a bare `"."` is no longer treated as an ordinal and is normalised as punctuation. Only enable the ordinal-number dictionary when you actually want that reading.
 
 > **Time values are epoch milliseconds, not a formatted clock string.** The matched token is converted to a `java.sql.Time` and the expression carries `Time#getTime()` — e.g. `"13:43"` becomes something like `time(45780000)` (the exact number depends on the JVM's time zone). Match on the presence of `time(*)` rather than on a literal value.
 
@@ -387,6 +396,17 @@ eddi://ai.labs.parser/parserstore/parsers/PARSER_ID?version=1
 | Levenshtein  | `eddi://ai.labs.parser.corrections.levenshtein` | Matches words with typos (configurable distance) | `"helo"` → `"hello"` (distance=1)  |
 | Phonetic     | `eddi://ai.labs.parser.corrections.phonetic`    | Matches phonetically similar words               | `"nite"` → `"night"`               |
 | Merged Terms | `eddi://ai.labs.parser.corrections.mergedTerms` | Handles words without spaces                     | `"techsupport"` → `"tech support"` |
+
+**Levenshtein config keys**
+
+| Key             | Default | Description                                                                                                                                                                            |
+| --------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `distance`      | `2`     | Maximum edit distance a dictionary word may have from the input token.                                                                                                                 |
+| `maxCandidates` | `5`     | Upper bound on how many correction candidates one token may produce. Every candidate becomes another branch in the parser's match matrix, so raising this multiplies the search space. |
+
+Candidates are sorted by edit distance first, so the closest matches survive the cap. A missing, non-numeric or non-positive value falls back to the default.
+
+> **Corrections respect the dictionary language too.** A dictionary whose `lang` does not match the conversation language is skipped by the corrections exactly as it is skipped by the direct lookup — otherwise a foreign-language word would come back as a "correction" at distance 0 for every unknown token.
 
 > **There is no stemming correction.** EDDI ships exactly the three corrections above; referencing `eddi://ai.labs.parser.corrections.stemming` (or any other unregistered extension URI) makes workflow initialization fail with `UnrecognizedExtensionException` and the agent will not start.
 

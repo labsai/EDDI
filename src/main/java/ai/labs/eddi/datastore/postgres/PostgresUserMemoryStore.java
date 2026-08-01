@@ -69,23 +69,21 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                 ON usermemories (user_id, access_count DESC);
             """;
 
+    /**
+     * Visibility-filtered SELECT, left deliberately un-closed: callers append the
+     * optional group clause, the closing parenthesis, an ORDER BY and a LIMIT.
+     */
+    private static final String VISIBILITY_SELECT = """
+            SELECT * FROM usermemories WHERE user_id = ? AND (
+                (visibility = 'self' AND source_agent_id = ?)
+                OR (visibility = 'global')
+            """;
+
+    private static final String ORDER_BY_ACCESS_COUNT = " ORDER BY access_count DESC";
+    private static final String ORDER_BY_RECENCY = " ORDER BY updated_at DESC";
+
     /** Recall order that ranks entries by how often they have been recalled. */
     private static final String RECALL_ORDER_MOST_ACCESSED = "most_accessed";
-
-    /**
-     * Share of the recall window reserved for the most recently updated entries
-     * when {@link #RECALL_ORDER_MOST_ACCESSED} is used (1/5th of the window, at
-     * least one slot).
-     * <p>
-     * Without this reservation {@code most_accessed} is self-reinforcing: only
-     * entries that are already inside the window get their {@code access_count}
-     * incremented, so a freshly written entry (count 0) can never climb in once the
-     * window is full. The reserved slots act as the recency term of the ranking — a
-     * new entry always gets at least one chance to be recalled (and thereby to
-     * start accumulating access counts). Mirrors
-     * {@code MongoUserMemoryStore.RECENCY_RESERVATION_DIVISOR}.
-     */
-    private static final int RECENCY_RESERVATION_DIVISOR = 5;
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
@@ -304,7 +302,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         try (Connection conn = dataSourceInstance.get().getConnection()) {
             if (!RECALL_ORDER_MOST_ACCESSED.equals(recallOrder)) {
                 List<UserMemoryEntry> entries = new ArrayList<>();
-                collectInto(conn, new LinkedHashSet<>(), entries, visibilityQuery, userId, agentId, groupIds, " ORDER BY updated_at DESC",
+                collectInto(conn, new LinkedHashSet<>(), entries, visibilityQuery, userId, agentId, groupIds, ORDER_BY_RECENCY,
                         maxEntries > 0 ? maxEntries : -1);
                 return entries;
             }
@@ -321,13 +319,10 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
      * operator — a single {@code ?} would be parsed as a bind parameter.
      */
     private String buildVisibilityQuery(List<String> groupIds) {
-        StringBuilder sql = new StringBuilder("""
-                SELECT * FROM usermemories WHERE user_id = ? AND (
-                    (visibility = 'self' AND source_agent_id = ?)
-                    OR (visibility = 'global')
-                """);
-
+        StringBuilder sql = new StringBuilder(VISIBILITY_SELECT);
         if (groupIds != null && !groupIds.isEmpty()) {
+            // `??|` is pgjdbc's escape for the jsonb `?|` overlap operator — a bare `?`
+            // would be parsed by the driver as a bind placeholder.
             sql.append(" OR (visibility = 'group' AND group_ids ??| ARRAY[");
             for (int i = 0; i < groupIds.size(); i++) {
                 sql.append(i > 0 ? ",?" : "?");
@@ -339,38 +334,57 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
 
     /**
      * {@code most_accessed} recall: the bulk of the window is filled by access
-     * count, a reserved slice by recency (see
-     * {@link #RECENCY_RESERVATION_DIVISOR}), and the {@code access_count}
-     * increments are applied in ONE set-based statement AFTER both result sets are
-     * drained. Mirrors
+     * count, a reserved slice by recency (the split is computed by the shared
+     * {@link RecallWindow}, so both backends mean the same thing by the recall
+     * order), and the {@code access_count} increments are applied in ONE set-based
+     * statement AFTER both result sets are drained.
+     * <p>
+     * The reserved recency slice stops {@code most_accessed} from being
+     * self-reinforcing: without it only entries already inside the window ever get
+     * incremented, so a freshly written entry (count 0) could never climb in once
+     * the window is full. Mirrors
      * {@code MongoUserMemoryStore.mostAccessedWithRecencyReservation}.
      */
     private List<UserMemoryEntry> mostAccessedWithRecencyReservation(Connection conn, String visibilityQuery, String userId, String agentId,
                                                                      List<String> groupIds, int maxEntries)
             throws SQLException {
-        int recencySlots = maxEntries > 0 ? Math.max(1, maxEntries / RECENCY_RESERVATION_DIVISOR) : 0;
-        int accessSlots = maxEntries > 0 ? maxEntries - recencySlots : -1;
+        var window = RecallWindow.forMaxEntries(maxEntries);
 
         Set<String> recalled = new LinkedHashSet<>();
         List<UserMemoryEntry> ordered = new ArrayList<>();
-        collectInto(conn, recalled, ordered, visibilityQuery, userId, agentId, groupIds, " ORDER BY access_count DESC", accessSlots);
-        collectInto(conn, recalled, ordered, visibilityQuery, userId, agentId, groupIds, " ORDER BY updated_at DESC", recencySlots);
-
-        if (!recalled.isEmpty()) {
-            String updateSql = "UPDATE usermemories SET access_count = access_count + 1 WHERE id = ANY (?)";
-            try (PreparedStatement up = conn.prepareStatement(updateSql)) {
-                up.setArray(1, conn.createArrayOf("varchar", recalled.toArray(new String[0])));
-                up.executeUpdate();
-            }
-        }
+        collectInto(conn, recalled, ordered, visibilityQuery, userId, agentId, groupIds, ORDER_BY_ACCESS_COUNT, window.accessSlots());
+        collectInto(conn, recalled, ordered, visibilityQuery, userId, agentId, groupIds, ORDER_BY_RECENCY, window.recencySlots());
+        incrementAccessCounts(conn, recalled);
 
         return ordered;
     }
 
     /**
+     * One set-based write for the whole recall — never a per-row update issued
+     * while a result set is still open.
+     */
+    private void incrementAccessCounts(Connection conn, Collection<String> entryIds) throws SQLException {
+        if (entryIds.isEmpty()) {
+            return;
+        }
+        String updateSql = "UPDATE usermemories SET access_count = access_count + 1 WHERE id = ANY (?)";
+        try (PreparedStatement up = conn.prepareStatement(updateSql)) {
+            up.setArray(1, conn.createArrayOf("varchar", entryIds.toArray(new String[0])));
+            up.executeUpdate();
+        }
+    }
+
+    /**
      * Drains one sorted query into {@code ordered}, de-duplicating against
-     * {@code seen} (keyed by row id). {@code limit < 0} means "no limit";
-     * {@code limit == 0} skips the query entirely.
+     * {@code seen} (keyed by row id).
+     *
+     * @param limit
+     *            {@code < 0} means "no limit" — the {@code LIMIT} clause is left
+     *            off entirely, because neither {@code LIMIT 0} (returns nothing)
+     *            nor a negative {@code LIMIT} (an outright error) can carry the
+     *            "unlimited" sentinel the MongoDB store honours for
+     *            {@code maxEntries <= 0}. {@code limit == 0} skips the query
+     *            entirely — a zero-slot budget means there is no work to do.
      */
     private void collectInto(Connection conn, Set<String> seen, List<UserMemoryEntry> ordered, String visibilityQuery, String userId,
                              String agentId, List<String> groupIds, String orderBy, int limit)

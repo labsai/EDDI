@@ -248,8 +248,48 @@ class LanguageModelBuildersTest {
         void modelIdKeyIsSpelledLikeEverywhereElse() {
             assertTrue(builder.recognisedParameters().contains("modelId"),
                     "gemini-vertex must read the same 'modelId' key that LlmTask.resolveModelName looks for");
-            assertFalse(builder.recognisedParameters().contains("modelID"),
-                    "the capital-D spelling was the typo; it must not come back");
+        }
+
+        @Test
+        @DisplayName("the canonical 'modelId' spelling is used")
+        void readsCanonicalKey() {
+            assertEquals("gemini-2.0-flash",
+                    VertexGeminiLanguageModelBuilder.resolveModelId(Map.of("modelId", "gemini-2.0-flash")));
+        }
+
+        /**
+         * Backward compatibility: while the constant read {@code "modelID"} that
+         * spelling was the ONLY one that worked, so agent configs stored in MongoDB (or
+         * shipped in an import ZIP) use it. Renaming the constant without a fallback
+         * silently built a nameless Vertex model for every one of them.
+         */
+        @Test
+        @DisplayName("a stored config using the legacy 'modelID' spelling still resolves a model name")
+        void legacyModelIdKeyStillWorks() {
+            assertEquals("gemini-1.5-pro",
+                    VertexGeminiLanguageModelBuilder.resolveModelId(Map.of("modelID", "gemini-1.5-pro")),
+                    "the pre-6.2.0 spelling must keep working or stored gemini-vertex configs lose their model name");
+        }
+
+        @Test
+        @DisplayName("the canonical key wins when both spellings are present")
+        void canonicalKeyWinsOverLegacy() {
+            assertEquals("gemini-2.0-flash", VertexGeminiLanguageModelBuilder.resolveModelId(
+                    Map.of("modelId", "gemini-2.0-flash", "modelID", "gemini-1.5-pro")));
+        }
+
+        @Test
+        @DisplayName("the legacy spelling is declared, so it is not also reported as unrecognised")
+        void legacyKeyIsDeclared() {
+            assertTrue(builder.recognisedParameters().contains("modelID"),
+                    "declaring it keeps the deprecation warning the only message an operator sees");
+        }
+
+        @Test
+        @DisplayName("neither spelling present resolves to null rather than an empty name")
+        void noModelIdResolvesToNull() {
+            assertNull(VertexGeminiLanguageModelBuilder.resolveModelId(Map.of("projectId", "p")));
+            assertNull(VertexGeminiLanguageModelBuilder.resolveModelId(Map.of("modelId", "")));
         }
     }
 

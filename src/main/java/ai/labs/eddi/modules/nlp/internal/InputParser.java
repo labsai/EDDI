@@ -137,7 +137,7 @@ public class InputParser implements IInputParser {
         for (IDictionary dictionary : dictionaries) {
             throwExceptionIfInterrupted("dictionaries");
 
-            if (!isNullOrEmpty(dictionary.getLanguageCode()) && !userLanguage.equals(dictionary.getLanguageCode())) {
+            if (!IDictionary.appliesToLanguage(dictionary.getLanguageCode(), userLanguage)) {
                 continue;
             }
 

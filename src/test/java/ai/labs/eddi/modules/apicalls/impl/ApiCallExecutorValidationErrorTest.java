@@ -13,11 +13,11 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
-import ai.labs.eddi.engine.security.CallerIdentityContext;
-import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -155,6 +155,23 @@ class ApiCallExecutorValidationErrorTest {
         // An error body is never promoted to the response object / result body.
         assertFalse(result.containsKey("body"), "an unsuccessful response must not be stored as the response body");
         verify(prePostUtils, times(1)).runPostResponse(eq(memory), eq(call.getPostResponse()), any(), eq(500), eq(false));
+    }
+
+    @Test
+    @DisplayName("an error response whose code is not in retryOnHttpCodes is sent once and reports the real http code")
+    void errorResponseWithNonMatchingRetryCodeIsNotRetried() throws Exception {
+        // A retry instruction is configured, but no http code qualifies for a retry —
+        // the post-response stage must still see the real code and
+        // validationError=false.
+        ApiCall call = apiCall(retryOn(500, 2));
+        call.getPostResponse().getRetryApiCallInstruction().setRetryOnHttpCodes(List.of());
+        IResponse errorResponse = response(503, "gateway down", "text/plain");
+        when(mockRequest.send()).thenReturn(errorResponse);
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(mockRequest, times(1)).send();
+        verify(prePostUtils, times(1)).runPostResponse(eq(memory), eq(call.getPostResponse()), any(), eq(503), eq(false));
     }
 
     @Test

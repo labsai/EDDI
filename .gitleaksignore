@@ -49,3 +49,12 @@
 # verbatim, so the rule matched this file too. The quote is gone now, but the
 # commit that carried it stays in history and still needs an entry.
 36e741846f2fcf3e25aa3bcb6efca0feeba69dd0:.gitleaksignore:curl-auth-header:38
+
+# SecretScrubberTest: a dummy OpenAI-shaped literal used to prove that a
+# credential in a secret-named field is still redacted. It was replaced in a
+# follow-up commit with a low-entropy value (a better test — a key-shaped value
+# could be redacted by the entropy heuristic instead, passing for the wrong
+# reason), but gitleaks scans a PR's whole commit range, so the commit that
+# introduced the line stays in history and still needs an entry. Not a real key:
+# it never authenticated against anything.
+eebfe898b34858918d5cbbe11e60336d1b6a916e:src/test/java/ai/labs/eddi/secrets/sanitize/SecretScrubberTest.java:generic-api-key:238

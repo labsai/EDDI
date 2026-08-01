@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.migration;
 
+import ai.labs.eddi.configs.migration.model.MigrationLog;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoNamespace;
 import com.mongodb.client.MongoCollection;
@@ -38,6 +39,9 @@ public class V6RenameMigration {
 
     private static final Logger LOGGER = Logger.getLogger(V6RenameMigration.class);
     private static final String MIGRATION_KEY = "v6-rename-migration-complete";
+
+    /** MongoDB {@code NamespaceExists} — renameCollection onto an existing name. */
+    private static final int NAMESPACE_EXISTS_ERROR_CODE = 48;
 
     /**
      * URI authority rewrites (old → new). Longest-first to avoid partial matches.
@@ -157,7 +161,7 @@ public class V6RenameMigration {
 
         LOGGER.infof("V6 rename migration complete: %d documents migrated", totalMigrated);
 
-        migrationLogStore.createMigrationLog(new ai.labs.eddi.configs.migration.model.MigrationLog(MIGRATION_KEY));
+        migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_KEY));
     }
 
     /**
@@ -274,11 +278,13 @@ public class V6RenameMigration {
             LOGGER.infof("  Renamed collection: %s → %s", oldName, newName);
             return true;
         } catch (MongoCommandException e) {
-            if (e.getErrorCode() == 48) {
-                // Target namespace already exists and holds documents (an empty one is
-                // dropped above) — this is not a skip we may shrug off, the v5 documents
-                // would be lost to the migration.
-                LOGGER.errorf("  Cannot rename %s → %s: the target collection already exists and holds documents", oldName, newName);
+            if (e.getErrorCode() == NAMESPACE_EXISTS_ERROR_CODE) {
+                // Target namespace already exists and holds documents, or its size could
+                // not be established (an existing target proven empty is dropped as part
+                // of the rename above) — this is not a skip we may shrug off, the v5
+                // documents would be lost to the migration.
+                LOGGER.errorf("  Cannot rename %s → %s: the target collection already exists and is not provably empty", oldName,
+                        newName);
             } else {
                 LOGGER.warnf("  Failed to rename collection %s → %s: %s", oldName, newName, e.getMessage());
             }

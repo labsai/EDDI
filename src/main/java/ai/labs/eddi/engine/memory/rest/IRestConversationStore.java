@@ -23,9 +23,18 @@ import static ai.labs.eddi.datastore.IResourceStore.*;
 /**
  * Conversation history store.
  * <p>
- * The per-conversation operations owner-scope their own results through
- * {@code ConversationAccessGuard}; the deployment-wide sweep has no such
- * scoping to apply and is therefore role-gated to {@code eddi-admin}.
+ * Every operation addressed at a single conversation
+ * ({@link #readRawConversationLog}, {@link #readSimpleConversationLog},
+ * {@link #deleteConversationLog}) is gated by
+ * {@code ConversationAccessGuard.requireConversationOwner} in the
+ * implementation, and the listing filters each row through the same guard, so a
+ * caller can neither read nor delete a conversation they do not own. The
+ * deployment-wide sweep has no owner to scope to and is therefore role-gated to
+ * {@code eddi-admin} instead.
+ * <p>
+ * {@link #getActiveConversations} and {@link #endActiveConversations} are
+ * agent-scoped operational endpoints, not per-conversation ones — they are
+ * deliberately outside that gate.
  *
  * @author ginccc
  */
