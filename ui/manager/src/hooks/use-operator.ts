@@ -20,7 +20,6 @@ import {
 } from "@/lib/api/operator";
 import { undeployAgent, deleteAgent } from "@/lib/api/agents";
 import { endpointsForScope } from "@/lib/operator/tool-scopes";
-import { OPERATOR_PROMPT_BODY } from "@/lib/operator/system-prompt";
 
 /* ─── Query Keys ─── */
 
@@ -255,5 +254,5 @@ export function useResetOperator() {
 
 /** The config to seed the activation form with. */
 export function seedConfig(existing: OperatorConfig | null | undefined): OperatorConfig {
-  return existing ?? defaultOperatorConfig(OPERATOR_PROMPT_BODY);
+  return existing ?? defaultOperatorConfig();
 }

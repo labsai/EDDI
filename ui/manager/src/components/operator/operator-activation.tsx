@@ -10,14 +10,26 @@ import { MODEL_SUGGESTIONS, isBaseUrlRequired } from "@/lib/model-suggestions";
 import { useVaultHealth } from "@/hooks/use-secrets";
 import { useAuth } from "@/hooks/use-auth";
 import {
-  OPERATOR_SAFETY_PREAMBLE,
-  OPERATOR_PROMPT_BODY,
+  safetyPreambleForScope,
+  defaultOperatorPromptBody,
 } from "@/lib/operator/system-prompt";
-import { READ_ENDPOINTS } from "@/lib/operator/tool-scopes";
+import { endpointsForScope, type OperatorScope } from "@/lib/operator/tool-scopes";
 import { extractVaultKeyName, toVaultRef } from "@/lib/operator/vault-ref";
 import type { OperatorConfig, OperatorAuthMode } from "@/lib/api/operator";
 import type { ActivationStage } from "@/hooks/use-operator";
 import { cn } from "@/lib/utils";
+
+/**
+ * The scope this form provisions.
+ *
+ * Pinned, not chosen: a write grant comes from deliberately populating
+ * `WRITE_ENDPOINTS`, never from a control in the activation UI. Named so the
+ * review step renders the preamble, default body and tool list of the *same*
+ * scope that `handleActivate` submits — what the admin reads is what is sent.
+ */
+const PROVISIONED_SCOPE: OperatorScope = "read_only";
+const GRANTED_ENDPOINTS = endpointsForScope(PROVISIONED_SCOPE);
+const SAFETY_PREAMBLE = safetyPreambleForScope(PROVISIONED_SCOPE);
 
 interface OperatorActivationProps {
   initial: OperatorConfig;
@@ -51,7 +63,9 @@ export function OperatorActivation({
   );
   const [baseUrl, setBaseUrl] = useState("");
   const [environment, setEnvironment] = useState(initial.environment);
-  const [promptBody, setPromptBody] = useState(initial.promptBody || OPERATOR_PROMPT_BODY);
+  const [promptBody, setPromptBody] = useState(
+    initial.promptBody || defaultOperatorPromptBody(PROVISIONED_SCOPE),
+  );
   const [authMode, setAuthMode] = useState<OperatorAuthMode>(initial.authMode);
 
   const providerConfig = getProviderConfig(provider);
@@ -95,7 +109,7 @@ export function OperatorActivation({
         promptBody,
         authMode,
         credentialKey: extractVaultKeyName(apiKey),
-        scope: "read_only",
+        scope: PROVISIONED_SCOPE,
       },
       apiKey,
       baseUrl || undefined,
@@ -246,7 +260,7 @@ export function OperatorActivation({
               hint={t("operator.activation.safetyPreambleHint", "Always prepended. It tells the operator to treat everything its tools return as untrusted data.")}
             >
               <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-xs whitespace-pre-wrap text-muted-foreground">
-                {OPERATOR_SAFETY_PREAMBLE}
+                {SAFETY_PREAMBLE}
               </pre>
             </Field>
 
@@ -265,9 +279,9 @@ export function OperatorActivation({
               />
             </Field>
 
-            <Field label={t("operator.activation.tools", { toolCount: READ_ENDPOINTS.length })}>
+            <Field label={t("operator.activation.tools", { toolCount: GRANTED_ENDPOINTS.length })}>
               <ul className="max-h-32 space-y-1 overflow-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-xs text-muted-foreground">
-                {READ_ENDPOINTS.map((e) => (
+                {GRANTED_ENDPOINTS.map((e) => (
                   <li key={e}>{e}</li>
                 ))}
               </ul>

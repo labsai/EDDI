@@ -137,6 +137,27 @@ export function endpointsForScope(scope: OperatorScope): readonly string[] {
 }
 
 /**
+ * Whether a granted endpoint set contains anything that can change state.
+ *
+ * Takes the resolved set rather than a scope so the answer describes what was
+ * actually granted: `read_write` grants no writes at all while `WRITE_ENDPOINTS`
+ * is empty, and anything derived from this — the operator's own system prompt
+ * above all — must say so rather than describing an intent.
+ *
+ * Fail-safe by construction: only a literal `GET` counts as a read. An entry
+ * this function cannot parse, or one using a method nobody updated it for,
+ * counts as a write. The failure mode is then an operator told it can change
+ * things when it cannot, which costs a needlessly cautious answer — rather than
+ * one told it is read-only while holding a tool that is not.
+ */
+export function grantsWriteCapability(endpoints: readonly string[]): boolean {
+  return endpoints.some((entry) => {
+    const parsed = parseEndpoint(entry);
+    return parsed === null || parsed.method !== "GET";
+  });
+}
+
+/**
  * Build the `endpoints` filter string for `setup-api`.
  *
  * The backend splits on commas and trims, so a comma-joined list is the wire

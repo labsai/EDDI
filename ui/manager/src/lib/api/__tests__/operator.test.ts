@@ -21,8 +21,12 @@ import {
   type OperatorConfig,
   type FetchedSpec,
 } from "../operator";
-import { OPERATOR_SAFETY_PREAMBLE } from "@/lib/operator/system-prompt";
-import { READ_ENDPOINTS, buildToolApprovals } from "@/lib/operator/tool-scopes";
+import { safetyPreambleForScope } from "@/lib/operator/system-prompt";
+import {
+  READ_ENDPOINTS,
+  buildToolApprovals,
+  buildEndpointFilter,
+} from "@/lib/operator/tool-scopes";
 import type { Agent } from "../agents";
 
 const BASE = "*/variablestore/variables/default";
@@ -230,8 +234,24 @@ describe("provisionOperator", () => {
       spec: fetchedSpec(),
     });
     const prompt = String(captured?.systemPrompt);
-    expect(prompt.startsWith(OPERATOR_SAFETY_PREAMBLE)).toBe(true);
+    expect(prompt.startsWith(safetyPreambleForScope("read_only"))).toBe(true);
     expect(prompt).toContain("Custom body.");
+  });
+
+  it("builds the preamble for the scope it sends the endpoint filter for", async () => {
+    // read_write grants no writes while WRITE_ENDPOINTS is empty, so both the
+    // filter and the preamble must still describe a read-only operator. The
+    // pairing is the point: whichever scope is provisioned, the prompt has to
+    // match the tools, or the agent is told about a boundary it is not behind.
+    await provisionOperator({
+      agentName: "Op",
+      config: config({ scope: "read_write" }),
+      apiKey: "sk-test",
+      spec: fetchedSpec(),
+    });
+    const prompt = String(captured?.systemPrompt);
+    expect(prompt.startsWith(safetyPreambleForScope("read_write"))).toBe(true);
+    expect(String(captured?.endpoints)).toBe(buildEndpointFilter("read_write"));
   });
 
   it("sends the full spec untrimmed", async () => {

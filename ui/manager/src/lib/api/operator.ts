@@ -21,7 +21,10 @@ import {
   parseEndpoint,
   type OperatorScope,
 } from "@/lib/operator/tool-scopes";
-import { buildOperatorSystemPrompt } from "@/lib/operator/system-prompt";
+import {
+  buildOperatorSystemPrompt,
+  defaultOperatorPromptBody,
+} from "@/lib/operator/system-prompt";
 
 /* ─── Config model ─── */
 
@@ -76,7 +79,10 @@ export interface OperatorConfig {
  */
 export const OPERATOR_VARIABLE_KEY = "platform.operator";
 
-export function defaultOperatorConfig(promptBody: string): OperatorConfig {
+export function defaultOperatorConfig(promptBody?: string): OperatorConfig {
+  // Derived from the scope set here rather than restated by callers, so the
+  // seeded body can never describe a capability this config does not grant.
+  const scope: OperatorScope = "read_only";
   return {
     enabled: false,
     agentId: null,
@@ -85,9 +91,9 @@ export function defaultOperatorConfig(promptBody: string): OperatorConfig {
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     credentialKey: null,
-    scope: "read_only",
+    scope,
     authMode: "none",
-    promptBody,
+    promptBody: promptBody ?? defaultOperatorPromptBody(scope),
   };
 }
 
@@ -231,7 +237,9 @@ export async function provisionOperator(
 
   return createApiAgent({
     agentName,
-    systemPrompt: buildOperatorSystemPrompt(config.promptBody),
+    // Same scope as the endpoint filter below, so the preamble describes the
+    // boundary the agent is actually behind.
+    systemPrompt: buildOperatorSystemPrompt(config.promptBody, config.scope),
     openApiSpec: JSON.stringify(spec.raw),
     provider: config.provider,
     model: config.model,

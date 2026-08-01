@@ -7,6 +7,7 @@ import {
   buildToolApprovals,
   parseEndpoint,
   isWriteScopeAvailable,
+  grantsWriteCapability,
   type WriteScopeFacts,
 } from "../tool-scopes";
 
@@ -157,6 +158,38 @@ describe("tool-scopes", () => {
       expect(parseEndpoint("/no-method")).toBeNull();
       expect(parseEndpoint("get /lowercase-method")).toBeNull();
       expect(parseEndpoint("GET no-leading-slash")).toBeNull();
+    });
+  });
+
+  describe("grantsWriteCapability", () => {
+    it("is false for a set of reads", () => {
+      expect(grantsWriteCapability(READ_ENDPOINTS)).toBe(false);
+    });
+
+    it("is false for an empty set", () => {
+      expect(grantsWriteCapability([])).toBe(false);
+    });
+
+    it.each(["POST", "PUT", "PATCH", "DELETE"])("is true for a single %s", (method) => {
+      expect(grantsWriteCapability([...READ_ENDPOINTS, `${method} /agentstore/agents`])).toBe(true);
+    });
+
+    it("fails safe on an entry it cannot parse", () => {
+      // An unparseable entry cannot be shown to be a read, so it counts as a
+      // write. Being needlessly cautious is recoverable; describing an agent as
+      // read-only while it holds a write tool is not.
+      expect(grantsWriteCapability(["garbage"])).toBe(true);
+      expect(grantsWriteCapability(["get /lowercase"])).toBe(true);
+    });
+
+    it("fails safe on a method nobody updated it for", () => {
+      expect(grantsWriteCapability(["PURGE /somewhere"])).toBe(true);
+    });
+
+    it("reports no write capability for read_write while the write list is empty", () => {
+      // Pairs with the prompt test of the same invariant: the scope is an
+      // intent, the resolved endpoint set is the fact.
+      expect(grantsWriteCapability(endpointsForScope("read_write"))).toBe(false);
     });
   });
 });
