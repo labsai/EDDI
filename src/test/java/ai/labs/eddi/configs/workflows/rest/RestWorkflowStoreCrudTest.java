@@ -226,6 +226,26 @@ class RestWorkflowStoreCrudTest {
         }
 
         @Test
+        @DisplayName("a query without a version parameter cannot unpin the stored reference")
+        void queryWithoutVersionParameterIsRejected() throws Exception {
+            // Same defect as the agent-store variant: '?other=2' satisfies a bare
+            // '?'-presence check, matches the stored versioned reference, and replaces it
+            // with a versionless one.
+            var config = new WorkflowConfiguration();
+            var step = new WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.rules"));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/111111111111111111111111?version=1")));
+            config.getWorkflowSteps().add(step);
+            lenient().when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
+
+            for (String query : List.of("?other=2", "?version=", "?version=abc", "?versionx=2", "?")) {
+                URI bad = URI.create("eddi://ai.labs.rules/rulestore/rulesets/111111111111111111111111" + query);
+                assertEquals(400, sut.updateResourceInWorkflow(WORKFLOW_ID, 1, bad).getStatus(), "must refuse: " + query);
+            }
+            verify(workflowStore, never()).update(eq(WORKFLOW_ID), eq(1), any());
+        }
+
+        @Test
         @DisplayName("should update resource URI in extension element config")
         void updatesExtensionConfigUri() throws Exception {
             var config = new WorkflowConfiguration();

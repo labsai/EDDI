@@ -314,6 +314,26 @@ class RestAgentStoreExpandedTest {
             assertEquals(400, response.getStatus());
             verify(agentStore, never()).update(eq(AGENT_ID), eq(1), any());
         }
+
+        @Test
+        @DisplayName("a query without a version parameter cannot unpin the stored reference")
+        void queryWithoutVersionParameterIsRejected() throws Exception {
+            // Guarding on the presence of a '?' alone is not enough: the stored reference
+            // is matched by everything BEFORE the query and then replaced by the supplied
+            // URI, so '?other=2' would match the versioned reference and overwrite it
+            // with a versionless one — silently unpinning the workflow the agent resolves
+            // at runtime.
+            var config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1"))));
+            lenient().when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
+
+            for (String query : List.of("?other=2", "?version=", "?version=abc", "?versionx=2", "?")) {
+                URI bad = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + query);
+                assertEquals(400, sut.updateResourceInAgent(AGENT_ID, 1, bad).getStatus(), "must refuse: " + query);
+            }
+            verify(agentStore, never()).update(eq(AGENT_ID), eq(1), any());
+        }
     }
 
     // ─── duplicateAgent ────────────────────────────────────────────────────────

@@ -686,6 +686,47 @@ class AgentSetupServiceTest {
         }
 
         @Test
+        @DisplayName("an invalid MCP server URL is refused BEFORE any resource is created")
+        void invalidMcpUrlRefusedBeforeAnyResourceIsCreated() throws Exception {
+            // McpCallsConfiguration.validate() rejects a non-http(s) URL at save time, so
+            // without the up-front sweep the SECOND bad URL would abort with the first
+            // one's resource already persisted — plus, on this path, the apicalls,
+            // parser, behaviour and LLM resources.
+            var restInterfaceFactory = mock(IRestInterfaceFactory.class);
+            var guardedService = new AgentSetupService(restInterfaceFactory,
+                    mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
+
+            var request = new CreateApiAgentRequest(
+                    "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
+                    "sk-key", null, null, null, null, null, null, null, null, null,
+                    "https://good.example.com/mcp,ftp://bad.example.com/mcp");
+
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                    () -> guardedService.createApiAgent(request));
+            assertTrue(ex.getMessage().startsWith("Invalid mcpServerUrls entry"), ex.getMessage());
+            assertTrue(ex.getMessage().contains("ftp://bad.example.com/mcp"), ex.getMessage());
+            org.mockito.Mockito.verify(restInterfaceFactory, org.mockito.Mockito.never()).get(any());
+        }
+
+        @Test
+        @DisplayName("valid MCP server URLs pass the up-front check")
+        void validMcpUrlsPassTheUpFrontCheck() throws Exception {
+            var restInterfaceFactory = mock(IRestInterfaceFactory.class);
+            var guardedService = new AgentSetupService(restInterfaceFactory,
+                    mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
+
+            var request = new CreateApiAgentRequest(
+                    "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
+                    "sk-key", null, null, null, null, null, null, null, null, null,
+                    "https://a.example.com/mcp, https://b.example.com/mcp");
+
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                    () -> guardedService.createApiAgent(request));
+            assertFalse(ex.getMessage().startsWith("Invalid mcpServerUrls entry"),
+                    "valid URLs must not be refused; got: " + ex.getMessage());
+        }
+
+        @Test
         @DisplayName("a valid hitlConfig passes the up-front check and reaches resource creation")
         void validHitlConfigPassesTheUpFrontCheck() throws Exception {
             // Mutation guard for the test above: the guard must reject only what is

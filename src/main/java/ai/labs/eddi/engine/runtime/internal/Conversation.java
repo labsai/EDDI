@@ -818,7 +818,10 @@ public class Conversation implements IConversation {
                 ? batch.getEffectiveToolApprovals()
                 : memory.getAgentToolApprovalsConfig();
         var rule = batch != null ? batch.getEffectiveRule() : null;
-        if (rule != null && !isNullOrEmpty(rule.getPendingMessage())) {
+        // isBlank, not isNullOrEmpty (which is isEmpty-only): a whitespace-only
+        // pendingMessage would otherwise be used verbatim and render as an empty
+        // bubble instead of falling back to the scalar or the default.
+        if (rule != null && rule.getPendingMessage() != null && !rule.getPendingMessage().isBlank()) {
             template = rule.getPendingMessage();
         } else if (cfg != null && !isNullOrEmpty(cfg.getPendingMessage())) {
             template = cfg.getPendingMessage();

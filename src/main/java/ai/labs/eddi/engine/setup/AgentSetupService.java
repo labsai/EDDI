@@ -124,6 +124,7 @@ public class AgentSetupService {
         if (!isLocalLLM && (request.apiKey() == null || request.apiKey().isBlank())) {
             throw new AgentSetupException("API key is required for cloud LLM providers (anthropic, openai, gemini)");
         }
+        validateMcpServerUrls(request.mcpServerUrls());
 
         var params = resolveParamsValidated(request.provider(), request.model(), request.deploy(), request.environment());
         boolean toolsEnabled = request.enableBuiltInTools() != null && request.enableBuiltInTools();
@@ -265,6 +266,7 @@ public class AgentSetupService {
         } catch (IllegalArgumentException e) {
             throw new AgentSetupException("Invalid hitlConfig: " + e.getMessage(), e);
         }
+        validateMcpServerUrls(request.mcpServerUrls());
 
         var params = resolveParamsValidated(request.provider(), request.model(), request.deploy(), request.environment());
         var createdResources = new LinkedHashMap<String, Object>();
@@ -386,6 +388,33 @@ public class AgentSetupService {
      * previously only the former, which made "REST plus MCP" unreachable through
      * the wizard.
      */
+    /**
+     * Validates every MCP server URL before any of them is written.
+     * <p>
+     * {@code McpCallsConfiguration.validate()} rejects a non-http(s) URL at save
+     * time, so without this the second bad URL in a list would abort the run with
+     * the first one's resource already persisted — and in {@code createApiAgent}
+     * with the apicalls, parser, behaviour and LLM resources persisted too. Same
+     * reasoning as the up-front {@code hitlConfig} check: a config error is cheap
+     * to detect before the first write, and the caller gets the same message with
+     * no debris.
+     */
+    private void validateMcpServerUrls(String mcpServerUrls) throws AgentSetupException {
+        if (mcpServerUrls == null || mcpServerUrls.isBlank()) {
+            return;
+        }
+        for (String url : mcpServerUrls.split(",")) {
+            String trimmed = url.trim();
+            if (trimmed.isEmpty())
+                continue;
+            try {
+                createMcpCallsConfig(trimmed).validate();
+            } catch (IllegalArgumentException e) {
+                throw new AgentSetupException("Invalid mcpServerUrls entry '" + trimmed + "': " + e.getMessage(), e);
+            }
+        }
+    }
+
     private List<String> createMcpCallsResources(String mcpServerUrls, String agentName, Map<String, Object> createdResources)
             throws Exception {
         if (mcpServerUrls == null || mcpServerUrls.isBlank()) {

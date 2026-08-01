@@ -152,6 +152,43 @@ public class RestUtilities {
         return true;
     }
 
+    /**
+     * The URI with its query string removed — but only when that query actually
+     * carries a usable {@code version}. Returns {@code null} when the URI has no
+     * query, no {@code version} parameter, or a {@code version} that is not a
+     * non-negative integer.
+     * <p>
+     * Exists for the {@code updateResourceUri} endpoints on the agent and workflow
+     * stores, which match stored references by "everything before the query" and
+     * then replace them with the supplied URI. Testing only for the presence of a
+     * {@code ?} is not enough there: {@code .../workflows/{id}?other=2} would match
+     * the stored {@code .../workflows/{id}?version=1} and replace it with a
+     * <em>versionless</em> reference, quietly corrupting the pinned version an
+     * agent resolves at runtime.
+     */
+    public static String pathWithoutVersionQuery(URI uri) {
+        if (uri == null) {
+            return null;
+        }
+        String uriString = uri.toString();
+        int queryStart = uriString.lastIndexOf('?');
+        if (queryStart < 0) {
+            return null;
+        }
+        String version = getQueryMap(uriString.substring(queryStart + 1)).get("version");
+        if (version == null || version.isBlank()) {
+            return null;
+        }
+        try {
+            if (Integer.parseInt(version.trim()) < 0) {
+                return null;
+            }
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        return uriString.substring(0, queryStart);
+    }
+
     private static Map<String, String> getQueryMap(String query) {
         String[] params = query.split("&");
         Map<String, String> map = new HashMap<>();

@@ -2512,49 +2512,59 @@ public class ConversationService implements IConversationService {
         ToolApprovalsConfig toolApprovals = effectiveToolApprovals(memory, hitlConfig);
         PendingToolCallBatch pendingBatch = memory.getHitlPendingToolCalls();
         ToolApprovalsConfig.ApprovalRule rule = pendingBatch != null ? pendingBatch.getEffectiveRule() : null;
+        // The duration resolves down its own chain, independently of which branch
+        // decides the policy: rule → toolApprovals → outer hitlConfig. Computed once
+        // rather than repeated per branch — three identical copies would drift, and a
+        // rule stating only "AUTO_REJECT" must still inherit a duration or the policy
+        // never fires.
+        //
+        // Blank-aware on purpose: HitlConfigValidation treats a whitespace-only
+        // approvalTimeout as ABSENT (isBlank) when deciding whether a finite rule may
+        // inherit the enclosing duration, so it saves cleanly. If resolution here
+        // treated it as PRESENT (isEmpty), it would win the chain, Duration.parse
+        // would throw inside scheduleHitlTimeout, no schedule would be armed, and the
+        // finite policy would silently degrade to wait-forever while the bookmark
+        // still reported the finite policy name.
+        String effectiveTimeout = firstNonBlank(
+                rule != null ? rule.getApprovalTimeout() : null,
+                toolApprovals != null ? toolApprovals.getApprovalTimeout() : null,
+                hitlConfig.getApprovalTimeout());
+
         HitlTimeoutPolicy effectivePolicy;
-        String effectiveTimeout;
-        // The rule's own duration wins, then the toolApprovals scalar, then the outer
-        // hitlConfig — resolved independently of the policy so a rule stating only
-        // "AUTO_REJECT" still gets a duration and actually fires.
-        String ruleTimeout = rule != null && !isNullOrEmpty(rule.getApprovalTimeout()) ? rule.getApprovalTimeout() : null;
         if (rule != null && rule.getTimeoutPolicy() != null) {
             // Most specific statement in the config — honored verbatim, AUTO_APPROVE
             // included: naming one endpoint and giving it a policy is as explicit as a
             // designer can be.
             effectivePolicy = rule.getTimeoutPolicy();
-            effectiveTimeout = ruleTimeout != null
-                    ? ruleTimeout
-                    : toolApprovals != null && !isNullOrEmpty(toolApprovals.getApprovalTimeout())
-                            ? toolApprovals.getApprovalTimeout()
-                            : hitlConfig.getApprovalTimeout();
         } else if (toolApprovals != null && toolApprovals.getTimeoutPolicy() != null) {
             // Explicit tool-level override — honored verbatim (AUTO_APPROVE included).
             effectivePolicy = toolApprovals.getTimeoutPolicy();
-            effectiveTimeout = ruleTimeout != null
-                    ? ruleTimeout
-                    : !isNullOrEmpty(toolApprovals.getApprovalTimeout())
-                            ? toolApprovals.getApprovalTimeout()
-                            : hitlConfig.getApprovalTimeout();
         } else {
             // Inherit the outer policy, demoting AUTO_APPROVE to WAIT_INDEFINITELY.
             effectivePolicy = hitlConfig.getTimeoutPolicy();
             if (effectivePolicy == HitlTimeoutPolicy.AUTO_APPROVE) {
                 effectivePolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
             }
-            // A rule- or tool-level approvalTimeout may still be set even without a
-            // policy at that level — prefer the more specific one, else inherit outward.
-            effectiveTimeout = ruleTimeout != null
-                    ? ruleTimeout
-                    : toolApprovals != null && !isNullOrEmpty(toolApprovals.getApprovalTimeout())
-                            ? toolApprovals.getApprovalTimeout()
-                            : hitlConfig.getApprovalTimeout();
         }
         if (effectivePolicy == null) {
             effectivePolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
         }
         memory.setHitlTimeoutPolicy(effectivePolicy);
         memory.setHitlApprovalTimeout(effectiveTimeout);
+    }
+
+    /**
+     * First value that is neither null nor blank, or null. Blank-aware because
+     * {@code RuntimeUtilities.isNullOrEmpty} is not: a whitespace-only duration
+     * saves as "absent" and must resolve as absent too.
+     */
+    private static String firstNonBlank(String... candidates) {
+        for (String candidate : candidates) {
+            if (candidate != null && !candidate.isBlank()) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     /**
