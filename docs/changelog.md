@@ -5,6 +5,24 @@
 
 ---
 
+## 🧩 refactor(orchestrator): extract HttpCallToolsProvider, first SPI-conformant provider (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 of `planning/group-collaboration-improvements-plan.md` §3.2 — first of 8 providers, and the template for the rest. Moved `discoverHttpCallTools`, `normalizeEndpointPath`, and `safeTemplateMerge` (plus `RESERVED_TEMPLATE_KEYS`) into a new `HttpCallToolsProvider implements ToolSourceProvider`.
+
+**A cross-class package-private dependency changed the whole extraction's package strategy before any code moved.** `discoverHttpCallTools` calls `WorkflowTraversal.discoverConfigs(...)` — a package-private static utility, in its own Javadoc "shared... between httpcall and mcpcalls tool discovery" (and RAG). Wave R's `groups`-subpackage convention would have forced widening `WorkflowTraversal` itself to `public` — a shared utility with call sites this extraction doesn't otherwise touch, for zero benefit. Decided instead: provider *implementations* live in `ai.labs.eddi.modules.llm.impl`, the same package as `AgentOrchestrator` (only the SPI *contracts*, already committed, live in the cross-cutting `tools.spi` package the plan names). Same-package access means zero widening was needed for `WorkflowTraversal` or anything else this or later providers touch there — a direct, one-extraction-early correction of the packaging assumption carried over from Wave R, made before it could compound across seven more providers.
+
+**Incremental de-risking, same pattern as `ToolContextBudget`: extract + delegate, defer the caller rewiring.** `buildToolSetup` still calls `discoverHttpCallTools` exactly as before — the delegator now adapts the provider's new `ToolContribution` back to the legacy `HttpCallToolsResult` record (which stays declared on `AgentOrchestrator`, unchanged). The provider's `contribute(ToolAssemblyContext)` — the actual SPI method future callers will use — is fully implemented and adds the `enableHttpCallTools` gate check (previously done by `buildToolSetup` itself, one level up); `discover(memory)` is the direct old-signature equivalent the current delegator calls. Rewiring `buildToolSetup` to iterate a provider list instead of calling three named discovery methods is deliberately still deferred — a separate, later step once all providers exist behind this same pattern.
+
+**Self-caught transcription error, same failure mode as R1 step 6 and R1 step 8 — the third time this exact mistake pattern has surfaced this session.** First draft of `safeTemplateMerge`'s delegator called a nonexistent `HttpCallToolsProvider.safeTemplateMergeForTest(...)`. Caught before compiling by re-reading the diff; fixed by widening the new class's `safeTemplateMerge` from `private` to package-private (same package as the caller — no `ForTest`-suffixed shim needed at all) rather than inventing a name. Also caught a straight copy-paste error in the new file's own `LOGGER` field (initialized against `AgentOrchestrator.class` instead of `HttpCallToolsProvider.class`) during the same re-read pass, before compiling.
+
+Added `HttpCallToolsProviderTest` (5 tests) for `contribute`'s enable/disable gate — genuinely new surface, since the check moved down from `buildToolSetup` and didn't exist as a method on the old `discoverHttpCallTools`. Discovery itself remains covered by `AgentOrchestratorTest`/`AgentOrchestratorExtendedTest`'s existing `normalizeEndpointPath`/`safeTemplateMerge` reflection suites, re-verified green through the new delegators.
+
+Full 16-class test battery (322 tests) green; formatter/validate clean after removing 6 imports the move made unused. `AgentOrchestrator`: 2,542 → 2,404 lines.
+
+---
+
 ## 🧩 feat(orchestrator): introduce the ToolSourceProvider SPI (2026-08-01)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
