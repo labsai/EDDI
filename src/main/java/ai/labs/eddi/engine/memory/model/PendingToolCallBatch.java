@@ -36,6 +36,7 @@ public class PendingToolCallBatch {
         private boolean argsTruncated; // true => call may NOT be executed on resume (auto-error result)
         private String argumentsRedacted; // SecretRedactionFilter'd, capped — the ONLY field approver surfaces read
         private String gateReason; // the matched pattern, e.g. "mcp:*"
+        private String matchedRule; // toolApprovals.rules[].match that tuned this call, or null
 
         public String getCallId() {
             return callId;
@@ -92,6 +93,14 @@ public class PendingToolCallBatch {
         public void setGateReason(String gateReason) {
             this.gateReason = gateReason;
         }
+
+        public String getMatchedRule() {
+            return matchedRule;
+        }
+
+        public void setMatchedRule(String matchedRule) {
+            this.matchedRule = matchedRule;
+        }
     }
 
     private String pauseEpoch; // UUID per pause — journal key component
@@ -123,6 +132,24 @@ public class PendingToolCallBatch {
      * it is config, not user data, and the generic read path does not need it.
      */
     private ToolApprovalsConfig effectiveToolApprovals;
+    /**
+     * The single {@code toolApprovals.rules} entry governing THIS pause — resolved
+     * at gate time by {@code ToolApprovalRules}, where the gated calls' names,
+     * sources and endpoints are all still in hand.
+     * <p>
+     * Resolved once and persisted rather than re-derived downstream: after the
+     * pause, {@code ConversationService} (timeout policy) and
+     * {@code Conversation.resolvePendingMessage} see only this batch, whose
+     * {@link PendingToolCall}s carry a name and source but no endpoint — so
+     * {@code http.post:/agentstore/agents} could not be re-matched there, and a
+     * silently different answer on the two sides of a pause is exactly the class of
+     * bug this field removes.
+     * <p>
+     * Null when the config has no rules or none matched; readers then fall back to
+     * the {@link #effectiveToolApprovals} scalars, which is also what every batch
+     * persisted before this field existed does.
+     */
+    private ToolApprovalsConfig.ApprovalRule effectiveRule;
 
     public String getPauseEpoch() {
         return pauseEpoch;
@@ -242,5 +269,13 @@ public class PendingToolCallBatch {
 
     public void setEffectiveToolApprovals(ToolApprovalsConfig effectiveToolApprovals) {
         this.effectiveToolApprovals = effectiveToolApprovals;
+    }
+
+    public ToolApprovalsConfig.ApprovalRule getEffectiveRule() {
+        return effectiveRule;
+    }
+
+    public void setEffectiveRule(ToolApprovalsConfig.ApprovalRule effectiveRule) {
+        this.effectiveRule = effectiveRule;
     }
 }

@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -1279,13 +1280,22 @@ class AgentOrchestrator {
                                 throw new LifecycleException.LifecycleInterruptedException(
                                         "Tool-approval pause abandoned: executing thread was interrupted before commit");
                             }
-                            // 2) snapshot + persist the pending batch, then abort the loop
+                            // 2) resolve the per-tool friction rule (iteration 1). Done HERE,
+                            // once, because this is the last place the gated calls' endpoints
+                            // exist — the persisted batch keeps names and sources only, so an
+                            // endpoint-addressed rule could never be re-matched downstream.
+                            var ruleByCallId = ToolApprovalRules.matchByCallId(gateResult.gated(), toolSources,
+                                    setup.toolEndpoints(), effectiveToolApprovals);
+                            var governingRule = ToolApprovalRules.governing(ruleByCallId.values());
+                            recordRuleMatches(ruleByCallId.values());
+                            // 3) snapshot + persist the pending batch, then abort the loop
                             PendingToolCallBatch batch = buildPendingBatch(currentMessages, gateResult, task, memory,
                                     i, activatedToolNames(isLazy, activeSpecs), trace, pausesSoFar + 1, llmTaskIndex,
-                                    toolSources, effectiveToolApprovals, transcriptMaxBytes);
+                                    toolSources, effectiveToolApprovals, transcriptMaxBytes, ruleByCallId, governingRule);
                             memory.setHitlPendingToolCalls(batch);
                             incrementToolPauseCount(memory, pausesSoFar);
-                            throw new ToolApprovalRequiredException(buildPauseReason(effectiveToolApprovals, gateResult), batch);
+                            throw new ToolApprovalRequiredException(
+                                    buildPauseReason(effectiveToolApprovals, gateResult, governingRule), batch);
                         }
                     }
 
@@ -1784,17 +1794,29 @@ class AgentOrchestrator {
         return activeSpecs.stream().map(ToolSpecification::name).toList();
     }
 
+    /** First non-blank of the two, or null. */
+    private static String firstNonBlank(String preferred, String fallback) {
+        if (preferred != null && !preferred.isBlank()) {
+            return preferred;
+        }
+        return fallback != null && !fallback.isBlank() ? fallback : null;
+    }
+
     /**
-     * Builds the approver-facing pause reason: {@code cfg.pauseReason} with
-     * {@code {toolNames}} replaced by the comma-joined gated names, defaulting to
-     * "Tool call requires approval: names". Redacted and capped at 500 chars.
+     * Builds the approver-facing pause reason: the governing rule's
+     * {@code pauseReason} if it set one, else {@code cfg.pauseReason}, with
+     * {@code {toolNames}} replaced by the comma-joined gated names and defaulting
+     * to "Tool call requires approval: names". Redacted and capped at 500 chars.
      */
-    private static String buildPauseReason(ToolApprovalsConfig cfg, ToolApprovalGate.GateResult gateResult) {
+    private static String buildPauseReason(ToolApprovalsConfig cfg, ToolApprovalGate.GateResult gateResult,
+                                           ToolApprovalsConfig.ApprovalRule rule) {
         String names = gateResult.gated().stream().map(ToolExecutionRequest::name).distinct()
                 .reduce((a, b) -> a + ", " + b).orElse("");
-        String template = cfg != null && cfg.getPauseReason() != null && !cfg.getPauseReason().isBlank()
-                ? cfg.getPauseReason()
-                : "Tool call requires approval: {toolNames}";
+        String template = firstNonBlank(rule != null ? rule.getPauseReason() : null,
+                cfg != null ? cfg.getPauseReason() : null);
+        if (template == null) {
+            template = "Tool call requires approval: {toolNames}";
+        }
         String reason = template.replace("{toolNames}", names);
         reason = SecretRedactionFilter.redact(reason);
         if (reason.length() > PAUSE_REASON_MAX_CHARS) {
@@ -1817,6 +1839,21 @@ class AgentOrchestrator {
     }
 
     /**
+     * Backward-compatible overload: no per-tool friction rules resolved (the batch
+     * falls back to the {@code toolApprovals} scalars, exactly as before iteration
+     * 1).
+     */
+    PendingToolCallBatch buildPendingBatch(List<ChatMessage> currentMessages, ToolApprovalGate.GateResult gateResult,
+                                           LlmConfiguration.Task task, IConversationMemory memory, int iterationIndex,
+                                           List<String> activatedToolNames, List<Map<String, Object>> trace,
+                                           int pauseCountThisTurn, int llmTaskIndex,
+                                           Map<String, String> toolSources, ToolApprovalsConfig effectiveToolApprovals,
+                                           int transcriptMaxBytes) {
+        return buildPendingBatch(currentMessages, gateResult, task, memory, iterationIndex, activatedToolNames, trace,
+                pauseCountThisTurn, llmTaskIndex, toolSources, effectiveToolApprovals, transcriptMaxBytes, Map.of(), null);
+    }
+
+    /**
      * Snapshots the interrupted tool-call batch into a durable
      * {@link PendingToolCallBatch}. All approver-facing strings are secret-redacted
      * and size-capped.
@@ -1826,13 +1863,22 @@ class AgentOrchestrator {
      *            — resolved by {@code LlmTask} from
      *            {@code eddi.hitl.tool.transcript-max-bytes} (default
      *            {@link PendingToolCallBatch#TRANSCRIPT_MAX_BYTES_DEFAULT}).
+     * @param ruleByCallId
+     *            per gated call, the {@code toolApprovals.rules} entry tuning it —
+     *            recorded for approver visibility only
+     * @param governingRule
+     *            the single rule governing this pause (strictest of the above), or
+     *            null; persisted so the post-pause resolvers read the same answer
+     *            this gate computed
      */
     PendingToolCallBatch buildPendingBatch(List<ChatMessage> currentMessages, ToolApprovalGate.GateResult gateResult,
                                            LlmConfiguration.Task task, IConversationMemory memory, int iterationIndex,
                                            List<String> activatedToolNames, List<Map<String, Object>> trace,
                                            int pauseCountThisTurn, int llmTaskIndex,
                                            Map<String, String> toolSources, ToolApprovalsConfig effectiveToolApprovals,
-                                           int transcriptMaxBytes) {
+                                           int transcriptMaxBytes,
+                                           Map<String, ToolApprovalsConfig.ApprovalRule> ruleByCallId,
+                                           ToolApprovalsConfig.ApprovalRule governingRule) {
         PendingToolCallBatch batch = new PendingToolCallBatch();
         batch.setPauseEpoch(UUID.randomUUID().toString());
         batch.setLlmTaskId(task.getId());
@@ -1843,6 +1889,7 @@ class AgentOrchestrator {
         // Conversation.resolvePendingMessage read the task-scoped config that produced
         // the pause instead of re-deriving from the agent level only.
         batch.setEffectiveToolApprovals(effectiveToolApprovals);
+        batch.setEffectiveRule(governingRule);
         // workflowId is informational; the authoritative pause bookmark carries the
         // paused workflow id (set by the LifecycleManager → Conversation pause commit).
         batch.setIterationIndex(iterationIndex);
@@ -1881,6 +1928,11 @@ class AgentOrchestrator {
             // gateReason: the matched pattern (by call id), fall back to bare name.
             String reason = req.id() != null ? gateResult.gateReasonByCallId().get(req.id()) : null;
             call.setGateReason(reason);
+            // matchedRule: which friction rule tuned THIS call, which is not necessarily
+            // the one governing the pause — an approver seeing a five-minute auto-reject
+            // on a batch should be able to tell which call brought it.
+            var callRule = req.id() != null ? ruleByCallId.get(req.id()) : null;
+            call.setMatchedRule(callRule != null ? callRule.getMatch() : null);
             calls.add(call);
         }
         batch.setCalls(calls);
@@ -1961,6 +2013,24 @@ class AgentOrchestrator {
      * {@code ConversationService} on the say/resume paths). Best-effort: any
      * failure is swallowed so guard bookkeeping never breaks the LLM loop.
      */
+    /**
+     * Counts which friction rules actually fire, tagged by the CONFIGURED pattern —
+     * never a URL, credential, tool argument or user id, so cardinality is bounded
+     * by the size of the agent's {@code rules} list. Deduplicated per pause: a
+     * batch where three calls match {@code http.delete:*} increments once, so the
+     * counter reads "how often did this rule govern a review", not "how many calls
+     * did the model happen to bundle".
+     */
+    private void recordRuleMatches(Collection<ToolApprovalsConfig.ApprovalRule> matched) {
+        try {
+            matched.stream().filter(Objects::nonNull).map(ToolApprovalsConfig.ApprovalRule::getMatch)
+                    .filter(Objects::nonNull).distinct()
+                    .forEach(match -> Metrics.globalRegistry.counter("eddi.hitl.rule.matched", "match", match).increment());
+        } catch (Exception e) {
+            LOGGER.debugf("hitl rule metric emit failed: %s", e.getMessage());
+        }
+    }
+
     private void recordPauseCapGuard(IConversationMemory memory, String fingerprint) {
         try {
             Metrics.globalRegistry.counter("eddi_hitl_tool_guard_count", "guard", "pause_cap").increment();

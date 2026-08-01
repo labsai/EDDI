@@ -253,8 +253,48 @@ The gate lives in the tool-execution loop (`AgentOrchestrator`), so it is **fail
 | `pauseReason` | string, ≤ 500 chars | generic | Approver-facing reason; the literal `{toolNames}` placeholder is substituted with the gated tool names. |
 | `pendingMessage` | string, ≤ 500 chars | `null` | End-user-facing message stored as **public output** at pause commit (so a chat UI shows the user *why* the turn stalled). `{toolNames}` is substituted. |
 | `inGroupTurns` | `REJECT` | `REJECT` | Behavior when a member agent's tool call is gated inside a group turn. `INBOX` is **reserved** (rejected with a 400 in v1). See [Group members](#group-members). |
+| `rules` | list of objects | `null` | Per-tool friction overrides. See [Per-tool approval rules](#per-tool-approval-rules). |
 
 All values are validated at **save time** and on ZIP import (`HitlConfigValidation.validateToolApprovals`): bad patterns (with the offending index), a pattern in both `requireApproval` and `exempt`, duplicates, `exempt` without `requireApproval`, out-of-range integers, a reserved `INBOX`, a finite policy without a valid `approvalTimeout`, and overlong reason/message all yield an actionable 400 — the gate never degrades silently at runtime.
+
+### Per-tool approval rules
+
+The fields above are single scalars for *every* gated tool, so "deploy an agent" and "create an agent" cannot differ in how long a reviewer has or what the approval card says. `rules` fixes that:
+
+```json
+{
+  "requireApproval": ["http.post:*", "http.put:*", "http.patch:*", "http.delete:*"],
+  "exempt": ["http.get:*"],
+  "rules": [
+    { "match": "http.post:/agentstore/agents",
+      "timeoutPolicy": "WAIT_INDEFINITELY",
+      "pauseReason": "Creating a new agent — review the whole config" },
+    { "match": "http.post:/administration/{environment}/deploy/{agentId}",
+      "timeoutPolicy": "AUTO_REJECT", "approvalTimeout": "PT5M" },
+    { "match": "http.delete:*", "timeoutPolicy": "WAIT_INDEFINITELY" }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `match` | pattern | **Required.** Same [pattern language](#pattern-language) as `requireApproval` — bare name, `source:name`, or `source.method:path`. |
+| `timeoutPolicy` | `AUTO_APPROVE` \| `AUTO_REJECT` \| `ABORT` \| `WAIT_INDEFINITELY` | Overrides `toolApprovals.timeoutPolicy` for this rule. |
+| `approvalTimeout` | ISO-8601 duration | Overrides `toolApprovals.approvalTimeout`. |
+| `pauseReason` | string, ≤ 500 chars | Overrides `toolApprovals.pauseReason`. `{toolNames}` is substituted. |
+| `pendingMessage` | string, ≤ 500 chars | Overrides `toolApprovals.pendingMessage`. `{toolNames}` is substituted. |
+
+> **A rule tunes friction; it never gates or ungates.** Whether a call needs approval is decided *only* by `requireApproval`/`exempt`. This is deliberate: the gate allows an unmatched call, so it only survives by gating broadly and exempting narrowly — a rule able to ungate would let a config grant capability by adding an entry.
+
+Resolution (`ToolApprovalRules`):
+
+1. **Per call, most specific wins.** Rules are tried fewest-wildcards-first, then longest-pattern-first, so `http.post:/agentstore/agents` beats `http.post:*` **whatever order they are listed in**.
+2. **Per batch, strictest wins.** A model can emit several gated calls in one message and they pause *together*, under one policy — so the matched rules are reduced to one: the rule assuming the least human authority on timeout, ordered `WAIT_INDEFINITELY` > `ABORT` > `AUTO_REJECT` > `AUTO_APPROVE` > (no policy stated). Bundling a lenient call into a batch can therefore never soften a stricter rule. Ties break on specificity.
+3. **Fields fall back individually** to the `toolApprovals` scalars, so a rule that sets only `pauseReason` keeps the configured timeout policy.
+
+The governing rule is resolved **at gate time** and persisted on the pending batch (`PendingToolCallBatch.effectiveRule`), because the persisted batch keeps tool names and sources but no endpoints — an endpoint-addressed rule could not be re-matched after the pause. Each gated call also records the rule that tuned it (`matchedRule`), so an approver can tell which call brought the batch's policy.
+
+Validation mirrors `requireApproval`: `match` goes through the same `ToolApprovalPatterns.validate`, duplicates are refused, `rules` without `requireApproval` is refused, and a finite `timeoutPolicy` with no duration at either level is refused. The counter `eddi.hitl.rule.matched{match="<pattern>"}` records which rules actually fire (deduplicated per pause; the tag is the configured pattern, never a URL or argument).
 
 ### Pattern language
 
@@ -282,9 +322,12 @@ Patterns are matched by `ToolApprovalPatterns` / `ToolApprovalGate`:
 
 Tool pauses resolve their effective timeout policy with a deliberate rule (`ConversationService.applyEffectiveToolTimeoutPolicy`):
 
-1. An **explicit** `toolApprovals.timeoutPolicy` wins verbatim — including an explicit `AUTO_APPROVE` (the designer opted in at the tool level). Its `approvalTimeout` is used, falling back to the outer `hitlConfig.approvalTimeout`.
-2. Otherwise the outer `hitlConfig.timeoutPolicy`/`approvalTimeout` is inherited, **except** an inherited `AUTO_APPROVE` is **demoted to `WAIT_INDEFINITELY`** — a silent timeout must never auto-execute a gated tool call (that is exactly what the gate exists to prevent).
-3. Absent config on both levels leaves the default `WAIT_INDEFINITELY`.
+1. The **governing [rule](#per-tool-approval-rules)**'s `timeoutPolicy` wins — the most specific statement in the config, so it is honoured verbatim (`AUTO_APPROVE` included).
+2. Otherwise an **explicit** `toolApprovals.timeoutPolicy` wins verbatim — including an explicit `AUTO_APPROVE` (the designer opted in at the tool level). Its `approvalTimeout` is used, falling back to the outer `hitlConfig.approvalTimeout`.
+3. Otherwise the outer `hitlConfig.timeoutPolicy`/`approvalTimeout` is inherited, **except** an inherited `AUTO_APPROVE` is **demoted to `WAIT_INDEFINITELY`** — a silent timeout must never auto-execute a gated tool call (that is exactly what the gate exists to prevent).
+4. Absent config on every level leaves the default `WAIT_INDEFINITELY`.
+
+The duration resolves down the same chain independently (rule → `toolApprovals` → `hitlConfig`), so a rule that states only a policy still inherits a clock and actually fires.
 
 > **Key rule:** `AUTO_APPROVE` applies to a **tool** pause **only when set explicitly on `toolApprovals`**. Agent-level `AUTO_APPROVE` covers RULE pauses but is demoted for tool pauses. Save-time emits a WARN (not a 400) when an agent sets `AUTO_APPROVE` and a `toolApprovals` block without its own `timeoutPolicy`.
 

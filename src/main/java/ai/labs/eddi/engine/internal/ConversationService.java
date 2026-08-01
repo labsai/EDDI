@@ -21,6 +21,7 @@ import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
@@ -1974,7 +1975,7 @@ public class ConversationService implements IConversationService {
         // Fix #1: resolve max-auto-approvals + onNoProgress from the config that gated
         // the RE-PAUSE batch (task-scoped override when present), falling back to the
         // agent-level default for a legacy/null-field batch.
-        ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig noProgressCfg = newBatch.getEffectiveToolApprovals() != null
+        ToolApprovalsConfig noProgressCfg = newBatch.getEffectiveToolApprovals() != null
                 ? newBatch.getEffectiveToolApprovals()
                 : memory.getAgentToolApprovalsConfig();
         int maxAutoApprovals = resolveMaxAutoApprovals(noProgressCfg);
@@ -2026,7 +2027,7 @@ public class ConversationService implements IConversationService {
      * Effective max consecutive system auto-approvals per turn (default 2, clamped
      * 0..10).
      */
-    private static int resolveMaxAutoApprovals(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig cfg) {
+    private static int resolveMaxAutoApprovals(ToolApprovalsConfig cfg) {
         if (cfg == null || cfg.getMaxAutoApprovalsPerTurn() == null) {
             return DEFAULT_MAX_AUTO_APPROVALS_PER_TURN;
         }
@@ -2034,7 +2035,7 @@ public class ConversationService implements IConversationService {
     }
 
     /** Effective onNoProgress policy (WAIT_FOR_HUMAN default). */
-    private static String resolveOnNoProgress(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig cfg) {
+    private static String resolveOnNoProgress(ToolApprovalsConfig cfg) {
         if (cfg == null || isNullOrEmpty(cfg.getOnNoProgress())) {
             return "WAIT_FOR_HUMAN";
         }
@@ -2407,6 +2408,9 @@ public class ConversationService implements IConversationService {
      * Task 10 — resolves the EFFECTIVE tool-pause timeout policy and writes it into
      * the memory bookmark. Precedence:
      * <ol>
+     * <li>the governing {@code toolApprovals.rules} entry's {@code timeoutPolicy} —
+     * the most specific statement there is, resolved at gate time and carried on
+     * the batch (iteration 1);</li>
      * <li>an explicit {@code toolApprovals.timeoutPolicy} (with its own
      * {@code approvalTimeout}) wins verbatim — an explicit AUTO_APPROVE is
      * honored;</li>
@@ -2415,7 +2419,10 @@ public class ConversationService implements IConversationService {
      * {@code WAIT_INDEFINITELY} so a silent timeout never auto-executes a gated
      * tool call.</li>
      * </ol>
-     * Absent config on both levels leaves the default WAIT_INDEFINITELY already set
+     * The timeout resolves down the same chain independently, so a rule that states
+     * only a policy still inherits a duration.
+     * <p>
+     * Absent config on every level leaves the default WAIT_INDEFINITELY already set
      * by the caller.
      */
     private void applyEffectiveToolTimeoutPolicy(IConversationMemory memory, AgentConfiguration.HitlConfig hitlConfig) {
@@ -2425,26 +2432,46 @@ public class ConversationService implements IConversationService {
         // agent-level hitlConfig.toolApprovals for a legacy batch (null field) or a
         // null batch. The inherit-from-outer fallback and the AUTO_APPROVE-demotion
         // below still read the OUTER hitlConfig — Task 10 semantics unchanged.
-        ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals = effectiveToolApprovals(memory, hitlConfig);
+        ToolApprovalsConfig toolApprovals = effectiveToolApprovals(memory, hitlConfig);
+        PendingToolCallBatch pendingBatch = memory.getHitlPendingToolCalls();
+        ToolApprovalsConfig.ApprovalRule rule = pendingBatch != null ? pendingBatch.getEffectiveRule() : null;
         HitlTimeoutPolicy effectivePolicy;
         String effectiveTimeout;
-        if (toolApprovals != null && toolApprovals.getTimeoutPolicy() != null) {
+        // The rule's own duration wins, then the toolApprovals scalar, then the outer
+        // hitlConfig — resolved independently of the policy so a rule stating only
+        // "AUTO_REJECT" still gets a duration and actually fires.
+        String ruleTimeout = rule != null && !isNullOrEmpty(rule.getApprovalTimeout()) ? rule.getApprovalTimeout() : null;
+        if (rule != null && rule.getTimeoutPolicy() != null) {
+            // Most specific statement in the config — honored verbatim, AUTO_APPROVE
+            // included: naming one endpoint and giving it a policy is as explicit as a
+            // designer can be.
+            effectivePolicy = rule.getTimeoutPolicy();
+            effectiveTimeout = ruleTimeout != null
+                    ? ruleTimeout
+                    : toolApprovals != null && !isNullOrEmpty(toolApprovals.getApprovalTimeout())
+                            ? toolApprovals.getApprovalTimeout()
+                            : hitlConfig.getApprovalTimeout();
+        } else if (toolApprovals != null && toolApprovals.getTimeoutPolicy() != null) {
             // Explicit tool-level override — honored verbatim (AUTO_APPROVE included).
             effectivePolicy = toolApprovals.getTimeoutPolicy();
-            effectiveTimeout = !isNullOrEmpty(toolApprovals.getApprovalTimeout())
-                    ? toolApprovals.getApprovalTimeout()
-                    : hitlConfig.getApprovalTimeout();
+            effectiveTimeout = ruleTimeout != null
+                    ? ruleTimeout
+                    : !isNullOrEmpty(toolApprovals.getApprovalTimeout())
+                            ? toolApprovals.getApprovalTimeout()
+                            : hitlConfig.getApprovalTimeout();
         } else {
             // Inherit the outer policy, demoting AUTO_APPROVE to WAIT_INDEFINITELY.
             effectivePolicy = hitlConfig.getTimeoutPolicy();
             if (effectivePolicy == HitlTimeoutPolicy.AUTO_APPROVE) {
                 effectivePolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
             }
-            // A tool-level approvalTimeout may still be set even without a tool-level
-            // policy — prefer it, else inherit the outer timeout.
-            effectiveTimeout = toolApprovals != null && !isNullOrEmpty(toolApprovals.getApprovalTimeout())
-                    ? toolApprovals.getApprovalTimeout()
-                    : hitlConfig.getApprovalTimeout();
+            // A rule- or tool-level approvalTimeout may still be set even without a
+            // policy at that level — prefer the more specific one, else inherit outward.
+            effectiveTimeout = ruleTimeout != null
+                    ? ruleTimeout
+                    : toolApprovals != null && !isNullOrEmpty(toolApprovals.getApprovalTimeout())
+                            ? toolApprovals.getApprovalTimeout()
+                            : hitlConfig.getApprovalTimeout();
         }
         if (effectivePolicy == null) {
             effectivePolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
@@ -2461,9 +2488,9 @@ public class ConversationService implements IConversationService {
      * the batch is null (never populated) or carries a null effective config (a
      * legacy pre-fix batch) — so those paths resolve EXACTLY as before the fix.
      */
-    private static ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig effectiveToolApprovals(
-                                                                                              IConversationMemory memory,
-                                                                                              AgentConfiguration.HitlConfig hitlConfig) {
+    private static ToolApprovalsConfig effectiveToolApprovals(
+                                                              IConversationMemory memory,
+                                                              AgentConfiguration.HitlConfig hitlConfig) {
         PendingToolCallBatch batch = memory.getHitlPendingToolCalls();
         if (batch != null && batch.getEffectiveToolApprovals() != null) {
             return batch.getEffectiveToolApprovals();

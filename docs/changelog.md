@@ -5,6 +5,41 @@
 
 ---
 
+## 🎚️ feat(hitl): per-endpoint approval friction (2026-08-01)
+
+**Repo:** EDDI (`feat/operator-write-capability`)
+
+First of the follow-ups named at the end of [#622](#-featoperator-the-foundation-for-an-agent-that-can-safely-write-2026-07-29). `timeoutPolicy`, `approvalTimeout`, `pauseReason` and `pendingMessage` were single scalars covering every gated tool, so "deploy an agent" and "create an agent" could not differ in how long a reviewer had or what the approval card said. `toolApprovals.rules` is an optional list of per-tool overrides addressed by the same pattern language as `requireApproval`:
+
+```json
+"rules": [
+  { "match": "http.post:/agentstore/agents", "timeoutPolicy": "WAIT_INDEFINITELY",
+    "pauseReason": "Creating a new agent — review the whole config" },
+  { "match": "http.post:/administration/{environment}/deploy/{agentId}",
+    "timeoutPolicy": "AUTO_REJECT", "approvalTimeout": "PT5M" }
+]
+```
+
+**A rule tunes friction; it never gates or ungates.** That stays entirely in `requireApproval`/`exempt`. The gate allows an unmatched call, so it only survives by gating broadly and exempting narrowly — a rule able to ungate would let a config grant capability by adding an entry, which is the enumerate-upward failure the whole design avoids. The invariant is asserted against the gate itself: a config whose rules name an exempt GET and give a required POST `AUTO_APPROVE` changes neither classification.
+
+**Two resolution decisions worth recording.**
+
+*Most specific wins, per call.* Fewest wildcards first, then longest pattern — so `http.post:/agentstore/agents` beats `http.post:*` regardless of JSON array order. Order-dependence would mean a designer silently losing their intended friction to a list edit.
+
+*Strictest wins, per batch.* A model can emit several gated calls in one message and they pause **together**, under one timeout policy, so the matched rules must reduce to one. Ranking them by how much of the human's decision the policy takes on timeout — `WAIT_INDEFINITELY` > `ABORT` > `AUTO_REJECT` > `AUTO_APPROVE` > (no policy) — means bundling a lenient call into a batch can never soften a stricter rule. Taking the *first* match instead would have let a model turn "delete waits for a human" into "delete auto-rejects in five minutes" by pairing a delete with a deploy. Fields fall back to the scalars *individually*, so a rule that sets only `pauseReason` keeps the configured policy.
+
+**The rule is resolved once, at gate time, and persisted on the batch.** `PendingToolCallBatch` keeps each gated call's name and source but no endpoint, so `http.post:/agentstore/agents` could not be re-matched by the post-pause resolvers in `ConversationService` (timeout) and `Conversation.resolvePendingMessage` (end-user message) — and a rule resolving differently on the two sides of a pause is exactly the bug the persisted field removes. It mirrors the existing `effectiveToolApprovals` field and is nullable for the same backward-compatibility reason.
+
+**Extracted rather than duplicated.** `ToolApprovalGate.addressesOf` is now public and is the single derivation of the three forms a pattern may address a call by; the gate and `ToolApprovalRules` both call it. A second copy would drift, and since the gate allows an unmatched call, drift there is an ungated write.
+
+**Metric.** `eddi.hitl.rule.matched{match="<configured pattern>"}` — deduplicated per pause, so it counts reviews governed rather than calls the model happened to bundle. The tag is the pattern from the config, never a URL, credential, argument or user id, so cardinality is bounded by the size of the `rules` list.
+
+**Verification.** 1929 tests pass across the HITL, conversation, orchestrator and lifecycle suites (the 3 errors are the known Docker/Testcontainers and Quarkus-IT environmental failures, unchanged from a clean checkout). Five mutations applied and each confirmed to kill tests: strictest-wins → first-wins (3 dead), specificity sort removed (2), the governing-rule branch in `applyEffectiveToolTimeoutPolicy` disabled (2), the rule's duration ignored (2), the rule's `pendingMessage` ignored (1). The duration test asserts on the *armed deadline* rather than the policy name, because both levels state `AUTO_REJECT` there and only the fire time distinguishes which duration was read.
+
+Documented in [`docs/hitl.md`](hitl.md).
+
+---
+
 ## 🔑 feat(operator): the foundation for an agent that can safely write (2026-07-29)
 
 **Repo:** EDDI (`feat/operator-write-foundation`)

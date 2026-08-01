@@ -208,6 +208,83 @@ class ConversationHitlTest {
         }
 
         @Test
+        @DisplayName("TOOL_CALL pause uses the governing rule's pendingMessage over both scalar levels")
+        void toolPauseUsesGoverningRulePendingMessage() throws Exception {
+            // "You are about to create an agent" reads very differently from a blanket
+            // "an action needs approval" — per-endpoint friction is only worth having if
+            // the end user actually sees the endpoint-specific wording.
+            memory.setConversationState(ConversationState.READY);
+
+            var agentLevel = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            agentLevel.setPendingMessage("AGENT default for {toolNames}");
+            memory.setAgentToolApprovalsConfig(agentLevel);
+
+            var taskOverride = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            taskOverride.setPendingMessage("TASK review pending for {toolNames}");
+
+            var rule = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig.ApprovalRule();
+            rule.setMatch("http.post:/agentstore/agents");
+            rule.setPendingMessage("RULE creating an agent via {toolNames}");
+
+            doAnswer(inv -> {
+                var call = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+                call.setToolName("createAgent");
+                var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+                batch.setCalls(List.of(call));
+                batch.setEffectiveToolApprovals(taskOverride);
+                batch.setEffectiveRule(rule);
+                memory.setHitlPendingToolCalls(batch);
+                throw new ConversationPauseException("wf1", 2, "gated tool call",
+                        ConversationPauseException.PauseOrigin.TOOL_CALL);
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            var conv = createConversation();
+            conv.say("create an agent", Map.of());
+
+            var output = memory.getCurrentStep().getConversationOutput();
+            String rendered = output.get(ai.labs.eddi.engine.memory.MemoryKeys.OUTPUT_PREFIX).toString();
+            assertTrue(rendered.contains("RULE creating an agent via createAgent"),
+                    "the governing rule's pendingMessage must win over both scalar levels; got: " + rendered);
+            assertFalse(rendered.contains("TASK review pending"),
+                    "the toolApprovals scalar must NOT be used when the governing rule states a message");
+        }
+
+        @Test
+        @DisplayName("a governing rule stating no pendingMessage still falls back to the toolApprovals scalar")
+        void toolPauseRuleWithoutMessageFallsBackToScalar() throws Exception {
+            // Fields fall back individually: a rule that only tightens the timeout must
+            // not blank out the message the designer wrote at the level above.
+            memory.setConversationState(ConversationState.READY);
+
+            var taskOverride = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            taskOverride.setPendingMessage("TASK review pending for {toolNames}");
+
+            var rule = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig.ApprovalRule();
+            rule.setMatch("http.delete:*");
+            rule.setTimeoutPolicy(ai.labs.eddi.configs.hitl.HitlTimeoutPolicy.WAIT_INDEFINITELY);
+
+            doAnswer(inv -> {
+                var call = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+                call.setToolName("deleteAgent");
+                var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+                batch.setCalls(List.of(call));
+                batch.setEffectiveToolApprovals(taskOverride);
+                batch.setEffectiveRule(rule);
+                memory.setHitlPendingToolCalls(batch);
+                throw new ConversationPauseException("wf1", 2, "gated tool call",
+                        ConversationPauseException.PauseOrigin.TOOL_CALL);
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            var conv = createConversation();
+            conv.say("delete it", Map.of());
+
+            var output = memory.getCurrentStep().getConversationOutput();
+            String rendered = output.get(ai.labs.eddi.engine.memory.MemoryKeys.OUTPUT_PREFIX).toString();
+            assertTrue(rendered.contains("TASK review pending for deleteAgent"),
+                    "a rule silent on pendingMessage must inherit the scalar; got: " + rendered);
+        }
+
+        @Test
         @DisplayName("normal (non-pause) turn DOES purge step-scoped properties — companion to Invariant 9")
         void normalTurnPurgesStepProperties() throws Exception {
             memory.setConversationState(ConversationState.READY);
