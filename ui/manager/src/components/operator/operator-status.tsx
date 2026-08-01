@@ -201,7 +201,7 @@ function GateBadge({
   gate,
   loading,
 }: {
-  gate: import("@/lib/api/operator").GateVerificationResult | null | undefined;
+  gate: GateVerificationResult | null | undefined;
   loading: boolean;
 }) {
   const { t } = useTranslation();

@@ -16,7 +16,12 @@ export interface ReconstructedEndpoint {
  * performed when it built the tool, run again on the client.
  */
 export function buildOperationIdIndex(spec: FetchedSpec): Record<string, ReconstructedEndpoint> {
-  const index: Record<string, ReconstructedEndpoint> = {};
+  // Null-prototype: the lookup key is a tool name from the pause payload, not a
+  // value this module controls. A plain object literal would resolve
+  // `index["toString"]` to the inherited function — truthy, so the caller would
+  // render `undefined undefined (reconstructed)` instead of showing nothing —
+  // and would silently fail to store an operationId of `"__proto__"`.
+  const index: Record<string, ReconstructedEndpoint> = Object.create(null);
   for (const [path, methods] of Object.entries(spec.paths ?? {})) {
     if (!methods || typeof methods !== "object") continue;
     for (const [method, operation] of Object.entries(methods)) {
@@ -43,5 +48,10 @@ export function reconstructEndpoint(
   toolName: string,
   index: Record<string, ReconstructedEndpoint>,
 ): ReconstructedEndpoint | null {
+  // Own-property check rather than a bare lookup: `buildOperationIdIndex`
+  // returns a null-prototype object, but this function does not get to assume
+  // its caller used it — and against a plain object `index["toString"]` would
+  // return the inherited function, which is truthy.
+  if (!Object.prototype.hasOwnProperty.call(index, toolName)) return null;
   return index[toolName] ?? null;
 }

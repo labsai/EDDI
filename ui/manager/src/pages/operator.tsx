@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Sparkles,
@@ -63,6 +63,7 @@ export function OperatorPage() {
   const reset = useResetOperator();
   const canary = useOperatorCanary();
 
+  const queryClient = useQueryClient();
   const status = useOperatorStatus(config);
   const gate = useVerifyOperatorGate(config);
   const chat = useOperatorChat(config);
@@ -84,6 +85,37 @@ export function OperatorPage() {
     () => (specQuery.data ? buildOperationIdIndex(specQuery.data) : {}),
     [specQuery.data],
   );
+  /**
+   * Resolve the pause, then DROP the cached approval-status.
+   *
+   * `useApprovalStatus` is keyed on the conversation id alone, and a turn may
+   * pause up to `maxPausesPerTurn` times (backend default 3). Without this, the
+   * second pause of a conversation would render the FIRST pause's cached
+   * `pauseDetails` — showing an approver a different set of tool calls than the
+   * one actually awaiting their decision. Removing rather than invalidating so
+   * the next pause starts at `undefined`, which drives `pauseDetailsPending`
+   * and keeps Approve disabled until the real details arrive.
+   *
+   * (`useResumeConversation` does this invalidation itself, but this surface
+   * calls `resumeConversation` directly — it also has to poll for the resumed
+   * turn's outcome, which that mutation does not do.)
+   */
+  const handleDecide = useCallback<typeof chat.resolveApproval>(
+    async (verdict, note, toolDecisions) => {
+      const conversationId = chat.conversationId;
+      try {
+        await chat.resolveApproval(verdict, note, toolDecisions);
+      } finally {
+        if (conversationId) {
+          queryClient.removeQueries({ queryKey: ["approval-status", conversationId] });
+        }
+      }
+    },
+    // `chat` is recreated each render; only these two members are used.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [chat.resolveApproval, chat.conversationId, queryClient],
+  );
+
   const renderCallExtra = useCallback(
     (call: PendingToolCallView) => {
       const endpoint = reconstructEndpoint(call.toolName, operationIdIndex);
@@ -351,7 +383,7 @@ export function OperatorPage() {
           pauseDetails={chat.isPaused ? approvalStatus.data?.pauseDetails : undefined}
           isResolvingPause={chat.isResolvingPause}
           resolveError={chat.resolveError}
-          onDecide={chat.resolveApproval}
+          onDecide={handleDecide}
           renderCallExtra={renderCallExtra}
         />
         <OperatorStatusPanel

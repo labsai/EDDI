@@ -150,17 +150,34 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Polls the conversation until it is no longer AWAITING_HUMAN.
+ * Polls the conversation until the decision we just submitted has been acted on.
  *
  * `resumeConversation` returns as soon as the decision is recorded, before the
  * resumed turn's continuation (the model's final answer, or the next gated
  * batch) actually completes — a single re-read immediately after would race it.
+ *
+ * "Acted on" is NOT simply "no longer AWAITING_HUMAN". A resumed turn may pause
+ * AGAIN on a fresh tool batch — the backend permits `maxPausesPerTurn` (default
+ * 3), and a multi-step job is expected to use them. Waiting for the state to
+ * clear would spin until the timeout on a conversation behaving exactly as
+ * intended. So a pause carrying a different `hitlPausedAt` than the one we
+ * decided also counts as settled, and the caller renders it as the next pause.
  */
-async function pollUntilSettled(conversationId: string, signal: AbortSignal) {
+async function pollUntilSettled(
+  conversationId: string,
+  signal: AbortSignal,
+  decidedPausedAt: string | null,
+) {
   const deadline = Date.now() + RESOLVE_TIMEOUT_MS;
   for (;;) {
     const snapshot = await getSimpleConversationLog(conversationId, false, true);
-    if (snapshot.conversationState !== "AWAITING_HUMAN") return snapshot;
+    const stillTheSamePause =
+      snapshot.conversationState === "AWAITING_HUMAN" &&
+      // With no timestamp to compare against, treat any pause as the one we
+      // decided — the conservative reading, since claiming a new pause we
+      // cannot prove would clear the banner for a decision still outstanding.
+      (decidedPausedAt === null || snapshot.hitlPausedAt === decidedPausedAt);
+    if (!stillTheSamePause) return snapshot;
     if (Date.now() >= deadline) {
       throw new Error(
         "Timed out waiting for the resumed turn to finish. It may still complete — refresh in a moment.",
@@ -187,15 +204,30 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
   }));
   const abortRef = useRef<AbortController | null>(null);
   const resolveAbortRef = useRef<AbortController | null>(null);
-  /** conversationOutputs.length at the moment the pause was detected — see
-   *  resolveApproval for why this decides append-vs-replace on reconciliation. */
-  const pausedOutputCountRef = useRef(0);
+  /**
+   * The id of the agent bubble currently showing the pending-approval message,
+   * or null when we have none (a 409 pause, where the turn was never consumed
+   * and its optimistic bubbles were dropped).
+   *
+   * Reconciliation is by THIS id, not by counting outputs. Both reads available
+   * here — the streamed `done` snapshot and `getSimpleConversationLog` — run with
+   * the backend's `returnCurrentStepOnly` default of `true`, and
+   * `ConversationMemoryUtilities` collapses `conversationOutputs` to exactly one
+   * element in that mode. Any "did the step advance?" comparison of those two
+   * lengths is therefore always 1 vs 1, i.e. an answer that looks computed but
+   * is a constant.
+   */
+  const pausedPlaceholderIdRef = useRef<string | null>(null);
+  /** `hitlPausedAt` of the pause currently on screen — see pollUntilSettled. */
+  const pausedAtRef = useRef<string | null>(null);
 
   const reset = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
     resolveAbortRef.current?.abort();
     resolveAbortRef.current = null;
+    pausedPlaceholderIdRef.current = null;
+    pausedAtRef.current = null;
     storeConversationId(null);
     setState({
       messages: [],
@@ -250,8 +282,11 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Declared outside the try so the catch can still read it — the 409 branch
+      // needs the id to look the pause reason up.
+      let conversationId = state.conversationId;
+
       try {
-        let conversationId = state.conversationId;
         if (!conversationId) {
           conversationId = await startConversation(config.environment, config.agentId);
           storeConversationId(conversationId);
@@ -289,14 +324,18 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
                 const snapshot: {
                   conversationState?: string;
                   hitlPauseReason?: string;
+                  hitlPausedAt?: string;
                   conversationOutputs?: Record<string, unknown>[];
                 } = JSON.parse(event.data);
                 if (snapshot.conversationState === "AWAITING_HUMAN") {
                   const outputs = snapshot.conversationOutputs ?? [];
-                  pausedOutputCountRef.current = outputs.length;
                   const lastOutput = outputs[outputs.length - 1];
                   const parts = lastOutput ? extractOutputParts(lastOutput) : [];
                   const pendingText = parts.join("\n\n");
+                  // This turn's own bubble is the placeholder resolveApproval will
+                  // replace — remembered by id, whether or not it got any text.
+                  pausedPlaceholderIdRef.current = agentId;
+                  pausedAtRef.current = snapshot.hitlPausedAt ?? null;
                   setState((s) => ({
                     ...s,
                     isPaused: true,
@@ -334,11 +373,30 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
           // this send was rejected WITHOUT being consumed. Drop the optimistic
           // user message and the empty streaming placeholder (neither happened),
           // and show the pause rather than a raw error bubble.
+          //
+          // No placeholder of ours survives, so resolveApproval must APPEND the
+          // resumed answer rather than replace a bubble that isn't there. This
+          // is the common shape after a page reload onto an already-paused
+          // conversation.
+          pausedPlaceholderIdRef.current = null;
           setState((s) => ({
             ...s,
             isPaused: true,
             messages: s.messages.filter((m) => m.id !== userMessage.id && m.id !== agentId),
           }));
+          // The pause happened on a turn we never saw, so its reason is not in
+          // any snapshot we hold — read it, or the banner shows a bare
+          // "awaiting approval" with no explanation of what for.
+          if (conversationId) {
+            try {
+              const snapshot = await getSimpleConversationLog(conversationId, false, true);
+              pausedAtRef.current = snapshot.hitlPausedAt ?? null;
+              setState((s) => ({ ...s, pauseReason: snapshot.hitlPauseReason ?? null }));
+            } catch {
+              // Best effort — the pause itself is already surfaced, and a reason
+              // we could not read is strictly less bad than no pause indicator.
+            }
+          }
         } else {
           setState((s) => ({ ...s, error: getErrorMessage(error) }));
         }
@@ -377,14 +435,16 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
    * reconciles the resumed turn's outcome into the transcript.
    *
    * Never blind-appends: `resumeConversation` returns before its continuation
-   * completes, and a TOOL_CALL resume re-enters the SAME step the pause
-   * interrupted — the backend drops the pending-approval placeholder and
-   * appends the final answer to that step's OWN output list, it does not start
-   * a new one. So whether the resumed turn produced a NEW step (a RULE pause
-   * can advance one) or reused the paused step (the TOOL_CALL case) is read
-   * back from `conversationOutputs.length`, captured at pause time, rather than
-   * assumed — reconciling by identity (replace the still-showing placeholder)
-   * instead of by counting messages sent.
+   * completes (the model's final answer, or the next gated batch), so a single
+   * re-read immediately after would race it — hence `pollUntilSettled`.
+   *
+   * Reconciliation is by the placeholder's ID. Every read available here runs
+   * under the backend's `returnCurrentStepOnly` default, which collapses
+   * `conversationOutputs` to the current step alone — so the response carries
+   * the resumed turn's answer and nothing else, and there is no step-advance to
+   * detect. When we own a placeholder bubble (the pause arrived on a turn we
+   * streamed) it is replaced in place; when we do not (a 409 pause, whose
+   * optimistic bubbles were dropped) the answer is appended.
    */
   const resolveApproval = useCallback(
     async (verdict: HitlVerdict, note?: string, toolDecisions?: Record<string, ToolCallDecision>) => {
@@ -397,37 +457,57 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
 
       try {
         await resumeConversation(conversationId, { verdict, note, toolDecisions });
-        const snapshot = await pollUntilSettled(conversationId, controller.signal);
+        const snapshot = await pollUntilSettled(conversationId, controller.signal, pausedAtRef.current);
 
         const outputs = snapshot.conversationOutputs ?? [];
-        const baseline = pausedOutputCountRef.current;
-        // A RULE pause CAN commit as a new step; a TOOL_CALL pause never does
-        // (LlmTask.executeResume appends to the step it paused in). Reading the
-        // actual count, rather than assuming either shape, covers both.
-        const isNewStep = outputs.length > baseline;
-        const relevantOutputs = isNewStep ? outputs.slice(baseline) : outputs.slice(-1);
-        const newBubbles: ChatMessage[] = relevantOutputs
-          .flatMap((output) => extractOutputParts(output))
-          .map((part) => ({ id: nextId("agent"), role: "agent" as const, content: part, timestamp: Date.now() }));
+        const lastOutput = outputs[outputs.length - 1];
+        const parts = lastOutput ? extractOutputParts(lastOutput) : [];
+        const placeholderId = pausedPlaceholderIdRef.current;
+        // The resumed turn may have paused again on a fresh tool batch — normal
+        // for a multi-step job. Its own pending message is what we just read, so
+        // the bubble we render for it becomes the placeholder the NEXT decision
+        // replaces.
+        const rePaused = snapshot.conversationState === "AWAITING_HUMAN";
+        pausedAtRef.current = rePaused ? (snapshot.hitlPausedAt ?? null) : null;
 
         setState((s) => {
           let messages = s.messages;
-          if (!isNewStep && newBubbles.length > 0) {
-            // Same step as the pause: the placeholder bubble showing the pending
-            // message is always the last message here (sending is disabled while
-            // paused), so it is replaced in place rather than searched for.
-            const lastIdx = messages.length - 1;
-            const last = messages[lastIdx];
-            if (last?.role === "agent") {
+          let renderedId: string | null = null;
+          if (parts.length > 0) {
+            const placeholderIdx = placeholderId
+              ? messages.findIndex((m) => m.id === placeholderId)
+              : -1;
+            const newBubbles: ChatMessage[] = parts.map((part) => ({
+              id: nextId("agent"),
+              role: "agent" as const,
+              content: part,
+              timestamp: Date.now(),
+            }));
+            if (placeholderIdx >= 0) {
+              // Reuse the placeholder's own id for the first part so any state
+              // keyed by it (tracesByMessageId — the trace of the very turn that
+              // paused) stays attached to the answer it belongs to.
               const [first, ...rest] = newBubbles;
-              messages = [...messages.slice(0, lastIdx), { ...last, content: first!.content }, ...rest];
+              messages = [
+                ...messages.slice(0, placeholderIdx),
+                { ...messages[placeholderIdx]!, content: first!.content, isStreaming: false },
+                ...rest,
+                ...messages.slice(placeholderIdx + 1),
+              ];
+              renderedId = messages[placeholderIdx]!.id;
             } else {
               messages = [...messages, ...newBubbles];
+              renderedId = newBubbles[newBubbles.length - 1]!.id;
             }
-          } else if (isNewStep) {
-            messages = [...messages, ...newBubbles];
           }
-          return { ...s, messages, isPaused: false, pauseReason: null, isResolvingPause: false };
+          pausedPlaceholderIdRef.current = rePaused ? renderedId : null;
+          return {
+            ...s,
+            messages,
+            isPaused: rePaused,
+            pauseReason: rePaused ? (snapshot.hitlPauseReason ?? null) : null,
+            isResolvingPause: false,
+          };
         });
       } catch (error) {
         if (!controller.signal.aborted) {

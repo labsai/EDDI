@@ -158,16 +158,25 @@ describe("a send rejected 409 while already paused", () => {
 });
 
 describe("resolveApproval — reconciling the resumed turn", () => {
-  /** Pauses the hook via a streamed done event, returning its result handle. */
-  async function pausedHook(pausedOutputCount = 1) {
-    const outputs = Array.from({ length: pausedOutputCount }, (_, i) => textOutput(`pending #${i}`));
+  /**
+   * Pauses the hook via a streamed done event, returning its result handle.
+   *
+   * The snapshot carries exactly ONE conversationOutput, which is what the
+   * backend actually sends: both `/stream` and `getSimpleConversationLog`
+   * default `returnCurrentStepOnly=true`, and `ConversationMemoryUtilities`
+   * collapses conversationOutputs to `List.of(getLast())` in that mode. A
+   * fixture with two outputs would be testing a response shape the API cannot
+   * produce.
+   */
+  async function pausedHook() {
     h.frames = [
       {
         type: "done",
         data: JSON.stringify({
           conversationState: "AWAITING_HUMAN",
           hitlPauseReason: "Approval required",
-          conversationOutputs: outputs,
+          hitlPausedAt: "2026-08-01T10:00:00Z",
+          conversationOutputs: [textOutput("Waiting on a reviewer…")],
         }),
       },
     ];
@@ -179,10 +188,8 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     return rendered;
   }
 
-  it("replaces the placeholder in place when the resumed turn reuses the SAME step (TOOL_CALL resume)", async () => {
-    // conversationOutputs.length stays 1 — the backend appended the final
-    // answer to the step it paused in, exactly as LlmTask.executeResume does.
-    const { result } = await pausedHook(1);
+  it("replaces the placeholder bubble in place, leaving no duplicate", async () => {
+    const { result } = await pausedHook();
     h.conversationLogs = [
       { conversationState: "READY", conversationOutputs: [textOutput("Done — the agent was created.")] },
     ];
@@ -196,17 +203,41 @@ describe("resolveApproval — reconciling the resumed turn", () => {
       { conversationId: "conv-1", decision: { verdict: "APPROVED", note: undefined, toolDecisions: { "call-1": { verdict: "APPROVED" } } } },
     ]);
     const agentMessages = result.current.messages.filter((m) => m.role === "agent");
-    // No duplicate: the ONE agent bubble now holds the final answer.
+    // The pending message is GONE and the answer took its place — not appended
+    // beneath it.
     expect(agentMessages).toHaveLength(1);
     expect(agentMessages[0]?.content).toBe("Done — the agent was created.");
   });
 
-  it("appends a new bubble when the resumed turn commits as a NEW step (RULE resume advancing)", async () => {
-    const { result } = await pausedHook(1);
+  it("keeps the placeholder's message id, so its pipeline trace stays attached", async () => {
+    const { result } = await pausedHook();
+    const placeholderId = result.current.messages.find((m) => m.role === "agent")?.id;
+    h.conversationLogs = [
+      { conversationState: "READY", conversationOutputs: [textOutput("Done.")] },
+    ];
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    const agentMessage = result.current.messages.find((m) => m.role === "agent");
+    expect(agentMessage?.id).toBe(placeholderId);
+    expect(agentMessage?.content).toBe("Done.");
+  });
+
+  it("stays paused when the resumed turn pauses AGAIN on a new batch", async () => {
+    // The plan's own agent-creation flow is ~3 approval cards in a row, and the
+    // backend permits maxPausesPerTurn (default 3). Waiting for the state to
+    // clear would spin to the timeout on a conversation working as intended, so
+    // a pause with a DIFFERENT hitlPausedAt counts as settled and becomes the
+    // next card.
+    const { result } = await pausedHook();
     h.conversationLogs = [
       {
-        conversationState: "READY",
-        conversationOutputs: [textOutput("pending #0"), textOutput("The rule pause resolved; continuing.")],
+        conversationState: "AWAITING_HUMAN",
+        hitlPausedAt: "2026-08-01T10:05:00Z",
+        hitlPauseReason: "Second batch needs approval",
+        conversationOutputs: [textOutput("Now waiting on batch two…")],
       },
     ];
 
@@ -214,22 +245,79 @@ describe("resolveApproval — reconciling the resumed turn", () => {
       await result.current.resolveApproval("APPROVED");
     });
 
-    expect(result.current.isPaused).toBe(false);
+    expect(result.current.isPaused).toBe(true);
+    expect(result.current.pauseReason).toBe("Second batch needs approval");
+    expect(result.current.resolveError).toBeNull();
+    expect(result.current.isResolvingPause).toBe(false);
     const agentMessages = result.current.messages.filter((m) => m.role === "agent");
-    // The original placeholder bubble is untouched AND a new one is added —
-    // nothing is silently overwritten.
-    expect(agentMessages).toHaveLength(2);
-    expect(agentMessages[0]?.content).toBe("pending #0");
-    expect(agentMessages[1]?.content).toBe("The rule pause resolved; continuing.");
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages[0]?.content).toBe("Now waiting on batch two…");
+  });
+
+  it("renders every part when the resumed step emits several outputs", async () => {
+    const { result } = await pausedHook();
+    h.conversationLogs = [
+      {
+        conversationState: "READY",
+        conversationOutputs: [{ output: [{ type: "text", text: "First." }, { type: "text", text: "Second." }] }],
+      },
+    ];
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    const agentMessages = result.current.messages.filter((m) => m.role === "agent");
+    expect(agentMessages.map((m) => m.content)).toEqual(["First.", "Second."]);
+  });
+
+  it("APPENDS rather than replacing when the pause came from a 409 (no placeholder of ours)", async () => {
+    // After a reload onto an already-paused conversation, the optimistic
+    // bubbles were dropped — there is nothing to replace, so replacing "the
+    // last agent message" would clobber an unrelated earlier answer.
+    h.sendError = { status: 409, message: "Conflict" };
+    h.conversationLogs = [{ conversationState: "AWAITING_HUMAN", hitlPauseReason: "Approval required" }];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("are you still there?");
+    });
+    expect(result.current.isPaused).toBe(true);
+    expect(result.current.messages).toHaveLength(0);
+
+    h.conversationLogs = [
+      { conversationState: "READY", conversationOutputs: [textOutput("Resumed and done.")] },
+    ];
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    const agentMessages = result.current.messages.filter((m) => m.role === "agent");
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages[0]?.content).toBe("Resumed and done.");
+  });
+
+  it("reads the pause reason on a 409, so the banner is not blank", async () => {
+    h.sendError = { status: 409, message: "Conflict" };
+    h.conversationLogs = [
+      { conversationState: "AWAITING_HUMAN", hitlPauseReason: "Creating a new agent — review the whole config" },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+    expect(result.current.pauseReason).toBe("Creating a new agent — review the whole config");
   });
 
   it("polls until the conversation leaves AWAITING_HUMAN rather than reading once", async () => {
     vi.useFakeTimers();
     try {
-      const { result } = await pausedHook(1);
+      const { result } = await pausedHook();
+      // The SAME hitlPausedAt as the pause being decided — i.e. the decision has
+      // not been acted on yet. A different one would mean a new card, not a
+      // still-outstanding one, and would (correctly) stop the poll.
       h.conversationLogs = [
-        { conversationState: "AWAITING_HUMAN", conversationOutputs: [textOutput("pending #0")] },
-        { conversationState: "AWAITING_HUMAN", conversationOutputs: [textOutput("pending #0")] },
+        { conversationState: "AWAITING_HUMAN", hitlPausedAt: "2026-08-01T10:00:00Z", conversationOutputs: [textOutput("pending #0")] },
+        { conversationState: "AWAITING_HUMAN", hitlPausedAt: "2026-08-01T10:00:00Z", conversationOutputs: [textOutput("pending #0")] },
         { conversationState: "READY", conversationOutputs: [textOutput("Finally done.")] },
       ];
 
@@ -252,10 +340,11 @@ describe("resolveApproval — reconciling the resumed turn", () => {
   it("reports a timeout as resolveError without clearing the pause", async () => {
     vi.useFakeTimers();
     try {
-      const { result } = await pausedHook(1);
-      // Every poll still reports AWAITING_HUMAN — never settles.
+      const { result } = await pausedHook();
+      // Every poll still reports the SAME pause — the decision never lands.
       h.conversationLogs = Array.from({ length: 100 }, () => ({
         conversationState: "AWAITING_HUMAN" as const,
+        hitlPausedAt: "2026-08-01T10:00:00Z",
         conversationOutputs: [textOutput("pending #0")],
       }));
 
@@ -275,7 +364,7 @@ describe("resolveApproval — reconciling the resumed turn", () => {
   });
 
   it("reports resumeConversation failing as resolveError, without polling", async () => {
-    const { result } = await pausedHook(1);
+    const { result } = await pausedHook();
     const { resumeConversation } = await import("@/lib/api/hitl");
     vi.mocked(resumeConversation).mockRejectedValueOnce({ status: 500, message: "backend exploded" });
 
