@@ -174,8 +174,10 @@ The same doc set is therefore served read-only over REST, where an agent generat
 
 | Endpoint | Role | Returns |
 | -------- | ---- | ------- |
-| `GET /administration/docs` | `eddi-viewer` | JSON array of page names, without the `.md` suffix |
-| `GET /administration/docs/{name}` | `eddi-viewer` | The page's markdown source as `text/plain`; `404` if absent |
+| `GET /administration/docs` | any of `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver`, `eddi-viewer` | JSON array of page names, without the `.md` suffix |
+| `GET /administration/docs/{name}` | same | The page's markdown source as `text/plain`; `404` if absent |
+
+> **Roles are enumerated, not inherited.** EDDI has no role hierarchy — JAX-RS `@RolesAllowed` and the MCP layer's `requireRole` are both literal `hasRole` checks — so `eddi-viewer` alone would refuse an `eddi-admin`. The widest read tier is spelled out because these are published documentation pages.
 
 Both surfaces delegate to `DocsService`, which owns the filesystem access and the path-traversal guard.
 
