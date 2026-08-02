@@ -16,7 +16,6 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import org.jboss.logging.Logger;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -132,10 +131,18 @@ public class GroupContextBuilder {
                 data.put("totalPhases", phaseIdx);
             }
             case PLAN -> {
-                // Provide member list for planning template
-                List<Map<String, Object>> memberList = new ArrayList<>();
-                // Note: speaker list should be the full member list for planning
-                data.put("members", memberList); // populated by caller via template data
+                // Unreachable in practice, and deliberately populates nothing —
+                // symmetric with EXECUTE/VERIFY below. executeDiscussion routes
+                // PLAN/EXECUTE/VERIFY to TaskForceEngine before any executor that
+                // calls this method, and TaskForceEngine.executeTaskPlanPhase
+                // builds its own template data with the real roster.
+                //
+                // This branch used to put an EMPTY "members" list here with a
+                // comment claiming the caller populated it; no caller ever did.
+                // Had the routing above ever changed, that empty list would have
+                // rendered TEMPLATE_PLAN's "TEAM MEMBERS:" section blank and
+                // silently degraded task assignment — a populated-looking key is
+                // more dangerous than an absent one.
             }
             case EXECUTE -> {
                 // Task-specific context populated by executeTaskPhase

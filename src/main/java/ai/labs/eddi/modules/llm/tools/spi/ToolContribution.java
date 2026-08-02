@@ -39,6 +39,28 @@ import java.util.Map;
 public record ToolContribution(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
         Map<String, String> toolSources, Map<String, String> toolEndpoints, List<ProviderFailure> failures) {
 
+    /**
+     * Defensively copies every component to an immutable view.
+     * <p>
+     * Without this, mutability varied per provider and per component — a discovery
+     * method returning live {@code ArrayList}/{@code HashMap} for specs/executors
+     * but {@code Map.of()} for {@code toolSources}, against {@link #empty()}'s
+     * all-immutable. The rewiring step's natural implementation (merge into the
+     * first contribution, or {@code toolSources().putAll(...)}) would then throw
+     * {@code UnsupportedOperationException} for some sources and silently succeed
+     * for others <em>depending on which source happened to be first in the
+     * iteration order</em> — the worst possible failure shape. Uniformly immutable
+     * makes that mistake fail fast and identically every time, and the merge target
+     * is a fresh map the caller owns.
+     */
+    public ToolContribution {
+        specs = specs == null ? List.of() : List.copyOf(specs);
+        executors = executors == null ? Map.of() : Map.copyOf(executors);
+        toolSources = toolSources == null ? Map.of() : Map.copyOf(toolSources);
+        toolEndpoints = toolEndpoints == null ? Map.of() : Map.copyOf(toolEndpoints);
+        failures = failures == null ? List.of() : List.copyOf(failures);
+    }
+
     /** Convenience for a source that never reports failures. */
     public ToolContribution(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
             Map<String, String> toolSources, Map<String, String> toolEndpoints) {

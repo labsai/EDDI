@@ -56,13 +56,9 @@ import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
-import io.quarkus.runtime.ShutdownEvent;
 import jakarta.annotation.PreDestroy;
-import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
-import jakarta.interceptor.Interceptor;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -295,8 +291,19 @@ public class GroupConversationService implements IGroupConversationService {
      * Rejects new group work once {@link GracefulShutdownService} has observed a
      * {@code ShutdownEvent} (R1 step 10) — mirrors
      * {@code ConversationService#rejectIfShuttingDown}. Applied on every entry
-     * point that starts or resumes a discussion: {@code discuss},
-     * {@code startAndDiscussAsync}, {@code resumeDiscussion}.
+     * point that starts, continues or resumes a discussion: {@code discuss},
+     * {@code startAndDiscussAsync}, {@code resumeDiscussion},
+     * {@code continueDiscussion} and {@code followUpWithMember}.
+     * <p>
+     * The last two matter more than they look. Both mutate persisted state
+     * <em>before</em> doing any agent work — {@code continueDiscussion} CASes
+     * {@code COMPLETED → IN_PROGRESS}, bumps the round and re-runs every phase from
+     * index 0. Ungated during a drain, each member turn would then be refused by
+     * {@code ConversationService.say}'s own gate and recorded as a {@code SKIPPED}
+     * transcript entry under the default {@code onAgentFailure=SKIP}, so a healthy
+     * COMPLETED conversation would come back COMPLETED but with a round of skipped
+     * entries and a stale synthesized answer. A clean 503 is strictly better than
+     * silently degrading a finished conversation.
      * <p>
      * A {@code null} gate means the bean was constructed outside CDI (only the
      * direct-construction unit tests do that) and never rejects.
@@ -305,43 +312,6 @@ public class GroupConversationService implements IGroupConversationService {
         if (gracefulShutdownService != null && gracefulShutdownService.isShuttingDown()) {
             throw new RejectedExecutionException(
                     "This node is shutting down and no longer accepts new group discussion work — retry against another node");
-        }
-    }
-
-    /**
-     * Signals every currently-active discussion to wind down gracefully once
-     * shutdown begins (R1 step 10). Before this existed, {@code
-     * GroupConversationService} did not participate in the graceful-shutdown drain
-     * at all — only its {@code @PreDestroy} unconditionally tore down the executor,
-     * and a multi-phase discussion mid-flight would be abandoned with no chance to
-     * reach a clean terminal state.
-     * <p>
-     * Deliberately does NOT re-implement {@link GracefulShutdownService}'s own
-     * bounded wait: every dispatched member turn already runs through the shared
-     * {@code IConversationCoordinator} (via {@code IConversationService#say}), so
-     * {@code GracefulShutdownService#drain()} already waits for whatever turn is
-     * currently in flight. What that drain has no way to stop is the group
-     * orchestration loop itself queuing MORE phase work while it waits — this
-     * observer signals {@link ControlSignal#CANCEL_GRACEFUL} (the same signal
-     * {@code cancelDiscussion} already exposes) so {@code executeDiscussion}'s
-     * top-of-phase check stops scheduling new work, shrinking what the drain is
-     * waiting on instead of racing it.
-     * <p>
-     * {@code @Priority} runs this BEFORE {@link GracefulShutdownService}'s own
-     * (unprioritized, default {@code Interceptor.Priority.APPLICATION}) shutdown
-     * observer — CDI does not guarantee observer order otherwise, and firing after
-     * the bounded drain has already finished waiting would make the signal useless
-     * for the shutdown it was meant to help.
-     */
-    void onShutdown(@Observes
-    @Priority(Interceptor.Priority.APPLICATION - 100) ShutdownEvent event) {
-        for (String groupConversationId : List.copyOf(activeTokens.keySet())) {
-            try {
-                cancelDiscussion(groupConversationId, ControlSignal.CANCEL_GRACEFUL);
-            } catch (Exception e) {
-                LOGGER.warnf("Failed to signal graceful cancel to group conversation %s during shutdown: %s",
-                        LogSanitizer.sanitize(groupConversationId), e.getMessage());
-            }
         }
     }
 
@@ -913,6 +883,7 @@ public class GroupConversationService implements IGroupConversationService {
     public GroupConversation followUpWithMember(String groupConversationId, String targetAgentId,
                                                 String question)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        rejectIfShuttingDown();
         return lifecycleOps().followUpWithMember(groupConversationId, targetAgentId, question);
     }
 
@@ -920,6 +891,7 @@ public class GroupConversationService implements IGroupConversationService {
     public GroupConversation continueDiscussion(String groupConversationId, String question,
                                                 GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        rejectIfShuttingDown();
         return lifecycleOps().continueDiscussion(groupConversationId, question, listener);
     }
 

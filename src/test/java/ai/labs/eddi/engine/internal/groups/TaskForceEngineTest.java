@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -52,7 +53,7 @@ class TaskForceEngineTest {
         jsonSerialization = mock(IJsonSerialization.class);
         return new TaskForceEngine(mock(MemberTurnExecutor.class), templatingEngine, jsonSerialization,
                 Executors.newVirtualThreadPerTaskExecutor(), new CallerIdentityContext(null, null),
-                new java.util.concurrent.ConcurrentHashMap<>(), 180, 5);
+                new ConcurrentHashMap<>(), 180, 5);
     }
 
     private GroupMember member(String id) {

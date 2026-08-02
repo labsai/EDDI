@@ -21,13 +21,15 @@ import java.util.Map;
  * a reflected delegator. {@code buildToolSetup} still calls
  * {@link A2AToolProviderManager} directly for now (unchanged); this provider
  * exists so the later step that rewires {@code buildToolSetup} to iterate
- * providers has all 8 sources uniformly SPI-conformant rather than 7 plus one
- * special-cased inline block.
+ * providers finds A2A already SPI-conformant rather than a special-cased inline
+ * block. (That rewiring is still blocked on the plain built-ins, which have no
+ * provider at all — {@code collectAllBuiltInTools}' if-chain is the one source
+ * of the SPI's eight that is still entirely inline.)
  * <p>
- * Same package as {@code AgentOrchestrator} as the other two providers, for
+ * Same package as {@code AgentOrchestrator} as the other providers, for
  * consistency — this one has no {@link WorkflowTraversal} dependency, so it
  * would work equally well in a separate package, but splitting one provider out
- * from its seven siblings for no functional reason is not an improvement.
+ * from its siblings for no functional reason is not an improvement.
  */
 class A2AToolsProvider implements ToolSourceProvider {
 

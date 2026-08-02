@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl.orchestration;
 import ai.labs.eddi.modules.llm.impl.TokenCounterFactory;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.model.TokenCountEstimator;
+import dev.langchain4j.model.output.TokenUsage;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -77,7 +78,7 @@ class ToolContextBudgetTest {
 
     @Test
     void sumTokens_nullOperands_returnTheOtherUnchanged() {
-        var usage = new dev.langchain4j.model.output.TokenUsage(1, 2, 3);
+        var usage = new TokenUsage(1, 2, 3);
 
         assertSame(usage, ToolContextBudget.sumTokens(usage, null));
         assertSame(usage, ToolContextBudget.sumTokens(null, usage));
@@ -85,7 +86,7 @@ class ToolContextBudgetTest {
 
     @Test
     void tokenUsageMap_nullFields_mapToZero() {
-        var map = ToolContextBudget.tokenUsageMap(new dev.langchain4j.model.output.TokenUsage(null, null, null));
+        var map = ToolContextBudget.tokenUsageMap(new TokenUsage(null, null, null));
 
         assertEquals(0, map.get("inputTokens"));
         assertEquals(0, map.get("outputTokens"));

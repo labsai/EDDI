@@ -27,8 +27,6 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededExcep
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
-import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.IAgentFactory;

@@ -85,6 +85,16 @@ public class GroupSigningGuard {
         }
         try {
             var resourceId = agentStore.getCurrentResourceId(agentId);
+            // Null-safe: getCurrentResourceId returns null for an agent with no
+            // current version (and does so routinely on the PostgreSQL adapter —
+            // see the same guard in GroupConversationService.discuss). Without this
+            // check the NPE lands in the catch below and is reported as "Failed to
+            // sign message" at WARN, which reads like a crypto failure for what is
+            // simply an unresolvable agent. The outcome is UNSIGNED either way.
+            if (resourceId == null) {
+                LOGGER.debugf("No current version for agent '%s' — sending unsigned", agentId);
+                return SigningResult.UNSIGNED;
+            }
             var agentConfig = agentStore.read(agentId, resourceId.getVersion());
             if (agentConfig.getSecurity() == null
                     || !agentConfig.getSecurity().isSignInterAgentMessages()

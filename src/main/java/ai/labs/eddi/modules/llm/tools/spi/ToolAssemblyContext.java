@@ -26,9 +26,14 @@ import java.util.List;
  *            the configured LLM task driving this turn
  * @param builtInToolsWhitelist
  *            {@code task.getBuiltInToolsWhitelist()}, or {@code null} when
- *            unset (no whitelist — providers fall back to their own default
- *            enablement rule); never an empty list with different meaning than
- *            {@code null} — callers normalize that upstream
+ *            unset. Null and empty mean the same thing — no whitelist, so
+ *            providers fall back to their own default enablement rule — and
+ *            both are handled here rather than assumed normalized upstream,
+ *            because the live path treats them identically
+ *            ({@code whitelist != null && !whitelist.isEmpty()}) and a caller
+ *            passing a task's raw getter must not behave differently from one
+ *            that normalized first. Use {@link #hasNoWhitelist()} rather than
+ *            null-checking this field directly.
  * @param dynamicAgentConfig
  *            resolved once per turn (never {@code null} — a disabled config
  *            when dynamic agents are off), shared by every provider that reads

@@ -93,8 +93,25 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         return "dynamic";
     }
 
+    /**
+     * Gated on {@code enableBuiltInTools} as well as the whitelist, mirroring the
+     * live path: {@code collectEnabledTools} returns before ever reaching
+     * {@code collectAllBuiltInTools} when built-ins are off (null counts as off,
+     * and null is the default), so these tools are unreachable in that case today.
+     * <p>
+     * The whitelist gate alone is NOT sufficient here. A config with
+     * {@code enableBuiltInTools: false} and a stale {@code builtInToolsWhitelist}
+     * still naming {@code "create_sub_agent"} currently gets nothing; without this
+     * check it would get sub-agent creation, delegation and teardown — tools that
+     * deploy real agents to production. That is the highest-blast-radius gate in
+     * this class, so it is checked here rather than left to the caller.
+     */
     @Override
     public ToolContribution contribute(ToolAssemblyContext ctx) {
+        Boolean enableBuiltInTools = ctx.task().getEnableBuiltInTools();
+        if (enableBuiltInTools == null || !enableBuiltInTools) {
+            return ToolContribution.empty();
+        }
         List<Object> tools = new ArrayList<>();
         addDynamicAgentTools(tools, ctx.builtInToolsWhitelist(), ctx.memory());
         if (tools.isEmpty()) {

@@ -218,16 +218,9 @@ class AgentOrchestrator {
     private final WeatherTool weatherTool;
     private final FetchToolResponsePageTool fetchToolResponsePageTool;
     private final ToolExecutionService toolExecutionService;
-    private final McpToolProviderManager mcpToolProviderManager;
     private final A2AToolProviderManager a2aToolProviderManager;
 
     // For httpcall auto-discovery from workflow
-    private final IRestAgentStore restAgentStore;
-    private final IRestWorkflowStore restWorkflowStore;
-    private final IResourceClientLibrary resourceClientLibrary;
-    private final IApiCallExecutor apiCallExecutor;
-    private final IJsonSerialization jsonSerialization;
-    private final IMemoryItemConverter memoryItemConverter;
     private final IUserMemoryStore userMemoryStore;
     private final ToolResponseTruncator toolResponseTruncator;
     private final TenantQuotaService tenantQuotaService;
@@ -282,7 +275,6 @@ class AgentOrchestrator {
      * second estimator: one accounting rule for both halves of the request means a
      * budget expressed in tokens keeps meaning the same thing wherever it is set.
      */
-    private final TokenCounterFactory tokenCounterFactory;
 
     /**
      * In-turn tool-context budget enforcement, extracted to
@@ -330,15 +322,8 @@ class AgentOrchestrator {
         this.pdfReaderTool = pdfReaderTool;
         this.weatherTool = weatherTool;
         this.toolExecutionService = toolExecutionService;
-        this.mcpToolProviderManager = mcpToolProviderManager;
         this.a2aToolProviderManager = a2aToolProviderManager;
         this.fetchToolResponsePageTool = fetchToolResponsePageTool;
-        this.restAgentStore = restAgentStore;
-        this.restWorkflowStore = restWorkflowStore;
-        this.resourceClientLibrary = resourceClientLibrary;
-        this.apiCallExecutor = apiCallExecutor;
-        this.jsonSerialization = jsonSerialization;
-        this.memoryItemConverter = memoryItemConverter;
         this.userMemoryStore = userMemoryStore;
         this.toolResponseTruncator = toolResponseTruncator;
         this.tenantQuotaService = tenantQuotaService;
@@ -350,7 +335,6 @@ class AgentOrchestrator {
         this.agentStore = agentStore;
         this.journalStore = journalStore;
         this.conversationHistoryBuilder = conversationHistoryBuilder;
-        this.tokenCounterFactory = tokenCounterFactory;
         this.toolContextBudgetGuard = new ToolContextBudget(tokenCounterFactory);
         this.httpCallToolsProvider = new HttpCallToolsProvider(restAgentStore, restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter);
@@ -1519,13 +1503,6 @@ class AgentOrchestrator {
     }
 
     // ─── Tool-approval gate helpers ───
-
-    /** Maps a built-in tool instance to its gate source tag. */
-    // Kept as a declared delegator; logic extracted to ToolObjectReflector (R2 step
-    // 2).
-    private static String sourceForBuiltInTool(Object tool) {
-        return ToolObjectReflector.sourceForBuiltInTool(tool);
-    }
 
     /** Reads this turn's cumulative gated-pause count (0 when absent). */
     private static int readToolPauseCount(IConversationMemory memory) {

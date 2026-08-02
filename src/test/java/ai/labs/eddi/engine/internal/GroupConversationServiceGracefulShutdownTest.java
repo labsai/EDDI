@@ -12,8 +12,6 @@ import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
-import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
-import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
@@ -26,7 +24,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -35,10 +32,11 @@ import static org.mockito.Mockito.*;
 
 /**
  * Tests for R1 step 10 — {@link GroupConversationService}'s participation in
- * graceful shutdown: new discussion work is rejected once
- * {@link GracefulShutdownService} signals shutdown, and every currently-active
- * discussion is signalled {@link ControlSignal#CANCEL_GRACEFUL} so the
- * orchestration loop stops scheduling new phase work.
+ * graceful shutdown: once {@link GracefulShutdownService} signals shutdown,
+ * every entry point that starts, continues or resumes a discussion refuses new
+ * work with {@link RejectedExecutionException} (mapped to HTTP 503 by
+ * {@code RejectedExecutionExceptionMapper}) rather than admitting work the node
+ * is about to abandon.
  *
  * @author tests
  */
@@ -90,13 +88,6 @@ class GroupConversationServiceGracefulShutdownTest {
                 return signalled.get();
             }
         };
-    }
-
-    @SuppressWarnings("unchecked")
-    private ConcurrentHashMap<String, DiscussionControlToken> activeTokens() throws Exception {
-        var field = GroupConversationService.class.getDeclaredField("activeTokens");
-        field.setAccessible(true);
-        return (ConcurrentHashMap<String, DiscussionControlToken>) field.get(service);
     }
 
     // =================================================================
@@ -153,43 +144,40 @@ class GroupConversationServiceGracefulShutdownTest {
                 () -> service.discuss("group1", "question", "user1", 0));
     }
 
-    // =================================================================
-    // onShutdown — graceful-cancel every active discussion
-    // =================================================================
-
+    /**
+     * {@code continueDiscussion} re-runs every phase from index 0 and mutates
+     * persisted state (CAS {@code COMPLETED → IN_PROGRESS}, round bump, transcript
+     * append) BEFORE any agent work. Ungated during a drain, each member turn would
+     * be refused by {@code ConversationService.say}'s own gate and recorded as
+     * {@code SKIPPED}, leaving a healthy COMPLETED conversation back at COMPLETED
+     * but with a round of skipped entries and a stale synthesized answer. The
+     * rejection must therefore happen before the first CAS.
+     */
     @Test
-    void onShutdown_signalsGracefulCancelToEveryActiveDiscussion() throws Exception {
-        var tokenA = new DiscussionControlToken();
-        var tokenB = new DiscussionControlToken();
-        activeTokens().put("gc-a", tokenA);
-        activeTokens().put("gc-b", tokenB);
+    void continueDiscussion_whileShuttingDown_throwsBeforeMutatingState() throws Exception {
+        var signalled = new AtomicBoolean(true);
+        service.gracefulShutdownService = shutdownGate(signalled);
 
-        service.onShutdown(null);
+        assertThrows(RejectedExecutionException.class,
+                () -> service.continueDiscussion("gc-1", "follow-up question", null));
 
-        assertEquals(ControlSignal.CANCEL_GRACEFUL, tokenA.getSignal());
-        assertEquals(ControlSignal.CANCEL_GRACEFUL, tokenB.getSignal());
+        // Nothing was read, no CAS attempted — the conversation is untouched.
+        verifyNoInteractions(conversationStore);
     }
 
+    /**
+     * Same reasoning as {@code continueDiscussion}: {@code followUpWithMember}
+     * CASes {@code COMPLETED → IN_PROGRESS} and appends to the transcript before
+     * calling the agent.
+     */
     @Test
-    void onShutdown_noActiveDiscussions_doesNothing() {
-        assertDoesNotThrow(() -> service.onShutdown(null));
-    }
+    void followUpWithMember_whileShuttingDown_throwsBeforeMutatingState() throws Exception {
+        var signalled = new AtomicBoolean(true);
+        service.gracefulShutdownService = shutdownGate(signalled);
 
-    @Test
-    void onShutdown_oneCancelFails_othersStillSignalled() throws Exception {
-        // A null token id would NPE deep inside cancelDiscussion's DB path if it ever
-        // reached it — but a live token short-circuits before any store call, so this
-        // just proves one troublesome entry does not stop the rest from being
-        // signalled.
-        var tokenA = new DiscussionControlToken();
-        activeTokens().put("gc-a", tokenA);
-        var tokenB = new DiscussionControlToken();
-        activeTokens().put("gc-b", tokenB);
-        doThrow(new RuntimeException("read failed")).when(conversationStore).read(anyString());
+        assertThrows(RejectedExecutionException.class,
+                () -> service.followUpWithMember("gc-1", "agent-a", "follow-up question"));
 
-        assertDoesNotThrow(() -> service.onShutdown(null));
-
-        assertEquals(ControlSignal.CANCEL_GRACEFUL, tokenA.getSignal());
-        assertEquals(ControlSignal.CANCEL_GRACEFUL, tokenB.getSignal());
+        verifyNoInteractions(conversationStore);
     }
 }

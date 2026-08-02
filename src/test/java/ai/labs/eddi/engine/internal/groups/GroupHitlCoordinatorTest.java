@@ -9,13 +9,13 @@ import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
-import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -24,7 +24,6 @@ import org.mockito.Mockito;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -192,7 +191,7 @@ class GroupHitlCoordinatorTest {
     void scheduleGroupHitlTimeout_waitIndefinitely_noScheduleCreated() throws Exception {
         var gc = gc(GroupConversationState.AWAITING_APPROVAL);
         gc.setHitlApprovalTimeout("PT10M");
-        gc.setHitlTimeoutPolicy(ai.labs.eddi.configs.hitl.HitlTimeoutPolicy.WAIT_INDEFINITELY);
+        gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
 
         coordinator().scheduleGroupHitlTimeout(gc);
 
@@ -203,7 +202,7 @@ class GroupHitlCoordinatorTest {
     void scheduleGroupHitlTimeout_finiteTimeout_createsSchedule() throws Exception {
         var gc = gc(GroupConversationState.AWAITING_APPROVAL);
         gc.setHitlApprovalTimeout("PT10M");
-        gc.setHitlTimeoutPolicy(ai.labs.eddi.configs.hitl.HitlTimeoutPolicy.AUTO_REJECT);
+        gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
         gc.setPausedAt(java.time.Instant.now());
 
         coordinator().scheduleGroupHitlTimeout(gc);
@@ -215,7 +214,7 @@ class GroupHitlCoordinatorTest {
     void scheduleGroupHitlTimeout_storeThrows_swallowed() throws Exception {
         var gc = gc(GroupConversationState.AWAITING_APPROVAL);
         gc.setHitlApprovalTimeout("PT10M");
-        gc.setHitlTimeoutPolicy(ai.labs.eddi.configs.hitl.HitlTimeoutPolicy.AUTO_REJECT);
+        gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
         gc.setPausedAt(java.time.Instant.now());
         var coordinator = coordinator();
         doThrow(new RuntimeException("store down")).when(scheduleStore).createSchedule(any());

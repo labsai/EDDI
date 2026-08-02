@@ -74,11 +74,37 @@ class ContextualToolsProvider implements ToolSourceProvider {
         return "builtin";
     }
 
+    /**
+     * Mirrors, exactly, the enablement rules the live
+     * {@code collectEnabledTools}/{@code collectAllBuiltInTools} path applies — NOT
+     * simply "add all three". Getting this wrong grants tools an operator
+     * deliberately switched off:
+     * <ul>
+     * <li>{@code enableBuiltInTools} null or false ⇒ <b>only</b>
+     * {@code readAttachment}. Null means disabled, and null is the default. User
+     * memory is a persistent cross-conversation <em>write</em> capability, so
+     * handing it to an agent with built-ins off would be a real privilege
+     * escalation, not a cosmetic difference.</li>
+     * <li>a whitelist is configured ⇒ user memory only on {@code "usermemory"},
+     * recall only on {@code "conversationRecall"}.</li>
+     * <li>no whitelist ⇒ both, as today.</li>
+     * </ul>
+     * {@code readAttachment} is deliberately outside every gate — it is part of
+     * attachment support rather than a built-in capability, and it self-gates on
+     * the conversation actually having files.
+     */
     @Override
     public ToolContribution contribute(ToolAssemblyContext ctx) {
         List<Object> tools = new ArrayList<>();
-        addUserMemoryToolIfEnabled(tools, ctx.memory());
-        addConversationRecallToolIfEnabled(tools, ctx.task(), ctx.memory());
+        Boolean enableBuiltInTools = ctx.task().getEnableBuiltInTools();
+        if (enableBuiltInTools != null && enableBuiltInTools) {
+            if (ctx.hasNoWhitelist() || ctx.isWhitelisted("usermemory")) {
+                addUserMemoryToolIfEnabled(tools, ctx.memory());
+            }
+            if (ctx.hasNoWhitelist() || ctx.isWhitelisted("conversationRecall")) {
+                addConversationRecallToolIfEnabled(tools, ctx.task(), ctx.memory());
+            }
+        }
         addReadAttachmentToolIfEnabled(tools, ctx.memory());
         if (tools.isEmpty()) {
             return ToolContribution.empty();
