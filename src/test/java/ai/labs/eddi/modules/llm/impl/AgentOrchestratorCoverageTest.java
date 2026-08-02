@@ -1246,6 +1246,89 @@ class AgentOrchestratorCoverageTest {
                 call.getRequestFingerprint());
     }
 
+    /** A pinned call as it would have been persisted at gate time. */
+    private static PendingToolCallBatch.PendingToolCall pinnedCall(String fingerprint) {
+        var call = new PendingToolCallBatch.PendingToolCall();
+        call.setCallId("c1");
+        call.setToolName("deployAgent");
+        call.setSource("http");
+        call.setArgumentsRaw("{\"id\":\"a1\"}");
+        call.setRequestFingerprint(fingerprint);
+        return call;
+    }
+
+    private static ResolvedRequest approvedRequest() {
+        return ResolvedRequest.of("POST", "https://eddi.example/deploy/a1", Map.of(), Map.of(), "{\"id\":\"a1\"}", true);
+    }
+
+    @Test
+    void requestChangedSinceApproval_allowsACallWhoseRequestStillMatches() {
+        var approved = approvedRequest();
+        var result = orchestrator.requestChangedSinceApproval(pinnedCall(approved.fingerprint()), null,
+                Map.of("deployAgent", req -> approved));
+        assertNull(result);
+    }
+
+    @Test
+    void requestChangedSinceApproval_refusesACallWhoseRequestNoLongerMatches() {
+        // The whole point: the approver said yes to /deploy/a1, and something now
+        // resolves to a different target. It does not run.
+        var tampered = ResolvedRequest.of("POST", "https://eddi.example/deploy/PRODUCTION", Map.of(), Map.of(), "{\"id\":\"a1\"}", true);
+        var result = orchestrator.requestChangedSinceApproval(pinnedCall(approvedRequest().fingerprint()), null,
+                Map.of("deployAgent", req -> tampered));
+        assertNotNull(result);
+        assertTrue(result.contains("no longer matches"));
+    }
+
+    @Test
+    void requestChangedSinceApproval_ignoresACallThatWasNeverPinned() {
+        // Every non-http tool, and anything unresolvable at gate time. Enforcing
+        // here would refuse calls on a comparison that never existed.
+        var unpinned = pinnedCall(null);
+        assertNull(orchestrator.requestChangedSinceApproval(unpinned, null, Map.of()));
+    }
+
+    @Test
+    void requestChangedSinceApproval_allowsAnAmendedCall() {
+        // The approver rewrote the arguments themselves, so the pin describes the
+        // request they replaced. Comparing against it would refuse every amendment.
+        var result = orchestrator.requestChangedSinceApproval(pinnedCall(approvedRequest().fingerprint()), "{\"id\":\"a2\"}",
+                Map.of("deployAgent", req -> ResolvedRequest.of("POST", "https://eddi.example/deploy/a2", Map.of(), Map.of(), "{}", true)));
+        assertNull(result);
+    }
+
+    @Test
+    void requestChangedSinceApproval_failsClosedWhenTheToolVanishedAcrossThePause() {
+        // Pinned at gate time, unresolvable now — the agent was reconfigured while
+        // a human was deciding. We cannot show that what runs is what was
+        // approved, so it does not run.
+        var result = orchestrator.requestChangedSinceApproval(pinnedCall(approvedRequest().fingerprint()), null, Map.of());
+        assertNotNull(result);
+        assertTrue(result.contains("no longer available"));
+    }
+
+    @Test
+    void requestChangedSinceApproval_failsClosedWhenReResolutionThrows() {
+        var result = orchestrator.requestChangedSinceApproval(pinnedCall(approvedRequest().fingerprint()), null,
+                Map.of("deployAgent", req -> {
+                    throw new LifecycleException("template blew up", new RuntimeException());
+                }));
+        assertNotNull(result);
+        assertTrue(result.contains("could not be re-resolved"));
+    }
+
+    @Test
+    void requestChangedSinceApproval_failsClosedWhenTheCallCanNoLongerBePinned() {
+        // Config gained a pre-request property instruction across the pause, so the
+        // request is no longer resolvable ahead of execution. Unverifiable is not
+        // the same as unchanged.
+        var unpinnable = ResolvedRequest.of("POST", "https://eddi.example/deploy/a1", Map.of(), Map.of(), "{\"id\":\"a1\"}", false);
+        var result = orchestrator.requestChangedSinceApproval(pinnedCall(approvedRequest().fingerprint()), null,
+                Map.of("deployAgent", req -> unpinnable));
+        assertNotNull(result);
+        assertTrue(result.contains("could no longer be resolved"));
+    }
+
     @Test
     void buildPendingBatch_persistsTheGoverningRuleAndThePerCallMatch() {
         // The rule is resolved at gate time and must SURVIVE the pause: the persisted

@@ -578,6 +578,19 @@ class AgentOrchestrator {
                 continue;
             }
 
+            // Approval binds to a REQUEST, not to a tool name: re-resolve now and
+            // refuse if what is about to be sent is not what was approved. Checked
+            // before the journal claim so a refusal consumes nothing and stays
+            // replayable.
+            String changed = requestChangedSinceApproval(c, amended, setup.toolRequestResolvers());
+            if (changed != null) {
+                auditRequestChanged(memory, c, changed);
+                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
+                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"the request changed after it was approved\"}"));
+                trace.add(Map.of("type", "hitl_request_changed", "tool", c.getToolName(), "callId", c.getCallId(), "detail", changed));
+                continue;
+            }
+
             // Journal protocol — at-most-once across crashes/re-approvals.
             if (journalStore.tryClaim(conversationId, pauseEpoch, c.getCallId(), c.getToolName(), decision.getDecidedBy())) {
                 String args = amended != null ? amended : c.getArgumentsRaw();
@@ -830,6 +843,64 @@ class AgentOrchestrator {
      * marker that operators can alert on. Package-private + overridable so tests
      * can assert it fired.
      */
+    /**
+     * Whether the request this approved call would now send differs from the one
+     * that was approved — the check that makes an approval bind to a request.
+     *
+     * @return null when the call may proceed, otherwise a short reason for the
+     *         audit trail and trace
+     */
+    String requestChangedSinceApproval(PendingToolCallBatch.PendingToolCall c, String amendedArguments,
+                                       Map<String, ToolRequestResolver> resolvers) {
+
+        if (!c.isRequestPinned()) {
+            // Never pinned, so there is nothing to compare: every non-http tool, and
+            // any call that could not be resolved ahead of execution. Enforcing here
+            // would reject calls on a comparison that was never sound.
+            return null;
+        }
+        if (amendedArguments != null) {
+            // The approver rewrote the arguments themselves. The pinned fingerprint
+            // describes the request they replaced, so comparing against it would
+            // refuse every amendment. An amendment is already a deliberate, audited
+            // act by the same human whose approval the pin exists to honour.
+            return null;
+        }
+
+        var resolver = resolvers.get(c.getToolName());
+        if (resolver == null) {
+            // Pinned at gate time and unresolvable now: the tool is gone from the
+            // workflow, or the agent was reconfigured across the pause. We cannot
+            // show that what runs is what was approved, so it does not run.
+            return "the tool is no longer available to re-check the approved request";
+        }
+        try {
+            ResolvedRequest current = resolver.resolve(rebuiltRequest(c));
+            if (current.fingerprint() == null) {
+                return "the request could no longer be resolved for comparison";
+            }
+            if (!current.fingerprint().equals(c.getRequestFingerprint())) {
+                return "the resolved request no longer matches the approved fingerprint";
+            }
+            return null;
+        } catch (Exception e) {
+            // Fail closed: a pinned call whose request cannot be re-derived is
+            // exactly the case this check exists for.
+            LOGGER.warnf(e, "Could not re-resolve the request for approved tool '%s'; refusing to execute it.", sanitize(c.getToolName()));
+            return "the request could not be re-resolved before execution";
+        }
+    }
+
+    /**
+     * Records that an approved call was refused because its request no longer
+     * matched. Deliberately logs no argument, body or header — only the tool, the
+     * call id and the fixed reason.
+     */
+    void auditRequestChanged(IConversationMemory memory, PendingToolCallBatch.PendingToolCall c, String reason) {
+        LOGGER.warnf("hitl.tool.request_changed: approved tool '%s' (callId '%s') for conversation '%s' was NOT executed — %s.",
+                sanitize(c.getToolName()), sanitize(c.getCallId()), sanitize(memory.getConversationId()), sanitize(reason));
+    }
+
     void auditOutcomeUnknown(IConversationMemory memory, PendingToolCallBatch.PendingToolCall c) {
         LOGGER.warnf("hitl.tool.outcome_unknown: approved tool '%s' (callId '%s') for conversation '%s' had an interrupted prior execution; "
                 + "outcome is unknown — verify externally before retrying.",
