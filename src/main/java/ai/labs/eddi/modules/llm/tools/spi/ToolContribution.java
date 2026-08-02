@@ -35,9 +35,20 @@ import java.util.Map;
  * @param failures
  *            structured per-server/per-tool discovery failures (MCP-style);
  *            empty when the source has nothing to report
+ * @param toolCanonicalNames
+ *            dispatch name → configuration slug
+ *            ({@code searchWeb → websearch}), so the executor boundary prices a
+ *            call and picks its cache TTL under the token the agent designer
+ *            actually configured rather than the method name. Only the
+ *            object-producing sources populate this — they get it from
+ *            {@code ToolObjectReflector}; externally-discovered sources
+ *            (http/mcp/a2a) have no separate configuration slug and leave it
+ *            empty, which the merge treats as "dispatch name is the canonical
+ *            name".
  */
 public record ToolContribution(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
-        Map<String, String> toolSources, Map<String, String> toolEndpoints, List<ProviderFailure> failures) {
+        Map<String, String> toolSources, Map<String, String> toolEndpoints, List<ProviderFailure> failures,
+        Map<String, String> toolCanonicalNames) {
 
     /**
      * Defensively copies every component to an immutable view.
@@ -59,12 +70,23 @@ public record ToolContribution(List<ToolSpecification> specs, Map<String, ToolEx
         toolSources = toolSources == null ? Map.of() : Map.copyOf(toolSources);
         toolEndpoints = toolEndpoints == null ? Map.of() : Map.copyOf(toolEndpoints);
         failures = failures == null ? List.of() : List.copyOf(failures);
+        toolCanonicalNames = toolCanonicalNames == null ? Map.of() : Map.copyOf(toolCanonicalNames);
     }
 
-    /** Convenience for a source that never reports failures. */
+    /**
+     * Convenience for an externally-discovered source: no failures, and no
+     * canonical names (http/mcp/a2a tools are configured under their dispatch name,
+     * so there is no second slug to record).
+     */
     public ToolContribution(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
             Map<String, String> toolSources, Map<String, String> toolEndpoints) {
-        this(specs, executors, toolSources, toolEndpoints, List.of());
+        this(specs, executors, toolSources, toolEndpoints, List.of(), Map.of());
+    }
+
+    /** Convenience for a source that reports failures but no canonical names. */
+    public ToolContribution(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
+            Map<String, String> toolSources, Map<String, String> toolEndpoints, List<ProviderFailure> failures) {
+        this(specs, executors, toolSources, toolEndpoints, failures, Map.of());
     }
 
     /**
@@ -72,6 +94,6 @@ public record ToolContribution(List<ToolSpecification> specs, Map<String, ToolEx
      * failed.
      */
     public static ToolContribution empty() {
-        return new ToolContribution(List.of(), Map.of(), Map.of(), Map.of(), List.of());
+        return new ToolContribution(List.of(), Map.of(), Map.of(), Map.of(), List.of(), Map.of());
     }
 }

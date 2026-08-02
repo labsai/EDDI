@@ -118,7 +118,8 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             return ToolContribution.empty();
         }
         var reflected = ToolObjectReflector.reflect(tools);
-        return new ToolContribution(reflected.specs(), reflected.executors(), reflected.toolSources(), Map.of());
+        return new ToolContribution(reflected.specs(), reflected.executors(), reflected.toolSources(), Map.of(),
+                List.of(), reflected.toolCanonicalNames());
     }
 
     /**

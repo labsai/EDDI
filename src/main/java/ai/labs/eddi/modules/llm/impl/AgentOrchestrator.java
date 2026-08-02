@@ -36,7 +36,9 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
+import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
@@ -301,6 +303,13 @@ class AgentOrchestrator {
      */
     private final McpToolsProvider mcpToolsProvider;
 
+    /**
+     * The nine plain built-in tool beans, extracted to {@link BuiltinToolsProvider}
+     * (R2 step 2). Constructed here rather than per call because every one of its
+     * dependencies is a {@code final} constructor-injected bean.
+     */
+    private final BuiltinToolsProvider builtinToolsProvider;
+
     @Inject
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
@@ -340,6 +349,9 @@ class AgentOrchestrator {
         this.httpCallToolsProvider = new HttpCallToolsProvider(restAgentStore, restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter);
         this.mcpToolsProvider = new McpToolsProvider(restAgentStore, restWorkflowStore, resourceClientLibrary, mcpToolProviderManager);
+        this.builtinToolsProvider = new BuiltinToolsProvider(calculatorTool, dateTimeTool, webSearchTool,
+                dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
+                fetchToolResponsePageTool);
     }
 
     /**
@@ -1917,26 +1929,15 @@ class AgentOrchestrator {
         List<Object> tools = new ArrayList<>();
         List<String> whitelist = task.getBuiltInToolsWhitelist();
 
+        // The nine plain tool beans, in catalog order — one call now serves both the
+        // whitelist and no-whitelist cases, because "no whitelist" has always meant
+        // "every entry applies". Previously these nine were listed twice, once per
+        // branch; see BuiltinToolsProvider for why that duplication was worth
+        // removing.
+        var assemblyContext = toolAssemblyContext(task, memory);
+        tools.addAll(builtinToolsProvider.collect(assemblyContext));
+
         if (whitelist != null && !whitelist.isEmpty()) {
-            // Only add tools that are explicitly listed in the whitelist
-            if (whitelist.contains("calculator"))
-                tools.add(calculatorTool);
-            if (whitelist.contains("datetime"))
-                tools.add(dateTimeTool);
-            if (whitelist.contains("websearch"))
-                tools.add(webSearchTool);
-            if (whitelist.contains("dataformatter"))
-                tools.add(dataFormatterTool);
-            if (whitelist.contains("webscraper"))
-                tools.add(webScraperTool);
-            if (whitelist.contains("textsummarizer"))
-                tools.add(textSummarizerTool);
-            if (whitelist.contains("pdfreader"))
-                tools.add(pdfReaderTool);
-            if (whitelist.contains("weather"))
-                tools.add(weatherTool);
-            if (whitelist.contains("fetch_page") || whitelist.contains("fetch_tool_response_page"))
-                tools.add(fetchToolResponsePageTool);
             if (whitelist.contains("usermemory"))
                 addUserMemoryToolIfEnabled(tools, memory);
             if (whitelist.contains("conversationRecall"))
@@ -1946,16 +1947,6 @@ class AgentOrchestrator {
             // call since deploymentStore is field-injected (see that class's Javadoc).
             dynamicAgentToolsProvider().addDynamicAgentTools(tools, whitelist, memory);
         } else {
-            // No whitelist — add all built-in tools
-            tools.add(calculatorTool);
-            tools.add(dateTimeTool);
-            tools.add(webSearchTool);
-            tools.add(dataFormatterTool);
-            tools.add(webScraperTool);
-            tools.add(textSummarizerTool);
-            tools.add(pdfReaderTool);
-            tools.add(weatherTool);
-            tools.add(fetchToolResponsePageTool);
             // Auto-add user memory tool if agent has it enabled
             addUserMemoryToolIfEnabled(tools, memory);
             // Auto-add conversation recall tool if rolling summary is active
@@ -1982,6 +1973,42 @@ class AgentOrchestrator {
         addReadAttachmentToolIfEnabled(tools, memory);
 
         return tools;
+    }
+
+    /**
+     * The turn's {@link ToolAssemblyContext}, built once and shared by every
+     * provider so they all read one consistent snapshot.
+     * <p>
+     * {@code dynamicAgentConfig} in particular is resolved here rather than inside
+     * each provider: it can come from a group-injected context variable, and two
+     * providers resolving it independently could disagree if the step data changed
+     * between reads.
+     */
+    ToolAssemblyContext toolAssemblyContext(LlmConfiguration.Task task, IConversationMemory memory) {
+        return new ToolAssemblyContext(memory, task, task.getBuiltInToolsWhitelist(),
+                DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory),
+                memory.getUserId(), memory.getAgentId(), groupConversationIdOf(memory));
+    }
+
+    /**
+     * The {@code groupConversationId} context variable, or null outside a group
+     * discussion. Read defensively — this runs on every turn, group or not, and a
+     * malformed context value must not cost the agent its entire tool set.
+     */
+    private static String groupConversationIdOf(IConversationMemory memory) {
+        try {
+            var currentStep = memory.getCurrentStep();
+            if (currentStep == null) {
+                return null;
+            }
+            var data = currentStep.getLatestData("context:groupConversationId");
+            if (data != null && data.getResult() instanceof Context ctx && ctx.getValue() != null) {
+                return String.valueOf(ctx.getValue());
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("groupConversationId context lookup failed: %s", e.getMessage());
+        }
+        return null;
     }
 
     /**

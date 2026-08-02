@@ -8,20 +8,9 @@ package ai.labs.eddi.modules.llm.tools.spi;
  * One source of tools for a turn (R2 step 1) — built-ins, dynamic-agent tools,
  * user memory, conversation recall, attachments, httpcalls, MCP, A2A.
  * <p>
- * <b>Not yet wired.</b> The intent is that
- * {@code AgentOrchestrator#buildToolSetup} iterate a fixed-order list of these
- * and merge their {@link ToolContribution}s, replacing the if-chain inside
- * {@code collectAllBuiltInTools} plus the three bespoke per-source discovery
- * methods. That rewiring has NOT happened: {@code buildToolSetup} still calls
- * {@code discoverHttpCallTools}/{@code discoverMcpCallTools} and the inline A2A
- * block by name, and no {@code contribute} implementation has a production
- * caller. Providers currently expose both shapes — a legacy method the facade
- * calls, and {@code contribute} for the future path.
- * <p>
- * Two obligations below are therefore <em>specifications for the rewiring
- * step</em>, not properties the current implementations already satisfy. Both
- * are called out inline. Do not assume either holds when consuming a
- * contribution today.
+ * {@code AgentOrchestrator#buildToolSetup} iterates a fixed-order list of these
+ * and merges their {@link ToolContribution}s via {@link ToolSourceRegistry},
+ * which is also where the isolation guarantee below is enforced.
  * <p>
  * This SPI is why R2 gates Wave 2: I5 ({@code GroupTaskToolsProvider}), I7
  * ({@code RecruitAgentTool} inside the dynamic-agent provider), and I17
@@ -47,29 +36,29 @@ public interface ToolSourceProvider {
      * {@code require: ["memory:*"]} pattern stop matching — an ungated persistent
      * memory write.
      * <p>
-     * The rewiring step must therefore take {@code toolSources} from
-     * {@link ToolContribution#toolSources()} and use this only as a fallback for
+     * {@link ToolSourceRegistry#assemble} therefore takes {@code toolSources} from
+     * {@link ToolContribution#toolSources()} and uses this only as the fallback for
      * sources that leave it empty (the externally-discovered http/mcp/a2a ones,
-     * which are tagged at merge time today). This value is also not unique —
-     * several providers legitimately return {@code "builtin"}.
+     * which were tagged at merge time before the SPI existed). This value is also
+     * not unique — several providers legitimately return {@code "builtin"}.
      */
     String source();
 
     /**
      * Contributes this source's tools for the turn described by {@code ctx}.
      * <p>
-     * <b>Target contract, not yet enforced:</b> an implementation should never
-     * throw — a provider that cannot contribute (misconfiguration, discovery
-     * failure, disabled) should return {@link ToolContribution#empty()} or a
-     * contribution carrying {@link ProviderFailure} entries, and log a WARN itself,
-     * so one failing provider cannot abort tool assembly for every other source.
-     * Today only {@code McpToolsProvider} and {@code HttpCallToolsProvider}
-     * actually satisfy this (their delegated {@code discover()} wraps everything in
-     * a try/catch); the others propagate. The rewiring step must either add the
-     * guard per provider or wrap each {@code contribute} call at the iteration site
-     * — the plan's post-condition test ({@code ToolSourceProviderTest}, "a provider
-     * throwing yields an empty contribution and the loop continues") is what pins
-     * this.
+     * <b>Should not throw</b> — a provider that cannot contribute
+     * (misconfiguration, discovery failure, disabled) should return
+     * {@link ToolContribution#empty()} or a contribution carrying
+     * {@link ProviderFailure} entries, and log a WARN itself.
+     * <p>
+     * That obligation is enforced structurally rather than trusted:
+     * {@link ToolSourceRegistry#assemble} wraps every call, so a provider that
+     * throws anyway yields an empty contribution and the remaining sources still
+     * assemble. This was deliberately not left to per-provider discipline — only
+     * two of the original five satisfied it, and the failure mode of getting it
+     * wrong (one misconfigured MCP server costing an agent its calculator) is far
+     * worse than the cost of one try/catch at the iteration site.
      */
     ToolContribution contribute(ToolAssemblyContext ctx);
 }

@@ -5,6 +5,24 @@
 
 ---
 
+## 🧩 refactor(orchestrator): BuiltinToolsProvider + close the three SPI gaps (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 completed and the rewiring unblocked. All eight tool sources now have a provider — this time actually.
+
+**`BuiltinToolsProvider` — the doubled if-chain becomes one catalog.** `collectAllBuiltInTools` listed the same nine tool beans twice: once as `if (whitelist.contains(...))` lines, once as unconditional `tools.add(...)` lines in the no-whitelist branch. Two lists of the same nine things in the same order is a drift hazard for nothing — add a tool to one branch, forget the other, and behaviour silently diverges for exactly one of the two configurations. The catalog declares each tool once with the whitelist keys that select it, and one loop serves both branches, because "no whitelist" has always meant "every entry applies". Order is load-bearing (it is the spec order the model sees) and is preserved verbatim: catalog declaration order == the old if-chain's order, which is also *not* the agent's whitelist order — the old code had that property too, since the if-chain's sequence governed. `fetch_page`/`fetch_tool_response_page` are aliases of one entry rather than two entries, which is what stops a whitelist naming both from registering the bean twice.
+
+**Gap 2: `ToolContribution` gained `toolCanonicalNames`.** Canonical names are what let the executor boundary price a call and pick its cache TTL under the configured slug (`searchWeb → websearch`) rather than the dispatch name. The record had no slot for them, so the three bean-producing providers were silently dropping what `ToolObjectReflector` had already computed — rewiring without this would have re-priced and re-cached every built-in under its method name.
+
+**Gap 3: never-throw is now structural, not a request.** The SPI asked implementations not to throw; only two of five actually didn't. Rather than adding five try/catches and hoping the sixth provider remembers, `ToolSourceRegistry.assemble` wraps every `contribute` call. It catches `Throwable`, not `Exception`, deliberately: the realistic non-`Exception` here is `NoClassDefFoundError` from an optional integration whose dependency is absent at runtime — precisely the per-source failure that must not take the other sources down with it.
+
+**`ToolSourceRegistry` also fixes merge determinism.** First-write-wins per dispatch name, so an earlier source's tool is never displaced by a later one — collisions resolve by provider order rather than by whichever map happened to be merged last, and an operator cannot shadow a governed built-in by naming an MCP tool after it. Collisions log at WARN, since a silently-dropped tool reads to the agent designer as "the model ignored my tool". Per-tool `toolSources` tags win over the provider's nominal `source()`, with `source()` as fallback only — the security property the SPI Javadoc had been describing as a specification is now the implementation.
+
+**Tests:** `ToolSourceProviderTest` (15) is the plan's R2 post-condition — a provider throwing yields an empty contribution and the loop continues, including the `Error` case, the null-return case, and every merge rule. `BuiltinToolsProviderTest` (11) pins catalog-order equivalence with the old if-chain for both configurations and the alias behaviour. 347 tests green across the orchestrator and provider batteries.
+
+---
+
 ## 🔍 review: PR #626 automated-review findings — 6 more defects fixed (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
