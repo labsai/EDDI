@@ -18,6 +18,7 @@ import ai.labs.eddi.configs.apicalls.model.QuickRepliesBuildingInstruction;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
@@ -123,6 +124,7 @@ public class AgentSetupService {
         if (!isLocalLLM && (request.apiKey() == null || request.apiKey().isBlank())) {
             throw new AgentSetupException("API key is required for cloud LLM providers (anthropic, openai, gemini)");
         }
+        validateMcpServerUrls(request.mcpServerUrls());
 
         var params = resolveParamsValidated(request.provider(), request.model(), request.deploy(), request.environment());
         boolean toolsEnabled = request.enableBuiltInTools() != null && request.enableBuiltInTools();
@@ -165,23 +167,7 @@ public class AgentSetupService {
             patchDescriptor(langchainId, langchainVersion, request.agentName());
 
             // --- Step 4: Create MCP Calls Configurations (if MCP server URLs provided) ---
-            List<String> mcpCallsLocations = null;
-            if (request.mcpServerUrls() != null && !request.mcpServerUrls().isBlank()) {
-                mcpCallsLocations = new ArrayList<>();
-                for (String url : request.mcpServerUrls().split(",")) {
-                    String trimmed = url.trim();
-                    if (trimmed.isEmpty())
-                        continue;
-                    var mcpConfig = createMcpCallsConfig(trimmed);
-                    Response mcpResponse = getRestStore(IRestMcpCallsStore.class).createMcpCalls(mcpConfig);
-                    String mcpLocation = mcpResponse.getHeaderString("Location");
-                    String mcpId = extractIdFromLocation(mcpLocation);
-                    int mcpVersion = extractVersionFromLocation(mcpLocation);
-                    mcpCallsLocations.add(mcpLocation);
-                    createdResources.put("mcpCallsLocation_" + mcpCallsLocations.size(), mcpLocation);
-                    patchDescriptor(mcpId, mcpVersion, request.agentName());
-                }
-            }
+            List<String> mcpCallsLocations = createMcpCallsResources(request.mcpServerUrls(), request.agentName(), createdResources);
 
             // --- Step 5: Create Output Set (if intro message provided) ---
             String outputLocation = null;
@@ -269,6 +255,18 @@ public class AgentSetupService {
         if (request.llmBaseUrl() != null && !request.llmBaseUrl().isBlank() && !UrlValidationUtils.isValidHttpUrl(request.llmBaseUrl())) {
             throw new AgentSetupException("llmBaseUrl must be a valid http(s) URL");
         }
+        // Validate the HITL config HERE, before a single resource exists.
+        // AgentStore.create validates it too, but only at step 7 — so an unusable
+        // approval pattern would surface after the apicalls, parser, behaviour, LLM
+        // and workflow had all been created, leaving every one of them orphaned.
+        // The caller gets the same actionable message either way; only the debris
+        // differs.
+        try {
+            HitlConfigValidation.validate(request.hitlConfig());
+        } catch (IllegalArgumentException e) {
+            throw new AgentSetupException("Invalid hitlConfig: " + e.getMessage(), e);
+        }
+        validateMcpServerUrls(request.mcpServerUrls());
 
         var params = resolveParamsValidated(request.provider(), request.model(), request.deploy(), request.environment());
         var createdResources = new LinkedHashMap<String, Object>();
@@ -332,8 +330,12 @@ public class AgentSetupService {
             createdResources.put("langchainLocation", langchainLocation);
             patchDescriptor(extractIdFromLocation(langchainLocation), extractVersionFromLocation(langchainLocation), request.agentName());
 
+            // --- Step 5b: Create MCP Calls Configurations (if MCP URLs provided) ---
+            List<String> mcpCallsLocations = createMcpCallsResources(request.mcpServerUrls(), request.agentName(), createdResources);
+
             // --- Step 6: Create Workflow (with httpcalls in pipeline) ---
-            var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, httpCallsLocations, null, langchainLocation, null);
+            var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, httpCallsLocations, mcpCallsLocations, langchainLocation,
+                    null);
             Response workflowResponse = getRestStore(IRestWorkflowStore.class).createWorkflow(workflowConfig);
             String workflowLocation = workflowResponse.getHeaderString("Location");
             createdResources.put("packageLocation", workflowLocation);
@@ -342,6 +344,11 @@ public class AgentSetupService {
             // --- Step 7: Create Agent ---
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(List.of(URI.create(workflowLocation)));
+            // The gate is installed on v1 of the agent document. It has to be created
+            // WITH the agent rather than PUT afterwards: an update writes version + 1 and
+            // leaves the ungated v1 reachable by a redeploy, so a two-step provision would
+            // ship an agent that can be returned to an ungated state.
+            agentConfig.setHitlConfig(request.hitlConfig());
             Response agentResponse = getRestStore(IRestAgentStore.class).createAgent(agentConfig);
             String agentLocation = agentResponse.getHeaderString("Location");
             String agentId = extractIdFromLocation(agentLocation);
@@ -369,6 +376,63 @@ public class AgentSetupService {
         } catch (Exception e) {
             throw new AgentSetupException("Failed to create API agent: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Creates one McpCalls resource per comma-separated server URL, recording each
+     * location in {@code createdResources}. Returns null when no URLs were given,
+     * which is what {@code createWorkflowConfig} expects for "no MCP step".
+     * <p>
+     * Shared by {@code setupAgent} and {@code createApiAgent} so an API agent can
+     * hold both the tools generated from its OpenAPI spec and an MCP server's —
+     * previously only the former, which made "REST plus MCP" unreachable through
+     * the wizard.
+     */
+    /**
+     * Validates every MCP server URL before any of them is written.
+     * <p>
+     * {@code McpCallsConfiguration.validate()} rejects a non-http(s) URL at save
+     * time, so without this the second bad URL in a list would abort the run with
+     * the first one's resource already persisted — and in {@code createApiAgent}
+     * with the apicalls, parser, behaviour and LLM resources persisted too. Same
+     * reasoning as the up-front {@code hitlConfig} check: a config error is cheap
+     * to detect before the first write, and the caller gets the same message with
+     * no debris.
+     */
+    private void validateMcpServerUrls(String mcpServerUrls) throws AgentSetupException {
+        if (mcpServerUrls == null || mcpServerUrls.isBlank()) {
+            return;
+        }
+        for (String url : mcpServerUrls.split(",")) {
+            String trimmed = url.trim();
+            if (trimmed.isEmpty())
+                continue;
+            try {
+                createMcpCallsConfig(trimmed).validate();
+            } catch (IllegalArgumentException e) {
+                throw new AgentSetupException("Invalid mcpServerUrls entry '" + trimmed + "': " + e.getMessage(), e);
+            }
+        }
+    }
+
+    private List<String> createMcpCallsResources(String mcpServerUrls, String agentName, Map<String, Object> createdResources)
+            throws Exception {
+        if (mcpServerUrls == null || mcpServerUrls.isBlank()) {
+            return null;
+        }
+        var locations = new ArrayList<String>();
+        for (String url : mcpServerUrls.split(",")) {
+            String trimmed = url.trim();
+            if (trimmed.isEmpty())
+                continue;
+            var mcpConfig = createMcpCallsConfig(trimmed);
+            Response mcpResponse = getRestStore(IRestMcpCallsStore.class).createMcpCalls(mcpConfig);
+            String mcpLocation = mcpResponse.getHeaderString("Location");
+            locations.add(mcpLocation);
+            createdResources.put("mcpCallsLocation_" + locations.size(), mcpLocation);
+            patchDescriptor(extractIdFromLocation(mcpLocation), extractVersionFromLocation(mcpLocation), agentName);
+        }
+        return locations;
     }
 
     // ==================== Config Builders ====================

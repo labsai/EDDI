@@ -381,6 +381,88 @@ Added `planning/group-collaboration-improvements-plan.md` — the Rev 2.1 implem
 The dedicated `Attachments` nested test class (12 tests) moved from `GroupConversationServiceTest` to a new focused `GroupAttachmentBinderTest`, testing the extracted class directly instead of through the facade. Baselined the full 12-class/470-test `GroupConversationService*Test` suite before touching any code (all green; JaCoCo: 82% instruction / 72% branch on the class) — that is this refactor's regression budget going forward. Re-ran the same suite plus the new test class after the extraction: still all green, 470 tests total (458 in the `GroupConversationService` family + 12 in the new class), `./mvnw clean compile` clean, formatter + Checkstyle clean.
 
 **What's next:** R1 steps 2–10 (extract `GroupContextBuilder`, `GroupSigningGuard`, `MemberTurnExecutor`, `PhaseExecutionEngine`, `TaskForceEngine`, `GroupHitlCoordinator`, `GroupLifecycleOps`, then the graceful-shutdown wiring commit) per `planning/group-collaboration-improvements-plan.md` §3.1, each its own commit. R2 (`AgentOrchestrator` tool-source SPI) and R3 (`ConversationService` HITL split) follow. Full sequencing in the plan's §7 dependency graph.
+## 🎚️ feat(hitl): per-endpoint approval friction (2026-08-01)
+
+**Repo:** EDDI (`feat/operator-write-capability`)
+
+First of the follow-ups named at the end of [#622](#-featoperator-the-foundation-for-an-agent-that-can-safely-write-2026-07-29). `timeoutPolicy`, `approvalTimeout`, `pauseReason` and `pendingMessage` were single scalars covering every gated tool, so "deploy an agent" and "create an agent" could not differ in how long a reviewer had or what the approval card said. `toolApprovals.rules` is an optional list of per-tool overrides addressed by the same pattern language as `requireApproval`:
+
+```json
+"rules": [
+  { "match": "http.post:/agentstore/agents", "timeoutPolicy": "WAIT_INDEFINITELY",
+    "pauseReason": "Creating a new agent — review the whole config" },
+  { "match": "http.post:/administration/{environment}/deploy/{agentId}",
+    "timeoutPolicy": "AUTO_REJECT", "approvalTimeout": "PT5M" }
+]
+```
+
+**A rule tunes friction; it never gates or ungates.** That stays entirely in `requireApproval`/`exempt`. The gate allows an unmatched call, so it only survives by gating broadly and exempting narrowly — a rule able to ungate would let a config grant capability by adding an entry, which is the enumerate-upward failure the whole design avoids. The invariant is asserted against the gate itself: a config whose rules name an exempt GET and give a required POST `AUTO_APPROVE` changes neither classification.
+
+**Two resolution decisions worth recording.**
+
+*Most specific wins, per call.* Fewest wildcards first, then longest pattern — so `http.post:/agentstore/agents` beats `http.post:*` regardless of JSON array order. Order-dependence would mean a designer silently losing their intended friction to a list edit.
+
+*Strictest wins, per batch.* A model can emit several gated calls in one message and they pause **together**, under one timeout policy, so the matched rules must reduce to one. Ranking them by how much of the human's decision the policy takes on timeout — `WAIT_INDEFINITELY` > `ABORT` > `AUTO_REJECT` > `AUTO_APPROVE` > (no policy) — means bundling a lenient call into a batch can never soften a stricter rule. Taking the *first* match instead would have let a model turn "delete waits for a human" into "delete auto-rejects in five minutes" by pairing a delete with a deploy. Fields fall back to the scalars *individually*, so a rule that sets only `pauseReason` keeps the configured policy.
+
+**The rule is resolved once, at gate time, and persisted on the batch.** `PendingToolCallBatch` keeps each gated call's name and source but no endpoint, so `http.post:/agentstore/agents` could not be re-matched by the post-pause resolvers in `ConversationService` (timeout) and `Conversation.resolvePendingMessage` (end-user message) — and a rule resolving differently on the two sides of a pause is exactly the bug the persisted field removes. It mirrors the existing `effectiveToolApprovals` field and is nullable for the same backward-compatibility reason.
+
+**Extracted rather than duplicated.** `ToolApprovalGate.addressesOf` is now public and is the single derivation of the three forms a pattern may address a call by; the gate and `ToolApprovalRules` both call it. A second copy would drift, and since the gate allows an unmatched call, drift there is an ungated write.
+
+**Metric.** `eddi.hitl.rule.matched{match="<configured pattern>"}` — deduplicated per pause, so it counts reviews governed rather than calls the model happened to bundle. The tag is the pattern from the config, never a URL, credential, argument or user id, so cardinality is bounded by the size of the `rules` list.
+
+**Verification.** 1929 tests pass across the HITL, conversation, orchestrator and lifecycle suites (the 3 errors are the known Docker/Testcontainers and Quarkus-IT environmental failures, unchanged from a clean checkout). Five mutations applied and each confirmed to kill tests: strictest-wins → first-wins (3 dead), specificity sort removed (2), the governing-rule branch in `applyEffectiveToolTimeoutPolicy` disabled (2), the rule's duration ignored (2), the rule's `pendingMessage` ignored (1). The duration test asserts on the *armed deadline* rather than the policy name, because both levels state `AUTO_REJECT` there and only the fire time distinguishes which duration was read.
+
+Documented in [`docs/hitl.md`](hitl.md).
+
+### setup-api can now install the gate (2026-08-01)
+
+**`CreateApiAgentRequest` had no HITL field and `AgentSetupService.createApiAgent` built a bare `AgentConfiguration`, so every agent the wizard has ever created has `hitlConfig == null` and an inert gate.** Nothing could provision a gated agent through setup-api at all — which is the blocker for anything downstream that wants to *offer* write capability, because there was no way to install the thing that makes writes safe.
+
+`hitlConfig` is now the last-but-one component of the request record (appended, so the positional constructor `McpSetupTools` uses keeps its existing meaning) and is set at step 7, **on v1 of the agent document**. Creating it with the agent rather than `PUT`-ing it afterwards matters: `HistorizedResourceStore.update` writes `version + 1` and leaves the ungated v1 reachable by a redeploy, so a two-step provision would ship an agent that can be returned to an ungated state.
+
+**Validated before the first resource exists.** `AgentStore.create` validates `hitlConfig` too ([`AgentStore.java:48`](../src/main/java/ai/labs/eddi/configs/agents/mongo/AgentStore.java)) — but that runs at step 7, so an unusable approval pattern surfaced only after the apicalls, parser, behaviour, LLM and workflow had all been created, leaving five orphaned resources behind. The up-front check gives the caller the same actionable message and no debris; the test asserts it by proving no REST store was even requested.
+
+**Deliberately not on the MCP tool.** `create_api_agent` passes `null` and has no `@ToolArg` for it. That tool already provisions an agent with a caller-chosen endpoint filter; letting the caller also choose the gate would turn it into a complete escape from whatever allow-list governs the agent doing the calling. Gated provisioning goes through `POST /administration/agents/setup-api` (`eddi-admin`).
+
+**Also on setup-api: `mcpServerUrls`.** An API agent could previously hold only the tools generated from its OpenAPI spec — `createApiAgent` passed `null` for the MCP locations — so "REST endpoints *and* an MCP server" was unreachable through the wizard and had to be assembled by hand. The per-URL creation loop is now shared with `setupAgent` rather than duplicated.
+
+Mutation-checked: dropping the up-front validation, dropping `setHitlConfig`, and reverting the workflow to `null` MCP locations each kill their test.
+
+### EDDI's docs are now readable by an EDDI agent (2026-08-01)
+
+**An MCP resource does not reach an EDDI agent.** A resource is only usable by a client that asks for it, and EDDI's own MCP client never calls `resources/read` — it consumes *tools*. So `eddi://docs/*` made EDDI's documentation readable by a desktop MCP client and not by an agent running on EDDI, which is exactly backwards for an agent whose job is to explain the platform.
+
+`DocsService` is extracted from `McpDocResources` (filesystem access plus the path-traversal guard) and served over REST at `GET /administration/docs` and `GET /administration/docs/{name}`, both open to the widest read tier (`eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver`, `eddi-viewer` — enumerated, because EDDI has no role hierarchy; see the review-pass note below) — the docs are published documentation, so anyone who may look at the deployment may read them. `McpDocResources` becomes a thin delegate, and its pre-existing test class is kept assertion-for-assertion as the evidence that no MCP client sees a different response than before.
+
+**Runtime doc set ≠ repo doc set,** and this is now written down where a caller will see it. The image copies only top-level `docs/*.md` (non-recursive) and then removes `changelog.md`, `code-review-standards.md`, `incident-response.md` and `SUMMARY.md` — so a caller must read the index rather than assume a page exists. The REST list endpoint is what makes that practical.
+
+**A redundant guard was found and made non-redundant.** Mutating away the name shape-check (`/`, `\`, `..`) killed nothing: `readDoc` also verifies the resolved path still sits under the docs directory, which subsumes it. The shape check is worth keeping — it is what lets the MCP surface answer "invalid name" rather than "not found" — but `McpDocResources` had *restated the predicate* to pick that message, i.e. two copies of a security check. It is now one shared `DocsService.isValidDocName`, and mutating it kills five tests. The REST surface deliberately returns a bare `404` for both cases instead, so an attacker-supplied traversal string is never echoed back.
+
+### `updateResourceUri` verified as the gate-immune re-point path (2026-08-01)
+
+`PUT /agentstore/agents/{id}` and `PUT /llmstore/llms/{id}` are permanently unbound for an approval-gated operator, because the gate lives in those documents and one approved write there removes all subsequent gating. That leaves editing an agent apparently impossible: changing a behaviour rule means rules v2 → workflow re-points at rules v2 → agent re-points at workflow v2, and the last two steps are document writes. The escape hatch is `PUT /{id}/updateResourceUri` on the agent and workflow stores — but it is only safe to bind if it *provably* cannot drop the gate, so this was checked rather than assumed.
+
+**It holds, for two independent reasons.** The caller cannot *supply* a `hitlConfig`: the request body is `text/plain` and is a single URI. And the implementation *preserves* the stored one — `updateResourceInAgent` reads the current document, mutates only the workflow URI list, and writes the whole document back, so the gate survives by round-trip rather than by the endpoint happening to ignore it. Both variants go through the normal `update` path, so `HistorizedResourceStore` writes `version + 1` as usual. Asserted by capturing the written `AgentConfiguration`: the gate is intact and only the URI list changed. Mutation-checked by nulling `hitlConfig` before the write.
+
+**One defect found and fixed on that path.** Both variants computed `resourceURIString.substring(0, resourceURIString.lastIndexOf("?"))`, which throws `StringIndexOutOfBoundsException` on a URI carrying no `?version=` — turning malformed caller input into a 500. That matters more here than it usually would: this is the endpoint an approval-gated operator has to walk to finish an edit, so its failure mode is one an LLM will hit and must be able to act on. Now an actionable 400.
+
+### Review pass over the above (2026-08-01)
+
+A critical read-back of the whole branch, which found three things worth recording:
+
+- **`GET /administration/docs` would have 403'd an admin.** It was written as `@RolesAllowed("eddi-viewer")` — the role the plan named and the one the MCP surface uses. But EDDI has **no role hierarchy**: JAX-RS `@RolesAllowed` and the MCP layer's `McpToolUtils.requireRole` are both literal `hasRole` checks, and `eddi-viewer` appears in *no other* REST endpoint. An `eddi-admin` principal — what an operator agent actually runs as — would have been refused by the one endpoint built for it. Now the read tier is enumerated like every other REST resource here.
+- **A javadoc was silently reassigned.** The new `recordRuleMatches` was inserted directly above `recordPauseCapGuard`, leaving two consecutive javadoc blocks: the original doc detached from its method and `recordPauseCapGuard` ended up undocumented. Method moved.
+- **One more sound validation.** A `rules[].match` string-identical to an `exempt` pattern is provably dead config — an exempt call is never gated, so no rule is ever resolved for it — and is now refused, in the same spirit as the existing "in both requireApproval and exempt" check. Deliberately *only* exact equality: a broader rule may legitimately overlap an exemption while still covering gated calls, and deciding that in general would mean reasoning about globs over an unknown tool set.
+
+### PR review pass — CodeRabbit + Copilot on #625 (2026-08-01)
+
+- **`updateResourceUri` could unpin a reference (Major, real).** The versionless-URI guard added above tested only for the presence of a `?`. A URI like `.../workflows/{id}?other=2` satisfied it, matched the stored `?version=1` reference by path prefix, and **replaced it with a versionless one** — silently unpinning the workflow an agent resolves at runtime. The guard now parses the query and requires a `version` that is a non-negative integer, via a shared `RestUtilities.pathWithoutVersionQuery` so both stores ask the same question. Mutation-checked: with the parse removed, `?other=2` returns 200 and the write goes through.
+- **A whitespace-only duration degraded a finite policy silently.** `RuntimeUtilities.isNullOrEmpty` is `isEmpty`-only, but `HitlConfigValidation` uses `isBlank` when deciding whether a finite rule may inherit the enclosing `approvalTimeout`. So `"  "` saved as "absent" and then resolved as "present", won the chain, threw inside `Duration.parse`, armed no schedule, and left the bookmark reporting a finite policy that could never fire. Both resolution sites are blank-aware now, and the three identical duration ternaries in `applyEffectiveToolTimeoutPolicy` are computed once — the timeout resolves down its own chain regardless of which branch picks the policy, and three copies would drift.
+- **MCP server URLs are validated before the first write.** `McpCallsConfiguration.validate()` (write-time validation, new on main) rejects a non-http(s) URL, so a bad *second* URL aborted with the first one's resource already persisted — plus, on the API-agent path, the apicalls, parser, behaviour and LLM resources. Same fix as the `hitlConfig` check: sweep them all up front.
+- **Declined, with evidence:** a suggestion to wrap `ToolApprovalPatterns.compile` in a try/catch for "invalid regex syntax". It cannot throw — every non-wildcard segment is `Pattern.quote`d by design. Probed 18 adversarial inputs (`\E`, `\Q`, `[`, `(((`, a lone backslash) and none threw, so the catch would be unreachable code implying a failure mode that does not exist.
+- Two doc comments about the docs endpoint's role tier were correct and are fixed.
+
+Also verified rather than assumed: `PendingToolCallBatch.effectiveRule` round-trips through the snapshot serializer (asserted in `PendingToolCallBatchSnapshotTest`). If it did not, a paused conversation would render the rule's pending message and the resume would recompute the scalar one — leaving the placeholder stranded, since `dropPendingApprovalPlaceholder` removes it by recomputing that exact string. And the null-`callId` branch in `ToolApprovalRules.matchByCallId` is unreachable in production: `AgentOrchestrator.normalizeToolCallIds` assigns a synthetic id to every request whenever the gate is active, so its test documents defensive behaviour rather than a live path.
 
 ---
 

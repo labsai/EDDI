@@ -48,6 +48,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
@@ -119,7 +120,15 @@ class ConversationServiceToolTimeoutTest {
      * resolvers read the batch config instead of the agent-level default. Null
      * exercises the legacy/backward-compat path (agent-level resolution).
      */
-    private ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig batchEffectiveToolApprovals;
+    private ToolApprovalsConfig batchEffectiveToolApprovals;
+
+    /**
+     * When set, the helper stamps this governing per-tool friction rule onto both
+     * batches — the shape {@code AgentOrchestrator} persists after resolving
+     * {@code toolApprovals.rules} at gate time. Null exercises the
+     * no-rules/legacy-batch path.
+     */
+    private ToolApprovalsConfig.ApprovalRule batchEffectiveRule;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -495,6 +504,113 @@ class ConversationServiceToolTimeoutTest {
     }
 
     // =========================================================================
+    // Iteration 1 — the governing toolApprovals.rules entry outranks the scalars
+    // =========================================================================
+
+    @Nested
+    @DisplayName("per-tool friction rule drives the tool-pause timeout policy")
+    class GoverningRule {
+
+        @Test
+        @DisplayName("the rule's policy + duration beat the toolApprovals scalars")
+        void ruleOverridesToolApprovalsScalars() throws Exception {
+            // "Deploying an agent" wants a short fuse even though the agent's blanket
+            // tool policy is wait-forever — the whole reason rules exist.
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
+            toolApprovals.setTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
+            hitl.setToolApprovals(toolApprovals);
+            batchEffectiveToolApprovals = toolApprovals;
+
+            var rule = new ToolApprovalsConfig.ApprovalRule();
+            rule.setMatch("http.post:/administration/{environment}/deploy/{agentId}");
+            rule.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            rule.setApprovalTimeout("PT5M");
+            batchEffectiveRule = rule;
+
+            resumeWithToolRePause(hitl, FINGERPRINT, null);
+
+            ArgumentCaptor<ScheduleConfiguration> cap = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+            verify(scheduleStore).createSchedule(cap.capture());
+            assertEquals("AUTO_REJECT", cap.getValue().getMetadata().get("policy"),
+                    "the governing rule must outrank the toolApprovals scalar policy");
+        }
+
+        @Test
+        @DisplayName("a rule stating only a policy inherits the enclosing duration")
+        void ruleWithoutDurationInheritsEnclosingTimeout() throws Exception {
+            // Otherwise a rule that omits approvalTimeout would arm a policy with no
+            // clock, i.e. silently behave as wait-forever.
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
+            toolApprovals.setApprovalTimeout("PT30S");
+            hitl.setToolApprovals(toolApprovals);
+            batchEffectiveToolApprovals = toolApprovals;
+
+            var rule = new ToolApprovalsConfig.ApprovalRule();
+            rule.setMatch("http.delete:*");
+            rule.setTimeoutPolicy(HitlTimeoutPolicy.ABORT);
+            batchEffectiveRule = rule;
+
+            resumeWithToolRePause(hitl, FINGERPRINT, null);
+
+            ArgumentCaptor<ScheduleConfiguration> cap = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+            verify(scheduleStore).createSchedule(cap.capture());
+            assertEquals("ABORT", cap.getValue().getMetadata().get("policy"));
+        }
+
+        @Test
+        @DisplayName("the rule's duration beats an enclosing one — the deadline is the rule's, not the agent's")
+        void ruleDurationBeatsTheEnclosingDuration() throws Exception {
+            // Asserted on the armed deadline rather than the policy name, because both
+            // levels here agree on AUTO_REJECT: only the fire time distinguishes "the
+            // rule's PT5M was read" from "the agent's PT10H was".
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
+            toolApprovals.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            toolApprovals.setApprovalTimeout("PT10H");
+            hitl.setToolApprovals(toolApprovals);
+            batchEffectiveToolApprovals = toolApprovals;
+
+            var rule = new ToolApprovalsConfig.ApprovalRule();
+            rule.setMatch("http.post:/administration/{environment}/deploy/{agentId}");
+            rule.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            rule.setApprovalTimeout("PT5M");
+            batchEffectiveRule = rule;
+
+            Instant before = Instant.now();
+            resumeWithToolRePause(hitl, FINGERPRINT, null);
+
+            ArgumentCaptor<ScheduleConfiguration> cap = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+            verify(scheduleStore).createSchedule(cap.capture());
+            Instant fireAt = cap.getValue().getNextFire();
+            assertTrue(fireAt.isBefore(before.plus(Duration.ofMinutes(30))),
+                    "the rule's PT5M must arm the deadline, not the enclosing PT10H — armed at " + fireAt);
+            assertTrue(fireAt.isAfter(before), "a fresh pause must arm a future deadline, armed at " + fireAt);
+        }
+
+        @Test
+        @DisplayName("a rule stating only a duration leaves the policy resolution alone")
+        void ruleWithOnlyDurationDoesNotChangeThePolicy() throws Exception {
+            // A messages-and-timing rule must not accidentally promote the inherited
+            // AUTO_APPROVE that Task 10 demotes.
+            var hitl = new AgentConfiguration.HitlConfig();
+            hitl.setApprovalTimeout("PT30S");
+            hitl.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_APPROVE);
+            hitl.setToolApprovals(new ToolApprovalsConfig());
+
+            var rule = new ToolApprovalsConfig.ApprovalRule();
+            rule.setMatch("http.post:*");
+            rule.setApprovalTimeout("PT2M");
+            batchEffectiveRule = rule;
+
+            resumeWithToolRePause(hitl, FINGERPRINT, null);
+
+            verify(scheduleStore, never()).createSchedule(any());
+        }
+    }
+
+    // =========================================================================
     // Fix #1 — backward compatibility: a legacy batch (null effective config),
     // a RULE pause, or a null batch must behave EXACTLY as before.
     // =========================================================================
@@ -649,6 +765,7 @@ class ConversationServiceToolTimeoutTest {
             newBatch.setAutoApproveCount(0);
             newBatch.setCalls(List.of(pendingCall("call-xyz", false)));
             newBatch.setEffectiveToolApprovals(batchEffectiveToolApprovals);
+            newBatch.setEffectiveRule(batchEffectiveRule);
             memory.setHitlPendingToolCalls(newBatch);
             if (newBatchCapture != null) {
                 newBatchCapture.set(newBatch);
@@ -724,6 +841,7 @@ class ConversationServiceToolTimeoutTest {
         batch.setFingerprint(fingerprint);
         batch.setAutoApproveCount(autoApproveCount);
         batch.setEffectiveToolApprovals(batchEffectiveToolApprovals);
+        batch.setEffectiveRule(batchEffectiveRule);
         List<PendingToolCall> calls = new ArrayList<>();
         calls.add(pendingCall("call-abc", false));
         batch.setCalls(calls);

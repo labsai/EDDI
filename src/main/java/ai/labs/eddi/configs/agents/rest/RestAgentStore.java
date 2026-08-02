@@ -141,8 +141,19 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response updateResourceInAgent(String id, Integer version, URI resourceURI) {
-        String resourceURIString = resourceURI.toString();
-        String resourceURIWithoutVersion = resourceURIString.substring(0, resourceURIString.lastIndexOf("?"));
+        // The supplied URI must carry a real version, not merely a '?'. Stored
+        // references are matched by "everything before the query" and then REPLACED by
+        // this URI, so '...?other=2' would match a versioned reference and overwrite it
+        // with a versionless one — silently unpinning the workflow the agent resolves.
+        // (Testing lastIndexOf('?') alone also made substring(0, -1) throw, turning
+        // malformed input into a 500 on the re-point cascade an approval-gated agent
+        // must walk to finish an edit.)
+        String resourceURIWithoutVersion = RestUtilities.pathWithoutVersionQuery(resourceURI);
+        if (resourceURIWithoutVersion == null) {
+            return Response.status(BAD_REQUEST)
+                    .entity("resourceURI must carry a version, e.g. '...?version=2'")
+                    .type(MediaType.TEXT_PLAIN).build();
+        }
 
         boolean updated = false;
         AgentConfiguration agentConfig = readAgent(id, version);

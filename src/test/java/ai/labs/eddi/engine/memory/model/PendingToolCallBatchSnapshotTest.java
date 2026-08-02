@@ -52,6 +52,7 @@ class PendingToolCallBatchSnapshotTest {
         call2.setArgsTruncated(true);
         call2.setArgumentsRedacted("<huge>");
         call2.setGateReason("mcp:*");
+        call2.setMatchedRule("mcp:delete_*");
 
         var batch = new PendingToolCallBatch();
         batch.setPauseEpoch("epoch-1");
@@ -76,6 +77,13 @@ class PendingToolCallBatchSnapshotTest {
         effective.setOnNoProgress("AUTO_REJECT");
         effective.setPendingMessage("Awaiting review for {toolNames}");
         batch.setEffectiveToolApprovals(effective);
+
+        var rule = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig.ApprovalRule();
+        rule.setMatch("mcp:delete_*");
+        rule.setTimeoutPolicy(ai.labs.eddi.configs.hitl.HitlTimeoutPolicy.WAIT_INDEFINITELY);
+        rule.setPauseReason("Deleting a record — check the id");
+        rule.setPendingMessage("Waiting on a reviewer for {toolNames}");
+        batch.setEffectiveRule(rule);
         return batch;
     }
 
@@ -113,6 +121,21 @@ class PendingToolCallBatchSnapshotTest {
         assertEquals("PT1H", batch.getEffectiveToolApprovals().getApprovalTimeout());
         assertEquals("AUTO_REJECT", batch.getEffectiveToolApprovals().getOnNoProgress());
         assertEquals("Awaiting review for {toolNames}", batch.getEffectiveToolApprovals().getPendingMessage());
+
+        // The governing per-tool friction rule must round-trip too. It is resolved
+        // ONCE at gate time and read back after the pause by ConversationService (the
+        // timeout policy) and Conversation.resolvePendingMessage (the end-user text).
+        // If it did not survive persistence, a paused conversation would show the
+        // rule's message and the resume would recompute the scalar one — leaving the
+        // pending-approval placeholder stranded in the resolved turn's output, because
+        // dropPendingApprovalPlaceholder removes it by recomputing that exact string.
+        assertNotNull(batch.getEffectiveRule());
+        assertEquals("mcp:delete_*", batch.getEffectiveRule().getMatch());
+        assertEquals(ai.labs.eddi.configs.hitl.HitlTimeoutPolicy.WAIT_INDEFINITELY,
+                batch.getEffectiveRule().getTimeoutPolicy());
+        assertEquals("Deleting a record — check the id", batch.getEffectiveRule().getPauseReason());
+        assertEquals("Waiting on a reviewer for {toolNames}", batch.getEffectiveRule().getPendingMessage());
+        assertEquals("mcp:delete_*", batch.getCalls().get(1).getMatchedRule());
     }
 
     @Test

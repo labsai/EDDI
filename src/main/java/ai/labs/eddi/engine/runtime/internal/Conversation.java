@@ -796,9 +796,16 @@ public class Conversation implements IConversation {
             + "You will receive the result once a reviewer decides.";
 
     /**
-     * Resolves the end-user-facing pending message for a tool pause:
-     * {@code toolApprovals.pendingMessage} with {@code {toolNames}} substituted
-     * from the pending batch's gated call names, falling back to a generic default.
+     * Resolves the end-user-facing pending message for a tool pause: the governing
+     * {@code toolApprovals.rules} entry's {@code pendingMessage} if it set one,
+     * else {@code toolApprovals.pendingMessage}, with {@code {toolNames}}
+     * substituted from the pending batch's gated call names, falling back to a
+     * generic default.
+     * <p>
+     * Must stay deterministic from the persisted batch alone —
+     * {@code dropPendingApprovalPlaceholder} recomputes this exact string on resume
+     * to remove it, so a value that varied between the two calls would leave the
+     * placeholder stranded in the resolved turn's output.
      */
     private String resolvePendingMessage(IConversationMemory memory) {
         String template = null;
@@ -810,7 +817,13 @@ public class Conversation implements IConversation {
         var cfg = batch != null && batch.getEffectiveToolApprovals() != null
                 ? batch.getEffectiveToolApprovals()
                 : memory.getAgentToolApprovalsConfig();
-        if (cfg != null && !isNullOrEmpty(cfg.getPendingMessage())) {
+        var rule = batch != null ? batch.getEffectiveRule() : null;
+        // isBlank, not isNullOrEmpty (which is isEmpty-only): a whitespace-only
+        // pendingMessage would otherwise be used verbatim and render as an empty
+        // bubble instead of falling back to the scalar or the default.
+        if (rule != null && rule.getPendingMessage() != null && !rule.getPendingMessage().isBlank()) {
+            template = rule.getPendingMessage();
+        } else if (cfg != null && !isNullOrEmpty(cfg.getPendingMessage())) {
             template = cfg.getPendingMessage();
         }
         if (template == null) {
