@@ -9,7 +9,6 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
-import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
@@ -30,7 +29,6 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
-import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
@@ -49,10 +47,6 @@ import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import ai.labs.eddi.modules.llm.tools.ToolNameResolver;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
 import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
-import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
-import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
-import ai.labs.eddi.modules.llm.tools.FindAgentsByCapabilityTool;
-import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -63,7 +57,6 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.TokenUsage;
-import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import io.micrometer.core.instrument.Metrics;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -110,9 +103,13 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 class AgentOrchestrator {
     private static final Logger LOGGER = Logger.getLogger(AgentOrchestrator.class);
 
-    /** Well-known data keys for dynamic agent lifecycle tracking. */
-    public static final String KEY_DYNAMIC_CREATED_AGENT_IDS = "dynamic:created_agent_ids";
-    public static final String KEY_DYNAMIC_RETAINED_AGENT_IDS = "dynamic:retained_agent_ids";
+    /**
+     * Well-known data keys for dynamic agent lifecycle tracking. Aliases of the
+     * {@link DynamicAgentToolsProvider} constants (R2 step 2) — kept declared here
+     * because tests reference them by this class name.
+     */
+    public static final String KEY_DYNAMIC_CREATED_AGENT_IDS = DynamicAgentToolsProvider.KEY_DYNAMIC_CREATED_AGENT_IDS;
+    public static final String KEY_DYNAMIC_RETAINED_AGENT_IDS = DynamicAgentToolsProvider.KEY_DYNAMIC_RETAINED_AGENT_IDS;
 
     // === Tool-level HITL (tool-approval gate) ===
     /** Step-data key holding this turn's cumulative gated-pause count (int). */
@@ -911,38 +908,13 @@ class AgentOrchestrator {
         // toolSources maps dispatch name → provenance ("builtin"/"http"/"mcp"/…) so
         // the gate can match qualified "source:name" patterns; missing entries are
         // tolerated (the gate falls back to bare-name matching).
-        List<ToolSpecification> toolSpecs = new ArrayList<>();
-        Map<String, ToolExecutor> toolExecutors = new HashMap<>();
-        Map<String, String> toolSources = new HashMap<>();
+        // Reflection loop extracted to ToolObjectReflector (R2 step 2).
+        var reflected = ToolObjectReflector.reflect(tools);
+        List<ToolSpecification> toolSpecs = new ArrayList<>(reflected.specs());
+        Map<String, ToolExecutor> toolExecutors = new HashMap<>(reflected.executors());
+        Map<String, String> toolSources = new HashMap<>(reflected.toolSources());
         Map<String, String> toolEndpoints = new HashMap<>();
-        Map<String, String> toolCanonicalNames = new HashMap<>();
-
-        for (Object tool : tools) {
-            // CDI proxies don't carry @Tool annotations — resolve to actual bean class
-            Class<?> toolClass = tool.getClass();
-            if (toolClass.getName().contains("_ClientProxy") || toolClass.getName().contains("$$")) {
-                toolClass = toolClass.getSuperclass();
-            }
-
-            // Resolved from the UNWRAPPED class on purpose: tool.getClass() would be
-            // "CalculatorTool_ClientProxy" under CDI, which no resolver case matches, and
-            // every built-in would silently fall back to its dispatch name again.
-            String canonicalToolName = ToolNameResolver.canonicalForClass(toolClass.getSimpleName());
-
-            var specs = ToolSpecifications.toolSpecificationsFrom(toolClass);
-            toolSpecs.addAll(specs);
-
-            // Find methods annotated with @Tool and map them to executors
-            for (java.lang.reflect.Method method : toolClass.getDeclaredMethods()) {
-                if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
-                    dev.langchain4j.agent.tool.Tool toolAnnotation = method.getAnnotation(dev.langchain4j.agent.tool.Tool.class);
-                    String toolName = toolAnnotation.name().isEmpty() ? method.getName() : toolAnnotation.name();
-                    toolExecutors.put(toolName, new DefaultToolExecutor(tool, method));
-                    toolSources.put(toolName, sourceForBuiltInTool(tool));
-                    toolCanonicalNames.put(toolName, canonicalToolName != null ? canonicalToolName : toolName);
-                }
-            }
-        }
+        Map<String, String> toolCanonicalNames = new HashMap<>(reflected.toolCanonicalNames());
 
         // Copy built-in specs before merging external ones — LAZY activation needs it.
         List<ToolSpecification> builtInSpecs = new ArrayList<>(toolSpecs);
@@ -1555,18 +1527,10 @@ class AgentOrchestrator {
     // ─── Tool-approval gate helpers ───
 
     /** Maps a built-in tool instance to its gate source tag. */
+    // Kept as a declared delegator; logic extracted to ToolObjectReflector (R2 step
+    // 2).
     private static String sourceForBuiltInTool(Object tool) {
-        Class<?> c = tool.getClass();
-        if (c.getName().contains("_ClientProxy") || c.getName().contains("$$")) {
-            c = c.getSuperclass();
-        }
-        String simple = c.getSimpleName();
-        return switch (simple) {
-            case "UserMemoryTool" -> "memory";
-            case "ConversationRecallTool" -> "recall";
-            case "CreateSubAgentTool", "ConverseWithAgentTool", "FindAgentsByCapabilityTool", "TeardownAgentTool" -> "dynamic";
-            default -> "builtin";
-        };
+        return ToolObjectReflector.sourceForBuiltInTool(tool);
     }
 
     /** Reads this turn's cumulative gated-pause count (0 when absent). */
@@ -1935,68 +1899,10 @@ class AgentOrchestrator {
                 addUserMemoryToolIfEnabled(tools, memory);
             if (whitelist.contains("conversationRecall"))
                 addConversationRecallToolIfEnabled(tools, task, memory);
-            // Dynamic agent tools (whitelist-gated, shared tracking lists)
-            {
-                // Finding F17: this list used to start EMPTY on every buildToolList call,
-                // i.e. once per LLM task execution — so maxCreatedAgentsPerDiscussion was
-                // enforced per TURN, and a 5-member x 3-phase discussion with the default
-                // cap of 5 could deploy up to 75 agents to production. Seed it with the
-                // agents already created in this conversation so the cap actually bounds
-                // the discussion.
-                List<String> sharedCreatedIds = new java.util.concurrent.CopyOnWriteArrayList<>(seedCreatedAgentIds(memory));
-                Set<String> sharedRetainedIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
-                String parentAgentId = memory.getAgentId();
-                String userId = memory.getUserId();
-                DynamicAgentConfig dynamicConfig = resolveDynamicAgentConfig(memory);
-
-                boolean anyDynamicToolAdded = false;
-                if (whitelist.contains("create_sub_agent") && agentSetupService != null && conversationService != null) {
-                    tools.add(new CreateSubAgentTool(agentSetupService,
-                            conversationService, parentAgentId, userId, dynamicConfig,
-                            sharedCreatedIds, sharedRetainedIds));
-                    LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s' (%d already created)",
-                            sanitize(parentAgentId), sharedCreatedIds.size());
-                    anyDynamicToolAdded = true;
-                }
-                if (whitelist.contains("converse_with_agent") && conversationService != null) {
-                    // Findings F18/I4: the tool used to take only (service, userId) and
-                    // consult no guardrails at all — allowDelegation was never read and
-                    // nothing bounded delegation depth or target.
-                    int delegationDepth = resolveDelegationDepth(memory);
-                    tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth));
-                    LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
-                            sanitize(parentAgentId), delegationDepth);
-                }
-                // Finding I4: allowRecruitment was documented as an enforced cap but was
-                // never read. Capability lookup is the recruitment entry point, so it is
-                // gated here.
-                if (whitelist.contains("find_agents_by_capability") && capabilityRegistryService != null) {
-                    if (dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()) {
-                        tools.add(new FindAgentsByCapabilityTool(capabilityRegistryService));
-                        LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool enabled for agent='%s'", sanitize(parentAgentId));
-                    } else {
-                        LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool suppressed for agent='%s': allowRecruitment is off",
-                                sanitize(parentAgentId));
-                    }
-                }
-                if (whitelist.contains("teardown_agent") && agentFactory != null && agentStore != null) {
-                    tools.add(new TeardownAgentTool(agentFactory, agentStore, deploymentStore, sharedCreatedIds, sharedRetainedIds));
-                    LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
-                    anyDynamicToolAdded = true;
-                }
-
-                // Store tracking lists in memory step data so GroupConversationService
-                // can read them from the snapshot after each member turn and propagate
-                // to GroupConversation for lifecycle cleanup (Copilot PR review fix).
-                // The lists are stored by reference — after tool execution, they'll
-                // contain all agent IDs accumulated during this turn.
-                if (anyDynamicToolAdded) {
-                    memory.getCurrentStep().storeData(
-                            new ai.labs.eddi.engine.memory.model.Data<>(KEY_DYNAMIC_CREATED_AGENT_IDS, sharedCreatedIds));
-                    memory.getCurrentStep().storeData(
-                            new ai.labs.eddi.engine.memory.model.Data<>(KEY_DYNAMIC_RETAINED_AGENT_IDS, sharedRetainedIds));
-                }
-            }
+            // Dynamic agent tools (whitelist-gated, shared tracking lists) —
+            // extracted to DynamicAgentToolsProvider (R2 step 2). Constructed per
+            // call since deploymentStore is field-injected (see that class's Javadoc).
+            dynamicAgentToolsProvider().addDynamicAgentTools(tools, whitelist, memory);
         } else {
             // No whitelist — add all built-in tools
             tools.add(calculatorTool);
@@ -2134,176 +2040,26 @@ class AgentOrchestrator {
     }
 
     /**
-     * Resolves the DynamicAgentConfig for the current conversation. If the agent is
-     * participating in a group discussion, the group's {@link DynamicAgentConfig}
-     * is passed via context variable {@code dynamicAgentConfig} by
-     * {@code GroupConversationService}. If no group config is present (standalone
-     * agent), a permissive default is used.
-     *
-     * @param memory
-     *            the conversation memory to check for group context
-     * @return the resolved DynamicAgentConfig — group-level if available,
-     *         permissive default otherwise
+     * Dynamic-agent tool construction, extracted to
+     * {@link DynamicAgentToolsProvider} (R2 step 2). Constructed per call — not
+     * once in the constructor like the http/mcp providers — because
+     * {@link #deploymentStore} is field-injected and still null when this class's
+     * constructor runs; see that class's Javadoc.
      */
-    private DynamicAgentConfig resolveDynamicAgentConfig(IConversationMemory memory) {
-        // Check if GroupConversationService injected a DynamicAgentConfig via context
-        var currentStep = memory.getCurrentStep();
-        if (currentStep != null) {
-            var contextData = currentStep.getLatestData("context:dynamicAgentConfig");
-            if (contextData != null) {
-                Object value = contextData.getResult();
-                if (value instanceof Context ctx && ctx.getValue() instanceof DynamicAgentConfig groupConfig) {
-                    LOGGER.debugf("[DYNAMIC] Using group-level DynamicAgentConfig for agent='%s'", sanitize(memory.getAgentId()));
-                    return groupConfig;
-                }
-            }
-        }
-        // Fallback: standalone agent — use permissive defaults
-        return createDefaultDynamicConfig();
+    private DynamicAgentToolsProvider dynamicAgentToolsProvider() {
+        return new DynamicAgentToolsProvider(agentSetupService, capabilityRegistryService, conversationService,
+                agentFactory, agentStore, deploymentStore);
     }
 
-    /**
-     * Finding F17: the agent IDs already created in this conversation, so
-     * {@code maxCreatedAgentsPerDiscussion} bounds every turn of a conversation
-     * rather than a single turn. The list used to start EMPTY on every
-     * {@code buildToolList} call — i.e. once per LLM task execution — so a 5-member
-     * × 3-phase discussion with the default cap of 5 could deploy up to 75 agents.
-     * <p>
-     * Two sources are consulted, in order:
-     * <ol>
-     * <li>a {@code dynamicCreatedAgentIds} context variable — an injection point
-     * for an orchestrator that owns the true discussion-wide total. <b>Nothing in
-     * {@code src/main} writes it today</b>: {@code GroupConversationService}
-     * propagates member → group ({@code propagateDynamicAgentTracking}) but does
-     * not inject the running total back into the per-turn member context alongside
-     * {@code groupId}/{@code groupDepth}. Until it does, the cap bounds each MEMBER
-     * conversation across the whole discussion, not the discussion total across
-     * members;</li>
-     * <li>every {@code dynamic:created_agent_ids} entry already written to this
-     * conversation's memory by an earlier turn — the source that actually carries
-     * the count today.</li>
-     * </ol>
-     * Returns a de-duplicated list, never null.
-     */
+    // Kept as declared delegators (not inlined) since tests reference them by
+    // class name. Logic extracted to DynamicAgentToolsProvider (R2 step 2).
+
     static List<String> seedCreatedAgentIds(IConversationMemory memory) {
-        Set<String> seeded = new LinkedHashSet<>();
-
-        var currentStep = memory.getCurrentStep();
-        if (currentStep != null) {
-            IData<Object> contextData = currentStep.getLatestData("context:dynamicCreatedAgentIds");
-            if (contextData != null && contextData.getResult() instanceof Context ctx) {
-                collectAgentIds(ctx.getValue(), seeded);
-            }
-        }
-
-        var allSteps = memory.getAllSteps();
-        if (allSteps != null) {
-            List<IData<Object>> priorEntries = allSteps.getAllLatestData(KEY_DYNAMIC_CREATED_AGENT_IDS);
-            if (priorEntries != null) {
-                for (IData<Object> entry : priorEntries) {
-                    if (entry != null) {
-                        collectAgentIds(entry.getResult(), seeded);
-                    }
-                }
-            }
-        }
-
-        return new ArrayList<>(seeded);
+        return DynamicAgentToolsProvider.seedCreatedAgentIds(memory);
     }
 
-    /**
-     * Add every String element of {@code value} (if it is a collection) to sink.
-     */
-    private static void collectAgentIds(Object value, Set<String> sink) {
-        if (value instanceof Collection<?> collection) {
-            for (Object element : collection) {
-                if (element instanceof String agentId && !agentId.isBlank()) {
-                    sink.add(agentId);
-                }
-            }
-        } else if (value instanceof String single && !single.isBlank()) {
-            sink.add(single);
-        }
-    }
-
-    /**
-     * Finding F18: how many delegation hops led to the current conversation.
-     * {@code ConverseWithAgentTool} propagates this as a {@code delegationDepth}
-     * context variable on the callee's start context AND on every message it sends,
-     * mirroring the {@code groupDepth} mechanism. 0 when a human started the
-     * conversation.
-     * <p>
-     * The current step is consulted first — that is where the per-turn context
-     * lands. Earlier steps are the fallback: the start context materializes on step
-     * 0 only, and a turn issued without the delegation context (a resume, or any
-     * other caller saying into the delegated conversation) must not silently reset
-     * an already-delegated conversation back to depth 0. Without that fallback the
-     * guard is inert on exactly the turns that matter.
-     */
     static int resolveDelegationDepth(IConversationMemory memory) {
-        String contextKey = "context:" + ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH;
-
-        var currentStep = memory.getCurrentStep();
-        if (currentStep != null) {
-            Integer depth = parseDelegationDepth(currentStep.getLatestData(contextKey));
-            if (depth != null) {
-                return depth;
-            }
-        }
-
-        var allSteps = memory.getAllSteps();
-        if (allSteps != null) {
-            List<IData<Object>> priorEntries = allSteps.getAllLatestData(contextKey);
-            if (priorEntries != null) {
-                int deepest = 0;
-                for (IData<Object> entry : priorEntries) {
-                    Integer depth = parseDelegationDepth(entry);
-                    if (depth != null) {
-                        deepest = Math.max(deepest, depth);
-                    }
-                }
-                return deepest;
-            }
-        }
-
-        return 0;
-    }
-
-    /**
-     * The hop count carried by a {@code context:delegationDepth} entry, or
-     * {@code null} when the entry is absent, not a {@link Context}, or carries a
-     * non-numeric value.
-     */
-    private static Integer parseDelegationDepth(IData<Object> contextData) {
-        if (contextData == null || !(contextData.getResult() instanceof Context ctx)) {
-            return null;
-        }
-        Object value = ctx.getValue();
-        if (value instanceof Number number) {
-            return Math.max(0, number.intValue());
-        }
-        if (value instanceof String text) {
-            try {
-                return Math.max(0, Integer.parseInt(text.trim()));
-            } catch (NumberFormatException e) {
-                LOGGER.debugf("Ignoring non-numeric delegationDepth context value '%s'", sanitize(text));
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Creates a default DynamicAgentConfig for agents without explicit group
-     * config. Used when individual agents have dynamic agent tools in their
-     * whitelist.
-     */
-    private DynamicAgentConfig createDefaultDynamicConfig() {
-        var config = new DynamicAgentConfig();
-        config.setEnabled(true);
-        config.setAllowCreation(true);
-        config.setAllowRecruitment(true);
-        config.setAllowDelegation(true);
-        return config;
+        return DynamicAgentToolsProvider.resolveDelegationDepth(memory);
     }
 
     // --- Httpcall auto-discovery from workflow ---

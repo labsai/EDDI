@@ -5,6 +5,26 @@
 
 ---
 
+## 🧩 refactor(orchestrator): extract DynamicAgentToolsProvider + ToolObjectReflector (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 continued — the biggest and most safety-relevant provider extraction: the ~60-line anonymous block inside `collectAllBuiltInTools` that constructs the four dynamic-agent tools (`CreateSubAgentTool`, `ConverseWithAgentTool`, `FindAgentsByCapabilityTool`, `TeardownAgentTool`) along with every guardrail bounding them, into `DynamicAgentToolsProvider`. `AgentOrchestrator`: 2,352 → 2,108 lines.
+
+**Extracted a shared reflection helper first, because the object-producing sources genuinely need one.** The http/mcp/a2a sources arrive as specs + executors; the five *object*-producing sources (built-ins, dynamic-agent, user memory, conversation recall, attachments) arrive as beans that `buildToolSetup` reflected over in one shared loop to derive specs/executors/provenance/canonical-names. Making those five SPI-conformant — the SPI's contract being specs + executors — needs exactly one copy of that loop, not five. `ToolObjectReflector` is that copy, extracted verbatim; `buildToolSetup` now calls it, and `DynamicAgentToolsProvider.contribute` uses it to satisfy the SPI honestly rather than faking a contribution shape.
+
+**Moved with the block, because they exist only to serve it:** `resolveDynamicAgentConfig` (+`createDefaultDynamicConfig`), `seedCreatedAgentIds` (+`collectAgentIds`), `resolveDelegationDepth` (+`parseDelegationDepth`), and the two `KEY_DYNAMIC_*` tracking-key constants. The bare-token sweep found three hard class-qualified references in tests — `AgentOrchestrator.seedCreatedAgentIds`, `AgentOrchestrator.resolveDelegationDepth`, `AgentOrchestrator.KEY_DYNAMIC_CREATED_AGENT_IDS` — so those three keep delegators/aliases on the facade; `KEY_DYNAMIC_RETAINED_AGENT_IDS` has no test reference but was kept aliased anyway, since splitting a constant pair across two classes is a readability trap for the next reader. The four genuinely internal helpers moved with no delegator.
+
+**Per-call construction, third instance of the field-injection wrinkle.** `deploymentStore` (handed to `TeardownAgentTool`) is `@Inject`-field-injected on `AgentOrchestrator` and still null when its constructor runs — the same constraint that forced `GroupAttachmentBinder` (R1 step 1) and `GroupLifecycleOps` (R1 step 8) to be built per call rather than once. Added a matching `dynamicAgentToolsProvider()` factory; unlike the http/mcp providers, this one cannot be a constructor-time field.
+
+**The V7 defect is now visible instead of buried — deliberately not fixed here.** The plan's verify-task V7 is that an agent with `enableBuiltInTools=true`, *no* whitelist, and `dynamicAgents.enabled=true` silently gets none of these four tools: the no-whitelist branch of `collectAllBuiltInTools` never constructed them. Post-extraction that asymmetry is a single legible fact — the no-whitelist branch simply doesn't call this provider — rather than a subtlety hidden in a 130-line if/else. Preserved verbatim (pure move) and documented in the new class's Javadoc pointing at V7; fixing it is a behavior change owing its own labeled commit and a deliberate update to `AgentOrchestratorBuiltInToolWiringTest`, exactly as the plan's ground rule 3.0-1 requires.
+
+Added `DynamicAgentToolsProviderTest` (11 tests) covering each of the four tools' whitelist gating independently, the null/empty/no-dynamic-keys short-circuits, the all-four case, and `createDefaultDynamicConfig`'s permissive defaults. The tools' own guardrail behavior stays covered by the unchanged `AgentOrchestratorBuiltInToolWiringTest`, `AgentOrchestratorToolGovernanceTest` and `ConverseWithAgentTool*Test` suites.
+
+Full 22-class test battery (376 tests) green — including the two `ConverseWithAgentTool` guardrail suites and `DynamicAgentTrackingPropagationTest`, the ones with the most power to catch a mistake in this particular move. 7 unused imports removed.
+
+---
+
 ## 🧩 feat(orchestrator): add A2AToolsProvider, not yet wired (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
