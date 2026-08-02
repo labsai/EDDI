@@ -5,6 +5,26 @@
 
 ---
 
+## 🧩 refactor(orchestrator): extract ToolLoopRunner + ToolLoopResumer — R2 complete (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 5, and with it R2 is done. **`AgentOrchestrator`: 2,725 → 1,163 lines.**
+
+`ToolLoopRunner` owns the live loop — drive the model, gate and execute the tools it asks for, meter cost and context budget, pause when a gated call needs a human. `ToolLoopResumer` owns the other way in: replay the transcript, apply the human's verdicts call by call, hand back to the same loop.
+
+**The two share one execution pipeline by construction, not by convention.** Every approved call goes through `ToolLoopRunner.executeSingleToolCallResult` and the continuation through `runToolCallLoop`, so rate limits, cache hits, cost charges, tenant budgets and LAZY activation behave identically whether a call was requested by the model or approved by a person. That was already true; it is now stated at the top of both classes, because two classes sharing one pipeline is much easier to break than one class calling itself — and a divergence there is the kind nobody notices until an audit asks why approved calls were priced differently.
+
+**Moved by exact line ranges rather than retyped.** ~470 lines of live LLM-execution code, and the failure mode of a hand-transcription slip in `runToolCallLoop` is a silent behavioural change in the path every agent turn takes. A script cut the source ranges verbatim and rewrote only the call sites that had to change: seven cross-class calls in the runner (now `ToolContextBudget.*` / `gateSupport.*`), and the resumer's calls back into the facade for tool assembly and into the runner for the shared pipeline.
+
+`ToolLoopResumer` holds a reference back to `AgentOrchestrator` for exactly two things resume genuinely needs from the facade — `buildToolSetup`, so a resumed turn rebuilds tooling through the same provider assembly the live path used, and `collectEnabledTools` for the history-rebuild fallback. Same pattern and same safety argument as `MemberTurnExecutor`'s self-reference in R1: the constructor only stores it. `ENVELOPE_MAPPER` moved along with its only two callers.
+
+Bare-token sweep before the move, as always: `activateDiscoveredTools` (28 refs), `toJson` (10), `restoreActiveSpecs` (9) are reached via `getDeclaredMethod`, and `auditOutcomeUnknown` is a direct instance call — all four keep declared delegators, along with everything else in both clusters.
+
+1,004 tests green. Checkstyle is down to 7 violations, and the only `FileLength` one left is `ConversationService` — R3's target.
+
+---
+
 ## 🧩 refactor(orchestrator): introduce IAgentOrchestrator (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
