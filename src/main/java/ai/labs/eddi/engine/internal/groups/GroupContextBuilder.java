@@ -163,6 +163,16 @@ public class GroupContextBuilder {
         }
     }
 
+    /**
+     * {@code transcript} and {@code phaseIdx} are unused, and stay. Static analysis
+     * flags them on every run; removing them breaks the build. Characterization
+     * tests reach this method through
+     * {@code getDeclaredMethod("selectDefaultTemplate", DiscussionPhase.class, List.class, int.class)},
+     * which resolves by exact parameter types, so a narrower signature is not
+     * findable — and those tests are the regression net this whole refactor leans
+     * on. They are also the natural inputs for the phase-aware template selection
+     * the plan's Wave 2 adds here.
+     */
     public String selectDefaultTemplate(DiscussionPhase phase, List<TranscriptEntry> transcript, int phaseIdx) {
         if (phase.type() == PhaseType.OPINION) {
             // Use independent template if no context, or context template if
@@ -240,6 +250,12 @@ public class GroupContextBuilder {
         return result != null ? result : "";
     }
 
+    /**
+     * {@code transcript} is unused and stays, for the same reason as
+     * {@link #selectDefaultTemplate}: the characterization suite resolves this
+     * method by exact parameter types. This is the fallback used when template
+     * rendering fails, so it deliberately reads nothing that could fail again.
+     */
     public String buildPlainTextFallback(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript) {
         var sb = new StringBuilder();
         sb.append("Discussion phase: ").append(phase.name()).append("\n\n");

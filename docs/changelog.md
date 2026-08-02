@@ -5,6 +5,22 @@
 
 ---
 
+## 🔍 review: Wave R branch review + PR nitpicks (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Critical pass over the whole branch after Wave R completed, plus every open automated-review comment.
+
+**The extractions were verified structurally, not just by a green suite.** Two checks that a passing test run cannot give you: (1) every method signature present in the pre-branch `AgentOrchestrator` and `ConversationService` was matched against the union of the facade plus every new collaborator — none vanished; (2) a line-level diff of the old class against the new set, ignoring comments and braces, left 23 unmatched statements, and each was confirmed to be an intentional qualifier rewrite with its qualified counterpart present (`getAgent(` → `conversationService.getAgent(`, `CancelOutcome.X` → `IConversationService.CancelOutcome.X`, and so on). Construction ordering in the `ConversationService` constructor was checked positionally: every dependency of `ConversationStepRunner` is assigned before it is built.
+
+**Three dead locals removed from `ToolLoopRunner.executeWithTools`** — `toolExecutors`, `toolSources`, `builtInSpecs` each read a `ToolSetup` component and were then never used. Dead since long before this branch; only visible once the method had a file of its own. The method hands the whole `ToolSetup` down to `runToolCallLoop`, which reads those components itself.
+
+**The recurring "useless parameter" findings on `GroupContextBuilder` are now documented in place rather than left to be re-reported forever.** `selectDefaultTemplate`'s `transcript`/`phaseIdx` and `buildPlainTextFallback`'s `transcript` are genuinely unused — and removing them breaks the build, because the characterization suite resolves both through `getDeclaredMethod(..., DiscussionPhase.class, List.class, int.class)`, which matches on exact parameter types. 44 test references depend on those signatures. A static analyser cannot see a reflective call site; a comment at the declaration can tell the next person why the obvious fix is wrong.
+
+656 tests green across the affected batteries; CI green on the Wave R commit (Build & Test, CodeQL, Trivy, Secret Scanning, Analyze).
+
+---
+
 ## 🧩 refactor(conversation): extract ConversationStepRunner — Wave R complete (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

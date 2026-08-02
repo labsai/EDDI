@@ -143,10 +143,11 @@ class ToolLoopRunner {
                                                        JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
-        Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
-        Map<String, String> toolSources = setup.toolSources();
-        List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
-
+        // The setup's executors / sources / built-in specs are deliberately NOT
+        // unpacked here: this method hands the whole ToolSetup to runToolCallLoop,
+        // which reads them itself. Three locals used to sit here reading exactly
+        // those three components and nothing ever used them — dead since before the
+        // extraction, and only visible now that the method has a file of its own.
         boolean isLazy = task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY;
 
         // Active specs: what the LLM currently sees (LAZY starts narrow).
