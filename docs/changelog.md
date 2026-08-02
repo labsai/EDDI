@@ -5,6 +5,24 @@
 
 ---
 
+## 🧩 refactor(conversation): extract ConversationHitlService (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R3 step 1. **`ConversationService`: 2,735 → 1,515 lines** — and with it, **no `FileLength` Checkstyle violation is left anywhere in the codebase.** Both monoliths this plan set out to decompose are now under the limit.
+
+The HITL cluster was the back ~43% of the class and had almost nothing to do with the front. `ConversationService` is fundamentally "run a turn"; this is "a turn stopped, and a person is deciding what happens next" — cancel and resume, per-tool decision validation, the no-progress guard, approval timeout scheduling and bookmarks, effective-policy resolution, and the compliance audit trail for all of it. The two halves share conversation memory and the coordinator, and little else.
+
+**Resume re-enters the facade deliberately.** Applying a verdict eventually means running the rest of the turn, and that has to be the same `say`/step machinery a normal turn uses — a second, resume-shaped copy of turn execution is exactly how post-approval behaviour drifts from ordinary behaviour without anyone noticing. Hence the back-reference for the eight facade members the cluster calls. Same pattern and same safety argument as `GroupHitlCoordinator` in R1.
+
+**One real trap, caught by the tests.** The collaborator was first built in a `@PostConstruct`, which never fires for the ~34 test classes that construct `ConversationService` with `new` — 12 tests failed with NPEs on a null collaborator. Moved into the constructor, which is what plan rule 3.0-4 (collaborators are plain classes the facade constructs) exists to prevent in the first place. Everything it needs is a constructor parameter or a field initializer, so there was never anything to wait for.
+
+Bare-token sweep first, as always: `resumeConversation` (118 test refs), `cancelConversation` (83), `listPendingApprovals` (46), `CancelOutcome` (27) — the `IConversationService` contract methods — plus reflection-reached internals. All keep declared delegators, and the front half's own calls into the cluster (`scheduleHitlTimeout`, `populateHitlTimeoutBookmark`, `deleteHitlTimeoutSchedule`, `auditHitlCancellation`, `fireHitlResumeCompletedTerminal`, `populateToolApprovalsConfig`) now route through the extracted service.
+
+1,355 tests green across the conversation, HITL and MCP batteries.
+
+---
+
 ## 🧩 refactor(orchestrator): extract ToolLoopRunner + ToolLoopResumer — R2 complete (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
