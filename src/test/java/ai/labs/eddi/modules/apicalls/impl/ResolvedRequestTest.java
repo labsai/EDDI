@@ -1,0 +1,196 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.modules.apicalls.impl;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * The fingerprint is what makes approval bind to a request rather than a tool
+ * name, so these tests are about one question: can two requests that would do
+ * <em>different</em> things share a fingerprint?
+ */
+class ResolvedRequestTest {
+
+    private static ResolvedRequest request(String method, String uri, Map<String, String> query, Map<String, String> headers, String body) {
+        return ResolvedRequest.of(method, uri, query, headers, body, true);
+    }
+
+    private static ResolvedRequest baseline() {
+        return request("POST", "https://eddi.example/agentstore/agents", Map.of("version", "1"), Map.of("Content-Type", "application/json"),
+                "{\"name\":\"ops\"}");
+    }
+
+    @Nested
+    @DisplayName("what must NOT change the fingerprint")
+    class Stable {
+
+        @Test
+        void identicalRequestsAgree() {
+            assertEquals(baseline().fingerprint(), baseline().fingerprint());
+        }
+
+        @Test
+        void headerOrderDoesNotMatter() {
+            var first = new LinkedHashMap<String, String>();
+            first.put("Accept", "application/json");
+            first.put("Content-Type", "application/json");
+            var second = new LinkedHashMap<String, String>();
+            second.put("Content-Type", "application/json");
+            second.put("Accept", "application/json");
+
+            assertEquals(request("GET", "https://x/y", Map.of(), first, null).fingerprint(),
+                    request("GET", "https://x/y", Map.of(), second, null).fingerprint());
+        }
+
+        @Test
+        void headerNameCasingDoesNotMatter() {
+            // HTTP header names are case-insensitive, so casing cannot change what
+            // the request does and must not change the hash.
+            assertEquals(request("GET", "https://x/y", Map.of(), Map.of("Content-Type", "application/json"), null).fingerprint(),
+                    request("GET", "https://x/y", Map.of(), Map.of("content-type", "application/json"), null).fingerprint());
+        }
+
+        @Test
+        void methodCasingDoesNotMatter() {
+            assertEquals(request("post", "https://x/y", Map.of(), Map.of(), null).fingerprint(),
+                    request("POST", "https://x/y", Map.of(), Map.of(), null).fingerprint());
+        }
+
+        @Test
+        void credentialValuesCannotParticipateBecauseTheyAreAlreadyRedacted() {
+            // The property the whole design rests on: an approver is routinely not
+            // the requester, so the resolved Authorization header differs between
+            // gate time and execution time. Both arrive here redacted to the same
+            // marker, so the fingerprint is stable across approvers — and a guard
+            // that fired on every cross-user approval would simply be switched off.
+            var atGateTime = Map.of("Authorization", RequestRedactor.REDACTED);
+            var atExecutionTime = Map.of("Authorization", RequestRedactor.REDACTED);
+            assertEquals(request("POST", "https://x/y", Map.of(), atGateTime, "{}").fingerprint(),
+                    request("POST", "https://x/y", Map.of(), atExecutionTime, "{}").fingerprint());
+        }
+    }
+
+    @Nested
+    @DisplayName("what MUST change the fingerprint")
+    class Discriminating {
+
+        @Test
+        void method() {
+            assertNotEquals(baseline().fingerprint(),
+                    request("DELETE", "https://eddi.example/agentstore/agents", Map.of("version", "1"),
+                            Map.of("Content-Type", "application/json"), "{\"name\":\"ops\"}").fingerprint());
+        }
+
+        @Test
+        void targetUri() {
+            assertNotEquals(baseline().fingerprint(),
+                    request("POST", "https://eddi.example/agentstore/agents/OTHER", Map.of("version", "1"),
+                            Map.of("Content-Type", "application/json"), "{\"name\":\"ops\"}").fingerprint());
+        }
+
+        @Test
+        void queryParameterValue() {
+            assertNotEquals(baseline().fingerprint(),
+                    request("POST", "https://eddi.example/agentstore/agents", Map.of("version", "99"),
+                            Map.of("Content-Type", "application/json"), "{\"name\":\"ops\"}").fingerprint());
+        }
+
+        @Test
+        void anAddedQueryParameter() {
+            assertNotEquals(baseline().fingerprint(),
+                    request("POST", "https://eddi.example/agentstore/agents", Map.of("version", "1", "force", "true"),
+                            Map.of("Content-Type", "application/json"), "{\"name\":\"ops\"}").fingerprint());
+        }
+
+        @Test
+        void body() {
+            assertNotEquals(baseline().fingerprint(),
+                    request("POST", "https://eddi.example/agentstore/agents", Map.of("version", "1"),
+                            Map.of("Content-Type", "application/json"), "{\"name\":\"attacker\"}").fingerprint());
+        }
+
+        @Test
+        void aNonCredentialHeader() {
+            // Headers are not excluded wholesale — only credential VALUES are
+            // redacted. A changed X-Forwarded-Host still changes the request.
+            assertNotEquals(request("POST", "https://x/y", Map.of(), Map.of("X-Tenant", "acme"), "{}").fingerprint(),
+                    request("POST", "https://x/y", Map.of(), Map.of("X-Tenant", "evil"), "{}").fingerprint());
+        }
+
+        @Test
+        void anAddedHeader() {
+            assertNotEquals(request("POST", "https://x/y", Map.of(), Map.of("X-Tenant", "acme"), "{}").fingerprint(),
+                    request("POST", "https://x/y", Map.of(), Map.of("X-Tenant", "acme", "X-Override", "1"), "{}").fingerprint());
+        }
+    }
+
+    @Nested
+    @DisplayName("field boundaries cannot be forged")
+    class Injection {
+
+        @Test
+        void bodyContentCannotImpersonateAHeaderField() {
+            // Without length prefixes, a canonical form of "name:value\n" lets a body
+            // containing a newline plus "header.x:..." produce the same byte stream
+            // as a genuine extra header — two different requests, one fingerprint.
+            var withHeader = request("POST", "https://x/y", Map.of(), Map.of("x", "1"), "");
+            var withBodyPretendingToBeAHeader = request("POST", "https://x/y", Map.of(), Map.of(), "\nheader.x:1:1\n");
+            assertNotEquals(withHeader.fingerprint(), withBodyPretendingToBeAHeader.fingerprint());
+        }
+
+        @Test
+        void movingContentBetweenAdjacentFieldsChangesIt() {
+            assertNotEquals(request("POST", "https://x/ab", Map.of(), Map.of(), "").fingerprint(),
+                    request("POST", "https://x/a", Map.of(), Map.of(), "b").fingerprint());
+        }
+
+        @Test
+        void anEmptyValueIsDistinctFromAnAbsentOne() {
+            assertNotEquals(request("POST", "https://x/y", Map.of("a", ""), Map.of(), null).fingerprint(),
+                    request("POST", "https://x/y", Map.of(), Map.of(), null).fingerprint());
+        }
+    }
+
+    @Nested
+    @DisplayName("unpinnable calls")
+    class Unpinned {
+
+        @Test
+        void produceNoFingerprintButStillPreview() {
+            var resolved = ResolvedRequest.of("POST", "https://x/y", Map.of(), Map.of("Accept", "*/*"), "{}", false);
+            assertNull(resolved.fingerprint());
+            assertFalse(resolved.isPinned());
+            // The preview is the point of resolving at all — it survives.
+            assertEquals("https://x/y", resolved.uri());
+            assertEquals("{}", resolved.body());
+            assertEquals(Map.of("accept", "*/*"), resolved.headers());
+        }
+
+        @Test
+        void pinnedOnesReportSo() {
+            assertTrue(baseline().isPinned());
+        }
+    }
+
+    @Test
+    void nullsAreToleratedRatherThanThrowing() {
+        // A call with no body, no query and no headers is ordinary, not an error.
+        var resolved = ResolvedRequest.of("GET", "https://x/y", null, null, null, true);
+        assertTrue(resolved.isPinned());
+        assertEquals(Map.of(), resolved.queryParams());
+        assertEquals(Map.of(), resolved.headers());
+    }
+}

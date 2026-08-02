@@ -28,14 +28,17 @@ import java.util.concurrent.TimeUnit;
 
 @ApplicationScoped
 public class HttpClientWrapper implements IHttpClient {
-    private static final String KEY_URI = "uri";
-    private static final String KEY_METHOD = "method";
-    private static final String KEY_HEADERS = "headers";
+    // The toMap() key names live on IRequest: they are part of that method's
+    // contract, and readers of the map (RequestRedactor, ApiCallExecutor#resolve)
+    // must key off the same constants rather than re-spelling the strings.
+    private static final String KEY_URI = IRequest.KEY_URI;
+    private static final String KEY_METHOD = IRequest.KEY_METHOD;
+    private static final String KEY_HEADERS = IRequest.KEY_HEADERS;
+    private static final String KEY_QUERY_PARAMS = IRequest.KEY_QUERY_PARAMS;
+    private static final String KEY_BODY = IRequest.KEY_BODY;
+    private static final String KEY_USER_AGENT = IRequest.KEY_USER_AGENT;
     private static final String KEY_LOGICAL_AND = "&";
     private static final String KEY_EQUALS = "=";
-    private static final String KEY_QUERY_PARAMS = "queryParams";
-    private static final String KEY_BODY = "body";
-    private static final String KEY_USER_AGENT = "userAgent";
     private static final String KEY_MAX_LENGTH = "maxLength";
     private static final int TEXT_LIMIT = 150;
     private final WebClientSession webClient;

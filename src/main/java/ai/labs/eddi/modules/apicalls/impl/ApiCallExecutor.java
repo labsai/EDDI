@@ -82,6 +82,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final SecretResolver secretResolver;
     private final CallerIdentityResolver callerIdentityResolver;
     private final CallerIdentityContext callerIdentityContext;
+    private final RequestRedactor requestRedactor;
     private final boolean ssrfProtectionEnabled;
     private final long defaultTimeoutInMillis;
     private final int defaultMaxResponseSizeInBytes;
@@ -89,7 +90,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     @Inject
     public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
             GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, CallerIdentityResolver callerIdentityResolver,
-            CallerIdentityContext callerIdentityContext,
+            CallerIdentityContext callerIdentityContext, RequestRedactor requestRedactor,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
             @ConfigProperty(name = "eddi.httpcalls.default-timeout-millis", defaultValue = "30000") long defaultTimeoutInMillis,
             @ConfigProperty(name = "eddi.httpcalls.default-max-response-size-bytes", defaultValue = "2000000") int defaultMaxResponseSizeInBytes) {
@@ -101,6 +102,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         this.secretResolver = secretResolver;
         this.callerIdentityResolver = callerIdentityResolver;
         this.callerIdentityContext = callerIdentityContext;
+        this.requestRedactor = requestRedactor;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.defaultTimeoutInMillis = defaultTimeoutInMillis;
         this.defaultMaxResponseSizeInBytes = defaultMaxResponseSizeInBytes;
@@ -245,6 +247,57 @@ public class ApiCallExecutor implements IApiCallExecutor {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public ResolvedRequest resolve(ApiCall call, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl)
+            throws LifecycleException {
+        if (call == null) {
+            throw new IllegalArgumentException("call cannot be null");
+        }
+        if (memory == null) {
+            throw new IllegalArgumentException("memory cannot be null");
+        }
+        if (templateDataObjects == null) {
+            throw new IllegalArgumentException("templateDataObjects cannot be null");
+        }
+        if (targetServerUrl == null || targetServerUrl.trim().isEmpty()) {
+            throw new IllegalArgumentException("targetServerUrl cannot be null or empty");
+        }
+
+        try {
+            // Note the absence of executePreRequestPropertyInstructions: it writes
+            // to conversation memory, and previewing a call must not change the
+            // conversation. See IApiCallExecutor#resolve for what that costs.
+            var requestMap = buildRequest(targetServerUrl, call, templateDataObjects).toMap();
+            var headers = requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> h ? (Map<String, ?>) h : Map.<String, Object>of();
+            var queryParams = requestMap.get(IRequest.KEY_QUERY_PARAMS) instanceof Map<?, ?> q
+                    ? (Map<String, String>) q
+                    : Map.<String, String>of();
+            Object body = requestMap.get(IRequest.KEY_BODY);
+
+            return ResolvedRequest.of(
+                    String.valueOf(requestMap.get(IRequest.KEY_METHOD)),
+                    String.valueOf(requestMap.get(IRequest.KEY_URI)),
+                    queryParams,
+                    requestRedactor.redactHeaders(headers),
+                    body == null ? null : body.toString(),
+                    !hasPreRequestPropertyInstructions(call));
+        } catch (Exception e) {
+            LOGGER.error(e.getLocalizedMessage(), e);
+            throw new LifecycleException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * Whether resolving this call ahead of execution would produce a different
+     * request than {@link #execute} eventually builds — because {@code execute}
+     * runs these instructions first and they change the template data.
+     */
+    private static boolean hasPreRequestPropertyInstructions(ApiCall call) {
+        var preRequest = call.getPreRequest();
+        return preRequest != null && !isNullOrEmpty(preRequest.getPropertyInstructions());
     }
 
     private IResponse executeAndMeasureRequest(ApiCall call, IRequest request, boolean retryCall, int amountOfExecutions)
@@ -534,37 +587,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
     /**
      * Scrub sensitive header values from the request map before it is stored in
-     * conversation memory. This prevents resolved secrets (API keys, bearer tokens)
-     * from being persisted to the database.
+     * conversation memory, so resolved secrets (API keys, bearer tokens) are never
+     * persisted to the database.
      * <p>
-     * Header-name matching only catches conventional names, so a resolved caller
-     * token is additionally matched by value — otherwise placing it in an
-     * arbitrarily named header would defeat the redaction.
+     * Delegates to {@link RequestRedactor} rather than carrying its own copy of the
+     * rules: the approval preview redacts the same request through the same code,
+     * and two definitions would eventually disagree about what counts as a
+     * credential.
      */
-    @SuppressWarnings("unchecked")
     private void scrubSensitiveHeaders(Map<String, Object> requestMap) {
-        Object headersObj = requestMap.get("headers");
-        if (headersObj instanceof Map) {
-            var headers = (Map<String, Object>) headersObj;
-            var scrubbed = new HashMap<>(headers);
-            for (var entry : scrubbed.entrySet()) {
-                // Locale.ROOT, not the default locale: under a Turkish locale
-                // "Authorization" lowercases to "authorızation" (dotless i), every
-                // name test below misses, and the header is persisted unredacted.
-                String headerName = entry.getKey().toLowerCase(Locale.ROOT);
-                if (headerName.contains("authorization") || headerName.contains("api-key") || headerName.contains("api_key")
-                        || headerName.contains("apikey") || headerName.contains("x-api-key") || headerName.contains("token")
-                        || headerName.contains("secret") || headerName.contains("credential")) {
-                    entry.setValue("<REDACTED>");
-                } else if (entry.getValue() instanceof String val && (val.contains("${vault:") || val.contains("${eddivault:"))) {
-                    entry.setValue("<REDACTED>");
-                } else if (entry.getValue() instanceof String val) {
-                    // Catches a caller token placed in an unconventionally named
-                    // header, which the name patterns above would miss.
-                    entry.setValue(callerIdentityResolver.redactCallerToken(val, "<REDACTED>"));
-                }
-            }
-            requestMap.put("headers", scrubbed);
-        }
+        requestRedactor.redactRequestMap(requestMap);
     }
 }
