@@ -279,7 +279,11 @@ export function OperatorActivation({
               />
             </Field>
 
-            <Field label={t("operator.activation.tools", { toolCount: GRANTED_ENDPOINTS.length })}>
+            <Field
+              label={t("operator.activation.tools", "Tools it will be given ({{toolCount}})", {
+                toolCount: GRANTED_ENDPOINTS.length,
+              })}
+            >
               <ul className="max-h-32 space-y-1 overflow-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-xs text-muted-foreground">
                 {GRANTED_ENDPOINTS.map((e) => (
                   <li key={e}>{e}</li>

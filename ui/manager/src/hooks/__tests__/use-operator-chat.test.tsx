@@ -151,6 +151,44 @@ describe("a send rejected 409 while already paused", () => {
     expect(result.current.messages.length).toBe(messagesBefore);
   });
 
+  it("clears a stale resolveError, so the new card is not shown under an old failure", async () => {
+    // A failed decision leaves resolveError set on purpose (the admin can try
+    // again). But once a NEW pause arrives, that error describes a decision
+    // nobody is still waiting on — the streamed pause path clears it, and this
+    // one has to match or the banner reads as though the fresh card had failed.
+    h.frames = [
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          hitlPauseReason: "First",
+          hitlPausedAt: "2026-08-01T10:00:00Z",
+          conversationOutputs: [textOutput("Pending…")],
+        }),
+      },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("do a thing");
+    });
+
+    const { resumeConversation } = await import("@/lib/api/hitl");
+    vi.mocked(resumeConversation).mockRejectedValueOnce({ status: 500, message: "backend exploded" });
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+    expect(result.current.resolveError).toBeTruthy();
+
+    h.sendError = { status: 409, message: "Conflict" };
+    h.conversationLogs = [{ conversationState: "AWAITING_HUMAN", hitlPauseReason: "Second" }];
+    await act(async () => {
+      await result.current.send("try again");
+    });
+
+    expect(result.current.isPaused).toBe(true);
+    expect(result.current.resolveError).toBeNull();
+  });
+
   it("still surfaces a non-409 error normally", async () => {
     h.sendError = { status: 500, message: "boom" };
     const { result } = renderHook(() => useOperatorChat(config()));
@@ -419,6 +457,48 @@ describe("resolveApproval — reconciling the resumed turn", () => {
       // The admin can still decide again — the pause itself is not cleared out
       // from under them by a client-side timeout.
       expect(result.current.isPaused).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cannot distinguish a re-pause when the 409 pause carried no hitlPausedAt", async () => {
+    // Pins a deliberate trade-off rather than asserting the ideal. With no
+    // timestamp on the pause we decided, pollUntilSettled has nothing to
+    // compare against and treats every AWAITING_HUMAN as that same pause — so
+    // a genuine re-pause is polled through to the timeout instead of becoming
+    // the next approval card. The alternative (treat any pause as new) would
+    // clear the banner for a decision still outstanding, which is worse: it
+    // loses a pending approval rather than delaying a visible one.
+    vi.useFakeTimers();
+    try {
+      h.sendError = { status: 409, message: "Conflict" };
+      // No hitlPausedAt — this is the shape that makes the branch reachable.
+      h.conversationLogs = [{ conversationState: "AWAITING_HUMAN", hitlPauseReason: "Approval required" }];
+      const { result } = renderHook(() => useOperatorChat(config()));
+      await act(async () => {
+        await result.current.send("still there?");
+      });
+      expect(result.current.isPaused).toBe(true);
+
+      // The resumed turn genuinely pauses again, on a different batch.
+      h.conversationLogs = Array.from({ length: 100 }, () => ({
+        conversationState: "AWAITING_HUMAN" as const,
+        hitlPausedAt: "2026-08-01T11:00:00Z",
+        hitlPauseReason: "A second batch",
+        conversationOutputs: [textOutput("Batch two pending…")],
+      }));
+
+      await act(async () => {
+        const resolvePromise = result.current.resolveApproval("APPROVED");
+        await vi.advanceTimersByTimeAsync(95_000);
+        await resolvePromise;
+      });
+
+      expect(result.current.resolveError).toMatch(/timed out/i);
+      expect(result.current.isPaused).toBe(true);
+      // The second batch's pending message never became a card.
+      expect(result.current.pauseReason).toBe("Approval required");
     } finally {
       vi.useRealTimers();
     }
