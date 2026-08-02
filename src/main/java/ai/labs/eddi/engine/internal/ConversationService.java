@@ -35,7 +35,6 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
-import ai.labs.eddi.engine.runtime.ExecutionAbandonedException;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
@@ -93,8 +92,8 @@ public class ConversationService implements IConversationService {
     private final IUserMemoryStore userMemoryStore;
     private final IConversationCoordinator conversationCoordinator;
     private final IRuntime runtime;
-    private final IContextLogger contextLogger;
-    private final CallerIdentityContext callerIdentityContext;
+    final IContextLogger contextLogger;
+    final CallerIdentityContext callerIdentityContext;
     private final AuditLedgerService auditLedgerService;
     private final GdprComplianceService gdprComplianceService;
     private final TenantQuotaService tenantQuotaService;
@@ -162,7 +161,7 @@ public class ConversationService implements IConversationService {
     private final Counter counterConversationProcessing;
     private final Counter counterConversationUndo;
     private final Counter counterConversationRedo;
-    private final Counter counterHitlPause;
+    final Counter counterHitlPause;
     private final Counter counterHitlResume;
     // Task 10 — tool-level HITL metrics registry (new meters, never re-tag
     // existing).
@@ -251,6 +250,8 @@ public class ConversationService implements IConversationService {
         // classes the facade constructs) exists to avoid. Everything it needs is a
         // constructor parameter or a field initializer, so there is nothing to wait
         // for. Passing `this` is safe: the constructor only stores it.
+        this.conversationStepRunner = new ConversationStepRunner(this, conversationMemoryStore,
+                conversationDescriptorStore, runtime, conversationStateCache, inFlightConversations, agentTimeout);
         this.conversationHitlService = new ConversationHitlService(this, conversationMemoryStore,
                 conversationCoordinator, runtime, contextLogger, callerIdentityContext, auditLedgerService,
                 scheduleStore, agentStore, jsonSerialization, hitlResumeCompletedEvent, counterHitlPause,
@@ -264,7 +265,7 @@ public class ConversationService implements IConversationService {
      * a pre-submission throw. Idempotent, so the turn callable's {@code finally}
      * can act as a safety net behind the normal completion path.
      */
-    private static final class ProcessingTurn {
+    static final class ProcessingTurn {
         private final AtomicInteger counter;
         private final AtomicBoolean released = new AtomicBoolean(false);
 
@@ -273,7 +274,7 @@ public class ConversationService implements IConversationService {
             counter.incrementAndGet();
         }
 
-        private void release() {
+        void release() {
             if (released.compareAndSet(false, true)) {
                 counter.decrementAndGet();
             }
@@ -293,7 +294,10 @@ public class ConversationService implements IConversationService {
      * direct-construction unit tests do that) and never rejects.
      */
     /** The HITL half, extracted to {@link ConversationHitlService} (R3 step 1). */
-    private final ConversationHitlService conversationHitlService;
+    final ConversationHitlService conversationHitlService;
+
+    /** Turn execution, extracted to {@link ConversationStepRunner} (R3 step 2). */
+    private final ConversationStepRunner conversationStepRunner;
 
     void rejectIfShuttingDown() {
         if (gracefulShutdownService != null && gracefulShutdownService.isShuttingDown()) {
@@ -618,7 +622,7 @@ public class ConversationService implements IConversationService {
         }
     }
 
-    private static void releaseTurn(ProcessingTurn turn) {
+    static void releaseTurn(ProcessingTurn turn) {
         if (turn != null) {
             turn.release();
         }
@@ -1057,369 +1061,38 @@ public class ConversationService implements IConversationService {
         return agent;
     }
 
+    // ─── Turn execution ───
+    //
+    // Bodies moved to ConversationStepRunner (R3 step 2). Declared delegators kept:
+    // the characterization suites reach several of these through getDeclaredMethod
+    // on this class, and ConversationHitlService calls the rest by name.
+
     private IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
                                                      Map<String, String> loggingContext, Callable<Void> executeConversation,
                                                      Consumer<IConversationMemory> skipNotifier, ProcessingTurn processingTurn) {
-        // Captured here because this method still runs on the REST request
-        // thread, where SecurityIdentity resolves. Everything downstream runs on
-        // pool threads with no request context, so the identity travels with the
-        // callable rather than with the thread.
-        // Binding is CallerIdentityContext's job — it owns the clearing semantics
-        // that keep a token off the next caller's turn on a pooled thread.
-        //
-        // captureOrCurrent, not capture: a group discussion calls say() from its own
-        // virtual thread, which it has already bound to the caller. There is no
-        // request there, so capture() alone would return null — and since a null
-        // identity now masks rather than inherits, it would erase the very binding
-        // the group dispatcher established.
-        //
-        // Stays OUTSIDE the returned task: the task body runs on a pool thread, where
-        // there is no request to capture from. Neither the C11 release wrapper nor the
-        // IDiscardableTask wrapper below changed that — runConversationStep receives
-        // the bound callable and hands it to runGuardedConversationStep, which is
-        // where it was used before.
-        final Callable<Void> identityBoundExecution = callerIdentityContext.withIdentity(callerIdentityContext.captureOrCurrent(),
-                executeConversation);
-
-        return new IDiscardableTask() {
-            @Override
-            public Void call() {
-                try {
-                    return runConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                            identityBoundExecution, skipNotifier);
-                } finally {
-                    // C11: the single guaranteed exit point of a turn. The completion
-                    // consumer releases first on the happy path, but a watchdog timeout,
-                    // a pipeline error or a cancelled inner future never reaches it — and
-                    // an entry that is never released leaks into the gauge forever.
-                    // release() is one-shot, so releasing twice is a no-op.
-                    processingTurn.release();
-                }
-            }
-
-            /**
-             * The coordinator dropped this turn WITHOUT running it (it could not hand it to
-             * the runtime and had no caller left to roll back to). The {@code finally}
-             * above therefore never executes, so the release and the caller's completion
-             * have to happen here instead — otherwise the in-flight gauge leaks for the
-             * JVM's lifetime and the HTTP caller waits for a response that can never
-             * arrive.
-             * <p>
-             * Reported through the SKIPPED contract, which means exactly this: the turn was
-             * dropped without consuming the input. The conversation is untouched (no state
-             * write) and remains usable, so a retry runs normally.
-             */
-            @Override
-            public void onDiscarded(Throwable cause) {
-                try {
-                    contextLogger.setLoggingContext(loggingContext);
-                    LOGGER.errorf(cause, "Queued turn of conversation %s was dropped before it ran — reporting it as "
-                            + "skipped; the input was not consumed and can be retried", conversationId);
-                    if (skipNotifier != null) {
-                        skipNotifier.accept(conversationMemory);
-                    }
-                } finally {
-                    // Belt and braces: release() is one-shot, so this is a no-op when
-                    // the skip notifier already released — but a null or throwing
-                    // notifier must not leak the reference.
-                    processingTurn.release();
-                }
-            }
-        };
-    }
-
-    private Void runConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
-                                     Map<String, String> loggingContext, Callable<Void> executeConversation,
-                                     Consumer<IConversationMemory> skipNotifier) {
-        // Queued-say guard: this memory copy was loaded at REST-request time;
-        // a previously queued turn may have committed a pause (or a resume may
-        // be executing), or the conversation may have been terminally resolved
-        // (ENDED via endConversation) in the meantime. Skip the turn entirely —
-        // executing it against the stale snapshot would end with a full-document
-        // store that silently overwrites the pause (destroying the pending
-        // approval and orphaning its timeout schedule) or RESURRECTS a terminated
-        // conversation to READY with post-termination side effects. The skip
-        // notifier completes the caller's response handler with the persisted
-        // state, so the client gets a prompt, honest answer instead of a watchdog
-        // timeout.
-        //
-        // EXECUTION_INTERRUPTED is deliberately NOT skipped: unlike ENDED it is a
-        // RECOVERABLE marker meaning "the previous turn did not finish" (an
-        // agentTimeout watchdog expiry, or HitlCrashRecoveryObserver parking a
-        // stuck IN_PROGRESS conversation with the explicit intent to "unlock
-        // say()"). A fresh say must run a new turn to self-heal the conversation
-        // back to READY — mirroring the pre-HITL behavior where a retry after an
-        // interrupt executed normally. Skipping it would strand the conversation's
-        // input forever, since nothing else transitions EXECUTION_INTERRUPTED back
-        // to READY.
-        ConversationState persistedState = conversationMemoryStore.getConversationState(conversationId);
-        if (persistedState == ConversationState.AWAITING_HUMAN || persistedState == ConversationState.IN_PROGRESS
-                || persistedState == ConversationState.ENDED) {
-            conversationMemory.setConversationState(persistedState);
-            contextLogger.setLoggingContext(loggingContext);
-            LOGGER.warnf("Skipping queued turn for conversation %s: persisted state is %s (turn arrived before the state change)",
-                    conversationId, persistedState);
-            if (skipNotifier != null) {
-                skipNotifier.accept(conversationMemory);
-            }
-            return null;
-        }
-
-        // Zombie-pause guard: the state loaded WITH the snapshot at request
-        // time — on a backend whose snapshot state diverged from the CAS'd
-        // state column, this can still claim AWAITING_HUMAN even though the
-        // pause was terminally resolved (persistedState above says otherwise).
-        // Never execute against, persist, or re-arm a pause this turn did not
-        // produce.
-        final ConversationState memoryStateAtSubmit = conversationMemory.getConversationState();
-
-        // #2: register the live memory so cancelConversation can signal the
-        // running pipeline via setCancelled (checked at task boundaries).
-        inFlightConversations.put(conversationId, conversationMemory);
-        // Carry the agent-level tool-approval config onto memory BEFORE the
-        // pipeline (LlmTask) runs, so the tool-approval gate can resolve its
-        // effective config. Transient — never persisted; re-resolved each turn.
-        conversationHitlService.populateToolApprovalsConfig(conversationMemory);
-        try {
-            runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
-                    executeConversation, memoryStateAtSubmit, persistedState);
-        } finally {
-            // value-conditional: only the leg that registered this memory may
-            // unregister — a plain remove(key) could evict a NEWER execution's
-            // entry and defeat its cooperative cancel.
-            inFlightConversations.remove(conversationId, conversationMemory);
-        }
-        return null;
-    }
-
-    private void runGuardedConversationStep(Map<String, String> loggingContext, String conversationId,
-                                            Environment environment, IConversationMemory conversationMemory,
-                                            Callable<Void> executeConversation, ConversationState memoryStateAtSubmit,
-                                            ConversationState preTurnPersistedState) {
-        waitForExecutionFinishOrTimeout(loggingContext, conversationId,
-                runtime.submitCallable(executeConversation, new IRuntime.IFinishedExecution<>() {
-                    @Override
-                    public void onComplete(Void result) {
-                        try {
-                            // #2 (say path parity with resume): a concurrent cancel/end
-                            // may have signalled this in-flight memory (e.g. a group
-                            // handleMemberPause → cancelConversation that lost both
-                            // state CAS races because this turn's pause was not yet
-                            // persisted). Honor the cooperative-cancel flag: never
-                            // persist AWAITING_HUMAN, arm a timeout, or count a pause
-                            // nobody wants — that strands the approval. Persist
-                            // EXECUTION_INTERRUPTED via CAS from the (non-terminal)
-                            // running state so a cross-pod terminal writer (ENDED) still
-                            // wins and a resurrected READY never lingers.
-                            if (conversationMemory.isCancelled()) {
-                                contextLogger.setLoggingContext(loggingContext);
-                                LOGGER.infof("Turn of conversation %s completed after a cancel signal — "
-                                        + "discarding its outcome (no pause persisted/armed)", conversationId);
-                                ConversationState runningState = conversationMemoryStore.getConversationState(conversationId);
-                                if (runningState == ConversationState.READY || runningState == ConversationState.IN_PROGRESS) {
-                                    if (conversationMemoryStore.compareAndSetState(conversationId,
-                                            runningState, ConversationState.EXECUTION_INTERRUPTED)) {
-                                        cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
-                                    }
-                                }
-                                return;
-                            }
-                            boolean awaitingHuman = conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN;
-                            if (awaitingHuman && memoryStateAtSubmit == ConversationState.AWAITING_HUMAN) {
-                                // Stale pause carried in from the loaded snapshot —
-                                // this turn did not pause (it was skipped/rejected
-                                // by the pipeline). Persisting would resurrect a
-                                // terminally resolved approval as a zombie and
-                                // re-arm its timeout. Drop the result.
-                                contextLogger.setLoggingContext(loggingContext);
-                                LOGGER.warnf("Discarding turn result for conversation %s: snapshot carried a stale "
-                                        + "AWAITING_HUMAN state this turn did not produce", conversationId);
-                                return;
-                            }
-                            // #6: copy the agent's timeout policy into the bookmark
-                            // BEFORE persisting so approval-status/pending-approvals
-                            // report it and crash recovery can distinguish
-                            // WAIT_INDEFINITELY pauses from lost-schedule ones.
-                            if (awaitingHuman) {
-                                conversationHitlService.populateHitlTimeoutBookmark(conversationMemory);
-                                // #3 (say-path parity with resume): a fresh pause commits
-                                // the FULL AWAITING_HUMAN snapshot. The up-front
-                                // isCancelled() check above narrows but does not close the
-                                // race with a concurrent end/cancel (REST/admin thread, NOT
-                                // serialized by the per-conversation coordinator): a terminal
-                                // write (ENDED / EXECUTION_INTERRUPTED) can land between that
-                                // check and this store, and an unconditional full-document
-                                // replace would then overwrite the terminal state with a
-                                // pending approval — resurrecting a terminated conversation
-                                // with a live timeout. Persist ONLY while the conversation
-                                // still holds the non-terminal state this turn started in —
-                                // the say path never CAS's the DB state (Conversation.runStep
-                                // sets IN_PROGRESS in-memory only), so the persisted state is
-                                // whatever it was when the queued-say guard let this turn
-                                // through: READY normally, or ERROR / EXECUTION_INTERRUPTED on
-                                // a retry after a failed or interrupted prior turn (both are
-                                // legal say-start states the guard deliberately admits). CAS
-                                // from that exact baseline so a concurrent end/cancel that
-                                // moved the state to a terminal value still wins; on a CAS
-                                // miss, discard the pause outcome (no counter, no schedule) so
-                                // the terminal state stands — mirrors the resume path's
-                                // storeConversationMemoryIfState guard.
-                                boolean persisted = storeConversationMemoryIfState(
-                                        conversationMemory, environment, preTurnPersistedState);
-                                if (!persisted) {
-                                    contextLogger.setLoggingContext(loggingContext);
-                                    LOGGER.infof("Pause of conversation %s not persisted: a concurrent end/cancel moved "
-                                            + "it off %s — discarding the pause outcome so the terminal state wins",
-                                            conversationId, preTurnPersistedState);
-                                    return;
-                                }
-                                // M2: close the cancel-during-commit window. A cancel that
-                                // signalled setCancelled(true) AFTER the top-of-onComplete
-                                // check but BEFORE the store above returned CANCELLED to its
-                                // caller via cancelConversation's in-flight-signal branch
-                                // WITHOUT flipping our (still-non-terminal) DB state — so the
-                                // pause we just committed would strand as a live approval with
-                                // an armed timer on a conversation the caller was told is
-                                // cancelled. Now that the pause is durable, re-check the flag:
-                                // if signalled, convert the committed AWAITING_HUMAN pause to
-                                // EXECUTION_INTERRUPTED and skip the counter/schedule so nothing
-                                // is armed and no approval is stranded.
-                                if (conversationMemory.isCancelled()) {
-                                    contextLogger.setLoggingContext(loggingContext);
-                                    if (conversationMemoryStore.compareAndSetState(conversationId,
-                                            ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED)) {
-                                        cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
-                                        try {
-                                            conversationMemoryStore.clearHitlBookmark(conversationId);
-                                        } catch (Exception e) {
-                                            LOGGER.warnf("Failed to clear HITL bookmark on cancel-raced pause of %s: %s",
-                                                    conversationId, e.getMessage());
-                                        }
-                                    }
-                                    LOGGER.infof("Cancel raced the pause commit for conversation %s — converted the "
-                                            + "committed pause to EXECUTION_INTERRUPTED (no counter, no timeout armed)",
-                                            conversationId);
-                                    return;
-                                }
-                                // M1: a durably-committed pause is counted and its timeout armed.
-                                counterHitlPause.increment();
-                                conversationHitlService.scheduleHitlTimeout(conversationId, conversationMemory);
-                            } else {
-                                // Non-pause completion is unchanged: the normal say turn
-                                // settles to READY/ENDED/… and persists the full snapshot.
-                                storeConversationMemory(conversationMemory, environment);
-                            }
-                        } catch (ResourceStoreException e) {
-                            logConversationError(loggingContext, conversationId, e);
-                        }
-                    }
-
-                    @Override
-                    public void onFailure(Throwable t) {
-                        // C3: an abandoned turn that completed anyway is routed here by
-                        // BaseRuntime's abandonment token. It must NOT be flipped to
-                        // ERROR — the watchdog already persisted the accurate
-                        // EXECUTION_INTERRUPTED (or deliberately left an AWAITING_HUMAN
-                        // pause alone), and a late ERROR write from the zombie turn is
-                        // exactly the stale overwrite the token exists to prevent.
-                        // Mirrors the resume path's onFailure.
-                        //
-                        // Matched on the DEDICATED abandonment type, not on the bare
-                        // InterruptedException: a genuine InterruptedException thrown
-                        // by the callable BODY means the turn never finished and no
-                        // watchdog recorded anything, so it must take the error path
-                        // below and leave an ERROR record — swallowing it at WARN left
-                        // the conversation looking untouched after a real failure.
-                        if (t instanceof ExecutionAbandonedException || t instanceof LifecycleException.LifecycleInterruptedException) {
-                            String errorMessage = "Conversation processing got interrupted! (conversationId=%s)";
-                            errorMessage = String.format(errorMessage, conversationId);
-                            contextLogger.setLoggingContext(loggingContext);
-                            LOGGER.warn(errorMessage, t);
-                        } else if (t instanceof IConversation.ConversationNotReadyException) {
-                            String msg = "Conversation not ready! (conversationId=%s)";
-                            msg = String.format(msg, conversationId);
-                            contextLogger.setLoggingContext(loggingContext);
-                            LOGGER.error(msg + "\n" + t.getLocalizedMessage(), t);
-                        } else {
-                            logConversationError(loggingContext, conversationId, t);
-                        }
-                    }
-                }, null));
+        return conversationStepRunner.processConversationStep(environment, conversationMemory, conversationId,
+                loggingContext, executeConversation, skipNotifier, processingTurn);
     }
 
     void waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId, Future<Void> future) {
-        try {
-            future.get(agentTimeout, TimeUnit.SECONDS);
-        } catch (TimeoutException | InterruptedException e) {
-            // C3: abandon the turn FIRST — before any further store round trip. The
-            // cancel marks BaseRuntime's per-submission abandonment token, which is
-            // what suppresses a late onComplete (and therefore its full-snapshot
-            // persist). The interrupt flag alone is NOT a safe completion guard: the
-            // pipeline consumes it via Thread.interrupted(), which CLEARS it, so a
-            // timed-out turn would still be reported complete and would overwrite a
-            // newer turn's state. Doing this before reading the persisted state keeps
-            // the "already abandoned but not yet flagged" window at ~0 instead of a
-            // full DB round trip.
-            //
-            // Cancelling on the AWAITING_HUMAN path too is deliberate: the watchdog
-            // has expired either way, so this turn's outcome must be discarded. Only
-            // the STATE write below is skipped there, to avoid overwriting a pause
-            // written by another writer with EXECUTION_INTERRUPTED (Invariant 10).
-            //
-            // B2: Future.get CLEARS the interrupt flag when it throws
-            // InterruptedException. The flag is restored in the finally below —
-            // deliberately AFTER the store round trips, not before them: a set flag
-            // makes the sync Mongo driver abort with MongoInterruptedException, which
-            // would skip the very EXECUTION_INTERRUPTED write this branch exists to
-            // perform. The finally also covers the AWAITING_HUMAN early return.
-            try {
-                future.cancel(true);
-                ConversationState currentState = conversationMemoryStore.getConversationState(conversationId);
-                if (currentState == ConversationState.AWAITING_HUMAN) {
-                    return;
-                }
-                setConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
-                String errorMessage = "Execution of Workflows interrupted or timed out.";
-                contextLogger.setLoggingContext(loggingContext);
-                LOGGER.error(errorMessage, e);
-            } finally {
-                if (e instanceof InterruptedException) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        } catch (ExecutionException e) {
-            logConversationError(loggingContext, conversationId, e);
-        }
+        conversationStepRunner.waitForExecutionFinishOrTimeout(loggingContext, conversationId, future);
     }
 
     void logConversationError(Map<String, String> loggingContext, String conversationId, Throwable t) {
-        setConversationState(conversationId, ConversationState.ERROR);
-        String msg = "Error while processing user input (conversationId=%s , conversationState=%s)";
-        msg = String.format(msg, conversationId, ConversationState.ERROR);
-        contextLogger.setLoggingContext(loggingContext);
-        LOGGER.error(msg, t);
+        conversationStepRunner.logConversationError(loggingContext, conversationId, t);
     }
 
     private IConversationMemory loadAndValidateConversationMemory(String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException {
-        var conversationMemory = loadConversationMemory(conversationId);
-        checkConversationMemoryNotNull(conversationMemory, conversationId);
-
-        if (!agentId.equals(conversationMemory.getAgentId())) {
-            throw new AgentMismatchException("Supplied agentId is incompatible to conversationId");
-        }
-
-        return conversationMemory;
+        return conversationStepRunner.loadAndValidateConversationMemory(agentId, conversationId);
     }
 
     private IConversationMemory loadConversationMemory(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        var conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
-        return convertConversationMemorySnapshot(conversationMemorySnapshot);
+        return conversationStepRunner.loadConversationMemory(conversationId);
     }
 
     private void setConversationState(String conversationId, ConversationState conversationState) {
-        conversationMemoryStore.setConversationState(conversationId, conversationState);
-        cacheConversationState(conversationId, conversationState);
+        conversationStepRunner.setConversationState(conversationId, conversationState);
     }
 
     @Override
@@ -1428,44 +1101,30 @@ public class ConversationService implements IConversationService {
     }
 
     void cacheConversationState(String conversationId, ConversationState conversationState) {
-        conversationStateCache.put(conversationId, conversationState);
+        conversationStepRunner.cacheConversationState(conversationId, conversationState);
     }
 
     private String storeConversationMemory(IConversationMemory conversationMemory, Environment environment) throws ResourceStoreException {
-        var memorySnapshot = convertConversationMemory(conversationMemory);
-        memorySnapshot.setEnvironment(environment);
-        return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
+        return conversationStepRunner.storeConversationMemory(conversationMemory, environment);
     }
 
-    /**
-     * Persist the full memory snapshot only while the conversation is still in
-     * {@code expectedState} — an atomic compare-and-store. Used by the resume path
-     * so a resumed outcome cannot clobber an ENDED/EXECUTION_INTERRUPTED state
-     * written concurrently by end/cancel.
-     */
     boolean storeConversationMemoryIfState(IConversationMemory conversationMemory, Environment environment,
                                            ConversationState expectedState)
             throws ResourceStoreException {
-        var memorySnapshot = convertConversationMemory(conversationMemory);
-        memorySnapshot.setEnvironment(environment);
-        return conversationMemoryStore.storeConversationMemorySnapshotIfState(memorySnapshot, expectedState);
+        return conversationStepRunner.storeConversationMemoryIfState(conversationMemory, environment, expectedState);
     }
 
     private static void checkConversationMemoryNotNull(IConversationMemory conversationMemory, String conversationId) {
-        if (conversationMemory == null) {
-            String message = "No conversation found with conversationId: %s";
-            message = String.format(message, conversationId);
-            throw new ConversationNotFoundException(message);
-        }
+        ConversationStepRunner.checkConversationMemoryNotNull(conversationMemory, conversationId);
     }
 
-    private static void validateParams(Environment environment, String agentId, String conversationId) {
+    static void validateParams(Environment environment, String agentId, String conversationId) {
         checkNotNull(environment, "environment");
         checkNotNull(agentId, "agentId");
         checkNotNull(conversationId, "conversationId");
     }
 
-    private void recordMetrics(Timer timer, Counter counter, long startTime) {
+    void recordMetrics(Timer timer, Counter counter, long startTime) {
         counter.increment();
         timer.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
     }

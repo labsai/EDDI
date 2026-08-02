@@ -5,6 +5,30 @@
 
 ---
 
+## 🧩 refactor(conversation): extract ConversationStepRunner — Wave R complete (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R3 step 2, and with it **Wave R is done**. All three monoliths are decomposed:
+
+| Class | Before | After |
+| --- | --- | --- |
+| `GroupConversationService` | 4,417 | **1,422** |
+| `AgentOrchestrator` | 2,725 | **1,163** |
+| `ConversationService` | 2,735 | **1,174** |
+
+**Checkstyle is down from 8 violations to 6, and every remaining one is a pre-existing `LineLength` in a file this branch never touched. There is no `FileLength` violation left anywhere in the codebase.**
+
+With the HITL cluster gone, what was left in `ConversationService` was two things wearing one name: the public `IConversationService` surface (start, say, read, undo/redo, access checks) and the machinery that actually executes a turn. `ConversationStepRunner` is the machinery; the facade is the surface.
+
+**The processing gauge and its release token are the delicate part.** `ProcessingTurn` increments `processingConversationCount` on construction and releases exactly once, and every path out of a turn — normal completion, timeout, abandonment, a pre-submission throw — must release it, or the gauge drifts upward forever and the graceful-shutdown drain waits on turns that already finished. Both the token type and `releaseTurn` stay on the facade, shared by reference, because `say`/`sayStreaming` create the token before the runner ever sees it.
+
+**Two bounds errors caught before they could hide.** The first extraction attempt sliced into `getAgent` (the method has no javadoc, and the walk-back heuristic overshot); the second still overshot by two lines. Both produced immediate parse errors rather than silently valid-but-wrong code — which is the argument for cutting exact ranges and letting the compiler check the seam, rather than retyping and hoping. Reverted cleanly both times via `git checkout --`.
+
+2,640 tests green across every group, orchestrator, conversation and HITL battery.
+
+---
+
 ## 🧩 refactor(conversation): extract ConversationHitlService (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
