@@ -5,6 +5,22 @@
 
 ---
 
+## 🧩 refactor(orchestrator): extract ToolApprovalGateSupport (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 4 — the gate's supporting cast: per-turn pause accounting, the approver-facing pause reason, the durable `PendingToolCallBatch` snapshot with its size caps, the batch fingerprint, tool-call-id normalisation, and the pause-cap guard's metric/audit emission. Pure move.
+
+**`AgentOrchestrator`: 2,127 -> 1,904 lines — under the 2,000-line Checkstyle `FileLength` limit it has exceeded for its entire history.** That was never the point of R2, but it is a fair marker of how much of this class was never orchestration.
+
+The cluster was mechanical to move because almost all of it is static; it accompanies `ToolApprovalGate`, which decides *whether* a batch pauses, while everything here is what happens once it does. The two were always a pair — the gate is self-instantiated by the orchestrator and these helpers sat in a labelled block beside its call sites — and lived in `AgentOrchestrator` only because that is where the loop is.
+
+**Every one stays as a declared delegator, and the reason is specific.** A bare-token sweep across the test tree first: `fingerprint` 25 references, `maxPausesPerTurn` 16, `buildPauseReason` 13, `normalizeToolCallIds` 10, `buildPendingBatch` 10, `readToolPauseCount` 3. Four of those are reached via `AgentOrchestrator.class.getDeclaredMethod(...)`, which resolves only methods declared on that exact class — inlining them at call sites would have broken the characterization suite even though nothing in production would notice — and `buildPendingBatch` is called directly as an instance method eight times. Signatures and modifiers are preserved verbatim.
+
+442 tests green across the orchestrator, gate and HITL batteries.
+
+---
+
 ## 🧩 refactor(orchestrator): buildToolSetup now iterates providers (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
