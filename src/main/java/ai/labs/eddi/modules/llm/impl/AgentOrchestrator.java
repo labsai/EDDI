@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
@@ -21,16 +20,13 @@ import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
-import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
-import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -45,8 +41,6 @@ import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import ai.labs.eddi.modules.llm.tools.ToolNameResolver;
-import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
-import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -1943,100 +1937,29 @@ class AgentOrchestrator {
     }
 
     /**
-     * Constructs and adds a UserMemoryTool if the agent has persistent user memory
-     * enabled. The tool is created per-invocation with conversation-specific
-     * context.
+     * User-memory / conversation-recall / attachment tool construction, extracted
+     * to {@link ContextualToolsProvider} (R2 step 2). Constructed per call —
+     * {@link #attachmentStore} and {@link #attachmentTextExtractor} are
+     * field-injected and still null when this class's constructor runs.
      */
+    private ContextualToolsProvider contextualToolsProvider() {
+        return new ContextualToolsProvider(userMemoryStore, attachmentStore, attachmentTextExtractor);
+    }
+
+    // Kept as declared delegators (not inlined) — each has two call sites in
+    // collectAllBuiltInTools' whitelist/no-whitelist branches. Logic extracted to
+    // ContextualToolsProvider (R2 step 2).
+
     private void addUserMemoryToolIfEnabled(List<Object> tools, IConversationMemory memory) {
-        AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
-        if (config == null || userMemoryStore == null)
-            return;
-
-        // Extract groupIds from conversation properties (injected by
-        // GroupConversationService)
-        List<String> groupIds = List.of();
-        var props = memory.getConversationProperties();
-        if (props != null) {
-            Object groupIdProp = props.get("groupId");
-            if (groupIdProp instanceof Property p && p.getValueString() != null) {
-                groupIds = List.of(p.getValueString());
-            }
-        }
-
-        var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config);
-        tools.add(tool);
-        LOGGER.infof("[MEMORY] UserMemoryTool enabled for agent='%s', user='%s', groups=%s", sanitize(memory.getAgentId()),
-                sanitize(memory.getUserId()), groupIds.stream().map(g -> sanitize(g)).toList());
+        contextualToolsProvider().addUserMemoryToolIfEnabled(tools, memory);
     }
 
-    /**
-     * Constructs and adds a ConversationRecallTool if a rolling summary is active.
-     * The tool is created per-invocation with the conversation's output list and
-     * the summary step boundary.
-     */
     private void addConversationRecallToolIfEnabled(List<Object> tools, LlmConfiguration.Task task, IConversationMemory memory) {
-        // Only add if rolling summary is configured and a summary exists
-        var summaryConfig = task.getConversationSummary();
-        if (summaryConfig == null || !summaryConfig.isEnabled())
-            return;
-
-        String existingSummary = ConversationSummarizer.readSummary(memory);
-        if (existingSummary == null)
-            return;
-
-        int throughStep = ConversationSummarizer.readSummaryThroughStep(memory);
-        var tool = new ConversationRecallTool(List.copyOf(memory.getConversationOutputs()), throughStep, summaryConfig.getMaxRecallTurns());
-        tools.add(tool);
-        LOGGER.infof("[RECALL] ConversationRecallTool enabled: summaryThroughStep=%d, maxRecallTurns=%d", throughStep,
-                summaryConfig.getMaxRecallTurns());
+        contextualToolsProvider().addConversationRecallToolIfEnabled(tools, task, memory);
     }
 
-    /**
-     * Constructs and adds a {@link ReadAttachmentTool} when this conversation has
-     * attachments — from this turn or any earlier one — giving the LLM on-demand
-     * access to attachment text (recall of an earlier turn's file, oversize files
-     * not inlined, page-targeted PDF reads). The conversation id is implicit — the
-     * tool never takes it as a parameter.
-     * <p>
-     * Gating on the current turn alone defeated the tool's main purpose: a file is
-     * inlined only on the turn it arrives, so a follow-up question about it reached
-     * a model with neither the document nor any way to fetch it — and the model
-     * would answer that no file had ever been shared.
-     */
     private void addReadAttachmentToolIfEnabled(List<Object> tools, IConversationMemory memory) {
-        if (attachmentStore == null || attachmentTextExtractor == null) {
-            return;
-        }
-        if (memory == null || memory.getCurrentStep() == null) {
-            return;
-        }
-        // Exact-match read (getData, not the prefix-scanning getLatestData):
-        // "attachments"
-        // is a prefix of the attachments:extracts/errors keys the forwarder persists.
-        IData<List<?>> attachmentData = memory.getCurrentStep().getData(MemoryKeys.ATTACHMENTS);
-        // Coerced, not raw-counted: on a resumed turn these are maps, and a raw
-        // count would also count entries that are not attachments at all.
-        //
-        // Restricted to blob-backed files, matching attachmentsFromPreviousTurns:
-        // the tool can only serve what the attachment store holds. An inline or
-        // URL-only attachment is already inlined by AttachmentForwarder on this
-        // turn, so offering a tool whose listAttachments would report nothing
-        // would only contradict the document sitting in the same message.
-        int thisTurn = attachmentData == null
-                ? 0
-                : (int) AttachmentContextExtractor.attachmentsFrom(attachmentData.getResult()).stream()
-                        .filter(attachment -> attachment.getStorageRef() != null)
-                        .count();
-        // Memory-only scan — no attachment-store round trip on turns without files.
-        int earlierTurns = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).size();
-        if (thisTurn == 0 && earlierTurns == 0) {
-            return;
-        }
-        var tool = new ReadAttachmentTool(attachmentStore, attachmentTextExtractor, memory.getConversationId());
-        tools.add(tool);
-        LOGGER.infof(
-                "[ATTACHMENTS] ReadAttachmentTool enabled for conversation='%s' (%d this turn, %d from earlier turns)",
-                sanitize(memory.getConversationId()), thisTurn, earlierTurns);
+        contextualToolsProvider().addReadAttachmentToolIfEnabled(tools, memory);
     }
 
     /**

@@ -5,6 +5,24 @@
 
 ---
 
+## 🧩 refactor(orchestrator): extract ContextualToolsProvider (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 continued — the last three object-producing tool sources: `addUserMemoryToolIfEnabled`, `addConversationRecallToolIfEnabled`, `addReadAttachmentToolIfEnabled` into `ContextualToolsProvider`. **`AgentOrchestrator`: 2,108 → 2,031 lines** — down from 2,725 at R2's start, and now 31 lines from clearing the Checkstyle `FileLength` limit it has exceeded for its entire history.
+
+**Grouped as one provider, not three — a judgment call worth stating.** The plan's §3.2 lists `UserMemoryToolProvider`, `ConversationRecallToolProvider` and `AttachmentToolProvider` as separate providers. Implemented as one, because all three share the single property that defines them: each is enabled by *what the conversation currently holds* (a user-memory config, an existing rolling summary, attachments from this or any earlier turn) rather than by the built-in-tools whitelist. Three separate classes would each be ~20 lines of construction with identical dependencies and lifetime — bureaucracy rather than modularity. Critically, this costs nothing at the approval-gate boundary: `toolSources` provenance is derived per *tool object* by `ToolObjectReflector` (`"memory"` / `"recall"` / `"builtin"`), not from the contributing provider's `source()`, so `memory:*` and `recall:*` approval patterns behave exactly as before. If a later item genuinely needs them separable, splitting one cohesive class is a much smaller move than merging three.
+
+Per-call construction again (third occurrence): `attachmentStore` and `attachmentTextExtractor` are `@Inject volatile` fields on `AgentOrchestrator`, null at constructor time. All three methods keep declared delegators — each has two call sites across `collectAllBuiltInTools`' whitelist and no-whitelist branches.
+
+No new test class: unlike the other providers, these three methods have no new surface — `contribute` composes the same three already-covered methods, and their enablement logic is covered by `AgentOrchestratorBranchTest`/`AgentOrchestratorExtendedBranchTest`/`AgentOrchestratorCoverageTest` through the unchanged delegators. Adding a fourth near-duplicate provider test asserting "the delegator delegates" would be ceremony, not coverage.
+
+Full 20-class battery (363 tests) green; 6 more imports removed.
+
+**R2 provider extraction now complete — all 8 sources are SPI-conformant classes:** `HttpCallToolsProvider`, `McpToolsProvider`, `A2AToolsProvider`, `DynamicAgentToolsProvider`, `ContextualToolsProvider` (covering user-memory/recall/attachment), with `ToolObjectReflector` shared by the object-producing ones. What remains in R2: rewiring `buildToolSetup` to iterate providers instead of calling them by name, then the `ToolApprovalGateSupport`/`ToolLoopRunner`/`ToolLoopResumer` extractions and the `IAgentOrchestrator` interface.
+
+---
+
 ## 🧩 refactor(orchestrator): extract DynamicAgentToolsProvider + ToolObjectReflector (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
