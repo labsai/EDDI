@@ -21,26 +21,31 @@ import java.util.Map;
  * <b>Isolation is the point.</b> Before this, one failing tool source could
  * abort assembly for every other source: a single unreachable MCP server, or a
  * malformed httpcall config, and the agent silently lost its calculator too.
- * {@link #assemble} wraps each {@code contribute} call, so a provider that
- * throws contributes nothing and the loop continues. Providers are still
- * expected not to throw — this is the backstop, not the excuse.
+ * Every {@code contribute} call is wrapped, so a provider that throws
+ * contributes nothing and the loop continues. Providers are still expected not
+ * to throw — this is the backstop, not the excuse.
  * <p>
- * <b>Order is fixed and load-bearing.</b> The provider list is supplied in the
- * order tools should appear in the model's spec list, and merge is
+ * <b>Order is fixed and load-bearing.</b> Providers are supplied in the order
+ * their tools should appear in the model's spec list, and merge is
  * first-write-wins per dispatch name: an earlier source's tool is never
- * displaced by a later source registering the same name. That makes name
- * collisions between, say, a built-in and an MCP tool resolve deterministically
- * instead of by whichever map happened to be merged last, and it means an
- * operator cannot shadow a governed built-in by naming an MCP tool after it.
- * Collisions are logged at WARN, because a silently-dropped tool is the kind of
- * thing that reads as "the model ignored my tool".
+ * displaced by a later source registering the same name. That makes collisions
+ * between, say, a built-in and an MCP tool resolve deterministically instead of
+ * by whichever map happened to be merged last, and it means an operator cannot
+ * shadow a governed built-in by naming an MCP tool after it. Collisions log at
+ * WARN, because a silently-dropped tool reads to an agent designer as "the
+ * model ignored my tool".
+ * <p>
+ * The drop rules are {@code AgentOrchestrator#mergeExternalTools}' rules,
+ * carried over verbatim so the rewiring changed no behaviour: a spec with no
+ * name, or with no executor to dispatch to, is skipped with a WARN rather than
+ * offered to the model as a tool that cannot possibly run.
  */
 public final class ToolSourceRegistry {
 
     private static final Logger LOGGER = Logger.getLogger(ToolSourceRegistry.class);
 
     private ToolSourceRegistry() {
-        // static utility
+        // static utility — use assemble() or newMerger()
     }
 
     /**
@@ -56,8 +61,11 @@ public final class ToolSourceRegistry {
      * @param toolEndpoints
      *            dispatch name → {@code "post:/path"}, http source only
      * @param toolCanonicalNames
-     *            dispatch name → configuration slug, defaulting to the dispatch
-     *            name for sources that have no separate slug
+     *            dispatch name → configuration slug. Absent, not defaulted, for
+     *            sources that supply none: {@code ToolNameResolver.canonical}
+     *            already falls back to the dispatch name, and writing identity
+     *            entries would change the map the rate-limit, pricing and
+     *            cache-scope lookups see
      * @param failures
      *            every provider's structured failures, concatenated
      */
@@ -67,7 +75,7 @@ public final class ToolSourceRegistry {
     }
 
     /**
-     * Runs every provider and merges the results.
+     * Runs every provider in order and merges the results.
      *
      * @param providers
      *            in the order their tools should appear; a {@code null} entry is
@@ -78,23 +86,122 @@ public final class ToolSourceRegistry {
      *            see one consistent snapshot
      */
     public static Assembled assemble(List<ToolSourceProvider> providers, ToolAssemblyContext ctx) {
-        List<ToolSpecification> specs = new ArrayList<>();
-        Map<String, ToolExecutor> executors = new LinkedHashMap<>();
-        Map<String, String> toolSources = new LinkedHashMap<>();
-        Map<String, String> toolEndpoints = new LinkedHashMap<>();
-        Map<String, String> toolCanonicalNames = new LinkedHashMap<>();
-        List<ProviderFailure> failures = new ArrayList<>();
+        Merger merger = newMerger();
+        merger.addAll(providers, ctx);
+        return merger.build();
+    }
 
-        for (ToolSourceProvider provider : providers) {
-            if (provider == null) {
-                continue;
-            }
-            ToolContribution contribution = contributeSafely(provider, ctx);
-            mergeOne(provider, contribution, specs, executors, toolSources, toolEndpoints, toolCanonicalNames);
-            failures.addAll(contribution.failures());
+    /**
+     * A merge in progress.
+     * <p>
+     * Exists because tool assembly is not one uniform pass. The LAZY loading
+     * strategy has to build its {@code discover_tools} meta-tool from the specs the
+     * <em>object-producing</em> sources contributed, and the orchestrator has to
+     * snapshot exactly those same specs as {@code builtInSpecs} (what LAZY later
+     * activates against) before the externally-discovered sources merge in. Both
+     * need a look at the half-assembled state, which a single {@code assemble} call
+     * cannot offer — while still sharing one collision namespace across the whole
+     * turn, which two independent {@code assemble} calls would lose.
+     */
+    public static Merger newMerger() {
+        return new Merger();
+    }
+
+    /** @see #newMerger() */
+    public static final class Merger {
+
+        private final List<ToolSpecification> specs = new ArrayList<>();
+        private final Map<String, ToolExecutor> executors = new LinkedHashMap<>();
+        private final Map<String, String> toolSources = new LinkedHashMap<>();
+        private final Map<String, String> toolEndpoints = new LinkedHashMap<>();
+        private final Map<String, String> toolCanonicalNames = new LinkedHashMap<>();
+        private final List<ProviderFailure> failures = new ArrayList<>();
+
+        private Merger() {
         }
 
-        return new Assembled(specs, executors, toolSources, toolEndpoints, toolCanonicalNames, failures);
+        /** Runs one provider and merges its contribution. Never throws. */
+        public Merger add(ToolSourceProvider provider, ToolAssemblyContext ctx) {
+            if (provider == null) {
+                return this;
+            }
+            merge(provider.source(), contributeSafely(provider, ctx));
+            return this;
+        }
+
+        /** Runs each provider in order, skipping {@code null} entries. */
+        public Merger addAll(List<ToolSourceProvider> providers, ToolAssemblyContext ctx) {
+            for (ToolSourceProvider provider : providers) {
+                add(provider, ctx);
+            }
+            return this;
+        }
+
+        /**
+         * Merges a contribution that no provider produced — the LAZY
+         * {@code discover_tools} meta-tool, which can only be built once the sources it
+         * advertises have already contributed.
+         */
+        public Merger addContribution(String source, ToolContribution contribution) {
+            merge(source, contribution != null ? contribution : ToolContribution.empty());
+            return this;
+        }
+
+        /**
+         * The specs merged so far, as an independent copy.
+         * <p>
+         * This is how the orchestrator takes its {@code builtInSpecs} snapshot at the
+         * boundary between the object-producing and externally-discovered sources.
+         */
+        public List<ToolSpecification> specsSoFar() {
+            return List.copyOf(specs);
+        }
+
+        public Assembled build() {
+            return new Assembled(List.copyOf(specs), Map.copyOf(executors), Map.copyOf(toolSources),
+                    Map.copyOf(toolEndpoints), Map.copyOf(toolCanonicalNames), List.copyOf(failures));
+        }
+
+        private void merge(String source, ToolContribution contribution) {
+            failures.addAll(contribution.failures());
+
+            for (ToolSpecification spec : contribution.specs()) {
+                String name = spec.name();
+                if (name == null) {
+                    LOGGER.warnf("Skipping %s tool with no name", source);
+                    continue;
+                }
+                if (executors.containsKey(name)) {
+                    String incumbent = toolSources.getOrDefault(name, "builtin");
+                    LOGGER.warnf("Tool name collision: %s tool '%s' clashes with the already-registered %s tool of "
+                            + "the same name — the %s tool is DROPPED and the %s tool keeps the name. Rename the "
+                            + "remote tool or exclude it via toolsBlacklist.", source, name, incumbent, source,
+                            incumbent);
+                    continue;
+                }
+                ToolExecutor executor = contribution.executors().get(name);
+                if (executor == null) {
+                    LOGGER.warnf("%s tool '%s' has a specification but no executor — skipping", source, name);
+                    continue;
+                }
+
+                specs.add(spec);
+                executors.put(name, executor);
+                // Per-tool tag where the provider supplied one (bean sources emit
+                // memory/recall/builtin across a single contribution); the provider's own
+                // source() only as fallback. See ToolSourceProvider#source.
+                toolSources.put(name, contribution.toolSources().getOrDefault(name, source));
+
+                String endpoint = contribution.toolEndpoints().get(name);
+                if (endpoint != null) {
+                    toolEndpoints.put(name, endpoint);
+                }
+                String canonical = contribution.toolCanonicalNames().get(name);
+                if (canonical != null) {
+                    toolCanonicalNames.put(name, canonical);
+                }
+            }
+        }
     }
 
     /**
@@ -116,37 +223,6 @@ public final class ToolSourceRegistry {
             LOGGER.warnf("Tool source '%s' failed to contribute and was skipped — the remaining sources still "
                     + "assemble: %s", provider.source(), t.toString());
             return ToolContribution.empty();
-        }
-    }
-
-    private static void mergeOne(ToolSourceProvider provider, ToolContribution contribution,
-                                 List<ToolSpecification> specs, Map<String, ToolExecutor> executors, Map<String, String> toolSources,
-                                 Map<String, String> toolEndpoints, Map<String, String> toolCanonicalNames) {
-
-        for (ToolSpecification spec : contribution.specs()) {
-            String name = spec.name();
-            if (executors.containsKey(name) || toolSources.containsKey(name)) {
-                LOGGER.warnf("Tool name collision: '%s' from source '%s' is shadowed by an earlier source ('%s') "
-                        + "and was dropped", name, provider.source(), toolSources.getOrDefault(name, "unknown"));
-                continue;
-            }
-            specs.add(spec);
-            // Per-tool tag where the provider supplied one (bean sources emit
-            // memory/recall/builtin across a single contribution); the provider's own
-            // source() only as fallback. See ToolSourceProvider#source.
-            toolSources.put(name, contribution.toolSources().getOrDefault(name, provider.source()));
-
-            ToolExecutor executor = contribution.executors().get(name);
-            if (executor != null) {
-                executors.put(name, executor);
-            }
-            String endpoint = contribution.toolEndpoints().get(name);
-            if (endpoint != null) {
-                toolEndpoints.put(name, endpoint);
-            }
-            // Dispatch name is its own canonical name unless the source says otherwise,
-            // so the executor boundary always has a slug to price and cache under.
-            toolCanonicalNames.put(name, contribution.toolCanonicalNames().getOrDefault(name, name));
         }
     }
 }

@@ -35,10 +35,11 @@ import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
-import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
+import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
+import ai.labs.eddi.modules.llm.tools.spi.ToolSourceRegistry;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
@@ -877,58 +878,67 @@ class AgentOrchestrator {
      * tools — returning the fully populated {@link ToolSetup}.
      */
     ToolSetup buildToolSetup(LlmConfiguration.Task task, IConversationMemory memory) {
-        // Collect enabled built-in tools
-        List<Object> tools = collectEnabledTools(task, memory);
+        var ctx = toolAssemblyContext(task, memory);
+        var merger = ToolSourceRegistry.newMerger();
 
-        // Discover httpcall tools from workflow (auto-discovery)
-        boolean enableHttpCallTools = task.getEnableHttpCallTools() == null || task.getEnableHttpCallTools();
-        HttpCallToolsResult httpCallTools = enableHttpCallTools ? discoverHttpCallTools(memory) : null;
+        // Phase 1 — the object-producing sources, in exactly the order
+        // collectAllBuiltInTools added them: the nine plain beans, then user memory
+        // and conversation recall, then the dynamic-agent block, then readAttachment
+        // last. That last position is why AttachmentToolsProvider exists separately
+        // from ContextualToolsProvider. Every one is a provider now, so a single
+        // failing source costs the turn only its own tools.
+        var contextual = contextualToolsProvider();
+        merger.addAll(List.of(builtinToolsProvider, contextual, dynamicAgentToolsProvider(),
+                new AttachmentToolsProvider(contextual)), ctx);
 
-        // Discover mcpcalls tools from workflow (auto-discovery)
-        boolean enableMcpCallTools = task.getEnableMcpCallTools() == null || task.getEnableMcpCallTools();
-        McpToolProviderManager.McpToolsResult mcpCallWorkflowTools = enableMcpCallTools ? discoverMcpCallTools(memory) : null;
-
-        // Discover A2A agent tools (if configured)
-        A2AToolProviderManager.A2AToolsResult a2aTools = null;
-        List<A2AAgentConfig> a2aAgents = task.getA2aAgents();
-        if (a2aAgents != null && !a2aAgents.isEmpty()) {
-            a2aTools = a2aToolProviderManager.discoverTools(a2aAgents);
+        // LAZY registers every built-in's executor but shows the model only
+        // discover_tools until it asks. The meta-tool advertises the specs phase 1
+        // just contributed, so it can only be built here — between the two phases —
+        // and it must land before the builtInSpecs snapshot, exactly as it did when
+        // collectEnabledTools appended it to the list reflection then ran over.
+        if (task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY) {
+            merger.addContribution("builtin", discoverToolsContribution(merger.specsSoFar(), task));
         }
 
-        // Build tool specifications and executors from built-in tool objects.
-        // toolSources maps dispatch name → provenance ("builtin"/"http"/"mcp"/…) so
-        // the gate can match qualified "source:name" patterns; missing entries are
-        // tolerated (the gate falls back to bare-name matching).
-        // Reflection loop extracted to ToolObjectReflector (R2 step 2).
-        var reflected = ToolObjectReflector.reflect(tools);
-        List<ToolSpecification> toolSpecs = new ArrayList<>(reflected.specs());
-        Map<String, ToolExecutor> toolExecutors = new HashMap<>(reflected.executors());
-        Map<String, String> toolSources = new HashMap<>(reflected.toolSources());
-        Map<String, String> toolEndpoints = new HashMap<>();
-        Map<String, String> toolCanonicalNames = new HashMap<>(reflected.toolCanonicalNames());
+        // The LAZY activation target: what phase 1 produced, before any external
+        // source merges in.
+        List<ToolSpecification> builtInSpecs = merger.specsSoFar();
 
-        // Copy built-in specs before merging external ones — LAZY activation needs it.
-        List<ToolSpecification> builtInSpecs = new ArrayList<>(toolSpecs);
+        // Phase 2 — the externally-discovered sources. Merged after phase 1 so a
+        // remote tool can never displace a governed built-in of the same name.
+        merger.addAll(List.of(httpCallToolsProvider, mcpToolsProvider, a2aToolsProvider()), ctx);
 
-        // Merge httpcall tools discovered from workflow (if any)
-        if (httpCallTools != null) {
-            mergeExternalTools(httpCallTools.toolSpecs(), httpCallTools.executors(), "http", toolSpecs, toolExecutors, toolSources);
-            // Endpoint provenance travels beside the source so an approval pattern can
-            // address what a tool calls, not just what it is named.
-            toolEndpoints.putAll(httpCallTools.endpoints());
-        }
+        var assembled = merger.build();
+        return new ToolSetup(new ArrayList<>(assembled.specs()), new HashMap<>(assembled.executors()),
+                new HashMap<>(assembled.toolSources()), builtInSpecs, assembled.toolCanonicalNames(),
+                assembled.toolEndpoints());
+    }
 
-        // Merge mcpcalls tools discovered from workflow (if any)
-        if (mcpCallWorkflowTools != null) {
-            mergeExternalTools(mcpCallWorkflowTools.toolSpecs(), mcpCallWorkflowTools.executors(), "mcp", toolSpecs, toolExecutors, toolSources);
-        }
+    /**
+     * The {@code discover_tools} meta-tool as a contribution, advertising
+     * {@code availableSpecs}.
+     * <p>
+     * Reflected here rather than inside a provider because it is not a tool source
+     * at all — it is a view over what the other local sources contributed, and no
+     * provider can see that from inside its own {@code contribute}.
+     */
+    private ToolContribution discoverToolsContribution(List<ToolSpecification> availableSpecs,
+                                                       LlmConfiguration.Task task) {
+        var discoverTool = new DiscoverToolsTool(availableSpecs, task.getMaxToolsInContext());
+        LOGGER.infof("LAZY tool loading: %d built-in tools + discover_tools meta-tool registered", availableSpecs.size());
+        var reflected = ToolObjectReflector.reflect(List.of(discoverTool));
+        return new ToolContribution(reflected.specs(), reflected.executors(), reflected.toolSources(), Map.of(),
+                List.of(), reflected.toolCanonicalNames());
+    }
 
-        // Merge A2A agent tools (if any)
-        if (a2aTools != null) {
-            mergeExternalTools(a2aTools.toolSpecs(), a2aTools.executors(), "a2a", toolSpecs, toolExecutors, toolSources);
-        }
-
-        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames), Map.copyOf(toolEndpoints));
+    /**
+     * A2A tool discovery, extracted to {@link A2AToolsProvider} (R2 step 2).
+     * Constructed per call for symmetry with the other per-call providers; its one
+     * dependency is constructor-injected, so this could be hoisted if it ever
+     * mattered.
+     */
+    private A2AToolsProvider a2aToolsProvider() {
+        return new A2AToolsProvider(a2aToolProviderManager);
     }
 
     /**
@@ -1874,13 +1884,24 @@ class AgentOrchestrator {
     }
 
     /**
-     * Collects enabled built-in tools based on task configuration.
+     * Collects enabled built-in tools based on task configuration, as tool
+     * <em>objects</em>.
      * <p>
      * When {@link LlmConfiguration.ToolLoadingStrategy#LAZY} is set, ALL tools are
      * returned (so executors get registered), plus a {@link DiscoverToolsTool}
      * meta-tool. The {@code executeWithTools} method handles presenting only
      * {@code discover_tools} spec initially and activating matching specs after
      * discovery.
+     * <p>
+     * <b>No production caller since the R2 rewiring.</b> {@code buildToolSetup} now
+     * assembles the same sources through {@link ToolSourceRegistry}, which works in
+     * specs and executors rather than objects. This method survives because several
+     * characterization tests call it directly, and it deliberately routes through
+     * the very same provider instances so the two paths cannot drift: a change to
+     * any provider's enablement rule shows up here too.
+     * {@code AgentOrchestratorLocalToolAssemblyTest} pins that the two agree tool
+     * for tool — without it, this method would be exactly the kind of dead
+     * lookalike that keeps a test suite green while production diverges.
      */
     List<Object> collectEnabledTools(LlmConfiguration.Task task, IConversationMemory memory) {
         List<Object> tools = new ArrayList<>();

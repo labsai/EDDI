@@ -190,12 +190,18 @@ class ToolSourceProviderTest {
         assertEquals("mcp", assembled.toolSources().get("listIssues"));
     }
 
+    /**
+     * Absent, not defaulted. {@code ToolNameResolver.canonical} already falls back
+     * to the dispatch name for an unmapped tool, and the pre-SPI
+     * {@code ToolSetup.toolCanonicalNames} carried built-ins only — writing an
+     * identity entry for every http/mcp/a2a tool would have changed the map the
+     * rate-limit, pricing and cache-scope lookups see.
+     */
     @Test
-    void canonicalNameDefaultsToTheDispatchName() {
+    void canonicalNameIsAbsentForSourcesThatSupplyNone() {
         var assembled = ToolSourceRegistry.assemble(List.of(provider("http", "createOrder")), null);
 
-        assertEquals("createOrder", assembled.toolCanonicalNames().get("createOrder"),
-                "the executor boundary always needs a slug to price and cache under");
+        assertFalse(assembled.toolCanonicalNames().containsKey("createOrder"));
     }
 
     @Test
@@ -244,6 +250,85 @@ class ToolSourceProviderTest {
 
         assertEquals(2, assembled.failures().size(),
                 "a structured failure is a report, not an error — both are surfaced");
+    }
+
+    // =================================================================
+    // Drop rules, carried over verbatim from mergeExternalTools
+    // =================================================================
+
+    /**
+     * A spec the model can call but nothing can dispatch is worse than no tool at
+     * all — the model spends a turn on it and gets an error.
+     */
+    @Test
+    void specWithNoExecutorIsDropped() {
+        ToolSourceProvider specOnly = new ToolSourceProvider() {
+            @Override
+            public String source() {
+                return "mcp";
+            }
+
+            @Override
+            public ToolContribution contribute(ToolAssemblyContext ctx) {
+                return new ToolContribution(List.of(ToolSpecification.builder().name("orphan").build()),
+                        Map.of(), Map.of(), Map.of());
+            }
+        };
+
+        var assembled = ToolSourceRegistry.assemble(List.of(specOnly, provider("builtin", "calculator")), null);
+
+        assertEquals(List.of("calculator"), assembled.specs().stream().map(ToolSpecification::name).toList());
+    }
+
+    @Test
+    void specWithNoNameIsDropped() {
+        ToolSourceProvider nameless = new ToolSourceProvider() {
+            @Override
+            public String source() {
+                return "a2a";
+            }
+
+            @Override
+            public ToolContribution contribute(ToolAssemblyContext ctx) {
+                return new ToolContribution(List.of(ToolSpecification.builder().description("no name").build()),
+                        Map.of(), Map.of(), Map.of());
+            }
+        };
+
+        var assembled = ToolSourceRegistry.assemble(List.of(nameless, provider("builtin", "calculator")), null);
+
+        assertEquals(List.of("calculator"), assembled.specs().stream().map(ToolSpecification::name).toList());
+    }
+
+    // =================================================================
+    // Merger — the half-assembled view LAZY needs
+    // =================================================================
+
+    @Test
+    void specsSoFar_snapshotsTheBoundaryBetweenLocalAndExternalSources() {
+        var merger = ToolSourceRegistry.newMerger();
+        merger.add(provider("builtin", "calculator"), null);
+
+        var builtInSpecs = merger.specsSoFar();
+
+        merger.add(provider("mcp", "listIssues"), null);
+
+        assertEquals(List.of("calculator"), builtInSpecs.stream().map(ToolSpecification::name).toList(),
+                "the snapshot must not see sources merged after it was taken");
+        assertEquals(List.of("calculator", "listIssues"),
+                merger.build().specs().stream().map(ToolSpecification::name).toList());
+    }
+
+    @Test
+    void addContribution_mergesToolsNoProviderProduced() {
+        var merger = ToolSourceRegistry.newMerger();
+        merger.add(provider("builtin", "calculator"), null);
+        merger.addContribution("builtin", new ToolContribution(
+                List.of(ToolSpecification.builder().name("discover_tools").build()),
+                Map.of("discover_tools", (ToolExecutor) (request, memoryId) -> "{}"), Map.of(), Map.of()));
+
+        assertEquals(List.of("calculator", "discover_tools"),
+                merger.build().specs().stream().map(ToolSpecification::name).toList());
     }
 
     // =================================================================

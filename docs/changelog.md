@@ -5,6 +5,26 @@
 
 ---
 
+## 🧩 refactor(orchestrator): buildToolSetup now iterates providers (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 done — the rewiring the SPI was introduced for. `buildToolSetup` no longer calls each source by name; it assembles them through `ToolSourceRegistry`. Adding a tool source is now adding a provider, which is what gates Wave 2's I5/I7/I17.
+
+**Two phases, because assembly was never one uniform pass.** Phase 1 is the object-producing sources; phase 2 the externally-discovered ones. Between them sit two things a single loop cannot express: LAZY's `discover_tools` meta-tool, which advertises the specs phase 1 just produced and so can only be built once they exist, and the `builtInSpecs` snapshot LAZY later activates against, which must be taken before any external source merges in. `ToolSourceRegistry.Merger` exposes exactly that half-assembled view while keeping one collision namespace across the whole turn — two independent `assemble` calls would have lost that, and an MCP tool could then have silently shadowed a governed built-in.
+
+**`AttachmentToolsProvider`, split out of `ContextualToolsProvider`, for a concrete reason.** The pre-SPI `collectAllBuiltInTools` added `readAttachment` *after* the dynamic-agent tools in its whitelist branch. Leaving it inside the contextual provider would have moved it ahead of that block for any agent with both a dynamic-agent whitelist and attachments in the conversation — a small, silent change to the order the model sees its tools, and exactly what a pure move may not do. Its own provider, assembled last, reproduces the old order exactly. It also happens to be the more honest grouping: unlike user memory and recall, this tool sits outside `enableBuiltInTools` and the whitelist entirely.
+
+**The merge rules are `mergeExternalTools`' rules, carried over verbatim** — a spec with no name, or with no executor to dispatch to, is dropped with a WARN. Both paths previously differed here (the built-in path added specs unconditionally), and the stricter rule is the correct one: a spec the model can call but nothing can run costs it a turn and returns an error.
+
+**A dropped signal, now carried.** `McpToolsProvider.discover` computed per-server failures and threw them away, exactly as the pre-extraction code did — so an unreachable or misconfigured MCP server had no signal above one log line. It now accumulates them across servers and maps them onto `ProviderFailure`, which the registry collects for the turn. The two `Kind` enums were already one-to-one.
+
+**The dangerous leftover, and what protects it.** `collectEnabledTools` now has no production caller — but several characterization tests call it directly, so deleting it would mean rewriting the safety net mid-refactor. Left in place, routed through the same provider instances, and pinned by a new `AgentOrchestratorLocalToolAssemblyTest` that asserts both paths yield the same tools in the same order across seven configurations. Without that test it would be precisely the kind of dead lookalike that keeps a suite green while production drifts. Mutation-checked: dropping one provider from the phase-1 list fails 5 of its 8 tests, and its output shows the two paths agreeing on a 32-tool list.
+
+1,086 tests green across the group and orchestrator batteries; `AgentOrchestrator` is temporarily up to 2,127 lines (the rewiring adds before the loop/gate/resume extractions remove).
+
+---
+
 ## 🧩 refactor(orchestrator): BuiltinToolsProvider + close the three SPI gaps (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

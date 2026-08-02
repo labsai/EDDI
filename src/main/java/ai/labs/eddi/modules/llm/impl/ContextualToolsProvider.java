@@ -105,7 +105,10 @@ class ContextualToolsProvider implements ToolSourceProvider {
                 addConversationRecallToolIfEnabled(tools, ctx.task(), ctx.memory());
             }
         }
-        addReadAttachmentToolIfEnabled(tools, ctx.memory());
+        // readAttachment is NOT contributed here — see AttachmentToolsProvider. It
+        // has to be assembled after the dynamic-agent tools to keep the pre-SPI spec
+        // order, and it is the one tool in this cluster that no built-in gate
+        // governs.
         if (tools.isEmpty()) {
             return ToolContribution.empty();
         }

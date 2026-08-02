@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
+import ai.labs.eddi.modules.llm.tools.spi.ProviderFailure;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
@@ -26,24 +27,25 @@ import java.util.Map;
  * Discovers mcpcalls configurations from the agent's workflow and connects to
  * each configured MCP server, applying per-config whitelist/blacklist filtering
  * (R2 step 2). Extracted from {@code AgentOrchestrator} as a pure move — no
- * behavior change; {@code AgentOrchestrator.discoverMcpCallTools} is kept as a
- * declared delegator (adapting {@link ToolContribution} back to the legacy
- * {@code McpToolProviderManager.McpToolsResult} shape) since
- * {@code buildToolSetup}'s merge flow is not yet rewired to iterate
- * {@link ToolSourceProvider}s.
+ * behavior change. {@code AgentOrchestrator.discoverMcpCallTools} remains as a
+ * declared delegator, adapting {@link ToolContribution} back to the legacy
+ * {@code McpToolProviderManager.McpToolsResult} shape, because the
+ * reflection-based characterization tests look that method up by name on
+ * {@code AgentOrchestrator} itself.
  * <p>
  * Lives in {@code ai.labs.eddi.modules.llm.impl} — same package as {@code
  * AgentOrchestrator} and {@link HttpCallToolsProvider} — for the same reason:
  * it depends on the package-private {@link WorkflowTraversal}.
  * <p>
  * {@code McpToolsResult.failures()} — per-server discovery failures with a
- * reason, populated by {@code McpToolProviderManager.discoverTools} — is READ
- * nowhere in this class, matching the pre-extraction behavior exactly: the
- * original {@code discoverMcpCallTools} only ever consulted {@code
- * result.toolSpecs()}/{@code result.executors()} from the per-server result.
- * Preserved as-is (pure move); flagged separately as a possible follow-up
- * (per-server misconfiguration currently has no signal above the manager's own
- * logging), not fixed inline here.
+ * reason, populated by {@code McpToolProviderManager.discoverTools} — used to
+ * be computed and then dropped: the pre-SPI {@code discoverMcpCallTools}
+ * consulted only {@code toolSpecs()}/{@code executors()}, so an unreachable or
+ * misconfigured server had no signal above the manager's own log line. The
+ * extraction preserved that; the rewiring fixes it. {@link #discover} now
+ * accumulates them across servers and {@link #contribute} maps them onto
+ * {@link ProviderFailure}, which {@code ToolSourceRegistry} collects for the
+ * turn. The two {@code Kind} enums were already one-to-one.
  */
 class McpToolsProvider implements ToolSourceProvider {
 
@@ -75,7 +77,30 @@ class McpToolsProvider implements ToolSourceProvider {
             return ToolContribution.empty();
         }
         var result = discover(ctx.memory());
-        return new ToolContribution(result.toolSpecs(), result.executors(), Map.of(), Map.of());
+        return new ToolContribution(result.toolSpecs(), result.executors(), Map.of(), Map.of(),
+                asProviderFailures(result.failures()), Map.of());
+    }
+
+    /**
+     * Adapts per-server MCP failures onto the SPI's structured failure shape.
+     * <p>
+     * Before the rewiring these were computed and then dropped — {@code
+     * buildToolSetup} consulted only specs and executors, so a misconfigured or
+     * unreachable server had no signal above this manager's own log line. Carrying
+     * them into the contribution costs nothing and puts them where a caller can
+     * finally surface them; the two {@code Kind} enums were already one-to-one.
+     */
+    private static List<ProviderFailure> asProviderFailures(List<McpToolProviderManager.McpServerFailure> failures) {
+        if (failures == null || failures.isEmpty()) {
+            return List.of();
+        }
+        return failures.stream()
+                .map(f -> new ProviderFailure("mcp", f.serverName(), switch (f.kind()) {
+                    case INVALID_CONFIGURATION -> ProviderFailure.Kind.INVALID_CONFIGURATION;
+                    case CONNECTION_FAILURE -> ProviderFailure.Kind.CONNECTION_FAILURE;
+                    case CIRCUIT_OPEN -> ProviderFailure.Kind.CIRCUIT_OPEN;
+                }, f.message()))
+                .toList();
     }
 
     /**
@@ -89,6 +114,9 @@ class McpToolsProvider implements ToolSourceProvider {
     McpToolProviderManager.McpToolsResult discover(IConversationMemory memory) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> executors = new HashMap<>();
+        // Accumulated across servers so a misconfigured or unreachable one has a
+        // signal above this class's own log line — see asProviderFailures.
+        List<McpToolProviderManager.McpServerFailure> failures = new ArrayList<>();
 
         try {
             LOGGER.infof("Discovering mcpcalls tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
@@ -109,6 +137,7 @@ class McpToolsProvider implements ToolSourceProvider {
 
                 // Discover tools from this MCP server
                 McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(serverConfig));
+                failures.addAll(result.failures());
 
                 // Apply whitelist/blacklist filtering
                 List<String> whitelist = mcpCallsConfig.getToolsWhitelist();
@@ -134,6 +163,6 @@ class McpToolsProvider implements ToolSourceProvider {
             LOGGER.warn("Failed to discover mcpcalls tools from workflow", e);
         }
 
-        return new McpToolProviderManager.McpToolsResult(toolSpecs, executors);
+        return new McpToolProviderManager.McpToolsResult(toolSpecs, executors, failures);
     }
 }
