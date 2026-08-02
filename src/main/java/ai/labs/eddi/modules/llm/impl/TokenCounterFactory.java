@@ -71,7 +71,7 @@ public class TokenCounterFactory {
      * counts.
      */
     public static String extractText(ChatMessage message) {
-        return switch (message) {
+        String text = switch (message) {
             case SystemMessage sm -> sm.text();
             case AiMessage am -> aiMessageText(am);
             case ToolExecutionResultMessage trm -> toolResultText(trm);
@@ -81,6 +81,13 @@ public class TokenCounterFactory {
                             .reduce("", (a, b) -> a + " " + b).trim();
             default -> "";
         };
+        // Never null. `sm.text()` and `um.singleText()` can both be null, and the
+        // `default` arm already established "" as this method's empty value — so
+        // callers reasonably treat the result as a String they can measure.
+        // ToolContextBudget#tokensOf does exactly that (`text.length() / 4` in its
+        // tokenizer-failure fallback), which would have thrown NPE on a null-text
+        // message inside the very branch that exists to keep a turn alive.
+        return text != null ? text : "";
     }
 
     /**

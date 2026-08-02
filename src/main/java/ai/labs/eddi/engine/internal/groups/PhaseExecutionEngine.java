@@ -227,7 +227,12 @@ public class PhaseExecutionEngine {
                                          AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
 
-        // Collect all non-moderator members as targets
+        // Every configured member is a candidate target, in speaking order. The
+        // comment here used to say "all non-moderator members"; there is no
+        // moderator filter and never was, so a configured moderatorAgentId does get
+        // peer-critiqued. Whether it should is a design question for the group
+        // config, not something to change silently inside an extraction — the
+        // comment is corrected to match the code rather than the reverse.
         List<GroupMember> allMembers = config.getMembers().stream()
                 .sorted(Comparator.comparing(m -> m.speakingOrder() != null ? m.speakingOrder() : Integer.MAX_VALUE)).toList();
 

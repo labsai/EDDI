@@ -766,14 +766,28 @@ public class TaskForceEngine {
             LOGGER.debugf("Failed to parse verification output, marking all as passed: %s", e.getMessage());
         }
 
-        // Fallback: mark all completed tasks as verified (safe default)
+        // Fallback: mark all still-completed tasks as verified (safe default).
+        //
+        // Status is re-read live rather than taken from `completedTasks`, which is a
+        // snapshot taken before the verification phase ran, and TaskItem is
+        // immutable — so a task the JSON pass already moved to VERIFIED/FAILED still
+        // reads COMPLETED here. tryParseVerificationJson can verify several tasks and
+        // *then* throw (a verifier LLM repeating the same subject twice is enough:
+        // the second match re-verifies an already-VERIFIED task), its catch returns
+        // false, and control lands in this loop with those tasks already terminal.
+        // Re-verifying them trips verifyTask's requireStatus(COMPLETED) guard, and
+        // since this loop sits outside the try above, that IllegalStateException
+        // escapes parseAndApplyVerification and executeTaskVerificationPhase — losing
+        // the verifier's transcript entry and its onSpeakerComplete event entirely.
         for (TaskItem task : completedTasks) {
-            if (task.status() == TaskStatus.COMPLETED) {
-                gc.getTaskList().verifyTask(task.id(), true, "Auto-verified (verification parse failed)");
-                if (listener != null) {
-                    listener.onTaskVerified(new GroupConversationEventSink.TaskVerifiedEvent(
-                            task.id(), task.subject(), true, "Auto-verified"));
-                }
+            TaskItem live = gc.getTaskList().findById(task.id());
+            if (live == null || live.status() != TaskStatus.COMPLETED) {
+                continue; // already verified/failed by the JSON pass, or gone
+            }
+            gc.getTaskList().verifyTask(live.id(), true, "Auto-verified (verification parse failed)");
+            if (listener != null) {
+                listener.onTaskVerified(new GroupConversationEventSink.TaskVerifiedEvent(
+                        live.id(), live.subject(), true, "Auto-verified"));
             }
         }
     }
@@ -819,15 +833,26 @@ public class TaskForceEngine {
 
                     if (subject != null) {
                         for (TaskItem task : completedTasks) {
-                            if (task.subject().equalsIgnoreCase(subject) && task.status() == TaskStatus.COMPLETED) {
-                                gc.getTaskList().verifyTask(task.id(), passed, feedback);
-                                if (listener != null) {
-                                    listener.onTaskVerified(new GroupConversationEventSink.TaskVerifiedEvent(
-                                            task.id(), task.subject(), passed, feedback));
-                                }
-                                anyVerified = true;
+                            if (!task.subject().equalsIgnoreCase(subject)) {
+                                continue;
+                            }
+                            // Live status, not the snapshot's: `completedTasks` was
+                            // captured before this phase, TaskItem is immutable, and a
+                            // verifier repeating the same subject twice would otherwise
+                            // re-verify an already-VERIFIED task and trip verifyTask's
+                            // requireStatus guard — aborting the whole parse mid-way and
+                            // dropping every verdict after it.
+                            TaskItem live = gc.getTaskList().findById(task.id());
+                            if (live == null || live.status() != TaskStatus.COMPLETED) {
                                 break;
                             }
+                            gc.getTaskList().verifyTask(live.id(), passed, feedback);
+                            if (listener != null) {
+                                listener.onTaskVerified(new GroupConversationEventSink.TaskVerifiedEvent(
+                                        live.id(), live.subject(), passed, feedback));
+                            }
+                            anyVerified = true;
+                            break;
                         }
                     }
                 }

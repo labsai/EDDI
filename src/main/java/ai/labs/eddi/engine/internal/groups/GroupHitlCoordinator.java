@@ -297,27 +297,47 @@ public class GroupHitlCoordinator {
         if (token == null || !token.isCancelled()) {
             return;
         }
+        // Only the persist itself may revert the in-memory state. Past the commit
+        // below, CANCELLED is durable, and reverting memory to AWAITING_APPROVAL
+        // would make executeDiscussion's finally block read the wrong state: it
+        // skips signingGuard.forgetConversation for AWAITING_APPROVAL (leaking the
+        // verification cursor) and only runs cleanupEphemeralAgents for
+        // FAILED/CANCELLED — so dynamically created agents would stay deployed.
+        // The realistic post-commit thrower is the listener: an SSE sink on a closed
+        // stream. It used to sit inside this try.
         try {
             gc.setState(GroupConversationState.CANCELLED);
             gc.setPausedAt(null);
             gc.setLastModified(Instant.now());
             conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
-            deleteGroupHitlTimeoutSchedule(gc.getId());
-            auditHitlCancellation(gc, token.getSignal());
-            LOGGER.infof("Cancel signal landed while pausing GC %s — converted pause to CANCELLED", gc.getId());
-            notifyCancelled(gc, listener);
         } catch (IResourceStore.ResourceModifiedException e) {
             // Someone else moved the state concurrently (approve/timeout) — restore
             // the in-memory state so the executeDiscussion finally block does not
             // release paused-state resources for a conversation still paused in DB.
             gc.setState(GroupConversationState.AWAITING_APPROVAL);
             LOGGER.infof("Pause→cancel conversion for GC %s lost a state race — leaving persisted state", gc.getId());
+            return;
         } catch (IGroupConversationStore.GroupConversationGoneException e) {
             // deleted concurrently — nothing left to cancel
             LOGGER.infof("Pause→cancel conversion for GC %s skipped — conversation was deleted", gc.getId());
+            return;
         } catch (Exception e) {
             gc.setState(GroupConversationState.AWAITING_APPROVAL);
             LOGGER.warnf("Failed to convert just-committed pause of GC %s to CANCELLED: %s",
+                    gc.getId(), e.getMessage());
+            return;
+        }
+
+        // Committed. Everything below is best-effort follow-up work that must not
+        // change the state the cleanup paths will read. The first two swallow their
+        // own exceptions already; the listener is wrapped here for the same reason.
+        deleteGroupHitlTimeoutSchedule(gc.getId());
+        auditHitlCancellation(gc, token.getSignal());
+        LOGGER.infof("Cancel signal landed while pausing GC %s — converted pause to CANCELLED", gc.getId());
+        try {
+            notifyCancelled(gc, listener);
+        } catch (Exception e) {
+            LOGGER.warnf("Cancel listener threw for GC %s after CANCELLED was committed — ignoring: %s",
                     gc.getId(), e.getMessage());
         }
     }

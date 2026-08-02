@@ -136,8 +136,14 @@ class ContextualToolsProvider implements ToolSourceProvider {
 
         var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config);
         tools.add(tool);
-        LOGGER.infof("[MEMORY] UserMemoryTool enabled for agent='%s', user='%s', groups=%s", sanitize(memory.getAgentId()),
-                sanitize(memory.getUserId()), groupIds.stream().map(g -> sanitize(g)).toList());
+        // Conversation id, not user id: sanitize() strips control characters, it does
+        // not make an identifier non-personal, and this line fires on every turn that
+        // enables the tool. The conversation id resolves back to the user through the
+        // store when an operator genuinely needs that, without writing a stable
+        // per-person identifier into logs that outlive the conversation.
+        LOGGER.infof("[MEMORY] UserMemoryTool enabled for agent='%s', conversation='%s', groups=%s",
+                sanitize(memory.getAgentId()), sanitize(memory.getConversationId()),
+                groupIds.stream().map(g -> sanitize(g)).toList());
     }
 
     /**

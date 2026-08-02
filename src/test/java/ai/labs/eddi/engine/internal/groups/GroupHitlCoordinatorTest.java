@@ -16,6 +16,8 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventLis
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -220,6 +222,58 @@ class GroupHitlCoordinatorTest {
         doThrow(new RuntimeException("store down")).when(scheduleStore).createSchedule(any());
 
         assertDoesNotThrow(() -> coordinator.scheduleGroupHitlTimeout(gc));
+    }
+
+    // =================================================================
+    // convertPauseToCancelIfSignalled — post-commit failures must not revert
+    // =================================================================
+
+    /**
+     * Regression: {@code notifyCancelled} used to run inside the same {@code try}
+     * as the store commit, under a blanket {@code catch (Exception)} that reset the
+     * in-memory state to {@code AWAITING_APPROVAL}. A listener throwing — an SSE
+     * sink on a closed stream is the realistic case — therefore left the store
+     * holding {@code CANCELLED} while memory said {@code AWAITING_APPROVAL}, and
+     * {@code executeDiscussion}'s {@code finally} reads that in-memory state: it
+     * skips {@code forgetConversation} for {@code AWAITING_APPROVAL} and only runs
+     * {@code cleanupEphemeralAgents} for {@code FAILED}/{@code CANCELLED}, so
+     * dynamically created agents stayed deployed.
+     */
+    @Test
+    void convertPauseToCancelIfSignalled_listenerThrowsAfterCommit_stateStaysCancelled() throws Exception {
+        var coordinator = coordinator();
+        var gc = gc(GroupConversationState.AWAITING_APPROVAL);
+        var token = new DiscussionControlToken();
+        token.setSignal(ControlSignal.CANCEL_GRACEFUL);
+        var listener = mock(GroupDiscussionEventListener.class);
+        doThrow(new RuntimeException("SSE stream closed")).when(listener).onCancelled(any());
+
+        assertDoesNotThrow(() -> coordinator.convertPauseToCancelIfSignalled(gc, listener, token));
+
+        verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+        assertEquals(GroupConversationState.CANCELLED, gc.getState(),
+                "the commit already landed — a throwing listener must not roll the in-memory state back");
+    }
+
+    /**
+     * The pre-commit revert is the one that must stay: a lost state race means the
+     * store still holds {@code AWAITING_APPROVAL}, so memory has to agree.
+     */
+    @Test
+    void convertPauseToCancelIfSignalled_commitLosesRace_revertsToAwaitingApproval() throws Exception {
+        var coordinator = coordinator();
+        var gc = gc(GroupConversationState.AWAITING_APPROVAL);
+        var token = new DiscussionControlToken();
+        token.setSignal(ControlSignal.CANCEL_GRACEFUL);
+        doThrow(new IResourceStore.ResourceModifiedException("raced"))
+                .when(conversationStore).updateIfState(any(), any());
+        var listener = mock(GroupDiscussionEventListener.class);
+
+        coordinator.convertPauseToCancelIfSignalled(gc, listener, token);
+
+        assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState());
+        verifyNoInteractions(listener);
+        verifyNoInteractions(scheduleStore);
     }
 
     @Test

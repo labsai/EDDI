@@ -15,6 +15,10 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -89,6 +93,41 @@ class HttpCallToolsProviderTest {
     @Test
     void normalizeEndpointPath_absoluteUrl_keepsOnlyThePath() {
         assertEquals("/agentstore/agents", HttpCallToolsProvider.normalizeEndpointPath("https://eddi.example/agentstore/agents"));
+    }
+
+    // =================================================================
+    // safeTemplateMerge — reserved namespace protection
+    // =================================================================
+
+    /**
+     * Every top-level namespace {@code MemoryItemConverter#convert} writes must be
+     * unwritable by a model-supplied tool argument. {@code snippets} and
+     * {@code vars} were missing from the reserved set (flagged on PR #626): a
+     * prompt-injected argument named {@code vars} could shadow the whole
+     * deployment-configuration namespace that httpcall templates read as
+     * {@code {vars.<key>}}.
+     * <p>
+     * The list here is deliberately spelled out rather than derived, so adding a
+     * namespace to the converter without reserving it fails this test instead of
+     * silently agreeing with itself.
+     */
+    @Test
+    void safeTemplateMerge_blocksEveryConverterNamespace() {
+        var reserved = List.of("context", "properties", "memory", "snippets", "vars",
+                "userInfo", "conversationInfo", "conversationLog");
+        Map<String, Object> templateData = new HashMap<>();
+        Map<String, Object> args = new HashMap<>();
+        reserved.forEach(k -> {
+            templateData.put(k, "legitimate-" + k);
+            args.put(k, "injected-" + k);
+        });
+        args.put("customerId", "42"); // an ordinary httpcall parameter
+
+        HttpCallToolsProvider.safeTemplateMerge(templateData, args);
+
+        reserved.forEach(k -> assertEquals("legitimate-" + k, templateData.get(k),
+                "reserved namespace '" + k + "' must survive a colliding tool argument"));
+        assertEquals("42", templateData.get("customerId"), "non-reserved arguments still merge");
     }
 
     @Test

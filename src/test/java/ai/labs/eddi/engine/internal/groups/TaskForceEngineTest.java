@@ -175,6 +175,85 @@ class TaskForceEngineTest {
         verifyNoInteractions(jsonSerialization);
     }
 
+    // =================================================================
+    // Stale-snapshot regressions (`completedTasks` is captured before the
+    // verification phase runs and TaskItem is immutable, so its status() never
+    // reflects a verdict applied during the phase).
+    // =================================================================
+
+    /**
+     * A verifier LLM repeating the same subject twice used to abort the whole
+     * parse: the second match re-verified an already-VERIFIED task, tripping
+     * {@code verifyTask}'s {@code requireStatus(COMPLETED)} guard. The
+     * {@code catch} then returned false and every verdict after the duplicate was
+     * silently dropped. The duplicate must be skipped instead.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void tryParseVerificationJson_duplicateSubject_skipsSecondInsteadOfAborting() throws Exception {
+        var gc = completedTaskConversation("Write the report");
+        var snapshot = List.of(gc.getTaskList().getTasks().get(0));
+
+        var engine = engine();
+        when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(List.of(
+                Map.of("subject", "Write the report", "passed", true, "feedback", "first verdict"),
+                Map.of("subject", "Write the report", "passed", false, "feedback", "duplicate")));
+
+        boolean result = engine.tryParseVerificationJson(gc, snapshot, "[]", null);
+
+        assertTrue(result, "the first verdict was applied, so the parse succeeded");
+        var live = gc.getTaskList().getTasks().get(0);
+        assertTrue(live.verified(), "first verdict stands");
+        assertEquals("first verdict", live.verificationNote(), "the duplicate must not overwrite the first verdict");
+    }
+
+    /**
+     * The fallback loop runs when JSON parsing fails — including when it fails
+     * <em>after</em> applying some verdicts. Re-verifying those already-terminal
+     * tasks threw {@code IllegalStateException} from outside the enclosing
+     * {@code try}, so it escaped {@code executeTaskVerificationPhase} entirely and
+     * the verifier's transcript entry and {@code onSpeakerComplete} event were
+     * lost. Live status must be re-read.
+     */
+    @Test
+    void parseAndApplyVerification_taskAlreadyVerified_fallbackSkipsItInsteadOfThrowing() {
+        var gc = completedTaskConversation("Write the report");
+        var snapshot = List.of(gc.getTaskList().getTasks().get(0)); // status()==COMPLETED forever
+        // Simulate "the JSON pass verified this one, then blew up".
+        gc.getTaskList().verifyTask(snapshot.get(0).id(), true, "verified by the JSON pass");
+
+        var engine = engine();
+
+        assertDoesNotThrow(() -> engine.parseAndApplyVerification(gc, snapshot, "not json at all", null));
+        assertEquals("verified by the JSON pass", gc.getTaskList().getTasks().get(0).verificationNote(),
+                "the fallback must not overwrite a verdict the JSON pass already applied");
+    }
+
+    @Test
+    void parseAndApplyVerification_stillCompleted_fallbackAutoVerifies() {
+        var gc = completedTaskConversation("Write the report");
+        var snapshot = List.of(gc.getTaskList().getTasks().get(0));
+
+        engine().parseAndApplyVerification(gc, snapshot, "not json at all", null);
+
+        var live = gc.getTaskList().getTasks().get(0);
+        assertTrue(live.verified());
+        assertTrue(live.verificationNote().contains("Auto-verified"));
+    }
+
+    /** A conversation holding exactly one task, driven to COMPLETED. */
+    private GroupConversation completedTaskConversation(String subject) {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setTaskList(new SharedTaskList());
+        var task = new TaskItem(subject, "desc", 1);
+        gc.getTaskList().addTask(task);
+        gc.getTaskList().assignTask(task.id(), AGENT_A, "A");
+        gc.getTaskList().startTask(task.id());
+        gc.getTaskList().completeTask(task.id(), "done");
+        return gc;
+    }
+
     @Test
     void formatVerificationForDisplay_nonJson_returnsRawContentUnchanged() {
         String raw = "just plain text, no brackets";

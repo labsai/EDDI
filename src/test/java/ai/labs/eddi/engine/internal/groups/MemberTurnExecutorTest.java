@@ -12,16 +12,22 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Focused unit tests for {@link MemberTurnExecutor}, extracted from
@@ -101,6 +107,94 @@ class MemberTurnExecutorTest {
         assertEquals(TranscriptEntryType.SKIPPED, entry.type());
         assertEquals("target-x", entry.targetAgentId());
         assertTrue(entry.errorReason().contains("down"));
+    }
+
+    // =================================================================
+    // tryResolveMemberToolPause — the graceful tool-rejection resume path
+    // =================================================================
+
+    /**
+     * Regression: the graceful path built its {@code TranscriptEntry} with the
+     * 9-arg constructor, so a signing-enabled agent produced an <em>unsigned</em>
+     * contribution whenever its tool call was auto-rejected — while the normal
+     * path, three lines away, signed identically-shaped entries. Peers read both
+     * through the same {@code verifyPriorEntriesIfRequired}, so the unsigned one
+     * simply had nothing to verify.
+     */
+    @Test
+    void tryResolveMemberToolPause_gracefulContribution_isSigned() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var signingGuard = Mockito.mock(GroupSigningGuard.class);
+        var contextBuilder = Mockito.mock(GroupContextBuilder.class);
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+
+        // Resume completes immediately with a tool-less answer.
+        doAnswer(inv -> {
+            inv.getArgument(2, ConversationResponseHandler.class).onComplete(snapshot);
+            return null;
+        }).when(conversationService).resumeConversation(anyString(), any(), any());
+        when(contextBuilder.extractResponse(snapshot)).thenReturn("tool-less answer");
+        when(signingGuard.signOutgoingMessage(eq(AGENT_A), eq("group-1"), eq("tool-less answer"), anyString()))
+                .thenReturn(new GroupSigningGuard.SigningResult("sig-abc", "nonce-1", 1234L, 7));
+
+        var executor = new MemberTurnExecutor(conversationService, Mockito.mock(IAgentFactory.class),
+                signingGuard, contextBuilder, Mockito.mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+
+        var entry = executor.tryResolveMemberToolPause(member(), gc, "conv-1", "input", 5, 0,
+                phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null);
+
+        assertNotNull(entry, "a completed resume yields a real contribution, not a fallback");
+        assertEquals("tool-less answer", entry.content());
+        assertEquals("sig-abc", entry.signature());
+        assertEquals("nonce-1", entry.signatureNonce());
+        assertEquals(1234L, entry.signatureTimestampMs());
+        assertEquals(7, entry.signatureKeyVersion());
+    }
+
+    /**
+     * The signing call must stay a no-op for agents that do not sign —
+     * {@code signOutgoingMessage} returns
+     * {@link GroupSigningGuard.SigningResult#UNSIGNED} then, and the entry keeps
+     * null envelope fields exactly as before the fix.
+     */
+    @Test
+    void tryResolveMemberToolPause_signingDisabled_entryStaysUnsigned() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var signingGuard = Mockito.mock(GroupSigningGuard.class);
+        var contextBuilder = Mockito.mock(GroupContextBuilder.class);
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+
+        doAnswer(inv -> {
+            inv.getArgument(2, ConversationResponseHandler.class).onComplete(snapshot);
+            return null;
+        }).when(conversationService).resumeConversation(anyString(), any(), any());
+        when(contextBuilder.extractResponse(snapshot)).thenReturn("tool-less answer");
+        when(signingGuard.signOutgoingMessage(any(), any(), any(), any()))
+                .thenReturn(GroupSigningGuard.SigningResult.UNSIGNED);
+
+        var executor = new MemberTurnExecutor(conversationService, Mockito.mock(IAgentFactory.class),
+                signingGuard, contextBuilder, Mockito.mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+
+        var entry = executor.tryResolveMemberToolPause(member(), gc, "conv-1", "input", 5, 0,
+                phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null);
+
+        assertNotNull(entry);
+        assertNull(entry.signature());
+        assertNull(entry.signatureNonce());
+        assertNull(entry.signatureTimestampMs());
+        assertNull(entry.signatureKeyVersion());
     }
 
     @Test

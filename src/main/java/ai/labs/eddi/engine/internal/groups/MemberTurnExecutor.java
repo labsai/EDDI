@@ -449,9 +449,22 @@ public class MemberTurnExecutor {
 
         LOGGER.infof("Member '%s' produced a tool-less contribution after group auto-rejection (conv %s)",
                 member.agentId(), convId);
+
+        // Signed exactly like the normal path above: this is a real member
+        // contribution with the same role in the transcript, and peers read it
+        // through the same verifyPriorEntriesIfRequired. Returning it unsigned meant
+        // a signing-enabled agent silently produced an unverifiable entry whenever
+        // its tool pause was auto-rejected — the one branch where an entry's
+        // provenance matters most, since its content was shaped by a rejection the
+        // agent did not choose. signOutgoingMessage yields UNSIGNED when signing is
+        // off, so this is a no-op for agents that never sign.
+        GroupSigningGuard.SigningResult signing = signingGuard.signOutgoingMessage(
+                member.agentId(), gc.getGroupId(), response, phase.name());
+
         return new TranscriptEntry(member.agentId(), member.displayName(), response,
                 phaseIdx, phase.name(), entryType, Instant.now(),
-                null, targetAgentId);
+                null, targetAgentId, signing.signature(),
+                signing.nonce(), signing.timestampMs(), signing.keyVersion());
     }
 
     /**

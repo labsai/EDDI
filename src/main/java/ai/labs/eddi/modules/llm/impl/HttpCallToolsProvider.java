@@ -60,9 +60,18 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      * authenticated identity and session state. LLM-provided tool arguments must
      * never override these — a prompt-injection attack could otherwise manipulate
      * userId/agentId in HTTP call templates.
+     * <p>
+     * This must stay in sync with every top-level namespace
+     * {@code MemoryItemConverter#convert} writes. {@code snippets} and {@code vars}
+     * were missing (flagged on PR #626): both are added by
+     * {@code addSnippetsAndVars}, and {@code vars} in particular carries
+     * deployment-wide configuration that httpcall templates read as
+     * {@code {vars.<key>}} — leaving it unreserved let a prompt-injected tool
+     * argument named {@code vars} shadow the whole namespace for that call.
      */
     private static final Set<String> RESERVED_TEMPLATE_KEYS = Set.of(
             "context", "properties", "memory",
+            "snippets", "vars",
             "userInfo", "conversationInfo", "conversationLog");
 
     private final IRestAgentStore restAgentStore;
@@ -161,7 +170,13 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                                     Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
                                     safeTemplateMerge(templateData, args);
                                 } catch (IOException e) {
-                                    LOGGER.warn("Failed to parse tool arguments: " + toolRequest.arguments(), e);
+                                    // The argument payload itself is deliberately not logged: it is
+                                    // model-generated from conversation content and routinely carries
+                                    // user identifiers, free text, or credentials destined for an
+                                    // httpcall body. Length is enough to tell truncation from
+                                    // malformed JSON, which is what this warning is actually for.
+                                    LOGGER.warnf("Failed to parse tool arguments for httpcall tool '%s' (%d chars): %s",
+                                            apiCall.getName(), toolRequest.arguments().length(), e.getMessage());
                                 }
                             }
 

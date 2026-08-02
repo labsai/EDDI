@@ -188,9 +188,13 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // to GroupConversation for lifecycle cleanup (Copilot PR review fix).
         // The lists are stored by reference — after tool execution, they'll
         // contain all agent IDs accumulated during this turn.
-        if (anyDynamicToolAdded) {
-            memory.getCurrentStep().storeData(new Data<>(KEY_DYNAMIC_CREATED_AGENT_IDS, sharedCreatedIds));
-            memory.getCurrentStep().storeData(new Data<>(KEY_DYNAMIC_RETAINED_AGENT_IDS, sharedRetainedIds));
+        // getCurrentStep() is treated as nullable by seedCreatedAgentIds a few lines
+        // up; assume the same here rather than half-guarding one of two reads of the
+        // same value in the same method.
+        var currentStep = memory.getCurrentStep();
+        if (anyDynamicToolAdded && currentStep != null) {
+            currentStep.storeData(new Data<>(KEY_DYNAMIC_CREATED_AGENT_IDS, sharedCreatedIds));
+            currentStep.storeData(new Data<>(KEY_DYNAMIC_RETAINED_AGENT_IDS, sharedRetainedIds));
         }
     }
 
