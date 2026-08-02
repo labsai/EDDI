@@ -23,7 +23,10 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
+import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
@@ -890,7 +893,7 @@ class AgentOrchestratorCoverageTest {
     // ═══════════════════════════════════════════════════════════════════
 
     private AgentOrchestrator.ToolSetup setupWith(List<ToolSpecification> all, List<ToolSpecification> builtIn) {
-        return new AgentOrchestrator.ToolSetup(all, Map.of(), Map.of(), builtIn, Map.of(), Map.of());
+        return new AgentOrchestrator.ToolSetup(all, Map.of(), Map.of(), builtIn, Map.of(), Map.of(), Map.of());
     }
 
     private ToolSpecification spec(String name) {
@@ -1171,6 +1174,78 @@ class AgentOrchestratorCoverageTest {
         assertFalse(batch.isTranscriptOmitted());
     }
 
+    /** One gated http call, with whatever resolver the test wants to supply. */
+    private PendingToolCallBatch batchWithResolver(AgentOrchestrator.ToolRequestResolver resolver) {
+        var deploy = ToolExecutionRequest.builder().id("c1").name("deployAgent").arguments("{\"id\":\"a1\"}").build();
+        var gr = new ToolApprovalGate.GateResult(List.of(deploy), List.of(), Map.of("c1", "http.post:*"));
+        List<ChatMessage> msgs = List.of(UserMessage.from("deploy it"), AiMessage.from(List.of(deploy)));
+        return orchestrator.buildPendingBatch(msgs, gr, twoToolTask(), memory, 0,
+                List.of(), new ArrayList<>(), 1, 0, Map.of("deployAgent", "http"),
+                gateCalculate(), PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT,
+                Map.of(), null, resolver == null ? Map.of() : Map.of("deployAgent", resolver));
+    }
+
+    @Test
+    void buildPendingBatch_pinsTheResolvedRequestSoApprovalBindsToItNotTheToolName() {
+        var resolved = ResolvedRequest.of("POST", "https://eddi.example/administration/production/deploy/a1",
+                Map.of("force", "false"), Map.of("Authorization", RequestRedactor.REDACTED), "{\"id\":\"a1\"}", true);
+
+        var call = batchWithResolver(req -> resolved).getCalls().get(0);
+
+        assertTrue(call.isRequestPinned());
+        assertEquals(resolved.fingerprint(), call.getRequestFingerprint());
+        // The approver sees the real request, not an operationId.
+        assertEquals("POST", call.getRequestPreview().getMethod());
+        assertEquals("https://eddi.example/administration/production/deploy/a1", call.getRequestPreview().getUri());
+        assertEquals("{\"id\":\"a1\"}", call.getRequestPreview().getBody());
+        assertFalse(call.getRequestPreview().isBodyTruncated());
+        // Headers travel too, because the fingerprint covers them — approving what
+        // you were shown has to mean the whole of what is later checked.
+        assertEquals(RequestRedactor.REDACTED, call.getRequestPreview().getHeaders().get("authorization"));
+    }
+
+    @Test
+    void buildPendingBatch_leavesACallUnpinnedWhenNothingCanResolveIt() {
+        // Every non-http tool: there is no HTTP request on this side of the
+        // boundary to pin, so the call is approved on name and arguments exactly
+        // as it was before pinning existed.
+        var call = batchWithResolver(null).getCalls().get(0);
+
+        assertFalse(call.isRequestPinned());
+        assertNull(call.getRequestFingerprint());
+        assertNull(call.getRequestPreview());
+    }
+
+    @Test
+    void buildPendingBatch_survivesAResolverThatThrows() {
+        // A template error while previewing must not kill the turn. The pause is
+        // still built; the call is merely unpinned, which is the honest outcome
+        // for "we could not determine the request".
+        var batch = batchWithResolver(req -> {
+            throw new LifecycleException("template blew up", new RuntimeException());
+        });
+
+        assertEquals(1, batch.getCalls().size());
+        assertFalse(batch.getCalls().get(0).isRequestPinned());
+        assertNotNull(batch.getPauseEpoch());
+    }
+
+    @Test
+    void buildPendingBatch_truncatesAnOversizeBodyForDisplayWithoutWeakeningTheFingerprint() {
+        String hugeBody = "x".repeat(PendingToolCallBatch.PREVIEW_BODY_MAX_BYTES + 500);
+        var resolved = ResolvedRequest.of("POST", "https://eddi.example/x", Map.of(), Map.of(), hugeBody, true);
+
+        var call = batchWithResolver(req -> resolved).getCalls().get(0);
+
+        assertTrue(call.getRequestPreview().isBodyTruncated());
+        assertTrue(call.getRequestPreview().getBody().length() <= PendingToolCallBatch.PREVIEW_BODY_MAX_BYTES);
+        // The fingerprint was computed over the WHOLE body before capping, so a
+        // caller cannot hide a payload change past the display cut-off.
+        assertEquals(resolved.fingerprint(), call.getRequestFingerprint());
+        assertNotEquals(ResolvedRequest.of("POST", "https://eddi.example/x", Map.of(), Map.of(), hugeBody + "y", true).fingerprint(),
+                call.getRequestFingerprint());
+    }
+
     @Test
     void buildPendingBatch_persistsTheGoverningRuleAndThePerCallMatch() {
         // The rule is resolved at gate time and must SURVIVE the pause: the persisted
@@ -1191,7 +1266,7 @@ class AgentOrchestratorCoverageTest {
         var batch = orchestrator.buildPendingBatch(msgs, gr, twoToolTask(), memory, 0,
                 List.of(), new ArrayList<>(), 1, 0, Map.of("deployAgent", "http", "deleteAgent", "http"),
                 gateCalculate(), PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT,
-                Map.of("c1", deployRule, "c2", deleteRule), deleteRule);
+                Map.of("c1", deployRule, "c2", deleteRule), deleteRule, Map.of());
 
         assertNotNull(batch.getEffectiveRule());
         assertEquals("http.delete:*", batch.getEffectiveRule().getMatch());

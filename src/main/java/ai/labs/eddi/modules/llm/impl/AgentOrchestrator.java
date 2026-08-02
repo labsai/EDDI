@@ -43,6 +43,7 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
@@ -859,7 +860,8 @@ class AgentOrchestrator {
      */
     record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
             Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
-            Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints) {
+            Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints,
+            Map<String, ToolRequestResolver> toolRequestResolvers) {
     }
 
     /**
@@ -928,12 +930,19 @@ class AgentOrchestrator {
         // Copy built-in specs before merging external ones — LAZY activation needs it.
         List<ToolSpecification> builtInSpecs = new ArrayList<>(toolSpecs);
 
+        Map<String, ToolRequestResolver> toolRequestResolvers = new HashMap<>();
+
         // Merge httpcall tools discovered from workflow (if any)
         if (httpCallTools != null) {
             mergeExternalTools(httpCallTools.toolSpecs(), httpCallTools.executors(), "http", toolSpecs, toolExecutors, toolSources);
             // Endpoint provenance travels beside the source so an approval pattern can
             // address what a tool calls, not just what it is named.
             toolEndpoints.putAll(httpCallTools.endpoints());
+            // Only httpcall tools resolve to an HTTP request, so only they can be
+            // pinned. A name rejected by mergeExternalTools as a duplicate keeps its
+            // resolver here harmlessly: nothing looks one up for a tool that was
+            // never registered.
+            toolRequestResolvers.putAll(httpCallTools.resolvers());
         }
 
         // Merge mcpcalls tools discovered from workflow (if any)
@@ -946,7 +955,8 @@ class AgentOrchestrator {
             mergeExternalTools(a2aTools.toolSpecs(), a2aTools.executors(), "a2a", toolSpecs, toolExecutors, toolSources);
         }
 
-        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames), Map.copyOf(toolEndpoints));
+        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames), Map.copyOf(toolEndpoints),
+                Map.copyOf(toolRequestResolvers));
     }
 
     /**
@@ -1291,7 +1301,8 @@ class AgentOrchestrator {
                             // 3) snapshot + persist the pending batch, then abort the loop
                             PendingToolCallBatch batch = buildPendingBatch(currentMessages, gateResult, task, memory,
                                     i, activatedToolNames(isLazy, activeSpecs), trace, pausesSoFar + 1, llmTaskIndex,
-                                    toolSources, effectiveToolApprovals, transcriptMaxBytes, ruleByCallId, governingRule);
+                                    toolSources, effectiveToolApprovals, transcriptMaxBytes, ruleByCallId, governingRule,
+                                    setup.toolRequestResolvers());
                             memory.setHitlPendingToolCalls(batch);
                             incrementToolPauseCount(memory, pausesSoFar);
                             throw new ToolApprovalRequiredException(
@@ -1869,7 +1880,7 @@ class AgentOrchestrator {
                                            Map<String, String> toolSources, ToolApprovalsConfig effectiveToolApprovals,
                                            int transcriptMaxBytes) {
         return buildPendingBatch(currentMessages, gateResult, task, memory, iterationIndex, activatedToolNames, trace,
-                pauseCountThisTurn, llmTaskIndex, toolSources, effectiveToolApprovals, transcriptMaxBytes, Map.of(), null);
+                pauseCountThisTurn, llmTaskIndex, toolSources, effectiveToolApprovals, transcriptMaxBytes, Map.of(), null, Map.of());
     }
 
     /**
@@ -1889,6 +1900,11 @@ class AgentOrchestrator {
      *            the single rule governing this pause (strictest of the above), or
      *            null; persisted so the post-pause resolvers read the same answer
      *            this gate computed
+     * @param resolvers
+     *            per httpcall tool name, how to resolve what it would send —
+     *            {@code ToolSetup#toolRequestResolvers}. Absent entries (every
+     *            non-http tool) leave the call unpinned, which is the pre-pinning
+     *            behaviour.
      */
     PendingToolCallBatch buildPendingBatch(List<ChatMessage> currentMessages, ToolApprovalGate.GateResult gateResult,
                                            LlmConfiguration.Task task, IConversationMemory memory, int iterationIndex,
@@ -1897,7 +1913,8 @@ class AgentOrchestrator {
                                            Map<String, String> toolSources, ToolApprovalsConfig effectiveToolApprovals,
                                            int transcriptMaxBytes,
                                            Map<String, ToolApprovalsConfig.ApprovalRule> ruleByCallId,
-                                           ToolApprovalsConfig.ApprovalRule governingRule) {
+                                           ToolApprovalsConfig.ApprovalRule governingRule,
+                                           Map<String, ToolRequestResolver> resolvers) {
         PendingToolCallBatch batch = new PendingToolCallBatch();
         batch.setPauseEpoch(UUID.randomUUID().toString());
         batch.setLlmTaskId(task.getId());
@@ -1952,6 +1969,7 @@ class AgentOrchestrator {
             // on a batch should be able to tell which call brought it.
             var callRule = req.id() != null ? ruleByCallId.get(req.id()) : null;
             call.setMatchedRule(callRule != null ? callRule.getMatch() : null);
+            pinResolvedRequest(call, req, resolvers);
             calls.add(call);
         }
         batch.setCalls(calls);
@@ -1966,6 +1984,59 @@ class AgentOrchestrator {
         batch.setFingerprint(fingerprint(gateResult.gated()));
 
         return batch;
+    }
+
+    /**
+     * Resolve what this gated call would send, and pin it to the pause.
+     *
+     * <p>
+     * Records both the redacted preview (so the approver sees the actual request
+     * rather than a tool name) and its fingerprint (so the request can be
+     * re-checked immediately before execution).
+     *
+     * <p>
+     * <b>Never fails the pause.</b> A tool with no resolver — every non-http source
+     * — and a resolve that throws both leave the call simply unpinned, which is
+     * exactly the behaviour that existed before pinning: approval on name and
+     * arguments. Letting a template error here abort the batch would turn a display
+     * feature into a way to kill a turn, and the honest failure mode for "we could
+     * not determine the request" is to say so, not to guess.
+     */
+    private void pinResolvedRequest(PendingToolCallBatch.PendingToolCall call, ToolExecutionRequest req,
+                                    Map<String, ToolRequestResolver> resolvers) {
+
+        var resolver = resolvers.get(req.name());
+        if (resolver == null) {
+            return;
+        }
+        try {
+            ResolvedRequest resolved = resolver.resolve(req);
+            call.setRequestFingerprint(resolved.fingerprint());
+            call.setRequestPreview(toPreview(resolved));
+        } catch (Exception e) {
+            LOGGER.warnf(e, "Could not resolve the request for gated tool '%s'; it will be approved unpinned.", req.name());
+        }
+    }
+
+    /** The persisted, display-shaped view of a resolved request. */
+    private static PendingToolCallBatch.ResolvedRequestPreview toPreview(ResolvedRequest resolved) {
+        var preview = new PendingToolCallBatch.ResolvedRequestPreview();
+        preview.setMethod(resolved.method());
+        preview.setUri(resolved.uri());
+        preview.setQueryParams(resolved.queryParams());
+        preview.setHeaders(resolved.headers());
+
+        String body = resolved.body();
+        if (body != null && body.getBytes(StandardCharsets.UTF_8).length > PendingToolCallBatch.PREVIEW_BODY_MAX_BYTES) {
+            // Capped for display only — the fingerprint above was computed over the
+            // whole body, so truncating here cannot weaken the pre-execution check.
+            preview.setBody(capUtf8(body, PendingToolCallBatch.PREVIEW_BODY_MAX_BYTES));
+            preview.setBodyTruncated(true);
+        } else {
+            preview.setBody(body);
+            preview.setBodyTruncated(false);
+        }
+        return preview;
     }
 
     /** Caps a string to at most maxBytes UTF-8 bytes without splitting a char. */
@@ -2568,7 +2639,20 @@ class AgentOrchestrator {
      *            method and path are what the agent designer actually wrote in the
      *            endpoint allow-list.
      */
-    record HttpCallToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors, Map<String, String> endpoints) {
+    record HttpCallToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors, Map<String, String> endpoints,
+            Map<String, ToolRequestResolver> resolvers) {
+    }
+
+    /**
+     * Resolves what an httpcall tool would send, without sending it.
+     * <p>
+     * Only httpcall tools have one. A builtin, MCP or A2A tool is not an HTTP
+     * request this side of the boundary, so there is nothing to pin — those calls
+     * pause and are approved on their name and arguments alone, exactly as before.
+     */
+    @FunctionalInterface
+    interface ToolRequestResolver {
+        ResolvedRequest resolve(ToolExecutionRequest toolRequest) throws LifecycleException;
     }
 
     /**
@@ -2626,10 +2710,34 @@ class AgentOrchestrator {
      * WorkflowConfiguration → filter httpcall steps → load ApiCallsConfiguration →
      * create tools from each ApiCall.
      */
+    /**
+     * Template data for one httpcall tool invocation: conversation memory plus the
+     * model's arguments merged over it.
+     * <p>
+     * Shared by the executor and the resolver on purpose. The gate-time fingerprint
+     * only means anything if it was computed from the same inputs execution will
+     * use — two copies of this merge would eventually disagree, and the guard would
+     * then reject correct calls (or, worse, pass altered ones).
+     */
+    private Map<String, Object> templateDataFor(IConversationMemory memory, ToolExecutionRequest toolRequest) {
+        Map<String, Object> templateData = memoryItemConverter.convert(memory);
+        if (toolRequest.arguments() != null && !toolRequest.arguments().isBlank()) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
+                safeTemplateMerge(templateData, args);
+            } catch (IOException e) {
+                LOGGER.warn("Failed to parse tool arguments: " + toolRequest.arguments(), e);
+            }
+        }
+        return templateData;
+    }
+
     HttpCallToolsResult discoverHttpCallTools(IConversationMemory memory) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> executors = new HashMap<>();
         Map<String, String> endpoints = new HashMap<>();
+        Map<String, ToolRequestResolver> resolvers = new HashMap<>();
 
         try {
             LOGGER.infof("Discovering httpcall tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
@@ -2668,19 +2776,15 @@ class AgentOrchestrator {
                                 apiRequest.getMethod().toLowerCase(Locale.ROOT) + ":" + normalizeEndpointPath(apiRequest.getPath()));
                     }
 
+                    // Resolving and executing MUST build their template data the same
+                    // way: the fingerprint pinned at gate time is only meaningful if
+                    // it describes the request execution will actually construct.
+                    resolvers.put(apiCall.getName(),
+                            toolRequest -> apiCallExecutor.resolve(apiCall, memory, templateDataFor(memory, toolRequest), targetServerUrl));
+
                     executors.put(apiCall.getName(), (toolRequest, memoryId) -> {
                         try {
-                            Map<String, Object> templateData = memoryItemConverter.convert(memory);
-
-                            if (toolRequest.arguments() != null && !toolRequest.arguments().isBlank()) {
-                                try {
-                                    @SuppressWarnings("unchecked")
-                                    Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
-                                    safeTemplateMerge(templateData, args);
-                                } catch (IOException e) {
-                                    LOGGER.warn("Failed to parse tool arguments: " + toolRequest.arguments(), e);
-                                }
-                            }
+                            Map<String, Object> templateData = templateDataFor(memory, toolRequest);
 
                             Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl);
 
@@ -2702,7 +2806,7 @@ class AgentOrchestrator {
             LOGGER.warn("Failed to discover httpcall tools from workflow", e);
         }
 
-        return new HttpCallToolsResult(toolSpecs, executors, endpoints);
+        return new HttpCallToolsResult(toolSpecs, executors, endpoints, resolvers);
     }
 
     // --- McpCalls auto-discovery from workflow ---
