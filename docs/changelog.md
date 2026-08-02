@@ -5,6 +5,20 @@
 
 ---
 
+## 🧩 refactor(orchestrator): introduce IAgentOrchestrator (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 6. Two methods, because there are exactly two ways into the tool loop: `executeIfToolsEnabled` and `resumeToolLoop`. Everything else `AgentOrchestrator` exposes is internal or test-facing, and hoisting it would turn a seam into a second copy of the class's surface.
+
+**Package-private, and in `modules.llm.impl` rather than an `api` package** — deliberately. `ExecutionResult` is a package-private nested record; moving the interface elsewhere would have meant promoting it purely to satisfy a file's location, widening a genuinely internal type for cosmetics. A public interface whose methods return a package-private record compiles but cannot be called from outside anyway, which is worse than matching the visibility that already exists. Both consumers (`LlmTask`, `CascadingModelExecutor`) live in that package already.
+
+The two implementing methods widen from package-private to `public` — required, since interface methods are implicitly public. Effective visibility is unchanged: the class itself is package-private.
+
+The 13 orchestrator test classes are untouched. They construct the concrete class and reach its package-private internals, which is exactly why this is a pure-move commit and not a migration. 701 tests green.
+
+---
+
 ## 🧩 refactor(orchestrator): extract ToolApprovalGateSupport (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

@@ -92,7 +92,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * injects.
  */
 @ApplicationScoped
-class AgentOrchestrator {
+class AgentOrchestrator implements IAgentOrchestrator {
     private static final Logger LOGGER = Logger.getLogger(AgentOrchestrator.class);
 
     /**
@@ -445,9 +445,11 @@ class AgentOrchestrator {
      *            that rejects JSON mode alongside function calling (Gemini) is
      *            never sent both.
      */
-    ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, LlmConfiguration.Task task,
-                                          IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
-                                          int transcriptMaxBytes, JsonResponseFormatPolicy jsonPolicy)
+    @Override
+    public ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages,
+                                                 LlmConfiguration.Task task,
+                                                 IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
+                                                 int transcriptMaxBytes, JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
         // Discover + register all tools (built-in + http + mcp + a2a) — the SAME
@@ -502,9 +504,11 @@ class AgentOrchestrator {
      * but carrying the JSON response-format policy so the continuation's requests
      * match what the live loop would have sent.
      */
-    ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory, PendingToolCallBatch batch,
-                                   HitlDecision decision, boolean toolHitlEnabled,
-                                   JsonResponseFormatPolicy jsonPolicy)
+    @Override
+    public ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory,
+                                          PendingToolCallBatch batch,
+                                          HitlDecision decision, boolean toolHitlEnabled,
+                                          JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
         String conversationId = memory.getConversationId();

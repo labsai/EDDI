@@ -114,7 +114,7 @@ public class LlmTask implements ILifecycleTask {
      * agent-mode branches reachable only through
      * {@code getDeclaredField("agentOrchestrator")} reflection.
      */
-    private final AgentOrchestrator agentOrchestrator;
+    private final IAgentOrchestrator agentOrchestrator;
 
     // Field-injected so the many direct-construction unit tests are unaffected;
     // null-guarded at the call site.
@@ -157,7 +157,7 @@ public class LlmTask implements ILifecycleTask {
             GlobalVariableResolver globalVariableResolver,
             CounterweightService counterweightService,
             IdentityMaskingService identityMaskingService,
-            AgentOrchestrator agentOrchestrator, ConversationHistoryBuilder conversationHistoryBuilder,
+            IAgentOrchestrator agentOrchestrator, ConversationHistoryBuilder conversationHistoryBuilder,
             MeterRegistry meterRegistry, CallerIdentityContext callerIdentityContext) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
