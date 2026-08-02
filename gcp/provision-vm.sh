@@ -84,14 +84,15 @@ ${BOLD}Usage:${RESET}
   $(basename "$0") <command> [options]
 
 ${BOLD}Commands:${RESET}
-  create        Provision a new GCP VM and install EDDI
-  update        Update EDDI image tag on an existing VM
-  delete        Delete a VM (pass VM_NAME as first positional arg)
-  list          List all EDDI VMs in the project
-  ssh           SSH into a VM (pass VM_NAME as first positional arg)
-  status        Check VM state and EDDI health
-  logs          Stream startup/EDDI logs from the VM
-  ip            Print the external IP of a VM
+  create          Provision a new GCP VM and install EDDI
+  update          Update EDDI image tag on an existing VM
+  install-reset   Install the 48-hour demo-reset timer on a VM
+  delete          Delete a VM (pass VM_NAME as first positional arg)
+  list            List all EDDI VMs in the project
+  ssh             SSH into a VM (pass VM_NAME as first positional arg)
+  status          Check VM state and EDDI health
+  logs            Stream startup/EDDI logs from the VM
+  ip              Print the external IP of a VM
 
 ${BOLD}Create options:${RESET}
   --name=NAME               VM name                      [${DEFAULT_VM_NAME}]
@@ -151,6 +152,9 @@ ${BOLD}Examples:${RESET}
 
   # Roll back to latest
   $(basename "$0") update eddi-demo --eddi-version=latest
+
+  # Install 48-hour demo-reset timer
+  $(basename "$0") install-reset eddi-demo
 
   # Delete
   $(basename "$0") delete eddi-demo
@@ -993,6 +997,99 @@ REMOTE_SCRIPT
   echo "  Check logs: $(basename "$0") logs ${name}"
 }
 
+# ── Command: install-reset ────────────────────────────────────────────────────
+#
+# Copies eddi-demo-reset.sh to the VM and installs a systemd timer that fires
+# strictly every 48 hours.  Idempotent — safe to re-run.
+
+cmd_install_reset() {
+  local name="${1:-$VM_NAME}"
+  check_prerequisites
+  resolve_project
+
+  step "Installing demo-reset timer on: ${name}"
+
+  local vm_status
+  vm_status=$(gcloud compute instances describe "$name" \
+    --zone="$ZONE" --project="$GCP_PROJECT" \
+    --format='value(status)' 2>/dev/null) || {
+    fail "VM '${name}' not found in zone '${ZONE}'."
+  }
+  if [[ "$vm_status" != "RUNNING" ]]; then
+    fail "VM '${name}' is not running (status: ${vm_status})."
+  fi
+
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local reset_script="${script_dir}/eddi-demo-reset.sh"
+  [[ -f "$reset_script" ]] || fail "eddi-demo-reset.sh not found at: ${reset_script}"
+
+  info "Uploading eddi-demo-reset.sh..."
+  gcloud compute scp "$reset_script" "${name}:/tmp/eddi-demo-reset.sh" \
+    --zone="$ZONE" --project="$GCP_PROJECT" >/dev/null
+
+  info "Installing script and systemd timer on VM..."
+  gcloud compute ssh "$name" \
+    --zone="$ZONE" --project="$GCP_PROJECT" \
+    -- "sudo bash -s" << 'REMOTE_SCRIPT'
+set -euo pipefail
+EDDI_DIR=/root/.eddi
+DEST="${EDDI_DIR}/eddi-demo-reset.sh"
+
+install -m 0755 /tmp/eddi-demo-reset.sh "$DEST"
+rm -f /tmp/eddi-demo-reset.sh
+
+# Remove any legacy cron file from a previous install
+rm -f /etc/cron.d/eddi-demo-reset
+
+# systemd service unit — runs the reset script, appends to log
+cat > /etc/systemd/system/eddi-reset.service << UNIT
+[Unit]
+Description=EDDI demo reset — clear conversation data
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=${DEST}
+StandardOutput=append:/var/log/eddi-reset.log
+StandardError=append:/var/log/eddi-reset.log
+UNIT
+
+# systemd timer unit — fires strictly every 48 h after the last run
+# OnBootSec delays the first run by 10 min after a fresh reboot so
+# EDDI has time to finish starting before the reset executes.
+cat > /etc/systemd/system/eddi-reset.timer << UNIT
+[Unit]
+Description=Run EDDI demo reset every 48 hours
+Requires=eddi-reset.service
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=48h
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now eddi-reset.timer
+
+echo "Installed:  ${DEST}"
+echo "Service:    /etc/systemd/system/eddi-reset.service"
+echo "Timer:      /etc/systemd/system/eddi-reset.timer  (every 48 h)"
+echo "Status:     $(systemctl is-active eddi-reset.timer)"
+REMOTE_SCRIPT
+
+  echo ""
+  info "Demo-reset timer installed on ${CYAN}${name}${RESET}."
+  echo ""
+  dim "Runs automatically: every 48 h (systemd timer)"
+  dim "Check timer:        $(basename "$0") ssh ${name}  →  sudo systemctl status eddi-reset.timer"
+  dim "Trigger manually:   $(basename "$0") ssh ${name}  →  sudo /root/.eddi/eddi-demo-reset.sh"
+  dim "Watch log:          $(basename "$0") ssh ${name}  →  tail -f /var/log/eddi-reset.log"
+  echo ""
+}
+
 # ── Command: list ─────────────────────────────────────────────────────────────
 
 cmd_list() {
@@ -1175,14 +1272,15 @@ done
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 
 case "$COMMAND" in
-  create)         cmd_create ;;
-  update)         cmd_update "${POSITIONAL[0]:-}" ;;
-  delete|destroy|rm) cmd_delete "${POSITIONAL[0]:-}" ;;
-  list|ls)        cmd_list ;;
-  ssh|connect)    cmd_ssh "${POSITIONAL[0]:-}" ;;
-  status|health)  cmd_status "${POSITIONAL[0]:-}" ;;
-  logs|log)       cmd_logs "${POSITIONAL[0]:-}" ;;
-  ip)             cmd_ip "${POSITIONAL[0]:-}" ;;
+  create)              cmd_create ;;
+  update)              cmd_update "${POSITIONAL[0]:-}" ;;
+  install-reset)       cmd_install_reset "${POSITIONAL[0]:-}" ;;
+  delete|destroy|rm)   cmd_delete "${POSITIONAL[0]:-}" ;;
+  list|ls)             cmd_list ;;
+  ssh|connect)         cmd_ssh "${POSITIONAL[0]:-}" ;;
+  status|health)       cmd_status "${POSITIONAL[0]:-}" ;;
+  logs|log)            cmd_logs "${POSITIONAL[0]:-}" ;;
+  ip)                  cmd_ip "${POSITIONAL[0]:-}" ;;
   help|--help|-h) usage ;;
   *)
     echo -e "${RED}Unknown command: ${COMMAND}${RESET}" >&2
