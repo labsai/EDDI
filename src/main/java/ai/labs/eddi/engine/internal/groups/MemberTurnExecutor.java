@@ -381,6 +381,13 @@ public class MemberTurnExecutor {
      * infrastructure failure likewise returns {@code null} so the fallback still
      * terminates the turn cleanly.
      *
+     * {@code input} is unused and stays: static analysis flags it every run, but
+     * the caller passes the member's turn input positionally alongside eight other
+     * arguments, and this method is the natural home for a retry that re-sends it —
+     * which the plan's I7 (delegation hardening) will need. Dropping one parameter
+     * from the middle of a nine-argument call is also the shape of change most
+     * likely to be silently mis-applied at the call site.
+     *
      * @return a real contribution entry on graceful success, or {@code null} to
      *         signal "fall back to SKIP + cancel"
      */
