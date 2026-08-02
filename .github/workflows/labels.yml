@@ -1,0 +1,32 @@
+name: Sync labels
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/labels.yml
+      - .github/workflows/labels.yml
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  labels:
+    name: Sync repository labels
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout label configuration
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/labels.yml
+
+      - name: Sync labels
+        uses: EndBug/label-sync@52074158190acb45f3077f9099fea818aa43f97a # v2
+        with:
+          config-file: .github/labels.yml
+          delete-other-labels: false
