@@ -271,12 +271,19 @@ class RestAgentEngineToolPauseDetailsTest {
             Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, "full");
 
             var returned = (ConversationMemorySnapshot) response.getEntity();
-            assertNull(returned.getHitlPendingToolCalls().getCalls().getFirst().getRequestFingerprint(),
-                    "detail=full must not carry the request fingerprint");
+            var returnedCall = returned.getHitlPendingToolCalls().getCalls().getFirst();
+            assertNotEquals(secretFingerprint, returnedCall.getRequestFingerprint(),
+                    "detail=full must not carry the real request fingerprint");
             // The approver still gets everything they need to decide — stripping the
             // digest must not cost them the preview it was derived from.
-            assertNotNull(returned.getHitlPendingToolCalls().getCalls().getFirst().getRequestPreview(),
-                    "the redacted request preview must survive the strip");
+            assertNotNull(returnedCall.getRequestPreview(), "the redacted request preview must survive the strip");
+            // And must not cost them the PINNED signal either. isRequestPinned() is
+            // derived from the fingerprint field, so clearing it outright silently
+            // reported every pinned call as unpinned — telling the approver the
+            // request is not re-checked before execution when it is, and
+            // contradicting what detail=summary says about the same conversation.
+            assertTrue(returnedCall.isRequestPinned(),
+                    "stripping the digest must not flip the documented requestPinned contract field");
         }
 
         @Test

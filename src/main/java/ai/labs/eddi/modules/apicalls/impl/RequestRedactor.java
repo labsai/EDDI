@@ -181,15 +181,54 @@ public class RequestRedactor {
      * {@link ResolvedRequest#of} applies it without an executor, keeping
      * "fingerprint the raw, store the redacted" resolved in exactly one place.
      */
+    /**
+     * Shape-scan the part of a URI before any query string, WITHOUT letting the
+     * scan eat the authority.
+     * <p>
+     * {@code SecretRedactionFilter}'s generic rule matches
+     * {@code (api_key|token|secret|password|authorization)[=:]<8+ chars>}, and its
+     * trailing character class does not exclude {@code /}. Run over a whole URI
+     * that scan consumes to the end of the string the moment the host itself ends
+     * in one of those words followed by a port — plausible for an in-cluster
+     * service name — so {@code https://vault-secret:8200/v1/agents/a1} collapsed to
+     * {@code https://vault-secret=<REDACTED>}. That is worse than the leak it
+     * guards: the approver loses the method's target entirely, and what is left is
+     * not even a URI. Over-redaction hides what is being written to; a human who
+     * cannot see the target cannot approve it.
+     * <p>
+     * So the scheme and authority are held aside and the scan is applied only to
+     * the path, where a templated credential can actually land.
+     */
+    private static String redactUpToQuery(String beforeQuery) {
+        int schemeEnd = beforeQuery.indexOf("://");
+        if (schemeEnd < 0) {
+            // Relative or scheme-less: it is all path.
+            return redactBody(beforeQuery);
+        }
+        int authorityStart = schemeEnd + 3;
+        int pathStart = beforeQuery.indexOf('/', authorityStart);
+        String authority = pathStart < 0 ? beforeQuery.substring(authorityStart) : beforeQuery.substring(authorityStart, pathStart);
+        String path = pathStart < 0 ? "" : beforeQuery.substring(pathStart);
+
+        // The authority is kept verbatim EXCEPT its userinfo: `user:sk-…@host`
+        // really does carry a credential, and it is bounded by '@', so scanning
+        // it cannot run away into the host and path the way scanning the whole
+        // authority did. Everything from '@' onward (host, port) stays legible.
+        int at = authority.lastIndexOf('@');
+        String safeAuthority = at < 0 ? authority : redactBody(authority.substring(0, at)) + authority.substring(at);
+
+        return beforeQuery.substring(0, authorityStart) + safeAuthority + redactBody(path);
+    }
+
     public static String redactUri(String uri) {
         if (uri == null) {
             return null;
         }
         int queryStart = uri.indexOf('?');
         if (queryStart < 0) {
-            return redactBody(uri);
+            return redactUpToQuery(uri);
         }
-        String beforeQuery = redactBody(uri.substring(0, queryStart));
+        String beforeQuery = redactUpToQuery(uri.substring(0, queryStart));
         String query = uri.substring(queryStart + 1);
         // Preserve the fragment: it is not a query parameter and splitting on '&'
         // would otherwise fold it into the last value.

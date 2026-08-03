@@ -120,6 +120,35 @@ class RequestRedactorTest {
         }
 
         @Test
+        void aHostThatLooksLikeASecretNameKeepsItsUriIntact() {
+            // SecretRedactionFilter's generic rule matches name[=:]<8+ chars> and
+            // its trailing class does not exclude '/', so scanning a whole URI
+            // consumed everything after a host ending in one of those words plus a
+            // port. The approver was then shown "https://vault-secret=<REDACTED>"
+            // — no host, no path, not a URI. Losing the target of a write is worse
+            // than the leak the scan defends against.
+            for (String host : List.of("vault-secret", "token", "authorization", "my-password")) {
+                String uri = "https://" + host + ":8200/v1/agentstore/agents/a1";
+                var map = new HashMap<String, Object>();
+                map.put(IRequest.KEY_URI, uri);
+                redactor.redactRequestMap(map);
+                assertEquals(uri, map.get(IRequest.KEY_URI), "host '" + host + "' must stay legible");
+            }
+        }
+
+        @Test
+        void aSecretInThePathIsStillRedactedDespiteTheAuthorityCarveOut() {
+            // The carve-out must not become a bypass: the path is where a
+            // templated credential actually lands, and it is still scanned.
+            var map = new HashMap<String, Object>();
+            map.put(IRequest.KEY_URI, "https://token:8200/v1/keys/" + KEY + "/rotate");
+            redactor.redactRequestMap(map);
+            String redacted = map.get(IRequest.KEY_URI).toString();
+            assertFalse(redacted.contains(KEY), redacted);
+            assertTrue(redacted.startsWith("https://token:8200/"), redacted);
+        }
+
+        @Test
         void aNullMapDoesNotThrow() {
             assertDoesNotThrow(() -> redactor.redactRequestMap(null));
         }
