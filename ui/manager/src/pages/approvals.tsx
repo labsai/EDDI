@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -13,23 +13,229 @@ import {
   Search,
   ExternalLink,
   Wrench,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { ApprovalBanner } from "@/components/hitl/approval-banner";
+import { RequestPreview } from "@/components/operator/request-preview";
 import {
   usePendingApprovals,
   useAllGroupPendingApprovals,
   useResumeConversation,
   useCancelConversation,
+  useApprovalStatus,
 } from "@/hooks/use-hitl";
 import { timeoutPolicyLabel } from "@/lib/hitl-labels";
 import { useHasRole } from "@/hooks/use-auth";
-import type { PendingApprovalSummary, HitlVerdict } from "@/lib/api/hitl";
+import type { PendingApprovalSummary, HitlVerdict, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
+
+/**
+ * The redacted-preview render prop shared by every `ApprovalBanner` consumer.
+ *
+ * Deliberately simpler than the operator screen's version: that one falls back
+ * to a client-side `operationId` reconstruction (via a fetched OpenAPI spec) for
+ * a call the backend could not preview. Fetching and indexing that spec just for
+ * the rare unpreviewable case is not worth the weight here — an approver in the
+ * inbox sees the redacted arguments only for those, the same baseline every
+ * surface had before request-preview existed.
+ */
+function renderCallExtra(call: PendingToolCallView): ReactNode {
+  if (!call.requestPreview) return null;
+  return <RequestPreview preview={call.requestPreview} pinned={call.requestPinned} callId={call.callId} />;
+}
 
 /** A pending confirmation for an irreversible queue action. */
 type PendingConfirm = { item: PendingApprovalSummary; action: HitlVerdict | "CANCEL" };
+
+interface ApprovalQueueRowProps {
+  item: PendingApprovalSummary;
+  onRequestConfirm: (item: PendingApprovalSummary, action: HitlVerdict | "CANCEL") => void;
+  onToolDecide: (
+    item: PendingApprovalSummary,
+    verdict: HitlVerdict,
+    note?: string,
+    toolDecisions?: Record<string, ToolCallDecision>,
+  ) => void;
+  onToolCancel: (item: PendingApprovalSummary) => void;
+  resumeMutation: ReturnType<typeof useResumeConversation>;
+  cancelMutation: ReturnType<typeof useCancelConversation>;
+}
+
+/**
+ * One inbox row. A TOOL_CALL pause expands in place into the same
+ * `ApprovalBanner` the operator screen and conversation-detail use, rather
+ * than only linking out — decided here is decided, no navigation required.
+ *
+ * A dedicated component, not inline JSX in the parent's `.map`, because the
+ * expand/collapse state and the `pauseDetails` fetch it drives are legitimately
+ * per-row: hooks cannot be called conditionally inside a loop, and each row's
+ * `useApprovalStatus` call must be independent so expanding one does not fetch
+ * — or show loading state — for every other row.
+ */
+function ApprovalQueueRow({
+  item,
+  onRequestConfirm,
+  onToolDecide,
+  onToolCancel,
+  resumeMutation,
+  cancelMutation,
+}: ApprovalQueueRowProps) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const isToolCall = !item.groupId && item.pauseType === "TOOL_CALL";
+  // Fetched only while expanded: pauseDetails (the per-call redacted arguments
+  // and request preview) is not on the list summary, deliberately — a payload
+  // that size has no place in an endpoint that lists every pending approval at
+  // once. `enabled: expanded` means collapsing and re-expanding re-fetches
+  // rather than trusting a stale cache, matching every other pause surface.
+  const approvalStatus = useApprovalStatus(item.conversationId, expanded);
+
+  const isSubmitting =
+    (resumeMutation.isPending && resumeMutation.variables?.conversationId === item.conversationId) ||
+    (cancelMutation.isPending && cancelMutation.variables === item.conversationId);
+
+  return (
+    <>
+      <tr className="hover:bg-muted/20 transition-colors">
+        <td className="px-4 py-3">
+          <span className={cn(
+            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+            item.groupId
+              ? "bg-blue-500/10 text-blue-600"
+              : "bg-purple-500/10 text-purple-600"
+          )}>
+            {item.groupId ? (
+              <><Boxes className="h-3 w-3" /> {t("hitl.group", "Group")}</>
+            ) : (
+              <><MessageSquare className="h-3 w-3" /> {t("hitl.regular", "Conversation")}</>
+            )}
+          </span>
+        </td>
+        <td className="px-4 py-3">
+          <Link
+            to={item.groupId
+              ? `/manage/groups/${item.groupId}`
+              : `/manage/conversationview/${item.conversationId}`}
+            className="font-mono text-xs text-primary hover:underline"
+          >
+            {item.conversationId.slice(0, 12)}…
+            <ExternalLink className="ms-1 inline h-3 w-3" />
+          </Link>
+        </td>
+        <td className="px-4 py-3 text-muted-foreground max-w-xs truncate">
+          {item.pauseType === "TOOL_CALL" && (
+            <span
+              className="me-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600"
+              data-testid={`tool-badge-${item.conversationId}`}
+            >
+              <Wrench className="h-3 w-3" /> {t("hitl.tool", "Tool")}
+            </span>
+          )}
+          {item.pauseType === "TOOL_CALL" && item.toolNames && item.toolNames.length > 0
+            ? item.toolNames.join(", ")
+            : item.pauseReason || "—"}
+        </td>
+        <td className="px-4 py-3 text-muted-foreground text-xs">
+          {item.pausedAt
+            ? new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "medium" }).format(new Date(item.pausedAt))
+            : "—"}
+        </td>
+        <td className="px-4 py-3">
+          <span className="text-xs text-muted-foreground">
+            {timeoutPolicyLabel(t, item.timeoutPolicy) || "—"}
+          </span>
+        </td>
+        <td className="px-4 py-3">
+          <div className="flex items-center justify-end gap-1">
+            {isToolCall && (
+              <>
+                <button
+                  onClick={() => setExpanded((v) => !v)}
+                  aria-expanded={expanded}
+                  className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-600 hover:bg-amber-500/20 transition-colors"
+                  data-testid={`review-${item.conversationId}`}
+                >
+                  {expanded ? t("common.close", "Close") : t("hitl.review", "Review")}
+                  <ChevronDown
+                    className={cn("h-3 w-3 transition-transform", expanded && "rotate-180")}
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  onClick={() => onRequestConfirm(item, "CANCEL")}
+                  disabled={cancelMutation.isPending && cancelMutation.variables === item.conversationId}
+                  className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                  data-testid={`cancel-${item.conversationId}`}
+                >
+                  {t("hitl.cancel", "Cancel")}
+                </button>
+              </>
+            )}
+            {!item.groupId && item.pauseType !== "TOOL_CALL" && (
+              <>
+                <button
+                  onClick={() => onRequestConfirm(item, "APPROVED")}
+                  disabled={resumeMutation.isPending && resumeMutation.variables?.conversationId === item.conversationId}
+                  className="rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 transition-colors disabled:opacity-50"
+                  data-testid={`approve-${item.conversationId}`}
+                >
+                  {t("hitl.approve", "Approve")}
+                </button>
+                <button
+                  onClick={() => onRequestConfirm(item, "REJECTED")}
+                  disabled={resumeMutation.isPending && resumeMutation.variables?.conversationId === item.conversationId}
+                  className="rounded-md bg-destructive px-2.5 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50"
+                  data-testid={`reject-${item.conversationId}`}
+                >
+                  {t("hitl.reject", "Reject")}
+                </button>
+                <button
+                  onClick={() => onRequestConfirm(item, "CANCEL")}
+                  disabled={cancelMutation.isPending && cancelMutation.variables === item.conversationId}
+                  className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                  data-testid={`cancel-${item.conversationId}`}
+                >
+                  {t("hitl.cancel", "Cancel")}
+                </button>
+              </>
+            )}
+            {item.groupId && (
+              <Link
+                to={`/manage/groups/${item.groupId}`}
+                className="rounded-md border border-border px-2.5 py-1 text-xs text-primary hover:bg-muted transition-colors"
+              >
+                {t("common.view", "View")}
+              </Link>
+            )}
+          </div>
+        </td>
+      </tr>
+      {isToolCall && expanded && (
+        <tr data-testid={`tool-decision-row-${item.conversationId}`}>
+          <td colSpan={6} className="bg-muted/10 px-4 py-4">
+            <ApprovalBanner
+              surface="regular"
+              pauseReason={item.pauseReason ?? undefined}
+              pausedAt={item.pausedAt}
+              timeoutPolicy={item.timeoutPolicy ?? undefined}
+              approvalTimeout={item.approvalTimeout ?? undefined}
+              pauseDetails={approvalStatus.data?.pauseDetails ?? null}
+              pauseDetailsPending={!approvalStatus.data}
+              isSubmitting={isSubmitting}
+              requireExplicitPerCall
+              renderCallExtra={renderCallExtra}
+              onDecide={(verdict, note, _taskApprovals, toolDecisions) => onToolDecide(item, verdict, note, toolDecisions)}
+              onCancel={() => onToolCancel(item)}
+            />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
 
 export function ApprovalsPage() {
   const { t } = useTranslation();
@@ -90,6 +296,35 @@ export function ApprovalsPage() {
         }
       );
     }
+  };
+
+  /**
+   * Decide a TOOL_CALL pause from the inline panel — per-call verdicts included.
+   *
+   * `useResumeConversation.onSuccess` already invalidates `["approval-status",
+   * conversationId]`, but a REMOVE (not just invalidate) is still needed here:
+   * a turn may pause again immediately on a fresh batch (`maxPausesPerTurn`,
+   * default 3), and an invalidated-but-not-yet-refetched cache entry can render
+   * for one frame before the refetch lands — showing the FIRST pause's calls
+   * under what is now the second pause. Same reasoning as the operator screen's
+   * `handleDecide`.
+   */
+  const decideToolCall = (
+    item: PendingApprovalSummary,
+    verdict: HitlVerdict,
+    note?: string,
+    toolDecisions?: Record<string, ToolCallDecision>,
+  ) => {
+    resumeMutation.mutate(
+      { conversationId: item.conversationId, decision: { verdict, note, toolDecisions } },
+      {
+        onSuccess: () => {
+          toast.success(verdict === "APPROVED" ? t("hitl.approved", "Approved") : t("hitl.rejected", "Rejected"));
+          queryClient.removeQueries({ queryKey: ["approval-status", item.conversationId] });
+        },
+        onError: (err) => toast.error(getErrorMessage(err)),
+      },
+    );
   };
 
   const doCancel = (item: PendingApprovalSummary) => {
@@ -278,119 +513,15 @@ export function ApprovalsPage() {
             </thead>
             <tbody className="divide-y">
               {filtered.map((item) => (
-                <tr key={item.conversationId} className="hover:bg-muted/20 transition-colors">
-                  <td className="px-4 py-3">
-                    <span className={cn(
-                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
-                      item.groupId
-                        ? "bg-blue-500/10 text-blue-600"
-                        : "bg-purple-500/10 text-purple-600"
-                    )}>
-                      {item.groupId ? (
-                        <><Boxes className="h-3 w-3" /> {t("hitl.group", "Group")}</>
-                      ) : (
-                        <><MessageSquare className="h-3 w-3" /> {t("hitl.regular", "Conversation")}</>
-                      )}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Link
-                      to={item.groupId
-                        ? `/manage/groups/${item.groupId}`
-                        : `/manage/conversationview/${item.conversationId}`}
-                      className="font-mono text-xs text-primary hover:underline"
-                    >
-                      {item.conversationId.slice(0, 12)}…
-                      <ExternalLink className="ms-1 inline h-3 w-3" />
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground max-w-xs truncate">
-                    {item.pauseType === "TOOL_CALL" && (
-                      <span
-                        className="me-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600"
-                        data-testid={`tool-badge-${item.conversationId}`}
-                      >
-                        <Wrench className="h-3 w-3" /> {t("hitl.tool", "Tool")}
-                      </span>
-                    )}
-                    {item.pauseType === "TOOL_CALL" && item.toolNames && item.toolNames.length > 0
-                      ? item.toolNames.join(", ")
-                      : item.pauseReason || "—"}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground text-xs">
-                    {item.pausedAt
-                      ? new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "medium" }).format(new Date(item.pausedAt))
-                      : "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs text-muted-foreground">
-                      {timeoutPolicyLabel(t, item.timeoutPolicy) || "—"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-1">
-                      {/* Tool-call pauses must NOT be quick-approved blind — a
-                          reviewer has to see the gated tool + arguments first,
-                          so route to the detail view where the full banner
-                          renders per-call decisions. */}
-                      {!item.groupId && item.pauseType === "TOOL_CALL" && (
-                        <>
-                          <Link
-                            to={`/manage/conversationview/${item.conversationId}`}
-                            className="rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-600 hover:bg-amber-500/20 transition-colors"
-                            data-testid={`review-${item.conversationId}`}
-                          >
-                            {t("hitl.review", "Review")}
-                          </Link>
-                          <button
-                            onClick={() => setConfirm({ item, action: "CANCEL" })}
-                            disabled={cancelMutation.isPending && cancelMutation.variables === item.conversationId}
-                            className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-                            data-testid={`cancel-${item.conversationId}`}
-                          >
-                            {t("hitl.cancel", "Cancel")}
-                          </button>
-                        </>
-                      )}
-                      {!item.groupId && item.pauseType !== "TOOL_CALL" && (
-                        <>
-                          <button
-                            onClick={() => setConfirm({ item, action: "APPROVED" })}
-                            disabled={resumeMutation.isPending && resumeMutation.variables?.conversationId === item.conversationId}
-                            className="rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 transition-colors disabled:opacity-50"
-                            data-testid={`approve-${item.conversationId}`}
-                          >
-                            {t("hitl.approve", "Approve")}
-                          </button>
-                          <button
-                            onClick={() => setConfirm({ item, action: "REJECTED" })}
-                            disabled={resumeMutation.isPending && resumeMutation.variables?.conversationId === item.conversationId}
-                            className="rounded-md bg-destructive px-2.5 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50"
-                            data-testid={`reject-${item.conversationId}`}
-                          >
-                            {t("hitl.reject", "Reject")}
-                          </button>
-                          <button
-                            onClick={() => setConfirm({ item, action: "CANCEL" })}
-                            disabled={cancelMutation.isPending && cancelMutation.variables === item.conversationId}
-                            className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-                            data-testid={`cancel-${item.conversationId}`}
-                          >
-                            {t("hitl.cancel", "Cancel")}
-                          </button>
-                        </>
-                      )}
-                      {item.groupId && (
-                        <Link
-                          to={`/manage/groups/${item.groupId}`}
-                          className="rounded-md border border-border px-2.5 py-1 text-xs text-primary hover:bg-muted transition-colors"
-                        >
-                          {t("common.view", "View")}
-                        </Link>
-                      )}
-                    </div>
-                  </td>
-                </tr>
+                <ApprovalQueueRow
+                  key={item.conversationId}
+                  item={item}
+                  onRequestConfirm={(row, action) => setConfirm({ item: row, action })}
+                  onToolDecide={decideToolCall}
+                  onToolCancel={doCancel}
+                  resumeMutation={resumeMutation}
+                  cancelMutation={cancelMutation}
+                />
               ))}
             </tbody>
           </table>
