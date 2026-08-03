@@ -5,6 +5,24 @@
 
 ---
 
+## 🔒 fix(hitl): a resume verdict that resolved to null was one comparison away from executing as approved (2026-08-03)
+
+**Repo:** EDDI (`feat/operator-request-fingerprint`)
+
+Found by an automated review comment on [#627](https://github.com/labsai/EDDI/pull/627) (Copilot), on `AgentOrchestrator.resumeToolLoop`'s per-call verdict resolution: `HitlVerdict verdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : topVerdict` falls back to `topVerdict` with no null check, and the only gate downstream is `if (verdict == REJECTED) { ...skip... }` — a null verdict is not `== REJECTED`, so it silently fell through to the execute branch. The metric emitted alongside it made this worse, not just neutral: `recordWriteApprovalDecision`'s `verdict == APPROVED ? "approved" : "rejected"` would have tagged the very same call `"rejected"` while it executed — the telemetry that should have caught the bug in production would have shown the opposite of what happened.
+
+Traced every caller of the shared choke point (`ConversationService.resumeConversation`) before concluding this was live: `RestAgentEngine` (`decision.getVerdict() == null` → 400), `SlackInteractivityHandler` (`verdictFor` checked before `ParsedAction` exists), `McpHitlTools` (`parseVerdictOrNull` checked before the tool call proceeds), `HitlTimeoutHandler` (verdict is a hardcoded `APPROVED`/`REJECTED` ternary), `GroupConversationService`'s member-tool-pause auto-resolution (hardcoded `REJECTED`) — all five independently guarantee a non-null top-level verdict today. Not exploitable as the code stands, but fragile: the invariant was enforced four separate times, never once at the method every one of them funnels through, so a sixth caller (or a refactor of any of the five) could silently reintroduce the gap with nothing to catch it.
+
+Fixed at both ends rather than patching the symptom:
+- **`ConversationService.resumeConversation`** now rejects `decision == null || decision.getVerdict() == null` up front with `IllegalArgumentException`, mirroring `RestAgentEngine`'s existing message — enforced once, for every current and future caller, instead of assumed five times over.
+- **`AgentOrchestrator`**, per Copilot's specific suggestion: normalizes an (now theoretically unreachable, but no longer trusted blindly) unresolved verdict to `REJECTED` before either the metric emit or the execution check, so the two can never disagree with each other again.
+
+Mutation-verified both independently: reverting the `ConversationService` guard makes the new null-decision/null-verdict tests fail with `ResourceNotFoundException` instead of `IllegalArgumentException` (proving the check, not something else, produces the 400); reverting the `AgentOrchestrator` normalization makes `unresolvedVerdictFailsClosed` fail on `journalStore.tryClaim` actually being invoked — i.e. with the fix removed, the call really does execute. Both restored and re-verified green (`ConversationServiceHitlCoverage2Test` 14/14, `AgentOrchestratorResumeToolLoopTest` 12/12, `ConversationServiceResumeTest` 18/18).
+
+Also landed on this branch: reattached `auditOutcomeUnknown`'s Javadoc, separated from its method by the request-pinning commit's insertion point (also a review finding, cosmetic — see the commit itself).
+
+---
+
 ## 🔓 feat(setup): let the standard agent-setup path install a HITL gate too (2026-08-03)
 
 **Repo:** EDDI (`feat/operator-request-fingerprint`)

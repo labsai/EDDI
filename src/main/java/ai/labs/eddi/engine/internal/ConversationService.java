@@ -1550,6 +1550,27 @@ public class ConversationService implements IConversationService {
                                    ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
                                    ConversationResponseHandler handler)
             throws ResourceStoreException, ResourceNotFoundException {
+        // Every current caller (RestAgentEngine, SlackInteractivityHandler,
+        // McpHitlTools, HitlTimeoutHandler) already guarantees a non-null verdict
+        // before reaching this point, so this check should never actually fire —
+        // but each of those is independently responsible for that guarantee, and
+        // this is the ONE method every one of them funnels through. Enforced here,
+        // once, rather than trusted four times over: a caller that ever forgot
+        // would otherwise reach AgentOrchestrator.resumeToolLoop with a verdict
+        // that is neither APPROVED nor REJECTED, one comparison away from being
+        // treated as an approval.
+        // Every current caller (RestAgentEngine, SlackInteractivityHandler,
+        // McpHitlTools, HitlTimeoutHandler) already guarantees a non-null verdict
+        // before reaching this point, so this check should never actually fire —
+        // but each of those is independently responsible for that guarantee, and
+        // this is the ONE method every one of them funnels through. Enforced here,
+        // once, rather than trusted four times over: a caller that ever forgot
+        // would otherwise reach AgentOrchestrator.resumeToolLoop with a verdict
+        // that is neither APPROVED nor REJECTED, one comparison away from being
+        // treated as an approval.
+        if (decision == null || decision.getVerdict() == null) {
+            throw new IllegalArgumentException("decision.verdict is required (APPROVED or REJECTED)");
+        }
         // B3: a resume enqueues a FULL turn through the same coordinator the shutdown
         // drain is waiting on, so admitting one during the drain both extends the
         // drain and risks the turn being SIGKILLed halfway. Rejected here, BEFORE the

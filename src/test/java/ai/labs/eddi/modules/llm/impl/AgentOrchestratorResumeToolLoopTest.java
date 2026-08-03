@@ -339,6 +339,35 @@ class AgentOrchestratorResumeToolLoopTest {
     }
 
     @Test
+    @DisplayName("unresolved verdict (no top-level, no per-call override) fails closed: treated as REJECTED, not executed")
+    void unresolvedVerdictFailsClosed() throws Exception {
+        // ConversationService.resumeConversation rejects a null decision.verdict
+        // before this method is ever reached in production — every real caller
+        // (REST, Slack, MCP, timeout auto-resolution) already guarantees one. This
+        // constructs the otherwise-unreachable case directly (decision.verdict left
+        // unset, no per-call override for the pending call) to prove
+        // resumeToolLoop's OWN fallback also fails closed rather than trusting that
+        // upstream guarantee alone — the not-REJECTED-so-must-be-approved shape is
+        // exactly the fail-open Copilot flagged on AgentOrchestrator.java.
+        var task = twoToolTask();
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("I could not perform that action."));
+
+        var unresolved = new HitlDecision();
+        unresolved.setDecidedBy("reviewer-1");
+        // verdict deliberately left null.
+
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, unresolved, true);
+
+        assertEquals("I could not perform that action.", result.response());
+        verify(calculatorTool, never()).calculate(anyString());
+        verify(journalStore, never()).tryClaim(anyString(), anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
     @DisplayName("mixed + amendment: approved executes with amended args, envelope argsAmendedByReviewer:true; rejected gets note")
     void mixedWithAmendment() throws Exception {
         var task = twoToolTask();

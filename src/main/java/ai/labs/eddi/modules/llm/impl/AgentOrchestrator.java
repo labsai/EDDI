@@ -556,7 +556,15 @@ class AgentOrchestrator {
 
         for (PendingToolCallBatch.PendingToolCall c : batch.getCalls()) {
             ToolCallDecision cd = perCall.get(c.getCallId());
-            HitlDecision.HitlVerdict verdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : topVerdict;
+            HitlDecision.HitlVerdict resolvedVerdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : topVerdict;
+            // Every current caller of resumeConversation validates a non-null verdict
+            // before this point, so resolvedVerdict should never actually be null —
+            // but the check that guarantees it lives in each caller, not here. Fail
+            // closed rather than trust that invariant silently: the REJECTED check
+            // below is the only thing standing between an unresolved verdict and
+            // executing a gated call, and "not REJECTED" is a dangerous way to spell
+            // "approved".
+            HitlDecision.HitlVerdict verdict = resolvedVerdict != null ? resolvedVerdict : HitlDecision.HitlVerdict.REJECTED;
             String note = cd != null ? cd.getNote() : decision.getNote();
             String amended = cd != null ? cd.getAmendedArguments() : null;
             recordWriteApprovalDecision(verdict, decision.getDecidedBy());
