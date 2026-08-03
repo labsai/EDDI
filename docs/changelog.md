@@ -245,6 +245,22 @@ Fifth Wave 0 foundation, and the first one that had to answer an open question b
 
 ---
 
+## 🧩 feat(groups): Paused-document schema versioning (Wave 0, F6) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Sixth and last Wave 0 foundation — Wave 0 is now complete (F1–F6); I1–I18 (Wave 1+) are next. A paused discussion (`AWAITING_APPROVAL`, and on the single-conversation side `AWAITING_HUMAN`) can sit in storage for days — long enough for a deploy to land in between, changing the shape resume-time logic depends on. Both surfaces gain the same guard: `schemaVersion` (current = 1) checked at the top of resume, before anything reads a bookmark field. Newer than this deployment understands → refuse. Older → run registered migrations forward (a `Map<Integer, UnaryOperator<T>>` chain keyed by the version each entry upgrades *from*; a hop with no registered entry defaults to identity, the documented common case for a bump whose new fields default correctly via Jackson). Both registries are empty today — version 1 is the first version that has ever existed, so there is nothing yet to migrate from; every future Wave item that adds a resume-relevant field bumps the constant and registers its own entry, per the plan's own obligation on every subsequent item.
+
+**Two parallel implementations, not one shared one — the two resume paths' failure semantics are different enough that sharing would have meant compromising one of them.** `GroupHitlCoordinator.resumeDiscussion` loads the document *before* any state CAS, so `GroupConversationSchemaMigrations.prepareForResume` (checked `GroupDiscussionException`) is a plain throw with nothing to roll back. `ConversationHitlService.resumeConversation` CASes `AWAITING_HUMAN → IN_PROGRESS` *before* loading the snapshot, so a refusal must roll that back or the conversation wedges `IN_PROGRESS` forever — `ConversationSchemaMigrations.prepareForResume` throws an *unchecked* `IllegalStateException` instead, deliberately, so it falls straight into the method's existing generic `catch (Exception e)` that already restores the pause and rethrows as `ResourceStoreException` for every other pre-conversion failure on that path (a transient snapshot-load hiccup, an undeployed agent) — reusing that already-hardened rollback rather than adding a second one next to it.
+
+**A reassignment nearly broke effective-finality on the group side.** `gc` is captured by several lambdas later in `resumeDiscussion` (the async `resumeWork` and its nested drift-guard closures); a first attempt reassigned it (`gc = GroupConversationSchemaMigrations.prepareForResume(gc);`) after its initial `conversationStore.read(...)` assignment, which doesn't compile once anything downstream captures it. Fixed by folding the read and the version-check into `gc`'s single assignment expression instead of reassigning it — same class of fix as the `startFromPhase` ternary in F2.
+
+**Tests intentionally use fixture documents at synthetic version numbers.** There is no real "older version" today (1 is the floor), so both `*SchemaMigrationsTest` classes construct documents with an explicit `setSchemaVersion(N)` below/above current rather than relying on Jackson's absent-field defaulting — the mechanism is exercised directly, independent of whether a real legacy Mongo document would ever naturally produce that value.
+
+14 new tests, mutation-checked: `GroupConversationSchemaMigrationsTest` and `ConversationSchemaMigrationsTest` each cover current/older/newer-version handling and the newer-version no-mutation guarantee for their own type; `GroupConversationServiceHitlTest` and `ConversationServiceResumeTest` each add one wiring test proving their resume path actually calls into the version guard — the group one asserts the refusal is synchronous (`verifyNoInteractions(groupStore)`, nothing async ever starts), the single-conversation one asserts the pre-resume CAS gets rolled back. Reverting each wiring call site, and reducing each `prepareForResume` to a no-op, fails exactly the tests scoped to that change. Full group/HITL/Slack/conversation-resume battery green; Checkstyle unchanged.
+
+---
+
 ## 🧩 refactor(orchestrator): BuiltinToolsProvider + close the three SPI gaps (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

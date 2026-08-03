@@ -25,6 +25,22 @@ import java.util.concurrent.ConcurrentHashMap;
  * @author ginccc
  */
 public class GroupConversation {
+    /**
+     * Current document shape this code understands (Wave 0, F6). Bump whenever a
+     * Wave adds a field resume-time logic depends on, and register that version's
+     * migration in {@code GroupConversationSchemaMigrations}.
+     */
+    public static final int CURRENT_SCHEMA_VERSION = 1;
+    /**
+     * The shape this specific document was last written in. Checked before a
+     * resume: newer than {@link #CURRENT_SCHEMA_VERSION} refuses (this deployment
+     * predates the document), older runs registered migrations forward. A pause can
+     * sit in storage for days — long enough for a deploy to land in between — so
+     * this is the group side's document-shape guard, alongside the existing
+     * per-resume config-drift check (bookmarked phase vs. current config) that
+     * guards a different axis. See {@code GroupConversationSchemaMigrations}.
+     */
+    private int schemaVersion = CURRENT_SCHEMA_VERSION;
     private String id;
     private String groupId;
     private String userId;
@@ -394,6 +410,14 @@ public class GroupConversation {
     }
 
     // --- Getters/Setters ---
+
+    public int getSchemaVersion() {
+        return schemaVersion;
+    }
+
+    public void setSchemaVersion(int schemaVersion) {
+        this.schemaVersion = schemaVersion;
+    }
 
     public String getId() {
         return id;

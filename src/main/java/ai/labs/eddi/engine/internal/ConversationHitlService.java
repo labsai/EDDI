@@ -272,6 +272,11 @@ class ConversationHitlService {
             if (snapshot == null) {
                 throw new ResourceNotFoundException("Conversation not found: " + conversationId);
             }
+            // Wave 0, F6: refuse/migrate before anything else reads a bookmark
+            // field. A refusal here (IllegalStateException) falls into the catch
+            // (Exception e) below, which restores the pause exactly like any other
+            // pre-conversion failure on this path.
+            snapshot = ConversationSchemaMigrations.prepareForResume(snapshot);
             memory = convertConversationMemorySnapshot(snapshot);
             memory.setConversationState(ConversationState.AWAITING_HUMAN);
             agentId = snapshot.getAgentId();

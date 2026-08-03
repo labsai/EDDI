@@ -469,7 +469,13 @@ public class GroupHitlCoordinator {
             throws GroupDiscussionException, IResourceStore.ResourceStoreException,
             IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
 
-        var gc = conversationStore.read(groupConversationId);
+        // Wave 0, F6: refuse/migrate before anything else reads a bookmark field —
+        // the state CAS below hasn't happened yet, so a refusal here is a plain
+        // throw with nothing to roll back (unlike the single-conversation surface,
+        // where the CAS runs before the document loads). Combined into gc's single
+        // assignment (rather than reassigning it) so gc stays effectively final for
+        // the lambdas later in this method.
+        var gc = GroupConversationSchemaMigrations.prepareForResume(conversationStore.read(groupConversationId));
         if (gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
             throw new GroupDiscussionException("Group conversation is not awaiting approval");
         }

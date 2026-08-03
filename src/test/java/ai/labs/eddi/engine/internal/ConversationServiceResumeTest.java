@@ -855,6 +855,41 @@ class ConversationServiceResumeTest {
     }
 
     // =========================================================================
+    // Schema version guard (Wave 0, F6)
+    // =========================================================================
+
+    @Nested
+    @DisplayName("resumeConversation — schema version guard (F6)")
+    class SchemaVersionGuard {
+
+        @Test
+        @DisplayName("a document newer than this code understands restores the pause and throws, instead of guessing at its shape")
+        void resumeOnNewerSchemaVersion_restoresPauseAndThrows() throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+
+            var snapshot = createResumeSnapshot();
+            snapshot.setSchemaVersion(ConversationMemorySnapshot.CURRENT_SCHEMA_VERSION + 1);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setDecidedBy("reviewer-1");
+
+            var ex = assertThrows(ResourceStoreException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, decision, null),
+                    "a document written by a newer version must refuse resume rather than guess at its shape");
+            assertTrue(ex.getMessage().contains("newer version"), () -> "unexpected message: " + ex.getMessage());
+
+            // The pre-resume CAS already consumed the pause — the schema refusal must
+            // roll it back, exactly like any other pre-conversion load failure on
+            // this path (mirrors the RejectedExecutionException discard test above).
+            verify(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+        }
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 

@@ -1590,6 +1590,36 @@ class GroupConversationServiceHitlTest {
     }
 
     // =================================================================
+    // Resume: schema version guard (Wave 0, F6)
+    // =================================================================
+
+    @Nested
+    @DisplayName("Resume schema version guard (F6)")
+    class ResumeSchemaVersionGuard {
+
+        @Test
+        @DisplayName("a document newer than this code understands refuses resume synchronously, before any async work")
+        void resumeOnNewerSchemaVersion_refusesSynchronously() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-future-schema");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setSchemaVersion(GroupConversation.CURRENT_SCHEMA_VERSION + 1);
+
+            doReturn(gc).when(conversationStore).read("gc-future-schema");
+
+            var request = new GroupApprovalRequest();
+
+            var ex = assertThrows(GroupDiscussionException.class,
+                    () -> service.resumeDiscussion("gc-future-schema", request, null),
+                    "a document written by a newer version must refuse resume rather than guess at its shape");
+            assertTrue(ex.getMessage().contains("newer version"), () -> "unexpected message: " + ex.getMessage());
+
+            verifyNoInteractions(groupStore);
+        }
+    }
+
+    // =================================================================
     // #3: member agent's own PAUSE_CONVERSATION inside a group discussion
     // =================================================================
 
