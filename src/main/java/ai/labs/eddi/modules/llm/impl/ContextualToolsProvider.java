@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
@@ -127,16 +128,7 @@ class ContextualToolsProvider implements ToolSourceProvider {
         if (config == null || userMemoryStore == null)
             return;
 
-        // Extract groupIds from conversation properties (injected by
-        // GroupConversationService)
-        List<String> groupIds = List.of();
-        var props = memory.getConversationProperties();
-        if (props != null) {
-            Object groupIdProp = props.get("groupId");
-            if (groupIdProp instanceof Property p && p.getValueString() != null) {
-                groupIds = List.of(p.getValueString());
-            }
-        }
+        List<String> groupIds = resolveGroupIds(memory);
 
         var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config);
         tools.add(tool);
@@ -148,6 +140,72 @@ class ContextualToolsProvider implements ToolSourceProvider {
         LOGGER.infof("[MEMORY] UserMemoryTool enabled for agent='%s', conversation='%s', groups=%s",
                 sanitize(memory.getAgentId()), sanitize(memory.getConversationId()),
                 groupIds.stream().map(g -> sanitize(g)).toList());
+    }
+
+    /**
+     * The group(s) whose shared memories this turn may see and write, for
+     * {@link UserMemoryTool}'s {@code group} visibility scope.
+     * <p>
+     * {@code groupId} arrives as a <b>context</b> value —
+     * {@code MemberTurnExecutor} and {@code GroupLifecycleOps} both inject it that
+     * way, and nothing anywhere writes it as a conversation <em>property</em>. This
+     * method previously read only the property, so {@code groupIds} was empty on
+     * every group member turn and the tool silently fell back to self-scope:
+     * group-visible memories were loaded at conversation init (via
+     * {@code Conversation.extractGroupIds}, which does read the context) but could
+     * never be recalled or written by the tool mid-conversation. Raised by Copilot
+     * on PR #626; the defect predates this branch — R2a moved it verbatim out of
+     * {@code AgentOrchestrator}.
+     * <p>
+     * Reads {@code context:groupId} the way {@code DynamicAgentToolsProvider}
+     * resolves its own delegation-depth context, falling back to the current step
+     * and then to any earlier step, since a resumed turn re-enters without the
+     * original context map. The property read is kept as a last resort so a config
+     * that genuinely does set a {@code groupId} property still works.
+     */
+    static List<String> resolveGroupIds(IConversationMemory memory) {
+        String contextKey = "context:groupId";
+
+        var currentStep = memory.getCurrentStep();
+        if (currentStep != null) {
+            String fromCurrent = contextValueAsString(currentStep.getLatestData(contextKey));
+            if (fromCurrent != null) {
+                return List.of(fromCurrent);
+            }
+        }
+
+        var allSteps = memory.getAllSteps();
+        if (allSteps != null) {
+            List<IData<Object>> priorEntries = allSteps.getAllLatestData(contextKey);
+            if (priorEntries != null) {
+                for (IData<Object> entry : priorEntries) {
+                    String value = contextValueAsString(entry);
+                    if (value != null) {
+                        return List.of(value);
+                    }
+                }
+            }
+        }
+
+        var props = memory.getConversationProperties();
+        if (props != null && props.get("groupId") instanceof Property p && p.getValueString() != null) {
+            return List.of(p.getValueString());
+        }
+        return List.of();
+    }
+
+    /** Unwraps a {@code context:*} data entry, which holds a {@link Context}. */
+    private static String contextValueAsString(IData<?> data) {
+        if (data == null || data.getResult() == null) {
+            return null;
+        }
+        Object result = data.getResult();
+        Object value = result instanceof Context ctx ? ctx.getValue() : result;
+        if (value == null) {
+            return null;
+        }
+        String asString = String.valueOf(value);
+        return asString.isBlank() ? null : asString;
     }
 
     /**

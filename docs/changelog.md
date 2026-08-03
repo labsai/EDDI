@@ -5,6 +5,22 @@
 
 ---
 
+## 🐛 fix(orchestrator): UserMemoryTool never resolved its group scope (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Raised by Copilot on PR #626, verified against the code, and real. `ContextualToolsProvider` derived `UserMemoryTool`'s `groupIds` from `memory.getConversationProperties().get("groupId")` — but **nothing in the codebase ever writes `groupId` as a conversation property.** It arrives as a *context* value, injected in exactly two places (`MemberTurnExecutor` at member-turn start, `GroupLifecycleOps` for follow-ups), both `context.put("groupId", ...)`.
+
+So the property lookup returned null on every group member turn, `groupIds` stayed empty, and the tool silently ran self-scoped. The asymmetry is what makes it easy to miss: conversation *init* reads the context correctly (`Conversation.extractGroupIds`), so group-visible memories **were** loaded into the turn — they just could not be recalled or written back through the tool. A group whose members were configured to share memory quietly behaved as if they did not, with no error anywhere.
+
+**The defect predates this branch** — it is on `main` at `AgentOrchestrator:2298`, and R2a moved it verbatim into the extracted provider. Worth stating plainly: a "pure move" refactor faithfully carried a bug across, which is the correct behavior for a pure move but means extraction reviews cannot be relied on to surface this class of defect.
+
+Now reads `context:groupId` from the current step, falling back to earlier steps (a resumed turn re-enters without the original context map) and finally to the property, so a config that genuinely sets a `groupId` property still works. Follows the same context-resolution shape `DynamicAgentToolsProvider.resolveDelegationDepth` already uses for its own context key.
+
+6 new tests in `ContextualToolsProviderGroupIdTest`, mutation-checked: restoring the property-only read fails exactly the three context-sourced cases and leaves the property-fallback and no-group cases passing.
+
+---
+
 ## ✨ feat(groups): Group cost ceiling + attribution (I1) (2026-08-03)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
