@@ -14,7 +14,7 @@ import { READ_ENDPOINTS, WRITE_ENDPOINTS, endpointsForScope } from "../tool-scop
  * Written out rather than taken from `WRITE_ENDPOINTS` directly, so the write
  * branch stays provable independent of that list's exact current content —
  * the assertions here describe "a set containing any write", not "today's
- * four curated endpoints", and shouldn't need updating if that list changes.
+ * curated endpoints", and shouldn't need updating if that list changes.
  */
 const WITH_A_WRITE = [...READ_ENDPOINTS, "POST /administration/production/deploy/{agentId}"];
 
