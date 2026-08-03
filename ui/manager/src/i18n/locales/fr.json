@@ -2839,7 +2839,10 @@
     "confirmCancelGroupTitle": "Annuler la discussion ?",
     "confirmCancelGroupDescription": "Annuler cette discussion ? Tout travail en cours sera interrompu.",
     "confirmCancelGroupButton": "Annuler la discussion",
-    "confirmDismiss": "Retour"
+    "confirmDismiss": "Retour",
+    "approvalBlockedHeading": "Ceci ne peut pas être approuvé ici",
+    "confirmRejectToolTitle": "Rejeter l'exécution de l'outil ?",
+    "confirmRejectToolDescription": "Rien ne sera exécuté. La conversation se poursuit et l'agent répond sans {{toolNames}}."
   },
   "chatDrawer": {
     "deploying": "Déploiement de l'agent…",
@@ -3195,7 +3198,8 @@
         "agentCreatedWithoutGate": "Cet agent est créé sans passerelle d'approbation. Chaque écriture qu'il effectuera par la suite s'exécutera sans supervision.",
         "agentCreatedWithBroadEndpoints": "Cet agent est créé avec un accès en écriture à son API — non limité aux lectures.",
         "unchecked": "Le corps était trop long pour être analysé à la recherche d'octrois de capacités — lisez-le en entier avant d'approuver."
-      }
+      },
+      "blockedSelfTarget": "Ceci modifie l'agent de l'opérateur lui-même ({{agentId}}) — la seule modification qui pourrait supprimer sa future passerelle d'approbation. Rejetez-la et effectuez plutôt la modification depuis la page de cet agent."
     },
     "starters": {
       "whatsDeployed": "Qu'est-ce qui est déployé actuellement ?",

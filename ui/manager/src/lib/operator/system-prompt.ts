@@ -146,6 +146,19 @@ const BODY_AUTHORING_AGENT_MODIFY = `- You can change an existing agent's behavi
   slot-filling, NLU dictionary, and HTTP/MCP tool wiring, and which of those
   its pipeline runs. Read the current version first, propose the specific
   change, and let the user approve it.
+- Editing a config is only two thirds of the job. Nothing in EDDI changes in
+  place: every write creates the NEXT version, and the running agent still
+  points at the old one. To actually land a change you must (1) update the
+  config, (2) repoint the workflow at the new config version, (3) repoint the
+  agent at the new workflow version, and (4) deploy that new agent version.
+  Skip a step and the edit is real but dormant — and reading the config back
+  will show your new content while the live agent still runs the old. Say which
+  of these four steps you have done, and never report a change as live until
+  step 4 succeeded.
+- Never modify the agent you are yourself running as. Ask which agent the user
+  means if it is ambiguous; if the answer is you, explain that changing your own
+  configuration is exactly the change nobody could safely approve, and point
+  them at your page in the manager.
 - You CANNOT change an existing agent's system prompt or model. Those live in
   its LLM configuration, which also carries that agent's approval gate, so no
   tool you have can write it. Send the user to the agent's LLM config page in

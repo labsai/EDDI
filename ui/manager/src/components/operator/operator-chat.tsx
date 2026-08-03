@@ -42,6 +42,9 @@ interface OperatorChatProps {
   /** Set only when resuming or awaiting the resumed turn's outcome failed. */
   resolveError: string | null;
   onDecide: (verdict: HitlVerdict, note?: string, toolDecisions?: Record<string, ToolCallDecision>) => void;
+  /** Calls the approver must not be able to approve here, with the reason —
+   *  see `ApprovalBannerProps.blockedCalls` and `self-guard.ts`. */
+  blockedCalls?: readonly { callId: string; reason: string }[];
   /** Rendered per gated call above its redacted arguments — see
    *  `ApprovalBannerProps.renderCallExtra`. */
   renderCallExtra?: (call: PendingToolCallView) => ReactNode;
@@ -65,6 +68,7 @@ export function OperatorChat({
   isResolvingPause,
   resolveError,
   onDecide,
+  blockedCalls,
   renderCallExtra,
 }: OperatorChatProps) {
   const { t } = useTranslation();
@@ -177,6 +181,7 @@ export function OperatorChat({
             pauseDetailsPending={pauseDetails === undefined}
             isSubmitting={isResolvingPause}
             requireExplicitPerCall
+            blockedCalls={blockedCalls}
             renderCallExtra={renderCallExtra}
             onDecide={(verdict, note, _taskApprovals, toolDecisions) => onDecide(verdict, note, toolDecisions)}
           />

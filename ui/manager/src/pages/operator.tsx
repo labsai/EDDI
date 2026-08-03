@@ -32,6 +32,7 @@ import { useApprovalStatus } from "@/hooks/use-hitl";
 import { getErrorMessage } from "@/lib/api-client";
 import { fetchOpenApiSpec, type OperatorConfig } from "@/lib/api/operator";
 import { buildOperationIdIndex, reconstructEndpoint } from "@/lib/operator/reconstruct-endpoint";
+import { findSelfTargetedCalls } from "@/lib/operator/self-guard";
 import { RequestPreview } from "@/components/operator/request-preview";
 import type { PendingToolCallView } from "@/lib/api/hitl";
 
@@ -86,6 +87,28 @@ export function OperatorPage() {
     () => (specQuery.data ? buildOperationIdIndex(specQuery.data) : {}),
     [specQuery.data],
   );
+  /**
+   * Writes the operator aimed at its OWN agent document — refused, not merely
+   * flagged. See `self-guard.ts`: repointing its own agent is the hinge of the
+   * chain that ends with the operator running an LLM task whose `toolApprovals`
+   * has replaced the gate, redeployed via the deploy verb it legitimately
+   * holds. Every other write on this surface is reviewable; this is the one
+   * that removes the reviewing.
+   */
+  const blockedCalls = useMemo(() => {
+    const details = chat.isPaused ? approvalStatus.data?.pauseDetails : undefined;
+    // Narrowed on the discriminator rather than a `"calls" in` probe: a RULE
+    // pause has no per-call requests to target anything with.
+    const pending = details?.type === "TOOL_CALL" ? details.calls : undefined;
+    return findSelfTargetedCalls(pending, config?.agentId).map((hit) => ({
+      callId: hit.callId,
+      reason: t(
+        "operator.approval.blockedSelfTarget",
+        "This modifies the operator's own agent ({{agentId}}) — the one change that could remove its future approval gate. Reject it and make the change from that agent's own page instead.",
+        { agentId: hit.agentId },
+      ),
+    }));
+  }, [chat.isPaused, approvalStatus.data, config?.agentId, t]);
   /**
    * Resolve the pause, then DROP the cached approval-status.
    *
@@ -409,6 +432,7 @@ export function OperatorPage() {
           isResolvingPause={chat.isResolvingPause}
           resolveError={chat.resolveError}
           onDecide={handleDecide}
+          blockedCalls={blockedCalls}
           renderCallExtra={renderCallExtra}
         />
         <OperatorStatusPanel

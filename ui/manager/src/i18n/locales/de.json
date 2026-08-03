@@ -2833,7 +2833,10 @@
     "confirmCancelGroupTitle": "Diskussion abbrechen?",
     "confirmCancelGroupDescription": "Diese Diskussion abbrechen? Alle laufenden Arbeiten werden abgebrochen.",
     "confirmCancelGroupButton": "Diskussion abbrechen",
-    "confirmDismiss": "Zurück"
+    "confirmDismiss": "Zurück",
+    "approvalBlockedHeading": "Dies kann hier nicht genehmigt werden",
+    "confirmRejectToolTitle": "Tool-Ausführung ablehnen?",
+    "confirmRejectToolDescription": "Es wird nichts ausgeführt. Die Konversation wird fortgesetzt und der Agent antwortet ohne {{toolNames}}."
   },
   "chatDrawer": {
     "deploying": "Agent wird bereitgestellt…",
@@ -3189,7 +3192,8 @@
         "agentCreatedWithoutGate": "Dieser Agent wird ohne Genehmigungs-Gate erstellt. Jeder spätere Schreibvorgang wird unbeaufsichtigt ausgeführt.",
         "agentCreatedWithBroadEndpoints": "Dieser Agent wird mit Schreibzugriff auf seine eigene API erstellt — nicht auf Lesevorgänge beschränkt.",
         "unchecked": "Der Body war zu lang, um ihn auf Berechtigungserweiterungen zu prüfen — lesen Sie ihn vor der Freigabe vollständig."
-      }
+      },
+      "blockedSelfTarget": "Dies ändert den eigenen Agenten des Operators ({{agentId}}) — die eine Änderung, die sein künftiges Genehmigungs-Gate entfernen könnte. Lehnen Sie sie ab und nehmen Sie die Änderung stattdessen auf der Seite dieses Agenten vor."
     },
     "starters": {
       "whatsDeployed": "Was ist derzeit deployt?",

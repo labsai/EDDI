@@ -2833,7 +2833,10 @@
     "confirmCancelGroupTitle": "चर्चा रद्द करें?",
     "confirmCancelGroupDescription": "इस चर्चा को रद्द करें? कोई भी चल रहा कार्य रोक दिया जाएगा।",
     "confirmCancelGroupButton": "चर्चा रद्द करें",
-    "confirmDismiss": "वापस जाएं"
+    "confirmDismiss": "वापस जाएं",
+    "approvalBlockedHeading": "इसे यहाँ से अनुमोदित नहीं किया जा सकता",
+    "confirmRejectToolTitle": "टूल निष्पादन अस्वीकार करें?",
+    "confirmRejectToolDescription": "कुछ भी नहीं चलेगा। बातचीत जारी रहेगी और एजेंट {{toolNames}} के बिना उत्तर देगा।"
   },
   "chatDrawer": {
     "deploying": "एजेंट Deploy हो रहा है…",
@@ -3189,7 +3192,8 @@
         "agentCreatedWithoutGate": "यह एजेंट बिना अनुमोदन-गेट के बनाया जा रहा है। इसके बाद की हर लेखन क्रिया बिना निगरानी के निष्पादित होगी।",
         "agentCreatedWithBroadEndpoints": "यह एजेंट अपने API पर लेखन पहुँच के साथ बनाया जा रहा है — केवल पठन तक सीमित नहीं।",
         "unchecked": "बॉडी इतनी लंबी थी कि क्षमता-वृद्धि सेटिंग्स के लिए इसकी जाँच नहीं हो सकी — अनुमोदन से पहले इसे पूरा पढ़ें।"
-      }
+      },
+      "blockedSelfTarget": "यह ऑपरेटर के अपने एजेंट ({{agentId}}) को बदलता है — यही एकमात्र बदलाव है जो आगे चलकर इसका अनुमोदन-गेट हटा सकता है। इसे अस्वीकार करें और यह बदलाव उस एजेंट के अपने पेज से करें।"
     },
     "starters": {
       "whatsDeployed": "अभी क्या-क्या परिनियोजित है?",

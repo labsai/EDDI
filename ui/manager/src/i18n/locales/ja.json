@@ -2833,7 +2833,10 @@
     "confirmCancelGroupTitle": "ディスカッションをキャンセルしますか？",
     "confirmCancelGroupDescription": "このディスカッションをキャンセルしますか？進行中の作業はすべて中止されます。",
     "confirmCancelGroupButton": "ディスカッションをキャンセル",
-    "confirmDismiss": "戻る"
+    "confirmDismiss": "戻る",
+    "approvalBlockedHeading": "ここでは承認できません",
+    "confirmRejectToolTitle": "ツールの実行を拒否しますか？",
+    "confirmRejectToolDescription": "何も実行されません。会話は続行され、エージェントは {{toolNames}} を使わずに回答します。"
   },
   "chatDrawer": {
     "deploying": "エージェントをデプロイ中…",
@@ -3189,7 +3192,8 @@
         "agentCreatedWithoutGate": "このエージェントは承認ゲートなしで作成されています。以降のすべての書き込みは監視されずに実行されます。",
         "agentCreatedWithBroadEndpoints": "このエージェントは自身のAPIへの書き込みアクセス権を持って作成されています — 読み取りに限定されていません。",
         "unchecked": "ボディが長すぎて権限付与の有無を確認できませんでした。承認前に全文をお読みください。"
-      }
+      },
+      "blockedSelfTarget": "これはオペレーター自身のエージェント（{{agentId}}）を変更します。今後の承認ゲートを取り除きうる唯一の変更です。拒否したうえで、そのエージェント自身のページから変更してください。"
     },
     "starters": {
       "whatsDeployed": "今は何がデプロイされていますか？",

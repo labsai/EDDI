@@ -359,6 +359,59 @@ describe("ApprovalBanner", () => {
     });
   });
 
+  describe("blockedCalls — a refusal, not a warning", () => {
+    const blocked = [{ callId: "c1", reason: "This modifies the operator's own agent." }];
+
+    it("disables Approve outright while a call is blocked", () => {
+      // The distinction from every other signal on this banner: an escalation
+      // flag informs, this one takes the decision away. It exists for the single
+      // write that would remove the approval gate itself.
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} blockedCalls={blocked} />,
+      );
+      expect(screen.getByTestId("approve-button")).toBeDisabled();
+    });
+
+    it("says why, as an alert rather than styled text", () => {
+      // An approver who loses Approve without explanation assumes the UI is
+      // broken and goes looking for another way to do the same thing.
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} blockedCalls={blocked} />,
+      );
+      const alert = screen.getByTestId("approval-blocked");
+      expect(alert).toHaveAttribute("role", "alert");
+      expect(alert).toHaveTextContent("This modifies the operator's own agent.");
+    });
+
+    it("still allows Reject, so a blocked pause is never a dead end", () => {
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} blockedCalls={blocked} />,
+      );
+      expect(screen.getByTestId("reject-button")).not.toBeDisabled();
+    });
+
+    it("blocks the whole batch, not just the offending call", () => {
+      // Per-call verdicts are submitted together; approving "the rest" would
+      // still run the batch containing the write being refused.
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} blockedCalls={blocked} />,
+      );
+      fireEvent.click(screen.getByTestId("approve-button"));
+      expect(onDecide).not.toHaveBeenCalled();
+    });
+
+    it("leaves Approve available when nothing is blocked", () => {
+      // The mirror direction, so the pairing is not vacuous: a regression that
+      // blocked everything would pass every test above.
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} blockedCalls={[]} />,
+      );
+      expect(screen.getByTestId("approve-button")).not.toBeDisabled();
+      expect(screen.queryByTestId("approval-blocked")).not.toBeInTheDocument();
+    });
+  });
+
   describe("requireExplicitPerCall", () => {
     it("disables Approve until every call has an explicit verdict", () => {
       renderWithProviders(

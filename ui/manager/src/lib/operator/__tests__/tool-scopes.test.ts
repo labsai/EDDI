@@ -82,8 +82,12 @@ describe("tool-scopes", () => {
       // A PUT requires the resource's current version; a POST that duplicates
       // or extends one requires reading it first. Write access without a
       // matching read would be unusable, not just incomplete.
-      const writeStores = WRITE_ENDPOINTS.filter((e) => e.startsWith("PUT /")).map(
-        (e) => e.replace(/^PUT \//, "").replace(/\/\{id\}$/, ""),
+      // Whole-document PUTs only. A sub-resource action like
+      // `PUT /agentstore/agents/{id}/updateResourceUri` is not a store and has
+      // no by-id read of its own — its prerequisite read is the agent document,
+      // which is asserted separately above.
+      const writeStores = WRITE_ENDPOINTS.filter((e) => /^PUT \/\S+\/\{id\}$/.test(e)).map((e) =>
+        e.replace(/^PUT \//, "").replace(/\/\{id\}$/, ""),
       );
       for (const store of writeStores) {
         expect(READ_ENDPOINTS, `missing a by-id read for ${store}`).toContain(`GET /${store}/{id}`);
@@ -110,6 +114,7 @@ describe("tool-scopes", () => {
         "POST /administration/agents/setup-api",
         "PUT /workflowstore/workflows/{id}",
         "POST /workflowstore/workflows",
+        "PUT /agentstore/agents/{id}/updateResourceUri",
         "PUT /rulestore/rulesets/{id}",
         "POST /rulestore/rulesets",
         "PUT /outputstore/outputsets/{id}",
@@ -135,6 +140,23 @@ describe("tool-scopes", () => {
       expect(WRITE_ENDPOINTS).not.toContain("DELETE /groupstore/groups/{id}");
     });
 
+    it("grants the repoint hop, without which every other authoring write is a silent no-op", () => {
+      // EDDI never mutates in place: editing a rule set makes rules K+1, and the
+      // deployed agent still references workflow M -> rules K. Without this the
+      // change is real, dormant, and reads back as success.
+      expect(WRITE_ENDPOINTS).toContain("PUT /agentstore/agents/{id}/updateResourceUri");
+    });
+
+    it("grants the repoint hop but NOT a full agent-document write", () => {
+      // The distinction the whole exclusion rests on: updateResourceUri consumes
+      // text/plain and its body is one bare URI, so it structurally cannot carry
+      // a hitlConfig. A full PUT can, and stays out.
+      expect(WRITE_ENDPOINTS).not.toContain("PUT /agentstore/agents/{id}");
+      expect(WRITE_ENDPOINTS).not.toContain("POST /agentstore/agents");
+      const agentWrites = WRITE_ENDPOINTS.filter((e) => e.includes("/agentstore/"));
+      expect(agentWrites).toEqual(["PUT /agentstore/agents/{id}/updateResourceUri"]);
+    });
+
     it("can create a whole new agent (both shapes), but never touch an existing agent's own document", () => {
       // setup and setup-api build a new AgentConfiguration from nothing, so
       // "does this body carry a real gate" needs no prior version to compare
@@ -143,8 +165,11 @@ describe("tool-scopes", () => {
       // comment on WRITE_ENDPOINTS), so that stays out categorically.
       expect(WRITE_ENDPOINTS).toContain("POST /administration/agents/setup");
       expect(WRITE_ENDPOINTS).toContain("POST /administration/agents/setup-api");
-      const agentDocumentWrites = WRITE_ENDPOINTS.filter((e) => e.includes("/agentstore/"));
-      expect(agentDocumentWrites).toEqual([]);
+      // The only agent-store write is the bare-URI repoint, asserted above.
+      const fullDocumentWrites = WRITE_ENDPOINTS.filter(
+        (e) => e.includes("/agentstore/") && !e.endsWith("/updateResourceUri"),
+      );
+      expect(fullDocumentWrites).toEqual([]);
     });
 
     it("authors every workflow-extension store that cannot carry a gate", () => {

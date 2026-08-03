@@ -2864,7 +2864,10 @@
     "confirmCancelGroupTitle": "Cancel discussion?",
     "confirmCancelGroupDescription": "Cancel this discussion? Any in-progress work is aborted.",
     "confirmCancelGroupButton": "Cancel discussion",
-    "confirmDismiss": "Go back"
+    "confirmDismiss": "Go back",
+    "approvalBlockedHeading": "This cannot be approved here",
+    "confirmRejectToolTitle": "Reject tool execution?",
+    "confirmRejectToolDescription": "Nothing will run. The conversation continues and the agent answers without {{toolNames}}."
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",
@@ -3216,7 +3219,8 @@
         "agentCreatedWithoutGate": "This agent is being created with no approval gate. Every write it later makes will execute unsupervised.",
         "agentCreatedWithBroadEndpoints": "This agent is being created with write access to its API — not limited to reads.",
         "unchecked": "The body was too long to scan for capability grants — read it in full before approving."
-      }
+      },
+      "blockedSelfTarget": "This modifies the operator's own agent ({{agentId}}) — the one change that could remove its future approval gate. Reject it and make the change from that agent's own page instead."
     },
     "starters": {
       "whatsDeployed": "What's deployed right now?",

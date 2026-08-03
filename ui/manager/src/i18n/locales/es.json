@@ -2839,7 +2839,10 @@
     "confirmCancelGroupTitle": "¿Cancelar la discusión?",
     "confirmCancelGroupDescription": "¿Cancelar esta discusión? Cualquier trabajo en curso se abortará.",
     "confirmCancelGroupButton": "Cancelar discusión",
-    "confirmDismiss": "Volver"
+    "confirmDismiss": "Volver",
+    "approvalBlockedHeading": "Esto no se puede aprobar aquí",
+    "confirmRejectToolTitle": "¿Rechazar la ejecución de la herramienta?",
+    "confirmRejectToolDescription": "No se ejecutará nada. La conversación continúa y el agente responde sin {{toolNames}}."
   },
   "chatDrawer": {
     "deploying": "Desplegando agente…",
@@ -3195,7 +3198,8 @@
         "agentCreatedWithoutGate": "Este agente se está creando sin puerta de aprobación. Cada escritura que realice más adelante se ejecutará sin supervisión.",
         "agentCreatedWithBroadEndpoints": "Este agente se está creando con acceso de escritura a su API — no limitado a lecturas.",
         "unchecked": "El cuerpo era demasiado largo para analizarlo en busca de concesiones de capacidad — léalo completo antes de aprobar."
-      }
+      },
+      "blockedSelfTarget": "Esto modifica el propio agente del operador ({{agentId}}) — el único cambio que podría eliminar su futura puerta de aprobación. Recházalo y haz el cambio desde la página de ese agente."
     },
     "starters": {
       "whatsDeployed": "¿Qué hay desplegado ahora mismo?",

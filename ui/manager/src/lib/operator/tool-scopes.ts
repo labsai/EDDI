@@ -232,6 +232,25 @@ export const WRITE_ENDPOINTS: readonly string[] = [
   "POST /administration/agents/setup-api",
   "PUT /workflowstore/workflows/{id}",
   "POST /workflowstore/workflows",
+  // The hop that makes every other authoring write actually take effect. EDDI
+  // never mutates in place — each PUT writes version + 1 — so editing a rule set
+  // produces rules K+1, repointing the workflow produces workflow M+1, and
+  // WITHOUT this the deployed agent still references workflow M and runs rules
+  // K. The edit is a silent no-op that reads back as success.
+  //
+  // Safe where a full `PUT /agentstore/agents/{id}` is not: it @Consumes
+  // TEXT_PLAIN and its whole body is one bare URI, so it is structurally
+  // incapable of carrying a hitlConfig. It prefix-matches the resource
+  // reference and produces a new agent version with everything else — the gate
+  // above all — copied forward untouched.
+  //
+  // It does complete a self-ungating chain, which is why `self-guard.ts` exists:
+  // the operator could repoint its OWN workflow's LLM step at an llmstore
+  // document carrying a permissive Task.toolApprovals and then redeploy itself
+  // through the already-granted deploy verb. Editing its own workflow alone is
+  // inert (the agent still references the old version); it is precisely THIS
+  // endpoint, aimed at its own agent, that would close the loop.
+  "PUT /agentstore/agents/{id}/updateResourceUri",
   ...WRITABLE_EXTENSION_STORES.flatMap((store) => [`PUT /${store}/{id}`, `POST /${store}`]),
 ] as const;
 

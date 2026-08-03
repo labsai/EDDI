@@ -2857,7 +2857,10 @@
     "confirmCancelGroupTitle": "إلغاء المناقشة؟",
     "confirmCancelGroupDescription": "إلغاء هذه المناقشة؟ سيتم إيقاف أي عمل قيد التنفيذ.",
     "confirmCancelGroupButton": "إلغاء المناقشة",
-    "confirmDismiss": "رجوع"
+    "confirmDismiss": "رجوع",
+    "approvalBlockedHeading": "لا يمكن الموافقة على هذا من هنا",
+    "confirmRejectToolTitle": "رفض تنفيذ الأداة؟",
+    "confirmRejectToolDescription": "لن يُنفَّذ أي شيء. تستمر المحادثة ويجيب الوكيل دون {{toolNames}}."
   },
   "chatDrawer": {
     "deploying": "جارٍ نشر الوكيل…",
@@ -3213,7 +3216,8 @@
         "agentCreatedWithoutGate": "يتم إنشاء هذا الوكيل بدون بوابة موافقة. ستُنفَّذ كل عملية كتابة يقوم بها لاحقًا دون إشراف.",
         "agentCreatedWithBroadEndpoints": "يتم إنشاء هذا الوكيل بصلاحية كتابة على واجهة برمجة التطبيقات الخاصة به — وليس مقتصرًا على القراءة.",
         "unchecked": "كان المحتوى أطول من أن يُفحص بحثًا عن منح صلاحيات إضافية — اقرأه كاملًا قبل الموافقة."
-      }
+      },
+      "blockedSelfTarget": "يعدّل هذا وكيل المشغّل نفسه ({{agentId}}) — وهو التغيير الوحيد الذي قد يزيل بوابة الموافقة الخاصة به مستقبلًا. ارفضه وأجرِ التغيير من صفحة ذلك الوكيل نفسه بدلًا من ذلك."
     },
     "starters": {
       "whatsDeployed": "ما المنشور حاليًا؟",

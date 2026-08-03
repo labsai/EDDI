@@ -71,6 +71,17 @@ interface ApprovalBannerProps {
    */
   requireExplicitPerCall?: boolean;
   /**
+   * Call ids that must NOT be approvable, with the reason shown to the
+   * approver. Unlike every other signal on this banner these are a refusal, not
+   * a warning: Approve is disabled outright while any is present.
+   *
+   * Used by the operator surfaces for a write the operator aimed at its own
+   * agent document — see `self-guard.ts` for why that specific write ends with
+   * an operator that no longer needs approval for anything. Reject stays
+   * available, so the pause is never a dead end.
+   */
+  blockedCalls?: readonly { callId: string; reason: string }[];
+  /**
    * Rendered per call, above the redacted arguments — e.g. the reconstructed
    * "METHOD /path" a generated tool actually calls, which `PendingToolCallView`
    * does not carry (only the operationId-derived tool name does). Kept as a
@@ -144,6 +155,7 @@ export function ApprovalBanner({
   onDecide,
   onCancel,
   requireExplicitPerCall = false,
+  blockedCalls,
   renderCallExtra,
 }: ApprovalBannerProps) {
   const { t } = useTranslation();
@@ -181,6 +193,13 @@ export function ApprovalBanner({
     requireExplicitPerCall &&
     isToolCall &&
     toolPause!.calls.some((call) => callStates[call.callId]?.verdict === undefined);
+
+  // A refusal, not a nudge. Any blocked call disables Approve for the whole
+  // batch rather than only for itself: the per-call verdicts are submitted
+  // together, and letting the rest through would still run the batch that
+  // contains the write we are refusing to authorise.
+  const blocked = blockedCalls ?? [];
+  const approvalBlocked = blocked.length > 0;
 
   const setCall = (callId: string, patch: Partial<CallState>) => {
     setCallStates((prev) => ({ ...prev, [callId]: { ...prev[callId], ...patch } }));
@@ -466,6 +485,26 @@ export function ApprovalBanner({
               {t("hitl.explicitReviewMissing", "Review every call above before approving.")}
             </p>
           )}
+          {approvalBlocked && (
+            // role="alert" rather than a styled paragraph: Approve has just been
+            // taken away, and an approver who does not know why will assume the
+            // UI is broken and go looking for another way to do it.
+            <div
+              role="alert"
+              className="rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive"
+              data-testid="approval-blocked"
+            >
+              <p className="flex items-center gap-1 font-medium">
+                <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("hitl.approvalBlockedHeading", "This cannot be approved here")}
+              </p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                {blocked.map((entry) => (
+                  <li key={entry.callId}>{entry.reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
@@ -585,7 +624,7 @@ export function ApprovalBanner({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          disabled={isSubmitting || pauseDetailsPending || explicitReviewMissing}
+          disabled={isSubmitting || pauseDetailsPending || explicitReviewMissing || approvalBlocked}
           onClick={() => setConfirmAction("APPROVED")}
           className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
           data-testid="approve-button"

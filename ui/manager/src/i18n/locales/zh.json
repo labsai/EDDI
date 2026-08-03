@@ -2833,7 +2833,10 @@
     "confirmCancelGroupTitle": "取消讨论？",
     "confirmCancelGroupDescription": "取消此讨论？所有进行中的工作都将中止。",
     "confirmCancelGroupButton": "取消讨论",
-    "confirmDismiss": "返回"
+    "confirmDismiss": "返回",
+    "approvalBlockedHeading": "此项无法在这里批准",
+    "confirmRejectToolTitle": "拒绝工具执行？",
+    "confirmRejectToolDescription": "不会运行任何内容。对话将继续，智能体会在不使用 {{toolNames}} 的情况下作答。"
   },
   "chatDrawer": {
     "deploying": "正在部署智能体…",
@@ -3189,7 +3192,8 @@
         "agentCreatedWithoutGate": "该智能体正在创建时没有审批关卡。它之后的每一次写入都将在无人监督的情况下执行。",
         "agentCreatedWithBroadEndpoints": "该智能体正在创建时被授予其 API 的写入权限——不限于读取。",
         "unchecked": "正文过长,无法扫描是否存在权限授予——请在批准前完整阅读。"
-      }
+      },
+      "blockedSelfTarget": "此更改会修改操作员自身的智能体（{{agentId}}）——这是唯一可能移除其未来审批关卡的更改。请拒绝，改为在该智能体自己的页面上进行此更改。"
     },
     "starters": {
       "whatsDeployed": "现在部署了哪些内容？",
