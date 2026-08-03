@@ -3063,6 +3063,7 @@
     "title": "Plattform-Operator",
     "subtitle": "Stellen Sie Fragen zu dieser EDDI-Installation — der Operator schlägt sie für Sie nach.",
     "readOnlyChip": "Nur Lesezugriff",
+    "readWriteChip": "Lese- und Schreibzugriff",
     "configError": "Die Operator-Konfiguration konnte nicht geladen werden",
     "empty": {
       "title": "Der Plattform-Operator ist deaktiviert",
@@ -3089,7 +3090,22 @@
       "environment": "Umgebung",
       "authMode": "Authentifizierung des Operators",
       "authModeHint": "Der Operator ruft Ihre EDDI-Admin-API auf. Diese Einstellung legt fest, welche Zugangsdaten diese Aufrufe mitführen.",
-      "authNoneBlocked": "Für diese Installation ist die Authentifizierung aktiviert, daher würden nicht authentifizierte Tool-Aufrufe abgelehnt. Der Operator würde erfolgreich deployt und danach bei jeder Abfrage scheitern. Wählen Sie stattdessen „Ihre Identität\".",
+      "authNoneBlocked": "Für diese Installation ist die Authentifizierung aktiviert, daher würden nicht authentifizierte Tool-Aufrufe abgelehnt. Der Operator würde erfolgreich deployt und danach bei jeder Abfrage scheitern. Wählen Sie stattdessen „Ihre Identität\".",      "scope": {
+        "label": "Berechtigung",
+        "hint": "Was der Operator tun darf. Jede Änderung wartet weiterhin auf Ihre Genehmigung — siehe die Sicherheitsregeln unten.",
+        "readOnly": {
+          "label": "Nur Lesezugriff",
+          "description": "Kann dieses Deployment einsehen und erklären. Kann nichts ändern."
+        },
+        "readWrite": {
+          "label": "Lese- und Schreibzugriff",
+          "description": "Kann außerdem bereitstellen, die Bereitstellung aufheben, einen außer Kontrolle geratenen Zeitplan deaktivieren und die Beschreibung eines Agenten bearbeiten — jeweils erst nach Ihrer Genehmigung."
+        },
+        "unavailableNotVerified": "Noch nicht verfügbar — das Genehmigungsgate dieses Operators wurde nicht als sicher verifiziert. Prüfen Sie die Verbindung im Statusbereich, oder wählen Sie unten „Ihre Identität“ und konfigurieren Sie danach neu.",
+        "unavailableFirstActivation": "Bei der ersten Aktivierung nicht verfügbar. Aktivieren Sie zunächst mit Nur-Lesezugriff, um zu belegen, dass das Genehmigungsgate zuverlässig funktioniert, und konfigurieren Sie dann neu, um Schreibzugriff zu gewähren.",
+        "writeWarning": "Beim Aktivieren wird ein Schreib-Kanarientest ausgeführt: ein echter, harmloser Testschreibvorgang, der vor Abschluss dieses Deployments auf Ihre Genehmigung warten muss. Pausiert er nicht, wird die Aktivierung verweigert und der Operator entfernt, statt mit einem ungeprüften Schreib-Gate bereitgestellt zu bleiben."
+      },
+
       "safetyPreamble": "Sicherheitsregeln (nicht bearbeitbar)",
       "safetyPreambleHint": "Wird immer vorangestellt. Sie weist den Operator an, alles von seinen Tools Zurückgelieferte als nicht vertrauenswürdige Daten zu behandeln.",
       "promptBody": "Anweisungen für den Operator",
@@ -3118,7 +3134,8 @@
       "saving": "Konfiguration wird gespeichert …",
       "verifying-gate": "Die Freigabesperre wird überprüft…",
       "done": "Fertig",
-      "canary": "Es wird geprüft, ob der Operator Ihre Plattform erreicht …"
+      "canary": "Es wird geprüft, ob der Operator Ihre Plattform erreicht …",
+      "write-canary": "Ein echter Testschreibvorgang wird ausgeführt, der auf Ihre Genehmigung wartet…"
     },
     "status": {
       "title": "Operator",
@@ -3166,6 +3183,8 @@
     },
     "toast": {
       "activated": "Plattform-Operator aktiviert",
+
+      "activatedReadWrite": "Platform Operator aktiviert — Schreibzugriff verifiziert",
       "deactivated": "Plattform-Operator deaktiviert",
       "reset": "Plattform-Operator gelöscht",
       "activatedButUnreachable": "Operator deployt, konnte Ihre Plattform aber nicht lesen"

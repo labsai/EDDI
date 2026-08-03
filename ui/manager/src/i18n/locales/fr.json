@@ -3069,6 +3069,7 @@
     "title": "Opérateur de plateforme",
     "subtitle": "Posez vos questions sur ce déploiement EDDI — il fait les recherches pour vous.",
     "readOnlyChip": "Lecture seule",
+    "readWriteChip": "Lecture et écriture",
     "configError": "Impossible de charger la configuration de l'opérateur",
     "empty": {
       "title": "L'opérateur de plateforme est désactivé",
@@ -3095,7 +3096,22 @@
       "environment": "Environnement",
       "authMode": "Authentification de l'opérateur",
       "authModeHint": "L'opérateur appelle votre API d'administration EDDI. Ce réglage détermine les identifiants portés par ces appels.",
-      "authNoneBlocked": "L'authentification est activée sur ce déploiement : les appels d'outils non authentifiés seraient rejetés. L'opérateur se déploierait correctement puis échouerait à chaque recherche. Choisissez plutôt « Votre identité ».",
+      "authNoneBlocked": "L'authentification est activée sur ce déploiement : les appels d'outils non authentifiés seraient rejetés. L'opérateur se déploierait correctement puis échouerait à chaque recherche. Choisissez plutôt « Votre identité ».",      "scope": {
+        "label": "Capacité",
+        "hint": "Ce que l'opérateur est autorisé à faire. Chaque écriture reste en attente de votre approbation — voir les règles de sécurité ci-dessous.",
+        "readOnly": {
+          "label": "Lecture seule",
+          "description": "Peut inspecter et expliquer ce déploiement. Ne peut rien modifier."
+        },
+        "readWrite": {
+          "label": "Lecture et écriture",
+          "description": "Peut aussi déployer, annuler le déploiement, désactiver une planification incontrôlée et modifier le descripteur d'un agent — chacune de ces actions étant d'abord soumise à votre approbation."
+        },
+        "unavailableNotVerified": "Pas encore disponible — la passerelle d'approbation de cet opérateur n'a pas été vérifiée comme fiable. Vérifiez la connexion depuis le panneau d'état, ou choisissez « Votre identité » ci-dessous, puis reconfigurez.",
+        "unavailableFirstActivation": "Non disponible lors de la première activation. Activez d'abord en lecture seule pour prouver que la passerelle d'approbation est fiable, puis reconfigurez pour accorder l'accès en écriture.",
+        "writeWarning": "L'activation exécutera un test canari d'écriture : une écriture de test réelle et inoffensive qui doit rester en attente d'approbation avant la fin de ce déploiement. Si elle ne se met pas en pause, l'activation est refusée et l'opérateur est supprimé plutôt que laissé déployé avec une passerelle d'écriture non vérifiée."
+      },
+
       "safetyPreamble": "Règles de sécurité (non modifiables)",
       "safetyPreambleHint": "Toujours ajoutées en tête. Elles indiquent à l'opérateur de traiter tout ce que renvoient ses outils comme des données non fiables.",
       "promptBody": "Instructions de l'opérateur",
@@ -3124,7 +3140,8 @@
       "saving": "Enregistrement de la configuration…",
       "verifying-gate": "Vérification de la barrière d'approbation…",
       "done": "Terminé",
-      "canary": "Vérification que l'opérateur atteint votre plateforme…"
+      "canary": "Vérification que l'opérateur atteint votre plateforme…",
+      "write-canary": "Exécution d'une écriture de test réelle, qui doit attendre votre approbation…"
     },
     "status": {
       "title": "Opérateur",
@@ -3172,6 +3189,8 @@
     },
     "toast": {
       "activated": "Opérateur de plateforme activé",
+
+      "activatedReadWrite": "Opérateur de plateforme activé — accès en écriture vérifié",
       "deactivated": "Opérateur de plateforme désactivé",
       "reset": "Opérateur de plateforme supprimé",
       "activatedButUnreachable": "Opérateur déployé, mais il n'a pas pu lire votre plateforme"

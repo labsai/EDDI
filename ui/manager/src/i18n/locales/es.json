@@ -3069,6 +3069,7 @@
     "title": "Operador de plataforma",
     "subtitle": "Pregunta sobre esta instalación de EDDI: el operador lo consulta por ti.",
     "readOnlyChip": "Solo lectura",
+    "readWriteChip": "Lectura y escritura",
     "configError": "No se pudo cargar la configuración del operador",
     "empty": {
       "title": "El operador de plataforma está desactivado",
@@ -3095,7 +3096,22 @@
       "environment": "Entorno",
       "authMode": "Cómo se autentica el operador",
       "authModeHint": "El operador llama a tu API de administración de EDDI. Esto determina qué credenciales llevan esas llamadas.",
-      "authNoneBlocked": "Esta instalación tiene la autenticación activada, por lo que las llamadas de herramientas sin autenticar serían rechazadas. El operador se desplegaría correctamente y luego fallaría en cada consulta. Elige «Tu identidad» en su lugar.",
+      "authNoneBlocked": "Esta instalación tiene la autenticación activada, por lo que las llamadas de herramientas sin autenticar serían rechazadas. El operador se desplegaría correctamente y luego fallaría en cada consulta. Elige «Tu identidad» en su lugar.",      "scope": {
+        "label": "Capacidad",
+        "hint": "Lo que el operador puede hacer. Cada escritura sigue esperando tu aprobación — consulta las reglas de seguridad más abajo.",
+        "readOnly": {
+          "label": "Solo lectura",
+          "description": "Puede inspeccionar y explicar este despliegue. No puede cambiar nada."
+        },
+        "readWrite": {
+          "label": "Lectura y escritura",
+          "description": "También le permite desplegar, retirar el despliegue, deshabilitar una programación descontrolada y editar el descriptor de un agente — cada una a la espera de tu aprobación."
+        },
+        "unavailableNotVerified": "Aún no disponible — la puerta de aprobación de este operador no se ha verificado como fiable. Comprueba la conexión en el panel de estado, o elige «Tu identidad» abajo y luego vuelve a configurar.",
+        "unavailableFirstActivation": "No disponible en la primera activación. Activa primero en modo de solo lectura para demostrar que la puerta de aprobación es fiable, y luego vuelve a configurar para conceder acceso de escritura.",
+        "writeWarning": "Al activar se ejecutará una prueba canario de escritura: una escritura de prueba real e inofensiva que debe quedar a la espera de aprobación antes de que termine este despliegue. Si no se pausa, la activación se rechaza y el operador se elimina en lugar de dejarlo desplegado con una puerta de escritura sin verificar."
+      },
+
       "safetyPreamble": "Reglas de seguridad (no editables)",
       "safetyPreambleHint": "Se anteponen siempre. Indican al operador que trate todo lo que devuelvan sus herramientas como datos no fiables.",
       "promptBody": "Instrucciones del operador",
@@ -3124,7 +3140,8 @@
       "saving": "Guardando la configuración…",
       "verifying-gate": "Verificando la puerta de aprobación…",
       "done": "Listo",
-      "canary": "Comprobando que el operador puede acceder a tu plataforma…"
+      "canary": "Comprobando que el operador puede acceder a tu plataforma…",
+      "write-canary": "Ejecutando una escritura de prueba real, que debe esperar tu aprobación…"
     },
     "status": {
       "title": "Operador",
@@ -3172,6 +3189,8 @@
     },
     "toast": {
       "activated": "Operador de plataforma activado",
+
+      "activatedReadWrite": "Operador de la plataforma activado — acceso de escritura verificado",
       "deactivated": "Operador de plataforma desactivado",
       "reset": "Operador de plataforma eliminado",
       "activatedButUnreachable": "Operador desplegado, pero no pudo leer tu plataforma"

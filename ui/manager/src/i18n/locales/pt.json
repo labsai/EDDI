@@ -3069,6 +3069,7 @@
     "title": "Operador da plataforma",
     "subtitle": "Pergunte sobre esta instalação do EDDI — o operador consulta por si.",
     "readOnlyChip": "Somente leitura",
+    "readWriteChip": "Leitura e escrita",
     "configError": "Não foi possível carregar a configuração do operador",
     "empty": {
       "title": "O operador da plataforma está desativado",
@@ -3095,7 +3096,22 @@
       "environment": "Ambiente",
       "authMode": "Como o operador se autentica",
       "authModeHint": "O operador chama a sua API de administração do EDDI. Isto define que credenciais essas chamadas transportam.",
-      "authNoneBlocked": "Esta instalação tem a autenticação ativada, pelo que chamadas de ferramentas não autenticadas seriam rejeitadas. O operador seria implantado com sucesso e depois falharia em todas as consultas. Escolha antes «A sua identidade».",
+      "authNoneBlocked": "Esta instalação tem a autenticação ativada, pelo que chamadas de ferramentas não autenticadas seriam rejeitadas. O operador seria implantado com sucesso e depois falharia em todas as consultas. Escolha antes «A sua identidade».",      "scope": {
+        "label": "Capacidade",
+        "hint": "O que o operador tem permissão para fazer. Cada escrita continua à espera da sua aprovação — veja as regras de segurança abaixo.",
+        "readOnly": {
+          "label": "Somente leitura",
+          "description": "Pode inspecionar e explicar este deployment. Não pode alterar nada."
+        },
+        "readWrite": {
+          "label": "Leitura e escrita",
+          "description": "Também permite implementar, remover a implementação, desativar uma agenda fora de controlo e editar o descritor de um agente — cada uma à espera da sua aprovação primeiro."
+        },
+        "unavailableNotVerified": "Ainda não disponível — o gate de aprovação deste operador não foi verificado como fiável. Verifique a ligação no painel de estado, ou escolha «A sua identidade» abaixo e depois reconfigure.",
+        "unavailableFirstActivation": "Não disponível na primeira ativação. Ative primeiro em modo de leitura para provar que o gate de aprovação é fiável, depois reconfigure para conceder acesso de escrita.",
+        "writeWarning": "Ativar irá executar um teste canário de escrita: uma escrita de teste real e inofensiva que tem de ficar em pausa à espera de aprovação antes de este deployment terminar. Se não pausar, a ativação é recusada e o operador é removido em vez de ficar implementado com um gate de escrita não verificado."
+      },
+
       "safetyPreamble": "Regras de segurança (não editáveis)",
       "safetyPreambleHint": "São sempre antepostas. Instruem o operador a tratar tudo o que as suas ferramentas devolvem como dados não fiáveis.",
       "promptBody": "Instruções do operador",
@@ -3124,7 +3140,8 @@
       "saving": "A guardar a configuração…",
       "verifying-gate": "A verificar a barreira de aprovação…",
       "done": "Concluído",
-      "canary": "A verificar se o operador consegue aceder à sua plataforma…"
+      "canary": "A verificar se o operador consegue aceder à sua plataforma…",
+      "write-canary": "A executar uma escrita de teste real, que tem de aguardar a sua aprovação…"
     },
     "status": {
       "title": "Operador",
@@ -3172,6 +3189,8 @@
     },
     "toast": {
       "activated": "Operador da plataforma ativado",
+
+      "activatedReadWrite": "Platform Operator ativado — acesso de escrita verificado",
       "deactivated": "Operador da plataforma desativado",
       "reset": "Operador da plataforma eliminado",
       "activatedButUnreachable": "Operador implantado, mas não conseguiu ler a sua plataforma"

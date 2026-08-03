@@ -3090,6 +3090,7 @@
     "title": "Platform Operator",
     "subtitle": "Ask about this EDDI deployment — it looks things up for you.",
     "readOnlyChip": "Read-only",
+    "readWriteChip": "Read & write",
     "configError": "Couldn't load the operator configuration",
     "empty": {
       "title": "The Platform Operator is off",
@@ -3117,6 +3118,21 @@
       "authMode": "How the operator authenticates",
       "authModeHint": "The operator calls your EDDI admin API. This decides what credentials those calls carry.",
       "authNoneBlocked": "This deployment has authentication enabled, so unauthenticated tool calls would be rejected. The operator would deploy successfully and then fail every lookup. Choose \"Your identity\" instead.",
+      "scope": {
+        "label": "Capability",
+        "hint": "What the operator is allowed to do. Every write still pauses for your approval — see the safety rules below.",
+        "readOnly": {
+          "label": "Read-only",
+          "description": "Can inspect and explain this deployment. Cannot change anything."
+        },
+        "readWrite": {
+          "label": "Read & write",
+          "description": "Also lets it deploy, undeploy, disable a runaway schedule, and edit an agent's descriptor — each one paused for your approval first."
+        },
+        "unavailableNotVerified": "Not available yet — this operator's approval gate has not been verified as sound. Check connection on the status panel, or choose \"Your identity\" below, then reconfigure.",
+        "unavailableFirstActivation": "Not available on first activation. Activate read-only first to prove the approval gate is sound, then reconfigure to grant write access.",
+        "writeWarning": "Activating will run a write canary: a real, harmless test write that must pause for approval before this deployment finishes. If it does not pause, activation is refused and the operator is removed rather than left deployed with an unverified write gate."
+      },
       "safetyPreamble": "Safety rules (not editable)",
       "safetyPreambleHint": "Always prepended. It tells the operator to treat everything its tools return as untrusted data.",
       "promptBody": "Operator instructions",
@@ -3145,7 +3161,8 @@
       "saving": "Saving configuration…",
       "verifying-gate": "Verifying the approval gate…",
       "done": "Done",
-      "canary": "Checking the operator can reach your platform…"
+      "canary": "Checking the operator can reach your platform…",
+      "write-canary": "Running a real test write, which must pause for your approval…"
     },
     "status": {
       "title": "Operator",
@@ -3193,6 +3210,7 @@
     },
     "toast": {
       "activated": "Platform Operator activated",
+      "activatedReadWrite": "Platform Operator activated — write access verified",
       "deactivated": "Platform Operator deactivated",
       "reset": "Platform Operator deleted",
       "activatedButUnreachable": "Operator deployed, but it could not read your platform"

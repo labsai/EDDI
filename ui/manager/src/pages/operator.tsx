@@ -151,7 +151,14 @@ export function OperatorPage() {
             chat.reset();
             if (outcome.canary.ok) {
               setCanaryWarning(null);
-              toast.success(t("operator.toast.activated", "Platform Operator activated"));
+              // A reachable onSuccess means the write canary either did not run
+              // (read_only) or passed — a non-"pass" result throws, landing in
+              // onError below with the agent already rolled back.
+              toast.success(
+                outcome.writeCanary
+                  ? t("operator.toast.activatedReadWrite", "Platform Operator activated — write access verified")
+                  : t("operator.toast.activated", "Platform Operator activated"),
+              );
             } else {
               setCanaryWarning(outcome.canary.error ?? t("operator.canary.genericFailure", "The connection check did not succeed."));
               toast.warning(t("operator.toast.activatedButUnreachable", "Operator deployed, but it could not read your platform"));
@@ -259,6 +266,7 @@ export function OperatorPage() {
           initial={seedConfig(config)}
           stage={stage}
           error={activationError}
+          gate={gate.data}
           onActivate={handleActivate}
           onCancel={() => {
             setShowActivation(false);
