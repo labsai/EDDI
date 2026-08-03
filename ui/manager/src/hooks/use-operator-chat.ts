@@ -187,6 +187,14 @@ async function pollUntilSettled(
       // With no timestamp to compare against, treat any pause as the one we
       // decided — the conservative reading, since claiming a new pause we
       // cannot prove would clear the banner for a decision still outstanding.
+      //
+      // Reachable only in theory: the backend sets hitlPausedAt unconditionally
+      // in the same block that sets AWAITING_HUMAN (Conversation#pauseConversation),
+      // so a paused snapshot without one would have to predate that or come from
+      // somewhere else entirely. Kept as a fallback rather than an assertion,
+      // and deliberately NOT inverted to "any pause is a new pause": that would
+      // trade a bounded wait-then-timeout for silently clearing an approval the
+      // human has not actually given.
       (decidedPausedAt === null || snapshot.hitlPausedAt === decidedPausedAt);
     if (!stillTheSamePause) return snapshot;
     if (Date.now() >= deadline) {
