@@ -10,16 +10,19 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * Removes credential material from a resolved request's headers and body.
+ * Removes credential material from a resolved request — headers, query
+ * parameters and body alike.
  * <p>
  * One definition, two consumers: the debug record written to conversation
  * memory and the approval preview shown to a human. They must not drift — a
- * header or body redacted in one and not the other is a credential leak through
- * whichever path was forgotten.
+ * part redacted in one and not the other is a credential leak through whichever
+ * path was forgotten. Each of the three has been that leak at some point, which
+ * is why they are all defined here rather than at the call sites.
  */
 @ApplicationScoped
 public class RequestRedactor {
@@ -134,16 +137,16 @@ public class RequestRedactor {
     }
 
     /**
-     * Redact the {@code headers} and {@code body} entries of a request map in
-     * place, as produced by
+     * Redact the {@code headers}, {@code queryParams} and {@code body} entries of a
+     * request map, as produced by
      * {@link ai.labs.eddi.engine.httpclient.IRequest#toMap()}.
      * <p>
-     * Query parameters are deliberately left alone here: this map is the debug
-     * record, whose {@code queryParams} entry is the live map the request itself
-     * holds ({@code HttpClientWrapper.RequestWrapper#toMap} does not copy it), so
-     * rewriting its values in place would corrupt the outgoing request. The
-     * approval preview redacts them on its own copy instead — see
-     * {@code ApiCallExecutor#resolve}.
+     * Each entry is REPLACED with a redacted copy rather than rewritten in place.
+     * That distinction is load-bearing for the query parameters:
+     * {@code HttpClientWrapper.RequestWrapper#toMap} hands back its live
+     * {@code queryParamsMap} rather than a copy, so mutating the nested map would
+     * corrupt the request that is about to be sent — while swapping the entry in
+     * this (freshly built) outer map cannot.
      */
     @SuppressWarnings("unchecked")
     public void redactRequestMap(Map<String, Object> requestMap) {
@@ -153,8 +156,33 @@ public class RequestRedactor {
         if (requestMap.get("headers") instanceof Map<?, ?> headers) {
             requestMap.put("headers", redactHeaders((Map<String, ?>) headers));
         }
+        if (requestMap.get("queryParams") instanceof Map<?, ?> queryParams) {
+            requestMap.put("queryParams", redactQueryParams((Map<String, ?>) queryParams));
+        }
         if (requestMap.get("body") instanceof String body) {
             requestMap.put("body", redactBody(body));
         }
+    }
+
+    /**
+     * Redact a query-parameter map, preserving its multi-valued shape.
+     * <p>
+     * Values arrive as {@code List<String>} from the default implementation but a
+     * bare value is tolerated, for the same reason
+     * {@code ApiCallExecutor#normalizeQueryParams} tolerates both.
+     */
+    public static Map<String, Object> redactQueryParams(Map<String, ?> queryParams) {
+        var redacted = new HashMap<String, Object>();
+        if (queryParams == null) {
+            return redacted;
+        }
+        queryParams.forEach((name, value) -> {
+            if (value instanceof List<?> values) {
+                redacted.put(name, values.stream().map(v -> redactQueryParamValue(name, v == null ? null : v.toString())).toList());
+            } else {
+                redacted.put(name, redactQueryParamValue(name, value == null ? null : value.toString()));
+            }
+        });
+        return redacted;
     }
 }

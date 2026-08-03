@@ -54,7 +54,7 @@ Three defects found by automated review on [#627](https://github.com/labsai/EDDI
 
 Also: the tool name in the resolve-failure WARN now goes through `sanitize` (it is model-chosen and could forge log records), and the docs no longer claim `requestPinned: false` implies `requestPreview: null` — a call with `preRequest.propertyInstructions` is previewed best-effort *and* left unpinnable, so both are true at once.
 
-**What's left before `WRITE_ENDPOINTS` can actually be populated:** it already has been, on the Manager side — see that repo's own changelog for the write canary, the four curated endpoints, and real `read_write` scope selection. What remains is Manager-side only: render this backend's `requestPreview` in the approval banner in place of the client-side `operationId` reconstruction it was always labelled as a stand-in for, and the agent/group authoring UI (iteration 7).
+**`WRITE_ENDPOINTS` is now populated**, on the Manager side — see that repo's own changelog for the write canary, the curated endpoints (four operational verbs plus group create), real `read_write` scope selection, and the approval banner rendering this backend's `requestPreview` in place of the client-side `operationId` reconstruction it was always labelled as a stand-in for. Nothing further is required on this side.
 
 ---
 

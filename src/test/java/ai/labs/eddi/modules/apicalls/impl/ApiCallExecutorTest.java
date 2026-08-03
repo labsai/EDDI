@@ -428,6 +428,39 @@ class ApiCallExecutorTest {
     }
 
     @Test
+    @DisplayName("a credential in a QUERY parameter is scrubbed before persistence, and the live request is untouched")
+    void execute_secretInQueryParam_isRedactedWithoutCorruptingTheRequest() throws Exception {
+        ApiCall call = createSimpleApiCall("query-secret-call", false);
+
+        Map<String, Object> requestMap = new HashMap<>();
+        requestMap.put("headers", new LinkedHashMap<String, Object>());
+        // The live map RequestWrapper#toMap hands back by reference, not a copy.
+        Map<String, List<String>> liveQueryParams = new LinkedHashMap<>();
+        liveQueryParams.put("api_key", new ArrayList<>(List.of("super-secret-value")));
+        liveQueryParams.put("version", new ArrayList<>(List.of("3")));
+        requestMap.put("queryParams", liveQueryParams);
+        when(mockRequest.toMap()).thenReturn(requestMap);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        var captor = ArgumentCaptor.forClass(Object.class);
+        verify(prePostUtils, atLeastOnce()).createMemoryEntry(
+                eq(currentStep), captor.capture(), contains("Request"), eq("httpCalls"));
+        @SuppressWarnings("unchecked")
+        var capturedMap = (Map<String, Object>) captor.getValue();
+        String persisted = String.valueOf(capturedMap.get("queryParams"));
+        assertFalse(persisted.contains("super-secret-value"), persisted);
+        assertTrue(persisted.contains("<REDACTED>"), persisted);
+        assertTrue(persisted.contains("3"), "an ordinary parameter must survive: " + persisted);
+
+        // The entry is REPLACED, never rewritten in place — the request that was
+        // already sent still carries its real credential.
+        assertEquals(List.of("super-secret-value"), liveQueryParams.get("api_key"),
+                "redacting the debug record must not mutate the live request");
+    }
+
+    @Test
     void execute_sensitiveHeaders_areScrubbed() throws Exception {
         ApiCall call = createSimpleApiCall("scrub-call", false);
 
