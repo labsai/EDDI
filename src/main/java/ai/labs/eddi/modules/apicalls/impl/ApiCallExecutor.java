@@ -289,18 +289,21 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     body == null ? null : body.toString(),
                     !hasPreRequestPropertyInstructions(call));
         } catch (Exception e) {
-            // Type only — not the message, not the throwable. Unlike execute(),
-            // this runs to build an APPROVAL PREVIEW, and a failure here comes out
-            // of template rendering or request building, whose messages quote the
-            // material being rendered (Jackson appends the offending source
-            // verbatim). Logging it would put the credential in the log of the very
-            // operation whose job is to show the approver a redacted request.
+            // Deliberately NOT logged here — throw only. Unlike execute(), the sole
+            // caller of resolve() is the gate-time/pre-execution pinning path, which
+            // catches this and logs it with the severity the situation actually has:
+            // a WARN saying the call will be approved unpinned (a documented, benign
+            // degrade) or that execution is refused. An ERROR here would double every
+            // one of those lines and label a normal degrade as breakage.
             //
-            // The cause is still attached to the thrown exception for a caller that
-            // needs it; both callers deliberately log only its type.
-            String safeName = LogSanitizer.sanitize(call.getName());
-            LOGGER.errorf("Could not resolve the request for ApiCall '%s' (%s)", safeName, e.getClass().getSimpleName());
-            throw new LifecycleException("could not resolve the request for ApiCall '" + safeName + "'", e);
+            // The message is generic and the cause is attached rather than unwrapped:
+            // a failure here comes out of template rendering or request building,
+            // whose messages quote the material being rendered — Jackson appends the
+            // offending source verbatim — so putting it in a log or an exception
+            // message would leak the credential from the very operation whose job is
+            // to show the approver a REDACTED request.
+            throw new LifecycleException(
+                    "could not resolve the request for ApiCall '" + LogSanitizer.sanitize(call.getName()) + "'", e);
         }
     }
 
