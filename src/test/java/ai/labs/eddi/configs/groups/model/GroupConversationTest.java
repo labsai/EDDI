@@ -269,7 +269,7 @@ class GroupConversationTest {
         @DisplayName("TranscriptEntryType — all values")
         void transcriptEntryTypes() {
             var values = TranscriptEntryType.values();
-            assertEquals(15, values.length);
+            assertEquals(25, values.length);
             assertNotNull(TranscriptEntryType.valueOf("QUESTION"));
             assertNotNull(TranscriptEntryType.valueOf("SYNTHESIS"));
             assertNotNull(TranscriptEntryType.valueOf("SKIPPED"));
@@ -277,6 +277,17 @@ class GroupConversationTest {
             assertNotNull(TranscriptEntryType.valueOf("TASK_RESULT"));
             assertNotNull(TranscriptEntryType.valueOf("VERIFICATION"));
             assertNotNull(TranscriptEntryType.valueOf("FOLLOW_UP"));
+            // Wave 0, F4
+            assertNotNull(TranscriptEntryType.valueOf("ABSTAINED"));
+            assertNotNull(TranscriptEntryType.valueOf("DISSENT"));
+            assertNotNull(TranscriptEntryType.valueOf("CONVERGENCE"));
+            assertNotNull(TranscriptEntryType.valueOf("FACILITATION"));
+            assertNotNull(TranscriptEntryType.valueOf("VOTE"));
+            assertNotNull(TranscriptEntryType.valueOf("PROPOSAL"));
+            assertNotNull(TranscriptEntryType.valueOf("BARGAIN"));
+            assertNotNull(TranscriptEntryType.valueOf("HUMAN_INPUT"));
+            assertNotNull(TranscriptEntryType.valueOf("RETRO"));
+            assertNotNull(TranscriptEntryType.valueOf("BID"));
         }
 
         @Test

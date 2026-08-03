@@ -144,6 +144,77 @@ class GroupContextBuilderTest {
         assertTrue(builder.filterByScope(transcript, ContextScope.TASK_WITH_DEPS, 1, member()).isEmpty());
     }
 
+    // =================================================================
+    // Peer-visibility matrix (Wave 0, F4) — table-driven; this IS the spec
+    // =================================================================
+
+    @Test
+    void filterByScope_peerVisibilityMatrix_exactlyMatchesSpec() {
+        final int currentPhaseIdx = 5;
+        // Expected visibility for an entry belonging to the CURRENT
+        // (still-running) phase — the strictest case for VOTE/BID, which are
+        // only conditionally hidden (see the two dedicated tests below).
+        var expected = new java.util.LinkedHashMap<TranscriptEntryType, Boolean>();
+        expected.put(TranscriptEntryType.QUESTION, false);
+        expected.put(TranscriptEntryType.OPINION, true);
+        expected.put(TranscriptEntryType.CRITIQUE, true);
+        expected.put(TranscriptEntryType.REVISION, true);
+        expected.put(TranscriptEntryType.CHALLENGE, true);
+        expected.put(TranscriptEntryType.DEFENSE, true);
+        expected.put(TranscriptEntryType.ARGUMENT, true);
+        expected.put(TranscriptEntryType.REBUTTAL, true);
+        expected.put(TranscriptEntryType.SYNTHESIS, true);
+        expected.put(TranscriptEntryType.ERROR, false);
+        expected.put(TranscriptEntryType.SKIPPED, false);
+        expected.put(TranscriptEntryType.PLAN, true);
+        expected.put(TranscriptEntryType.TASK_RESULT, true);
+        expected.put(TranscriptEntryType.VERIFICATION, true);
+        expected.put(TranscriptEntryType.FOLLOW_UP, true);
+        expected.put(TranscriptEntryType.ABSTAINED, false);
+        expected.put(TranscriptEntryType.DISSENT, true);
+        expected.put(TranscriptEntryType.CONVERGENCE, false);
+        expected.put(TranscriptEntryType.FACILITATION, false);
+        expected.put(TranscriptEntryType.VOTE, false); // still running its own phase
+        expected.put(TranscriptEntryType.PROPOSAL, true);
+        expected.put(TranscriptEntryType.BARGAIN, true);
+        expected.put(TranscriptEntryType.HUMAN_INPUT, true);
+        expected.put(TranscriptEntryType.RETRO, true);
+        expected.put(TranscriptEntryType.BID, false); // still running its own phase
+
+        assertEquals(TranscriptEntryType.values().length, expected.size(),
+                "matrix must cover every TranscriptEntryType — a new type added without updating "
+                        + "this table is exactly the silent gap this test exists to catch");
+
+        for (var testCase : expected.entrySet()) {
+            var transcriptEntry = new TranscriptEntry(AGENT_A, "A", "content", currentPhaseIdx, "P", testCase.getKey(), Instant.now(), null, null);
+            var result = builder.filterByScope(List.of(transcriptEntry), ContextScope.FULL, currentPhaseIdx, member());
+            assertEquals(testCase.getValue(), !result.isEmpty(),
+                    () -> testCase.getKey() + ": expected visible=" + testCase.getValue() + " but was " + !result.isEmpty());
+        }
+    }
+
+    @Test
+    void filterByScope_vote_hiddenWhileOwnPhaseStillRunning_visibleOnceItCompletes() {
+        var stillRunning = new TranscriptEntry(AGENT_A, "A", "ballot", 3, "Voting", TranscriptEntryType.VOTE, Instant.now(), null, null);
+        var completed = new TranscriptEntry(AGENT_A, "A", "ballot", 2, "Voting", TranscriptEntryType.VOTE, Instant.now(), null, null);
+
+        assertTrue(builder.filterByScope(List.of(stillRunning), ContextScope.FULL, 3, member()).isEmpty(),
+                "a ballot cast so far in the still-running vote phase must be blind to peers");
+        assertEquals(1, builder.filterByScope(List.of(completed), ContextScope.FULL, 3, member()).size(),
+                "a ballot from a completed vote phase must become visible");
+    }
+
+    @Test
+    void filterByScope_bid_hiddenWhileOwnPhaseStillRunning_visibleOnceItCompletes() {
+        var stillRunning = new TranscriptEntry(AGENT_A, "A", "bid", 3, "Bidding", TranscriptEntryType.BID, Instant.now(), null, null);
+        var completed = new TranscriptEntry(AGENT_A, "A", "bid", 2, "Bidding", TranscriptEntryType.BID, Instant.now(), null, null);
+
+        assertTrue(builder.filterByScope(List.of(stillRunning), ContextScope.FULL, 3, member()).isEmpty(),
+                "a bid placed so far in the still-running bidding phase must be blind to peers");
+        assertEquals(1, builder.filterByScope(List.of(completed), ContextScope.FULL, 3, member()).size(),
+                "a bid from a completed bidding phase must become visible");
+    }
+
     @Test
     void findLatestResponse_returnsLastNonErrorMatch() {
         var transcript = List.of(

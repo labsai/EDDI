@@ -142,6 +142,11 @@ public class GroupContextBuilder {
                 data.put("opposingArguments", opposing);
             }
             case SYNTHESIS -> {
+                // Deliberately its own filter, not filterByScope's peer-visibility
+                // matrix (Wave 0, F4): the synthesizer needs the full picture —
+                // including ABSTAINED/CONVERGENCE/FACILITATION bookkeeping and any
+                // still-running-phase VOTE/BID a regular peer would not yet see —
+                // to write an accurate summary.
                 List<Map<String, Object>> fullTranscript = transcript.stream()
                         .filter(e -> e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
                                 && e.type() != TranscriptEntryType.QUESTION)
@@ -219,7 +224,7 @@ public class GroupContextBuilder {
         }
 
         return transcript.stream().filter(e -> e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
-                && e.type() != TranscriptEntryType.QUESTION).filter(e -> switch (scope) {
+                && e.type() != TranscriptEntryType.QUESTION).filter(e -> isVisibleToPeers(e, currentPhaseIdx)).filter(e -> switch (scope) {
                     case FULL -> true;
                     case LAST_PHASE -> e.phaseIndex() >= currentPhaseIdx - 1;
                     case ANONYMOUS -> true; // Content included, attribution stripped
@@ -237,6 +242,31 @@ public class GroupContextBuilder {
                     entry.put("phaseName", e.phaseName() != null ? e.phaseName() : "");
                     return entry;
                 }).collect(Collectors.toList());
+    }
+
+    /**
+     * The peer-visibility matrix (Wave 0, F4) — what a group MEMBER's own turn
+     * context may include, as opposed to an observer (SSE/Slack), which reads
+     * {@code GroupConversation#getTranscript()} directly and is never filtered
+     * through this method.
+     * <p>
+     * {@code ABSTAINED}, {@code CONVERGENCE} and {@code FACILITATION} are never
+     * peer-visible — they are process bookkeeping (a pass, a judge's score, a
+     * facilitator's intervention), not a contribution another speaker should react
+     * to. {@code VOTE} and {@code BID} are blind while their own phase is still
+     * running (a ballot/bid cast so far THIS phase, {@code e.phaseIndex() ==
+     * currentPhaseIdx}) and become visible once that phase completes and a later
+     * phase looks back at it — commit-reveal, not permanent concealment. Everything
+     * else (including the newer {@code DISSENT}, {@code PROPOSAL}, {@code BARGAIN},
+     * {@code HUMAN_INPUT}, {@code RETRO}) is peer-visible, same as every pre-F4
+     * entry type.
+     */
+    private static boolean isVisibleToPeers(TranscriptEntry e, int currentPhaseIdx) {
+        return switch (e.type()) {
+            case ABSTAINED, CONVERGENCE, FACILITATION -> false;
+            case VOTE, BID -> e.phaseIndex() != currentPhaseIdx;
+            default -> true;
+        };
     }
 
     public String findLatestResponse(List<TranscriptEntry> transcript, String agentId) {

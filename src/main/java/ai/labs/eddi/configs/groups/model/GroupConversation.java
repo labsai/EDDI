@@ -194,7 +194,50 @@ public class GroupConversation {
         /** Verification assessment from the VERIFY phase. */
         VERIFICATION,
         /** User-to-member or member-to-user follow-up exchange between rounds. */
-        FOLLOW_UP
+        FOLLOW_UP,
+        /**
+         * A speaker declined to add anything new this round (I4). Peer-hidden — see
+         * {@code GroupContextBuilder#filterByScope}'s visibility matrix (Wave 0, F4).
+         */
+        ABSTAINED,
+        /**
+         * A member's recorded disagreement with a synthesis (I4). Peer-visible.
+         */
+        DISSENT,
+        /**
+         * A convergence judge's agreement-score result (I2). Peer-hidden.
+         */
+        CONVERGENCE,
+        /**
+         * A facilitator's bounded intervention (I12). Peer-hidden.
+         */
+        FACILITATION,
+        /**
+         * A cast ballot (I14). Peer-hidden while its own phase is still running (blind
+         * ballot); visible once that phase completes.
+         */
+        VOTE,
+        /**
+         * A negotiation offer (I11). Peer-visible.
+         */
+        PROPOSAL,
+        /**
+         * A negotiation counter-offer or concession (I11). Peer-visible.
+         */
+        BARGAIN,
+        /**
+         * A human group member's contribution (I6). Peer-visible.
+         */
+        HUMAN_INPUT,
+        /**
+         * Retrospective phase output, feeding group memory (I8). Peer-visible.
+         */
+        RETRO,
+        /**
+         * A bid for a task assignment (I18). Peer-hidden while its own phase is still
+         * running (blind bid); visible once that phase completes.
+         */
+        BID
     }
 
     /**

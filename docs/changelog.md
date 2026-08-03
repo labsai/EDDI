@@ -211,6 +211,24 @@ Third Wave 0 foundation. Every group discussion today concludes in prose (`synth
 
 ---
 
+## 🧩 feat(groups): Transcript entry types + visibility matrix (Wave 0, F4) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Fourth and last Wave 0 *type* foundation (F5/F6 remain). Ten new `TranscriptEntryType` values for the items F1–F3 already reference by name in Javadoc but that had nowhere to land: `ABSTAINED`, `DISSENT` (I4); `CONVERGENCE` (I2); `FACILITATION` (I12); `VOTE` (I14); `PROPOSAL`, `BARGAIN` (I11); `HUMAN_INPUT` (I6); `RETRO` (I8); `BID` (I18). Same as every prior Wave 0 piece — no feature writes one of these yet.
+
+**The peer-visibility matrix is the actual point, and it is the spec, not documentation of one.** `GroupContextBuilder.filterByScope` decides what a group MEMBER's own turn context includes — the single place, per its class Javadoc, this was always meant to land. `ABSTAINED`, `CONVERGENCE`, `FACILITATION` are unconditionally peer-hidden (a pass, a judge's score, a facilitator's intervention are process bookkeeping, not a contribution a peer should react to). `VOTE`/`BID` are conditionally hidden — blind while their *own* phase is still running (`entry.phaseIndex() == currentPhaseIdx`, a ballot/bid cast so far this round) and visible once that phase completes and a later phase looks back — commit-reveal, not permanent concealment. Everything else, including the four new peer-visible types, follows every pre-F4 type's default.
+
+**Observers were already unaffected — no code needed there.** SSE (`RestGroupConversation.readGroupConversation`, the SSE listener's `SpeakerCompleteEvent`) and Slack read `GroupConversation`/its transcript directly; neither ever called `filterByScope`. "Observers see everything" was already true by construction — the plan's phrasing describes the existing boundary between peer and observer, not a new one this commit draws.
+
+**One deliberate non-change, called out where a reviewer would look for it.** The SYNTHESIS phase's own transcript-building filter (`buildPhaseInput`'s `SYNTHESIS` branch) has always been a separate inline filter, never routed through `filterByScope` — it already saw everything `filterByScope` now starts hiding from ordinary peers. Left as-is (a synthesizer needs the full picture to summarize accurately) with a comment explaining why, rather than silently gaining new blind spots or silently being pulled into the matrix without discussion.
+
+**One pre-existing test would have gone red without a fix.** `GroupConversationTest.transcriptEntryTypes` asserted an exact count (`15`) of `TranscriptEntryType.values()` — caught before the battery run, updated to `25` with the ten new values asserted by name alongside it.
+
+4 new tests: `GroupContextBuilderTest` gets a table-driven test enumerating expected visibility for all 25 entry types (asserting `expected.size() == TranscriptEntryType.values().length` first, so a future entry type added without updating the table fails loudly instead of silently defaulting to visible) plus two focused tests for `VOTE`/`BID`'s still-running-vs-completed transition. Mutation-checked: reducing `isVisibleToPeers` to `return true` fails exactly those three tests — the table-driven test on its first mismatch (`ABSTAINED`), both dedicated tests on the still-running case — while the other 21 pre-existing tests in that class stay green. Full group/HITL/Slack battery green; Checkstyle unchanged.
+
+---
+
 ## 🧩 refactor(orchestrator): BuiltinToolsProvider + close the three SPI gaps (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
