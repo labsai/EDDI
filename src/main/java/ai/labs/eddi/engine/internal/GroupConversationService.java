@@ -698,7 +698,7 @@ public class GroupConversationService implements IGroupConversationService {
                         }
                     }
 
-                    List<GroupMember> speakers = resolveParticipants(phase, config.getMembers(), config.getModeratorAgentId());
+                    List<GroupMember> speakers = resolveParticipants(phase, rosterWithRecruits(config, gc), config.getModeratorAgentId());
 
                     // F2: consume a mid-phase speaker bookmark, if this is the exact
                     // (phaseIdx, repeat) it names. Read-and-clear together so a stale
@@ -1272,6 +1272,40 @@ public class GroupConversationService implements IGroupConversationService {
      * Determines which members participate in a phase based on the
      * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
      */
+    /**
+     * The configured roster plus anyone recruited into the discussion at runtime
+     * (I7).
+     * <p>
+     * Unioned at the call sites rather than inside {@link #resolveParticipants} on
+     * purpose: that method is resolved by exact parameter types by the
+     * characterization suite, and it is a pure function of its inputs — which is
+     * what makes its ALL/MODERATOR/ROLE branches testable without a live
+     * discussion. Recruits are appended after the configured members, and carry
+     * {@code RECRUIT_SPEAKING_ORDER}, so every existing ordering places them last
+     * without renumbering anyone.
+     * <p>
+     * Recruits therefore take effect from the NEXT phase iteration. Mutating a
+     * roster mid-phase would desynchronise the speaker index F2's resume bookmark
+     * points into, and move the denominator I2's convergence check and I4's
+     * unanimity test already computed for the round in flight.
+     */
+    public List<GroupMember> rosterWithRecruits(AgentGroupConfiguration config, GroupConversation gc) {
+        List<GroupMember> configured = config.getMembers() != null ? config.getMembers() : List.of();
+        if (gc == null || gc.getDynamicMembers() == null || gc.getDynamicMembers().isEmpty()) {
+            return configured;
+        }
+        var combined = new ArrayList<>(configured);
+        synchronized (gc.getDynamicMembers()) {
+            for (GroupMember dynamic : gc.getDynamicMembers()) {
+                if (dynamic != null && dynamic.agentId() != null
+                        && combined.stream().noneMatch(m -> dynamic.agentId().equals(m.agentId()))) {
+                    combined.add(dynamic);
+                }
+            }
+        }
+        return combined;
+    }
+
     public List<GroupMember> resolveParticipants(DiscussionPhase phase, List<GroupMember> allMembers, String moderatorAgentId) {
         String participants = phase.participants() != null ? phase.participants() : "ALL";
 

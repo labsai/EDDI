@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -18,6 +19,7 @@ import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
 import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
 import ai.labs.eddi.modules.llm.tools.FindAgentsByCapabilityTool;
+import ai.labs.eddi.modules.llm.tools.RecruitAgentTool;
 import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
@@ -76,16 +78,18 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;
     private final IDeploymentStore deploymentStore;
+    private final LiveDiscussionRegistry liveDiscussionRegistry;
 
     DynamicAgentToolsProvider(AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
-            IDeploymentStore deploymentStore) {
+            IDeploymentStore deploymentStore, LiveDiscussionRegistry liveDiscussionRegistry) {
         this.agentSetupService = agentSetupService;
         this.capabilityRegistryService = capabilityRegistryService;
         this.conversationService = conversationService;
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
         this.deploymentStore = deploymentStore;
+        this.liveDiscussionRegistry = liveDiscussionRegistry;
     }
 
     @Override
@@ -113,7 +117,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             return ToolContribution.empty();
         }
         List<Object> tools = new ArrayList<>();
-        addDynamicAgentTools(tools, ctx.builtInToolsWhitelist(), ctx.memory());
+        addDynamicAgentTools(tools, ctx.builtInToolsWhitelist(), ctx.memory(), ctx.groupConversationId());
         if (tools.isEmpty()) {
             return ToolContribution.empty();
         }
@@ -133,6 +137,10 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * the null/empty normalization.
      */
     void addDynamicAgentTools(List<Object> tools, List<String> whitelist, IConversationMemory memory) {
+        addDynamicAgentTools(tools, whitelist, memory, null);
+    }
+
+    void addDynamicAgentTools(List<Object> tools, List<String> whitelist, IConversationMemory memory, String groupConversationId) {
         if (whitelist == null || whitelist.isEmpty()) {
             return;
         }
@@ -177,6 +185,19 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
                 LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool suppressed for agent='%s': allowRecruitment is off",
                         sanitize(parentAgentId));
             }
+        }
+        // I7: acting on that discovery. Same gate as the lookup above — finding an
+        // agent and bringing it in are two halves of one capability, and allowing
+        // one without the other is either a dead end or an ungated roster write.
+        // Additionally requires a live group discussion: recruiting into a
+        // standalone conversation has no roster to join.
+        if (whitelist.contains("recruit_agent") && dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()
+                && groupConversationId != null && liveDiscussionRegistry != null
+                && liveDiscussionRegistry.get(groupConversationId).isPresent()) {
+            tools.add(new RecruitAgentTool(liveDiscussionRegistry, groupConversationId, parentAgentId,
+                    dynamicConfig, deploymentStore));
+            LOGGER.debugf("[DYNAMIC] RecruitAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+            anyDynamicToolAdded = true;
         }
         if (whitelist.contains("teardown_agent") && agentFactory != null && agentStore != null) {
             tools.add(new TeardownAgentTool(agentFactory, agentStore, deploymentStore, sharedCreatedIds, sharedRetainedIds));

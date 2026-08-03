@@ -5,6 +5,30 @@
 
 ---
 
+## ✨ feat(groups): Runtime recruitment + delegation timeout (I7) (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+**Recruitment was a dead end, and the plan's re-scope was accurate.** I verified all four of its claims against the current tree before building: `addDynamicMember` had **zero** production callers, `maxRecruitedAgentsPerDiscussion` was read **nowhere** (only its getter existed), `resolveParticipants` never looked at `dynamicMembers`, and the delegation timeout was hard-coded to 60s. So an agent could *discover* a specialist via `findAgentsByCapability` — which already shipped — and then had no way to act on it. `dynamicMembers` was written by nothing and read by nothing in the participation path.
+
+`RecruitAgentTool.recruitAgent(agentId, role, reason)` closes it, gated by the same `enabled && allowRecruitment` as the discovery half — finding an agent and bringing it in are two halves of one capability, and allowing one without the other is either a dead end or an ungated roster write. It additionally requires a live group discussion, since recruiting into a standalone conversation has no roster to join.
+
+**Recruits join from the next phase, never mid-phase.** `rosterWithRecruits` unions the configured members with `gc.getDynamicMembers()` at the two sites that build a speaker list. Mutating a roster mid-phase would desynchronise the speaker index F2's resume bookmark points into, and move the denominator I2's convergence check and I4's unanimity test already computed for the round in flight. The union lives at the call sites rather than inside `resolveParticipants` because that method is resolved by exact parameter types by the characterization suite, and its purity is what makes its ALL/MODERATOR/ROLE branches testable without a live discussion.
+
+The HITL resume path resolves against the **same** roster, or its config-drift guard would measure a roster the resumed loop no longer has and abort a discussion that merely recruited someone before it paused.
+
+**Recruits are never torn down.** Tracked in a new `recruitedAgentIds`, deliberately *not* merged into `createdAgentIds` — that list drives `cleanupEphemeralAgents`, which undeploys. A recruit is a borrowed pre-existing agent; undeploying it would take it away from every other conversation using it. Two lists because they mean two different things at teardown.
+
+**Delegation timeout is now `DynamicAgentConfig.delegationTimeoutSeconds`** (default 60). The hard-coded 60s was far too short for a delegate that itself runs tools and far too long for a fan-out of quick lookups. The stale `"(60s limit)"` message now reports the limit actually applied — a message naming a limit that was never enforced is worse than no message. Non-positive values fall back to the default rather than meaning "wait forever", which is how a delegation cycle became a hang before the depth cap existed. The config reaches the tool through the existing group→member context channel, so no new plumbing was needed.
+
+**Deliberately not done: the cost sub-budget.** The spec calls for passing the delegate conversation a ceiling equal to the remaining group budget. `IConversationService.say()` has no budget parameter and single-agent conversations have no cost-ceiling mechanism at all — only *group* discussions do, via `discuss(..., remainingBudget)`. Worse, per the plan's own V1 finding, non-cascade model-call cost is not tracked per-conversation anywhere, so a ceiling there would bound a number that is mostly zero. That is protection in name only, which is worse than none; building it properly is its own item.
+
+Also registered `recruit_agent` in `ToolNameResolver`, without which the tool would have no canonical slug for whitelisting, pricing or rate-limiting.
+
+New: `RecruitAgentTool`, `RecruitAgentToolTest`, `GroupConversation.recruitedAgentIds`, `GroupConversationService.rosterWithRecruits`, `DynamicAgentConfig.delegationTimeoutSeconds`; the recruitment section of `docs/group-conversations.md` rewritten to the actual mechanism (V6). 17 tests; 11 mutation checks.
+
+---
+
 ## ✨ feat(groups): Agent-writable shared task list (I5) (2026-08-04)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

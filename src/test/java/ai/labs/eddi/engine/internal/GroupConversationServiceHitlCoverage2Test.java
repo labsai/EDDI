@@ -693,6 +693,58 @@ class GroupConversationServiceHitlCoverage2Test {
     }
 
     // =================================================================
+    // I7 — rosterWithRecruits
+    // =================================================================
+
+    @SuppressWarnings("unchecked")
+    private List<GroupMember> roster(AgentGroupConfiguration config, GroupConversation gc) throws Exception {
+        return (List<GroupMember>) invoke(method("rosterWithRecruits", AgentGroupConfiguration.class, GroupConversation.class),
+                config, gc);
+    }
+
+    private AgentGroupConfiguration configWith(List<GroupMember> members) {
+        var config = new AgentGroupConfiguration();
+        config.setMembers(members);
+        return config;
+    }
+
+    @Test
+    @DisplayName("rosterWithRecruits: recruits are appended to the configured roster")
+    void rosterIncludesRecruits() throws Exception {
+        var gc = new GroupConversation();
+        gc.addDynamicMember(new GroupMember("recruit", "Recruit", Integer.MAX_VALUE, "Reviewer"));
+
+        var result = roster(configWith(List.of(new GroupMember("a1", "A", 0, null))), gc);
+
+        assertEquals(2, result.size(), "a recruit that never reaches the speaker list can never speak");
+        assertEquals("a1", result.get(0).agentId());
+        assertEquals("recruit", result.get(1).agentId(), "recruits go last, so configured speaking order is untouched");
+    }
+
+    @Test
+    @DisplayName("rosterWithRecruits: no recruits leaves the configured roster untouched")
+    void rosterWithoutRecruitsIsUnchanged() throws Exception {
+        var configured = List.of(new GroupMember("a1", "A", 0, null));
+
+        assertEquals(configured, roster(configWith(configured), new GroupConversation()));
+        assertEquals(configured, roster(configWith(configured), null));
+    }
+
+    @Test
+    @DisplayName("rosterWithRecruits: an id already configured is not duplicated")
+    void rosterDeduplicates() throws Exception {
+        // Defence in depth: RecruitAgentTool refuses an existing member, but a
+        // persisted document from an older build could carry the overlap, and a
+        // duplicated member would speak twice per phase.
+        var gc = new GroupConversation();
+        gc.addDynamicMember(new GroupMember("a1", "A", Integer.MAX_VALUE, null));
+
+        var result = roster(configWith(List.of(new GroupMember("a1", "A", 0, null))), gc);
+
+        assertEquals(1, result.size());
+    }
+
+    // =================================================================
     // resolveTaskAssignment() branches
     // =================================================================
 

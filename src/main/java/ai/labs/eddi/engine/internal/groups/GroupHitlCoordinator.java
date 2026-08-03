@@ -764,8 +764,15 @@ public class GroupHitlCoordinator {
                 // authority for which phase's roster to check.
                 if (savedResumePoint != null) {
                     List<GroupMember> currentSpeakers = savedResumePoint.phaseIdx() < phases.size()
+                            // I7: the same roster the phase loop will use, recruits
+                            // included — resolving against the config alone would
+                            // measure a roster the resumed loop no longer has, and
+                            // report config drift for a discussion that merely
+                            // recruited someone before it paused.
                             ? groupConversationService.resolveParticipants(
-                                    phases.get(savedResumePoint.phaseIdx()), groupConfig.getMembers(), groupConfig.getModeratorAgentId())
+                                    phases.get(savedResumePoint.phaseIdx()),
+                                    groupConversationService.rosterWithRecruits(groupConfig, gc),
+                                    groupConfig.getModeratorAgentId())
                             : List.of();
                     if (savedResumePoint.speakerIdx() >= currentSpeakers.size()) {
                         LOGGER.warnf("Config drift detected for GC %s: resume speaker index %d out of bounds for phase %d (roster size %d)",

@@ -79,6 +79,7 @@ public final class ToolNameResolver {
             case "ConverseWithAgentTool" -> "converse_with_agent";
             case "FindAgentsByCapabilityTool" -> "find_agents_by_capability";
             case "TeardownAgentTool" -> "teardown_agent";
+            case "RecruitAgentTool" -> "recruit_agent";
             // DiscoverToolsTool is intentionally absent: discover_tools is a LAZY-mode
             // meta-tool that is never whitelisted, priced or rate-limited by slug, and it
             // already declares @Tool(name = "discover_tools") so dispatch name == slug.

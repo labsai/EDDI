@@ -633,6 +633,29 @@ public class AgentGroupConfiguration {
         private int maxDelegationDepth = 3;
 
         /**
+         * Seconds a delegating agent waits for its delegate's turn before giving up
+         * (I7). Previously hard-coded to 60 in {@code ConverseWithAgentTool}, which is
+         * far too short for a delegate that itself runs tools or a nested discussion,
+         * and far too long for a fan-out of quick lookups — the caller blocks a virtual
+         * thread and the model waits for the whole budget.
+         * <p>
+         * Non-positive values fall back to the default rather than meaning "wait
+         * forever": an unbounded wait here is how a delegation cycle became a hang
+         * before the depth cap existed.
+         */
+        private int delegationTimeoutSeconds = DEFAULT_DELEGATION_TIMEOUT_SECONDS;
+
+        public static final int DEFAULT_DELEGATION_TIMEOUT_SECONDS = 60;
+
+        public int getDelegationTimeoutSeconds() {
+            return delegationTimeoutSeconds > 0 ? delegationTimeoutSeconds : DEFAULT_DELEGATION_TIMEOUT_SECONDS;
+        }
+
+        public void setDelegationTimeoutSeconds(int delegationTimeoutSeconds) {
+            this.delegationTimeoutSeconds = delegationTimeoutSeconds;
+        }
+
+        /**
          * Agent IDs this agent may delegate to via {@code converse_with_agent}.
          * {@code null} or empty means "any deployed agent" (the previous, unrestricted
          * behavior).

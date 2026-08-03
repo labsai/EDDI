@@ -1119,7 +1119,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
      */
     private DynamicAgentToolsProvider dynamicAgentToolsProvider() {
         return new DynamicAgentToolsProvider(agentSetupService, capabilityRegistryService, conversationService,
-                agentFactory, agentStore, deploymentStore);
+                agentFactory, agentStore, deploymentStore, liveDiscussionRegistry);
     }
 
     // Kept as declared delegators (not inlined) since tests reference them by

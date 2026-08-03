@@ -99,6 +99,17 @@ public class GroupConversation {
     private List<AgentGroupConfiguration.GroupMember> dynamicMembers = Collections.synchronizedList(new ArrayList<>());
     /** Agent IDs created during this discussion (for lifecycle cleanup). */
     private List<String> createdAgentIds = Collections.synchronizedList(new ArrayList<>());
+
+    /**
+     * Agents recruited into this discussion at runtime (I7).
+     * <p>
+     * Deliberately NOT merged into {@link #createdAgentIds}: that list drives
+     * {@code cleanupEphemeralAgents}, which undeploys what the discussion created.
+     * A recruit is a pre-existing agent this discussion borrowed, so undeploying it
+     * would take it away from every other conversation using it. Two lists because
+     * they mean two different things at teardown.
+     */
+    private List<String> recruitedAgentIds = Collections.synchronizedList(new ArrayList<>());
     /** Agent IDs explicitly retained by the creating agent (skip cleanup). */
     private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
     private int pausedAtPhaseIndex = -1;
@@ -618,6 +629,16 @@ public class GroupConversation {
 
     public List<String> getCreatedAgentIds() {
         return createdAgentIds;
+    }
+
+    public List<String> getRecruitedAgentIds() {
+        return recruitedAgentIds;
+    }
+
+    public void setRecruitedAgentIds(List<String> recruitedAgentIds) {
+        this.recruitedAgentIds = recruitedAgentIds != null
+                ? Collections.synchronizedList(new ArrayList<>(recruitedAgentIds))
+                : Collections.synchronizedList(new ArrayList<>());
     }
 
     public void setCreatedAgentIds(List<String> createdAgentIds) {

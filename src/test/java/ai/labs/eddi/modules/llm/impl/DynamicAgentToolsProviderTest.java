@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -41,9 +42,13 @@ import static org.mockito.Mockito.*;
 class DynamicAgentToolsProviderTest {
 
     private DynamicAgentToolsProvider provider() {
+        return providerWith(new LiveDiscussionRegistry());
+    }
+
+    private DynamicAgentToolsProvider providerWith(LiveDiscussionRegistry registry) {
         return new DynamicAgentToolsProvider(mock(AgentSetupService.class), mock(CapabilityRegistryService.class),
                 mock(IConversationService.class), mock(IAgentFactory.class), mock(IAgentStore.class),
-                mock(IDeploymentStore.class));
+                mock(IDeploymentStore.class), registry);
     }
 
     private IConversationMemory memory() {

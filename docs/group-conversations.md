@@ -313,7 +313,30 @@ During TASK_FORCE (or any group) discussions, agents with the appropriate LLM to
 | `CreateSubAgentTool` | Create a new ephemeral agent with a specific system prompt |
 | `ConverseWithAgentTool` | Delegate a sub-task to an existing deployed agent |
 | `FindAgentsByCapabilityTool` | Discover agents by capability keywords |
+| `RecruitAgentTool` | Bring a discovered agent into the discussion as a member |
 | `TeardownAgentTool` | Clean up dynamically created agents |
+
+#### Recruitment
+
+Discovery and recruitment are two halves of one capability, and both are gated by
+`allowRecruitment`. `findAgentsByCapability` locates a specialist;
+`recruitAgent(agentId, role, reason)` brings it in.
+
+A recruit **joins from the next round**, never mid-round — a roster that changed
+while a round was running would move the speaker index a paused discussion
+resumes from, and change the denominator the convergence and unanimity checks
+already computed for the round in flight. The recruitment is recorded as a
+`FACILITATION` transcript entry naming the recruiter, the recruit, the role and
+the reason, so the rest of the team can see why the roster changed.
+
+Recruitment is refused, with an actionable message, when the agent is not
+deployed, is already a member, is the recruiter itself, or when
+`maxRecruitedAgentsPerDiscussion` is reached.
+
+**Recruits are never torn down.** They are pre-existing deployed agents the
+discussion borrowed, so `TeardownAgentTool` and end-of-discussion cleanup leave
+them alone — undeploying one would take it away from every other conversation
+using it. Only agents the discussion *created* are cleaned up.
 
 #### DynamicAgentConfig
 
@@ -348,6 +371,7 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `allowDelegation` | `true` | Allow delegating sub-tasks to other agents |
 | `maxCreatedAgentsPerDiscussion` | `5` | Cap on new agents created per discussion |
 | `maxRecruitedAgentsPerDiscussion` | `10` | Cap on recruited agents per discussion |
+| `delegationTimeoutSeconds` | `60` | How long a delegating agent waits for its delegate's turn. Non-positive falls back to the default |
 | `maxDelegationsPerTask` | `3` | Cap on delegations per task |
 | `lifecyclePolicy` | `EPHEMERAL` | `EPHEMERAL`, `KEEP_DEPLOYED`, `UNDEPLOY_ONLY`, or `AGENT_DECIDES` |
 | `inheritParentModel` | `true` | Created agents inherit the parent agent's model |
