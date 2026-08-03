@@ -36,11 +36,11 @@ import java.util.Locale;
  * <p>
  * Both {@code memberCosts} and the recomputed {@code totalCost} are set, never
  * incremented by a delta — each call replaces the member's entry with its
- * latest known cumulative cost and resums the whole map. That makes a duplicate
- * call for the same turn idempotent (unlike accumulating a delta twice, which
- * would double-count) and keeps {@code totalCost} from drifting out of sync
- * with {@code memberCosts} under concurrent updates from a PARALLEL phase's
- * simultaneous member turns.
+ * latest known cumulative cost and re-sums the whole map. That makes a
+ * duplicate call for the same turn idempotent (unlike accumulating a delta
+ * twice, which would double-count) and keeps {@code totalCost} from drifting
+ * out of sync with {@code memberCosts} under concurrent updates from a PARALLEL
+ * phase's simultaneous member turns.
  *
  * @author ginccc
  */
@@ -80,7 +80,7 @@ public final class GroupCostLedger {
         }
         for (var stepData : lastStep.getConversationStep()) {
             if (stepData != null && MemoryKeys.AUDIT_COST.equals(stepData.getKey()) && stepData.getValue() instanceof Number cost) {
-                recordAndResum(gc, attributionKey, cost.doubleValue());
+                recordAndReSum(gc, attributionKey, cost.doubleValue());
                 return;
             }
         }
@@ -96,7 +96,7 @@ public final class GroupCostLedger {
         if (subConversation == null) {
             return;
         }
-        recordAndResum(gc, member.agentId(), subConversation.getTotalCost());
+        recordAndReSum(gc, member.agentId(), subConversation.getTotalCost());
     }
 
     /**
@@ -165,7 +165,7 @@ public final class GroupCostLedger {
         return ceiling != null && gc.getTotalCost() > ceiling;
     }
 
-    private static void recordAndResum(GroupConversation gc, String agentId, double cost) {
+    private static void recordAndReSum(GroupConversation gc, String agentId, double cost) {
         synchronized (gc.getMemberCosts()) {
             gc.getMemberCosts().put(agentId, cost);
             gc.setTotalCost(gc.getMemberCosts().values().stream().mapToDouble(Double::doubleValue).sum());

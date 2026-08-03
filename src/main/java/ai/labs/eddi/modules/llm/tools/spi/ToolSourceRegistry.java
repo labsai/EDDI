@@ -227,7 +227,11 @@ public final class ToolSourceRegistry {
             // Restore the interrupt before swallowing: a provider that was interrupted
             // mid-discovery clears the flag on the way out, and this catch is broad
             // enough to hide that from every later blocking call on this thread.
-            if (t instanceof InterruptedException) {
+            // Walks the cause chain rather than testing t itself — the providers that
+            // actually block are the network ones (MCP/A2A discovery), and those
+            // surface an interrupt wrapped in ExecutionException or
+            // CompletionException far more often than bare.
+            if (isCausedByInterrupt(t)) {
                 Thread.currentThread().interrupt();
             }
             // Pass the throwable, not t.toString(): a NoClassDefFoundError/LinkageError
@@ -237,5 +241,21 @@ public final class ToolSourceRegistry {
                     provider.source());
             return ToolContribution.empty();
         }
+    }
+
+    /**
+     * Whether {@code t} is, or wraps, an {@link InterruptedException}. Bounded and
+     * cycle-safe: a self-referential cause chain (rare, but legal — a
+     * {@code Throwable} can be its own cause via {@code initCause} misuse) would
+     * otherwise spin here, inside the very handler whose job is to keep one bad
+     * provider from taking the assembly down.
+     */
+    private static boolean isCausedByInterrupt(Throwable t) {
+        for (Throwable cause = t; cause != null && cause != cause.getCause(); cause = cause.getCause()) {
+            if (cause instanceof InterruptedException) {
+                return true;
+            }
+        }
+        return false;
     }
 }
