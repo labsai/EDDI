@@ -173,10 +173,14 @@ public final class ToolSourceRegistry {
                 }
                 if (executors.containsKey(name)) {
                     String incumbent = toolSources.getOrDefault(name, "builtin");
+                    // Deliberately does NOT name toolsBlacklist: that setting exists
+                    // only on McpCallsConfiguration, so recommending it for an http or
+                    // a2a collision sends an operator hunting for a knob their source
+                    // does not have — during an incident, at that.
                     LOGGER.warnf("Tool name collision: %s tool '%s' clashes with the already-registered %s tool of "
                             + "the same name — the %s tool is DROPPED and the %s tool keeps the name. Rename the "
-                            + "remote tool or exclude it via toolsBlacklist.", source, name, incumbent, source,
-                            incumbent);
+                            + "colliding tool in its own source config (for MCP servers, 'toolsBlacklist' can "
+                            + "exclude it instead).", source, name, incumbent, source, incumbent);
                     continue;
                 }
                 ToolExecutor executor = contribution.executors().get(name);
@@ -220,8 +224,17 @@ public final class ToolSourceRegistry {
             ToolContribution contribution = provider.contribute(ctx);
             return contribution != null ? contribution : ToolContribution.empty();
         } catch (Throwable t) {
-            LOGGER.warnf("Tool source '%s' failed to contribute and was skipped — the remaining sources still "
-                    + "assemble: %s", provider.source(), t.toString());
+            // Restore the interrupt before swallowing: a provider that was interrupted
+            // mid-discovery clears the flag on the way out, and this catch is broad
+            // enough to hide that from every later blocking call on this thread.
+            if (t instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            // Pass the throwable, not t.toString(): a NoClassDefFoundError/LinkageError
+            // from an optional integration — the case this catch exists for — is
+            // near-undiagnosable without the stack trace naming the missing class.
+            LOGGER.warnf(t, "Tool source '%s' failed to contribute and was skipped — the remaining sources still assemble",
+                    provider.source());
             return ToolContribution.empty();
         }
     }

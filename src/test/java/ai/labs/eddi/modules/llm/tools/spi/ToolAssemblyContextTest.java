@@ -33,6 +33,28 @@ class ToolAssemblyContextTest {
     }
 
     @Test
+    void nullDynamicAgentConfig_isNormalizedToADisabledDefault() {
+        // The record's Javadoc promises "never null" so providers can dereference it
+        // without a guard; the compact constructor is what makes that true rather
+        // than aspirational. Raised by Copilot on PR #626.
+        var ctx = new ToolAssemblyContext(null, null, null, null, "user-1", "agent-1", null);
+
+        assertNotNull(ctx.dynamicAgentConfig(), "a null argument must not reach a provider");
+        assertFalse(ctx.dynamicAgentConfig().isEnabled(),
+                "'no config supplied' must mean dynamic agents are OFF, never accidentally on");
+    }
+
+    @Test
+    void suppliedDynamicAgentConfig_isPreserved() {
+        var supplied = new DynamicAgentConfig();
+        supplied.setEnabled(true);
+
+        var ctx = new ToolAssemblyContext(null, null, null, supplied, "user-1", "agent-1", null);
+
+        assertSame(supplied, ctx.dynamicAgentConfig(), "normalization must not replace a real config");
+    }
+
+    @Test
     void isWhitelisted_configuredWhitelist_trueOnlyForListedKey() {
         var ctx = context(List.of("calculator", "websearch"));
 

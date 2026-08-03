@@ -35,9 +35,13 @@ import java.util.List;
  *            that normalized first. Use {@link #hasNoWhitelist()} rather than
  *            null-checking this field directly.
  * @param dynamicAgentConfig
- *            resolved once per turn (never {@code null} — a disabled config
- *            when dynamic agents are off), shared by every provider that reads
- *            it so they see one consistent snapshot
+ *            resolved once per turn and shared by every provider that reads it,
+ *            so they all see one consistent snapshot. Never {@code null} — the
+ *            compact constructor substitutes a default (dynamic agents
+ *            disabled) for a null argument, so a provider can dereference this
+ *            without a guard. That is enforced here rather than merely
+ *            documented: the promise was previously Javadoc-only, and callers
+ *            (tests among them) do pass null.
  * @param userId
  *            the authenticated caller's user id
  * @param agentId
@@ -50,6 +54,18 @@ import java.util.List;
 public record ToolAssemblyContext(IConversationMemory memory, LlmConfiguration.Task task,
         List<String> builtInToolsWhitelist, DynamicAgentConfig dynamicAgentConfig, String userId, String agentId,
         String groupConversationId) {
+
+    /**
+     * Normalizes {@code dynamicAgentConfig} so the record's own contract holds at
+     * one choke point instead of at every provider that reads it. A default
+     * {@link DynamicAgentConfig} is disabled, which is the correct meaning of "no
+     * config supplied" — the same reading {@code AgentOrchestrator} applies.
+     */
+    public ToolAssemblyContext {
+        if (dynamicAgentConfig == null) {
+            dynamicAgentConfig = new DynamicAgentConfig();
+        }
+    }
 
     /**
      * @return true if a whitelist is configured and names this tool key; false when

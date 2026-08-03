@@ -5,6 +5,22 @@
 
 ---
 
+## 🔧 fix(orchestrator): three SPI hardening fixes from PR review (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Three findings from Copilot's review of the R2 SPI, all verified against the code and all real.
+
+**The tool-collision warning recommended a knob most sources don't have.** It told operators to "exclude it via `toolsBlacklist`" for *any* colliding source, but `toolsBlacklist` exists only on `McpCallsConfiguration` — so an HTTP or A2A collision sent someone hunting for a setting their source has no concept of, during an incident. Now points at the colliding tool's own source config and names `toolsBlacklist` only as the MCP-specific option it is.
+
+**`contributeSafely` swallowed the stack trace and the interrupt.** It logged `t.toString()` only — and the case this broad `catch (Throwable)` exists for is precisely `NoClassDefFoundError`/`LinkageError` from an optional integration, which is near-undiagnosable without the trace naming the missing class. It also cleared the thread's interrupt status: a provider interrupted mid-discovery had that signal dropped, hiding it from every later blocking call on the thread. Both fixed.
+
+**`ToolAssemblyContext.dynamicAgentConfig` promised "never null" in Javadoc and enforced nothing.** Callers (tests included) do pass null, so a future provider dereferencing it per the documented contract would NPE. Now normalized in the record's compact constructor — one choke point rather than a guard in every provider. A default `DynamicAgentConfig` has `enabled=false`, so "no config supplied" correctly means dynamic agents are off, never accidentally on.
+
+2 new tests pinning the normalization (null → disabled default; a supplied config is preserved by identity).
+
+---
+
 ## 🐛 fix(orchestrator): UserMemoryTool never resolved its group scope (2026-08-03)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
