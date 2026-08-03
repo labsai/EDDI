@@ -672,6 +672,14 @@ class AgentOrchestrator {
     private static final int JOURNAL_RESULT_MAX_BYTES = 32_768;
 
     /**
+     * Cap for tool arguments echoed into a log line. Deliberately small: a log is
+     * for identifying WHICH call failed to parse, not for reproducing its payload,
+     * and an unbounded model-supplied string is a log-flooding vector on top of the
+     * redaction concern.
+     */
+    private static final int ARGS_LOG_MAX_BYTES = 512;
+
+    /**
      * Restores the active-spec surface on resume. For EAGER, every registered spec.
      * For LAZY, exactly the specs that were active at pause time (by name), falling
      * back to the LAZY-initial surface when the recorded names are absent.
@@ -2853,7 +2861,12 @@ class AgentOrchestrator {
                 Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
                 safeTemplateMerge(templateData, args);
             } catch (IOException e) {
-                LOGGER.warn("Failed to parse tool arguments: " + toolRequest.arguments(), e);
+                // Redacted and capped, never raw: these are model-supplied arguments
+                // that routinely carry credentials — the pause record keeps only a
+                // SecretRedactionFilter'd copy for exactly this reason, and a log
+                // line is no safer a place for the plaintext than that record was.
+                LOGGER.warnf(e, "Failed to parse arguments for tool '%s': %s", sanitize(toolRequest.name()),
+                        capUtf8(SecretRedactionFilter.redact(toolRequest.arguments()), ARGS_LOG_MAX_BYTES));
             }
         }
         return templateData;

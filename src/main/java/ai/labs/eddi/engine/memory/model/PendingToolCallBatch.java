@@ -48,8 +48,16 @@ public class PendingToolCallBatch {
         private String matchedRule; // toolApprovals.rules[].match that tuned this call, or null
 
         /**
-         * SHA-256 of the redacted HTTP request this call resolved to at gate time,
-         * re-derived and compared immediately before execution.
+         * SHA-256 of the HTTP request this call resolved to at gate time, re-derived
+         * and compared immediately before execution.
+         * <p>
+         * Headers participate in their <em>redacted</em> form and the query and body as
+         * <em>resolved</em> — see {@code ResolvedRequest} for why the two differ (a
+         * caller token legitimately varies between requester and approver; a query
+         * value or body does not, and collapsing two credentials to one marker before
+         * hashing would let a swapped one pass this check). Never exposed through any
+         * client-facing projection: it is a digest, not encryption, and for a
+         * predictable body it would support offline guessing.
          * <p>
          * Distinct from the batch-level {@code fingerprint} above, which hashes tool
          * names and arguments to detect a wedged no-progress loop. This one answers a
