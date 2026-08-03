@@ -67,6 +67,15 @@ public class GroupConversation {
     private HitlPauseType hitlPauseType;
     /** Human-readable reason for the pause (from HITL gate). */
     private String hitlPauseReason;
+    /**
+     * Where inside a SEQUENTIAL phase's speaker list a pause landed (Wave 0, F2).
+     * {@code null} for every pause today — {@code PHASE} and {@code TASK} pauses
+     * (the only kinds that exist) both land at a phase/task boundary, never
+     * mid-speaker-list. Exists for I6 (human as a group member), which pauses
+     * between one speaker and the next within a running SEQUENTIAL phase; see
+     * {@link ResumePoint}'s own Javadoc for why PARALLEL phases never set this.
+     */
+    private ResumePoint resumePoint;
     /** Timeout policy copied from config at pause time (Phase 6d). */
     private HitlTimeoutPolicy hitlTimeoutPolicy;
     /**
@@ -177,6 +186,49 @@ public class GroupConversation {
         VERIFICATION,
         /** User-to-member or member-to-user follow-up exchange between rounds. */
         FOLLOW_UP
+    }
+
+    /**
+     * A pause landing inside a running SEQUENTIAL phase's speaker list, rather than
+     * at a phase boundary (Wave 0, F2). Lets a resume skip the speakers that
+     * already ran before the pause instead of re-running the whole phase.
+     * <p>
+     * <b>PARALLEL phases never produce one of these.</b> A parallel phase fans
+     * every speaker out at once and joins at the end; there is no "speaker N of the
+     * batch already ran, N+1 didn't" state to bookmark — a parallel resume always
+     * re-runs the entire fan-out from the paused snapshot. That is idempotent by
+     * design (each member turn is independent and the results only join once, at
+     * the end), so re-running members that "already" produced a transcript entry
+     * before the pause is not a correctness problem the way it would be for a
+     * stateful sequential turn order — it is simply redundant LLM calls, which a
+     * future optimization could avoid but this feature does not need to.
+     *
+     * @param phaseIdx
+     *            the phase this pause happened inside — matched against
+     *            {@code executeDiscussion}'s current phase before the speaker
+     *            offset is honored, so a resume of a <em>different</em> phase (or
+     *            of a discussion whose phase list changed underneath it) never
+     *            misapplies a stale offset
+     * @param repeatIdx
+     *            which repeat of that phase (phases with {@code repeats() > 1}) the
+     *            pause landed on. Only the repeat matching this value gets the
+     *            {@code speakerIdx} offset — earlier repeats of the <em>same</em>
+     *            phase are not skipped and replay from their own first speaker, the
+     *            same way a phase-level ({@code
+     *            HitlPauseType.TASK}) resume already replays a whole phase from its
+     *            first speaker. A producer that pauses mid-repeat on a phase with
+     *            {@code repeats() > 1} accepts that replay; a repeat-level start
+     *            offset would avoid it but is outside this feature.
+     * @param speakerIdx
+     *            index into the phase's resolved speaker list of the speaker the
+     *            pause landed on; on resume, speakers before this index are skipped
+     *            rather than re-run
+     * @param pauseKind
+     *            free-text tag for observability (REST/MCP status payloads) — not
+     *            consulted by any resume logic, which keys off this record's mere
+     *            presence rather than what kind of mid-phase pause it names
+     */
+    public record ResumePoint(int phaseIdx, int repeatIdx, int speakerIdx, String pauseKind) {
     }
 
     public enum GroupConversationState {
@@ -480,6 +532,14 @@ public class GroupConversation {
 
     public void setHitlPauseReason(String hitlPauseReason) {
         this.hitlPauseReason = hitlPauseReason;
+    }
+
+    public ResumePoint getResumePoint() {
+        return resumePoint;
+    }
+
+    public void setResumePoint(ResumePoint resumePoint) {
+        this.resumePoint = resumePoint;
     }
 
     public HitlTimeoutPolicy getHitlTimeoutPolicy() {

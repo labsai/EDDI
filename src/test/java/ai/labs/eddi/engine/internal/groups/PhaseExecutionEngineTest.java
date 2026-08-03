@@ -110,6 +110,47 @@ class PhaseExecutionEngineTest {
     }
 
     @Test
+    void sequentialPhase_withStartSpeakerIdx_resumesOnlyRemainingSpeakers() throws Exception {
+        var engine = engine();
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any()))
+                .thenAnswer(inv -> opinionEntry(((GroupMember) inv.getArgument(0)).agentId()));
+        var speakers = List.of(member("a"), member("b"), member("c"));
+        var gc = gc();
+        var turnCounter = new AtomicInteger(0);
+
+        // F2: a pause bookmarked speaker index 1 ("b") — resume must skip "a"
+        // entirely (already spoke before the pause) and run only "b" and "c".
+        engine.executeSequentialPhase(gc, new AgentGroupConfiguration(), speakers, phase(TurnOrder.SEQUENTIAL), protocol(), "Q?", 0, null,
+                turnCounter, 10, 1);
+
+        assertEquals(2, gc.getTranscript().size());
+        assertEquals("b", gc.getTranscript().get(0).speakerAgentId());
+        assertEquals("c", gc.getTranscript().get(1).speakerAgentId());
+        assertEquals(2, turnCounter.get());
+        verify(memberTurnExecutor, never()).executeAgentTurn(argThat(m -> "a".equals(m.agentId())), any(), any(), any(), anyInt(), any(), any(),
+                any());
+    }
+
+    @Test
+    void sequentialPhase_startSpeakerIdxAtOrBeyondSize_clampsToNoTurns() throws Exception {
+        var engine = engine();
+        var gc = gc();
+        var turnCounter = new AtomicInteger(0);
+
+        // F2 Javadoc contract: an out-of-range offset (config edited to remove
+        // members while paused) clamps to speakers.size() — zero turns, not an
+        // IndexOutOfBoundsException. GroupHitlCoordinator's drift guard is what
+        // is meant to catch this before it gets here; this only proves the
+        // fallback itself is safe.
+        engine.executeSequentialPhase(gc, new AgentGroupConfiguration(), List.of(member("a"), member("b")), phase(TurnOrder.SEQUENTIAL),
+                protocol(), "Q?", 0, null, turnCounter, 10, 5);
+
+        assertTrue(gc.getTranscript().isEmpty());
+        assertEquals(0, turnCounter.get());
+        verifyNoInteractions(memberTurnExecutor);
+    }
+
+    @Test
     void parallelPhase_allSpeakers_produceEntries() throws Exception {
         var engine = engine();
         when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any()))

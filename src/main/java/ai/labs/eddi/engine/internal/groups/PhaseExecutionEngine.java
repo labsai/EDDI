@@ -67,7 +67,28 @@ public class PhaseExecutionEngine {
                                        ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
                                        AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
-        for (GroupMember speaker : speakers) {
+        executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns, 0);
+    }
+
+    /**
+     * @param startSpeakerIdx
+     *            index into {@code speakers} to resume from (Wave 0, F2) — 0 for
+     *            every normal call. A speaker-level HITL pause (I6) bookmarks the
+     *            index it landed on in {@code GroupConversation#resumePoint};
+     *            {@code executeDiscussion} reads that back and passes it here on
+     *            the resumed leg so speakers before it are not re-run. Out-of-range
+     *            values (a config edited to remove members while paused) clamp to
+     *            {@code speakers.size()} — i.e. the phase produces zero turns
+     *            rather than an {@code IndexOutOfBoundsException}; catching that
+     *            drift before it gets this far is {@code GroupHitlCoordinator}'s
+     *            job — see its bookmark-drift validation.
+     */
+    public void executeSequentialPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
+                                       ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
+                                       AtomicInteger turnCounter, int maxTurns, int startSpeakerIdx)
+            throws GroupDiscussionException {
+        int from = Math.min(Math.max(startSpeakerIdx, 0), speakers.size());
+        for (GroupMember speaker : speakers.subList(from, speakers.size())) {
             if (turnCounter.get() >= maxTurns) {
                 break;
             }

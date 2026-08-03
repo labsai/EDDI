@@ -609,6 +609,22 @@ public class GroupConversationService implements IGroupConversationService {
 
                     List<GroupMember> speakers = resolveParticipants(phase, config.getMembers(), config.getModeratorAgentId());
 
+                    // F2: consume a mid-phase speaker bookmark, if this is the exact
+                    // (phaseIdx, repeat) it names. Read-and-clear together so a stale
+                    // offset can never bleed into a later phase/repeat within this same
+                    // leg — the bookmark is only ever valid for the one speaker-list it
+                    // was taken from. GroupHitlCoordinator's config-drift validation is
+                    // what guarantees this matches on the very first (phaseIdx, repeat)
+                    // this leg visits, before executeDiscussion is ever called.
+                    int startSpeakerIdx = 0;
+                    GroupConversation.ResumePoint resumePoint = gc.getResumePoint();
+                    if (resumePoint != null) {
+                        gc.setResumePoint(null);
+                        if (resumePoint.phaseIdx() == phaseIdx && resumePoint.repeatIdx() == repeat) {
+                            startSpeakerIdx = resumePoint.speakerIdx();
+                        }
+                    }
+
                     // --- Task-oriented phase routing ---
                     if (phase.type() == PhaseType.PLAN || phase.type() == PhaseType.EXECUTE || phase.type() == PhaseType.VERIFY) {
                         executeTaskPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
@@ -617,10 +633,13 @@ public class GroupConversationService implements IGroupConversationService {
                                 turnCounter,
                                 maxTurns);
                     } else if (phase.turnOrder() == TurnOrder.PARALLEL) {
+                        // F2: PARALLEL never honors a speaker offset — see
+                        // GroupConversation.ResumePoint's Javadoc for why a parallel
+                        // resume always re-runs its whole fan-out instead.
                         executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
                     } else {
                         phaseExecutionEngine.executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter,
-                                maxTurns);
+                                maxTurns, startSpeakerIdx);
                     }
 
                     // #27/#45: a cross-pod cancel/ABORT flips the persisted state to
@@ -1017,7 +1036,7 @@ public class GroupConversationService implements IGroupConversationService {
      * Determines which members participate in a phase based on the
      * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
      */
-    private List<GroupMember> resolveParticipants(DiscussionPhase phase, List<GroupMember> allMembers, String moderatorAgentId) {
+    public List<GroupMember> resolveParticipants(DiscussionPhase phase, List<GroupMember> allMembers, String moderatorAgentId) {
         String participants = phase.participants() != null ? phase.participants() : "ALL";
 
         if ("MODERATOR".equalsIgnoreCase(participants)) {

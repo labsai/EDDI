@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.HitlPauseType;
@@ -667,9 +668,14 @@ public class GroupHitlCoordinator {
         var question = gc.getResumeQuestion() != null ? gc.getResumeQuestion() : gc.getOriginalQuestion();
         // BLOCKER fix: TASK pauses mid-phase → re-enter at same phase (idempotent).
         // PHASE pauses after phase completes → resume at +1.
-        int startFromPhase = (pauseType == HitlPauseType.TASK)
-                ? resumePhaseIndex
-                : resumePhaseIndex + 1;
+        // F2: a speaker-level pause is ALSO mid-phase, like TASK — overridden below
+        // rather than folded into the ternary above, so this does not have to name
+        // whatever HitlPauseType a future mid-sequential-phase pause (I6) turns out
+        // to use. A resumePoint's mere presence already means "mid-phase, re-enter
+        // the exact phase it names," independent of pauseType.
+        final int startFromPhase = gc.getResumePoint() != null
+                ? gc.getResumePoint().phaseIdx()
+                : (pauseType == HitlPauseType.TASK ? resumePhaseIndex : resumePhaseIndex + 1);
 
         // Saved bookmark fields for pause restoration on transient failures.
         // #35: restore with the ORIGINAL pausedAt so a re-armed timeout keeps its
@@ -678,6 +684,12 @@ public class GroupHitlCoordinator {
         final Instant savedPausedAt = originalPausedAt != null ? originalPausedAt : Instant.now();
         final int savedPhaseIndex = resumePhaseIndex;
         final String savedPhaseName = pausedPhaseName;
+        // F2: captured here (before the resume work runs) rather than re-read from
+        // gc inside the lambda below — executeDiscussion clears it as soon as it is
+        // consumed, and by the time a retry of the transient-failure branch below
+        // re-reads gc, a first attempt may already have cleared it even though that
+        // attempt never actually reached executeDiscussion's phase loop.
+        final GroupConversation.ResumePoint savedResumePoint = gc.getResumePoint();
         final var savedPauseType = pauseType;
 
         // O2: the control token is registered right after the resume CAS above (not
@@ -727,6 +739,42 @@ public class GroupHitlCoordinator {
                                 savedTimeoutPolicy, savedApprovalTimeout);
                         // A cancel signalled in this window must win over the restore —
                         // remove-and-recheck so a signal racing the remove is not dropped.
+                        removeTokenAndConvertIfSignalled(gc, listener);
+                        if (listener != null) {
+                            listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(driftMessage));
+                        }
+                        return;
+                    }
+                }
+
+                // F2: speaker-level bookmark drift guard. A resumePoint targets a
+                // specific speaker index within a phase's roster at pause time. If
+                // the config changed while paused and that roster is now shorter
+                // than or equal to the bookmarked index (members removed, or the
+                // phase itself no longer exists), resuming would either skip past
+                // the end of the sequential loop or address a stale index — restore
+                // the pause instead, mirroring the phase-name drift branch above.
+                // Independent of savedPhaseName: a resumePoint's own phaseIdx is the
+                // authority for which phase's roster to check.
+                if (savedResumePoint != null) {
+                    List<GroupMember> currentSpeakers = savedResumePoint.phaseIdx() < phases.size()
+                            ? groupConversationService.resolveParticipants(
+                                    phases.get(savedResumePoint.phaseIdx()), groupConfig.getMembers(), groupConfig.getModeratorAgentId())
+                            : List.of();
+                    if (savedResumePoint.speakerIdx() >= currentSpeakers.size()) {
+                        LOGGER.warnf("Config drift detected for GC %s: resume speaker index %d out of bounds for phase %d (roster size %d)",
+                                groupConversationId, savedResumePoint.speakerIdx(), savedResumePoint.phaseIdx(), currentSpeakers.size());
+                        String driftMessage = "Resume aborted: group config changed while paused (bookmarked speaker index "
+                                + savedResumePoint.speakerIdx() + " no longer exists in phase " + savedResumePoint.phaseIdx()
+                                + "'s roster of " + currentSpeakers.size()
+                                + " speakers) — the discussion remains awaiting approval; fix the config and retry, or cancel";
+                        gc.getTranscript().add(new TranscriptEntry(
+                                "system", "System",
+                                driftMessage,
+                                savedResumePoint.phaseIdx(), savedPhaseName != null ? savedPhaseName : "n/a",
+                                TranscriptEntryType.ERROR, Instant.now(), driftMessage, null));
+                        restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, groupConfig,
+                                savedTimeoutPolicy, savedApprovalTimeout);
                         removeTokenAndConvertIfSignalled(gc, listener);
                         if (listener != null) {
                             listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(driftMessage));

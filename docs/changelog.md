@@ -175,6 +175,26 @@ This incidentally resolves the "useless parameter" finding on `PhaseExecutionEng
 
 ---
 
+## 🧩 feat(groups): Speaker-level ResumePoint (Wave 0, F2) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Second Wave 0 foundation. Today, every group HITL pause is a phase/task boundary bookmark — resuming re-enters a whole phase (`TASK`) or the next one (`PHASE`). F2 adds a finer bookmark for a pause landing *inside* a running `SEQUENTIAL` phase's speaker list, so a resume can skip the speakers that already ran instead of re-running the whole phase. No producer sets one yet — like F1, this is infrastructure for I6 (human as a group member), which will pause between one speaker and the next.
+
+**`GroupConversation.ResumePoint`** is a nested record — `{phaseIdx, repeatIdx, speakerIdx, pauseKind}` — deliberately independent of `HitlPauseType`. Resume logic keys off "is `resumePoint` non-null," not a pause-type tag, so it never has to guess which enum value I6 eventually uses. `executeDiscussion`'s phase-dispatch block reads and clears it in the same step, only once, for the exact `(phaseIdx, repeat)` it names — a stale offset can never bleed into a later phase or repeat within the same resumed leg.
+
+**`PhaseExecutionEngine.executeSequentialPhase` gained a `startSpeakerIdx` overload**, clamped to `[0, speakers.size()]` — an out-of-range offset produces zero turns rather than an `IndexOutOfBoundsException`. `PARALLEL` phases never receive the offset: a parallel phase fans every speaker out and joins at the end, so there is no partial-progress state to bookmark, and re-running a member whose turn already landed is redundant work, not a correctness problem, the way it would be for a stateful sequential order.
+
+**`GroupHitlCoordinator.resumeDiscussion` gained a second bookmark-drift guard, alongside the existing phase-name one.** If the config changed while paused and the bookmarked phase's roster is now shorter than or equal to `speakerIdx` (a member removed, or the phase itself gone), the pause is restored instead of resumed. This is not a hypothetical: the mutation check for this guard showed that *without* it, the existing `PhaseExecutionEngine` clamp silently produces zero turns for that phase and the discussion sails through to `onGroupComplete` — a discussion that quietly skipped every remaining speaker in the paused phase, with no error and no signal to the operator. The guard turns that into a restored pause plus an actionable transcript/SSE error, the same shape as the phase-name drift branch it sits beside.
+
+**One deliberate scope boundary, documented rather than silently accepted.** `repeatIdx` only gates *which* repeat of a `repeats() > 1` phase gets the speaker offset — the resumed leg's repeat loop still starts at 0, so earlier repeats of the same phase replay in full before reaching the bookmarked one. This mirrors what a `TASK` pause already does for a whole phase (safe there because `findExecutableTasks` is idempotent). Whether it stays safe for a speaker-level pause depends on I6's own design — noted on `ResumePoint.repeatIdx()`'s Javadoc rather than solved speculatively for a producer that does not exist yet.
+
+`GroupConversationService.resolveParticipants` widened from `private` to `public` — `GroupHitlCoordinator`'s new guard needs the same roster-resolution logic the phase loop uses, and the only existing coupling to it was reflective (`getDeclaredMethod`), which resolves regardless of visibility.
+
+4 new tests, all mutation-checked: `PhaseExecutionEngineTest` gets the resume-skips-earlier-speakers case and the out-of-range clamp; `GroupConversationServiceHitlTest` gets the roster-shrink-restores-the-pause case and a defensive PARALLEL-phase case (a bookmark present but ignored, every speaker still runs, cleared regardless). Reverting each of the three behavioral changes in turn fails exactly its own test and no others. 825 tests green across the full group and HITL batteries; Checkstyle unchanged.
+
+---
+
 ## 🧩 refactor(orchestrator): BuiltinToolsProvider + close the three SPI gaps (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
