@@ -11,6 +11,28 @@ function groupBody(overrides: Record<string, unknown> = {}): string {
   });
 }
 
+/** A minimal setup_agent body, gated by default. */
+function setupAgentBody(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    agentName: "Refund helper",
+    systemPrompt: "You help customers request refunds.",
+    hitlConfig: { toolApprovals: { requireApproval: ["http.post:*"], exempt: ["http.get:*"] } },
+    ...overrides,
+  });
+}
+
+/** A minimal create_api_agent body, gated and endpoint-scoped by default. */
+function createApiAgentBody(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    agentName: "Ticketing bridge",
+    systemPrompt: "You file and look up support tickets.",
+    openApiSpec: "https://tickets.example.com/openapi.json",
+    endpoints: "GET /tickets,GET /tickets/{id}",
+    hitlConfig: { toolApprovals: { requireApproval: ["http.post:*"], exempt: ["http.get:*"] } },
+    ...overrides,
+  });
+}
+
 describe("detectEscalationFlags", () => {
   it("finds nothing in an ordinary group create", () => {
     expect(detectEscalationFlags(groupBody())).toEqual([]);
@@ -93,5 +115,101 @@ describe("detectEscalationFlags", () => {
         groupBody({ dynamicAgents: { enabled: "true", allowCreation: "false" } }),
       ),
     ).toEqual([]);
+  });
+
+  describe("agentCreatedWithoutGate", () => {
+    it("finds nothing when a setup_agent create carries a real gate", () => {
+      expect(detectEscalationFlags(setupAgentBody())).toEqual([]);
+    });
+
+    it("flags a setup_agent create with no hitlConfig at all", () => {
+      const body = JSON.parse(setupAgentBody());
+      delete body.hitlConfig;
+      const flags = detectEscalationFlags(JSON.stringify(body));
+      expect(flags).toEqual([{ id: "agentCreatedWithoutGate", path: "hitlConfig" }]);
+    });
+
+    it("flags a create whose toolApprovals has no requireApproval entries", () => {
+      expect(
+        detectEscalationFlags(
+          setupAgentBody({ hitlConfig: { toolApprovals: { requireApproval: [], exempt: ["http.get:*"] } } }),
+        ),
+      ).toEqual([{ id: "agentCreatedWithoutGate", path: "hitlConfig" }]);
+    });
+
+    it("flags a create whose hitlConfig has no toolApprovals block", () => {
+      expect(detectEscalationFlags(setupAgentBody({ hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY" } }))).toEqual([
+        { id: "agentCreatedWithoutGate", path: "hitlConfig" },
+      ]);
+    });
+
+    it("finds nothing when a create_api_agent create carries a real gate", () => {
+      expect(detectEscalationFlags(createApiAgentBody())).toEqual([]);
+    });
+
+    it("flags a create_api_agent create with no gate the same way", () => {
+      const body = JSON.parse(createApiAgentBody());
+      delete body.hitlConfig;
+      expect(detectEscalationFlags(JSON.stringify(body)).map((f) => f.id)).toContain(
+        "agentCreatedWithoutGate",
+      );
+    });
+
+    it("does not cry wolf on an ordinary group create, which has no agentName/systemPrompt", () => {
+      // A group body has neither required field, so this check must stay
+      // silent rather than misreading unrelated fields as a missing gate.
+      expect(detectEscalationFlags(groupBody())).toEqual([]);
+    });
+
+    it("does not fire on a body missing only one of the two required fields", () => {
+      expect(detectEscalationFlags(JSON.stringify({ agentName: "x" }))).toEqual([]);
+      expect(detectEscalationFlags(JSON.stringify({ systemPrompt: "x" }))).toEqual([]);
+    });
+  });
+
+  describe("agentCreatedWithBroadEndpoints", () => {
+    it("finds nothing when create_api_agent scopes endpoints to reads", () => {
+      expect(detectEscalationFlags(createApiAgentBody())).toEqual([]);
+    });
+
+    it("flags an endpoints filter that includes a write verb", () => {
+      const flags = detectEscalationFlags(
+        createApiAgentBody({ endpoints: "GET /tickets,DELETE /tickets/{id}" }),
+      );
+      expect(flags).toEqual([{ id: "agentCreatedWithBroadEndpoints", path: "endpoints" }]);
+    });
+
+    it("flags an omitted endpoints filter — broader than any explicit list", () => {
+      const body = JSON.parse(createApiAgentBody());
+      delete body.endpoints;
+      const flags = detectEscalationFlags(JSON.stringify(body));
+      expect(flags).toEqual([{ id: "agentCreatedWithBroadEndpoints", path: "endpoints" }]);
+    });
+
+    it("flags a blank endpoints filter the same way as an omitted one", () => {
+      expect(
+        detectEscalationFlags(createApiAgentBody({ endpoints: "   " })).map((f) => f.id),
+      ).toContain("agentCreatedWithBroadEndpoints");
+    });
+
+    it("does not fire on a setup_agent body, which has no endpoints field", () => {
+      // openApiSpec is what distinguishes create_api_agent; a setup_agent body
+      // has neither it nor the risk this check exists for.
+      expect(detectEscalationFlags(setupAgentBody())).toEqual([]);
+    });
+
+    it("does not cry wolf on an ordinary group create", () => {
+      expect(detectEscalationFlags(groupBody({ endpoints: "not a real field here" }))).toEqual([]);
+    });
+  });
+
+  it("reports an ungated, endpoint-unbounded create_api_agent as both flags", () => {
+    const body = JSON.parse(createApiAgentBody());
+    delete body.hitlConfig;
+    delete body.endpoints;
+    const flags = detectEscalationFlags(JSON.stringify(body));
+    expect(flags.map((f) => f.id).sort()).toEqual(
+      ["agentCreatedWithBroadEndpoints", "agentCreatedWithoutGate"].sort(),
+    );
   });
 });

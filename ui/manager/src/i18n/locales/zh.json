@@ -3099,7 +3099,7 @@
         },
         "readWrite": {
           "label": "读写",
-          "description": "还可以部署、取消部署、禁用失控的计划任务，以及编辑智能体的描述——每一项都会先等待你的批准。"
+          "description": "还可以创建和修改智能体与智能体群组、部署、取消部署、禁用失控的计划任务，以及编辑智能体的描述——每一项都会先等待你的批准。"
         },
         "unavailableNotVerified": "暂不可用——尚未验证此操作员的审批关卡是否可靠。请在状态面板中检查连接，或在下方选择“你的身份”，然后重新配置。",
         "unavailableFirstActivation": "首次激活时不可用。请先以只读方式激活，以证明审批关卡可靠，然后重新配置以授予写入权限。",
@@ -3186,6 +3186,8 @@
         "dynamicAgentCreation": "该组在运行时可以创建新智能体,而这些智能体本身不受审批门控。",
         "dynamicAgentRecruitment": "该组可以将其他已有智能体纳入其讨论。",
         "autoApproveOnTimeout": "该资源的审批在超时后会自动通过,无人监督。",
+        "agentCreatedWithoutGate": "该智能体正在创建时没有审批关卡。它之后的每一次写入都将在无人监督的情况下执行。",
+        "agentCreatedWithBroadEndpoints": "该智能体正在创建时被授予其 API 的写入权限——不限于读取。",
         "unchecked": "正文过长,无法扫描是否存在权限授予——请在批准前完整阅读。"
       }
     },

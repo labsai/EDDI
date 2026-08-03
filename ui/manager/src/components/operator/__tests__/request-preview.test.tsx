@@ -107,6 +107,40 @@ describe("RequestPreview", () => {
       expect(warning).toHaveTextContent(/create new agents/i);
     });
 
+    it("calls out an agent being created with no approval gate", () => {
+      renderWithProviders(
+        <RequestPreview
+          preview={preview({
+            body: JSON.stringify({ agentName: "Refund helper", systemPrompt: "You help with refunds." }),
+          })}
+          pinned
+          callId="call-1"
+        />,
+      );
+      const warning = screen.getByTestId("request-preview-escalations-call-1");
+      expect(warning).toHaveTextContent(/no approval gate/i);
+    });
+
+    it("calls out a create_api_agent with write access to its own API", () => {
+      renderWithProviders(
+        <RequestPreview
+          preview={preview({
+            body: JSON.stringify({
+              agentName: "Ticketing bridge",
+              systemPrompt: "You file tickets.",
+              openApiSpec: "https://tickets.example.com/openapi.json",
+              endpoints: "GET /tickets,DELETE /tickets/{id}",
+              hitlConfig: { toolApprovals: { requireApproval: ["http.post:*"] } },
+            }),
+          })}
+          pinned
+          callId="call-1"
+        />,
+      );
+      const warning = screen.getByTestId("request-preview-escalations-call-1");
+      expect(warning).toHaveTextContent(/write access to its api/i);
+    });
+
     it("stays silent for an ordinary body", () => {
       renderWithProviders(
         <RequestPreview

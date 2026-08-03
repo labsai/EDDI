@@ -8,6 +8,8 @@ import {
   parseEndpoint,
   isWriteScopeAvailable,
   grantsWriteCapability,
+  grantsAgentCreation,
+  grantsAgentModification,
   type WriteScopeFacts,
 } from "../tool-scopes";
 
@@ -63,22 +65,65 @@ describe("tool-scopes", () => {
       // cannot list schedules would recommend disabling one it cannot name.
       expect(READ_ENDPOINTS).toContain("GET /schedulestore/schedules");
     });
+
+    it("can read a workflow's step list — the only way to learn an extension's id and version", () => {
+      // Every workflow-extension URI (e.g. eddi://ai.labs.llm/llmstore/llms/{id}?version=N)
+      // is only ever discovered by reading the workflow that references it; every
+      // by-id read below requires a version, so without this no authoring read
+      // or write is reachable at all.
+      expect(READ_ENDPOINTS).toContain("GET /workflowstore/workflows/{id}");
+    });
+
+    it("can read a specific group in detail, not just its descriptor", () => {
+      expect(READ_ENDPOINTS).toContain("GET /groupstore/groups/{id}");
+    });
+
+    it("has a by-id read for every workflow-extension store it can also write", () => {
+      // A PUT requires the resource's current version; a POST that duplicates
+      // or extends one requires reading it first. Write access without a
+      // matching read would be unusable, not just incomplete.
+      const writeStores = WRITE_ENDPOINTS.filter((e) => e.startsWith("PUT /")).map(
+        (e) => e.replace(/^PUT \//, "").replace(/\/\{id\}$/, ""),
+      );
+      for (const store of writeStores) {
+        expect(READ_ENDPOINTS, `missing a by-id read for ${store}`).toContain(`GET /${store}/{id}`);
+      }
+    });
   });
 
   describe("write scope", () => {
     it("is exactly the curated entries — narrow verbs, not a resource-level grant", () => {
       // Pinned deliberately, not just "non-empty": each entry is chosen so an
-      // approved-but-wrong call is small and reversible (see the doc comment on
-      // WRITE_ENDPOINTS for why each one, and why not PUT /agentstore/agents,
-      // schedule creation, or any DELETE). A silent addition here is exactly as
-      // dangerous as a silent removal from an allow-list — this test catches
-      // either direction.
+      // approved-but-wrong call is small and reversible, or (the authoring
+      // entries) cannot touch the document that gates it (see the doc comment
+      // on WRITE_ENDPOINTS for why each one, and why not PUT /agentstore/agents,
+      // PUT /groupstore/groups/{id}, schedule creation, or any DELETE). A silent
+      // addition here is exactly as dangerous as a silent removal from an
+      // allow-list — this test catches either direction.
       expect(WRITE_ENDPOINTS).toEqual([
         "PATCH /descriptorstore/descriptors/{id}",
         "POST /administration/{environment}/deploy/{agentId}",
         "POST /administration/{environment}/undeploy/{agentId}",
         "POST /schedulestore/schedules/{scheduleId}/disable",
         "POST /groupstore/groups",
+        "POST /administration/agents/setup",
+        "POST /administration/agents/setup-api",
+        "PUT /workflowstore/workflows/{id}",
+        "POST /workflowstore/workflows",
+        "PUT /llmstore/llms/{id}",
+        "POST /llmstore/llms",
+        "PUT /rulestore/rulesets/{id}",
+        "POST /rulestore/rulesets",
+        "PUT /outputstore/outputsets/{id}",
+        "POST /outputstore/outputsets",
+        "PUT /propertysetterstore/propertysetters/{id}",
+        "POST /propertysetterstore/propertysetters",
+        "PUT /dictionarystore/dictionaries/{id}",
+        "POST /dictionarystore/dictionaries",
+        "PUT /apicallstore/apicalls/{id}",
+        "POST /apicallstore/apicalls",
+        "PUT /mcpcallsstore/mcpcalls/{id}",
+        "POST /mcpcallsstore/mcpcalls",
       ]);
     });
 
@@ -92,14 +137,36 @@ describe("tool-scopes", () => {
       expect(WRITE_ENDPOINTS).not.toContain("DELETE /groupstore/groups/{id}");
     });
 
-    it("binds no agent-authoring endpoint — the handoff to the wizard is structural", () => {
-      // The system prompt tells the operator to send the user to the agent
-      // wizard. That instruction is only honest because there is no tool it
-      // could reach for instead; a prompt is not what enforces this.
-      const agentAuthoring = WRITE_ENDPOINTS.filter(
-        (e) => e.includes("/agentstore/") || e.includes("/administration/agents/setup"),
-      );
-      expect(agentAuthoring).toEqual([]);
+    it("can create a whole new agent (both shapes), but never touch an existing agent's own document", () => {
+      // setup and setup-api build a new AgentConfiguration from nothing, so
+      // "does this body carry a real gate" needs no prior version to compare
+      // against — escalation-flags.ts's agentCreatedWithoutGate answers it. A
+      // PUT to an existing agent has no such answer available (see the doc
+      // comment on WRITE_ENDPOINTS), so that stays out categorically.
+      expect(WRITE_ENDPOINTS).toContain("POST /administration/agents/setup");
+      expect(WRITE_ENDPOINTS).toContain("POST /administration/agents/setup-api");
+      const agentDocumentWrites = WRITE_ENDPOINTS.filter((e) => e.includes("/agentstore/"));
+      expect(agentDocumentWrites).toEqual([]);
+    });
+
+    it("authors every workflow-extension store, none of which can carry a gate", () => {
+      // This is "modify any type of agent" in practice: prompt/model, behavior
+      // rules, outputs, slot-filling, dictionaries, HTTP and MCP tool wiring,
+      // and the pipeline that runs them. AgentConfiguration.hitlConfig lives
+      // one level up from every one of these documents.
+      for (const store of [
+        "llmstore/llms",
+        "rulestore/rulesets",
+        "outputstore/outputsets",
+        "propertysetterstore/propertysetters",
+        "dictionarystore/dictionaries",
+        "apicallstore/apicalls",
+        "mcpcallsstore/mcpcalls",
+        "workflowstore/workflows",
+      ]) {
+        expect(WRITE_ENDPOINTS).toContain(`PUT /${store}/{id}`);
+        expect(WRITE_ENDPOINTS).toContain(`POST /${store}`);
+      }
     });
 
     it("never contains a read verb", () => {
@@ -119,18 +186,18 @@ describe("tool-scopes", () => {
     });
 
     it.each([
+      // The one pair of documents anywhere in this list that carry their own
+      // gate — see the doc comment on WRITE_ENDPOINTS for why a create can be
+      // checked (escalation-flags.ts) but a full-document update cannot.
       "PUT /agentstore/agents/{id}",
       "POST /agentstore/agents",
-      "POST /llmstore/llms",
-      "PUT /llmstore/llms/{id}",
+      "PUT /groupstore/groups/{id}",
+      "POST /groupstore/groups/{id}",
+      // Attacker persistence: a scheduled turn has no human present, so an
+      // approval prompt covering these would never actually appear.
       "POST /schedulestore/schedules",
       "POST /schedulestore/schedules/{scheduleId}/enable",
       "POST /schedulestore/schedules/{scheduleId}/fire",
-      // The two composite create endpoints: one call provisions an agent with an
-      // arbitrary `endpoints` filter and no gate — a complete escape from this
-      // allow-list — and their request bodies carry a raw provider API key.
-      "POST /administration/agents/setup",
-      "POST /administration/agents/setup-api",
     ])("excludes %s — a full-document write or attacker persistence", (excluded) => {
       expect(WRITE_ENDPOINTS).not.toContain(excluded);
     });
@@ -271,6 +338,62 @@ describe("tool-scopes", () => {
 
     it("still reports no write capability for read_only", () => {
       expect(grantsWriteCapability(endpointsForScope("read_only"))).toBe(false);
+    });
+  });
+
+  describe("grantsAgentCreation", () => {
+    it("is true once either creation endpoint is granted", () => {
+      expect(grantsAgentCreation(["POST /administration/agents/setup"])).toBe(true);
+      expect(grantsAgentCreation(["POST /administration/agents/setup-api"])).toBe(true);
+    });
+
+    it("is false for an unrelated write, including a deploy", () => {
+      expect(
+        grantsAgentCreation(["POST /administration/production/deploy/{agentId}"]),
+      ).toBe(false);
+    });
+
+    it("does not match on a substring of the administration path", () => {
+      // /administration/ also holds deploy, undeploy, logs, and quotas.
+      expect(grantsAgentCreation(["GET /administration/logs"])).toBe(false);
+      expect(grantsAgentCreation(["GET /administration/quotas"])).toBe(false);
+    });
+
+    it("agrees with the real read_write endpoint set", () => {
+      expect(grantsAgentCreation(endpointsForScope("read_write"))).toBe(true);
+      expect(grantsAgentCreation(endpointsForScope("read_only"))).toBe(false);
+    });
+  });
+
+  describe("grantsAgentModification", () => {
+    it("is true once any workflow-extension store's update verb is granted", () => {
+      for (const entry of [
+        "PUT /workflowstore/workflows/{id}",
+        "PUT /llmstore/llms/{id}",
+        "PUT /rulestore/rulesets/{id}",
+        "PUT /outputstore/outputsets/{id}",
+        "PUT /propertysetterstore/propertysetters/{id}",
+        "PUT /dictionarystore/dictionaries/{id}",
+        "PUT /apicallstore/apicalls/{id}",
+        "PUT /mcpcallsstore/mcpcalls/{id}",
+      ]) {
+        expect(grantsAgentModification([entry]), entry).toBe(true);
+      }
+    });
+
+    it("is false for the corresponding create verb alone — creating is not modifying", () => {
+      expect(grantsAgentModification(["POST /llmstore/llms"])).toBe(false);
+    });
+
+    it("is false for an unrelated write, including a deploy", () => {
+      expect(
+        grantsAgentModification(["POST /administration/production/deploy/{agentId}"]),
+      ).toBe(false);
+    });
+
+    it("agrees with the real read_write endpoint set", () => {
+      expect(grantsAgentModification(endpointsForScope("read_write"))).toBe(true);
+      expect(grantsAgentModification(endpointsForScope("read_only"))).toBe(false);
     });
   });
 });

@@ -16,6 +16,31 @@
 export type OperatorScope = "read_only" | "read_write";
 
 /**
+ * `{store}/{resource}` path segments for every workflow-extension store an
+ * agent's workflow can reference — the config documents that define what an
+ * agent says and does (prompt/model, behavior rules, output messages,
+ * slot-filling, NLU dictionaries, HTTP and MCP tool wiring). Named once here
+ * and reused to build both the by-id READ_ENDPOINTS entries and the
+ * PUT/POST WRITE_ENDPOINTS entries below, plus `grantsAgentModification` —
+ * three lists that would otherwise drift independently if a ninth store were
+ * ever added and one of the three forgot to change.
+ *
+ * Deliberately excludes `workflowstore/workflows` (listed by hand alongside
+ * `groupstore/groups` below): a workflow is the pipeline that *references*
+ * these stores, not one of the documents it references, and its own read is
+ * already grouped with the agent/group reads it sits between.
+ */
+const WORKFLOW_EXTENSION_STORES = [
+  "llmstore/llms",
+  "rulestore/rulesets",
+  "outputstore/outputsets",
+  "propertysetterstore/propertysetters",
+  "dictionarystore/dictionaries",
+  "apicallstore/apicalls",
+  "mcpcallsstore/mcpcalls",
+] as const;
+
+/**
  * Read endpoints the operator is allowed to call.
  *
  * These are OpenAPI path templates copied verbatim from EDDI's spec. Every entry
@@ -32,7 +57,15 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /agentstore/agents/{id}",
   // Workflows and groups
   "GET /workflowstore/workflows/descriptors",
+  "GET /workflowstore/workflows/{id}",
   "GET /groupstore/groups/descriptors",
+  "GET /groupstore/groups/{id}",
+  // Workflow extensions — the by-id read half of every authoring pair below.
+  // Each is reached by navigating agent -> workflow -> the exact id+version a
+  // step's resourceUri names, never by browsing a store's full contents, so no
+  // corresponding "descriptors" entry is needed here (see WRITE_ENDPOINTS' own
+  // doc comment for why authoring is scoped to these stores).
+  ...WORKFLOW_EXTENSION_STORES.map((store) => `GET /${store}/{id}`),
   // Conversations
   "GET /conversationstore/conversations",
   "GET /conversationstore/conversations/{conversationId}",
@@ -49,18 +82,21 @@ export const READ_ENDPOINTS: readonly string[] = [
 ] as const;
 
 /**
- * Write endpoints — curated, and deliberately short.
+ * Write endpoints.
  *
  * Populated only once the whole chain that makes a write safe actually exists:
- * the gate itself (backend), provisioning that installs it (setup-api), a
- * verified read-back of every version (`verifyGateInstalled`), the approval
- * surface that can resolve a pause (iteration 5), and — the piece that was
- * missing until now — approval binding to the resolved REQUEST rather than the
- * tool name, so what an approver sees is what actually runs (backend
- * `IApiCallExecutor#resolve` + gate-time fingerprint + pre-execution
+ * the gate itself (backend), provisioning that installs it (setup / setup-api,
+ * both `hitlConfig`-capable as of the request-fingerprint work), a verified
+ * read-back of every version (`verifyGateInstalled`), the approval surface
+ * that can resolve a pause (iteration 5, extended in iteration 22 to decide a
+ * `TOOL_CALL` pause inline), and approval binding to the resolved REQUEST
+ * rather than the tool name, so what an approver sees is what actually runs
+ * (backend `IApiCallExecutor#resolve` + gate-time fingerprint + pre-execution
  * re-check). See `docs/hitl.md` "Request pinning" in the EDDI backend repo.
  *
- * Each entry is deliberately the narrowest verb that solves a real operator
+ * Two shapes of entry, judged by two different standards:
+ *
+ * **Operational verbs** — each the narrowest verb that solves a real operator
  * need, chosen so the worst case of an approved-but-wrong write is small and
  * reversible:
  *
@@ -77,25 +113,62 @@ export const READ_ENDPOINTS: readonly string[] = [
  *   by design: disable is bound, enable/create/fire/retry are not — creating a
  *   schedule is attacker persistence (a scheduled turn has no human present,
  *   so an approval prompt never appears), and disabling one is not.
+ *
+ * **Authoring endpoints** — full create/update of agent behavior. Judged
+ * differently: not by blast radius (a bad prompt or a bad rule set can be as
+ * consequential as any operational verb) but by whether the *document itself*
+ * can defeat the approval mechanism reviewing it. That standard is what
+ * separates what is bound from what is not:
+ *
+ * - `POST`/`PUT` on `llmstore`, `rulestore`, `outputstore`,
+ *   `propertysetterstore`, `dictionarystore`, `apicallstore`, `mcpcallsstore`,
+ *   and `workflowstore` — this is "create and modify any type of agent" in
+ *   practice: prompt and model (`llm`), behavior rules, output messages,
+ *   slot-filling, NLU dictionaries, HTTP and MCP tool wiring, and which of
+ *   those a workflow's pipeline actually runs, in order. **None of these
+ *   documents carry a `hitlConfig` or any other field that gates a write** —
+ *   `AgentConfiguration.hitlConfig` lives one level up, on the agent document
+ *   itself, never on a workflow extension. A bad edit here is reviewable and
+ *   reversible exactly like any other config change; it cannot touch the gate
+ *   that is reviewing it.
+ * - `POST /administration/agents/setup` and `.../setup-api` — build a whole
+ *   new agent (standard, and OpenAPI-spec-backed) in one call. Unlike an
+ *   update, a create has no prior version to diff against, so "does this body
+ *   carry a real gate" is an unambiguous, standalone question — which is
+ *   exactly what `escalation-flags.ts`'s `agentCreatedWithoutGate` and
+ *   `agentCreatedWithBroadEndpoints` checks answer for the approver, above the
+ *   raw JSON. Both request bodies also carry a provider API key in plaintext;
+ *   `SecretRedactionFilter`-based preview redaction (backend) covers the
+ *   common key shapes, not every possible one — an honest, documented gap, not
+ *   a solved one.
  * - `POST /groupstore/groups` — CREATE only, never `PUT`. A group references
  *   agents that already exist and already have their own gates; it composes
- *   authored behavior rather than authoring any. Create is also the one shape
- *   where the generated tool's degenerate whole-document body (see below) is
- *   not a handicap: there is no prior version, so the approver reads the
- *   document itself rather than diffing one. `PUT` stays out for exactly that
- *   reason — an update is a diff nobody can see. Note the request preview is
- *   what makes even the create reviewable, and that a group body can still
- *   carry a capability grant of its own: see `escalation-flags.ts`.
+ *   authored behavior rather than authoring any. Create is also the shape
+ *   where the generated tool's whole-document body is reviewable: there is no
+ *   prior version, so the approver reads the document itself rather than
+ *   diffing one they cannot see.
  *
- * Deliberately NOT here, regardless of how the request would look:
- * `PUT /agentstore/agents/{id}` (the operator's own gate lives in that
- * document — one approved write removes all subsequent gating), any agent- or
- * LLM-config creation (a full config document is not something an approver
- * can meaningfully diff, and `setup`/`setup-api` provision an agent with an
- * arbitrary `endpoints` filter and no gate — a complete escape from this
- * allow-list), `PUT /groupstore/groups/{id}` and `POST /groupstore/groups/{id}`
- * (update and duplicate), any schedule verb but disable, and every `DELETE`
- * (no undo exists in any of these stores).
+ * Deliberately NOT here, regardless of how safe the request would look:
+ * `PUT /agentstore/agents/{id}` and `PUT /groupstore/groups/{id}` — the one
+ * pair of documents in this whole list that carry their own gate
+ * (`AgentConfiguration.hitlConfig.toolApprovals`; `AgentGroupConfiguration
+ * .hitlConfig` plus each `DiscussionPhase.requiresApproval`). A create can be
+ * checked in isolation — "does this new document have a gate" needs no prior
+ * state — but a full-document *update* cannot: "was the gate just weakened"
+ * is a diff question, and nothing here has a prior version to diff against.
+ * `escalation-flags.ts` deliberately stays a pure function of the resolved
+ * body alone (see its own doc comment), so it cannot answer that question
+ * either — extending it to try would mean fetching and comparing prior state
+ * from inside a body-shape check, a different mechanism this file does not
+ * have. Until a narrower primitive exists (e.g. a patch endpoint that cannot
+ * touch `hitlConfig` at all, the same role `updateResourceUri` already plays
+ * for repointing one workflow step without replacing the whole document),
+ * "modify this agent" is served entirely by the workflow-extension stores
+ * above, which is most of what a real request needs and none of what makes
+ * this pair different. `POST /groupstore/groups/{id}` (duplicate) stays out
+ * for the same document-integrity reason as `PUT`. Also excluded: any
+ * schedule verb but disable (creating one is attacker persistence — see
+ * above), and every `DELETE` (no undo exists in any of these stores).
  *
  * Because `buildToolApprovals` gates every `http.{post,put,patch,delete}:*`
  * unconditionally, anything added here is gated the moment it is added — the
@@ -107,6 +180,11 @@ export const WRITE_ENDPOINTS: readonly string[] = [
   "POST /administration/{environment}/undeploy/{agentId}",
   "POST /schedulestore/schedules/{scheduleId}/disable",
   "POST /groupstore/groups",
+  "POST /administration/agents/setup",
+  "POST /administration/agents/setup-api",
+  "PUT /workflowstore/workflows/{id}",
+  "POST /workflowstore/workflows",
+  ...WORKFLOW_EXTENSION_STORES.flatMap((store) => [`PUT /${store}/{id}`, `POST /${store}`]),
 ] as const;
 
 /**
@@ -208,6 +286,37 @@ export function grantsWriteCapability(endpoints: readonly string[]): boolean {
     const parsed = parseEndpoint(entry);
     return parsed === null || parsed.method !== "GET";
   });
+}
+
+/**
+ * Whether the granted endpoints can build a whole new agent from scratch
+ * (standard or OpenAPI-spec-backed).
+ *
+ * Exact membership, not a substring or prefix match on `/administration/` —
+ * that directory also holds deploy/undeploy/logs/quotas, none of which create
+ * anything.
+ */
+export function grantsAgentCreation(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return set.has("POST /administration/agents/setup") || set.has("POST /administration/agents/setup-api");
+}
+
+/**
+ * Whether the granted endpoints can change an existing agent's prompt,
+ * behavior, outputs, tool wiring, or pipeline — any workflow or
+ * workflow-extension store's update verb.
+ *
+ * Deliberately silent on `PUT /agentstore/agents/{id}` and
+ * `PUT /groupstore/groups/{id}`: neither is ever granted (see WRITE_ENDPOINTS'
+ * doc comment), so checking for them here would just be dead code describing
+ * a capability that can never exist.
+ */
+export function grantsAgentModification(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return (
+    set.has("PUT /workflowstore/workflows/{id}") ||
+    WORKFLOW_EXTENSION_STORES.some((store) => set.has(`PUT /${store}/{id}`))
+  );
 }
 
 /**

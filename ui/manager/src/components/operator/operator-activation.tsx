@@ -536,7 +536,7 @@ function ScopeField({ effectiveScope, writeScopeAvailable, hasExistingOperator, 
             <span className="block text-xs text-muted-foreground">
               {t(
                 "operator.activation.scope.readWrite.description",
-                "Also lets it deploy, undeploy, disable a runaway schedule, and edit an agent's descriptor — each one paused for your approval first.",
+                "Also lets it create and modify agents and agent groups, deploy, undeploy, disable a runaway schedule, and edit an agent's descriptor — each one paused for your approval first.",
               )}
             </span>
           </span>

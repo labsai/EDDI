@@ -3099,7 +3099,7 @@
         },
         "readWrite": {
           "label": "Lese- und Schreibzugriff",
-          "description": "Kann außerdem bereitstellen, die Bereitstellung aufheben, einen außer Kontrolle geratenen Zeitplan deaktivieren und die Beschreibung eines Agenten bearbeiten — jeweils erst nach Ihrer Genehmigung."
+          "description": "Kann außerdem Agenten und Agentengruppen erstellen und ändern, bereitstellen, die Bereitstellung aufheben, einen außer Kontrolle geratenen Zeitplan deaktivieren und die Beschreibung eines Agenten bearbeiten — jeweils erst nach Ihrer Genehmigung."
         },
         "unavailableNotVerified": "Noch nicht verfügbar — das Genehmigungsgate dieses Operators wurde nicht als sicher verifiziert. Prüfen Sie die Verbindung im Statusbereich, oder wählen Sie unten „Ihre Identität“ und konfigurieren Sie danach neu.",
         "unavailableFirstActivation": "Bei der ersten Aktivierung nicht verfügbar. Aktivieren Sie zunächst mit Nur-Lesezugriff, um zu belegen, dass das Genehmigungsgate zuverlässig funktioniert, und konfigurieren Sie dann neu, um Schreibzugriff zu gewähren.",
@@ -3186,6 +3186,8 @@
         "dynamicAgentCreation": "Diese Gruppe darf zur Laufzeit neue Agenten erstellen. Diese Agenten unterliegen selbst keiner Freigabepflicht.",
         "dynamicAgentRecruitment": "Diese Gruppe darf weitere vorhandene Agenten in ihre Diskussionen einbeziehen.",
         "autoApproveOnTimeout": "Freigaben für diese Ressource werden bei Zeitüberschreitung automatisch erteilt — ohne dass jemand mitschaut.",
+        "agentCreatedWithoutGate": "Dieser Agent wird ohne Genehmigungs-Gate erstellt. Jeder spätere Schreibvorgang wird unbeaufsichtigt ausgeführt.",
+        "agentCreatedWithBroadEndpoints": "Dieser Agent wird mit Schreibzugriff auf seine eigene API erstellt — nicht auf Lesevorgänge beschränkt.",
         "unchecked": "Der Body war zu lang, um ihn auf Berechtigungserweiterungen zu prüfen — lesen Sie ihn vor der Freigabe vollständig."
       }
     },

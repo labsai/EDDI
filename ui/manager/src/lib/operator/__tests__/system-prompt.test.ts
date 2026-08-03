@@ -78,8 +78,16 @@ describe("buildOperatorSafetyPreamble", () => {
     it("forbids enabling a setting that grants capability past the approval", () => {
       // A group that may create agents while it runs escapes the endpoint
       // allow-list entirely — one approved create becomes an open-ended one.
-      expect(preamble).toContain("Never enable a setting that lets something you create");
+      expect(preamble).toContain("Never create or enable something that can act without a human watching");
       expect(preamble).toContain("create or recruit agents while it runs");
+    });
+
+    it("forbids creating an agent with no approval gate, in the same rule", () => {
+      // Security-relevant wording belongs in the non-editable preamble, not the
+      // editable body — this is the preamble's own stated reason BODY_MAKING_CHANGES
+      // never restates the rules it enforces. A gate-less agent can act without a
+      // human watching just as much as an auto-approving timeout can.
+      expect(preamble).toContain("a new agent with no approval");
     });
 
     it("numbers nine rules contiguously", () => {
@@ -175,6 +183,54 @@ describe("buildOperatorPromptBody", () => {
 
   it("omits the authoring section when nothing can be created", () => {
     expect(buildOperatorPromptBody(READ_ENDPOINTS)).not.toContain("Creating things:");
+  });
+
+  describe("agent authoring, now that setup/setup-api and the extension stores are granted", () => {
+    const body = buildOperatorPromptBody(endpointsForScope("read_write"));
+
+    it("still describes group creation and its own no-update/no-delete limit", () => {
+      expect(body).toContain("You can create an agent GROUP");
+      expect(body).toContain("You cannot update or delete a group you created");
+    });
+
+    it("describes real agent-creation capability instead of the old refusal", () => {
+      expect(body).toContain("You can create a whole new agent");
+      expect(body).not.toContain("You CANNOT create or edit an agent");
+      expect(body).not.toContain("Agents → New agent");
+    });
+
+    it("describes real agent-modification capability", () => {
+      expect(body).toContain("You can change an existing agent's system prompt");
+    });
+
+    it("still states the boundary: no gate, memory/session, or top-level workflow changes", () => {
+      expect(body).toContain("You cannot change an agent's own approval gate");
+    });
+  });
+
+  it("shows only creation text when creation is granted but modification is not", () => {
+    const endpoints = [...READ_ENDPOINTS, "POST /administration/agents/setup"];
+    const body = buildOperatorPromptBody(endpoints);
+    expect(body).toContain("You can create a whole new agent");
+    expect(body).not.toContain("You can change an existing agent's system prompt");
+    expect(body).not.toContain("You CANNOT create or edit an agent");
+  });
+
+  it("shows only modification text when modification is granted but creation is not", () => {
+    const endpoints = [...READ_ENDPOINTS, "PUT /llmstore/llms/{id}"];
+    const body = buildOperatorPromptBody(endpoints);
+    expect(body).toContain("You can change an existing agent's system prompt");
+    expect(body).not.toContain("You can create a whole new agent");
+    expect(body).not.toContain("You CANNOT create or edit an agent");
+  });
+
+  it("falls back to the original refusal when writes exist but touch no agent content", () => {
+    // WITH_A_WRITE (deploy-only) is exactly this case — pinned again here
+    // alongside the two tests above so the three-way branch reads as one group.
+    const body = buildOperatorPromptBody(WITH_A_WRITE);
+    expect(body).toContain("You CANNOT create or edit an agent");
+    expect(body).not.toContain("You can create a whole new agent");
+    expect(body).not.toContain("You can change an existing agent's system prompt");
   });
 
   it("resolves a scope through the same predicate", () => {

@@ -3105,7 +3105,7 @@
         },
         "readWrite": {
           "label": "Leitura e escrita",
-          "description": "Também permite implementar, remover a implementação, desativar uma agenda fora de controlo e editar o descritor de um agente — cada uma à espera da sua aprovação primeiro."
+          "description": "Também permite criar e alterar agentes e grupos de agentes, implementar, remover a implementação, desativar uma agenda fora de controlo e editar o descritor de um agente — cada uma à espera da sua aprovação primeiro."
         },
         "unavailableNotVerified": "Ainda não disponível — o gate de aprovação deste operador não foi verificado como fiável. Verifique a ligação no painel de estado, ou escolha «A sua identidade» abaixo e depois reconfigure.",
         "unavailableFirstActivation": "Não disponível na primeira ativação. Ative primeiro em modo de leitura para provar que o gate de aprovação é fiável, depois reconfigure para conceder acesso de escrita.",
@@ -3192,6 +3192,8 @@
         "dynamicAgentCreation": "Este grupo pode criar novos agentes enquanto é executado. Esses agentes não passam por aprovação.",
         "dynamicAgentRecruitment": "Este grupo pode trazer outros agentes existentes para as suas discussões.",
         "autoApproveOnTimeout": "As aprovações deste recurso são concedidas automaticamente ao expirar o prazo, sem ninguém a supervisionar.",
+        "agentCreatedWithoutGate": "Este agente está a ser criado sem porta de aprovação. Cada escrita que fizer posteriormente será executada sem supervisão.",
+        "agentCreatedWithBroadEndpoints": "Este agente está a ser criado com acesso de escrita à sua API — não limitado a leituras.",
         "unchecked": "O corpo era demasiado longo para analisar concessões de capacidade — leia-o na íntegra antes de aprovar."
       }
     },

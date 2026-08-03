@@ -3127,7 +3127,7 @@
         },
         "readWrite": {
           "label": "Read & write",
-          "description": "Also lets it deploy, undeploy, disable a runaway schedule, and edit an agent's descriptor — each one paused for your approval first."
+          "description": "Also lets it create and modify agents and agent groups, deploy, undeploy, disable a runaway schedule, and edit an agent's descriptor — each one paused for your approval first."
         },
         "unavailableNotVerified": "Not available yet — this operator's approval gate has not been verified as sound. Check connection on the status panel, or choose \"Your identity\" below, then reconfigure.",
         "unavailableFirstActivation": "Not available on first activation. Activate read-only first to prove the approval gate is sound, then reconfigure to grant write access.",
@@ -3213,6 +3213,8 @@
         "dynamicAgentCreation": "This group may create new agents while it runs. Those agents are not themselves approval-gated.",
         "dynamicAgentRecruitment": "This group may pull other existing agents into its discussions.",
         "autoApproveOnTimeout": "Approvals for this resource are granted automatically when they time out, with nobody watching.",
+        "agentCreatedWithoutGate": "This agent is being created with no approval gate. Every write it later makes will execute unsupervised.",
+        "agentCreatedWithBroadEndpoints": "This agent is being created with write access to its API — not limited to reads.",
         "unchecked": "The body was too long to scan for capability grants — read it in full before approving."
       }
     },

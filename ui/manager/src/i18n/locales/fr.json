@@ -3105,7 +3105,7 @@
         },
         "readWrite": {
           "label": "Lecture et écriture",
-          "description": "Peut aussi déployer, annuler le déploiement, désactiver une planification incontrôlée et modifier le descripteur d'un agent — chacune de ces actions étant d'abord soumise à votre approbation."
+          "description": "Peut aussi créer et modifier des agents et des groupes d'agents, déployer, annuler le déploiement, désactiver une planification incontrôlée et modifier le descripteur d'un agent — chacune de ces actions étant d'abord soumise à votre approbation."
         },
         "unavailableNotVerified": "Pas encore disponible — la passerelle d'approbation de cet opérateur n'a pas été vérifiée comme fiable. Vérifiez la connexion depuis le panneau d'état, ou choisissez « Votre identité » ci-dessous, puis reconfigurez.",
         "unavailableFirstActivation": "Non disponible lors de la première activation. Activez d'abord en lecture seule pour prouver que la passerelle d'approbation est fiable, puis reconfigurez pour accorder l'accès en écriture.",
@@ -3192,6 +3192,8 @@
         "dynamicAgentCreation": "Ce groupe peut créer de nouveaux agents pendant son exécution. Ces agents ne sont pas eux-mêmes soumis à approbation.",
         "dynamicAgentRecruitment": "Ce groupe peut intégrer d'autres agents existants à ses discussions.",
         "autoApproveOnTimeout": "Les approbations de cette ressource sont accordées automatiquement en cas d'expiration du délai, sans surveillance.",
+        "agentCreatedWithoutGate": "Cet agent est créé sans passerelle d'approbation. Chaque écriture qu'il effectuera par la suite s'exécutera sans supervision.",
+        "agentCreatedWithBroadEndpoints": "Cet agent est créé avec un accès en écriture à son API — non limité aux lectures.",
         "unchecked": "Le corps était trop long pour être analysé à la recherche d'octrois de capacités — lisez-le en entier avant d'approuver."
       }
     },

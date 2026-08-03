@@ -23,7 +23,12 @@
 /** One escalating setting found in a request body. */
 export interface EscalationFlag {
   /** Stable id — also the i18n key suffix under `operator.approval.escalation`. */
-  id: "dynamicAgentCreation" | "dynamicAgentRecruitment" | "autoApproveOnTimeout";
+  id:
+    | "dynamicAgentCreation"
+    | "dynamicAgentRecruitment"
+    | "autoApproveOnTimeout"
+    | "agentCreatedWithoutGate"
+    | "agentCreatedWithBroadEndpoints";
   /** Dotted path of the setting within the body, shown verbatim so the approver
    *  can find it in the JSON below. */
   path: string;
@@ -47,6 +52,17 @@ function at(root: unknown, path: string): unknown {
  * (`allowDelegation` is `true` by default), so flagging one while the feature is
  * switched off would cry wolf on an ordinary group and train approvers to skim
  * past the warning — which costs more than it buys.
+ *
+ * The last two exist only for a **create** body (`setup_agent` /
+ * `create_api_agent` — distinguished by the `agentName` + `systemPrompt` pair
+ * every such body carries, checked before either does anything else) and
+ * deliberately have no counterpart for an *update*. "This new document has no
+ * gate" is answerable by reading the document alone; "this update just removed
+ * a gate the document used to have" is a diff question this module cannot
+ * answer — it sees one resolved body, never a prior version — which is exactly
+ * why `PUT /agentstore/agents/{id}` and `PUT /groupstore/groups/{id}` stay out
+ * of `WRITE_ENDPOINTS` rather than being flagged here instead. See that file's
+ * doc comment.
  */
 const CHECKS: readonly {
   id: EscalationFlag["id"];
@@ -68,7 +84,36 @@ const CHECKS: readonly {
     path: "hitlConfig.timeoutPolicy",
     matches: (value) => value === "AUTO_APPROVE",
   },
+  {
+    id: "agentCreatedWithoutGate",
+    path: "hitlConfig",
+    matches: (_value, body) => {
+      if (!isAgentCreationBody(body)) return false;
+      const requireApproval = at(body, "hitlConfig.toolApprovals.requireApproval");
+      return !Array.isArray(requireApproval) || requireApproval.length === 0;
+    },
+  },
+  {
+    id: "agentCreatedWithBroadEndpoints",
+    path: "endpoints",
+    matches: (value, body) => {
+      // Only create_api_agent bodies carry endpoints at all — openApiSpec is
+      // the field that shape adds on top of the common agentName+systemPrompt
+      // pair. A setup_agent body has neither this field nor this risk.
+      if (typeof at(body, "openApiSpec") !== "string") return false;
+      // Omitted means "every non-deprecated endpoint" per the tool's own
+      // description — broader than any explicit list, so it is flagged too.
+      if (typeof value !== "string" || value.trim() === "") return true;
+      return value.split(",").some((entry) => !entry.trim().startsWith("GET "));
+    },
+  },
 ];
+
+/** Whether a resolved body is shaped like a setup_agent / create_api_agent
+ *  request — the pair of required fields both share. */
+function isAgentCreationBody(body: unknown): boolean {
+  return typeof at(body, "agentName") === "string" && typeof at(body, "systemPrompt") === "string";
+}
 
 /**
  * Escalating settings in a resolved request body, in display order.
