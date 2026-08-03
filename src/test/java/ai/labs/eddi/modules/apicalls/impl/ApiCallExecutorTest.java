@@ -409,7 +409,10 @@ class ApiCallExecutorTest {
 
         Map<String, Object> requestMap = new HashMap<>();
         requestMap.put("headers", new LinkedHashMap<String, Object>());
-        requestMap.put("body", "{\"apiKey\":\"sk-abcdefghijklmnopqrstuvwxyz012345\",\"name\":\"billing\"}");
+        // Zero-entropy on purpose — see ResolvedRequestTest.BodyRedaction: the
+        // `sk-` shape is what the filter matches, the randomness is what trips
+        // the repo's secret scanner.
+        requestMap.put("body", "{\"apiKey\":\"sk-aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"name\":\"billing\"}");
         when(mockRequest.toMap()).thenReturn(requestMap);
         setupSuccessResponse(200, "ok", "text/plain");
 
@@ -421,7 +424,7 @@ class ApiCallExecutorTest {
         @SuppressWarnings("unchecked")
         var capturedMap = (Map<String, Object>) captor.getValue();
         String persistedBody = String.valueOf(capturedMap.get("body"));
-        assertFalse(persistedBody.contains("sk-abcdefghijklmnopqrstuvwxyz012345"), persistedBody);
+        assertFalse(persistedBody.contains("sk-aaaaaaaaaaaaaaaaaaaaaaaaaa"), persistedBody);
         assertTrue(persistedBody.contains("REDACTED"), persistedBody);
         // Over-redaction would make the debug record useless — the rest survives.
         assertTrue(persistedBody.contains("billing"), persistedBody);

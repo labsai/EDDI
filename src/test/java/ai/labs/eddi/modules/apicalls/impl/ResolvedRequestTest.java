@@ -224,8 +224,15 @@ class ResolvedRequestTest {
     @DisplayName("the stored body is redacted, the fingerprinted one is not")
     class BodyRedaction {
 
-        private static final String KEY = "sk-abcdefghijklmnopqrstuvwxyz012345";
-        private static final String OTHER_KEY = "sk-zyxwvutsrqponmlkjihgfedcba543210";
+        // Deliberately zero-entropy. These have to carry the `sk-` + 20 chars
+        // shape, because that shape is exactly what SecretRedactionFilter's
+        // OpenAI rule matches and what these tests assert on — but a realistic
+        // random-looking value additionally trips the repo's gitleaks scan, which
+        // then fails CI on a literal that never authenticated against anything.
+        // Repeated characters keep the shape and drop the entropy. Do not
+        // "improve" these into realistic keys.
+        private static final String KEY = "sk-aaaaaaaaaaaaaaaaaaaaaaaaaa";
+        private static final String OTHER_KEY = "sk-bbbbbbbbbbbbbbbbbbbbbbbbbb";
 
         @Test
         void aSecretInTheBodyNeverReachesTheStoredCopy() {
