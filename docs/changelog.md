@@ -42,6 +42,18 @@ The ordering matters more than the redaction. Headers stay fingerprinted **redac
 
 The limitation is stated rather than papered over: value-shape matching catches `sk-…`, `sk-ant-…`, bearer tokens and vault refs, not a hand-rolled secret in a generically named field. That is the same limitation `argumentsRedacted` already carries.
 
+### Review findings on the PR — pinning was silently not applying (2026-08-03)
+
+Three defects found by automated review on [#627](https://github.com/labsai/EDDI/pull/627), all in the pinning path, all fixed with tests that fail without the fix.
+
+**Query parameters broke pinning entirely.** `IRequest#toMap` returns them as `Map<String, List<String>>` — `HttpClientWrapper` accumulates repeats — but `resolve` cast that to `Map<String, String>`. The cast erases cleanly and then throws `ClassCastException` inside the fingerprint canonicaliser, which `pinResolvedRequest` catches and downgrades to "approved unpinned". So **every gated endpoint carrying a query parameter was silently unpinned**, `POST .../deploy/{agentId}?version=N` — a granted write — among them. The headline guarantee of this PR did not apply where it mattered most, and nothing failed loudly. Fixed by normalising both shapes, canonicalising one length-prefixed field per value (so `?tag=a&tag=b` cannot be forged by a single value containing the display separator), and correcting the `KEY_QUERY_PARAMS` javadoc that asserted the wrong type.
+
+**Query parameters were not redacted.** Same class as the body leak above and missed for the same reason — `?api_key=…` is a conventional credential channel, and the query string is shown to the approver. Redacted for display, hashed raw, exactly as the body is.
+
+**A dropped tool kept its resolver.** `mergeExternalTools` resolves a name collision by dropping the incoming tool, but the resolver was registered before that verdict was known. A builtin that won a collision against an http tool of the same name would then be pinned against the *dropped* tool's request — the approver shown a preview of a call that never runs, and the pre-execution check comparing against that same fabricated request and passing. Resolvers are now pruned to names a surviving http tool actually owns.
+
+Also: the tool name in the resolve-failure WARN now goes through `sanitize` (it is model-chosen and could forge log records), and the docs no longer claim `requestPinned: false` implies `requestPreview: null` — a call with `preRequest.propertyInstructions` is previewed best-effort *and* left unpinnable, so both are true at once.
+
 **What's left before `WRITE_ENDPOINTS` can actually be populated:** it already has been, on the Manager side — see that repo's own changelog for the write canary, the four curated endpoints, and real `read_write` scope selection. What remains is Manager-side only: render this backend's `requestPreview` in the approval banner in place of the client-side `operationId` reconstruction it was always labelled as a stand-in for, and the agent/group authoring UI (iteration 7).
 
 ---

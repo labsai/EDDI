@@ -107,9 +107,43 @@ public class RequestRedactor {
     }
 
     /**
+     * Redact a query parameter's value.
+     * <p>
+     * Judged by name like a header, and for the same reason: {@code ?api_key=…} or
+     * {@code ?access_token=…} is a conventional way to pass a credential, and this
+     * value is shown to an approver who is routinely not the person whose turn
+     * raised the pause. Value-shape matching backs the name check up so a
+     * credential under an unconventional name is still caught.
+     */
+    public static String redactQueryParamValue(String name, String value) {
+        if (isSensitiveHeaderName(name)) {
+            return REDACTED;
+        }
+        if (value == null) {
+            return "";
+        }
+        if (value.contains("${vault:") || value.contains("${eddivault:")) {
+            return REDACTED;
+        }
+        // No caller-token check, unlike a header: CallerIdentityResolver rejects
+        // ${caller:token} outside headers outright, so a live caller token cannot
+        // legitimately reach a query parameter. That is what lets this stay static
+        // — and static is what lets ResolvedRequest#of apply it itself, keeping
+        // "fingerprint the raw, store the redacted" in one place.
+        return redactBody(value);
+    }
+
+    /**
      * Redact the {@code headers} and {@code body} entries of a request map in
      * place, as produced by
      * {@link ai.labs.eddi.engine.httpclient.IRequest#toMap()}.
+     * <p>
+     * Query parameters are deliberately left alone here: this map is the debug
+     * record, whose {@code queryParams} entry is the live map the request itself
+     * holds ({@code HttpClientWrapper.RequestWrapper#toMap} does not copy it), so
+     * rewriting its values in place would corrupt the outgoing request. The
+     * approval preview redacts them on its own copy instead — see
+     * {@code ApiCallExecutor#resolve}.
      */
     @SuppressWarnings("unchecked")
     public void redactRequestMap(Map<String, Object> requestMap) {

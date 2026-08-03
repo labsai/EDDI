@@ -42,7 +42,15 @@ public interface IRequest {
     /** Key of the {@code Map<String, String>} of headers in {@link #toMap()}. */
     String KEY_HEADERS = "headers";
     /**
-     * Key of the {@code Map<String, String>} of query params in {@link #toMap()}.
+     * Key of the query parameters in {@link #toMap()}.
+     * <p>
+     * The value is a {@code Map<String, List<String>>}, not a
+     * {@code Map<String, String>}: a parameter may legitimately repeat
+     * ({@code ?tag=a&tag=b}) and the default implementation accumulates repeats
+     * into a list. Reading it back through a single-valued cast compiles and erases
+     * cleanly, then throws a {@link ClassCastException} at first use — see
+     * {@code ApiCallExecutor#normalizeQueryParams}, which tolerates both shapes
+     * rather than trusting either.
      */
     String KEY_QUERY_PARAMS = "queryParams";
     /** Key of the request body in {@link #toMap()}; absent when there is none. */

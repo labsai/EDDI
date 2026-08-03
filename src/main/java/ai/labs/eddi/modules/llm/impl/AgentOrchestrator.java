@@ -1011,9 +1011,8 @@ class AgentOrchestrator {
             // address what a tool calls, not just what it is named.
             toolEndpoints.putAll(httpCallTools.endpoints());
             // Only httpcall tools resolve to an HTTP request, so only they can be
-            // pinned. A name rejected by mergeExternalTools as a duplicate keeps its
-            // resolver here harmlessly: nothing looks one up for a tool that was
-            // never registered.
+            // pinned. Pruned below once every source has merged — a name whose http
+            // tool LOST a collision must not keep its resolver.
             toolRequestResolvers.putAll(httpCallTools.resolvers());
         }
 
@@ -1026,6 +1025,8 @@ class AgentOrchestrator {
         if (a2aTools != null) {
             mergeExternalTools(a2aTools.toolSpecs(), a2aTools.executors(), "a2a", toolSpecs, toolExecutors, toolSources);
         }
+
+        pruneResolversToSurvivingHttpTools(toolRequestResolvers, toolSources);
 
         return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames), Map.copyOf(toolEndpoints),
                 Map.copyOf(toolRequestResolvers));
@@ -1045,6 +1046,24 @@ class AgentOrchestrator {
      * Precedence follows merge order: built-in beats http beats mcp beats a2a. The
      * loser is dropped, never silently substituted, and every collision is logged.
      */
+    /**
+     * Drop every request resolver whose name is not owned by a surviving http tool.
+     * <p>
+     * {@link #mergeExternalTools} resolves a name collision by DROPPING the
+     * incoming tool and leaving the incumbent in place, but the dropped tool's
+     * resolver was registered before that verdict was known. Left in, a builtin (or
+     * mcp/a2a) tool that won a collision would be pinned against the losing http
+     * tool's request: the approver would be shown a preview of a request that is
+     * not the one about to run, and the pre-execution re-check would compare
+     * against it too — a fabricated request passing as a verified one.
+     * <p>
+     * Run after every source has merged, so {@code toolSources} already records the
+     * final owner of each name.
+     */
+    static void pruneResolversToSurvivingHttpTools(Map<String, ToolRequestResolver> resolvers, Map<String, String> toolSources) {
+        resolvers.keySet().removeIf(name -> !"http".equals(toolSources.get(name)));
+    }
+
     static void mergeExternalTools(List<ToolSpecification> incomingSpecs, Map<String, ToolExecutor> incomingExecutors, String source,
                                    List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors, Map<String, String> toolSources) {
         if (incomingSpecs == null || incomingSpecs.isEmpty()) {
@@ -2118,7 +2137,10 @@ class AgentOrchestrator {
             call.setRequestFingerprint(resolved.fingerprint());
             call.setRequestPreview(toPreview(resolved));
         } catch (Exception e) {
-            LOGGER.warnf(e, "Could not resolve the request for gated tool '%s'; it will be approved unpinned.", req.name());
+            // sanitize: the tool name is model-chosen, so it can carry newlines or
+            // control characters and forge log records — same treatment as every
+            // other name-bearing log statement in this class.
+            LOGGER.warnf(e, "Could not resolve the request for gated tool '%s'; it will be approved unpinned.", sanitize(req.name()));
         }
     }
 

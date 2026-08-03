@@ -27,6 +27,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -272,9 +273,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // conversation. See IApiCallExecutor#resolve for what that costs.
             var requestMap = buildRequest(targetServerUrl, call, templateDataObjects).toMap();
             var headers = requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> h ? (Map<String, ?>) h : Map.<String, Object>of();
-            var queryParams = requestMap.get(IRequest.KEY_QUERY_PARAMS) instanceof Map<?, ?> q
-                    ? (Map<String, String>) q
-                    : Map.<String, String>of();
+            var queryParams = normalizeQueryParams(requestMap.get(IRequest.KEY_QUERY_PARAMS));
             Object body = requestMap.get(IRequest.KEY_BODY);
 
             // The RAW body goes in: ResolvedRequest redacts it for display itself,
@@ -292,6 +291,36 @@ public class ApiCallExecutor implements IApiCallExecutor {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * Read the query parameters out of {@link IRequest#toMap()} without assuming
+     * their shape.
+     * <p>
+     * {@code HttpClientWrapper} accumulates repeats, so the values are lists —
+     * casting the map to {@code Map<String, String>} compiles, erases cleanly, and
+     * then throws a {@link ClassCastException} deep in the fingerprint
+     * canonicaliser. The gate-time caller catches that and approves the call
+     * <em>unpinned</em>, so the failure is silent and pinning simply stops applying
+     * to every endpoint that carries a query parameter. A single-valued map is
+     * still accepted, because this interface has other implementations and the
+     * contract has been ambiguous.
+     */
+    private static Map<String, List<String>> normalizeQueryParams(Object rawQueryParams) {
+        if (!(rawQueryParams instanceof Map<?, ?> params)) {
+            return Map.of();
+        }
+        var normalized = new LinkedHashMap<String, List<String>>();
+        for (var entry : params.entrySet()) {
+            String name = String.valueOf(entry.getKey());
+            Object value = entry.getValue();
+            if (value instanceof List<?> values) {
+                normalized.put(name, values.stream().map(v -> v == null ? "" : v.toString()).toList());
+            } else {
+                normalized.put(name, List.of(value == null ? "" : value.toString()));
+            }
+        }
+        return normalized;
     }
 
     /**

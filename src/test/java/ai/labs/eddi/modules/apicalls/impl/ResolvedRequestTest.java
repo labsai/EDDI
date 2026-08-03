@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -24,8 +25,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ResolvedRequestTest {
 
+    /**
+     * Single-valued query params, spelled the way callers usually think of them.
+     */
     private static ResolvedRequest request(String method, String uri, Map<String, String> query, Map<String, String> headers, String body) {
-        return ResolvedRequest.of(method, uri, query, headers, body, true);
+        var multi = new LinkedHashMap<String, List<String>>();
+        query.forEach((key, value) -> multi.put(key, List.of(value)));
+        return ResolvedRequest.of(method, uri, multi, headers, body, true);
     }
 
     private static ResolvedRequest baseline() {
@@ -158,6 +164,35 @@ class ResolvedRequestTest {
         }
 
         @Test
+        void aRepeatedQueryParameterCannotBeForgedByOneValueContainingTheSeparator() {
+            // The display form joins repeats with ", ". If the fingerprint were
+            // computed over THAT, then ?tag=a&tag=b and a single tag whose value is
+            // literally "a, b" would hash identically — two different requests, one
+            // fingerprint. The canonical form emits one length-prefixed field per
+            // value instead, so the two stay distinct.
+            var repeated = new LinkedHashMap<String, List<String>>();
+            repeated.put("tag", List.of("a", "b"));
+            var singleJoined = new LinkedHashMap<String, List<String>>();
+            singleJoined.put("tag", List.of("a, b"));
+
+            assertNotEquals(ResolvedRequest.of("GET", "https://x/y", repeated, Map.of(), null, true).fingerprint(),
+                    ResolvedRequest.of("GET", "https://x/y", singleJoined, Map.of(), null, true).fingerprint());
+        }
+
+        @Test
+        void reorderingRepeatedValuesChangesIt() {
+            // ?tag=a&tag=b and ?tag=b&tag=a are different requests to any server
+            // that reads the first value, so order within a name is preserved.
+            var forward = new LinkedHashMap<String, List<String>>();
+            forward.put("tag", List.of("a", "b"));
+            var reversed = new LinkedHashMap<String, List<String>>();
+            reversed.put("tag", List.of("b", "a"));
+
+            assertNotEquals(ResolvedRequest.of("GET", "https://x/y", forward, Map.of(), null, true).fingerprint(),
+                    ResolvedRequest.of("GET", "https://x/y", reversed, Map.of(), null, true).fingerprint());
+        }
+
+        @Test
         void anEmptyValueIsDistinctFromAnAbsentOne() {
             assertNotEquals(request("POST", "https://x/y", Map.of("a", ""), Map.of(), null).fingerprint(),
                     request("POST", "https://x/y", Map.of(), Map.of(), null).fingerprint());
@@ -230,6 +265,38 @@ class ResolvedRequestTest {
         void aVaultReferenceIsRedactedToo() {
             var resolved = request("POST", "https://x/y", Map.of(), Map.of(), "{\"apiKey\":\"${vault:openai-key}\"}");
             assertFalse(resolved.body().contains("openai-key"), resolved.body());
+        }
+
+        @Test
+        void aCredentialInAQueryParameterIsRedactedToo() {
+            // ?api_key=… is a conventional way to pass a credential, and the query
+            // string is shown to the approver exactly like the body is.
+            var query = new LinkedHashMap<String, List<String>>();
+            query.put("api_key", List.of(KEY));
+            var resolved = ResolvedRequest.of("GET", "https://x/y", query, Map.of(), null, true);
+
+            assertFalse(resolved.queryParams().get("api_key").contains(KEY), resolved.queryParams().toString());
+            assertEquals(RequestRedactor.REDACTED, resolved.queryParams().get("api_key"));
+        }
+
+        @Test
+        void twoDifferentQueryCredentialsDoNotShareAFingerprint() {
+            // Same reason the body is hashed raw: redacting first would collapse
+            // both to one marker and let a swapped key pass the re-check.
+            var first = new LinkedHashMap<String, List<String>>();
+            first.put("api_key", List.of(KEY));
+            var second = new LinkedHashMap<String, List<String>>();
+            second.put("api_key", List.of(OTHER_KEY));
+
+            assertNotEquals(ResolvedRequest.of("GET", "https://x/y", first, Map.of(), null, true).fingerprint(),
+                    ResolvedRequest.of("GET", "https://x/y", second, Map.of(), null, true).fingerprint());
+        }
+
+        @Test
+        void anOrdinaryQueryParameterSurvivesUnredacted() {
+            var query = new LinkedHashMap<String, List<String>>();
+            query.put("version", List.of("3"));
+            assertEquals("3", ResolvedRequest.of("GET", "https://x/y", query, Map.of(), null, true).queryParams().get("version"));
         }
 
         @Test

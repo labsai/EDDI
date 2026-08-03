@@ -1208,7 +1208,7 @@ class AgentOrchestratorCoverageTest {
     @Test
     void buildPendingBatch_pinsTheResolvedRequestSoApprovalBindsToItNotTheToolName() {
         var resolved = ResolvedRequest.of("POST", "https://eddi.example/administration/production/deploy/a1",
-                Map.of("force", "false"), Map.of("Authorization", RequestRedactor.REDACTED), "{\"id\":\"a1\"}", true);
+                Map.of("force", List.of("false")), Map.of("Authorization", RequestRedactor.REDACTED), "{\"id\":\"a1\"}", true);
 
         var call = batchWithResolver(req -> resolved).getCalls().get(0);
 

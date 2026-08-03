@@ -351,6 +351,55 @@ class ApiCallExecutorTest {
     }
 
     @Test
+    @DisplayName("a call carrying query parameters still pins — they arrive as List values, not Strings")
+    void resolve_withQueryParameters_stillProducesAFingerprint() throws Exception {
+        // HttpClientWrapper stores query params as Map<String, List<String>> (a
+        // param may legitimately repeat). Reading them back as Map<String, String>
+        // erases cleanly at the cast and then throws deep inside the fingerprint
+        // canonicaliser — which pinResolvedRequest catches and downgrades to
+        // "approved unpinned". The whole pinning guarantee would silently not
+        // apply to any endpoint with a query param, deploy?version=N included.
+        ApiCall call = createSimpleApiCall("query-call", false);
+
+        Map<String, Object> requestMap = new HashMap<>();
+        requestMap.put("uri", "http://example.com/administration/production/deploy/agent-1");
+        requestMap.put("method", "POST");
+        requestMap.put("headers", new LinkedHashMap<String, Object>());
+        Map<String, List<String>> queryParams = new LinkedHashMap<>();
+        queryParams.put("version", List.of("3"));
+        requestMap.put("queryParams", queryParams);
+        when(mockRequest.toMap()).thenReturn(requestMap);
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNotNull(resolved.fingerprint(), "a call with a query parameter must still be pinnable");
+        assertTrue(resolved.isPinned());
+        assertEquals("3", resolved.queryParams().get("version"));
+    }
+
+    @Test
+    @DisplayName("a repeated query parameter keeps both values distinguishable in the fingerprint")
+    void resolve_withRepeatedQueryParameter_doesNotCollapseValues() throws Exception {
+        ApiCall call = createSimpleApiCall("multi-query-call", false);
+
+        ResolvedRequest twoValues = resolveWithQuery(call, Map.of("tag", List.of("a", "b")));
+        ResolvedRequest oneValue = resolveWithQuery(call, Map.of("tag", List.of("a")));
+
+        assertNotEquals(twoValues.fingerprint(), oneValue.fingerprint(),
+                "dropping a repeated value changes what the request does and must change the hash");
+    }
+
+    private ResolvedRequest resolveWithQuery(ApiCall call, Map<String, List<String>> queryParams) throws Exception {
+        Map<String, Object> requestMap = new HashMap<>();
+        requestMap.put("uri", "http://example.com/x");
+        requestMap.put("method", "GET");
+        requestMap.put("headers", new LinkedHashMap<String, Object>());
+        requestMap.put("queryParams", new LinkedHashMap<>(queryParams));
+        when(mockRequest.toMap()).thenReturn(requestMap);
+        return executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+    }
+
+    @Test
     @DisplayName("a secret in the request BODY is scrubbed before persistence, not just headers")
     void execute_secretInBody_isRedacted() throws Exception {
         // Header-name matching cannot see into a body. A config write (create an

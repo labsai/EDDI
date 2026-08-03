@@ -7,9 +7,11 @@ package ai.labs.eddi.modules.apicalls.impl;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 /**
  * The HTTP request an {@code ApiCall} resolves to, with every credential
@@ -71,13 +73,13 @@ public record ResolvedRequest(
      *            is still produced; {@link #fingerprint()} is null, and enforcement
      *            is skipped rather than failing a call it cannot honestly pin.
      */
-    public static ResolvedRequest of(String method, String uri, Map<String, String> queryParams, Map<String, String> redactedHeaders,
+    public static ResolvedRequest of(String method, String uri, Map<String, List<String>> queryParams, Map<String, String> redactedHeaders,
                                      String rawBody, boolean fingerprintable) {
 
         var sortedQuery = sorted(queryParams);
         var sortedHeaders = sortedByLowercasedName(redactedHeaders);
         String fingerprint = fingerprintable ? fingerprintOf(method, uri, sortedQuery, sortedHeaders, rawBody) : null;
-        return new ResolvedRequest(method, uri, sortedQuery, sortedHeaders, RequestRedactor.redactBody(rawBody), fingerprint);
+        return new ResolvedRequest(method, uri, displayQuery(sortedQuery), sortedHeaders, RequestRedactor.redactBody(rawBody), fingerprint);
     }
 
     /** Whether this request was pinned to a fingerprint at gate time. */
@@ -94,13 +96,21 @@ public record ResolvedRequest(
      * Header names are lowercased and both maps sorted, so ordering and casing —
      * neither of which changes what the request does — cannot change the hash.
      */
-    private static String fingerprintOf(String method, String uri, Map<String, String> queryParams, Map<String, String> headers, String body) {
+    private static String fingerprintOf(String method, String uri, Map<String, List<String>> queryParams, Map<String, String> headers,
+                                        String body) {
 
         var canonical = new StringBuilder();
         appendField(canonical, "method", method == null ? "" : method.toUpperCase(Locale.ROOT));
         appendField(canonical, "uri", uri);
         for (var entry : queryParams.entrySet()) {
-            appendField(canonical, "query." + entry.getKey(), entry.getValue());
+            // One field per value, indexed: a query parameter may legitimately
+            // repeat (?tag=a&tag=b), and joining the values into one string would
+            // let a single value containing the separator impersonate two — the
+            // same field-boundary forgery the length prefixes exist to stop.
+            var values = entry.getValue();
+            for (int i = 0; i < values.size(); i++) {
+                appendField(canonical, "query." + entry.getKey() + "[" + i + "]", values.get(i));
+            }
         }
         for (var entry : headers.entrySet()) {
             appendField(canonical, "header." + entry.getKey(), entry.getValue());
@@ -126,11 +136,49 @@ public record ResolvedRequest(
         canonical.append(name).append(':').append(safe.length()).append(':').append(safe).append('\n');
     }
 
-    private static Map<String, String> sorted(Map<String, String> values) {
-        var result = new TreeMap<String, String>();
-        if (values != null) {
-            values.forEach((key, value) -> result.put(key, value == null ? "" : value));
+    /**
+     * Sort by name and normalise each value list.
+     * <p>
+     * Takes the multi-valued shape {@code IRequest#toMap} actually produces
+     * ({@code HttpClientWrapper} accumulates repeats into a list), rather than the
+     * single-valued one it is tempting to assume: an unchecked cast to
+     * {@code Map<String, String>} erases cleanly and then throws a
+     * {@link ClassCastException} in here, which the gate-time caller catches and
+     * downgrades to "approved unpinned" — silently disabling pinning for every
+     * endpoint carrying a query parameter.
+     */
+    private static Map<String, List<String>> sorted(Map<String, List<String>> values) {
+        var result = new TreeMap<String, List<String>>();
+        if (values == null) {
+            return result;
         }
+        values.forEach((key, value) -> {
+            if (value == null || value.isEmpty()) {
+                // A present-but-valueless parameter (?flag) is not the same request
+                // as one that is absent, so it is kept as a single empty value.
+                result.put(key, List.of(""));
+            } else {
+                result.put(key, value.stream().map(v -> v == null ? "" : v).toList());
+            }
+        });
+        return result;
+    }
+
+    /**
+     * The display form of the query parameters — one redacted string per name,
+     * repeats joined.
+     * <p>
+     * Redacted here and hashed raw above, for the same reason the body is: a
+     * credential does show up in a query string ({@code ?api_key=…}), the approver
+     * must not be shown it, and collapsing two different credentials to one marker
+     * before hashing would let a swapped one pass the pre-execution re-check. The
+     * join is display-only and cannot weaken the fingerprint, which uses the
+     * per-value structured form.
+     */
+    private static Map<String, String> displayQuery(Map<String, List<String>> queryParams) {
+        var result = new TreeMap<String, String>();
+        queryParams.forEach((key, values) -> result.put(key,
+                values.stream().map(value -> RequestRedactor.redactQueryParamValue(key, value)).collect(Collectors.joining(", "))));
         return result;
     }
 
