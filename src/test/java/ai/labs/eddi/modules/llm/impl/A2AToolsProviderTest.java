@@ -20,8 +20,9 @@ import static org.mockito.Mockito.*;
 /**
  * Focused unit tests for {@link A2AToolsProvider}, extracted from the inline
  * A2A-discovery block in {@code AgentOrchestrator#buildToolSetup} during the R2
- * (step 2) refactor. Not yet wired into {@code buildToolSetup} — see the class
- * Javadoc — so this is the only coverage of {@code contribute} today;
+ * (step 2) refactor. Covers {@code contribute} directly; the provider's
+ * assembly through {@code ToolSourceRegistry} in {@code buildToolSetup} is
+ * covered by {@code AgentOrchestratorLocalToolAssemblyTest}, and
  * {@code A2AToolProviderManager}'s own discovery logic is untouched by this
  * move and remains covered by its existing test suites.
  *

@@ -18,13 +18,10 @@ import java.util.Map;
  * AgentOrchestrator#buildToolSetup} — unlike HTTP/MCP discovery this was never
  * a separate named method, just a five-line config-gated call into
  * {@link A2AToolProviderManager#discoverTools}, so there is nothing to keep as
- * a reflected delegator. {@code buildToolSetup} still calls
- * {@link A2AToolProviderManager} directly for now (unchanged); this provider
- * exists so the later step that rewires {@code buildToolSetup} to iterate
- * providers finds A2A already SPI-conformant rather than a special-cased inline
- * block. (That rewiring is still blocked on the plain built-ins, which have no
- * provider at all — {@code collectAllBuiltInTools}' if-chain is the one source
- * of the SPI's eight that is still entirely inline.)
+ * a reflected delegator. {@code buildToolSetup} assembles this provider through
+ * {@code ToolSourceRegistry} (R2 step 2's rewiring, since completed) in phase 2
+ * alongside the other externally-discovered sources, so a remote A2A tool can
+ * never displace a governed built-in of the same name.
  * <p>
  * Same package as {@code AgentOrchestrator} as the other providers, for
  * consistency — this one has no {@link WorkflowTraversal} dependency, so it

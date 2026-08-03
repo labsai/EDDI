@@ -14,9 +14,10 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Tests for the R2 step 1 SPI's small helper types: {@link ToolAssemblyContext}
  * (whitelist predicates) and {@link ToolContribution} (the empty/no-failures
- * convenience constructors). No production code references these yet — they
- * land ahead of the provider extractions that will use them, per the plan's own
- * step ordering (introduce the SPI, then extract providers against it).
+ * convenience constructors). Both are now used throughout
+ * {@code AgentOrchestrator#buildToolSetup} and every {@code ToolSourceProvider}
+ * implementation; these tests cover the helper semantics directly, which the
+ * provider-level suites exercise only incidentally.
  *
  * @author tests
  */

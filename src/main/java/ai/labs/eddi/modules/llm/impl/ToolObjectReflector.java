@@ -22,13 +22,12 @@ import java.util.Map;
  * registry needs (R2 step 2). Extracted verbatim from the reflection loop in
  * {@code AgentOrchestrator#buildToolSetup} as a pure move — no behavior change.
  * <p>
- * Note for the rewiring step: {@link Reflected} carries four components, but
- * {@link ai.labs.eddi.modules.llm.tools.spi.ToolContribution} has no slot for
- * {@code toolCanonicalNames}, so the providers that call this drop it.
- * Canonical names are what let the executor boundary price a call and pick its
- * cache TTL under the configured slug rather than the dispatch name, so the SPI
- * needs a fifth component (or the caller needs to collect these separately)
- * before {@code buildToolSetup} can source built-ins through providers.
+ * {@link Reflected}'s four components map one-to-one onto
+ * {@link ai.labs.eddi.modules.llm.tools.spi.ToolContribution}, canonical names
+ * included — the SPI gained that slot during R2 step 2, because canonical names
+ * are what let the executor boundary price a call and pick its cache TTL under
+ * the configured slug rather than the dispatch name. Dropping them would have
+ * silently mispriced every built-in sourced through a provider.
  * <p>
  * Exists because the object-producing tool sources (built-ins, dynamic-agent
  * tools, user memory, conversation recall, attachments) are shaped differently
