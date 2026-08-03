@@ -133,6 +133,26 @@ R2 step 2 done — the rewiring the SPI was introduced for. `buildToolSetup` no 
 
 ---
 
+## 🧩 feat(groups): LiveDiscussionRegistry (Wave 0, F1) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+First Wave 0 foundation, in its plan-mandated home: `executeDiscussion`'s registration point.
+
+**Why now, with no consumer yet.** I5 (agent-writable shared task list), I7 (runtime recruitment) and I17 (shared artifacts) all need an LLM tool, running mid-turn, to mutate the *running* discussion. The loop persists via whole-document `conversationStore.update(gc)` after each phase boundary — a tool writing through a separate store call would be clobbered by the loop's next stale-snapshot write. The only race-free fix is for the tool to mutate the exact same in-memory `GroupConversation` instance the loop holds, so the loop's next persist picks up the mutation as part of its own snapshot. That requires the tool to be able to find that instance — which is all this registry does.
+
+**`@ApplicationScoped`, unlike its R1 packagemates — deliberately.** Rule 3.0-4 keeps the R1 extraction collaborators (`GroupContextBuilder`, `MemberTurnExecutor`, etc.) as plain constructor-built classes because ~34 test classes construct `GroupConversationService` directly; a constructor signature change breaks all of them for no functional gain. F1 is the rule's own carved-out exception: a genuinely new bean dependency, field-injected exactly like `attachmentStore` (`@Inject LiveDiscussionRegistry liveDiscussionRegistry;`, `null` in the direct-construction tests, every call site null-checked).
+
+**Wired at the two points the plan specifies, and nowhere else.** `register(gc)` at the top of `executeDiscussion` — which covers both a fresh start and a resume, since `GroupHitlCoordinator#resumeDiscussion` re-enters through that exact method, not a separate path. `unregister(gc.getId())` unconditionally in the `finally` block, which already runs on every exit (completion, pause, cancel, failure) for the control-token cleanup beside it.
+
+**One inaccurate assumption caught before it shipped as a comment.** The first draft of the `finally`-block comment claimed `commitPause` runs *after* `executeDiscussion` returns to its caller, and that this was why there's no window where the registry says "running" while the store already says paused. Checking the actual call sites (`commitPause(...)` followed immediately by `return gc;`, twice, inside the phase loop) showed this is backwards: `commitPause` persists the pause from *inside* the same call, before the `finally` that unregisters. The window does exist — briefly, within the same call — and is harmless for a different reason: by the time `commitPause` runs, the phase loop has already produced every member turn it's going to for this leg, so nothing remains that could look the registry up before `finally` runs moments later. Corrected in place rather than left as a false comment for the next reader.
+
+10 new tests: `LiveDiscussionRegistryTest` (8) proves the class's identity semantics directly — `get` returns the *exact* instance `register` was given (asserted with `assertSame`, never just `equals`, since identity is the entire point), a same-id `register` replaces rather than accumulates, and discussions are tracked independently. `GroupConversationServiceLiveDiscussionTest` (3, new file) proves the wiring itself using a spied registry and an empty-phase-list discussion that falls straight through to the completion path — register-then-unregister in order on normal completion, unregister still fires when the completion path throws, and a null registry is a no-op. Mutation-checked: removing the two wiring calls fails exactly those two wiring tests.
+
+687 tests green; Checkstyle unchanged at 6 pre-existing violations.
+
+---
+
 ## 🐛 fix(groups): DEBATE opposingArguments team-filter bug (V6(a)) — resolves Wave 0 verify tasks V5-V7 (2026-08-03)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

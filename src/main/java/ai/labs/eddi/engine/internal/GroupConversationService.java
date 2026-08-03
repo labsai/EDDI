@@ -38,6 +38,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
 import ai.labs.eddi.engine.internal.groups.GroupHitlCoordinator;
+import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.internal.groups.GroupLifecycleOps;
 import ai.labs.eddi.engine.internal.groups.GroupSigningGuard;
 import ai.labs.eddi.engine.internal.groups.MemberTurnExecutor;
@@ -194,6 +195,15 @@ public class GroupConversationService implements IGroupConversationService {
      */
     @Inject
     GracefulShutdownService gracefulShutdownService;
+
+    /**
+     * The live in-memory instances of currently-running discussions (Wave 0, F1).
+     * Same field-injection pattern and null-safety as {@link #attachmentStore} —
+     * {@code null} in the direct-construction unit tests, which then register and
+     * unregister against nothing (a no-op, not an error).
+     */
+    @Inject
+    LiveDiscussionRegistry liveDiscussionRegistry;
 
     // In-node fast-fail guard for concurrent post-discussion operations
     // (follow-up, continue, close) on the same conversation: a second
@@ -489,6 +499,15 @@ public class GroupConversationService implements IGroupConversationService {
             counterGroupDiscussion.increment();
         }
 
+        // F1: publish the live instance this leg runs with. Covers both a fresh
+        // start and a resume re-entry (this method is the single entry point for
+        // both), so a tool call landing mid-phase always resolves the exact
+        // GroupConversation the loop is currently mutating — never a stale one from
+        // before a resume. Removed unconditionally in the finally block below.
+        if (liveDiscussionRegistry != null) {
+            liveDiscussionRegistry.register(gc);
+        }
+
         ProtocolConfig protocol = resolveProtocol(config);
         int maxTurns = protocol.maxTurns() > 0 ? protocol.maxTurns() : 50;
 
@@ -780,6 +799,21 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupExecutionException("Group discussion failed: " + e.getMessage(), e);
         } finally {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+            // F1: unconditional, like the control-token removal below — a paused
+            // discussion must not stay resolvable as "live" once this leg has
+            // decided to stop. commitPause() persists AWAITING_APPROVAL and then
+            // returns immediately (every commitPause call site is followed by
+            // `return gc;`), which triggers this finally before the method returns
+            // to ITS caller — so by the time anything outside this call observes
+            // the pause, the registry is already clean. There is a narrow window,
+            // inside this same call, between commitPause's persist and this
+            // unregister where the store says paused but the registry still says
+            // running; harmless, because the phase loop has already produced every
+            // member turn it is going to for this leg by the time commitPause runs
+            // — nothing remains to look the registry up.
+            if (liveDiscussionRegistry != null) {
+                liveDiscussionRegistry.unregister(gc.getId());
+            }
             // NEW-2: Always remove the control token — paused conversations have no
             // running thread, so a lingering token causes cancel-of-paused to take
             // the no-op signal branch. Resume re-registers a fresh token. Re-check the
