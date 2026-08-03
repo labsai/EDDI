@@ -4,7 +4,15 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.CostPolicy;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -174,5 +182,68 @@ class GroupCostLedgerTest {
         GroupCostLedger.accumulateNestedGroupCost(gc, AGENT_B, subConversation);
 
         assertEquals(0.60, gc.getTotalCost(), 1e-9);
+    }
+
+    // =================================================================
+    // wouldExceedCeiling — must agree with enforceCeiling, zero case and all
+    // =================================================================
+
+    private ProtocolConfig protocolWithCeiling(Double ceiling) {
+        return new ProtocolConfig(60, MemberFailurePolicy.SKIP, 0, MemberUnavailablePolicy.SKIP, 50, ceiling, CostPolicy.ABORT);
+    }
+
+    private GroupConversation gcSpending(double totalCost) {
+        var gc = gc();
+        gc.setTotalCost(totalCost);
+        return gc;
+    }
+
+    @Test
+    void wouldExceedCeiling_noCeiling_isNeverExceeded() {
+        assertFalse(GroupCostLedger.wouldExceedCeiling(gcSpending(999.0), protocolWithCeiling(null)));
+        assertFalse(GroupCostLedger.wouldExceedCeiling(gcSpending(999.0), null));
+    }
+
+    @Test
+    void wouldExceedCeiling_withinBudget_isNotExceeded() {
+        // `<=` semantics: the ceiling is a budget to spend, not a value to stop
+        // short of. Spending it exactly is allowed.
+        assertFalse(GroupCostLedger.wouldExceedCeiling(gcSpending(0.99), protocolWithCeiling(1.0)));
+        assertFalse(GroupCostLedger.wouldExceedCeiling(gcSpending(1.0), protocolWithCeiling(1.0)));
+    }
+
+    @Test
+    void wouldExceedCeiling_overBudget_isExceeded() {
+        assertTrue(GroupCostLedger.wouldExceedCeiling(gcSpending(1.01), protocolWithCeiling(1.0)));
+    }
+
+    @Test
+    void wouldExceedCeiling_zeroCeiling_isAlreadyExceeded() {
+        // A nested child inherits ceiling 0.0 when its parent has spent its whole
+        // budget (MemberTurnExecutor's Math.max(0.0, remaining)). Reading 0.0 > 0.0
+        // as "budget available" let the optional work this gate exists to skip —
+        // I2's convergence judge, I4's whole dissent round — run anyway, one LLM
+        // call per dissenter, against a budget already gone.
+        assertTrue(GroupCostLedger.wouldExceedCeiling(gcSpending(0.0), protocolWithCeiling(0.0)));
+        assertTrue(GroupCostLedger.wouldExceedCeiling(gcSpending(0.0), protocolWithCeiling(-1.0)));
+    }
+
+    @Test
+    void wouldExceedCeiling_agreesWithEnforceCeiling() {
+        // The two are asked the same question by different callers; they diverged
+        // once already. Pinning them against each other is what stops that
+        // recurring, since neither test alone would notice.
+        // OPINION + ABORT: neither of enforceCeiling's carve-outs applies, so the
+        // comparison is against its plain ceiling test.
+        var phase = new DiscussionPhase("P", PhaseType.OPINION, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false);
+        for (Double ceiling : new Double[]{null, -1.0, 0.0, 1.0, 5.0}) {
+            for (double spent : new double[]{0.0, 0.99, 1.0, 1.01, 10.0}) {
+                var protocol = protocolWithCeiling(ceiling);
+                boolean enforced = GroupCostLedger.enforceCeiling(gcSpending(spent), protocol, 0, phase);
+                boolean wouldExceed = GroupCostLedger.wouldExceedCeiling(gcSpending(spent), protocol);
+                assertEquals(enforced, wouldExceed,
+                        "ceiling=" + ceiling + " spent=" + spent + ": the two ceiling checks must agree");
+            }
+        }
     }
 }

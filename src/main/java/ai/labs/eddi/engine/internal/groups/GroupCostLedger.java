@@ -162,7 +162,18 @@ public final class GroupCostLedger {
      */
     public static boolean wouldExceedCeiling(GroupConversation gc, ProtocolConfig protocol) {
         Double ceiling = protocol != null ? protocol.maxCostPerDiscussion() : null;
-        return ceiling != null && gc.getTotalCost() > ceiling;
+        if (ceiling == null) {
+            return false;
+        }
+        // Exactly the inverse of enforceCeiling's "not exceeded" test, zero case and
+        // all. Keeping only the `>` half here left a nested child that inherited a
+        // fully-spent budget (ceiling 0.0, totalCost 0.0) reading as "budget
+        // available", so the optional work this gate exists to skip — I2's
+        // convergence judge, I4's whole dissent round, one call per dissenter — ran
+        // anyway against a budget already gone. The two must agree: a caller that
+        // asks "already blown?" and one that asks "stop now?" cannot disagree about
+        // the same discussion.
+        return ceiling <= 0.0 || gc.getTotalCost() > ceiling;
     }
 
     private static void recordAndReSum(GroupConversation gc, String agentId, double cost) {

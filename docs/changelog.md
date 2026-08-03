@@ -5,6 +5,20 @@
 
 ---
 
+## 🐛 fix(groups): wouldExceedCeiling disagreed with enforceCeiling at zero (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+From PR review. I1 gave `enforceCeiling` an explicit zero-ceiling guard — a nested child inherits `ceiling = 0.0` when its parent has spent its whole budget (`MemberTurnExecutor`'s `Math.max(0.0, remaining)`), and treating that as "one free turn" lets every nested group overspend a fully-consumed parent. I did not give the same guard to `wouldExceedCeiling`, the read-only sibling added alongside it.
+
+So the two answered the same question differently at exactly the point that matters: with `ceiling == 0.0` and `totalCost == 0.0`, `0.0 > 0.0` reads as "budget available". The optional work this gate exists to skip ran anyway — I2's convergence judge, and I4's entire dissent round at one LLM call per dissenter — against a budget already gone.
+
+The gate now mirrors `enforceCeiling`'s test exactly. `wouldExceedCeiling` had **no test at all**; it has five now, including a property test that runs both functions over the same 25 ceiling/spend combinations and asserts they agree — neither function's own tests would have caught the divergence, which is how it got in.
+
+Not changed: a static-analysis finding that `getMemberCosts()` exposes internal mutable state. It is deliberate — `GroupCostLedger.recordAndReSum` is the sole mutator and synchronizes on that map, and Jackson needs the getter for persistence. Returning a copy would break the mutator to satisfy a heuristic.
+
+---
+
 ## ✨ feat(groups): Structured verdicts + deterministic synthesis (I3) (2026-08-03)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
