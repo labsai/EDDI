@@ -3186,7 +3186,13 @@
       "previewOnlyTitle": "Esta chamada executa etapas de preparação adicionais antes de ser executada, portanto isto é uma pré-visualização de melhor esforço — a solicitação real pode diferir e não é reverificada antes da execução.",
       "query": "Consulta",
       "headers": "Cabeçalhos",
-      "bodyTruncated": "O corpo é exibido truncado para exibição — a aprovação ainda cobre a solicitação completa."
+      "bodyTruncated": "O corpo é exibido truncado para exibição — a aprovação ainda cobre a solicitação completa.",
+      "escalation": {
+        "heading": "Esta solicitação concede capacidades adicionais",
+        "dynamicAgentCreation": "Este grupo pode criar novos agentes enquanto é executado. Esses agentes não passam por aprovação.",
+        "dynamicAgentRecruitment": "Este grupo pode trazer outros agentes existentes para as suas discussões.",
+        "autoApproveOnTimeout": "As aprovações deste recurso são concedidas automaticamente ao expirar o prazo, sem ninguém a supervisionar."
+      }
     },
     "starters": {
       "whatsDeployed": "O que está implantado neste momento?",

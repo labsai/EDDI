@@ -66,7 +66,7 @@ describe("tool-scopes", () => {
   });
 
   describe("write scope", () => {
-    it("is exactly the four curated entries — narrow verbs, not a resource-level grant", () => {
+    it("is exactly the curated entries — narrow verbs, not a resource-level grant", () => {
       // Pinned deliberately, not just "non-empty": each entry is chosen so an
       // approved-but-wrong call is small and reversible (see the doc comment on
       // WRITE_ENDPOINTS for why each one, and why not PUT /agentstore/agents,
@@ -78,7 +78,28 @@ describe("tool-scopes", () => {
         "POST /administration/{environment}/deploy/{agentId}",
         "POST /administration/{environment}/undeploy/{agentId}",
         "POST /schedulestore/schedules/{scheduleId}/disable",
+        "POST /groupstore/groups",
       ]);
+    });
+
+    it("can create a group but never update, duplicate or delete one", () => {
+      // Create is the only group verb where the generated tool's whole-document
+      // body is reviewable: there is no prior version, so the approver reads the
+      // document rather than diffing one they cannot see.
+      expect(WRITE_ENDPOINTS).toContain("POST /groupstore/groups");
+      expect(WRITE_ENDPOINTS).not.toContain("PUT /groupstore/groups/{id}");
+      expect(WRITE_ENDPOINTS).not.toContain("POST /groupstore/groups/{id}");
+      expect(WRITE_ENDPOINTS).not.toContain("DELETE /groupstore/groups/{id}");
+    });
+
+    it("binds no agent-authoring endpoint — the handoff to the wizard is structural", () => {
+      // The system prompt tells the operator to send the user to the agent
+      // wizard. That instruction is only honest because there is no tool it
+      // could reach for instead; a prompt is not what enforces this.
+      const agentAuthoring = WRITE_ENDPOINTS.filter(
+        (e) => e.includes("/agentstore/") || e.includes("/administration/agents/setup"),
+      );
+      expect(agentAuthoring).toEqual([]);
     });
 
     it("never contains a read verb", () => {
@@ -105,6 +126,11 @@ describe("tool-scopes", () => {
       "POST /schedulestore/schedules",
       "POST /schedulestore/schedules/{scheduleId}/enable",
       "POST /schedulestore/schedules/{scheduleId}/fire",
+      // The two composite create endpoints: one call provisions an agent with an
+      // arbitrary `endpoints` filter and no gate — a complete escape from this
+      // allow-list — and their request bodies carry a raw provider API key.
+      "POST /administration/agents/setup",
+      "POST /administration/agents/setup-api",
     ])("excludes %s — a full-document write or attacker persistence", (excluded) => {
       expect(WRITE_ENDPOINTS).not.toContain(excluded);
     });

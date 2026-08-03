@@ -3180,7 +3180,13 @@
       "previewOnlyTitle": "Dieser Aufruf führt vor der Ausführung zusätzliche Vorbereitungsschritte aus, daher ist dies eine bestmögliche Vorschau — die tatsächliche Anfrage kann abweichen und wird vor der Ausführung nicht erneut geprüft.",
       "query": "Query",
       "headers": "Headers",
-      "bodyTruncated": "Der Body wird zur Anzeige gekürzt dargestellt — die Freigabe deckt weiterhin die vollständige Anfrage ab."
+      "bodyTruncated": "Der Body wird zur Anzeige gekürzt dargestellt — die Freigabe deckt weiterhin die vollständige Anfrage ab.",
+      "escalation": {
+        "heading": "Diese Anfrage gewährt zusätzliche Berechtigungen",
+        "dynamicAgentCreation": "Diese Gruppe darf zur Laufzeit neue Agenten erstellen. Diese Agenten unterliegen selbst keiner Freigabepflicht.",
+        "dynamicAgentRecruitment": "Diese Gruppe darf weitere vorhandene Agenten in ihre Diskussionen einbeziehen.",
+        "autoApproveOnTimeout": "Freigaben für diese Ressource werden bei Zeitüberschreitung automatisch erteilt — ohne dass jemand mitschaut."
+      }
     },
     "starters": {
       "whatsDeployed": "Was ist derzeit deployt?",

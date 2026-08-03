@@ -75,8 +75,15 @@ describe("buildOperatorSafetyPreamble", () => {
       expect(preamble).toContain("After an approved change");
     });
 
-    it("numbers eight rules contiguously", () => {
-      expect(ruleNumbers(preamble)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    it("forbids enabling a setting that grants capability past the approval", () => {
+      // A group that may create agents while it runs escapes the endpoint
+      // allow-list entirely — one approved create becomes an open-ended one.
+      expect(preamble).toContain("Never enable a setting that lets something you create");
+      expect(preamble).toContain("create or recruit agents while it runs");
+    });
+
+    it("numbers nine rules contiguously", () => {
+      expect(ruleNumbers(preamble)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     });
   });
 
@@ -155,6 +162,19 @@ describe("buildOperatorPromptBody", () => {
       expect(body).toContain("help an administrator understand and operate this EDDI");
       expect(body).toContain("How to work:");
     }
+  });
+
+  it("describes what it can author, and hands agent authoring to the wizard", () => {
+    // "Create an agent" is the obvious next ask of something that can create a
+    // group. Without this the operator improvises with the tools it does have.
+    const body = buildOperatorPromptBody(WITH_A_WRITE);
+    expect(body).toContain("You can create an agent GROUP");
+    expect(body).toContain("You CANNOT create or edit an agent");
+    expect(body).toContain("Agents → New agent");
+  });
+
+  it("omits the authoring section when nothing can be created", () => {
+    expect(buildOperatorPromptBody(READ_ENDPOINTS)).not.toContain("Creating things:");
   });
 
   it("resolves a scope through the same predicate", () => {

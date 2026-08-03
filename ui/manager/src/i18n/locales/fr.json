@@ -3186,7 +3186,13 @@
       "previewOnlyTitle": "Cet appel exécute des étapes de préparation supplémentaires avant de s'exécuter ; il s'agit donc d'un aperçu au mieux — la requête réelle peut différer et n'est pas revérifiée avant l'exécution.",
       "query": "Requête",
       "headers": "En-têtes",
-      "bodyTruncated": "Le corps est affiché tronqué pour l'affichage — l'approbation couvre toujours la requête complète."
+      "bodyTruncated": "Le corps est affiché tronqué pour l'affichage — l'approbation couvre toujours la requête complète.",
+      "escalation": {
+        "heading": "Cette requête accorde des capacités supplémentaires",
+        "dynamicAgentCreation": "Ce groupe peut créer de nouveaux agents pendant son exécution. Ces agents ne sont pas eux-mêmes soumis à approbation.",
+        "dynamicAgentRecruitment": "Ce groupe peut intégrer d'autres agents existants à ses discussions.",
+        "autoApproveOnTimeout": "Les approbations de cette ressource sont accordées automatiquement en cas d'expiration du délai, sans surveillance."
+      }
     },
     "starters": {
       "whatsDeployed": "Qu'est-ce qui est déployé actuellement ?",

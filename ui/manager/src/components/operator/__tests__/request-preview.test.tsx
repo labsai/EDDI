@@ -87,4 +87,48 @@ describe("RequestPreview", () => {
     renderWithProviders(<RequestPreview preview={preview()} pinned callId="call-42" />);
     expect(screen.getByTestId("request-preview-call-42")).toBeInTheDocument();
   });
+
+  describe("escalation warnings", () => {
+    it("calls out a body that grants further capability", () => {
+      // The setting is in the JSON below too, but an approver skimming a config
+      // document misses exactly this line — which is the whole point.
+      renderWithProviders(
+        <RequestPreview
+          preview={preview({
+            body: JSON.stringify({ name: "board", dynamicAgents: { enabled: true, allowCreation: true } }),
+          })}
+          pinned
+          callId="call-1"
+        />,
+      );
+      const warning = screen.getByTestId("request-preview-escalations-call-1");
+      expect(warning).toHaveTextContent(/grants further capability/i);
+      expect(warning).toHaveTextContent(/dynamicAgents\.allowCreation/);
+      expect(warning).toHaveTextContent(/create new agents/i);
+    });
+
+    it("stays silent for an ordinary body", () => {
+      renderWithProviders(
+        <RequestPreview
+          preview={preview({ body: JSON.stringify({ name: "board", members: [{ agentId: "a1" }] }) })}
+          pinned
+          callId="call-1"
+        />,
+      );
+      expect(screen.queryByTestId("request-preview-escalations-call-1")).not.toBeInTheDocument();
+    });
+
+    it("announces itself to assistive tech rather than being a silent colour change", () => {
+      renderWithProviders(
+        <RequestPreview
+          preview={preview({
+            body: JSON.stringify({ hitlConfig: { timeoutPolicy: "AUTO_APPROVE" } }),
+          })}
+          pinned
+          callId="call-1"
+        />,
+      );
+      expect(screen.getByTestId("request-preview-escalations-call-1")).toHaveAttribute("role", "alert");
+    });
+  });
 });

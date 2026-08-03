@@ -3207,7 +3207,13 @@
       "previewOnlyTitle": "This call runs additional setup steps before executing, so this is a best-effort preview — the actual request may differ and is not re-checked before execution.",
       "query": "Query",
       "headers": "Headers",
-      "bodyTruncated": "Body shown truncated for display — approval still covers the full request."
+      "bodyTruncated": "Body shown truncated for display — approval still covers the full request.",
+      "escalation": {
+        "heading": "This request grants further capability",
+        "dynamicAgentCreation": "This group may create new agents while it runs. Those agents are not themselves approval-gated.",
+        "dynamicAgentRecruitment": "This group may pull other existing agents into its discussions.",
+        "autoApproveOnTimeout": "Approvals for this resource are granted automatically when they time out, with nobody watching."
+      }
     },
     "starters": {
       "whatsDeployed": "What's deployed right now?",

@@ -1,5 +1,16 @@
 import { useTranslation } from "react-i18next";
+import { ShieldAlert } from "lucide-react";
+import { detectEscalationFlags } from "@/lib/operator/escalation-flags";
 import type { ResolvedRequestPreview } from "@/lib/api/hitl";
+
+/** Approver-facing text per escalating setting — see `escalation-flags.ts`. */
+const ESCALATION_TEXT: Record<string, string> = {
+  dynamicAgentCreation:
+    "This group may create new agents while it runs. Those agents are not themselves approval-gated.",
+  dynamicAgentRecruitment: "This group may pull other existing agents into its discussions.",
+  autoApproveOnTimeout:
+    "Approvals for this resource are granted automatically when they time out, with nobody watching.",
+};
 
 interface RequestPreviewProps {
   preview: ResolvedRequestPreview;
@@ -22,6 +33,9 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
   const { t } = useTranslation();
   const queryEntries = Object.entries(preview.queryParams ?? {});
   const headerEntries = Object.entries(preview.headers ?? {});
+  // Above the body, not inside it: the point is that an approver skimming JSON
+  // misses exactly these lines.
+  const escalations = detectEscalationFlags(preview.body);
 
   return (
     <div className="mb-1.5 space-y-1" data-testid={`request-preview-${callId}`}>
@@ -58,6 +72,27 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
         <p className="font-mono text-[11px] text-muted-foreground">
           {t("operator.approval.headers", "Headers")}: {headerEntries.map(([k, v]) => `${k}: ${v}`).join(", ")}
         </p>
+      )}
+      {escalations.length > 0 && (
+        <div
+          className="rounded border border-destructive/40 bg-destructive/10 p-2"
+          data-testid={`request-preview-escalations-${callId}`}
+          role="alert"
+        >
+          <p className="flex items-center gap-1 text-[11px] font-medium text-destructive">
+            <ShieldAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            {t("operator.approval.escalation.heading", "This request grants further capability")}
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {escalations.map((flag) => (
+              <li key={flag.id} className="text-[11px] text-destructive">
+                <span className="font-mono">{flag.path}</span>
+                {" — "}
+                {t(`operator.approval.escalation.${flag.id}`, ESCALATION_TEXT[flag.id] ?? flag.path)}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {preview.body != null && preview.body !== "" && (
         <pre

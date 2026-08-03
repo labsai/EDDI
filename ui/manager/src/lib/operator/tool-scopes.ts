@@ -77,12 +77,24 @@ export const READ_ENDPOINTS: readonly string[] = [
  *   by design: disable is bound, enable/create/fire/retry are not — creating a
  *   schedule is attacker persistence (a scheduled turn has no human present,
  *   so an approval prompt never appears), and disabling one is not.
+ * - `POST /groupstore/groups` — CREATE only, never `PUT`. A group references
+ *   agents that already exist and already have their own gates; it composes
+ *   authored behavior rather than authoring any. Create is also the one shape
+ *   where the generated tool's degenerate whole-document body (see below) is
+ *   not a handicap: there is no prior version, so the approver reads the
+ *   document itself rather than diffing one. `PUT` stays out for exactly that
+ *   reason — an update is a diff nobody can see. Note the request preview is
+ *   what makes even the create reviewable, and that a group body can still
+ *   carry a capability grant of its own: see `escalation-flags.ts`.
  *
  * Deliberately NOT here, regardless of how the request would look:
  * `PUT /agentstore/agents/{id}` (the operator's own gate lives in that
  * document — one approved write removes all subsequent gating), any agent- or
  * LLM-config creation (a full config document is not something an approver
- * can meaningfully diff), any schedule verb but disable, and every `DELETE`
+ * can meaningfully diff, and `setup`/`setup-api` provision an agent with an
+ * arbitrary `endpoints` filter and no gate — a complete escape from this
+ * allow-list), `PUT /groupstore/groups/{id}` and `POST /groupstore/groups/{id}`
+ * (update and duplicate), any schedule verb but disable, and every `DELETE`
  * (no undo exists in any of these stores).
  *
  * Because `buildToolApprovals` gates every `http.{post,put,patch,delete}:*`
@@ -94,6 +106,7 @@ export const WRITE_ENDPOINTS: readonly string[] = [
   "POST /administration/{environment}/deploy/{agentId}",
   "POST /administration/{environment}/undeploy/{agentId}",
   "POST /schedulestore/schedules/{scheduleId}/disable",
+  "POST /groupstore/groups",
 ] as const;
 
 /**

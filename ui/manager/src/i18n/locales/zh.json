@@ -3180,7 +3180,13 @@
       "previewOnlyTitle": "此调用会在执行前运行额外的准备步骤,因此这只是尽力而为的预览——实际请求可能有所不同,且不会在执行前重新检查。",
       "query": "查询参数",
       "headers": "标头",
-      "bodyTruncated": "正文为便于显示已被截断——审批仍覆盖完整请求。"
+      "bodyTruncated": "正文为便于显示已被截断——审批仍覆盖完整请求。",
+      "escalation": {
+        "heading": "此请求会授予额外能力",
+        "dynamicAgentCreation": "该组在运行时可以创建新智能体,而这些智能体本身不受审批门控。",
+        "dynamicAgentRecruitment": "该组可以将其他已有智能体纳入其讨论。",
+        "autoApproveOnTimeout": "该资源的审批在超时后会自动通过,无人监督。"
+      }
     },
     "starters": {
       "whatsDeployed": "现在部署了哪些内容？",
