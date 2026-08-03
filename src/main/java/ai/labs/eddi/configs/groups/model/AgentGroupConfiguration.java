@@ -62,6 +62,19 @@ public class AgentGroupConfiguration {
     private List<TaskDefinition> tasks;
     /** Dynamic agent creation and recruitment configuration. */
     private DynamicAgentConfig dynamicAgents;
+    /**
+     * After each SYNTHESIS phase, give every participant who did NOT write the
+     * synthesis one short turn to state where they still materially disagree (I4).
+     * Non-PASS replies become public {@code DISSENT} transcript entries and
+     * populate {@code DecisionRecord.dissents}.
+     * <p>
+     * Opt-in because it costs one extra short call per non-synthesizer. It is
+     * nonetheless the honest design: the alternative is asking the synthesizer to
+     * report the disagreement with its own synthesis, and an author summarizing the
+     * objections to their own summary is exactly the failure mode a minority report
+     * exists to prevent.
+     */
+    private boolean recordDissents;
 
     /**
      * A member of the group. Members can be individual agents or nested groups.
@@ -126,7 +139,8 @@ public class AgentGroupConfiguration {
      * "ROLE:&lt;roleName&gt;" (e.g. "ROLE:DEVIL_ADVOCATE").
      */
     public record DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
-            boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence) {
+            boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
+            boolean allowAbstention) {
 
         /**
          * Convenience constructor with defaults: participants=ALL,
@@ -156,6 +170,16 @@ public class AgentGroupConfiguration {
                 boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval) {
             this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, null);
         }
+
+        /**
+         * Backward-compatible constructor without {@code allowAbstention} (I4) —
+         * {@code false} means every participant must produce a contribution, which is
+         * the behavior of every phase that predates I4 and of every style preset.
+         */
+        public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
+                boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence) {
+            this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence, false);
+        }
     }
 
     /**
@@ -167,15 +191,12 @@ public class AgentGroupConfiguration {
      * Two mechanisms feed one exit path. <b>Deterministic:</b> every participant
      * abstained this repeat — free, no LLM call, and the reason {@code minRepeats}
      * does not gate it: unanimous silence is evidence on its own terms, not a
-     * similarity estimate that needs a baseline. <b>Inert until I4 lands</b>: the
-     * {@code ABSTAINED} transcript type exists (F4) but nothing produces one yet,
-     * so today only the semantic mechanism can fire. The detection is written and
-     * tested now because I2 and I4 are separable, and a half-built check added
-     * later next to a working one is how the two silently disagree.
-     * <b>Semantic:</b> a judge compares this repeat's contributions with the
-     * previous repeat's and returns an agreement score. The judge cannot run before
-     * repeat index {@code minRepeats - 1} because it needs a previous repeat to
-     * compare against.
+     * similarity estimate that needs a baseline. Requires a phase with
+     * {@code allowAbstention} (I4), which is what produces the {@code ABSTAINED}
+     * entries it counts. <b>Semantic:</b> a judge compares this repeat's
+     * contributions with the previous repeat's and returns an agreement score. The
+     * judge cannot run before repeat index {@code minRepeats - 1} because it needs
+     * a previous repeat to compare against.
      *
      * @param enabled
      *            off by default — an LLM judge costs a call per repeat, so this is
@@ -428,6 +449,14 @@ public class AgentGroupConfiguration {
 
     public void setDynamicAgents(DynamicAgentConfig dynamicAgents) {
         this.dynamicAgents = dynamicAgents;
+    }
+
+    public boolean isRecordDissents() {
+        return recordDissents;
+    }
+
+    public void setRecordDissents(boolean recordDissents) {
+        this.recordDissents = recordDissents;
     }
 
     /**

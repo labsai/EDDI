@@ -5,6 +5,34 @@
 
 ---
 
+## ✨ feat(groups): Abstention + minority report (I4) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Two opt-in mechanisms that make a discussion say less and mean more. **Abstention** (`allowAbstention` per phase): a member with nothing new to add replies `PASS` and gets an `ABSTAINED` entry instead of an N-th restatement of agreement. **Minority report** (`recordDissents` per group): after each synthesis, every non-synthesizer gets one short turn to say where they still materially disagree — non-`PASS` replies become public `DISSENT` entries and populate `DecisionRecord.dissents`.
+
+This also makes I2's deterministic convergence path live. It shipped with I2 but could not fire, because nothing produced `ABSTAINED` entries; the stale "inert until I4 lands" Javadoc is corrected here.
+
+**Exact-token detection, never containment.** "I'll pass on point one, but I disagree about the timeline" is a position that happens to contain the word. Reading it as an abstention deletes it from the group record silently and — once several members are misread the same way — can end the phase early through the convergence hook on the strength of arguments nobody read. Case and whitespace are normalized and a single trailing terminator is accepted (`PASS.` is the common near-miss); a run of them is not.
+
+**An adversarial review found three MAJOR defects the tests missed.**
+
+*Detection without instruction on task phases.* `TaskForceEngine` builds its PLAN/EXECUTE/VERIFY inputs itself and never routes through `buildPhaseInput`, so the member was never told `PASS` exists — but detection ran anyway. "PASS" is a natural verdict word for a VERIFY turn, and an abstention's `null` content sends `parseAndApplyVerification` down its mark-everything-passed fallback: **tasks nobody checked, silently verified**. An EXECUTE turn would complete its task with no result. Both sides now consult one `AbstentionDetector.isEnabledFor`, so the instruction and the detection cannot drift apart.
+
+*Wrong denominator for unanimity.* A peer-targeted phase runs N×(N−1) turns, but the check compared against the speaker count. For 3 members that made 3 abstentions out of 6 entries read as "all 3 participants abstained" — ending a round that produced four real critiques — while a genuinely unanimous 6-of-6 round could never use the free exit at all. Only N=2 was accidentally correct.
+
+*Dissents duplicating.* The round sat inside the repeat loop, so a synthesis phase with `repeats > 1` ran it once per repeat, duplicating every dissent in both the transcript and the `DecisionRecord` and paying N extra calls each time.
+
+Four MINORs from the same pass: dissent entries landed inside I2's convergence slice (the judge would read them as this round's contributions); they were rebuilt bare, dropping the signature envelope `executeAgentTurn` had already computed — making `DISSENT` the one entry type a signing-enabled group could not verify; a `MemberType.GROUP` dissenter's "one short turn" would recurse into an entire nested sub-discussion; and the round fired no speaker events, so the minority report was invisible to SSE and Slack.
+
+**A mutation check caught a weak test of my own** — and it was the same trap the reviewer had explicitly named. My peer-targeted test used 2 members, where `n` and `n×(n-1)` are both 2, so reverting the denominator fix changed nothing and the test passed either way. Rebuilt on 3 members, the smallest roster where the two differ. The reviewer also found the instruction append had *zero* coverage: every abstention test stubs the response directly, so the one line that tells a model the token exists could have been deleted silently. Now covered on the template path, the fallback path, and the task-phase exclusion.
+
+**Anti-sycophancy** (spec-required): `TEMPLATE_OPINION_WITH_CONTEXT` and `TEMPLATE_CRITIQUE` gain a directive line, via a shared constant rather than duplicated text so editing it actually changes both. Added only where a member can see peers — `INDEPENDENT` shows none, and `ANONYMOUS` already instructs independent judgment.
+
+24 new tests across `AbstentionDetectorTest`, `GroupContextBuilderTest` and `GroupConversationServiceAbstentionTest`; three mutation checks, all confirmed load-bearing after the 2-member test was rebuilt.
+
+---
+
 ## ✨ feat(groups): Convergence detection + early exit (I2) (2026-08-03)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

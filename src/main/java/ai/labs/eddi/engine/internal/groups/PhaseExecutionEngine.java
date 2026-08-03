@@ -8,6 +8,9 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ConvergenceConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.Dissent;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
@@ -23,8 +26,12 @@ import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
@@ -63,6 +70,14 @@ public class PhaseExecutionEngine {
      * still be keyed by its own id in every other code path.
      */
     static final String JUDGE_CONVERSATION_KEY = "__convergence_judge";
+
+    /**
+     * Prefix for each dissenter's own dissent-round conversation key (I4). Same
+     * reasoning as {@link #JUDGE_CONVERSATION_KEY}: a "critique the synthesis"
+     * exchange in the member's own conversation becomes recent context a later
+     * round reads back.
+     */
+    static final String DISSENT_CONVERSATION_KEY_PREFIX = "__dissent__";
 
     public PhaseExecutionEngine(MemberTurnExecutor memberTurnExecutor, GroupContextBuilder contextBuilder,
             ExecutorService executorService, CallerIdentityContext callerIdentityContext) {
@@ -111,8 +126,15 @@ public class PhaseExecutionEngine {
         // The free mechanism, and the only one that runs when convergence is not
         // configured at all: I4's unanimous PASS is unambiguous evidence on its own
         // terms, so it needs neither an opt-in nor a minRepeats baseline.
-        if (ConvergenceDetector.allParticipantsAbstained(repeatEntries, speakers != null ? speakers.size() : 0)) {
-            String reason = "All %d participants abstained — nothing further to add".formatted(speakers.size());
+        //
+        // The denominator is TURNS SCHEDULED, not speakers: a peer-targeted phase
+        // runs N×(N-1) turns for N speakers, so comparing against speakers.size()
+        // both fired falsely (3 of 6 entries abstaining in a 3-member critique
+        // round read as "all 3 abstained" and ended a phase that produced real
+        // critiques) and failed to fire when every one of the 6 genuinely did.
+        int expectedTurns = expectedTurnsFor(phase, speakers);
+        if (ConvergenceDetector.allParticipantsAbstained(repeatEntries, expectedTurns)) {
+            String reason = "All %d participants abstained — nothing further to add".formatted(expectedTurns);
             recordConvergence(gc, phase, phaseIdx, repeat, -1, true, reason, listener);
             return PhaseOutcome.endRepeats(reason);
         }
@@ -151,6 +173,156 @@ public class PhaseExecutionEngine {
         var verdict = runJudge(gc, config, phase, protocol, phaseIdx, convergence, repeatEntries, previousRepeatEntries, listener);
         recordConvergence(gc, phase, phaseIdx, repeat, verdict.agreementScore(), verdict.converged(), verdict.summary(), listener);
         return verdict.converged() ? PhaseOutcome.endRepeats(verdict.summary()) : PhaseOutcome.cont();
+    }
+
+    /**
+     * The minority report (I4b): after a SYNTHESIS phase, every participant who did
+     * NOT write the synthesis gets one short turn to record where they still
+     * materially disagree.
+     * <p>
+     * Runs against the members rather than the synthesizer on purpose. Asking the
+     * synthesizer to enumerate the objections to its own synthesis is exactly the
+     * failure a minority report exists to prevent — the author is the one party
+     * structurally unable to report what their summary left out.
+     * <p>
+     * Non-PASS replies become public {@code DISSENT} entries (unlike
+     * {@code ABSTAINED}, peers and readers are meant to see these) and populate
+     * {@code DecisionRecord.dissents}. Bounded by the same two budgets as any other
+     * turn: it stops at {@code maxTurns} and declines to start once I1's cost
+     * ceiling is already blown.
+     *
+     * @return the number of dissents recorded
+     */
+    public int runDissentRound(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase, ProtocolConfig protocol,
+                               int phaseIdx, List<GroupMember> synthesizers, GroupDiscussionEventListener listener,
+                               AtomicInteger turnCounter, int maxTurns) {
+
+        String synthesis = latestSynthesis(gc);
+        Set<String> synthesizerIds = synthesizers == null
+                ? Set.of()
+                : synthesizers.stream().map(GroupMember::agentId).filter(Objects::nonNull).collect(Collectors.toSet());
+
+        List<GroupMember> dissenters = config.getMembers() == null
+                ? List.of()
+                : config.getMembers().stream()
+                        .filter(m -> m.agentId() != null && !synthesizerIds.contains(m.agentId()))
+                        // A GROUP member's "one short turn" would recurse into an entire
+                        // nested sub-discussion, whose concatenated transcript then
+                        // becomes the dissent text. That is neither short nor a minority
+                        // report, and it costs a full discussion per dissenter.
+                        .filter(m -> m.memberType() != AgentGroupConfiguration.MemberType.GROUP)
+                        .toList();
+        if (dissenters.isEmpty()) {
+            return 0;
+        }
+
+        String input = AbstentionDetector.buildDissentInput(synthesis);
+        List<Dissent> collected = new ArrayList<>();
+        for (GroupMember member : dissenters) {
+            if (maxTurns > 0 && turnCounter != null && turnCounter.get() >= maxTurns) {
+                break;
+            }
+            if (GroupCostLedger.wouldExceedCeiling(gc, protocol)) {
+                break;
+            }
+            if (turnCounter != null) {
+                turnCounter.incrementAndGet();
+            }
+            try {
+                // DISSENT_CONVERSATION_KEY_PREFIX + agentId: the member's own
+                // conversation would otherwise gain a "critique the synthesis" exchange
+                // that a later round (a continuation, or another repeat of an earlier
+                // phase) reads back as recent context. Same reasoning as I2's judge.
+                TranscriptEntry reply = memberTurnExecutor.executeAgentTurn(member, gc, input, protocol, phaseIdx, phase, null, listener,
+                        null, DISSENT_CONVERSATION_KEY_PREFIX + member.agentId());
+                String content = reply != null ? reply.content() : null;
+                // A PASS here is checked directly rather than through the phase's
+                // allowAbstention: the dissent prompt always offers PASS, independent
+                // of whether the SYNTHESIS phase itself allows abstention.
+                if (content == null || content.isBlank() || AbstentionDetector.isAbstention(content)) {
+                    continue;
+                }
+                // Carries the envelope executeAgentTurn already computed rather than
+                // rebuilding bare: a DISSENT is a real member-authored contribution
+                // peers can read, so dropping its signature would make it the one
+                // entry type a signing-enabled group cannot verify — the same defect
+                // the tool-rejection path documents at MemberTurnExecutor's
+                // tryResolveMemberToolPause.
+                var dissentEntry = new TranscriptEntry(
+                        member.agentId(), member.displayName(), content,
+                        phaseIdx, phase.name(), TranscriptEntryType.DISSENT, Instant.now(), null, null,
+                        reply.signature(), reply.signatureNonce(), reply.signatureTimestampMs(), reply.signatureKeyVersion());
+                gc.getTranscript().add(dissentEntry);
+                collected.add(new Dissent(member.agentId(), member.displayName(), content));
+                if (listener != null) {
+                    // Without this the minority report is invisible to every
+                    // event-driven surface (SSE, Slack) — the transcript would carry a
+                    // dissent nobody watching the discussion ever saw.
+                    listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
+                            member.agentId(), member.displayName(), content, phaseIdx, phase.name()));
+                }
+            } catch (Exception e) {
+                // One member's failure must not cost the others their dissent, and must
+                // not fail a discussion that has already produced its synthesis.
+                LOGGER.warnf("Dissent turn failed for member '%s' — continuing: %s", member.agentId(), e.getMessage());
+            }
+        }
+
+        if (!collected.isEmpty()) {
+            recordDissents(gc, phase, collected);
+        }
+        return collected.size();
+    }
+
+    /**
+     * How many member turns a repeat of {@code phase} schedules — the denominator
+     * "did everyone abstain?" must be measured against.
+     * <p>
+     * A peer-targeted phase runs one turn per (speaker, other-member) pair, so its
+     * count is N×(N-1), not N. Sequential and parallel phases run one turn per
+     * speaker. Using the speaker count for all three made unanimity mean different
+     * things per turn order — the kind of mismatch that reads as correct until a
+     * three-member critique round quietly ends itself.
+     */
+    private static int expectedTurnsFor(DiscussionPhase phase, List<GroupMember> speakers) {
+        int n = speakers != null ? speakers.size() : 0;
+        if (n == 0) {
+            return 0;
+        }
+        // Mirrors executePeerTargetedPhase's own loop: each speaker addresses every
+        // OTHER member, and the roster it iterates is the phase's speaker list.
+        return phase.targetEachPeer() ? n * (n - 1) : n;
+    }
+
+    /** The most recent synthesis text, which is what dissenters are reacting to. */
+    private static String latestSynthesis(GroupConversation gc) {
+        String fromTranscript = gc.getTranscript().stream()
+                .filter(e -> e.type() == TranscriptEntryType.SYNTHESIS && e.content() != null)
+                .reduce((first, second) -> second)
+                .map(TranscriptEntry::content)
+                .orElse(null);
+        return fromTranscript != null ? fromTranscript : gc.getSynthesizedAnswer();
+    }
+
+    /**
+     * Merges dissents into the discussion's {@code DecisionRecord}, creating a
+     * {@code NONE}-type record when no decision-producing feature ran. Records are
+     * immutable, so an existing one is rebuilt rather than mutated.
+     */
+    private static void recordDissents(GroupConversation gc, DiscussionPhase phase, List<Dissent> collected) {
+        DecisionRecord existing = gc.getDecision();
+        if (existing == null) {
+            gc.setDecision(new DecisionRecord(DecisionType.NONE, null, null, null, List.copyOf(collected),
+                    "dissent-round", phase.name(), null));
+            return;
+        }
+        // Appends rather than replaces: a verdict or vote may already carry dissents
+        // from its own mechanism, and this round adds to the minority view rather
+        // than being the only source of it.
+        var merged = new ArrayList<Dissent>(existing.dissents() != null ? existing.dissents() : List.of());
+        merged.addAll(collected);
+        gc.setDecision(new DecisionRecord(existing.type(), existing.outcome(), existing.winner(), existing.tally(),
+                List.copyOf(merged), existing.method(), existing.decidedAtPhase(), existing.raw()));
     }
 
     private ConvergenceDetector.ConvergenceVerdict runJudge(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,

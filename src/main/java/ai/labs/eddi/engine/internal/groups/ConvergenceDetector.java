@@ -111,12 +111,12 @@ public final class ConvergenceDetector {
      * The deterministic mechanism: every participant abstained this repeat, so
      * nobody had anything left to add.
      * <p>
-     * <b>Cannot fire in production yet.</b> {@code ABSTAINED} entries are produced
-     * by I4 (abstention), which has not landed — F4 added the type, not a producer.
-     * This returns {@code false} for every real discussion today. Built and tested
-     * with I2 rather than deferred to I4 because the two are independently useful,
-     * and bolting a second exit mechanism onto a live one later is how the two end
-     * up disagreeing about what "converged" means.
+     * Live as of I4, which produces the {@code ABSTAINED} entries this counts.
+     * <p>
+     * {@code participantCount} must be the number of turns the phase SCHEDULED, not
+     * its speaker count — a peer-targeted phase runs N×(N-1) turns for N speakers,
+     * and passing the speaker count there made unanimity mean different things per
+     * turn order (see {@code PhaseExecutionEngine.expectedTurnsFor}).
      * <p>
      * Requires an exact match against the participant count rather than "every
      * entry in the slice is an ABSTAINED" — a slice can be short (a member turn

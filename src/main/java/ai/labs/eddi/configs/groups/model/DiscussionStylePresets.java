@@ -35,6 +35,22 @@ public final class DiscussionStylePresets {
 
             As {displayName}, please share your professional perspective.""";
 
+    /**
+     * The anti-sycophancy directive (I4). Added only to the templates where a
+     * member can see what others said — {@link #TEMPLATE_OPINION_WITH_CONTEXT} and
+     * {@link #TEMPLATE_CRITIQUE}. {@link #TEMPLATE_OPINION_INDEPENDENT} shows no
+     * peers, so there is nobody to agree with, and
+     * {@link #TEMPLATE_OPINION_ANONYMOUS} already instructs independent judgment;
+     * adding it there would be noise that dilutes the instruction where it counts.
+     * <p>
+     * The failure it addresses is well documented in multi-agent LLM setups: shown
+     * prior responses, models converge on them regardless of merit, which turns a
+     * panel into an echo of whoever spoke first. That also silently degrades I2's
+     * convergence signal — agreement reached by deference looks identical to
+     * agreement reached by persuasion.
+     */
+    public static final String ANTI_SYCOPHANCY_DIRECTIVE = "State your genuine assessment; do not adjust your position merely to agree with prior speakers.";
+
     public static final String TEMPLATE_OPINION_WITH_CONTEXT = """
             The discussion continues.
 
@@ -43,7 +59,8 @@ public final class DiscussionStylePresets {
             — {entry.speaker}: "{entry.content}"
             {/for}
 
-            As {displayName}, please respond to the others' perspectives.""";
+            As {displayName}, please respond to the others' perspectives.
+            """ + ANTI_SYCOPHANCY_DIRECTIVE;
 
     public static final String TEMPLATE_CRITIQUE = """
             You are reviewing {targetName}'s perspective on:
@@ -52,7 +69,8 @@ public final class DiscussionStylePresets {
             Their response: "{targetResponse}"
 
             As {displayName}, provide constructive feedback — identify strengths, \
-            weaknesses, and suggestions for improvement.""";
+            weaknesses, and suggestions for improvement.
+            """ + ANTI_SYCOPHANCY_DIRECTIVE;
 
     public static final String TEMPLATE_REVISION = """
             You previously shared your perspective on:

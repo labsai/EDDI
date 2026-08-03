@@ -185,12 +185,20 @@ public class GroupContextBuilder {
             }
         }
 
+        String rendered;
         try {
-            return templatingEngine.processTemplate(template, data, ITemplatingEngine.TemplateMode.TEXT);
+            rendered = templatingEngine.processTemplate(template, data, ITemplatingEngine.TemplateMode.TEXT);
         } catch (ITemplatingEngine.TemplateEngineException e) {
             LOGGER.warnf("Template processing failed for phase '%s', " + "using plain text: %s", phase.name(), e.getMessage());
-            return buildPlainTextFallback(phase, speaker, question, transcript);
+            rendered = buildPlainTextFallback(phase, speaker, question, transcript);
         }
+        // I4: appended AFTER rendering, and on the fallback path too. Appending here
+        // rather than inside each template covers custom inputTemplates for free, and
+        // covering the fallback matters because a template-engine failure would
+        // otherwise silently disable abstention for exactly the turns already going
+        // wrong — the member would be told nothing about PASS, answer normally, and
+        // the phase would look like it simply had nothing to abstain about.
+        return AbstentionDetector.isEnabledFor(phase) ? rendered + AbstentionDetector.ABSTENTION_INSTRUCTION : rendered;
     }
 
     /**

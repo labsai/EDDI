@@ -75,6 +75,63 @@ class GroupContextBuilderTest {
         verify(templatingEngine).processTemplate(any(), any(), eq(ITemplatingEngine.TemplateMode.TEXT));
     }
 
+    // =================================================================
+    // I4: the abstention instruction
+    // =================================================================
+
+    private DiscussionPhase abstainablePhase(PhaseType type) {
+        return new DiscussionPhase("P-" + type, type, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                false, null, 1, false, null, true);
+    }
+
+    @Test
+    void buildPhaseInput_allowAbstention_appendsTheInstruction() throws Exception {
+        // The only line that tells a model the PASS token exists. Without coverage
+        // here the whole feature can be half-removed and every other I4 test — which
+        // stubs the response directly — still passes.
+        when(templatingEngine.processTemplate(any(), any(), eq(ITemplatingEngine.TemplateMode.TEXT))).thenReturn("rendered");
+
+        String result = builder.buildPhaseInput(abstainablePhase(PhaseType.OPINION), member(), "Q?", List.of(), 1, null);
+
+        assertTrue(result.startsWith("rendered"), "the rendered template must still lead");
+        assertTrue(result.contains("PASS"), "the member is never told the token exists otherwise");
+    }
+
+    @Test
+    void buildPhaseInput_allowAbstentionOff_appendsNothing() throws Exception {
+        when(templatingEngine.processTemplate(any(), any(), eq(ITemplatingEngine.TemplateMode.TEXT))).thenReturn("rendered");
+
+        String result = builder.buildPhaseInput(phase(PhaseType.OPINION, ContextScope.FULL), member(), "Q?", List.of(), 1, null);
+
+        assertEquals("rendered", result);
+    }
+
+    @Test
+    void buildPhaseInput_templateFailureWithAbstention_stillAppendsTheInstruction() throws Exception {
+        // A template-engine failure would otherwise silently disable abstention for
+        // exactly the turns already going wrong: the member answers normally and the
+        // phase looks like it simply had nothing to abstain about.
+        when(templatingEngine.processTemplate(any(), any(), eq(ITemplatingEngine.TemplateMode.TEXT)))
+                .thenThrow(new ITemplatingEngine.TemplateEngineException("boom", null));
+
+        String result = builder.buildPhaseInput(abstainablePhase(PhaseType.OPINION), member(), "Q?", List.of(), 1, null);
+
+        assertTrue(result.contains("Agent A"), "the plain-text fallback still renders");
+        assertTrue(result.contains("PASS"), "and the instruction survives the fallback path");
+    }
+
+    @Test
+    void buildPhaseInput_taskPhases_neverGetTheInstruction() throws Exception {
+        // TaskForceEngine builds its own inputs, so a task phase that reached here
+        // must still not advertise a token whose detection is deliberately disabled
+        // for it — the two sides share AbstentionDetector.isEnabledFor precisely so
+        // they cannot disagree.
+        when(templatingEngine.processTemplate(any(), any(), eq(ITemplatingEngine.TemplateMode.TEXT))).thenReturn("rendered");
+
+        assertEquals("rendered", builder.buildPhaseInput(abstainablePhase(PhaseType.VERIFY), member(), "Q?", List.of(), 1, null));
+        assertEquals("rendered", builder.buildPhaseInput(abstainablePhase(PhaseType.EXECUTE), member(), "Q?", List.of(), 1, null));
+    }
+
     @Test
     void buildPhaseInput_templateEngineException_fallsBackToPlainText() throws Exception {
         when(templatingEngine.processTemplate(any(), any(), eq(ITemplatingEngine.TemplateMode.TEXT)))

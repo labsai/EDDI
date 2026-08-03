@@ -340,6 +340,14 @@ public class MemberTurnExecutor {
                     return handleMemberPause(member, gc, convId, phaseIdx, phase, targetAgentId, listener);
                 }
 
+                // I4: an abstention replaces the typed contribution entirely — the
+                // member said it has nothing to add, so recording "PASS" as its
+                // OPINION would put a non-answer into the record that peers, the
+                // synthesizer and the convergence judge all then read as a position.
+                if (AbstentionDetector.isEnabledFor(phase) && AbstentionDetector.isAbstention(response)) {
+                    return abstentionEntry(member, phaseIdx, phase, targetAgentId);
+                }
+
                 // Wave 6: Sign inter-agent messages with full envelope if configured
                 GroupSigningGuard.SigningResult signing = signingGuard.signOutgoingMessage(
                         member.agentId(), gc.getGroupId(), response, phase.name());
@@ -497,6 +505,14 @@ public class MemberTurnExecutor {
         // provenance matters most, since its content was shaped by a rejection the
         // agent did not choose. signOutgoingMessage yields UNSIGNED when signing is
         // off, so this is a no-op for agents that never sign.
+        // I4: same abstention rule as the normal path. A member whose gated tool call
+        // was auto-rejected can legitimately conclude it has nothing to add; without
+        // this the identical reply becomes a real contribution on one path and an
+        // abstention on the other, purely by whether a tool happened to be called.
+        if (AbstentionDetector.isEnabledFor(phase) && AbstentionDetector.isAbstention(response)) {
+            return abstentionEntry(member, phaseIdx, phase, targetAgentId);
+        }
+
         GroupSigningGuard.SigningResult signing = signingGuard.signOutgoingMessage(
                 member.agentId(), gc.getGroupId(), response, phase.name());
 
@@ -504,6 +520,23 @@ public class MemberTurnExecutor {
                 phaseIdx, phase.name(), entryType, Instant.now(),
                 null, targetAgentId, signing.signature(),
                 signing.nonce(), signing.timestampMs(), signing.keyVersion());
+    }
+
+    /**
+     * The {@code ABSTAINED} record for a member that passed (I4).
+     * <p>
+     * Content is deliberately {@code null}, not the literal "PASS": every reader of
+     * the transcript ({@code GroupContextBuilder}'s peer view, the synthesizer,
+     * I2's convergence judge) treats content as a position, and the whole point of
+     * an abstention is that there is no position. The type carries the meaning;
+     * F4's visibility matrix already hides the entry from peers. Unsigned for the
+     * same reason — there is no member-authored content to attest to.
+     */
+    private TranscriptEntry abstentionEntry(GroupMember member, int phaseIdx, DiscussionPhase phase, String targetAgentId) {
+        LOGGER.debugf("Member '%s' abstained in phase '%s'", member.agentId(), phase.name());
+        return new TranscriptEntry(member.agentId(), member.displayName(), null,
+                phaseIdx, phase.name(), TranscriptEntryType.ABSTAINED, Instant.now(),
+                null, targetAgentId);
     }
 
     /**

@@ -805,6 +805,25 @@ public class GroupConversationService implements IGroupConversationService {
                                 repeatEntries, previousRepeatEntries, listener, turnCounter, maxTurns);
                     }
 
+                    // I4: the minority report. Placed AFTER the convergence slice above
+                    // and BEFORE the persist below — after, so the DISSENT entries do
+                    // not land inside repeatEntries where the convergence judge would
+                    // read them as this round's contributions (and where a lone
+                    // abstaining synthesizer would make "1 of 1 abstained" true);
+                    // before, so the entries and the DecisionRecord share one document
+                    // write. It also sits after the cost-ceiling block, so a discussion
+                    // that blew its budget does not then pay for N more turns.
+                    //
+                    // Only on the LAST repeat: a synthesis phase with repeats > 1 would
+                    // otherwise run the whole round once per repeat, duplicating every
+                    // dissent in both the transcript and the DecisionRecord. Dissent is
+                    // a reaction to the final synthesis, not to each draft of it.
+                    boolean lastRepeat = repeat == Math.max(phase.repeats(), 1) - 1;
+                    if (phase.type() == PhaseType.SYNTHESIS && config.isRecordDissents() && lastRepeat) {
+                        phaseExecutionEngine.runDissentRound(gc, config, phase, protocol, phaseIdx, speakers, listener,
+                                turnCounter, maxTurns);
+                    }
+
                     gc.setLastModified(Instant.now());
                     conversationStore.update(gc);
 
