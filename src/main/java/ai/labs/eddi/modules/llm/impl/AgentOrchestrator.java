@@ -2898,8 +2898,18 @@ class AgentOrchestrator {
                 // The throwable is deliberately NOT passed: a Jackson parse error
                 // quotes the offending source in its own message, which would undo
                 // the redaction on the line right next to it. See errorType.
+                // Order is load-bearing. Redact FIRST, on the full string: capping
+                // first would cut a credential mid-token, and the fragment left
+                // behind no longer matches the shape rules — a partial secret in
+                // the log instead of a marker. Sanitize LAST: these arguments are
+                // model-chosen and therefore prompt-injectable, and
+                // SecretRedactionFilter only substitutes secret-shaped VALUES — it
+                // leaves \r and \n untouched, so a model could forge whole log
+                // records in the HITL audit stream. The tool name beside it was
+                // already sanitized for exactly this reason; the argument string
+                // is the more attacker-controllable of the two.
                 LOGGER.warnf("Failed to parse arguments for tool '%s' (%s): %s", sanitize(toolRequest.name()), errorType(e),
-                        capUtf8(SecretRedactionFilter.redact(toolRequest.arguments()), ARGS_LOG_MAX_BYTES));
+                        sanitize(capUtf8(SecretRedactionFilter.redact(toolRequest.arguments()), ARGS_LOG_MAX_BYTES)));
             }
         }
         return templateData;
