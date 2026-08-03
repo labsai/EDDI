@@ -399,6 +399,89 @@ class ApiCallExecutorTest {
         return executor.resolve(call, memory, new HashMap<>(), "http://example.com");
     }
 
+    /** A request map shaped like the one HttpClientWrapper hands back. */
+    private void stubRequestMap() {
+        Map<String, Object> requestMap = new HashMap<>();
+        requestMap.put("uri", "http://example.com/api/test");
+        requestMap.put("method", "POST");
+        requestMap.put("headers", new LinkedHashMap<String, Object>());
+        requestMap.put("queryParams", new LinkedHashMap<String, List<String>>());
+        when(mockRequest.toMap()).thenReturn(requestMap);
+    }
+
+    @Test
+    @DisplayName("an EMPTY preRequest.propertyInstructions list still makes the call unpinnable")
+    void resolve_withEmptyPropertyInstructions_isNotPinned() throws Exception {
+        // The fail-open this closes. The old predicate used isNullOrEmpty, so an
+        // empty list read as "absent" and the call was PINNED — while
+        // PrePostUtils guards on != null and therefore still re-runs
+        // memoryItemConverter.convert, discarding the model arguments merged in
+        // for this call. Gate time and resume time both skip that (both go
+        // through resolve), so they agreed with each other and the guard passed
+        // while execute() sent a request with every {arg} rendered empty.
+        ApiCall call = createSimpleApiCall("empty-instructions-call", false);
+        var preRequest = new HttpPreRequest();
+        preRequest.setPropertyInstructions(new java.util.ArrayList<>());
+        call.setPreRequest(preRequest);
+        stubRequestMap();
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNull(resolved.fingerprint(), "an empty-but-present instruction list must not be treated as absent");
+        assertFalse(resolved.isPinned());
+        // Unpinnable is not unreviewable: the approver still gets a preview.
+        assertNotNull(resolved.uri());
+    }
+
+    @Test
+    @DisplayName("fireAndForget with batchRequests is unpinnable — one resolved request cannot stand for N")
+    void resolve_withFireAndForgetBatch_isNotPinned() throws Exception {
+        // execute() routes these to executeFireAndForgetCalls, which calls
+        // buildRequest once PER iteration object. resolve() builds exactly one,
+        // with the iteration variable empty. batchRequests is a different field
+        // from propertyInstructions, so this used to be pinned: the approver saw
+        // one request, the re-check compared that same never-sent request, and N
+        // unapproved requests went out on a background thread.
+        ApiCall call = createSimpleApiCall("batch-call", false);
+        call.setFireAndForget(true);
+        var preRequest = new HttpPreRequest();
+        preRequest.setBatchRequests(new BatchRequestBuildingInstruction());
+        call.setPreRequest(preRequest);
+        stubRequestMap();
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNull(resolved.fingerprint(), "a batched fire-and-forget call must not claim a fingerprint");
+        assertFalse(resolved.isPinned());
+    }
+
+    @Test
+    @DisplayName("an ordinary call is still pinned — the divergence check is not a blanket opt-out")
+    void resolve_withOrdinaryCall_remainsPinned() throws Exception {
+        // The mirror direction. Widening the predicate must not quietly unpin
+        // everything, which would disable enforcement while every test above
+        // still passed.
+        ApiCall call = createSimpleApiCall("ordinary-call", false);
+        stubRequestMap();
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNotNull(resolved.fingerprint(), "an ordinary call must still be pinnable");
+        assertTrue(resolved.isPinned());
+    }
+
+    @Test
+    @DisplayName("fireAndForget WITHOUT batchRequests stays pinned — it sends exactly one request")
+    void resolve_withPlainFireAndForget_remainsPinned() throws Exception {
+        ApiCall call = createSimpleApiCall("plain-fnf-call", false);
+        call.setFireAndForget(true);
+        stubRequestMap();
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNotNull(resolved.fingerprint(), "a single fire-and-forget request is still one request");
+    }
+
     @Test
     @DisplayName("a secret in the request BODY is scrubbed before persistence, not just headers")
     void execute_secretInBody_isRedacted() throws Exception {

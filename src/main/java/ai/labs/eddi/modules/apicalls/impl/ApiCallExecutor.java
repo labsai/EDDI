@@ -289,7 +289,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     queryParams,
                     requestRedactor.redactHeaders(headers),
                     body == null ? null : body.toString(),
-                    !hasPreRequestPropertyInstructions(call));
+                    !canExecuteDivergeFromResolve(call));
         } catch (Exception e) {
             // Deliberately NOT logged here — throw only. Unlike execute(), the sole
             // caller of resolve() is the gate-time/pre-execution pinning path, which
@@ -340,13 +340,44 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
-     * Whether resolving this call ahead of execution would produce a different
-     * request than {@link #execute} eventually builds — because {@code execute}
-     * runs these instructions first and they change the template data.
+     * Whether {@link #execute} can build a request this method's caller did not
+     * resolve — the question a fingerprint's soundness actually turns on.
+     * <p>
+     * It used to ask something narrower ("does this call have pre-request property
+     * instructions"), and the gap between the two questions was the only fail-open
+     * in the pinning design. Both misses below produce a call that is PINNED, whose
+     * gate-time and pre-execution resolutions agree with each other — because both
+     * skip the divergence — while {@code execute} sends something else entirely.
+     * The guard then passes on a comparison that was never sound:
+     * <ul>
+     * <li><b>An empty-but-present {@code propertyInstructions} list.</b>
+     * {@code isNullOrEmpty} treated it as absent, but
+     * {@code PrePostUtils#executePreRequestPropertyInstructions} guards on
+     * {@code != null} — so it still re-runs {@code memoryItemConverter.convert},
+     * discarding the model arguments merged in for this call. Every {@code {arg}}
+     * then renders empty at execution and non-empty in the preview. Hence
+     * {@code != null}, matching the code that actually runs.</li>
+     * <li><b>{@code fireAndForget} with {@code preRequest.batchRequests}.</b>
+     * {@code execute} routes to {@code executeFireAndForgetCalls}, which calls
+     * {@code buildRequest} once PER iteration object — N distinct requests, none of
+     * them the single one {@code resolve} builds (the iteration variable renders
+     * empty there). {@code batchRequests} is a different field from
+     * {@code propertyInstructions}, so this was pinned, and an approver shown one
+     * request authorised N unreviewed ones.</li>
+     * </ul>
+     * Returning true here means unpinnable, not refused: the call still needs its
+     * approval, it is previewed best-effort, and only the fingerprint enforcement
+     * is skipped — which is the honest state for a request we genuinely cannot pin,
+     * rather than a pin we cannot honour.
      */
-    private static boolean hasPreRequestPropertyInstructions(ApiCall call) {
+    private static boolean canExecuteDivergeFromResolve(ApiCall call) {
         var preRequest = call.getPreRequest();
-        return preRequest != null && !isNullOrEmpty(preRequest.getPropertyInstructions());
+        if (preRequest != null && preRequest.getPropertyInstructions() != null) {
+            return true;
+        }
+        // One resolved request cannot stand for N. Guarded on fireAndForget too
+        // because that is what selects the batching branch in execute().
+        return Boolean.TRUE.equals(call.getFireAndForget()) && preRequest != null && preRequest.getBatchRequests() != null;
     }
 
     private IResponse executeAndMeasureRequest(ApiCall call, IRequest request, boolean retryCall, int amountOfExecutions)
