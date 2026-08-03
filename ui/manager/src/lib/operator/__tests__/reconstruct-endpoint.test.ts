@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildOperationIdIndex, reconstructEndpoint } from "../reconstruct-endpoint";
+import { buildOperationIdIndex, reconstructEndpoint, resolveToolNameForEndpoint } from "../reconstruct-endpoint";
 import type { FetchedSpec } from "@/lib/api/operator";
 
 function spec(paths: FetchedSpec["paths"]): FetchedSpec {
@@ -70,5 +70,45 @@ describe("reconstructEndpoint", () => {
     // this covers the backend's slug fallback and non-HTTP tool sources (mcp).
     const index = buildOperationIdIndex(spec({ "/agentstore/agents": { post: { operationId: "createAgent" } } }));
     expect(reconstructEndpoint("sendEmail", index)).toBeNull();
+  });
+});
+
+describe("resolveToolNameForEndpoint", () => {
+  it("finds the tool name for a known allow-list entry", () => {
+    const index = buildOperationIdIndex(
+      spec({ "/descriptorstore/descriptors/{id}": { patch: { operationId: "patchDescriptor" } } }),
+    );
+    expect(resolveToolNameForEndpoint("PATCH /descriptorstore/descriptors/{id}", index)).toBe("patchDescriptor");
+  });
+
+  it("is the exact inverse of buildOperationIdIndex — round-trips both ways", () => {
+    const index = buildOperationIdIndex(
+      spec({ "/administration/{environment}/deploy/{agentId}": { post: { operationId: "deployAgent" } } }),
+    );
+    const endpoint = reconstructEndpoint("deployAgent", index)!;
+    expect(resolveToolNameForEndpoint(`${endpoint.method} ${endpoint.path}`, index)).toBe("deployAgent");
+  });
+
+  it("returns null for an endpoint the spec does not expose", () => {
+    const index = buildOperationIdIndex(spec({ "/agentstore/agents": { post: { operationId: "createAgent" } } }));
+    expect(resolveToolNameForEndpoint("PATCH /descriptorstore/descriptors/{id}", index)).toBeNull();
+  });
+
+  it("returns null for a malformed 'METHOD /path' string rather than throwing", () => {
+    const index = buildOperationIdIndex(spec({ "/x": { get: { operationId: "readX" } } }));
+    expect(resolveToolNameForEndpoint("not-an-endpoint", index)).toBeNull();
+  });
+
+  it("distinguishes method — GET and PATCH on the same path resolve to different tools", () => {
+    const index = buildOperationIdIndex(
+      spec({
+        "/descriptorstore/descriptors/{id}": {
+          get: { operationId: "readDescriptor" },
+          patch: { operationId: "patchDescriptor" },
+        },
+      }),
+    );
+    expect(resolveToolNameForEndpoint("GET /descriptorstore/descriptors/{id}", index)).toBe("readDescriptor");
+    expect(resolveToolNameForEndpoint("PATCH /descriptorstore/descriptors/{id}", index)).toBe("patchDescriptor");
   });
 });

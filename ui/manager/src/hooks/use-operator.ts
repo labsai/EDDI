@@ -15,11 +15,13 @@ import {
   findMissingEndpoints,
   defaultOperatorConfig,
   verifyGateInstalled,
+  reportOperatorGateStatus,
   type GateVerificationResult,
   type OperatorConfig,
 } from "@/lib/api/operator";
 import { undeployAgent, deleteAgent } from "@/lib/api/agents";
 import { endpointsForScope } from "@/lib/operator/tool-scopes";
+import { enforceWriteCanaryGate, type WriteCanaryResult } from "@/lib/operator/write-canary";
 
 /* ─── Query Keys ─── */
 
@@ -72,6 +74,7 @@ export type ActivationStage =
   | "saving"
   | "verifying-gate"
   | "canary"
+  | "write-canary"
   | "done";
 
 /** What activation returns: the saved config plus the probe outcomes. */
@@ -79,6 +82,8 @@ export interface ActivationOutcome {
   config: OperatorConfig;
   canary: CanaryResult;
   gate: GateVerificationResult;
+  /** Only run for scope "read_write" — null for a read_only activation. */
+  writeCanary: WriteCanaryResult | null;
 }
 
 export interface ActivateParams {
@@ -154,14 +159,28 @@ export function useActivateOperator() {
       // failed provision.
       onStage?.("verifying-gate");
       const gate = await verifyGateInstalled(result.agentId);
+      await reportOperatorGateStatus(gate.verified);
 
       // A READY badge only proves the config loaded. Run one real read so a
       // deployed-but-unreachable operator is reported as such, not as success.
       onStage?.("canary");
       const canary = await runOperatorCanary(next);
 
+      // The empirical proof, not just configuration: does a real gated write
+      // actually pause? A non-pass result rolls the whole activation back
+      // (undeploy, delete, clear the config variable) rather than merely
+      // reporting the failure — see enforceWriteCanaryGate's own doc comment
+      // for why a failed write canary can't be treated like a failed read
+      // canary or gate check.
+      //
+      // The scope check stays here (enforceWriteCanaryGate also no-ops for
+      // read_only on its own) so the "write-canary" stage is never announced
+      // for an activation that has no write tool to probe.
+      if (config.scope === "read_write") onStage?.("write-canary");
+      const writeCanary = await enforceWriteCanaryGate(config, spec);
+
       onStage?.("done");
-      return { config: next, canary, gate };
+      return { config: next, canary, gate, writeCanary };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: operatorKeys.all });
@@ -220,7 +239,15 @@ export function useVerifyOperatorGate(config: OperatorConfig | null | undefined)
   const ready = Boolean(config?.enabled && agentId);
   return useQuery({
     queryKey: operatorKeys.gate(agentId),
-    queryFn: () => verifyGateInstalled(agentId),
+    queryFn: async () => {
+      const result = await verifyGateInstalled(agentId);
+      // Piggybacks on traffic that already has to happen for the status
+      // panel, rather than opening a separate poll: every time an admin looks
+      // at this page, the gauge that "the alert is on it dropping to 0"
+      // refers to (docs/hitl.md, EDDI backend repo) gets refreshed too.
+      await reportOperatorGateStatus(result.verified);
+      return result;
+    },
     enabled: ready,
     staleTime: 0,
   });

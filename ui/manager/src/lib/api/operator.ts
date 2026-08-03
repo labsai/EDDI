@@ -660,3 +660,34 @@ export async function resetOperator(config: OperatorConfig): Promise<void> {
   }
   await clearOperatorConfig();
 }
+
+/* ─── Metrics relay ─── */
+
+/**
+ * Report a client-run canary outcome onto this deployment's `/q/metrics`.
+ *
+ * Purely a relay — see `docs/hitl.md` (EDDI backend repo) "Operator canary/gate
+ * metrics" for why this has to exist at all: the canary runs entirely in this
+ * browser tab, and the backend has no server-side event to hang a meter on.
+ *
+ * Best-effort BY DESIGN: a caller must never let a failed report change the
+ * canary's own result. Losing the metric for one run is a worse UX than
+ * treating a Grafana dashboard as more important than the security probe it
+ * is merely reporting on.
+ */
+export async function reportOperatorCanaryResult(outcome: string, durationMs?: number): Promise<void> {
+  try {
+    await api.post("/administration/operator/canary-result", { outcome, durationMs });
+  } catch {
+    // See doc comment.
+  }
+}
+
+/** Report a client-run gate-verification outcome. Same best-effort contract as {@link reportOperatorCanaryResult}. */
+export async function reportOperatorGateStatus(verified: boolean): Promise<void> {
+  try {
+    await api.post("/administration/operator/gate-status", { verified });
+  } catch {
+    // Best-effort — see reportOperatorCanaryResult.
+  }
+}

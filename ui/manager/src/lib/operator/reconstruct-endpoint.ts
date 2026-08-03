@@ -1,4 +1,5 @@
 import type { FetchedSpec } from "@/lib/api/operator";
+import { parseEndpoint } from "./tool-scopes";
 
 /** A method + path reconstructed for display, never sent anywhere. */
 export interface ReconstructedEndpoint {
@@ -54,4 +55,30 @@ export function reconstructEndpoint(
   // return the inherited function, which is truthy.
   if (!Object.prototype.hasOwnProperty.call(index, toolName)) return null;
   return index[toolName] ?? null;
+}
+
+/**
+ * The inverse of {@link reconstructEndpoint}: given an allow-list entry (the
+ * `"METHOD /path"` format `WRITE_ENDPOINTS` and `READ_ENDPOINTS` both use),
+ * finds the generated tool name that calls it.
+ *
+ * Used by the write canary, which needs to recognize — among an arbitrary
+ * toolTrace — specifically the ONE tool it deliberately provoked, to tell
+ * "this call executed without pausing" (the gate is broken) apart from "the
+ * model never attempted a write at all" (inconclusive, not a failure).
+ *
+ * Returns `null` on no match, same as `reconstructEndpoint` and for the same
+ * reason: a caller acting on an endpoint it could not actually confirm the
+ * name of would be acting on a guess.
+ */
+export function resolveToolNameForEndpoint(
+  endpoint: string,
+  index: Record<string, ReconstructedEndpoint>,
+): string | null {
+  const parsed = parseEndpoint(endpoint);
+  if (!parsed) return null;
+  for (const [operationId, entry] of Object.entries(index)) {
+    if (entry.method === parsed.method && entry.path === parsed.path) return operationId;
+  }
+  return null;
 }
