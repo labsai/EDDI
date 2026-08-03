@@ -146,11 +146,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     request = buildRequest(targetServerUrl, call, templateDataObjects);
                     var objectName = call.getName() + "Request";
                     var requestMap = request.toMap();
-                    // Scrub resolved secrets from request map before persisting to conversation
-                    // memory.
-                    // The actual request (with secrets) was already built — this only affects the
-                    // debug record.
-                    scrubSensitiveHeaders(requestMap);
+                    // Scrub resolved secrets — headers, query parameters and body — from
+                    // the request map before it is persisted to conversation memory. The
+                    // actual request was already built and still carries them; each entry
+                    // here is REPLACED with a redacted copy, so this only affects the debug
+                    // record. Shares RequestRedactor with the approval preview so the two
+                    // cannot disagree about what counts as a credential.
+                    requestRedactor.redactRequestMap(requestMap);
                     prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
                     response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
@@ -632,17 +634,4 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return request;
     }
 
-    /**
-     * Scrub sensitive header values from the request map before it is stored in
-     * conversation memory, so resolved secrets (API keys, bearer tokens) are never
-     * persisted to the database.
-     * <p>
-     * Delegates to {@link RequestRedactor} rather than carrying its own copy of the
-     * rules: the approval preview redacts the same request through the same code,
-     * and two definitions would eventually disagree about what counts as a
-     * credential.
-     */
-    private void scrubSensitiveHeaders(Map<String, Object> requestMap) {
-        requestRedactor.redactRequestMap(requestMap);
-    }
 }
