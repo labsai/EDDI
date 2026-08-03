@@ -559,6 +559,7 @@ class AgentOrchestrator {
             HitlDecision.HitlVerdict verdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : topVerdict;
             String note = cd != null ? cd.getNote() : decision.getNote();
             String amended = cd != null ? cd.getAmendedArguments() : null;
+            recordWriteApprovalDecision(verdict, decision.getDecidedBy());
 
             if (verdict == HitlDecision.HitlVerdict.REJECTED) {
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), rejectionEnvelope(c.getToolName(), note)));
@@ -1866,6 +1867,38 @@ class AgentOrchestrator {
             return DEFAULT_MAX_PAUSES_PER_TURN;
         }
         return Math.max(1, Math.min(10, cfg.getMaxPausesPerTurn()));
+    }
+
+    /**
+     * {@code eddi.operator.write.approval} — one per gated call the moment its
+     * verdict is resolved, regardless of what happens to it afterwards (truncated
+     * args, a changed-request refusal, and a successful execution are all still an
+     * instance of a human's — or the timeout policy's — decision).
+     * <p>
+     * "write" describes the mechanism, not the source: any call reaching this loop
+     * was gated by {@code toolApprovals.requireApproval}, whether it dispatches
+     * over http, mcp, or a2a. Restricting the tag to http-sourced calls would
+     * silently exclude a gated MCP tool that writes to an external system, which is
+     * exactly the rubber-stamping risk this counter exists to surface.
+     * <p>
+     * {@code decidedBy} distinguishes a real decision from one the timeout policy
+     * made ({@link HitlTimeoutHandler}, {@code decidedBy = "system:timeout"}) —
+     * folding those into {@code approved}/{@code rejected} would count an operator
+     * walking away from their desk as an approval, which is the opposite of what
+     * "approvals ≫ rejections is a rubber-stamping signal" is trying to detect.
+     * <p>
+     * Tagged only with the decision outcome — never a tool name, argument, or
+     * conversation id.
+     */
+    void recordWriteApprovalDecision(HitlDecision.HitlVerdict verdict, String decidedBy) {
+        try {
+            String decisionTag = "system:timeout".equals(decidedBy)
+                    ? "timeout"
+                    : verdict == HitlDecision.HitlVerdict.APPROVED ? "approved" : "rejected";
+            Metrics.globalRegistry.counter("eddi.operator.write.approval", "decision", decisionTag).increment();
+        } catch (Exception e) {
+            LOGGER.debugf("write.approval metric emit failed: %s", e.getMessage());
+        }
     }
 
     /**

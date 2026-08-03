@@ -15,6 +15,9 @@ import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeAll;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -81,6 +84,23 @@ import static org.mockito.Mockito.*;
  * mirrors the sibling tests.
  */
 class AgentOrchestratorCoverageTest {
+
+    /**
+     * {@code recordWriteApprovalDecision} writes to the process-wide
+     * {@code Metrics.globalRegistry}. Outside a running Quarkus app that registry
+     * is a bare {@code CompositeMeterRegistry} with no backing registry attached —
+     * meters register and {@code increment()} without throwing, but nothing
+     * actually stores a count, so every read-back is a silent 0. A real backing
+     * registry has to be attached before these tests can observe anything at all.
+     * Guarded so repeat attachment across test classes in the same JVM fork is a
+     * no-op rather than an error.
+     */
+    @BeforeAll
+    static void attachMeterRegistryBackingStore() {
+        if (Metrics.globalRegistry.getRegistries().isEmpty()) {
+            Metrics.addRegistry(new SimpleMeterRegistry());
+        }
+    }
 
     @Mock
     private CalculatorTool calculatorTool;
@@ -1327,6 +1347,47 @@ class AgentOrchestratorCoverageTest {
                 Map.of("deployAgent", req -> unpinnable));
         assertNotNull(result);
         assertTrue(result.contains("could no longer be resolved"));
+    }
+
+    /** Delta of the named decision-tagged counter across whatever `action` does. */
+    private static double approvalCountDelta(String decision, Runnable action) {
+        double before = Metrics.globalRegistry.find("eddi.operator.write.approval").tag("decision", decision).counters().stream()
+                .mapToDouble(io.micrometer.core.instrument.Counter::count).sum();
+        action.run();
+        double after = Metrics.globalRegistry.find("eddi.operator.write.approval").tag("decision", decision).counters().stream()
+                .mapToDouble(io.micrometer.core.instrument.Counter::count).sum();
+        return after - before;
+    }
+
+    @Test
+    void recordWriteApprovalDecision_tagsAHumanApprovalAsApproved() {
+        assertEquals(1.0, approvalCountDelta("approved",
+                () -> orchestrator.recordWriteApprovalDecision(HitlDecision.HitlVerdict.APPROVED, "user:alice")));
+    }
+
+    @Test
+    void recordWriteApprovalDecision_tagsAHumanRejectionAsRejected() {
+        assertEquals(1.0, approvalCountDelta("rejected",
+                () -> orchestrator.recordWriteApprovalDecision(HitlDecision.HitlVerdict.REJECTED, "user:alice")));
+    }
+
+    @Test
+    void recordWriteApprovalDecision_tagsATimeoutAutoApproveAsTimeoutNotApproved() {
+        // The rubber-stamping signal this counter exists for ("approvals >>
+        // rejections") is meaningless if an unattended timeout auto-approval
+        // silently inflates "approved". It must land in its own bucket.
+        assertEquals(0.0, approvalCountDelta("approved",
+                () -> orchestrator.recordWriteApprovalDecision(HitlDecision.HitlVerdict.APPROVED, "system:timeout")));
+        assertEquals(1.0, approvalCountDelta("timeout",
+                () -> orchestrator.recordWriteApprovalDecision(HitlDecision.HitlVerdict.APPROVED, "system:timeout")));
+    }
+
+    @Test
+    void recordWriteApprovalDecision_tagsATimeoutAutoRejectAsTimeoutNotRejected() {
+        assertEquals(0.0, approvalCountDelta("rejected",
+                () -> orchestrator.recordWriteApprovalDecision(HitlDecision.HitlVerdict.REJECTED, "system:timeout")));
+        assertEquals(1.0, approvalCountDelta("timeout",
+                () -> orchestrator.recordWriteApprovalDecision(HitlDecision.HitlVerdict.REJECTED, "system:timeout")));
     }
 
     @Test
