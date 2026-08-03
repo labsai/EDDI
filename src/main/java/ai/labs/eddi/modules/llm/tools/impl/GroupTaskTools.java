@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.internal.groups.TaskForceEngine;
 import dev.langchain4j.agent.tool.P;
+import jakarta.enterprise.inject.Vetoed;
 import dev.langchain4j.agent.tool.Tool;
 import org.jboss.logging.Logger;
 
@@ -48,8 +49,18 @@ import java.util.stream.Collectors;
  * next action gets a useful second attempt; a stack trace or a bare {@code
  * false} gets the same call again.
  *
+ * <p>
+ * Constructed per-turn with runtime values — NOT a CDI bean. {@code @Vetoed} is
+ * load-bearing: the langchain4j extension registers {@code @Tool}-bearing
+ * classes as beans, and Arc then tries to inject this constructor's
+ * {@code String}s and {@link GroupTaskConfig}, which are not beans. That is a
+ * <em>deployment</em> failure — the application does not start — so no unit
+ * test can catch it. Same reason {@code ReadAttachmentTool} and
+ * {@code DiscoverToolsTool} carry it.
+ *
  * @author ginccc
  */
+@Vetoed
 public class GroupTaskTools {
 
     private static final Logger LOGGER = Logger.getLogger(GroupTaskTools.class);

@@ -27,6 +27,8 @@ The shared task list was written only by the PLAN phase and by config, so work a
 
 Caps are independent by design: `maxPerTurn` bounds a runaway single turn, `maxAgentAddedTasksPerDiscussion` bounds slow drift across a long one, and the discussion cap counts only agent-filed tasks so a large planned backlog does not exhaust it.
 
+**Follow-up, caught by CI:** `GroupTaskTools` needs `@Vetoed`. The langchain4j extension registers `@Tool`-bearing classes as CDI beans, so Arc tried to inject the constructor's `String`s and `GroupTaskConfig` — five deployment problems, and **the application does not start**. No unit test can see that; only a container boot can, which is exactly why local green is not the same as CI green here. `ReadAttachmentTool` and `DiscoverToolsTool` carry the annotation for the same reason; this class was the only `@Tool` holder in its package without it.
+
 New: `GroupTaskTools`, `GroupTaskToolsProvider`, `SharedTaskList.addAgentTask`, `AgentGroupConfiguration.GroupTaskConfig`, plus an "Agent-filed tasks" section in `docs/group-conversations.md`. 33 tests across `GroupTaskToolsTest` and `GroupTaskToolsProviderTest`; 16 mutation checks.
 
 ---
