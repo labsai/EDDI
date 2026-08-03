@@ -24,7 +24,15 @@ Closes the gap the operator write-scope plan (`planning/operator-write-scope-pla
 
 Documented in [`docs/hitl.md`](hitl.md) (new §"Request pinning — approval binds to a request, not a tool name"; Operations metrics list extended).
 
-**What's left before `WRITE_ENDPOINTS` can actually be populated (Manager-side, not started here):** the write canary itself (provoke a real gated write, assert the pause names the expected tool, reject it so nothing executes), populating the four curated write endpoints, real `read_write` scope selection in the activation UI (currently pinned to `read_only`), and rendering this commit's server-side preview in the approval banner in place of the client-side `operationId` reconstruction it was always labelled as a stand-in for.
+### Two more commits on the same branch: the preview reaches the wire, and everything above gets a real metric (2026-08-03)
+
+The pinning above persisted `requestPreview`/`requestFingerprint` on the pause record, but nothing external ever read them back — `RestAgentEngine.buildToolCallPauseDetails` builds its response as an explicit field-by-field map, so a new model field is invisible to a caller until something puts it there. `GET .../approval-status` now surfaces `requestPinned` and, when pinned, the redacted `requestPreview` (`method`/`uri`/`queryParams`/`headers`/`body`/`bodyTruncated`) per call — this is what an approver actually reads, replacing what the Manager previously had to guess by reconstructing an `operationId` against a separately-fetched spec. The raw fingerprint stays internal; it means nothing to a human. `namesOnlyPendingToolCalls` — the security-motivated projection for the generic (non-approver) read surfaces — needed no code change, since it's an explicit allow-list and a field it was never told to copy is absent by construction; only its doc comment needed the two new field names added.
+
+Also lands `eddi.operator.write.approval{decision=approved|rejected|timeout}` (a real backend-native metric — the orchestrator observes every gated-call verdict directly) and the relay endpoints `POST /administration/operator/{canary-result,gate-status}` for the two metrics the backend cannot honestly emit itself.
+
+**Verification note worth recording**: this repo's `@Nested`-only JUnit classes report `Tests run: 0` in the plain-text surefire report even when every test inside passed — already documented in memory from a prior session, and it still cost real time to rediscover mid-session before the XML `<testsuite tests="…">` attribute was checked. Both touched test classes' real results: `RestAgentEngineToolPauseDetailsTest` 11/11, `ConversationMemoryUtilitiesHitlTest` 8/8.
+
+**What's left before `WRITE_ENDPOINTS` can actually be populated:** it already has been, on the Manager side — see that repo's own changelog for the write canary, the four curated endpoints, and real `read_write` scope selection. What remains is Manager-side only: render this backend's `requestPreview` in the approval banner in place of the client-side `operationId` reconstruction it was always labelled as a stand-in for, and the agent/group authoring UI (iteration 7).
 
 ---
 
