@@ -105,10 +105,13 @@ async function runProbe(
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), WRITE_CANARY_TIMEOUT_MS);
   // Both, not `signal ?? timeout.signal`: picking the caller's signal when one is
-  // supplied silently DISABLES the timeout for exactly the callers who cared
-  // enough to pass a signal, and the catch below would still report "timed out"
-  // on their cancellation. AbortSignal.any is Baseline since March 2024 and this
-  // app already targets modern browsers.
+  // supplied leaves nothing listening to `timeout.signal`, so the 60s ceiling
+  // stops being enforced for exactly the callers who cared enough to pass a
+  // signal — a stalled stream would hang past it. It also leaves the timer free
+  // to fire unobserved, after which `timeout.signal.aborted` reads true and the
+  // catch below would attribute an unrelated later failure to a timeout that
+  // aborted nothing. AbortSignal.any is Baseline since March 2024 and this app
+  // already targets modern browsers.
   const effectiveSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
 
   let conversationId: string | null = null;
