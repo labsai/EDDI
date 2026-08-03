@@ -82,8 +82,14 @@ public class McpSetupTools {
                              @ToolArg(description = "Environment: 'production' (default) or 'test'") String environment) {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
+            // hitlConfig is deliberately null and has no @ToolArg: this tool already
+            // lets the caller choose the created agent's own tool surface
+            // (enableBuiltInTools, builtInToolsWhitelist, mcpServerUrls), so also
+            // letting it choose that agent's gate would let a caller build an
+            // ungated agent at will. Provisioning a gated agent goes through the
+            // REST setup endpoint.
             var request = new SetupAgentRequest(agentName, systemPrompt, provider, model, apiKey, baseUrl, introMessage, enableBuiltInTools,
-                    builtInToolsWhitelist, enableQuickReplies, enableSentimentAnalysis, mcpServerUrls, deploy, environment);
+                    builtInToolsWhitelist, enableQuickReplies, enableSentimentAnalysis, mcpServerUrls, deploy, environment, null);
             var result = agentSetupService.setupAgent(request);
             return jsonSerialization.serialize(result);
         } catch (AgentSetupException e) {

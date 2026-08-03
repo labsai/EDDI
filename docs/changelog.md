@@ -5,6 +5,20 @@
 
 ---
 
+## 🔓 feat(setup): let the standard agent-setup path install a HITL gate too (2026-08-03)
+
+**Repo:** EDDI (`feat/operator-request-fingerprint`)
+
+`CreateApiAgentRequest` (the OpenAPI-spec agent path) has carried a `hitlConfig` field since the setup-api gate provisioning work referenced above — `SetupAgentRequest` (the "standard" agent path: behavior rules + LLM + output, no OpenAPI spec) never got the same field, so every agent it created had `hitlConfig == null` and no gate. Added the field, mirroring `CreateApiAgentRequest`'s reasoning exactly: validated up front (`HitlConfigValidation.validate`, same as `createApiAgent`), wired onto `AgentConfiguration` at creation time — before `createAgent()` is called, never via a later PUT, for the same "v1 must ship gated or a redeploy reaches an ungated version" reason documented on `createApiAgent`. Deliberately absent from the MCP `setup_agent` tool's arguments (stays `null`, same as `create_api_agent`) — that tool already lets the caller choose the created agent's tool surface, so also letting it choose the approval gate would be a caller-controlled way to produce an ungated agent. Provisioning a gated agent goes through `POST /administration/agents/setup` directly, which the JAX-RS layer deserializes with no such restriction.
+
+Closes a real, previously undocumented gap: this was the one remaining agent-creation path with no `hitlConfig` support at all — a prerequisite for letting the operator provision *any* type of agent (not just OpenAPI-spec ones) with an approval gate installed from v1.
+
+New coverage: `HitlConfigWiringTests` (`AgentSetupServiceTest`) asserts — via `ArgumentCaptor<AgentConfiguration>` — that the exact `hitlConfig` object reaches `createAgent()`, and that an absent one leaves the agent ungated rather than inventing a default. This assertion didn't previously exist for either `setupAgent` or `createApiAgent`; adding it for the new path closed the gap for both. Mutation-tested: removing the `setHitlConfig` call fails `hitlConfigReachesTheCreatedAgentConfiguration` (asserted `null` where the real object was expected); restored and re-verified 95/95 green.
+
+**Verification.** Full `mvnw test` run checked against the documented environmental baseline (~288 no-network loopback errors in `Web*ToolTest`, 8 pre-existing failures in `EmbeddingModelFactoryBranchTest`); this run: 313 errors / 8 failures, none in a touched class.
+
+---
+
 ## 🔒 feat(hitl): approval binds to the resolved request, not the tool name (2026-08-03)
 
 **Repo:** EDDI (`feat/operator-request-fingerprint`, branched from `main` after PR #625 merged — the per-endpoint-friction entry below plus setup-api gate provisioning, docs-over-REST, and `mcpServerUrls`; builds on the foundation laid in [#622](#-featoperator-the-foundation-for-an-agent-that-can-safely-write-2026-07-29))
