@@ -28,20 +28,38 @@ import type { PendingToolCallView } from "@/lib/api/hitl";
  * Step 1 alone is inert: the deployed agent still references the old workflow
  * version. Step 2 is the hinge, and step 2 is what this refuses.
  *
+ * ## Whose id to pass
+ *
+ * The **acting** agent — the one whose conversation raised this pause — NOT a
+ * separately-fetched "the operator" id. That distinction is load-bearing:
+ *
+ * - Reading the operator's config needs `GET /globalvariables/…`, which is
+ *   `eddi-admin`/`eddi-editor` only. A dedicated `eddi-approver` — precisely
+ *   the persona who decides pauses in the inbox without surrounding context —
+ *   gets a 403, the id comes back undefined, and this function short-circuits
+ *   to "nothing blocked". A control that silently disables itself for one role
+ *   is worse than no control, because the UI still looks guarded.
+ * - The acting agent id rides on the pause itself
+ *   (`PendingApprovalSummary.agentId`, `conversation.agentId`), so every role
+ *   that can see the pause can evaluate the guard.
+ * - It also generalises: "an agent must not rewrite its own definition" is a
+ *   sound rule for any agent, not only the Platform Operator. The operator is
+ *   just the one that currently has the tools to try.
+ *
  * ## Scope, stated honestly
  *
  * This runs where a human authorises the write, which is the right seam — but
- * it is a Manager-side control, so it governs the Manager's approval surfaces
- * (operator chat, approvals inbox) and not the Slack buttons or the MCP
- * `resume_conversation` tool. Those decide the same pause through different
- * code. Closing that properly needs the backend to refuse the write itself,
- * which needs a server-side notion of "the operator" that does not exist today.
- * Treat this as removing the easy path, not as a boundary.
+ * it is a Manager-side control, so it governs the Manager's three approval
+ * surfaces (operator chat, approvals inbox, conversation detail) and not the
+ * Slack buttons or the MCP `resume_conversation` tool. Those decide the same
+ * pause through different code. Closing that properly needs the backend to
+ * refuse the write itself. Treat this as removing the easy path, not as a
+ * boundary.
  *
- * Matching is on the operator's agent id appearing in the resolved request URI.
- * The id is a path segment, not a credential, so it survives
- * `RequestRedactor.redactUri` intact and the redacted preview the UI holds is
- * enough to decide.
+ * Matching is on the agent id appearing in the resolved request URI. The id is
+ * a path segment, not a credential, so it survives
+ * `RequestRedactor.redactUri` intact — verified against the backend's five
+ * redaction rules — and the redacted preview the UI holds is enough to decide.
  */
 
 /** A call refused because it targets the operator's own agent. */
@@ -65,7 +83,21 @@ export interface SelfTargetedCall {
  */
 export function uriTargetsAgent(uri: string | null | undefined, agentId: string | null | undefined): boolean {
   if (!uri || !agentId || agentId.trim() === "") return false;
-  return uri.includes(agentId);
+  // Case-insensitive, and percent-decoded first. MongoDB ObjectId parsing
+  // accepts A-F while a stored id is lowercase `toHexString()` output, so
+  // `/agentstore/agents/68A1B2…` reaches the identical document — and a
+  // case-sensitive `includes` would wave it straight through. Percent-encoding
+  // any path character is the same class of miss. The module's own asymmetry
+  // decides this: a false positive costs one refused approval, a false negative
+  // costs the gate.
+  let decoded = uri;
+  try {
+    decoded = decodeURIComponent(uri);
+  } catch {
+    // A malformed escape sequence is not a reason to stop checking — fall back
+    // to the raw string rather than returning false and allowing the write.
+  }
+  return decoded.toLowerCase().includes(agentId.trim().toLowerCase());
 }
 
 /**
@@ -81,9 +113,10 @@ export function uriTargetsAgent(uri: string | null | undefined, agentId: string 
  */
 export function findSelfTargetedCalls(
   calls: readonly PendingToolCallView[] | null | undefined,
-  operatorAgentId: string | null | undefined,
+  actingAgentId: string | null | undefined,
 ): SelfTargetedCall[] {
-  if (!calls || !operatorAgentId) return [];
+  if (!calls || !actingAgentId) return [];
+  const operatorAgentId = actingAgentId;
   const found: SelfTargetedCall[] = [];
   for (const call of calls) {
     const preview = call.requestPreview;

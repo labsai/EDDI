@@ -49,6 +49,26 @@ describe("uriTargetsAgent", () => {
     expect(uriTargetsAgent(`https://x/agentstore/agents/${OTHER_ID}`, OPERATOR_ID)).toBe(false);
   });
 
+  it("matches regardless of hex case — ObjectId parsing accepts A-F", () => {
+    // A stored id is lowercase toHexString() output, but the driver's
+    // parseHexString accepts A-F, so /agents/68F1C2A9… reaches the identical
+    // document. A case-sensitive includes() waved that straight through.
+    expect(uriTargetsAgent(`https://x/agentstore/agents/${OPERATOR_ID.toUpperCase()}`, OPERATOR_ID)).toBe(true);
+    expect(uriTargetsAgent(`https://x/agentstore/agents/${OPERATOR_ID}`, OPERATOR_ID.toUpperCase())).toBe(true);
+  });
+
+  it("matches through percent-encoding", () => {
+    // Same class of miss: encode any character in the path and the raw
+    // substring test stops matching while the request reaches the same agent.
+    expect(uriTargetsAgent(`https://x/agentstore%2Fagents%2F${OPERATOR_ID}`, OPERATOR_ID)).toBe(true);
+  });
+
+  it("still checks a URI with a malformed escape rather than failing open", () => {
+    // decodeURIComponent throws on a stray '%'. Falling back to the raw string
+    // keeps the guard live; returning false would allow the write.
+    expect(uriTargetsAgent(`https://x/a%/agents/${OPERATOR_ID}`, OPERATOR_ID)).toBe(true);
+  });
+
   it("never matches on a blank or absent id", () => {
     // The dangerous direction: "" is a substring of every string, so a missing
     // operator id must not silently refuse every write on the platform.

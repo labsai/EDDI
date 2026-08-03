@@ -18,7 +18,6 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
-import { useOperatorConfig } from "@/hooks/use-operator";
 import { findSelfTargetedCalls } from "@/lib/operator/self-guard";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
@@ -62,10 +61,6 @@ interface ApprovalQueueRowProps {
     toolDecisions?: Record<string, ToolCallDecision>,
   ) => void;
   onToolCancel: (item: PendingApprovalSummary) => void;
-  /** The Platform Operator's own agent id, when one is provisioned — used to
-   *  refuse a write it aimed at itself. Undefined when no operator exists, in
-   *  which case nothing is blocked. */
-  operatorAgentId?: string;
   resumeMutation: ReturnType<typeof useResumeConversation>;
   cancelMutation: ReturnType<typeof useCancelConversation>;
 }
@@ -86,7 +81,6 @@ function ApprovalQueueRow({
   onRequestConfirm,
   onToolDecide,
   onToolCancel,
-  operatorAgentId,
   resumeMutation,
   cancelMutation,
 }: ApprovalQueueRowProps) {
@@ -107,12 +101,20 @@ function ApprovalQueueRow({
   // The same refusal the operator screen applies, enforced here too: this inbox
   // is precisely where an admin decides a pause WITHOUT the surrounding context
   // of the conversation that raised it, so it is the likelier place for a
-  // self-repointing write to be waved through. See `self-guard.ts`.
+  // self-repointing write to be waved through.
+  //
+  // Keyed on the pause's OWN agentId, not a separately-fetched operator id.
+  // Reading the operator config needs `GET /globalvariables/…`, which is
+  // eddi-admin/eddi-editor only — so for a dedicated eddi-approver (a
+  // first-class user of this page) that fetch 403s, the id is undefined, and
+  // the guard silently evaluates to "nothing blocked" while the UI still looks
+  // guarded. The acting agent id rides on the pause itself, so every role that
+  // can see the pause can evaluate the guard. See `self-guard.ts`.
   const blockedCalls = useMemo(() => {
     const details = approvalStatus.data?.pauseDetails;
     // Narrowed on the discriminator: a RULE pause carries no per-call requests.
     const pending = details?.type === "TOOL_CALL" ? details.calls : undefined;
-    return findSelfTargetedCalls(pending, operatorAgentId).map((hit) => ({
+    return findSelfTargetedCalls(pending, item.agentId).map((hit) => ({
       callId: hit.callId,
       reason: t(
         "operator.approval.blockedSelfTarget",
@@ -120,7 +122,7 @@ function ApprovalQueueRow({
         { agentId: hit.agentId },
       ),
     }));
-  }, [approvalStatus.data, operatorAgentId, t]);
+  }, [approvalStatus.data, item.agentId, t]);
 
   return (
     <>
@@ -265,10 +267,6 @@ function ApprovalQueueRow({
 
 export function ApprovalsPage() {
   const { t } = useTranslation();
-  // Read once for the page, not per row: every row needs the same id to decide
-  // whether a pending write targets the operator itself, and this is a single
-  // cached global-variable read.
-  const operatorConfig = useOperatorConfig();
   const [search, setSearch] = useState("");
   // Approve/Reject/Cancel from the queue are irreversible (resume executes the
   // gated tools / rejection can't be undone / cancel aborts the run), so each
@@ -549,7 +547,6 @@ export function ApprovalsPage() {
                   onRequestConfirm={(row, action) => setConfirm({ item: row, action })}
                   onToolDecide={decideToolCall}
                   onToolCancel={doCancel}
-                  operatorAgentId={operatorConfig.data?.agentId ?? undefined}
                   resumeMutation={resumeMutation}
                   cancelMutation={cancelMutation}
                 />

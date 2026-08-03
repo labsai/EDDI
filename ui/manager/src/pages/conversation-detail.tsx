@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, Link } from "react-router-dom";
 import {
@@ -40,12 +40,21 @@ import type {
 import { extractInput, extractOutput, extractActions } from "@/lib/api/conversations";
 import { useNavigate } from "react-router-dom";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
+import { RequestPreview } from "@/components/operator/request-preview";
+import { useOperatorConfig } from "@/hooks/use-operator";
+import { findSelfTargetedCalls } from "@/lib/operator/self-guard";
 import {
   useResumeConversation,
   useCancelConversation,
   useApprovalStatus,
 } from "@/hooks/use-hitl";
-import type { HitlVerdict, ToolCallDecision } from "@/lib/api/hitl";
+import type { HitlVerdict, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
+
+/** Same redacted-preview render prop the approvals inbox uses. */
+function renderCallExtra(call: PendingToolCallView) {
+  if (!call.requestPreview) return null;
+  return <RequestPreview preview={call.requestPreview} pinned={call.requestPinned} callId={call.callId} />;
+}
 
 // Status icons — labels resolved via i18n in component
 const stateIcons: Record<
@@ -91,6 +100,31 @@ export function ConversationDetailPage() {
     id,
     conversation?.conversationState === "AWAITING_HUMAN",
   );
+
+  // The Platform Operator's own agent, so this surface can apply the same
+  // refusal and the same per-call review requirement the operator screen and
+  // the approvals inbox do. Without it, clicking a conversation id in the
+  // inbox — the natural way to get more context before deciding — landed on a
+  // strictly weaker version of the same decision.
+  const operatorConfig = useOperatorConfig();
+  const operatorAgentId = operatorConfig.data?.agentId ?? undefined;
+  const isOperatorConversation =
+    !!operatorAgentId && !!conversation?.agentId && conversation.agentId === operatorAgentId;
+  const blockedCalls = useMemo(() => {
+    const details = approvalStatus?.pauseDetails;
+    const pending = details?.type === "TOOL_CALL" ? details.calls : undefined;
+    // The conversation's OWN agent, not the separately-fetched operator id: the
+    // operator-config read is admin/editor-only, so keying on it would leave
+    // this guard silently inert for an eddi-approver. See `self-guard.ts`.
+    return findSelfTargetedCalls(pending, conversation?.agentId).map((hit) => ({
+      callId: hit.callId,
+      reason: t(
+        "operator.approval.blockedSelfTarget",
+        "This modifies the operator's own agent ({{agentId}}) — the one change that could remove its future approval gate. Reject it and make the change from that agent's own page instead.",
+        { agentId: hit.agentId },
+      ),
+    }));
+  }, [approvalStatus, conversation?.agentId, t]);
 
   function handleDelete() {
     deleteMutation.mutate(
@@ -259,6 +293,21 @@ export function ConversationDetailPage() {
           pauseDetails={approvalStatus?.pauseDetails ?? null}
           pauseDetailsPending={!approvalStatus}
           isSubmitting={resumeMutation.isPending || cancelMutation.isPending}
+          // The THIRD approval surface, and the one an admin reaches by clicking
+          // a conversation id in the approvals inbox — the natural "let me see
+          // the context first" move. Without these it silently offered a WEAKER
+          // decision than the row it was reached from: a self-targeting operator
+          // write with Approve still enabled, no per-call review requirement,
+          // and no server-verified request preview.
+          blockedCalls={blockedCalls}
+          // Every conversation: strictly more information about what a gated
+          // call actually sends. No approver is worse off for seeing it.
+          renderCallExtra={renderCallExtra}
+          // Scoped to the operator's own conversations rather than forced on
+          // all of them: it exists because a swept-in call THERE executes an
+          // unreviewed write against the platform itself. Enabling it globally
+          // would change the review contract for unrelated agents.
+          requireExplicitPerCall={isOperatorConversation}
           onDecide={(
             verdict: HitlVerdict,
             note?: string,
