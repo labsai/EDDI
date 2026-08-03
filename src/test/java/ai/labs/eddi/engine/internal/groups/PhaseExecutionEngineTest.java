@@ -150,6 +150,88 @@ class PhaseExecutionEngineTest {
         verifyNoInteractions(memberTurnExecutor);
     }
 
+    // =================================================================
+    // I1 — cost ceiling gates
+    // =================================================================
+
+    private ProtocolConfig protocolWithCeiling(double ceiling) {
+        return new ProtocolConfig(5, MemberFailurePolicy.SKIP, 0, MemberUnavailablePolicy.SKIP, 50, ceiling, null);
+    }
+
+    @Test
+    void sequentialPhase_ceilingAlreadyExceeded_runsNoTurns() throws Exception {
+        var engine = engine();
+        var gc = gc();
+        gc.setTotalCost(5.0);
+        var turnCounter = new AtomicInteger(0);
+
+        engine.executeSequentialPhase(gc, new AgentGroupConfiguration(), List.of(member("a"), member("b")), phase(TurnOrder.SEQUENTIAL),
+                protocolWithCeiling(1.0), "Q?", 0, null, turnCounter, 10);
+
+        verifyNoInteractions(memberTurnExecutor);
+        assertEquals(0, turnCounter.get(), "a turn blocked by the ceiling must not consume turn budget either");
+        assertEquals(1, gc.getTranscript().size(), "exactly one SKIPPED entry — the loop breaks, it does not re-check per speaker");
+        assertEquals(TranscriptEntryType.SKIPPED, gc.getTranscript().get(0).type());
+    }
+
+    @Test
+    void sequentialPhase_ceilingExceededMidPhase_stopsAtThatSpeaker() throws Exception {
+        var engine = engine();
+        var gc = gc();
+        // Each turn pushes the running total up; the ceiling trips before speaker 3.
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any()))
+                .thenAnswer(inv -> {
+                    gc.setTotalCost(gc.getTotalCost() + 0.6);
+                    return opinionEntry(((GroupMember) inv.getArgument(0)).agentId());
+                });
+        var turnCounter = new AtomicInteger(0);
+
+        engine.executeSequentialPhase(gc, new AgentGroupConfiguration(), List.of(member("a"), member("b"), member("c")),
+                phase(TurnOrder.SEQUENTIAL), protocolWithCeiling(1.0), "Q?", 0, null, turnCounter, 10);
+
+        // a runs (cost 0 -> 0.6), b runs (0.6 <= 1.0, cost -> 1.2), c is blocked (1.2 >
+        // 1.0)
+        verify(memberTurnExecutor, times(2)).executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any());
+        assertEquals(2, turnCounter.get());
+        var lastEntry = gc.getTranscript().get(gc.getTranscript().size() - 1);
+        assertEquals(TranscriptEntryType.SKIPPED, lastEntry.type());
+        assertTrue(lastEntry.errorReason().contains("Cost ceiling reached"));
+    }
+
+    @Test
+    void parallelPhase_ceilingAlreadyExceeded_dispatchesNoBatch() throws Exception {
+        var engine = engine();
+        var gc = gc();
+        gc.setTotalCost(5.0);
+        var turnCounter = new AtomicInteger(0);
+
+        engine.executeParallelPhase(gc, new AgentGroupConfiguration(), List.of(member("a"), member("b")), phase(TurnOrder.PARALLEL),
+                protocolWithCeiling(1.0), "Q?", 0, null, turnCounter, 10);
+
+        verifyNoInteractions(memberTurnExecutor);
+        assertEquals(0, turnCounter.get());
+        assertEquals(1, gc.getTranscript().size());
+        assertEquals(TranscriptEntryType.SKIPPED, gc.getTranscript().get(0).type());
+    }
+
+    @Test
+    void peerTargetedPhase_ceilingAlreadyExceeded_runsNoTurns() throws Exception {
+        var engine = engine();
+        var gc = gc();
+        gc.setTotalCost(5.0);
+        var a = member("a");
+        var b = member("b");
+        var config = new AgentGroupConfiguration();
+        config.setMembers(List.of(a, b));
+        var turnCounter = new AtomicInteger(0);
+
+        engine.executePeerTargetedPhase(gc, config, List.of(a, b), phase(TurnOrder.SEQUENTIAL), protocolWithCeiling(1.0), "Q?", 0, null,
+                turnCounter, 10);
+
+        verifyNoInteractions(memberTurnExecutor);
+        assertEquals(0, turnCounter.get());
+    }
+
     @Test
     void parallelPhase_allSpeakers_produceEntries() throws Exception {
         var engine = engine();

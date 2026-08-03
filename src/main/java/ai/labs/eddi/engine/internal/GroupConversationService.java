@@ -68,6 +68,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.DoubleAdder;
 
 /**
  * Phase-based orchestrator for multi-agent group conversations. Supports 6
@@ -229,6 +230,16 @@ public class GroupConversationService implements IGroupConversationService {
     private final Counter counterGroupFollowUp;
     private final Counter counterGroupContinue;
     private final Counter counterGroupClose;
+    /**
+     * I1: times a discussion's cost ceiling stopped it scheduling further turns.
+     */
+    private final Counter counterGroupCostCeilingHit;
+    /**
+     * I1: lifetime dollars attributed across all discussions this instance ran.
+     * Cumulative, not a live in-flight sum — mirrors {@code ToolCostTracker}'s
+     * {@code eddi.tool.costs.total} gauge, which is the closest existing pattern.
+     */
+    private final DoubleAdder groupCostDollars = new DoubleAdder();
 
     @Inject
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
@@ -265,6 +276,8 @@ public class GroupConversationService implements IGroupConversationService {
         this.counterGroupFollowUp = meterRegistry.counter("eddi_group_followup_count");
         this.counterGroupContinue = meterRegistry.counter("eddi_group_continue_count");
         this.counterGroupClose = meterRegistry.counter("eddi_group_close_count");
+        this.counterGroupCostCeilingHit = meterRegistry.counter("eddi_group_cost_ceiling_hit_total");
+        meterRegistry.gauge("eddi_group_cost_dollars", groupCostDollars, DoubleAdder::sum);
         // Constructed last: needs counterGroupMemberPauseSkipped (just above) and
         // passes `this` for MemberTurnExecutor's nested-GROUP-member discuss()/
         // cancelDiscussion() calls. Safe here because MemberTurnExecutor's own
@@ -341,6 +354,26 @@ public class GroupConversationService implements IGroupConversationService {
     public GroupConversation discuss(String groupId, String question, String userId, int depth,
                                      GroupDiscussionEventListener listener, List<Attachment> attachments)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return discuss(groupId, question, userId, depth, listener, attachments, null);
+    }
+
+    /**
+     * Internal overload carrying a parent discussion's remaining cost budget into a
+     * nested {@code MemberType.GROUP} member's own run (I1). Not on
+     * {@link IGroupConversationService} deliberately: every external caller starts
+     * at {@code depth=0} with no parent to inherit from, and the only caller that
+     * has a parent — {@code MemberTurnExecutor}, which holds the concrete class —
+     * is internal. Same precedent as {@code grantAndInjectAttachments} and
+     * {@code resolveAgentTimeoutSeconds}.
+     *
+     * @param inheritedCostCeiling
+     *            the parent's remaining budget, or {@code null} when the parent has
+     *            no ceiling. The child runs under {@code min(own, inherited)} — see
+     *            {@link #effectiveCostCeiling}.
+     */
+    public GroupConversation discuss(String groupId, String question, String userId, int depth,
+                                     GroupDiscussionEventListener listener, List<Attachment> attachments, Double inheritedCostCeiling)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         if (depth > maxDepth) {
             throw new GroupDepthExceededException("Maximum group discussion depth (%d) exceeded".formatted(maxDepth));
@@ -369,7 +402,24 @@ public class GroupConversationService implements IGroupConversationService {
 
         GroupConversation gc = createGroupConversation(groupId, question, userId, depth);
         materializeAttachments(gc, attachments);
+        gc.setInheritedCostCeiling(inheritedCostCeiling);
         return executeDiscussion(gc, config, phases, question, listener, 0);
+    }
+
+    /**
+     * The ceiling a discussion actually runs under (I1): the tighter of its own
+     * configured {@code maxCostPerDiscussion} and whatever budget a parent
+     * discussion had left when it dispatched this one. Either side may be
+     * {@code null} (unlimited); {@code null} only wins when BOTH are null.
+     */
+    static Double effectiveCostCeiling(Double own, Double inherited) {
+        if (own == null) {
+            return inherited;
+        }
+        if (inherited == null) {
+            return own;
+        }
+        return Math.min(own, inherited);
     }
 
     @Override
@@ -494,6 +544,8 @@ public class GroupConversationService implements IGroupConversationService {
             throws GroupDiscussionException, IResourceStore.ResourceStoreException {
 
         long startTime = System.nanoTime();
+        // I1: baseline for this leg's gauge contribution — see the finally block.
+        final double costAtLegStart = gc.getTotalCost();
         // MINOR-1: Only count/fire GROUP_START on fresh discussion, not resume
         if (startPhaseIndex == 0) {
             counterGroupDiscussion.increment();
@@ -508,7 +560,17 @@ public class GroupConversationService implements IGroupConversationService {
             liveDiscussionRegistry.register(gc);
         }
 
-        ProtocolConfig protocol = resolveProtocol(config);
+        ProtocolConfig resolvedProtocol = resolveProtocol(config);
+        // I1: a nested discussion runs under the tighter of its own ceiling and the
+        // budget its parent had left. Applied here (once, at the top of the leg)
+        // rather than at each check site, so every executor sees one already-resolved
+        // ceiling and none of them has to know about nesting.
+        Double effectiveCeiling = effectiveCostCeiling(resolvedProtocol.maxCostPerDiscussion(), gc.getInheritedCostCeiling());
+        ProtocolConfig protocol = Objects.equals(effectiveCeiling, resolvedProtocol.maxCostPerDiscussion())
+                ? resolvedProtocol
+                : new ProtocolConfig(resolvedProtocol.agentTimeoutSeconds(), resolvedProtocol.onAgentFailure(), resolvedProtocol.maxRetries(),
+                        resolvedProtocol.onMemberUnavailable(), resolvedProtocol.maxTurns(), effectiveCeiling,
+                        resolvedProtocol.onCostExceeded());
         int maxTurns = protocol.maxTurns() > 0 ? protocol.maxTurns() : 50;
 
         // Store the group's DynamicAgentConfig on the GC so executeAgentTurn()
@@ -560,6 +622,13 @@ public class GroupConversationService implements IGroupConversationService {
             }
         }
 
+        // I1: set once the cost ceiling fires under SYNTHESIZE_NOW. From then on the
+        // phase loop skips every non-SYNTHESIS phase but still runs any remaining
+        // SYNTHESIS one, so the discussion concludes with an answer rather than
+        // stopping mid-transcript. Deliberately NOT a break: "jump to the first
+        // remaining SYNTHESIS phase" is a skip-ahead, not a stop.
+        boolean costCeilingSynthesizeNow = false;
+
         try {
             // Execute each phase
             for (int phaseIdx = startPhaseIndex; phaseIdx < phases.size(); phaseIdx++) {
@@ -574,6 +643,16 @@ public class GroupConversationService implements IGroupConversationService {
                     LOGGER.infof("Group discussion %s cancelled via control token at phase %d", gc.getId(), phaseIdx);
                     notifyCancelled(gc, listener);
                     return gc;
+                }
+
+                // I1 SYNTHESIZE_NOW skip-ahead. Placed AFTER the cancel check above so
+                // a cancel arriving while winding down is still honored, and BEFORE
+                // the HITL gate below: a phase this run has decided to abandon must
+                // not also pause for a human approval it will never act on (which
+                // would strand the discussion AWAITING_APPROVAL, and on resume trip
+                // the same ceiling again).
+                if (costCeilingSynthesizeNow && phase.type() != PhaseType.SYNTHESIS) {
+                    continue;
                 }
 
                 for (int repeat = 0; repeat < Math.max(phase.repeats(), 1); repeat++) {
@@ -640,6 +719,39 @@ public class GroupConversationService implements IGroupConversationService {
                     } else {
                         phaseExecutionEngine.executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter,
                                 maxTurns, startSpeakerIdx);
+                    }
+
+                    // I1: a phase executor hit the cost ceiling and stopped scheduling
+                    // turns. Read-and-clear the signal it left, then act on the policy:
+                    // ABORT fails the discussion here; SYNTHESIZE_NOW falls through to
+                    // the phase loop's own skip-ahead guard, which jumps to the next
+                    // remaining SYNTHESIS phase so the run still produces an answer.
+                    if (gc.getCostCeilingOutcome() != null) {
+                        counterGroupCostCeilingHit.increment();
+                        var costPolicy = gc.getCostCeilingOutcome();
+                        gc.setCostCeilingOutcome(null);
+                        // %s, not %.2f: warnf formats with the JVM's default locale, so
+                        // a decimal-comma locale would render the same spend
+                        // differently across a fleet (same reason GroupCostLedger's
+                        // transcript message pins Locale.ROOT).
+                        LOGGER.warnf("Cost ceiling reached for group %s at phase %d (spend $%s) — policy %s",
+                                gc.getGroupId(), phaseIdx, gc.getTotalCost(), costPolicy);
+                        if (costPolicy == ProtocolConfig.CostPolicy.ABORT) {
+                            failConversation(gc);
+                            if (listener != null) {
+                                listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
+                                        "Discussion aborted: cost ceiling reached"));
+                            }
+                            return gc;
+                        }
+                        costCeilingSynthesizeNow = true;
+                        // Leave the REPEAT loop too, not just future phases: a phase
+                        // with repeats > 1 (ROUND_TABLE's "Discussion" is repeats =
+                        // rounds - 1 by default) would otherwise re-enter its executor
+                        // for every remaining repeat, re-trip the same gate, and append
+                        // one more identical SKIPPED entry and one more metric
+                        // increment per repeat — reporting a single overspend as many.
+                        break;
                     }
 
                     // #27/#45: a cross-pod cancel/ABORT flips the persisted state to
@@ -731,6 +843,25 @@ public class GroupConversationService implements IGroupConversationService {
                     .reduce((first, second) -> second) // last one
                     .ifPresent(e -> gc.setSynthesizedAnswer(e.content()));
 
+            // I1: SYNTHESIZE_NOW promises the run still concludes with an answer, but
+            // it can only deliver one if a SYNTHESIS phase actually remained after the
+            // ceiling fired (a DELPHI-style config of pure OPINION rounds, or a resume
+            // that had already passed its synthesis, has none). Completing silently
+            // with a null answer would look like an ordinary success to every caller;
+            // say so explicitly instead.
+            if (costCeilingSynthesizeNow && gc.getSynthesizedAnswer() == null) {
+                LOGGER.warnf("Group %s hit its cost ceiling with no remaining SYNTHESIS phase — completing without an answer", gc.getGroupId());
+                gc.getTranscript().add(new TranscriptEntry(
+                        null, "System", null, gc.getCurrentPhaseIndex(), gc.getCurrentPhaseName(),
+                        TranscriptEntryType.ERROR, Instant.now(),
+                        "Cost ceiling reached and no SYNTHESIS phase remained — the discussion ends without a synthesized answer",
+                        null));
+                if (listener != null) {
+                    listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
+                            "Cost ceiling reached with no synthesis phase remaining — no answer was produced"));
+                }
+            }
+
             // Don't overwrite AWAITING_APPROVAL with COMPLETED
             if (gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
                 return gc;
@@ -818,6 +949,11 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupExecutionException("Group discussion failed: " + e.getMessage(), e);
         } finally {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+            // I1: fold this leg's spend into the lifetime gauge. Recorded as a delta
+            // against what this leg started with, so a resumed leg (whose gc arrives
+            // already carrying the pre-pause total) contributes only what it newly
+            // spent rather than double-counting the earlier leg's.
+            groupCostDollars.add(Math.max(0.0, gc.getTotalCost() - costAtLegStart));
             // F1: unconditional, like the control-token removal below — a paused
             // discussion must not stay resolvable as "live" once this leg has
             // decided to stop. commitPause() persists AWAITING_APPROVAL and then

@@ -155,6 +155,29 @@ public class GroupConversation {
     private transient List<Attachment> attachments;
 
     /**
+     * Set by a phase executor (I1) when a turn/wave observes
+     * {@code getTotalCost() > protocol.maxCostPerDiscussion()}, naming the policy
+     * that fired. Read back by {@code executeDiscussion}'s own phase loop right
+     * after the phase-execution call returns, then cleared — a same-leg, read-once
+     * signal, exactly like {@link #resumePoint}, not a persisted fact about the
+     * discussion. {@code null} means no ceiling has fired (the common case, and the
+     * only possible value while {@code maxCostPerDiscussion} is unset).
+     */
+    @JsonIgnore
+    private transient AgentGroupConfiguration.ProtocolConfig.CostPolicy costCeilingOutcome;
+
+    /**
+     * A parent discussion's remaining cost budget at the moment it dispatched this
+     * nested one (I1), or {@code null} for a top-level discussion (and for a parent
+     * that has no ceiling of its own). The discussion runs under
+     * {@code min(own configured ceiling, this)} — see
+     * {@code GroupConversationService.effectiveCostCeiling}. Transient: it is a
+     * property of one dispatch, not of the stored discussion.
+     */
+    @JsonIgnore
+    private transient Double inheritedCostCeiling;
+
+    /**
      * A single entry in the discussion transcript. Each entry records one agent's
      * contribution during a specific phase.
      *
@@ -733,6 +756,22 @@ public class GroupConversation {
 
     public void setResumePoint(ResumePoint resumePoint) {
         this.resumePoint = resumePoint;
+    }
+
+    public AgentGroupConfiguration.ProtocolConfig.CostPolicy getCostCeilingOutcome() {
+        return costCeilingOutcome;
+    }
+
+    public void setCostCeilingOutcome(AgentGroupConfiguration.ProtocolConfig.CostPolicy costCeilingOutcome) {
+        this.costCeilingOutcome = costCeilingOutcome;
+    }
+
+    public Double getInheritedCostCeiling() {
+        return inheritedCostCeiling;
+    }
+
+    public void setInheritedCostCeiling(Double inheritedCostCeiling) {
+        this.inheritedCostCeiling = inheritedCostCeiling;
     }
 
     public HitlTimeoutPolicy getHitlTimeoutPolicy() {

@@ -524,8 +524,26 @@ public class MemberTurnExecutor {
 
             // Propagate the parent's attachments to the nested group so its members
             // receive them too (each nested member conversation is granted in turn).
+            // I1: also hand down what is LEFT of this discussion's budget, so a nested
+            // group cannot spend past a ceiling its parent is already bound by. Null
+            // ceiling → null remaining (unlimited); computed here because only the
+            // parent knows both its ceiling and its spend so far.
+            //
+            // KNOWN BOUND, not a bug to fix here: in a PARALLEL phase, N nested GROUP
+            // members are dispatched together and each reads the same "remaining R"
+            // (a child's spend only rolls into the parent when it RETURNS), so the
+            // batch can collectively reach N×R against a parent budget of R. This is
+            // the same accepted-overshoot shape the spec already documents for a
+            // single in-flight turn, scaled by the batch. Bounding it properly needs
+            // budget RESERVATION at dispatch (each child claiming a slice up front)
+            // rather than a read of the current remainder — a design change, not a
+            // tweak, and one that would also have to decide how to return unspent
+            // slices. Sequential nesting — the common shape — is exact.
+            Double remainingBudget = protocol.maxCostPerDiscussion() == null
+                    ? null
+                    : Math.max(0.0, protocol.maxCostPerDiscussion() - gc.getTotalCost());
             GroupConversation subConversation = groupConversationService.discuss(subGroupId, input, gc.getUserId(), nextDepth, null,
-                    gc.getAttachments());
+                    gc.getAttachments(), remainingBudget);
 
             // Wave 0, F5: roll the child's cost up into this group's attribution —
             // before the AWAITING_APPROVAL branch below, so a nested pause that gets

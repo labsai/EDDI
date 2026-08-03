@@ -92,6 +92,11 @@ public class PhaseExecutionEngine {
             if (turnCounter.get() >= maxTurns) {
                 break;
             }
+            // I1: checked before each turn — an already-dispatched turn may still
+            // overshoot the ceiling, which is accepted (see GroupCostLedger's Javadoc).
+            if (GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)) {
+                break;
+            }
             turnCounter.incrementAndGet();
             if (listener != null) {
                 listener.onSpeakerStart(
@@ -111,6 +116,14 @@ public class PhaseExecutionEngine {
                                      ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
                                      AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
+
+        // I1: whole-batch check — a PARALLEL phase fans every speaker out at once,
+        // so there is no per-speaker checkpoint to gate individually; this is the
+        // coarsest granularity the spec's "an in-flight turn may overshoot" already
+        // accepts.
+        if (GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)) {
+            return;
+        }
 
         // Cap batch size to remaining turn budget
         int remainingTurns = maxTurns > 0 ? Math.max(0, maxTurns - turnCounter.get()) : speakers.size();
@@ -264,6 +277,9 @@ public class PhaseExecutionEngine {
                     continue; // Don't critique yourself
                 }
                 if (turnCounter.get() >= maxTurns) {
+                    break outer;
+                }
+                if (GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)) {
                     break outer;
                 }
                 turnCounter.incrementAndGet();

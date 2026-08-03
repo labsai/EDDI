@@ -5,6 +5,33 @@
 
 ---
 
+## ✨ feat(groups): Group cost ceiling + attribution (I1) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+First Wave 1 item, and the first thing built on Wave 0's foundations — F5's `GroupCostLedger` supplies the running spend this gates on. A discussion multiplies cost (members × phases × repeats × tools) and nothing capped dollars before this.
+
+**`ProtocolConfig` gains `Double maxCostPerDiscussion` (null = unlimited) and `CostPolicy onCostExceeded`** — `SYNTHESIZE_NOW` (default: stop scheduling work, jump ahead to the next remaining SYNTHESIS phase so the run still concludes with an answer) or `ABORT` (fail immediately). The record's canonical constructor normalizes a null policy, so no reader null-checks it; two backward-compat constructors keep all ~30 existing call sites compiling unchanged.
+
+**The gate is one method, `GroupCostLedger.enforceCeiling`, called from five sites**: before each sequential speaker, before a parallel batch fans out, before each peer-targeted turn, and before each `TaskForceEngine` PLAN / EXECUTE-wave / VERIFY turn. It records a `SKIPPED` transcript entry naming spend, ceiling and policy, and leaves a read-once signal the phase loop acts on. PARALLEL is necessarily whole-batch — there is no mid-fan-out checkpoint — which is the same accepted overshoot the spec already documents for a single in-flight turn.
+
+**Six defects found and fixed before this landed** — three by the tests as they were written, three by an adversarial review pass afterwards:
+
+- **`SYNTHESIZE_NOW` was gating its own synthesis phase**, making it behave identically to `ABORT` and never produce the answer the policy exists to deliver. The synthesis phase is now exempt under that policy (and only that policy).
+- **A default-locale money format** rendered `$1,50` on a decimal-comma JVM and `$1.50` on another for the same spend — pinned to `Locale.ROOT`, since the string lands in an audit transcript and in operator log triage.
+- **One overspend was reported many times.** The skip-ahead flag was set inside the *repeat* loop without breaking it, so a phase with `repeats > 1` (ROUND_TABLE's default "Discussion" is `rounds - 1`) re-entered its executor per remaining repeat, re-tripping the gate — one more identical entry and one more `eddi_group_cost_ceiling_hit_total` increment each time.
+- **PLAN and VERIFY had no gate at all**, so a TASK_FORCE discussion still paid for planning and verification with its budget already blown. Both now gate like EXECUTE.
+- **A fully-consumed inherited budget (`0.0`) granted a free turn**, because `totalCost <= ceiling` passes at `0 <= 0` — and under the synthesis exemption, two. Zero is now always stopping.
+- **Completing with no answer looked like ordinary success.** If the ceiling fires and no SYNTHESIS phase remains (a DELPHI-style config of pure opinion rounds; a resume already past synthesis), the run now says so via an ERROR transcript entry and an `onGroupError` event instead of returning COMPLETED with a null answer.
+
+**Nested groups inherit `min(own ceiling, parent's remaining)`**, threaded through a new internal 7-arg `discuss` overload deliberately kept off `IGroupConversationService` — every external caller starts at depth 0 with no parent, and the one caller that has a parent holds the concrete class already. **One known bound is documented rather than papered over**: N nested GROUP members dispatched *in parallel* each read the same remaining budget, so a batch can collectively reach N×remaining. Bounding that needs budget *reservation* at dispatch, not a read of the current remainder — a design change with its own question (how unspent slices return), not a tweak. Sequential nesting, the common shape, is exact.
+
+Also: a save-time warn-and-coalesce for a non-positive ceiling (which would otherwise stop the first turn of every discussion that group ever runs), a `eddi_group_cost_dollars` gauge fed per-leg as a delta so a resumed leg cannot double-count, and the `eddi_group_cost_ceiling_hit_total` counter.
+
+19 new tests across `GroupCostCeilingTest` (the gate in isolation), `PhaseExecutionEngineTest` (all three turn-order call sites) and `GroupConversationServiceCostCeilingTest` (the full loop: both policies end-to-end, single-report-per-overspend, attribution, inherited-budget wiring). Four mutation checks — removing the sequential gate, the skip-ahead guard, the synthesis exemption, and the ABORT branch each fail exactly their own tests. Two weak tests found and replaced during review: one asserted `totalCost == sum(memberCosts)`, restating the ledger's own invariant so it could never fail; the skip-ahead test originally had only one trailing non-synthesis phase, which cannot distinguish the guard from the per-phase gate — it now has two, and the mutation fails as it should. Full group/HITL/config battery green (1,167 tests); Checkstyle unchanged.
+
+---
+
 ## 🔍 review: Wave R branch review + PR nitpicks (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

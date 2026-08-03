@@ -130,6 +130,14 @@ public class TaskForceEngine {
                                       GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
 
+        // I1: LLM planning is a paid moderator turn, so it gets the same pre-turn
+        // gate as EXECUTE and VERIFY. Checked before the pre-configured branch too —
+        // that branch is free, but letting it run under a blown budget would build a
+        // task list the EXECUTE phase is then gated out of ever running.
+        if (GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)) {
+            return;
+        }
+
         if (gc.getTaskList() == null) {
             gc.setTaskList(new SharedTaskList());
         }
@@ -315,6 +323,12 @@ public class TaskForceEngine {
             var token = activeTokens.get(gc.getId());
             if (token != null && token.isCancelled()) {
                 LOGGER.infof("EXECUTE wave loop cancelled via control token at wave %d", wave);
+                break;
+            }
+
+            // I1: checked before each wave — a wave already in flight may still
+            // overshoot the ceiling, which is accepted (see GroupCostLedger's Javadoc).
+            if (GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)) {
                 break;
             }
 
@@ -631,6 +645,13 @@ public class TaskForceEngine {
                                              DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
                                              GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
+
+        // I1: VERIFY runs a paid verifier turn, so it needs the same pre-turn gate
+        // the EXECUTE wave loop has — otherwise a discussion whose budget is already
+        // blown still pays for verification.
+        if (GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)) {
+            return;
+        }
 
         if (gc.getTaskList() == null || gc.getTaskList().isEmpty()) {
             LOGGER.warn("VERIFY phase: no tasks to verify");

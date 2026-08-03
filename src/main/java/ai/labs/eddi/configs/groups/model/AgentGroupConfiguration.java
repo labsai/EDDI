@@ -199,17 +199,48 @@ public class AgentGroupConfiguration {
      *            runaway discussions from misconfigured rounds. 0 or negative = use
      *            default (50). When exceeded, remaining phases are skipped and
      *            synthesis proceeds with whatever transcript exists.
+     * @param maxCostPerDiscussion
+     *            dollar ceiling on {@code GroupConversation#getTotalCost()} (I1).
+     *            {@code null} = unlimited. Checked before each turn and before each
+     *            {@code TaskForceEngine} EXECUTE wave — an already-dispatched,
+     *            in-flight turn may still push the total past the ceiling; that
+     *            overshoot is accepted, not prevented. A non-positive value is
+     *            treated as {@code null} (unlimited) at save time, with a warning —
+     *            see {@code AgentGroupStore}.
+     * @param onCostExceeded
+     *            what to do once {@code maxCostPerDiscussion} is hit. {@code null}
+     *            defaults to {@code SYNTHESIZE_NOW} (see the constructor).
      */
     public record ProtocolConfig(int agentTimeoutSeconds, MemberFailurePolicy onAgentFailure, int maxRetries,
-            MemberUnavailablePolicy onMemberUnavailable, int maxTurns) {
+            MemberUnavailablePolicy onMemberUnavailable, int maxTurns, Double maxCostPerDiscussion, CostPolicy onCostExceeded) {
+
+        /**
+         * Canonical constructor — normalizes a {@code null} {@link #onCostExceeded} to
+         * {@link CostPolicy#SYNTHESIZE_NOW} so every reader can treat the field as
+         * non-null, the same way {@link #maxTurns}'s 0-or-negative-means-default is
+         * normalized at the read site rather than pushed onto every caller.
+         */
+        public ProtocolConfig {
+            if (onCostExceeded == null) {
+                onCostExceeded = CostPolicy.SYNTHESIZE_NOW;
+            }
+        }
 
         /**
          * Backward-compatible constructor — defaults maxTurns to 0 (engine default:
-         * 50).
+         * 50), cost ceiling to unlimited.
          */
         public ProtocolConfig(int agentTimeoutSeconds, MemberFailurePolicy onAgentFailure, int maxRetries,
                 MemberUnavailablePolicy onMemberUnavailable) {
             this(agentTimeoutSeconds, onAgentFailure, maxRetries, onMemberUnavailable, 0);
+        }
+
+        /**
+         * Backward-compatible constructor — defaults the cost ceiling to unlimited.
+         */
+        public ProtocolConfig(int agentTimeoutSeconds, MemberFailurePolicy onAgentFailure, int maxRetries,
+                MemberUnavailablePolicy onMemberUnavailable, int maxTurns) {
+            this(agentTimeoutSeconds, onAgentFailure, maxRetries, onMemberUnavailable, maxTurns, null, null);
         }
 
         public enum MemberFailurePolicy {
@@ -218,6 +249,21 @@ public class AgentGroupConfiguration {
 
         public enum MemberUnavailablePolicy {
             SKIP, FAIL
+        }
+
+        /**
+         * What happens once {@link #maxCostPerDiscussion} is exceeded (I1).
+         */
+        public enum CostPolicy {
+            /**
+             * Stop scheduling new turns; jump ahead to the next remaining SYNTHESIS phase,
+             * if any.
+             */
+            SYNTHESIZE_NOW,
+            /**
+             * Fail the discussion immediately (state FAILED), with an actionable reason.
+             */
+            ABORT
         }
     }
 
