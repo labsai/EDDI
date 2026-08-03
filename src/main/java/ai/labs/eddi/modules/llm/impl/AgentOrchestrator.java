@@ -844,15 +844,6 @@ class AgentOrchestrator {
     }
 
     /**
-     * Records an at-most-once outcome-unknown event. No lightweight
-     * {@code hitl.tool.*} audit collector is reachable from this task (the
-     * {@link ai.labs.eddi.engine.audit.model.AuditEntry} record is built by the
-     * LifecycleManager per-task with HMAC context we do not have here), so —
-     * exactly as the config-drift path does — this WARN-logs with a distinctive
-     * marker that operators can alert on. Package-private + overridable so tests
-     * can assert it fired.
-     */
-    /**
      * Whether the request this approved call would now send differs from the one
      * that was approved — the check that makes an approval bind to a request.
      *
@@ -912,6 +903,15 @@ class AgentOrchestrator {
                 sanitize(c.getToolName()), sanitize(c.getCallId()), sanitize(memory.getConversationId()), sanitize(reason));
     }
 
+    /**
+     * Records an at-most-once outcome-unknown event. No lightweight
+     * {@code hitl.tool.*} audit collector is reachable from this task (the
+     * {@link ai.labs.eddi.engine.audit.model.AuditEntry} record is built by the
+     * LifecycleManager per-task with HMAC context we do not have here), so —
+     * exactly as the config-drift path does — this WARN-logs with a distinctive
+     * marker that operators can alert on. Package-private + overridable so tests
+     * can assert it fired.
+     */
     void auditOutcomeUnknown(IConversationMemory memory, PendingToolCallBatch.PendingToolCall c) {
         LOGGER.warnf("hitl.tool.outcome_unknown: approved tool '%s' (callId '%s') for conversation '%s' had an interrupted prior execution; "
                 + "outcome is unknown — verify externally before retrying.",
