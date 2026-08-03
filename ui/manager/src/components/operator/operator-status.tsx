@@ -67,10 +67,22 @@ export function OperatorStatusPanel({
             <Cpu className="h-3 w-3" />
             {config.model}
           </Badge>
-          <Badge variant="success" className="gap-1">
-            <Lock className="h-3 w-3" />
-            {t("operator.readOnlyChip", "Read-only")}
-          </Badge>
+          {/* Derived from the CONFIGURED scope, never hardcoded: this panel is
+              where an admin answers "what can this thing do right now?", and a
+              green padlock on a write-capable operator is the one wrong answer
+              that matters. Mirrors the same two-branch chip in the activation
+              form so the two surfaces cannot disagree. */}
+          {config.scope === "read_write" ? (
+            <Badge variant="warning" className="gap-1" data-testid="operator-status-scope-chip">
+              <ShieldAlert className="h-3 w-3" />
+              {t("operator.readWriteChip", "Read & write")}
+            </Badge>
+          ) : (
+            <Badge variant="success" className="gap-1" data-testid="operator-status-scope-chip">
+              <Lock className="h-3 w-3" />
+              {t("operator.readOnlyChip", "Read-only")}
+            </Badge>
+          )}
           <GateBadge gate={gate} loading={gateLoading} />
         </div>
 

@@ -176,8 +176,15 @@ export function useActivateOperator() {
       // The scope check stays here (enforceWriteCanaryGate also no-ops for
       // read_only on its own) so the "write-canary" stage is never announced
       // for an activation that has no write tool to probe.
-      if (config.scope === "read_write") onStage?.("write-canary");
-      const writeCanary = await enforceWriteCanaryGate(config, spec);
+      // `next`, NOT `config`: the probe has to run against the agent that was
+      // just provisioned. `config` still carries the PREVIOUS agentId, which on
+      // a reconfigure `removeSupersededAgent` deleted a few lines above — so
+      // probing it returned "unknown", rolled back an already-deleted agent, and
+      // left the new write-capable operator deployed with its config pointer
+      // cleared: the exact outcome this rollback exists to prevent. The read
+      // canary above already uses `next`; these must agree.
+      if (next.scope === "read_write") onStage?.("write-canary");
+      const writeCanary = await enforceWriteCanaryGate(next, spec);
 
       onStage?.("done");
       return { config: next, canary, gate, writeCanary };

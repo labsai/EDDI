@@ -110,8 +110,6 @@ describe("tool-scopes", () => {
         "POST /administration/agents/setup-api",
         "PUT /workflowstore/workflows/{id}",
         "POST /workflowstore/workflows",
-        "PUT /llmstore/llms/{id}",
-        "POST /llmstore/llms",
         "PUT /rulestore/rulesets/{id}",
         "POST /rulestore/rulesets",
         "PUT /outputstore/outputsets/{id}",
@@ -149,13 +147,12 @@ describe("tool-scopes", () => {
       expect(agentDocumentWrites).toEqual([]);
     });
 
-    it("authors every workflow-extension store, none of which can carry a gate", () => {
-      // This is "modify any type of agent" in practice: prompt/model, behavior
-      // rules, outputs, slot-filling, dictionaries, HTTP and MCP tool wiring,
-      // and the pipeline that runs them. AgentConfiguration.hitlConfig lives
-      // one level up from every one of these documents.
+    it("authors every workflow-extension store that cannot carry a gate", () => {
+      // "Modify an agent" in practice: behavior rules, outputs, slot-filling,
+      // dictionaries, HTTP and MCP tool wiring, and the pipeline that runs
+      // them. Every one of these documents was checked field-by-field against
+      // the backend model — none carries a hitlConfig or any other gate field.
       for (const store of [
-        "llmstore/llms",
         "rulestore/rulesets",
         "outputstore/outputsets",
         "propertysetterstore/propertysetters",
@@ -167,6 +164,26 @@ describe("tool-scopes", () => {
         expect(WRITE_ENDPOINTS).toContain(`PUT /${store}/{id}`);
         expect(WRITE_ENDPOINTS).toContain(`POST /${store}`);
       }
+    });
+
+    it("never grants an llmstore WRITE — it carries a gate that fully replaces the agent's", () => {
+      // The load-bearing exclusion. LlmConfiguration.Task.toolApprovals fully
+      // REPLACES the agent-level hitlConfig.toolApprovals (LlmTask.java:
+      // task.getToolApprovals() != null ? task.getToolApprovals() : <agent>).
+      // So a granted llmstore PUT would let the operator propose a write to its
+      // OWN config setting requireApproval: [] — one approved, near-unreviewable
+      // whole-document write and every future write executes ungated. Same class
+      // of risk as PUT /agentstore/agents/{id}, excluded for the same reason.
+      expect(WRITE_ENDPOINTS).not.toContain("PUT /llmstore/llms/{id}");
+      expect(WRITE_ENDPOINTS).not.toContain("POST /llmstore/llms");
+      expect(WRITE_ENDPOINTS.filter((e) => e.includes("/llmstore/"))).toEqual([]);
+    });
+
+    it("still READS llmstore, so it can show a prompt it cannot change", () => {
+      // Excluding the write must not blind it: "what is this agent's prompt?"
+      // stays answerable, and the handoff to the manager UI is only useful if
+      // the operator can first show the user what is there now.
+      expect(READ_ENDPOINTS).toContain("GET /llmstore/llms/{id}");
     });
 
     it("never contains a read verb", () => {
@@ -366,10 +383,9 @@ describe("tool-scopes", () => {
   });
 
   describe("grantsAgentModification", () => {
-    it("is true once any workflow-extension store's update verb is granted", () => {
+    it("is true once any writable workflow-extension store's update verb is granted", () => {
       for (const entry of [
         "PUT /workflowstore/workflows/{id}",
-        "PUT /llmstore/llms/{id}",
         "PUT /rulestore/rulesets/{id}",
         "PUT /outputstore/outputsets/{id}",
         "PUT /propertysetterstore/propertysetters/{id}",
@@ -381,8 +397,14 @@ describe("tool-scopes", () => {
       }
     });
 
+    it("is false for an llmstore write, which is never granted and never ordinary modify", () => {
+      // Reads the writable list, not the full read list — so a hypothetical
+      // llmstore grant could never be reported as routine modify capability.
+      expect(grantsAgentModification(["PUT /llmstore/llms/{id}"])).toBe(false);
+    });
+
     it("is false for the corresponding create verb alone — creating is not modifying", () => {
-      expect(grantsAgentModification(["POST /llmstore/llms"])).toBe(false);
+      expect(grantsAgentModification(["POST /rulestore/rulesets"])).toBe(false);
     });
 
     it("is false for an unrelated write, including a deploy", () => {

@@ -19,11 +19,10 @@ export type OperatorScope = "read_only" | "read_write";
  * `{store}/{resource}` path segments for every workflow-extension store an
  * agent's workflow can reference — the config documents that define what an
  * agent says and does (prompt/model, behavior rules, output messages,
- * slot-filling, NLU dictionaries, HTTP and MCP tool wiring). Named once here
- * and reused to build both the by-id READ_ENDPOINTS entries and the
- * PUT/POST WRITE_ENDPOINTS entries below, plus `grantsAgentModification` —
- * three lists that would otherwise drift independently if a ninth store were
- * ever added and one of the three forgot to change.
+ * slot-filling, NLU dictionaries, HTTP and MCP tool wiring).
+ *
+ * READ scope. Every one of these is safe to read; only a subset
+ * (`WRITABLE_EXTENSION_STORES`) is safe to write — see there.
  *
  * Deliberately excludes `workflowstore/workflows` (listed by hand alongside
  * `groupstore/groups` below): a workflow is the pipeline that *references*
@@ -41,11 +40,57 @@ const WORKFLOW_EXTENSION_STORES = [
 ] as const;
 
 /**
+ * The subset of {@link WORKFLOW_EXTENSION_STORES} that is safe to WRITE.
+ *
+ * **`llmstore/llms` is deliberately absent, and this is the load-bearing
+ * exclusion in this file.** An LLM document is not just a prompt and a model:
+ * `LlmConfiguration.Task.toolApprovals` is a per-task approval-gate override
+ * that, when present, **fully replaces the agent-level
+ * `hitlConfig.toolApprovals`** for that task — `LlmTask.java` resolves
+ * `task.getToolApprovals() != null ? task.getToolApprovals() : <agent default>`,
+ * and the backend deliberately honours an explicit task-level policy as a
+ * designer opt-in.
+ *
+ * So an operator able to `PUT` an llmstore document could propose a write to
+ * **its own** config setting `toolApprovals.requireApproval: []`. That write is
+ * gated and a human sees it — but what they see is a large LLM config document
+ * in which one nested field silently disables every future approval. One
+ * approved, near-unreviewable write and the operator is permanently ungated.
+ * That is precisely the self-gate-stripping risk `PUT /agentstore/agents/{id}`
+ * and `PUT /groupstore/groups/{id}` are excluded for; the rule is simply
+ * applied consistently: **no document that can carry a gate is writable.**
+ *
+ * An escalation flag is not sufficient here. `escalation-flags.ts` is an
+ * attention aid by its own explicit design ("not a security control"), and a
+ * complete bypass of the approval mechanism is not something to defend with a
+ * warning label an approver can skim past.
+ *
+ * The cost is real and should not be papered over: the system prompt lives in
+ * this document (`parameters.systemMessage`), so the operator cannot edit an
+ * agent's prompt or model — only its rules, outputs, slot-filling, dictionary
+ * and tool wiring. Restoring that safely needs a backend change (a task-level
+ * `toolApprovals` must not be able to WEAKEN an inherited agent-level gate —
+ * the same defensive demotion the backend already applies to an inherited
+ * `AUTO_APPROVE` timeout policy). Until that exists, this stays out.
+ */
+const WRITABLE_EXTENSION_STORES = WORKFLOW_EXTENSION_STORES.filter(
+  (store) => store !== "llmstore/llms",
+);
+
+/**
  * Read endpoints the operator is allowed to call.
  *
- * These are OpenAPI path templates copied verbatim from EDDI's spec. Every entry
- * is asserted to exist in the fetched spec by `tool-scopes.test.ts`, so an
- * invented or renamed path fails CI rather than silently producing zero tools.
+ * These are OpenAPI path templates copied verbatim from EDDI's spec.
+ *
+ * A typo or a renamed backend path binds ZERO tools rather than failing loudly,
+ * so entries are checked against the REAL spec at activation time:
+ * `useActivateOperator` fetches it and runs `findMissingEndpoints` over the
+ * resolved scope BEFORE provisioning anything, refusing with the list of
+ * missing paths. Note this is a runtime guard, not a CI one — no committed spec
+ * fixture exists to check these against at build time, so a bad entry surfaces
+ * when an admin activates, not when a test runs. `tool-scopes.test.ts` pins the
+ * SHAPE of these entries (well-formed, no substituted ids, no duplicates), not
+ * their existence in any real deployment's spec.
  *
  * The set is chosen so the operator can actually answer the questions we suggest
  * to users: descriptors alone cannot diagnose a failing deployment, so by-id
@@ -120,17 +165,18 @@ export const READ_ENDPOINTS: readonly string[] = [
  * can defeat the approval mechanism reviewing it. That standard is what
  * separates what is bound from what is not:
  *
- * - `POST`/`PUT` on `llmstore`, `rulestore`, `outputstore`,
- *   `propertysetterstore`, `dictionarystore`, `apicallstore`, `mcpcallsstore`,
- *   and `workflowstore` — this is "create and modify any type of agent" in
- *   practice: prompt and model (`llm`), behavior rules, output messages,
- *   slot-filling, NLU dictionaries, HTTP and MCP tool wiring, and which of
- *   those a workflow's pipeline actually runs, in order. **None of these
- *   documents carry a `hitlConfig` or any other field that gates a write** —
- *   `AgentConfiguration.hitlConfig` lives one level up, on the agent document
- *   itself, never on a workflow extension. A bad edit here is reviewable and
- *   reversible exactly like any other config change; it cannot touch the gate
- *   that is reviewing it.
+ * - `POST`/`PUT` on `rulestore`, `outputstore`, `propertysetterstore`,
+ *   `dictionarystore`, `apicallstore`, `mcpcallsstore`, and `workflowstore` —
+ *   behavior rules, output messages, slot-filling, NLU dictionaries, HTTP and
+ *   MCP tool wiring, and which of those a workflow's pipeline actually runs,
+ *   in order. **None of these documents carry a `hitlConfig` or any other
+ *   field that gates a write** — verified field-by-field against the backend
+ *   models, not assumed. A bad edit here is reviewable and reversible exactly
+ *   like any other config change; it cannot touch the gate that is reviewing
+ *   it. `llmstore` is the one workflow-extension store that FAILS that test
+ *   and is therefore writable only for reads — see
+ *   {@link WRITABLE_EXTENSION_STORES} for the full reasoning and the
+ *   capability cost.
  * - `POST /administration/agents/setup` and `.../setup-api` — build a whole
  *   new agent (standard, and OpenAPI-spec-backed) in one call. Unlike an
  *   update, a create has no prior version to diff against, so "does this body
@@ -149,13 +195,15 @@ export const READ_ENDPOINTS: readonly string[] = [
  *   diffing one they cannot see.
  *
  * Deliberately NOT here, regardless of how safe the request would look:
- * `PUT /agentstore/agents/{id}` and `PUT /groupstore/groups/{id}` — the one
- * pair of documents in this whole list that carry their own gate
+ * `PUT /agentstore/agents/{id}`, `PUT /groupstore/groups/{id}`, and every
+ * `llmstore` write — the documents that carry a gate of their own
  * (`AgentConfiguration.hitlConfig.toolApprovals`; `AgentGroupConfiguration
- * .hitlConfig` plus each `DiscussionPhase.requiresApproval`). A create can be
- * checked in isolation — "does this new document have a gate" needs no prior
- * state — but a full-document *update* cannot: "was the gate just weakened"
- * is a diff question, and nothing here has a prior version to diff against.
+ * .hitlConfig` plus each `DiscussionPhase.requiresApproval`;
+ * `LlmConfiguration.Task.toolApprovals`, which fully replaces the agent-level
+ * gate). A create can be checked in isolation — "does this new document have a
+ * gate" needs no prior state — but a full-document *update* cannot: "was the
+ * gate just weakened" is a diff question, and nothing here has a prior version
+ * to diff against.
  * `escalation-flags.ts` deliberately stays a pure function of the resolved
  * body alone (see its own doc comment), so it cannot answer that question
  * either — extending it to try would mean fetching and comparing prior state
@@ -184,7 +232,7 @@ export const WRITE_ENDPOINTS: readonly string[] = [
   "POST /administration/agents/setup-api",
   "PUT /workflowstore/workflows/{id}",
   "POST /workflowstore/workflows",
-  ...WORKFLOW_EXTENSION_STORES.flatMap((store) => [`PUT /${store}/{id}`, `POST /${store}`]),
+  ...WRITABLE_EXTENSION_STORES.flatMap((store) => [`PUT /${store}/{id}`, `POST /${store}`]),
 ] as const;
 
 /**
@@ -302,20 +350,25 @@ export function grantsAgentCreation(endpoints: readonly string[]): boolean {
 }
 
 /**
- * Whether the granted endpoints can change an existing agent's prompt,
- * behavior, outputs, tool wiring, or pipeline — any workflow or
+ * Whether the granted endpoints can change an existing agent's behavior,
+ * outputs, tool wiring, or pipeline — any workflow or writable
  * workflow-extension store's update verb.
  *
+ * Checks {@link WRITABLE_EXTENSION_STORES}, not the full read list: a granted
+ * `PUT /llmstore/llms/{id}` is not something this should ever report as
+ * ordinary modify capability, because it is never granted (it can strip the
+ * gate — see that constant). Reading the writable list keeps this predicate
+ * honest by construction rather than by a comment.
+ *
  * Deliberately silent on `PUT /agentstore/agents/{id}` and
- * `PUT /groupstore/groups/{id}`: neither is ever granted (see WRITE_ENDPOINTS'
- * doc comment), so checking for them here would just be dead code describing
- * a capability that can never exist.
+ * `PUT /groupstore/groups/{id}`: neither is ever granted, so checking for them
+ * here would just be dead code describing a capability that cannot exist.
  */
 export function grantsAgentModification(endpoints: readonly string[]): boolean {
   const set = new Set(endpoints);
   return (
     set.has("PUT /workflowstore/workflows/{id}") ||
-    WORKFLOW_EXTENSION_STORES.some((store) => set.has(`PUT /${store}/{id}`))
+    WRITABLE_EXTENSION_STORES.some((store) => set.has(`PUT /${store}/{id}`))
   );
 }
 

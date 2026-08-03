@@ -297,12 +297,30 @@ export function ApprovalBanner({
               variant: "warning" as const,
             };
       case "REJECTED":
-        return {
-          title: t("hitl.confirmRejectTitle", "Reject request?"),
-          description: t("hitl.confirmRejectDescription", "Reject this request? The conversation will not proceed."),
-          confirmLabel: t("hitl.reject", "Reject"),
-          variant: "destructive" as const,
-        };
+        // Two different outcomes, and conflating them pushed the wrong way. A
+        // TOOL_CALL rejection does NOT end the conversation: the backend
+        // (Conversation.java — `verdict == REJECTED && !toolPause`) short-circuits
+        // only RULE pauses; a rejected tool call becomes a synthetic rejection
+        // result and the model answers without it. Telling an approver their
+        // conversation dies is pressure toward Approve — precisely the
+        // rubber-stamping this whole flow exists to avoid.
+        return isToolCall
+          ? {
+              title: t("hitl.confirmRejectToolTitle", "Reject tool execution?"),
+              description: t(
+                "hitl.confirmRejectToolDescription",
+                "Nothing will run. The conversation continues and the agent answers without {{toolNames}}.",
+                { toolNames: gatedToolNames.join(", ") },
+              ),
+              confirmLabel: t("hitl.reject", "Reject"),
+              variant: "destructive" as const,
+            }
+          : {
+              title: t("hitl.confirmRejectTitle", "Reject request?"),
+              description: t("hitl.confirmRejectDescription", "Reject this request? The conversation will not proceed."),
+              confirmLabel: t("hitl.reject", "Reject"),
+              variant: "destructive" as const,
+            };
       case "CANCEL":
         return surface === "group"
           ? {

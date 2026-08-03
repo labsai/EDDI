@@ -142,14 +142,17 @@ const BODY_AUTHORING_AGENT_CREATE = `- You can create a whole new agent: its sys
  * Appended only when `grantsAgentModification` — changing what an existing
  * agent already does, as opposed to building a new one.
  */
-const BODY_AUTHORING_AGENT_MODIFY = `- You can change an existing agent's system prompt, model, behavior rules,
-  output messages, slot-filling, NLU dictionary, or HTTP/MCP tool wiring, and
-  which of those its pipeline runs. Read the current version first, propose
-  the specific change, and let the user approve it.
-- You cannot change an agent's own approval gate, its A2A/memory/session
-  settings, or which workflows it references at the top level — those require
-  a tool you do not have. Point the user at the agent's page in the manager
-  for that.`;
+const BODY_AUTHORING_AGENT_MODIFY = `- You can change an existing agent's behavior rules, output messages,
+  slot-filling, NLU dictionary, and HTTP/MCP tool wiring, and which of those
+  its pipeline runs. Read the current version first, propose the specific
+  change, and let the user approve it.
+- You CANNOT change an existing agent's system prompt or model. Those live in
+  its LLM configuration, which also carries that agent's approval gate, so no
+  tool you have can write it. Send the user to the agent's LLM config page in
+  the manager, and offer to show them the current values first.
+- You also cannot change an agent's own approval gate, its A2A/memory/session
+  settings, or which workflows it references at the top level. Point the user
+  at the agent's page in the manager for those.`;
 
 /**
  * The ORIGINAL "cannot author an agent at all" text, now shown only when

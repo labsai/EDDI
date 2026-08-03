@@ -200,11 +200,20 @@ describe("buildOperatorPromptBody", () => {
     });
 
     it("describes real agent-modification capability", () => {
-      expect(body).toContain("You can change an existing agent's system prompt");
+      expect(body).toContain("You can change an existing agent's behavior rules");
+    });
+
+    it("says plainly that the prompt and model are NOT among what it can change", () => {
+      // The llmstore document carries a per-task gate that fully replaces the
+      // agent's, so it is deliberately unwritable (see WRITABLE_EXTENSION_STORES).
+      // The prompt must not imply otherwise, or the operator will keep proposing
+      // a change it has no tool to make.
+      expect(body).toContain("You CANNOT change an existing agent's system prompt or model");
+      expect(body).not.toContain("You can change an existing agent's system prompt");
     });
 
     it("still states the boundary: no gate, memory/session, or top-level workflow changes", () => {
-      expect(body).toContain("You cannot change an agent's own approval gate");
+      expect(body).toContain("You also cannot change an agent's own approval gate");
     });
   });
 
@@ -212,14 +221,14 @@ describe("buildOperatorPromptBody", () => {
     const endpoints = [...READ_ENDPOINTS, "POST /administration/agents/setup"];
     const body = buildOperatorPromptBody(endpoints);
     expect(body).toContain("You can create a whole new agent");
-    expect(body).not.toContain("You can change an existing agent's system prompt");
+    expect(body).not.toContain("You can change an existing agent's behavior rules");
     expect(body).not.toContain("You CANNOT create or edit an agent");
   });
 
   it("shows only modification text when modification is granted but creation is not", () => {
-    const endpoints = [...READ_ENDPOINTS, "PUT /llmstore/llms/{id}"];
+    const endpoints = [...READ_ENDPOINTS, "PUT /rulestore/rulesets/{id}"];
     const body = buildOperatorPromptBody(endpoints);
-    expect(body).toContain("You can change an existing agent's system prompt");
+    expect(body).toContain("You can change an existing agent's behavior rules");
     expect(body).not.toContain("You can create a whole new agent");
     expect(body).not.toContain("You CANNOT create or edit an agent");
   });
