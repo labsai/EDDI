@@ -894,8 +894,10 @@ class AgentOrchestrator {
             return null;
         } catch (Exception e) {
             // Fail closed: a pinned call whose request cannot be re-derived is
-            // exactly the case this check exists for.
-            LOGGER.warnf(e, "Could not re-resolve the request for approved tool '%s'; refusing to execute it.", sanitize(c.getToolName()));
+            // exactly the case this check exists for. Type only, no throwable —
+            // see errorType.
+            LOGGER.warnf("Could not re-resolve the request for approved tool '%s' (%s); refusing to execute it.", sanitize(c.getToolName()),
+                    errorType(e));
             return "the request could not be re-resolved before execution";
         }
     }
@@ -1852,6 +1854,22 @@ class AgentOrchestrator {
 
     // ─── Tool-approval gate helpers ───
 
+    /**
+     * The only part of a failure from the request-resolution path that is safe to
+     * log: its type.
+     * <p>
+     * Not the throwable and not its message. These failures come out of template
+     * rendering and request building, so the message routinely quotes the material
+     * being rendered — Jackson in particular appends a snippet of the offending
+     * source ({@code at [Source: (String)"{\"apiKey\":\"sk-…"]}), which puts the
+     * credential straight back into the log line that carefully redacted it. The
+     * type alone is what an operator triages on; the payload is already available,
+     * redacted, in the same message.
+     */
+    private static String errorType(Throwable e) {
+        return e == null ? "unknown" : e.getClass().getSimpleName();
+    }
+
     /** Maps a built-in tool instance to its gate source tag. */
     private static String sourceForBuiltInTool(Object tool) {
         Class<?> c = tool.getClass();
@@ -2147,8 +2165,11 @@ class AgentOrchestrator {
         } catch (Exception e) {
             // sanitize: the tool name is model-chosen, so it can carry newlines or
             // control characters and forge log records — same treatment as every
-            // other name-bearing log statement in this class.
-            LOGGER.warnf(e, "Could not resolve the request for gated tool '%s'; it will be approved unpinned.", sanitize(req.name()));
+            // other name-bearing log statement in this class. The throwable is
+            // omitted for the reason given on errorType: this failure comes out of
+            // request building, whose message quotes the request being built.
+            LOGGER.warnf("Could not resolve the request for gated tool '%s' (%s); it will be approved unpinned.", sanitize(req.name()),
+                    errorType(e));
         }
     }
 
@@ -2865,7 +2886,11 @@ class AgentOrchestrator {
                 // that routinely carry credentials — the pause record keeps only a
                 // SecretRedactionFilter'd copy for exactly this reason, and a log
                 // line is no safer a place for the plaintext than that record was.
-                LOGGER.warnf(e, "Failed to parse arguments for tool '%s': %s", sanitize(toolRequest.name()),
+                //
+                // The throwable is deliberately NOT passed: a Jackson parse error
+                // quotes the offending source in its own message, which would undo
+                // the redaction on the line right next to it. See errorType.
+                LOGGER.warnf("Failed to parse arguments for tool '%s' (%s): %s", sanitize(toolRequest.name()), errorType(e),
                         capUtf8(SecretRedactionFilter.redact(toolRequest.arguments()), ARGS_LOG_MAX_BYTES));
             }
         }
