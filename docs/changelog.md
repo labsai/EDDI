@@ -5,6 +5,29 @@
 
 ---
 
+## 🔒 feat(hitl): approval binds to the resolved request, not the tool name (2026-08-03)
+
+**Repo:** EDDI (`feat/operator-request-fingerprint`, branched from `main` after PR #625 merged — the per-endpoint-friction entry below plus setup-api gate provisioning, docs-over-REST, and `mcpServerUrls`; builds on the foundation laid in [#622](#-featoperator-the-foundation-for-an-agent-that-can-safely-write-2026-07-29))
+
+Closes the gap the operator write-scope plan (`planning/operator-write-scope-plan.md` §3) flagged as the reason `WRITE_ENDPOINTS` had to stay empty: an approver of a gated `http` call saw the tool's name and the model's raw arguments, never the actual request. Method, path, query and body are only produced inside `ApiCallExecutor#execute`, **after** approval — so what an approver signed off on and what ran could, in principle, differ.
+
+**Four commits, one seam apiece:**
+
+1. `IApiCallExecutor#resolve` — builds the request `execute` would send, without sending it. Deliberately weaker than `execute`: it skips `preRequest.propertyInstructions` because those write to conversation memory and previewing a call must never do that, so a call that has them comes back with no fingerprint rather than one that doesn't match what execution will actually build. Shares one redaction definition (`RequestRedactor`, extracted from `ApiCallExecutor`'s private scrub) between the conversation-memory debug record and the approval preview, so the two paths cannot drift apart on what counts as a credential.
+2. Gate time: each gated httpcall tool is resolved, and a redacted preview plus a SHA-256 fingerprint are persisted on the pause (`PendingToolCall.requestPreview` / `.requestFingerprint`). The fingerprint deliberately hashes the **redacted** request, not the live one — `ApiCallExecutor` resolves `${caller:token}` into `Authorization`, the approver is routinely a different person than whoever's turn raised the pause, and fingerprinting the live header would mismatch on every cross-user approval (the normal case), which would just get the check disabled. Canonicalization is length-prefixed rather than delimiter-joined, so a body containing a crafted newline cannot impersonate an extra header field and collide.
+3. Resume time: an approved, pinned call is re-resolved and refused — synthetic `NOT_EXECUTED`, audited as `hitl.tool.request_changed` (tool + callId + reason, never the request) — if the fingerprint moved. This is the actual enforcement; everything before it was groundwork. Three situations fail *closed* rather than being waved through: the tool vanished from the workflow across the pause, re-resolution throws, or the call's config gained `preRequest.propertyInstructions` mid-pause. "Cannot verify" is a different answer than "unchanged" — treating it as the latter would make reconfiguring an agent while a human decides the way around the guard.
+4. `eddi.operator.write.approval{decision=approved|rejected|timeout}` — the rubber-stamping signal the plan's metrics table calls for, emitted the instant a gated call's verdict is resolved regardless of what happens to it afterwards. `timeout` is its own bucket (`decidedBy == "system:timeout"`, from `HitlTimeoutHandler`) rather than folded into `approved`/`rejected` — an unattended auto-approval inflating "approved" would defeat the point of the metric.
+
+**Two metrics the backend cannot honestly emit itself.** `eddi.operator.canary` (+`.duration`) and `eddi.operator.gate.verified` describe facts the Manager establishes client-side — the write canary is a synthetic conversation it drives in the browser, gate verification is it re-reading every version of the operator agent document — and this codebase has no first-class notion of "the operator" to hang a server-side event on. `POST /administration/operator/{canary-result,gate-status}` (`eddi-admin`) exists purely to relay those already-established facts onto `/q/metrics`, so on-call doesn't need a Manager tab open. **Not a verification endpoint** — a report is trusted at face value, which is why it sits behind the same tier that can provision the operator at all. The gauge defaults to 0 before any report arrives, which is indistinguishable from "activated, and broken"; that ambiguity is real and this signal alone doesn't resolve it.
+
+**Verification.** Full `mvnw validate` + `mvnw test` run checked against the documented environmental baseline (no-network loopback failures in `Web*ToolTest`); none of the touched classes appear in the failure list. The fingerprint discrimination properties (method/URI/query/body/header changes each move the hash; header casing, ordering, and redacted-credential values do not) and the enforcement decision (pinned+changed → refused; unpinned, amended, or matching → proceeds; unresolvable → fails closed) are both covered with dedicated unit tests. Four mutations applied against the enforcement path, each confirmed to kill exactly the tests guarding that branch; one applied against the timeout-tagging logic, confirmed to kill only the two timeout tests and leave approved/rejected untouched.
+
+Documented in [`docs/hitl.md`](hitl.md) (new §"Request pinning — approval binds to a request, not a tool name"; Operations metrics list extended).
+
+**What's left before `WRITE_ENDPOINTS` can actually be populated (Manager-side, not started here):** the write canary itself (provoke a real gated write, assert the pause names the expected tool, reject it so nothing executes), populating the four curated write endpoints, real `read_write` scope selection in the activation UI (currently pinned to `read_only`), and rendering this commit's server-side preview in the approval banner in place of the client-side `operationId` reconstruction it was always labelled as a stand-in for.
+
+---
+
 ## 🎚️ feat(hitl): per-endpoint approval friction (2026-08-01)
 
 **Repo:** EDDI (`feat/operator-write-capability`)
