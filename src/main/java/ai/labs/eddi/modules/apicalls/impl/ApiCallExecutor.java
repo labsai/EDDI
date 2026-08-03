@@ -288,8 +288,17 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     body == null ? null : body.toString(),
                     !hasPreRequestPropertyInstructions(call));
         } catch (Exception e) {
-            LOGGER.error(e.getLocalizedMessage(), e);
-            throw new LifecycleException(e.getLocalizedMessage(), e);
+            // Type only — not the message, not the throwable. Unlike execute(),
+            // this runs to build an APPROVAL PREVIEW, and a failure here comes out
+            // of template rendering or request building, whose messages quote the
+            // material being rendered (Jackson appends the offending source
+            // verbatim). Logging it would put the credential in the log of the very
+            // operation whose job is to show the approver a redacted request.
+            //
+            // The cause is still attached to the thrown exception for a caller that
+            // needs it; both callers deliberately log only its type.
+            LOGGER.errorf("Could not resolve the request for ApiCall '%s' (%s)", call.getName(), e.getClass().getSimpleName());
+            throw new LifecycleException("could not resolve the request for ApiCall '" + call.getName() + "'", e);
         }
     }
 
