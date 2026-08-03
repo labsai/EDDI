@@ -857,6 +857,13 @@ public class RestGroupConversation implements IRestGroupConversation {
                 // Not terminal — the discussion continues past the skipped member.
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_MEMBER_PAUSE_SKIPPED, toJson(event));
             }
+
+            @Override
+            public void onDecisionReached(GroupConversationEventSink.DecisionReachedEvent event) {
+                // Not terminal — a decision can be reached mid-discussion (e.g. a
+                // debate verdict before a later synthesis phase).
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_DECISION_REACHED, toJson(event));
+            }
         };
     }
 

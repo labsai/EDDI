@@ -44,6 +44,12 @@ public final class GroupConversationEventSink {
      * member turn is recorded SKIPPED and its stranded pause is cancelled.
      */
     public static final String EVENT_MEMBER_PAUSE_SKIPPED = "member_pause_skipped";
+    /**
+     * A {@link GroupConversation.DecisionRecord} was set on the discussion (Wave 0,
+     * F3). No feature fires this yet — I3 (verdicts), I11 (agreements), I14 (votes)
+     * and I18 (awards) are the eventual producers.
+     */
+    public static final String EVENT_DECISION_REACHED = "decision_reached";
 
     // --- Event payloads ---
 
@@ -109,5 +115,12 @@ public final class GroupConversationEventSink {
      * the stranded member pause is cancelled.
      */
     public record MemberPauseSkippedEvent(String agentId, String displayName, int phaseIndex, String phaseName, String reason) {
+    }
+
+    /**
+     * Emitted when a {@link GroupConversation.DecisionRecord} is set on the
+     * discussion (Wave 0, F3).
+     */
+    public record DecisionReachedEvent(GroupConversation.DecisionRecord decision) {
     }
 }

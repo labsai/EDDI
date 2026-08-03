@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import org.jboss.logging.Logger;
@@ -262,6 +263,32 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
         if (event.feedback() != null && !event.feedback().isBlank()) {
             sb.append(String.format("> %s\n", event.feedback().replace("\n", "\n> ")));
+        }
+
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, sb.toString().stripTrailing());
+    }
+
+    @Override
+    public void onDecisionReached(GroupConversationEventSink.DecisionReachedEvent event) {
+        var decision = event.decision();
+        // NONE means the producing feature's own parse fell back rather than
+        // leaving the record unset (see DecisionRecord's Javadoc) — that failure
+        // is the producing feature's own concern, not something to surface here.
+        if (decision == null || decision.type() == DecisionType.NONE) {
+            return;
+        }
+
+        var sb = new StringBuilder();
+        sb.append(String.format("⚖️ *Decision reached* (%s)\n", decision.type()));
+        if (decision.outcome() != null && !decision.outcome().isBlank()) {
+            sb.append(String.format("> %s\n", decision.outcome()));
+        }
+        if (decision.winner() != null && !decision.winner().isBlank()) {
+            sb.append(String.format("Winner: *%s*\n", decision.winner()));
+        }
+        if (decision.dissents() != null && !decision.dissents().isEmpty()) {
+            sb.append(String.format("Dissents: %d\n", decision.dissents().size()));
         }
 
         String threadTs = expandedMode ? null : userThreadTs;

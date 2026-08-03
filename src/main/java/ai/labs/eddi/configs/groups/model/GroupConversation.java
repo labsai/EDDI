@@ -50,6 +50,15 @@ public class GroupConversation {
     private int currentPhaseIndex;
     private String currentPhaseName;
     private String synthesizedAnswer;
+    /**
+     * Typed outcome of the discussion (Wave 0, F3) — verdict, vote, agreement or
+     * award. {@code null} until a decision-producing feature (I3 verdicts, I11
+     * agreements, I14 votes, I18 awards) sets it; none of those exist yet, so this
+     * is {@code null} for every discussion today. {@link #synthesizedAnswer} is
+     * always prose; {@code decision} is the structured form of a conclusion when
+     * one of those features ran.
+     */
+    private DecisionRecord decision;
     private int depth;
     /** Current discussion round (1-based). Incremented by continueDiscussion(). */
     private int round = 1;
@@ -231,6 +240,83 @@ public class GroupConversation {
     public record ResumePoint(int phaseIdx, int repeatIdx, int speakerIdx, String pauseKind) {
     }
 
+    /**
+     * What kind of conclusion a {@link DecisionRecord} represents (Wave 0, F3).
+     */
+    public enum DecisionType {
+        /** A debate judged to a winner (I3). */
+        VERDICT,
+        /** A tallied ballot (I14). */
+        VOTE,
+        /** A negotiated compromise both sides accepted (I11). */
+        AGREEMENT,
+        /** A task/turn awarded by bid (I18). */
+        AWARD,
+        /** No structured decision was produced — prose-only conclusion. */
+        NONE
+    }
+
+    /**
+     * One member's recorded disagreement with a decision (Wave 0, F3).
+     *
+     * @param agentId
+     *            the dissenting member
+     * @param displayName
+     *            human-readable name, for display without a roster lookup
+     * @param position
+     *            the member's own short statement of where they disagree
+     */
+    public record Dissent(String agentId, String displayName, String position) {
+    }
+
+    /**
+     * Typed outcome of a discussion, or of one decision-producing phase within it
+     * (Wave 0, F3). Today the only conclusion a discussion produces is
+     * {@link #synthesizedAnswer}, which is always prose — callers that want to
+     * branch on a winner, a tally, or a vote count have to parse it. This is the
+     * structured alternative, populated by whichever decision-producing feature ran
+     * (I3 verdicts, I11 agreements, I14 votes, I18 awards); {@code null} until one
+     * of those exists.
+     * <p>
+     * A parse failure in the producing feature's own judgment/tally step must never
+     * fail the discussion — the convention each of those features follows is to
+     * fall back to {@code type=NONE} with {@link #raw} set to the unparsed text,
+     * rather than to leave {@link GroupConversation#getDecision()} {@code null} and
+     * lose the source material.
+     *
+     * @param type
+     *            what kind of decision this is
+     * @param outcome
+     *            human-readable one-liner summarizing the result, for display
+     *            without interpreting {@link #tally}
+     * @param winner
+     *            the winning side/option/agent, if this decision has one;
+     *            {@code null} for a tie, a non-competitive agreement, or
+     *            {@code type=NONE}
+     * @param tally
+     *            nullable structured detail specific to {@link #type} — option to
+     *            weight for {@code VOTE}, side to score for {@code VERDICT}, bidder
+     *            to bid for {@code AWARD}
+     * @param dissents
+     *            members who disagreed with this decision; empty (never
+     *            {@code null}) when nobody dissented or dissent-recording is off
+     * @param method
+     *            free-text tag naming the mechanism that produced this decision,
+     *            e.g. {@code "debate-judgment"}, {@code "majority"},
+     *            {@code "approval"}, {@code "negotiation"}, {@code "arbitration"},
+     *            {@code "bid-award"} — not an enum, since new methods are expected
+     *            to be added by later features without touching this record
+     * @param decidedAtPhase
+     *            name of the phase that produced this decision
+     * @param raw
+     *            the unparsed source text the producing feature judged/tallied,
+     *            kept for audit even when {@link #type} is {@code NONE} because
+     *            parsing failed
+     */
+    public record DecisionRecord(DecisionType type, String outcome, String winner, Map<String, Object> tally, List<Dissent> dissents,
+            String method, String decidedAtPhase, String raw) {
+    }
+
     public enum GroupConversationState {
         CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED,
         /** Discussion was cancelled before completion — HITL foundation (Phase 9b). */
@@ -340,6 +426,14 @@ public class GroupConversation {
 
     public void setSynthesizedAnswer(String synthesizedAnswer) {
         this.synthesizedAnswer = synthesizedAnswer;
+    }
+
+    public DecisionRecord getDecision() {
+        return decision;
+    }
+
+    public void setDecision(DecisionRecord decision) {
+        this.decision = decision;
     }
 
     public int getDepth() {

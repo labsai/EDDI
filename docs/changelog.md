@@ -195,6 +195,22 @@ Second Wave 0 foundation. Today, every group HITL pause is a phase/task boundary
 
 ---
 
+## 🧩 feat(groups): DecisionRecord (Wave 0, F3) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Third Wave 0 foundation. Every group discussion today concludes in prose (`synthesizedAnswer`) — a caller that wants to branch on a winner, a vote tally, or an award has to parse it. F3 adds the typed alternative: a `DecisionRecord` field, surfaced everywhere a discussion's state already surfaces. Like F1 and F2, no producer sets one yet — I3 (verdicts), I11 (agreements), I14 (votes) and I18 (awards) are the eventual writers.
+
+**`GroupConversation.DecisionRecord`** — nested record, same placement convention as `TranscriptEntry` and `ResumePoint` — `{DecisionType, outcome, winner, tally, dissents, method, decidedAtPhase, raw}`. `DecisionType` is `VERDICT | VOTE | AGREEMENT | AWARD | NONE`; `method` is a free-text tag (`"debate-judgment"`, `"majority"`, ...) rather than an enum, deliberately, so later features can name new mechanisms without touching this record. `NONE` is not "absent" — it is the documented fallback every producing feature is expected to use when its own judgment/tally parse fails, with `raw` holding the unparsed text for audit, so a parse failure never has to choose between losing the source material and leaving the field silently `null`.
+
+**Surfaced for free in two of the three places.** `RestGroupConversation.readGroupConversation` and `McpGroupTools.read_group_conversation` both already return the whole `GroupConversation` via direct Jackson serialization — a getter is all either needed. The third surface, the SSE stream, needed the usual four-part addition: `EVENT_DECISION_REACHED` constant, `DecisionReachedEvent` payload record, a default no-op `onDecisionReached` on `GroupDiscussionEventListener` (so neither existing implementer breaks), and the SSE consumer override in `RestGroupConversation`'s streaming listener — same shape as every other event in the sink, copied from `onSynthesisStart`.
+
+**Slack gets a real (not stub) `onDecisionReached` override**, styled after `onTaskVerified`'s informational post rather than the heavier HITL approval Block Kit card — a decision is news, not a request. Skips posting for `type=NONE`: that is the producing feature's own parse failure, not something worth surfacing to a channel that can't do anything about it.
+
+11 new tests: `GroupConversationTest` covers the new field's default/round-trip plus `DecisionRecord`/`Dissent` accessors and the `DecisionType` value set; `SlackGroupDiscussionListenerTest` covers the formatted post (type, outcome, winner, dissent count), the `NONE`-skips-posting guard, and a null-decision defensive case — mutation-checked by disabling the guard, which fails exactly those two tests (the null case as an actual `NullPointerException`, confirming the guard is load-bearing, not decorative). 1030 tests green across the full group, HITL and Slack batteries (27 unrelated `SlackWebApiClientTest` failures are a pre-existing sandbox limitation — that class opens a real loopback `HttpClient` in `setUp`, which this environment cannot do; untouched by this change). Checkstyle unchanged.
+
+---
+
 ## 🧩 refactor(orchestrator): BuiltinToolsProvider + close the three SPI gaps (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
