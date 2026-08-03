@@ -61,6 +61,24 @@ public class RequestRedactor {
      * reference and a resolved caller token are additionally matched by value —
      * otherwise placing either in an arbitrarily named header would defeat the
      * redaction entirely.
+     * <p>
+     * The value-shape scan is the last step, and it is the one that closes the
+     * asymmetry this class kept for a while: a query parameter and a body both ran
+     * through {@link SecretRedactionFilter}, and a header did not. So
+     * {@code X-Client-Auth: Bearer eyJhbGciOi…} — a name matching none of the
+     * conventional patterns, a value that is not a vault reference and not the
+     * current caller's token — was stored and shown to an approver in full, while
+     * the identical string one field away in the body was caught. The shape is
+     * recognisable and the filter already existed; only the wiring was missing.
+     * <p>
+     * Note this makes header redaction slightly more aggressive, and headers are
+     * deliberately fingerprinted in their REDACTED form (see
+     * {@link ResolvedRequest}). Two different secret-shaped values under the same
+     * header therefore hash alike — but that is the pre-existing, documented
+     * trade-off for headers, not a new one: a caller token legitimately differs
+     * between requester and approver, so header values were already excluded from
+     * change detection. Gate time and resume time run this same code, so they
+     * continue to agree.
      */
     public String redactHeaderValue(String headerName, Object headerValue) {
         if (isSensitiveHeaderName(headerName)) {
@@ -70,7 +88,7 @@ public class RequestRedactor {
             if (value.contains("${vault:") || value.contains("${eddivault:")) {
                 return REDACTED;
             }
-            return callerIdentityResolver.redactCallerToken(value, REDACTED);
+            return redactBody(callerIdentityResolver.redactCallerToken(value, REDACTED));
         }
         return headerValue == null ? null : headerValue.toString();
     }
