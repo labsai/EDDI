@@ -138,9 +138,71 @@ public class RequestRedactor {
     }
 
     /**
-     * Redact the {@link IRequest#KEY_HEADERS}, {@link IRequest#KEY_QUERY_PARAMS}
-     * and {@link IRequest#KEY_BODY} entries of a request map, as produced by
-     * {@link IRequest#toMap()}.
+     * Redact a request URI.
+     * <p>
+     * The URI was the one field of a resolved request that carried no redaction of
+     * any kind, which made it the leak the rest of this class exists to prevent: a
+     * credential templated into the path —
+     * {@code "/v1/invoices?api_key=${vault:k}"} — is resolved to its live value by
+     * {@code ApiCallExecutor#buildRequest} before the URI is ever built, and the
+     * same value then appeared REDACTED in {@code queryParams} and PLAINTEXT in
+     * {@code uri}, adjacent fields of one JSON object shown to an approver who is
+     * routinely not the person whose turn raised the pause.
+     * <p>
+     * Two passes, because a URI has two places to hide one:
+     * <ul>
+     * <li>the query string is split and each value run through
+     * {@link #redactQueryParamValue} — the SAME function the {@code queryParams}
+     * map uses, so the two views of one credential cannot disagree;</li>
+     * <li>whatever remains (scheme, userinfo, host, path) goes through
+     * {@link #redactBody}'s value-shape scan, which catches
+     * {@code https://user:sk-…@host} and a key segment inside a path.</li>
+     * </ul>
+     * <p>
+     * Static and null-tolerant for the same reason as {@link #redactBody}:
+     * {@link ResolvedRequest#of} applies it without an executor, keeping
+     * "fingerprint the raw, store the redacted" resolved in exactly one place.
+     */
+    public static String redactUri(String uri) {
+        if (uri == null) {
+            return null;
+        }
+        int queryStart = uri.indexOf('?');
+        if (queryStart < 0) {
+            return redactBody(uri);
+        }
+        String beforeQuery = redactBody(uri.substring(0, queryStart));
+        String query = uri.substring(queryStart + 1);
+        // Preserve the fragment: it is not a query parameter and splitting on '&'
+        // would otherwise fold it into the last value.
+        String fragment = "";
+        int fragmentStart = query.indexOf('#');
+        if (fragmentStart >= 0) {
+            fragment = redactBody(query.substring(fragmentStart));
+            query = query.substring(0, fragmentStart);
+        }
+        var redactedQuery = new StringBuilder();
+        for (String pair : query.split("&", -1)) {
+            if (!redactedQuery.isEmpty()) {
+                redactedQuery.append('&');
+            }
+            int eq = pair.indexOf('=');
+            if (eq < 0) {
+                // A valueless flag carries no credential to redact, but could still
+                // BE one (?sk-live-…), so it is shape-scanned like anything else.
+                redactedQuery.append(redactBody(pair));
+                continue;
+            }
+            String name = pair.substring(0, eq);
+            redactedQuery.append(name).append('=').append(redactQueryParamValue(name, pair.substring(eq + 1)));
+        }
+        return beforeQuery + "?" + redactedQuery + fragment;
+    }
+
+    /**
+     * Redact the {@link IRequest#KEY_URI}, {@link IRequest#KEY_HEADERS},
+     * {@link IRequest#KEY_QUERY_PARAMS} and {@link IRequest#KEY_BODY} entries of a
+     * request map, as produced by {@link IRequest#toMap()}.
      * <p>
      * Each entry is REPLACED with a redacted copy rather than rewritten in place.
      * That distinction is load-bearing for the query parameters:
@@ -157,6 +219,9 @@ public class RequestRedactor {
         // The KEY_* constants, not string literals: this map's shape is
         // IRequest#toMap's contract, and a redactor that spells the keys itself is
         // one rename away from silently redacting nothing.
+        if (requestMap.get(IRequest.KEY_URI) instanceof String uri) {
+            requestMap.put(IRequest.KEY_URI, redactUri(uri));
+        }
         if (requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> headers) {
             requestMap.put(IRequest.KEY_HEADERS, redactHeaders((Map<String, ?>) headers));
         }

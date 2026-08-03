@@ -78,8 +78,13 @@ public record ResolvedRequest(
 
         var sortedQuery = sorted(queryParams);
         var sortedHeaders = sortedByLowercasedName(redactedHeaders);
+        // Fingerprint the RAW uri, store the REDACTED one — the same order, and for
+        // the same reason, as the body below: two different credentials in the same
+        // query position must not collapse to one marker before hashing, or swapping
+        // one for the other would pass the pre-execution re-check as "unchanged".
         String fingerprint = fingerprintable ? fingerprintOf(method, uri, sortedQuery, sortedHeaders, rawBody) : null;
-        return new ResolvedRequest(method, uri, displayQuery(sortedQuery), sortedHeaders, RequestRedactor.redactBody(rawBody), fingerprint);
+        return new ResolvedRequest(method, RequestRedactor.redactUri(uri), displayQuery(sortedQuery), sortedHeaders,
+                RequestRedactor.redactBody(rawBody), fingerprint);
     }
 
     /** Whether this request was pinned to a fingerprint at gate time. */

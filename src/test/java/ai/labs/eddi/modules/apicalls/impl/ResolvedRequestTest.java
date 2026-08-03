@@ -300,6 +300,50 @@ class ResolvedRequestTest {
         }
 
         @Test
+        void aCredentialInTheURIItselfIsRedacted() {
+            // The leak this case exists for. A credential templated into an
+            // httpcall's path is resolved to its live value BEFORE the URI is
+            // built, so it arrives here as plaintext. It was previously redacted
+            // in queryParams and shown verbatim in uri — the same secret, two
+            // adjacent fields of one JSON object handed to an approver.
+            var resolved = ResolvedRequest.of("GET", "https://x/y?api_key=" + KEY, Map.of(), Map.of(), null, true);
+
+            assertFalse(resolved.uri().contains(KEY), resolved.uri());
+            assertTrue(resolved.uri().contains("REDACTED"), resolved.uri());
+            // The rest of the URI must survive — an approver who cannot see which
+            // host and path is being called cannot evaluate the request at all.
+            assertTrue(resolved.uri().startsWith("https://x/y?api_key="), resolved.uri());
+        }
+
+        @Test
+        void aSecretShapedValueAnywhereInTheURIIsRedacted() {
+            // Not only the query string: userinfo and path segments carry them too.
+            var inUserInfo = ResolvedRequest.of("GET", "https://user:" + KEY + "@x/y", Map.of(), Map.of(), null, true);
+            assertFalse(inUserInfo.uri().contains(KEY), inUserInfo.uri());
+
+            var inPath = ResolvedRequest.of("GET", "https://x/keys/" + KEY + "/rotate", Map.of(), Map.of(), null, true);
+            assertFalse(inPath.uri().contains(KEY), inPath.uri());
+        }
+
+        @Test
+        void twoDifferentURICredentialsDoNotShareAFingerprint() {
+            // The uri is hashed RAW and stored REDACTED, exactly like the body and
+            // query — so swapping one credential for another still moves the hash
+            // and is refused by the pre-execution re-check.
+            assertNotEquals(ResolvedRequest.of("GET", "https://x/y?api_key=" + KEY, Map.of(), Map.of(), null, true).fingerprint(),
+                    ResolvedRequest.of("GET", "https://x/y?api_key=" + OTHER_KEY, Map.of(), Map.of(), null, true).fingerprint());
+        }
+
+        @Test
+        void anOrdinaryURIIsLeftIntact() {
+            // Over-redaction is its own failure mode: the method and path are the
+            // first thing an approver reads.
+            var resolved = ResolvedRequest.of("PATCH", "https://eddi.example/descriptorstore/descriptors/abc?version=3",
+                    Map.of(), Map.of(), null, true);
+            assertEquals("https://eddi.example/descriptorstore/descriptors/abc?version=3", resolved.uri());
+        }
+
+        @Test
         void anOrdinaryQueryParameterSurvivesUnredacted() {
             var query = new LinkedHashMap<String, List<String>>();
             query.put("version", List.of("3"));
