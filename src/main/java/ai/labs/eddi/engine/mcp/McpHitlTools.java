@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -169,7 +170,10 @@ public class McpHitlTools {
                     return errorJson("Full approval status is available to approvers only while awaiting approval — "
                             + "use the summary view", "FORBIDDEN", null);
                 }
-                return jsonSerialization.serialize(snapshot);
+                // Same internal-fingerprint strip as the REST surface — this
+                // serializes the identical snapshot object, so leaving it out
+                // here would just move the leak to the other door.
+                return jsonSerialization.serialize(ConversationMemoryUtilities.stripRequestFingerprintsForRead(snapshot));
             }
             Map<String, String> summary = new LinkedHashMap<>();
             summary.put("conversationId", conversationId);

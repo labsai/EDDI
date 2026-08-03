@@ -352,6 +352,45 @@ public class ConversationMemoryUtilities {
         return snapshot;
     }
 
+    /**
+     * Strips the request fingerprints from a snapshot about to be returned in FULL
+     * to an approver.
+     * <p>
+     * {@code approval-status?detail=full} deliberately returns the whole snapshot —
+     * an approver needs the arguments and the request preview — so
+     * {@link #namesOnlyPendingToolCalls} is far too aggressive here. But
+     * {@code requestFingerprint} must not ride along: it is a SHA-256 over a
+     * canonical string that includes the RAW body and RAW query values, i.e.
+     * precisely the credential material {@code RequestRedactor} stripped out of the
+     * preview beside it. Handing an approver both the digest and everything that
+     * went into it except the secret is an offline guessing exercise, which is why
+     * {@code PendingToolCallBatch}, {@code ResolvedRequest} and
+     * {@code docs/hitl.md} all state it is never exposed. This is what makes that
+     * true on this path.
+     * <p>
+     * A read-time projection rather than {@code @JsonIgnore} on the getter:
+     * {@code SerializationCustomizer.configureObjectMapper} is shared with
+     * {@code PersistenceMapperProducer}, so ignoring the field would also drop it
+     * from the PERSISTED document — silently disabling pinning everywhere, since
+     * the fingerprint would no longer survive the pause it exists to guard.
+     * <p>
+     * Mutates the passed snapshot, matching
+     * {@link #redactRawPendingToolCallsForRead}: both operate on a snapshot freshly
+     * loaded for one request, never on shared state.
+     */
+    public static ConversationMemorySnapshot stripRequestFingerprintsForRead(ConversationMemorySnapshot snapshot) {
+        if (snapshot == null || snapshot.getHitlPendingToolCalls() == null
+                || snapshot.getHitlPendingToolCalls().getCalls() == null) {
+            return snapshot;
+        }
+        for (var call : snapshot.getHitlPendingToolCalls().getCalls()) {
+            if (call != null) {
+                call.setRequestFingerprint(null);
+            }
+        }
+        return snapshot;
+    }
+
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(IConversationMemory returnConversationMemory,
                                                                                            Boolean returnDetailed, Boolean returnCurrentStepOnly,
                                                                                            List<String> returningFields) {

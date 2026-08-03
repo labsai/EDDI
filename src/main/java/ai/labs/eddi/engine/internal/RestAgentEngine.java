@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
@@ -434,7 +435,10 @@ public class RestAgentEngine implements IRestAgentEngine {
                                     + "is awaiting approval — use the summary view")
                             .build();
                 }
-                return Response.ok(snapshot).build();
+                // The fingerprint is internal: it digests the RAW body and query
+                // values, which is exactly what the preview beside it redacts.
+                // See ConversationMemoryUtilities#stripRequestFingerprintsForRead.
+                return Response.ok(ConversationMemoryUtilities.stripRequestFingerprintsForRead(snapshot)).build();
             }
             // Bookmark fields describe the pause — suppress them once the
             // conversation left AWAITING_HUMAN so stale fields (e.g. after a
