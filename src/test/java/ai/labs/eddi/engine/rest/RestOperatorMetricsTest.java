@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Validates at the REST boundary, then delegates — the service tests own the
@@ -43,9 +44,12 @@ class RestOperatorMetricsTest {
     }
 
     @Test
-    @DisplayName("a null report body is rejected")
+    @DisplayName("a null report body is rejected, and says so rather than blaming the outcome field")
     void nullCanaryReportIsRejected() {
-        assertThrows(BadRequestException.class, () -> rest.reportCanaryResult(null));
+        // A caller who sent no body should not be sent looking at a field they
+        // never supplied — the gate-status endpoint already words this correctly.
+        var e = assertThrows(BadRequestException.class, () -> rest.reportCanaryResult(null));
+        assertTrue(e.getMessage().contains("body"), e.getMessage());
     }
 
     @Test

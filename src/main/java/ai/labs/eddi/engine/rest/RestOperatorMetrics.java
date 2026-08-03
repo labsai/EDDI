@@ -29,7 +29,12 @@ public class RestOperatorMetrics implements IRestOperatorMetrics {
 
     @Override
     public Response reportCanaryResult(OperatorCanaryReport report) {
-        if (report == null || !OperatorMetricsService.isValidOutcome(report.outcome())) {
+        // Distinguished, not collapsed: telling a caller who sent no body that its
+        // "outcome" is wrong sends them looking at a field they never sent.
+        if (report == null) {
+            throw new BadRequestException("request body is required");
+        }
+        if (!OperatorMetricsService.isValidOutcome(report.outcome())) {
             throw new BadRequestException("outcome must be one of: pass, fail, unknown");
         }
         operatorMetricsService.recordCanaryResult(report.outcome(), report.durationMs());
