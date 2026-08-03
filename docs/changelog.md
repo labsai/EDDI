@@ -5,6 +5,32 @@
 
 ---
 
+## ✨ feat(groups): Agent-writable shared task list (I5) (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+The shared task list was written only by the PLAN phase and by config, so work an agent *discovers* while executing — a missing migration, an untested edge case — could only be described in prose and hoped for. Two tools (`addGroupTask`, `listGroupTasks`) let a member file it, and because the wave loop already re-queries `findExecutableTasks()` every wave, a filed task flows into execution with **zero scheduler changes**.
+
+**Two tools, not four.** No claim or complete tool: the wave loop owns every task-state transition, and a second writer racing it would corrupt the state machine that decides what runs next. Filing is the only agent-side write.
+
+**Off by default, and *absent* rather than refusing when off.** `GroupTaskConfig {allowAgentTaskCreation=false, maxAgentAddedTasksPerDiscussion=20, maxPerTurn=3}`. `GroupTaskToolsProvider` (R2's SPI) assembles the tools only on the positive case — a live group discussion whose config explicitly opts in. Every ambiguous case fails closed: no group conversation id, discussion not live, config absent, store unreadable. A tool that is not assembled costs no prompt tokens and cannot be argued with; one that exists and always says no invites retries.
+
+**Writes the live instance, never the store.** The loop persists the whole document after each phase, so a tool writing through its own store call would be silently clobbered by the next stale-snapshot write. F1's `LiveDiscussionRegistry` resolves the in-memory instance the loop is holding — which is also why an unregistered (paused or finished) discussion refuses the write instead of pretending to accept it.
+
+**Validation, cycle detection and insert happen under one lock.** `SharedTaskList.addAgentTask` holds the monitor across the whole check-then-act sequence, because a PARALLEL phase runs every speaker at once: validating outside the lock would let two callers both pass a duplicate-subject check, or both pass a cycle check that only the pair of them together violates. Cycle detection needs the candidate already inserted, so the insert happens first and is rolled back on a cycle — sound only because nobody else can observe the intermediate state.
+
+**`assignToRole` assigns at insert, not after.** Between an insert and a follow-up `assignTask`, the task is PENDING and unowned — `findExecutableTasks()` would hand it to a concurrent wave, which then assigns it to whoever the loop picks, silently discarding the owner the filing agent asked for. Role resolution reuses `TaskForceEngine`'s existing resolver (extracted to a static entry point, one implementation, so loop-assignment and filed-assignment cannot drift). `"ALL"` and omission deliberately do *not* round-robin here: round-robin keys off a task index the loop assigns, and a filed task has no position in the plan.
+
+**Rejections are sentences aimed at the model**, because that is who reads them — duplicate subject, unknown dependency (refused, not dropped: filing without the dependency schedules the task immediately, the opposite of what was asked), circular dependency, oversized subject/description, and either cap. A rejected call does not consume the per-turn budget, or one malformed argument would silence the rest of the turn.
+
+**`TaskItem` gained `createdByAgentId`** as a 14th component, carried through all 10 positional mutator constructions. Missing one would have erased the author the moment the loop assigned the task — and since the discussion cap counts exactly that field, the cap would have silently reset itself as tasks progressed. A test walks a filed task through assign → start → complete → verify asserting attribution survives each.
+
+Caps are independent by design: `maxPerTurn` bounds a runaway single turn, `maxAgentAddedTasksPerDiscussion` bounds slow drift across a long one, and the discussion cap counts only agent-filed tasks so a large planned backlog does not exhaust it.
+
+New: `GroupTaskTools`, `GroupTaskToolsProvider`, `SharedTaskList.addAgentTask`, `AgentGroupConfiguration.GroupTaskConfig`, plus an "Agent-filed tasks" section in `docs/group-conversations.md`. 33 tests across `GroupTaskToolsTest` and `GroupTaskToolsProviderTest`; 16 mutation checks.
+
+---
+
 ## 🐛 fix(groups): wouldExceedCeiling disagreed with enforceCeiling at zero (2026-08-03)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

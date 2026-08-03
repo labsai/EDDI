@@ -46,6 +46,8 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.service.tool.ToolExecutor;
 import jakarta.enterprise.context.ApplicationScoped;
+import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
+import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
@@ -250,6 +252,19 @@ class AgentOrchestrator implements IAgentOrchestrator {
 
     @Inject
     volatile AttachmentTextExtractor attachmentTextExtractor;
+
+    /**
+     * I5's two dependencies, field-injected rather than constructor-injected for
+     * the same reason as the stores above: the orchestrator is constructed directly
+     * by a large number of test classes, and widening the constructor would touch
+     * every one. {@code GroupTaskToolsProvider} treats either being null as "no
+     * task tools", which is also what a non-group turn means.
+     */
+    @Inject
+    volatile LiveDiscussionRegistry liveDiscussionRegistry;
+
+    @Inject
+    volatile IAgentGroupStore agentGroupStore;
 
     /**
      * Test seam for supplying the attachment services to a directly-constructed
@@ -614,6 +629,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         // failing source costs the turn only its own tools.
         var contextual = contextualToolsProvider();
         merger.addAll(List.of(builtinToolsProvider, contextual, dynamicAgentToolsProvider(),
+                new GroupTaskToolsProvider(liveDiscussionRegistry, agentGroupStore),
                 new AttachmentToolsProvider(contextual)), ctx);
 
         // LAZY registers every built-in's executor but shows the model only

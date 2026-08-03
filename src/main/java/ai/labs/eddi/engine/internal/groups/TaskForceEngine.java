@@ -976,6 +976,21 @@ public class TaskForceEngine {
      */
     public String resolveTaskAssignment(String assignToRole, List<GroupMember> members,
                                         String moderatorAgentId, int taskIndex) {
+        return resolveAssignee(assignToRole, members, moderatorAgentId, taskIndex);
+    }
+
+    /**
+     * The same resolution, reachable without an engine instance (I5).
+     * <p>
+     * {@code GroupTaskTools} has to answer "who does this role mean?" for an
+     * agent-filed task, and it runs in the tool layer where no engine exists. The
+     * instance method above stays as the call site every existing caller and
+     * characterization test already uses; this is one implementation, not a second
+     * one, so the loop's assignment and a filed task's assignment cannot drift
+     * apart.
+     */
+    public static String resolveAssignee(String assignToRole, List<GroupMember> members,
+                                         String moderatorAgentId, int taskIndex) {
         if (assignToRole == null || "ALL".equalsIgnoreCase(assignToRole)) {
             // Round-robin across non-moderator members (H3 fix)
             List<GroupMember> eligible = members.stream()

@@ -114,6 +114,52 @@ of them is an error:
   want a debate to conclude in plain prose.
 - **A judgment the parser cannot read.** The prose conclusion is kept as-is.
 
+## Agent-filed tasks
+
+Work an agent *discovers* mid-discussion — a missing migration, an untested
+edge case — would otherwise die in prose: the shared task list is written only
+by the PLAN phase and by config. Turning on `taskListConfig` gives members two
+tools, `addGroupTask` and `listGroupTasks`, and a filed task is picked up by the
+next execution wave with no other changes.
+
+```json
+"taskListConfig": {
+  "allowAgentTaskCreation": true,
+  "maxAgentAddedTasksPerDiscussion": 20,
+  "maxPerTurn": 3
+}
+```
+
+**Off by default, and absent rather than refusing when off.** A tool that is not
+assembled costs no prompt tokens and cannot be argued with; one that exists and
+always says no invites retries. The tools appear only when the turn belongs to a
+live group discussion whose config sets `allowAgentTaskCreation: true` — a
+standalone agent, a paused discussion, or an unreadable config all yield no
+tools.
+
+`addGroupTask(subject, description, dependsOnSubjects?, priority?, assignToRole?)`
+
+- **`dependsOnSubjects`** names other tasks by their *subject*, as
+  `listGroupTasks` prints them. An unknown name is refused, not dropped —
+  silently filing a task without its dependency schedules it immediately, which
+  is the opposite of what was asked.
+- **`assignToRole`** takes `"ROLE:Reviewer"` or a member's exact name, and files
+  the task already assigned. Omitting it (or passing `"ALL"`) leaves the task
+  for the wave loop to assign, as it does any other. An unmatched role is
+  refused with the available roles named.
+- Refusals are sentences aimed at the model: duplicate subject, unknown
+  dependency, circular dependency, subject over 200 chars, description over
+  4,000, and either cap being reached.
+
+**No claim or complete tools.** The wave loop owns every task-state transition;
+a second writer racing it would corrupt the state machine that decides what runs
+next. Filing is the only agent-side write.
+
+Both caps are enforced independently: `maxPerTurn` bounds a runaway single turn,
+`maxAgentAddedTasksPerDiscussion` bounds slow drift across a long discussion. The
+discussion cap counts only agent-filed tasks, so a large planned backlog does not
+exhaust it. A rejected call does not consume the per-turn budget.
+
 ## Nested Groups (Group-of-Groups)
 
 Members can be other groups. The sub-group runs its own discussion and its synthesized answer becomes the member's response.

@@ -77,6 +77,74 @@ public class AgentGroupConfiguration {
     private boolean recordDissents;
 
     /**
+     * Whether and how far members may file their own tasks mid-discussion (I5).
+     * {@code null} means the tools are absent entirely, which is also what a
+     * default-constructed {@link GroupTaskConfig} means.
+     */
+    private GroupTaskConfig taskListConfig;
+
+    public GroupTaskConfig getTaskListConfig() {
+        return taskListConfig;
+    }
+
+    public void setTaskListConfig(GroupTaskConfig taskListConfig) {
+        this.taskListConfig = taskListConfig;
+    }
+
+    /**
+     * Governs agent-filed tasks (I5). The task list is otherwise written only by
+     * the PLAN phase and by config, so work an agent <em>discovers</em> while
+     * executing — a missing migration, an untested edge case — dies in prose. The
+     * wave loop already re-queries {@code findExecutableTasks()} each wave, so a
+     * filed task flows into execution with no scheduler changes.
+     * <p>
+     * <b>Off by default, and deliberately so.</b> An LLM that can file work can
+     * file it in a loop; the caps below are the bound. There is no permissive
+     * standalone default anywhere — a discussion that does not opt in never sees
+     * the tools at all.
+     *
+     * @param allowAgentTaskCreation
+     *            master switch. {@code false} (default) means the tools are not
+     *            assembled, not merely rejected at call time — an absent tool costs
+     *            no prompt tokens and cannot be argued with
+     * @param maxAgentAddedTasksPerDiscussion
+     *            ceiling on agent-filed tasks across the whole discussion (default
+     *            20). Non-positive values fall back to the default rather than
+     *            meaning "unlimited": an unbounded write surface for an LLM is
+     *            never the intent behind a mistyped 0
+     * @param maxPerTurn
+     *            ceiling within a single member turn (default 3). Separate from the
+     *            discussion cap because the failure modes differ — a runaway turn
+     *            files twenty tasks in one breath, where a discussion-long drift
+     *            files one per turn for forty turns
+     */
+    public record GroupTaskConfig(boolean allowAgentTaskCreation, int maxAgentAddedTasksPerDiscussion, int maxPerTurn) {
+
+        public static final int DEFAULT_MAX_PER_DISCUSSION = 20;
+        public static final int DEFAULT_MAX_PER_TURN = 3;
+
+        /**
+         * Normalizes at the one choke point every reader passes through, so no consumer
+         * re-derives defaults from a partially-specified config — a JSON naming only
+         * {@code allowAgentTaskCreation} is the common case. Same shape as
+         * {@link ConvergenceConfig}'s compact constructor.
+         */
+        public GroupTaskConfig {
+            if (maxAgentAddedTasksPerDiscussion <= 0) {
+                maxAgentAddedTasksPerDiscussion = DEFAULT_MAX_PER_DISCUSSION;
+            }
+            if (maxPerTurn <= 0) {
+                maxPerTurn = DEFAULT_MAX_PER_TURN;
+            }
+        }
+
+        /** Disabled, with both caps at their defaults. */
+        public GroupTaskConfig() {
+            this(false, DEFAULT_MAX_PER_DISCUSSION, DEFAULT_MAX_PER_TURN);
+        }
+    }
+
+    /**
      * A member of the group. Members can be individual agents or nested groups.
      * <p>
      * For {@code MemberType.GROUP} members, the {@code agentId} field contains the

@@ -67,15 +67,30 @@ public class SharedTaskList {
             boolean verified,
             int priority,
             Instant createdAt,
-            Instant completedAt) {
+            Instant completedAt,
+            String createdByAgentId) {
 
         /**
-         * Convenience constructor for creating a new pending task.
+         * Convenience constructor for creating a new pending task, authored by config
+         * or the PLAN phase rather than by a member.
          */
         public TaskItem(String subject, String description, int priority) {
             this(UUID.randomUUID().toString(), subject, description,
                     TaskStatus.PENDING, null, null, List.of(),
-                    null, null, false, priority, Instant.now(), null);
+                    null, null, false, priority, Instant.now(), null, null);
+        }
+
+        /**
+         * Backward-compatible constructor without {@code createdByAgentId} (I5), for
+         * the ~30 positional call sites that predate it. Attribution defaults to
+         * {@code null}, which reads as "not filed by a member" — the correct meaning
+         * for every one of those sites.
+         */
+        public TaskItem(String id, String subject, String description, TaskStatus status, String assignedAgentId,
+                String assignedDisplayName, List<String> dependsOnIds, String result, String verificationNote,
+                boolean verified, int priority, Instant createdAt, Instant completedAt) {
+            this(id, subject, description, status, assignedAgentId, assignedDisplayName, dependsOnIds,
+                    result, verificationNote, verified, priority, createdAt, completedAt, null);
         }
     }
 
@@ -174,6 +189,15 @@ public class SharedTaskList {
                 .orElse(null);
     }
 
+    /**
+     * Caps on member-authored task text (I5). A subject is an index entry other
+     * members scan; a description is the brief. Both are bounded because an LLM
+     * with a write tool will otherwise paste an entire analysis into one, and the
+     * task list is loaded, re-serialized and re-sent to every subsequent turn.
+     */
+    public static final int MAX_AGENT_TASK_SUBJECT_LENGTH = 200;
+    public static final int MAX_AGENT_TASK_DESCRIPTION_LENGTH = 4000;
+
     // --- Mutation methods ---
 
     /**
@@ -182,6 +206,122 @@ public class SharedTaskList {
     public synchronized TaskItem addTask(TaskItem task) {
         tasks.add(task);
         return task;
+    }
+
+    /**
+     * Either the task that was filed, or the reason it was refused (I5).
+     * <p>
+     * A rejection is not an exception because the caller is an LLM tool: the
+     * {@code reason} is written to be read by the model that just tried, so it can
+     * fix its own call rather than retry the same one.
+     */
+    public record AddTaskResult(TaskItem task, String rejectionReason) {
+
+        public boolean accepted() {
+            return task != null;
+        }
+
+        static AddTaskResult rejected(String reason) {
+            return new AddTaskResult(null, reason);
+        }
+    }
+
+    /**
+     * Files a member-authored task, validating and inserting <em>atomically</em>
+     * (I5).
+     * <p>
+     * The whole check-then-act sequence holds this object's monitor for the same
+     * reason every other mutator here does, and then some: two speakers in a
+     * PARALLEL phase can call this concurrently, and validating outside the lock
+     * would let both pass a duplicate-subject check, or both pass a cycle check
+     * that only the pair of them together violates. Cycle detection in particular
+     * has to see the candidate already inserted — so the insert happens first and
+     * is rolled back if it created a cycle, which is only sound while nobody else
+     * can observe the intermediate state.
+     *
+     * @param dependsOnSubjects
+     *            dependencies named by <em>subject</em>, not id — an LLM filing a
+     *            task has read the list as text and has no reason to know internal
+     *            ids. Unknown subjects are refused rather than dropped: silently
+     *            filing a task with its dependency missing schedules it
+     *            immediately, which is the opposite of what was asked for
+     */
+    public synchronized AddTaskResult addAgentTask(String subject, String description, List<String> dependsOnSubjects,
+                                                   int priority, String createdByAgentId) {
+        return addAgentTask(subject, description, dependsOnSubjects, priority, createdByAgentId, null, null);
+    }
+
+    /**
+     * As above, filing the task already assigned when the caller named an owner
+     * (I5's {@code assignToRole}).
+     * <p>
+     * Assigning here rather than with a follow-up {@link #assignTask} call is not
+     * tidiness: between an insert and a separate assign the task is PENDING and
+     * unowned, so {@code findExecutableTasks()} can hand it to a concurrent
+     * execution wave, which then assigns it to whoever the loop picks — silently
+     * discarding the owner the filing agent asked for. One lock, one visible state.
+     *
+     * @param assignedAgentId
+     *            resolved owner, or {@code null} to leave the task PENDING for the
+     *            wave loop to assign as it would any other
+     */
+    public synchronized AddTaskResult addAgentTask(String subject, String description, List<String> dependsOnSubjects,
+                                                   int priority, String createdByAgentId, String assignedAgentId,
+                                                   String assignedDisplayName) {
+
+        if (subject == null || subject.isBlank()) {
+            return AddTaskResult.rejected("A task needs a subject.");
+        }
+        String trimmedSubject = subject.trim();
+        if (trimmedSubject.length() > MAX_AGENT_TASK_SUBJECT_LENGTH) {
+            return AddTaskResult.rejected("Subject is too long (%d chars, max %d). Put the detail in the description."
+                    .formatted(trimmedSubject.length(), MAX_AGENT_TASK_SUBJECT_LENGTH));
+        }
+        String trimmedDescription = description != null ? description.trim() : "";
+        if (trimmedDescription.length() > MAX_AGENT_TASK_DESCRIPTION_LENGTH) {
+            return AddTaskResult.rejected("Description is too long (%d chars, max %d)."
+                    .formatted(trimmedDescription.length(), MAX_AGENT_TASK_DESCRIPTION_LENGTH));
+        }
+        if (tasks.stream().anyMatch(t -> t.subject() != null && t.subject().equalsIgnoreCase(trimmedSubject))) {
+            return AddTaskResult.rejected("A task with the subject \"%s\" already exists. Add to that one instead of duplicating it."
+                    .formatted(trimmedSubject));
+        }
+
+        List<String> dependsOnIds = new ArrayList<>();
+        if (dependsOnSubjects != null) {
+            for (String dependency : dependsOnSubjects) {
+                if (dependency == null || dependency.isBlank()) {
+                    continue;
+                }
+                String wanted = dependency.trim();
+                TaskItem match = tasks.stream()
+                        .filter(t -> t.subject() != null && t.subject().equalsIgnoreCase(wanted))
+                        .findFirst().orElse(null);
+                if (match == null) {
+                    return AddTaskResult.rejected("No task named \"%s\" to depend on. Use listGroupTasks to see the exact subjects."
+                            .formatted(wanted));
+                }
+                dependsOnIds.add(match.id());
+            }
+        }
+
+        var filed = new TaskItem(UUID.randomUUID().toString(), trimmedSubject, trimmedDescription,
+                assignedAgentId != null ? TaskStatus.ASSIGNED : TaskStatus.PENDING,
+                assignedAgentId, assignedDisplayName, List.copyOf(dependsOnIds), null, null, false,
+                priority, Instant.now(), null, createdByAgentId);
+        tasks.add(filed);
+
+        // Cycles are only visible once the candidate is in the graph. Rolling back
+        // is safe here and nowhere else: no other thread can have observed the
+        // insert, because they would need this monitor to look. detectCycles() is
+        // itself synchronized; Java monitors are reentrant, so this is one lock
+        // acquisition, not two.
+        if (!detectCycles().isEmpty()) {
+            tasks.remove(filed);
+            return AddTaskResult.rejected("That would create a circular dependency. Check what \"%s\" depends on."
+                    .formatted(trimmedSubject));
+        }
+        return new AddTaskResult(filed, null);
     }
 
     /**
@@ -198,7 +338,7 @@ public class SharedTaskList {
                 TaskStatus.ASSIGNED, agentId, displayName,
                 existing.dependsOnIds(), existing.result(),
                 existing.verificationNote(), existing.verified(),
-                existing.priority(), existing.createdAt(), existing.completedAt());
+                existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId());
         replaceTask(taskId, updated);
         return updated;
     }
@@ -217,7 +357,7 @@ public class SharedTaskList {
                 TaskStatus.IN_PROGRESS, existing.assignedAgentId(), existing.assignedDisplayName(),
                 existing.dependsOnIds(), existing.result(),
                 existing.verificationNote(), existing.verified(),
-                existing.priority(), existing.createdAt(), existing.completedAt());
+                existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId());
         replaceTask(taskId, updated);
         return updated;
     }
@@ -236,7 +376,7 @@ public class SharedTaskList {
                 TaskStatus.COMPLETED, existing.assignedAgentId(), existing.assignedDisplayName(),
                 existing.dependsOnIds(), result,
                 existing.verificationNote(), existing.verified(),
-                existing.priority(), existing.createdAt(), Instant.now());
+                existing.priority(), existing.createdAt(), Instant.now(), existing.createdByAgentId());
         replaceTask(taskId, updated);
         return updated;
     }
@@ -253,7 +393,7 @@ public class SharedTaskList {
                 newStatus, existing.assignedAgentId(), existing.assignedDisplayName(),
                 existing.dependsOnIds(), existing.result(),
                 note, passed,
-                existing.priority(), existing.createdAt(), existing.completedAt());
+                existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId());
         replaceTask(taskId, updated);
         return updated;
     }
@@ -274,7 +414,7 @@ public class SharedTaskList {
                 TaskStatus.FAILED, existing.assignedAgentId(), existing.assignedDisplayName(),
                 existing.dependsOnIds(), existing.result(),
                 reason, false,
-                existing.priority(), existing.createdAt(), Instant.now());
+                existing.priority(), existing.createdAt(), Instant.now(), existing.createdByAgentId());
         replaceTask(taskId, updated);
         return updated;
     }
@@ -288,7 +428,7 @@ public class SharedTaskList {
             throw new IllegalStateException("submitForApproval '%s': expected IN_PROGRESS but was %s".formatted(taskId, t.status()));
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.AWAITING_APPROVAL,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), result,
-                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt());
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt(), t.createdByAgentId());
         replaceTask(taskId, u);
         return u;
     }
@@ -300,7 +440,7 @@ public class SharedTaskList {
             throw new IllegalStateException("approveTask '%s': expected AWAITING_APPROVAL but was %s".formatted(taskId, t.status()));
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.COMPLETED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
-                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now());
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId());
         replaceTask(taskId, u);
         return u;
     }
@@ -312,7 +452,7 @@ public class SharedTaskList {
             throw new IllegalStateException("rejectTask '%s': expected AWAITING_APPROVAL but was %s".formatted(taskId, t.status()));
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.FAILED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
-                rejectionNote, false, t.priority(), t.createdAt(), Instant.now());
+                rejectionNote, false, t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId());
         replaceTask(taskId, u);
         return u;
     }
@@ -324,7 +464,7 @@ public class SharedTaskList {
             throw new IllegalStateException("resetToAssigned '%s': expected IN_PROGRESS but was %s".formatted(taskId, t.status()));
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.ASSIGNED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
-                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt());
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt(), t.createdByAgentId());
         replaceTask(taskId, u);
         return u;
     }
@@ -350,7 +490,7 @@ public class SharedTaskList {
         }
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.ASSIGNED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), null,
-                reviewerFeedback, false, t.priority(), t.createdAt(), null);
+                reviewerFeedback, false, t.priority(), t.createdAt(), null, t.createdByAgentId());
         replaceTask(taskId, u);
         return u;
     }
