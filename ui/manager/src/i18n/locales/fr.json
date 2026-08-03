@@ -3191,7 +3191,8 @@
         "heading": "Cette requête accorde des capacités supplémentaires",
         "dynamicAgentCreation": "Ce groupe peut créer de nouveaux agents pendant son exécution. Ces agents ne sont pas eux-mêmes soumis à approbation.",
         "dynamicAgentRecruitment": "Ce groupe peut intégrer d'autres agents existants à ses discussions.",
-        "autoApproveOnTimeout": "Les approbations de cette ressource sont accordées automatiquement en cas d'expiration du délai, sans surveillance."
+        "autoApproveOnTimeout": "Les approbations de cette ressource sont accordées automatiquement en cas d'expiration du délai, sans surveillance.",
+        "unchecked": "Le corps était trop long pour être analysé à la recherche d'octrois de capacités — lisez-le en entier avant d'approuver."
       }
     },
     "starters": {

@@ -118,6 +118,54 @@ describe("RequestPreview", () => {
       expect(screen.queryByTestId("request-preview-escalations-call-1")).not.toBeInTheDocument();
     });
 
+    it("says the scan was incomplete when the body was truncated, rather than showing nothing", () => {
+      // The false negative this closes: a body over the preview cap does not
+      // parse, so the scan finds nothing — and an approver reads "no warning"
+      // as "no capability grant". A group config can exceed the cap.
+      renderWithProviders(
+        <RequestPreview
+          preview={preview({ body: '{"name":"board","members":[{"agentId', bodyTruncated: true })}
+          pinned
+          callId="call-1"
+        />,
+      );
+      expect(screen.getByTestId("request-preview-escalation-unchecked-call-1")).toHaveTextContent(
+        /too long to scan/i,
+      );
+    });
+
+    it("does not claim an incomplete scan when the body was not truncated", () => {
+      renderWithProviders(
+        <RequestPreview
+          preview={preview({ body: JSON.stringify({ name: "board" }), bodyTruncated: false })}
+          pinned
+          callId="call-1"
+        />,
+      );
+      expect(
+        screen.queryByTestId("request-preview-escalation-unchecked-call-1"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("prefers the concrete finding over the incomplete-scan note when both could apply", () => {
+      // A truncated body that still yielded a flag: naming the actual grant is
+      // strictly more useful than saying the scan may have missed something.
+      renderWithProviders(
+        <RequestPreview
+          preview={preview({
+            body: JSON.stringify({ dynamicAgents: { enabled: true, allowCreation: true } }),
+            bodyTruncated: true,
+          })}
+          pinned
+          callId="call-1"
+        />,
+      );
+      expect(screen.getByTestId("request-preview-escalations-call-1")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("request-preview-escalation-unchecked-call-1"),
+      ).not.toBeInTheDocument();
+    });
+
     it("announces itself to assistive tech rather than being a silent colour change", () => {
       renderWithProviders(
         <RequestPreview

@@ -3191,7 +3191,8 @@
         "heading": "Esta solicitud otorga capacidades adicionales",
         "dynamicAgentCreation": "Este grupo puede crear nuevos agentes mientras se ejecuta. Esos agentes no requieren aprobación por sí mismos.",
         "dynamicAgentRecruitment": "Este grupo puede incorporar otros agentes existentes a sus discusiones.",
-        "autoApproveOnTimeout": "Las aprobaciones de este recurso se conceden automáticamente al agotarse el tiempo, sin que nadie lo supervise."
+        "autoApproveOnTimeout": "Las aprobaciones de este recurso se conceden automáticamente al agotarse el tiempo, sin que nadie lo supervise.",
+        "unchecked": "El cuerpo era demasiado largo para analizarlo en busca de concesiones de capacidad — léalo completo antes de aprobar."
       }
     },
     "starters": {

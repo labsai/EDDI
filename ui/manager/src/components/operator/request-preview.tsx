@@ -36,6 +36,11 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
   // Above the body, not inside it: the point is that an approver skimming JSON
   // misses exactly these lines.
   const escalations = detectEscalationFlags(preview.body);
+  // A truncated body cannot be scanned to the end — and for THIS warning,
+  // showing nothing would read as "nothing to worry about". A group config can
+  // exceed the preview cap (up to 100 members), which would put a capability
+  // grant past the cut and silently unflagged. Say so instead.
+  const escalationCheckIncomplete = preview.bodyTruncated && escalations.length === 0;
 
   return (
     <div className="mb-1.5 space-y-1" data-testid={`request-preview-${callId}`}>
@@ -93,6 +98,19 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
             ))}
           </ul>
         </div>
+      )}
+      {escalationCheckIncomplete && (
+        <p
+          className="flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] text-amber-700 dark:text-amber-400"
+          data-testid={`request-preview-escalation-unchecked-${callId}`}
+          role="alert"
+        >
+          <ShieldAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          {t(
+            "operator.approval.escalation.unchecked",
+            "The body was too long to scan for capability grants — read it in full before approving.",
+          )}
+        </p>
       )}
       {preview.body != null && preview.body !== "" && (
         <pre

@@ -3185,7 +3185,8 @@
         "heading": "此请求会授予额外能力",
         "dynamicAgentCreation": "该组在运行时可以创建新智能体,而这些智能体本身不受审批门控。",
         "dynamicAgentRecruitment": "该组可以将其他已有智能体纳入其讨论。",
-        "autoApproveOnTimeout": "该资源的审批在超时后会自动通过,无人监督。"
+        "autoApproveOnTimeout": "该资源的审批在超时后会自动通过,无人监督。",
+        "unchecked": "正文过长,无法扫描是否存在权限授予——请在批准前完整阅读。"
       }
     },
     "starters": {

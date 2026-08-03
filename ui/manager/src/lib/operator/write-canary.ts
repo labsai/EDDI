@@ -269,7 +269,8 @@ async function handlePause(
  * agent has no write tool this probe could provoke, and running it anyway
  * would report "unknown" uselessly on every activation.
  *
- * @throws if the canary did not pass, AFTER rollback has already completed.
+ * @throws if the canary did not pass — after rollback, or, if rollback ALSO
+ *         failed, with a message saying so explicitly.
  */
 export async function enforceWriteCanaryGate(
   config: OperatorConfig,
@@ -280,10 +281,24 @@ export async function enforceWriteCanaryGate(
 
   const result = await runOperatorWriteCanary(config, spec, signal);
   if (result.outcome !== "pass") {
-    await resetOperator(config);
+    const failure = `Write canary did not pass (${result.outcome}): ${result.error ?? "no further detail"}.`;
+    try {
+      await resetOperator(config);
+    } catch (rollbackError) {
+      // The one path where the admin MUST act. Letting the rollback error
+      // propagate on its own would surface a bare transport message ("Failed to
+      // fetch") for what is actually "a write-capable operator that just failed
+      // its gate check is still deployed" — the admin would read it as a
+      // retryable blip and never learn the agent is live.
+      const detail = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+      throw new Error(
+        `${failure} Rolling it back ALSO failed (${detail}). The operator is still deployed with ` +
+          "write tools and an unverified gate — remove it manually from the operator screen now.",
+      );
+    }
     throw new Error(
-      `Write canary did not pass (${result.outcome}): ${result.error ?? "no further detail"}. ` +
-        "The operator has been deactivated and removed rather than left deployed with an unverified write gate.",
+      `${failure} The operator has been deactivated and removed rather than left deployed ` +
+        "with an unverified write gate.",
     );
   }
   return result;

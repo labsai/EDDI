@@ -390,4 +390,33 @@ describe("enforceWriteCanaryGate", () => {
 
     await expect(enforceWriteCanaryGate(config(), spec())).rejects.toThrow(/executed without pausing/i);
   });
+
+  it("says the operator is STILL DEPLOYED when the rollback itself fails", async () => {
+    // The one path the admin has to act on. Letting the rollback's own error
+    // propagate would surface a bare transport message for what is actually
+    // "a write-capable operator that failed its gate check is still live" —
+    // read as a retryable blip, and the agent is never removed.
+    serveTurn([
+      taskComplete([
+        { type: "tool_call", tool: "patchDescriptor" },
+        { type: "tool_result", tool: "patchDescriptor", result: '{"status":"ok"}' },
+      ]),
+      doneWith("READY"),
+    ]);
+    server.use(
+      // The DELETE, not the undeploy: resetOperator deliberately tolerates a
+      // failed undeploy (already undeployed is fine — deletion is the point),
+      // so only a failed delete actually leaves the agent standing.
+      http.delete("*/agentstore/agents/:id", () =>
+        HttpResponse.json({ message: "backend down" }, { status: 500 }),
+      ),
+    );
+
+    const error = await enforceWriteCanaryGate(config(), spec()).catch((e: unknown) => e);
+
+    expect(String(error)).toMatch(/still deployed/i);
+    expect(String(error)).toMatch(/remove it manually/i);
+    // The original reason must survive too — the admin needs both facts.
+    expect(String(error)).toMatch(/write canary did not pass/i);
+  });
 });

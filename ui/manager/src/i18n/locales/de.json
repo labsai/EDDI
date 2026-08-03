@@ -3185,7 +3185,8 @@
         "heading": "Diese Anfrage gewährt zusätzliche Berechtigungen",
         "dynamicAgentCreation": "Diese Gruppe darf zur Laufzeit neue Agenten erstellen. Diese Agenten unterliegen selbst keiner Freigabepflicht.",
         "dynamicAgentRecruitment": "Diese Gruppe darf weitere vorhandene Agenten in ihre Diskussionen einbeziehen.",
-        "autoApproveOnTimeout": "Freigaben für diese Ressource werden bei Zeitüberschreitung automatisch erteilt — ohne dass jemand mitschaut."
+        "autoApproveOnTimeout": "Freigaben für diese Ressource werden bei Zeitüberschreitung automatisch erteilt — ohne dass jemand mitschaut.",
+        "unchecked": "Der Body war zu lang, um ihn auf Berechtigungserweiterungen zu prüfen — lesen Sie ihn vor der Freigabe vollständig."
       }
     },
     "starters": {

@@ -3212,7 +3212,8 @@
         "heading": "This request grants further capability",
         "dynamicAgentCreation": "This group may create new agents while it runs. Those agents are not themselves approval-gated.",
         "dynamicAgentRecruitment": "This group may pull other existing agents into its discussions.",
-        "autoApproveOnTimeout": "Approvals for this resource are granted automatically when they time out, with nobody watching."
+        "autoApproveOnTimeout": "Approvals for this resource are granted automatically when they time out, with nobody watching.",
+        "unchecked": "The body was too long to scan for capability grants — read it in full before approving."
       }
     },
     "starters": {
