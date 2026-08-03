@@ -19,7 +19,9 @@ import org.jboss.logging.Logger;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Builds phase-specific input for a group member's turn and decides what
@@ -45,6 +47,21 @@ public class GroupContextBuilder {
 
     public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
                                   GroupMember target) {
+        return buildPhaseInput(phase, speaker, question, transcript, phaseIdx, target, null);
+    }
+
+    /**
+     * @param allMembers
+     *            the full group roster, used only by {@code ARGUE}/{@code
+     *            REBUTTAL} to resolve which transcript entries came from the
+     *            opposing team rather than merely "not me" (see
+     *            {@link #opposingArguments}). {@code null} or empty falls back to
+     *            the not-me filter, which is only correct for a 2-member debate —
+     *            existing callers that never reach those two phase types are
+     *            unaffected either way.
+     */
+    public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
+                                  GroupMember target, List<GroupMember> allMembers) {
 
         String template = phase.inputTemplate() != null ? phase.inputTemplate() : selectDefaultTemplate(phase, transcript, phaseIdx);
 
@@ -105,10 +122,18 @@ public class GroupContextBuilder {
             case ARGUE, REBUTTAL -> {
                 String role = speaker.role();
                 data.put("teamSide", "PRO".equalsIgnoreCase(role) ? "FOR" : "AGAINST");
-                // Opposing arguments (filtered by different speaker, not role label)
+                Set<String> teammateIds = teammateAgentIds(speaker, allMembers);
+                // Opposing arguments — filtered by TEAM (role), not by "any other
+                // speaker" (V6(a), confirmed as a real defect rather than a
+                // hypothetical one: DEBATE's phases select participants via
+                // "ROLE:PRO"/"ROLE:CON", which resolveParticipants resolves against
+                // every member sharing that role, with no cap of one per side. The
+                // old "not me" filter only happened to be correct for exactly 1 PRO
+                // + 1 CON; with 2+ members per side, a PRO speaker saw their own
+                // PRO teammate's arguments folded into "opposingArguments" too.
                 List<Map<String, Object>> opposing = transcript.stream()
                         .filter(e -> (e.type() == TranscriptEntryType.ARGUMENT || e.type() == TranscriptEntryType.REBUTTAL) && e.content() != null)
-                        .filter(e -> !e.speakerAgentId().equals(speaker.agentId())).map(e -> {
+                        .filter(e -> !teammateIds.contains(e.speakerAgentId())).map(e -> {
                             Map<String, Object> a = new LinkedHashMap<>();
                             a.put("speaker", e.speakerDisplayName());
                             a.put("content", e.content());
@@ -263,5 +288,22 @@ public class GroupContextBuilder {
         sb.append("As ").append(speaker.displayName());
         sb.append(", please contribute to this phase of the discussion.");
         return sb.toString();
+    }
+
+    /**
+     * Agent ids sharing {@code speaker}'s role (case-insensitively), including
+     * {@code speaker} itself — "my team" for the purposes of excluding entries from
+     * {@code opposingArguments}. Falls back to just {@code speaker}'s own id when
+     * the roster is unavailable or {@code speaker.role()} is null, which reproduces
+     * the pre-fix "not me" filter exactly for that case.
+     */
+    private static Set<String> teammateAgentIds(GroupMember speaker, List<GroupMember> allMembers) {
+        if (allMembers == null || allMembers.isEmpty() || speaker.role() == null) {
+            return Set.of(speaker.agentId());
+        }
+        return Stream.concat(
+                allMembers.stream().filter(m -> speaker.role().equalsIgnoreCase(m.role())).map(GroupMember::agentId),
+                Stream.of(speaker.agentId()))
+                .collect(Collectors.toUnmodifiableSet());
     }
 }

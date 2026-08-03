@@ -133,6 +133,28 @@ R2 step 2 done — the rewiring the SPI was introduced for. `buildToolSetup` no 
 
 ---
 
+## 🐛 fix(groups): DEBATE opposingArguments team-filter bug (V6(a)) — resolves Wave 0 verify tasks V5-V7 (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Closing the plan's Wave-0-gate verify tasks before starting F1-F6, per §2's own instruction that findings get recorded and, if confirmed, fixed in a separate labeled commit.
+
+**V5 (same-JVM invariant) — confirmed.** `MemberTurnExecutor.executeAgentTurn` calls `conversationService.say(...)` directly, in-process; there is no dispatch boundary between the discussion loop and a member's turn. F1's `LiveDiscussionRegistry` (next) relies on this.
+
+**V6(a) (DEBATE `opposingArguments` team-filter bug) — confirmed and fixed.** `GroupContextBuilder`'s ARGUE/REBUTTAL branch filtered "opposing" transcript entries by `!speakerAgentId.equals(speaker.agentId())` — excluding only the speaker's own entries, not their team's. The comment even flagged it: "filtered by different speaker, not role label." This was correct only by coincidence for the shipped 1-PRO/1-CON preset — but `resolveParticipants`'s `ROLE:PRO`/`ROLE:CON` selector resolves against *every* member sharing that role, with no cap of one per side (`GroupConversationService.resolveParticipants`). A group with 2 PRO + 2 CON members would show a PRO speaker their own PRO teammate's argument folded into `opposingArguments`.
+
+Fixed by resolving each entry's speaker against the full roster and excluding same-role teammates, not just the speaker itself. `buildPhaseInput` gained a `List<GroupMember> allMembers` overload (the roster, threaded from `PhaseExecutionEngine`'s `config.getMembers()`, which all three phase executors already receive); the pre-existing 6-arg overload falls back to the old not-me filter when no roster is available, preserving every existing caller and reflection-pinned test byte-for-byte. A `null` role also falls back to not-me, since there is no team to resolve.
+
+This incidentally resolves the "useless parameter" finding on `PhaseExecutionEngine`'s `config`: threading the roster through gives all three phase executors a real use for it, so the Javadoc explaining why it stayed unused is now simply deleted rather than needed.
+
+**V6(b) (docs/group-conversations.md accuracy) — deferred**, no in-flight session found (`git log --all` shows nothing touching that file since the merge); tracked separately, not gating Wave 0.
+
+**V7 (dynamic tools skipped without whitelist) — already resolved during R2.** `DynamicAgentToolsProvider.contribute()` now gates on `enableBuiltInTools` (fixed in the R2 review pass); the whitelist-vs-no-whitelist asymmetry the plan flagged is preserved verbatim and documented in that class's Javadoc as a deliberate, separately-tracked behavior decision — not silently changed inside a refactor.
+
+4 new regression tests in `GroupContextBuilderTest` (multi-team exclusion, no-roster fallback, null-role fallback, case-insensitive `teamSide`), mutation-checked: reverting to the not-me filter fails exactly the multi-team test. 677 tests green.
+
+---
+
 ## 🧩 refactor(orchestrator): BuiltinToolsProvider + close the three SPI gaps (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

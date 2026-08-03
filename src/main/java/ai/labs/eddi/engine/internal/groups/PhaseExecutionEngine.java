@@ -63,15 +63,6 @@ public class PhaseExecutionEngine {
         this.callerIdentityContext = callerIdentityContext;
     }
 
-    /**
-     * {@code config} is unused here and in {@link #executeParallelPhase}, and stays
-     * in both. The four phase executors share one signature so
-     * {@code executeDiscussion} can dispatch on {@code TurnOrder} without
-     * per-branch argument lists, and {@code executeParallelPhase} is reached
-     * reflectively by {@code GroupConversationServiceConcurrencyTest}. Removing it
-     * from the two that happen not to read it today would break that symmetry for a
-     * lint score — and Wave 2's I2/I12 add config-driven phase behaviour here.
-     */
     public void executeSequentialPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
                                        ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
                                        AtomicInteger turnCounter, int maxTurns)
@@ -85,7 +76,7 @@ public class PhaseExecutionEngine {
                 listener.onSpeakerStart(
                         new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
             }
-            String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null);
+            String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null, config.getMembers());
             TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(entry);
             if (listener != null) {
@@ -151,7 +142,8 @@ public class PhaseExecutionEngine {
         List<CompletableFuture<TranscriptEntry>> futures = batchSpeakers.stream()
                 .map(speaker -> CompletableFuture.supplyAsync(callerIdentityContext.withIdentitySupplying(phaseCaller, () -> {
                     try {
-                        String input = contextBuilder.buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null);
+                        String input = contextBuilder.buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null,
+                                config.getMembers());
                         return memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
                     } catch (MemberTurnCancelledException e) {
                         // The orchestrator stopped waiting for this batch — surface the
@@ -258,7 +250,7 @@ public class PhaseExecutionEngine {
                     listener.onSpeakerStart(
                             new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
                 }
-                String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target);
+                String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target, config.getMembers());
                 TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId(),
                         listener);
                 gc.getTranscript().add(entry);
