@@ -3173,7 +3173,14 @@
       "transcript": "오퍼레이터 대화"
     },
     "approval": {
-      "reconstructedEndpoint": "{{method}} {{path}} (재구성됨)"
+      "reconstructedEndpoint": "{{method}} {{path}} (재구성됨)",
+      "verified": "검증됨",
+      "verifiedTitle": "실제 API 호출 설정에서 확인되었으며, 실행 직전에 다시 확인됩니다 — 그 전에 요청이 변경되면 실행이 거부됩니다.",
+      "previewOnly": "미리보기",
+      "previewOnlyTitle": "이 호출은 실행 전에 추가 설정 단계를 실행하므로 이는 최선의 미리보기입니다 — 실제 요청은 다를 수 있으며 실행 전에 다시 확인되지 않습니다.",
+      "query": "쿼리",
+      "headers": "헤더",
+      "bodyTruncated": "본문은 표시를 위해 잘려서 보여집니다 — 승인은 여전히 전체 요청을 포함합니다."
     },
     "starters": {
       "whatsDeployed": "지금 무엇이 배포되어 있나요?",

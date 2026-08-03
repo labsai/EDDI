@@ -9,8 +9,8 @@ function toolPause(overrides: Partial<ToolCallPauseDetails> = {}): ToolCallPause
   return {
     type: "TOOL_CALL",
     calls: [
-      { callId: "c1", toolName: "sendEmail", source: "mcp", arguments: '{"to":"[REDACTED]"}', argsTruncated: false, gateReason: "mcp:*" },
-      { callId: "c2", toolName: "transfer_funds", source: "builtin", arguments: '{"amount":100}', argsTruncated: false, gateReason: "transfer_*" },
+      { callId: "c1", toolName: "sendEmail", source: "mcp", arguments: '{"to":"[REDACTED]"}', argsTruncated: false, gateReason: "mcp:*", requestPinned: false },
+      { callId: "c2", toolName: "transfer_funds", source: "builtin", arguments: '{"amount":100}', argsTruncated: false, gateReason: "transfer_*", requestPinned: false },
     ],
     executedUngatedCalls: [],
     outcomeUnknown: [],
@@ -301,7 +301,7 @@ describe("ApprovalBanner", () => {
     it("does not offer amendment for a call whose arguments were truncated", () => {
       const details = toolPause({
         calls: [
-          { callId: "c1", toolName: "bulkUpdate", source: "http", arguments: "{…}", argsTruncated: true, gateReason: "http:*" },
+          { callId: "c1", toolName: "bulkUpdate", source: "http", arguments: "{…}", argsTruncated: true, gateReason: "http:*", requestPinned: false },
         ],
       });
       renderWithProviders(
@@ -314,7 +314,7 @@ describe("ApprovalBanner", () => {
     it("surfaces executedUngatedCalls and the outcome-unknown warning", () => {
       const details = toolPause({
         calls: [
-          { callId: "c1", toolName: "sendEmail", source: "mcp", arguments: "{}", argsTruncated: false, gateReason: "mcp:*" },
+          { callId: "c1", toolName: "sendEmail", source: "mcp", arguments: "{}", argsTruncated: false, gateReason: "mcp:*", requestPinned: false },
         ],
         executedUngatedCalls: ["getCurrentDateTime"],
         outcomeUnknown: ["c1"],

@@ -185,6 +185,106 @@ describe("OperatorPage", () => {
     });
   });
 
+  describe("when a turn pauses on a gated tool call", () => {
+    /** Wires the 409-pause path (`send` rejected because the conversation is
+     *  already AWAITING_HUMAN) since it needs no SSE mocking, plus the
+     *  approval-status read that supplies `pauseDetails` — the same two reads
+     *  `useOperatorChat`/`useApprovalStatus` perform for a real streamed pause. */
+    function servePause(calls: unknown[]) {
+      server.use(
+        http.post("*/agents/op-1/start", () => HttpResponse.json({ location: "/agents/conv-1" })),
+        http.post("*/agents/conv-1/stream", () => new HttpResponse(null, { status: 409 })),
+        http.get("*/conversationstore/conversations/simple/conv-1", () =>
+          HttpResponse.json({
+            conversationState: "AWAITING_HUMAN",
+            hitlPauseReason: "Tool approval required",
+            hitlPausedAt: "2026-08-03T10:00:00Z",
+            conversationOutputs: [],
+          }),
+        ),
+        http.get("*/agents/conv-1/approval-status", () =>
+          HttpResponse.json({
+            conversationId: "conv-1",
+            state: "AWAITING_HUMAN",
+            pausedAt: "2026-08-03T10:00:00Z",
+            pauseReason: "Tool approval required",
+            pauseDetails: {
+              type: "TOOL_CALL",
+              calls,
+              executedUngatedCalls: [],
+              outcomeUnknown: [],
+            },
+          }),
+        ),
+      );
+    }
+
+    it("renders the backend's resolved-request preview instead of guessing from the tool name", async () => {
+      serveConfig(activeConfig());
+      serveDeploymentStatus("READY");
+      servePause([
+        {
+          callId: "call-1",
+          toolName: "createAgent",
+          source: "http",
+          arguments: '{"name":"foo"}',
+          argsTruncated: false,
+          gateReason: "http.post:*",
+          requestPinned: true,
+          requestPreview: {
+            method: "POST",
+            uri: "https://eddi.example.com/agentstore/agents",
+            queryParams: {},
+            headers: { "Content-Type": "application/json" },
+            body: '{"name":"foo"}',
+            bodyTruncated: false,
+          },
+        },
+      ]);
+
+      renderWithProviders(<OperatorPage />);
+      await userEvent.type(await screen.findByTestId("operator-input"), "create an agent{enter}");
+
+      expect(await screen.findByTestId("request-preview-call-1")).toBeInTheDocument();
+      expect(screen.getByText(/POST https:\/\/eddi\.example\.com\/agentstore\/agents/)).toBeInTheDocument();
+      // The honest server-verified preview replaces the client-side guess —
+      // both must never render for the same call.
+      expect(screen.queryByTestId("tool-endpoint-call-1")).not.toBeInTheDocument();
+    });
+
+    it("falls back to the client-side reconstruction when a call carries no preview", async () => {
+      serveConfig(activeConfig());
+      serveDeploymentStatus("READY");
+      server.use(
+        http.get("*/openapi", () =>
+          HttpResponse.json({
+            openapi: "3.1.0",
+            paths: { "/agentstore/agents": { post: { operationId: "createAgent" } } },
+          }),
+        ),
+      );
+      servePause([
+        {
+          callId: "call-1",
+          toolName: "createAgent",
+          source: "http",
+          arguments: '{"name":"foo"}',
+          argsTruncated: false,
+          gateReason: "http.post:*",
+          requestPinned: false,
+          requestPreview: null,
+        },
+      ]);
+
+      renderWithProviders(<OperatorPage />);
+      await userEvent.type(await screen.findByTestId("operator-input"), "create an agent{enter}");
+
+      expect(await screen.findByTestId("tool-endpoint-call-1")).toBeInTheDocument();
+      expect(screen.getByText(/POST \/agentstore\/agents \(reconstructed\)/)).toBeInTheDocument();
+      expect(screen.queryByTestId("request-preview-call-1")).not.toBeInTheDocument();
+    });
+  });
+
   describe("when the operator is configured but merely switched off", () => {
     it("offers to turn it back on instead of rebuilding it", async () => {
       serveConfig(activeConfig({ enabled: false }));

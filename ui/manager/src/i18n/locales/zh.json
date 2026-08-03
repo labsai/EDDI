@@ -3173,7 +3173,14 @@
       "transcript": "操作员对话"
     },
     "approval": {
-      "reconstructedEndpoint": "{{method}} {{path}}（重建）"
+      "reconstructedEndpoint": "{{method}} {{path}}（重建）",
+      "verified": "已验证",
+      "verifiedTitle": "根据实际的 API 调用配置解析而来；将在执行前立即重新检查——如果请求在此之前发生变化，执行将被拒绝。",
+      "previewOnly": "预览",
+      "previewOnlyTitle": "此调用会在执行前运行额外的准备步骤,因此这只是尽力而为的预览——实际请求可能有所不同,且不会在执行前重新检查。",
+      "query": "查询参数",
+      "headers": "标头",
+      "bodyTruncated": "正文为便于显示已被截断——审批仍覆盖完整请求。"
     },
     "starters": {
       "whatsDeployed": "现在部署了哪些内容？",

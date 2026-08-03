@@ -32,6 +32,7 @@ import { useApprovalStatus } from "@/hooks/use-hitl";
 import { getErrorMessage } from "@/lib/api-client";
 import { fetchOpenApiSpec, type OperatorConfig } from "@/lib/api/operator";
 import { buildOperationIdIndex, reconstructEndpoint } from "@/lib/operator/reconstruct-endpoint";
+import { RequestPreview } from "@/components/operator/request-preview";
 import type { PendingToolCallView } from "@/lib/api/hitl";
 
 export function OperatorPage() {
@@ -118,6 +119,15 @@ export function OperatorPage() {
 
   const renderCallExtra = useCallback(
     (call: PendingToolCallView) => {
+      // The backend's own resolved-request preview is ground truth — prefer it
+      // over guessing an endpoint client-side from the tool name's operationId.
+      // The client-side reconstruction remains only for a call the backend could
+      // not preview (a non-http tool source, or a pre-fix persisted pause).
+      if (call.requestPreview) {
+        return (
+          <RequestPreview preview={call.requestPreview} pinned={call.requestPinned} callId={call.callId} />
+        );
+      }
       const endpoint = reconstructEndpoint(call.toolName, operationIdIndex);
       if (!endpoint) return null;
       return (

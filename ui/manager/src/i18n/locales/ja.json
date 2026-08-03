@@ -3173,7 +3173,14 @@
       "transcript": "オペレーターとの会話"
     },
     "approval": {
-      "reconstructedEndpoint": "{{method}} {{path}}（再構築）"
+      "reconstructedEndpoint": "{{method}} {{path}}（再構築）",
+      "verified": "検証済み",
+      "verifiedTitle": "実際のAPI呼び出し設定から解決されています。実行直前に再チェックされ、それまでにリクエストが変更されると実行は拒否されます。",
+      "previewOnly": "プレビュー",
+      "previewOnlyTitle": "この呼び出しは実行前に追加のセットアップ手順を実行するため、これはベストエフォートのプレビューです。実際のリクエストは異なる可能性があり、実行前に再チェックされません。",
+      "query": "クエリ",
+      "headers": "ヘッダー",
+      "bodyTruncated": "表示のためボディは切り詰められています — 承認は引き続き完全なリクエストを対象とします。"
     },
     "starters": {
       "whatsDeployed": "今は何がデプロイされていますか？",

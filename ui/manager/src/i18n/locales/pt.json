@@ -3179,7 +3179,14 @@
       "transcript": "Conversa com o operador"
     },
     "approval": {
-      "reconstructedEndpoint": "{{method}} {{path}} (reconstruído)"
+      "reconstructedEndpoint": "{{method}} {{path}} (reconstruído)",
+      "verified": "verificado",
+      "verifiedTitle": "Resolvido a partir da configuração real da chamada à API; reverificado imediatamente antes da execução — se a solicitação mudar antes disso, a execução é recusada.",
+      "previewOnly": "pré-visualização",
+      "previewOnlyTitle": "Esta chamada executa etapas de preparação adicionais antes de ser executada, portanto isto é uma pré-visualização de melhor esforço — a solicitação real pode diferir e não é reverificada antes da execução.",
+      "query": "Consulta",
+      "headers": "Cabeçalhos",
+      "bodyTruncated": "O corpo é exibido truncado para exibição — a aprovação ainda cobre a solicitação completa."
     },
     "starters": {
       "whatsDeployed": "O que está implantado neste momento?",

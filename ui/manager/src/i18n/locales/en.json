@@ -3200,7 +3200,14 @@
       "transcript": "Operator conversation"
     },
     "approval": {
-      "reconstructedEndpoint": "{{method}} {{path}} (reconstructed)"
+      "reconstructedEndpoint": "{{method}} {{path}} (reconstructed)",
+      "verified": "verified",
+      "verifiedTitle": "Resolved from the actual API call config; re-checked immediately before execution — if the request changes before then, execution is refused.",
+      "previewOnly": "preview",
+      "previewOnlyTitle": "This call runs additional setup steps before executing, so this is a best-effort preview — the actual request may differ and is not re-checked before execution.",
+      "query": "Query",
+      "headers": "Headers",
+      "bodyTruncated": "Body shown truncated for display — approval still covers the full request."
     },
     "starters": {
       "whatsDeployed": "What's deployed right now?",

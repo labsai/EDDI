@@ -3179,7 +3179,14 @@
       "transcript": "Conversation avec l'opérateur"
     },
     "approval": {
-      "reconstructedEndpoint": "{{method}} {{path}} (reconstruit)"
+      "reconstructedEndpoint": "{{method}} {{path}} (reconstruit)",
+      "verified": "vérifié",
+      "verifiedTitle": "Résolu à partir de la configuration réelle de l'appel API ; revérifié juste avant l'exécution — si la requête change avant cela, l'exécution est refusée.",
+      "previewOnly": "aperçu",
+      "previewOnlyTitle": "Cet appel exécute des étapes de préparation supplémentaires avant de s'exécuter ; il s'agit donc d'un aperçu au mieux — la requête réelle peut différer et n'est pas revérifiée avant l'exécution.",
+      "query": "Requête",
+      "headers": "En-têtes",
+      "bodyTruncated": "Le corps est affiché tronqué pour l'affichage — l'approbation couvre toujours la requête complète."
     },
     "starters": {
       "whatsDeployed": "Qu'est-ce qui est déployé actuellement ?",

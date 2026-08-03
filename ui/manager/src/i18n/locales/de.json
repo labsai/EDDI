@@ -3173,7 +3173,14 @@
       "transcript": "Operator-Konversation"
     },
     "approval": {
-      "reconstructedEndpoint": "{{method}} {{path}} (rekonstruiert)"
+      "reconstructedEndpoint": "{{method}} {{path}} (rekonstruiert)",
+      "verified": "verifiziert",
+      "verifiedTitle": "Aus der tatsächlichen API-Aufruf-Konfiguration aufgelöst; wird unmittelbar vor der Ausführung erneut geprüft — ändert sich die Anfrage bis dahin, wird die Ausführung verweigert.",
+      "previewOnly": "Vorschau",
+      "previewOnlyTitle": "Dieser Aufruf führt vor der Ausführung zusätzliche Vorbereitungsschritte aus, daher ist dies eine bestmögliche Vorschau — die tatsächliche Anfrage kann abweichen und wird vor der Ausführung nicht erneut geprüft.",
+      "query": "Query",
+      "headers": "Headers",
+      "bodyTruncated": "Der Body wird zur Anzeige gekürzt dargestellt — die Freigabe deckt weiterhin die vollständige Anfrage ab."
     },
     "starters": {
       "whatsDeployed": "Was ist derzeit deployt?",
