@@ -22,7 +22,18 @@ interface OperatorChatProps {
   onReset: () => void;
   /** Whether the conversation is currently AWAITING_HUMAN. */
   isPaused: boolean;
+  /**
+   * Pause metadata for the banner.
+   *
+   * The caller must source these from `approval-status`, not from a conversation
+   * snapshot: `getSimpleConversationLog` returns only `hitlPausedAt` and
+   * `hitlPauseType`, so a reason or timeout read from there is always undefined
+   * and the banner's countdown silently never renders.
+   */
   pauseReason: string | null;
+  pausedAt?: string;
+  timeoutPolicy?: string;
+  approvalTimeout?: string;
   /** Structured RULE/TOOL_CALL detail from GET …/approval-status. `undefined`
    *  while it is still loading — distinct from `null` (nothing to show). */
   pauseDetails?: PauseDetails | null;
@@ -47,6 +58,9 @@ export function OperatorChat({
   onReset,
   isPaused,
   pauseReason,
+  pausedAt,
+  timeoutPolicy,
+  approvalTimeout,
   pauseDetails,
   isResolvingPause,
   resolveError,
@@ -156,6 +170,9 @@ export function OperatorChat({
           <ApprovalBanner
             surface="regular"
             pauseReason={pauseReason ?? undefined}
+            pausedAt={pausedAt}
+            timeoutPolicy={timeoutPolicy}
+            approvalTimeout={approvalTimeout}
             pauseDetails={pauseDetails ?? null}
             pauseDetailsPending={pauseDetails === undefined}
             isSubmitting={isResolvingPause}

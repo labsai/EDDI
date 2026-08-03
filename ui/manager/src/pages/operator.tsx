@@ -397,7 +397,14 @@ export function OperatorPage() {
           onStop={chat.stop}
           onReset={chat.reset}
           isPaused={chat.isPaused}
-          pauseReason={chat.pauseReason}
+          // approval-status first: the chat hook derives its own pauseReason from
+          // getSimpleConversationLog, which does not carry one — so on the 409 and
+          // re-pause paths it is always null. This endpoint is the one that has it,
+          // along with the timeout fields the countdown needs.
+          pauseReason={approvalStatus.data?.pauseReason ?? chat.pauseReason}
+          pausedAt={approvalStatus.data?.pausedAt}
+          timeoutPolicy={approvalStatus.data?.timeoutPolicy}
+          approvalTimeout={approvalStatus.data?.approvalTimeout}
           pauseDetails={chat.isPaused ? approvalStatus.data?.pauseDetails : undefined}
           isResolvingPause={chat.isResolvingPause}
           resolveError={chat.resolveError}

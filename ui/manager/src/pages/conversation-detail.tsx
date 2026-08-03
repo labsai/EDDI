@@ -243,12 +243,19 @@ export function ConversationDetailPage() {
 
       {/* HITL Approval Banner */}
       {state === "AWAITING_HUMAN" && (
+        /* Pause metadata comes from approval-status, not the conversation: this
+           page reads the SIMPLE snapshot, which carries only hitlPausedAt and
+           hitlPauseType — never the reason or the timeout fields, whatever the TS
+           type claims. Reading them off `conversation` yielded undefined, so the
+           countdown in ApprovalBanner never rendered for a 1:1 pause and the
+           reason was blank. `conversation` stays as the fallback for pausedAt,
+           which it genuinely does carry. */
         <ApprovalBanner
           surface="regular"
-          pauseReason={conversation.hitlPauseReason}
-          pausedAt={conversation.hitlPausedAt}
-          timeoutPolicy={conversation.hitlTimeoutPolicy}
-          approvalTimeout={conversation.hitlApprovalTimeout}
+          pauseReason={approvalStatus?.pauseReason ?? conversation.hitlPauseReason}
+          pausedAt={approvalStatus?.pausedAt ?? conversation.hitlPausedAt}
+          timeoutPolicy={approvalStatus?.timeoutPolicy}
+          approvalTimeout={approvalStatus?.approvalTimeout}
           pauseDetails={approvalStatus?.pauseDetails ?? null}
           pauseDetailsPending={!approvalStatus}
           isSubmitting={resumeMutation.isPending || cancelMutation.isPending}

@@ -194,10 +194,14 @@ describe("OperatorPage", () => {
       server.use(
         http.post("*/agents/op-1/start", () => HttpResponse.json({ location: "/agents/conv-1" })),
         http.post("*/agents/conv-1/stream", () => new HttpResponse(null, { status: 409 })),
+        // Deliberately WITHOUT hitlPauseReason/hitlTimeoutPolicy/hitlApprovalTimeout:
+        // SimpleConversationMemorySnapshot carries only hitlPausedAt and
+        // hitlPauseType. A mock that invented the others hid a real bug — the UI
+        // read the reason and timeouts off this response and got undefined in
+        // production while the tests passed.
         http.get("*/conversationstore/conversations/simple/conv-1", () =>
           HttpResponse.json({
             conversationState: "AWAITING_HUMAN",
-            hitlPauseReason: "Tool approval required",
             hitlPausedAt: "2026-08-03T10:00:00Z",
             conversationOutputs: [],
           }),
@@ -208,6 +212,8 @@ describe("OperatorPage", () => {
             state: "AWAITING_HUMAN",
             pausedAt: "2026-08-03T10:00:00Z",
             pauseReason: "Tool approval required",
+            timeoutPolicy: "AUTO_REJECT",
+            approvalTimeout: "PT15M",
             pauseDetails: {
               type: "TOOL_CALL",
               calls,
@@ -250,6 +256,36 @@ describe("OperatorPage", () => {
       // The honest server-verified preview replaces the client-side guess —
       // both must never render for the same call.
       expect(screen.queryByTestId("tool-endpoint-call-1")).not.toBeInTheDocument();
+    });
+
+    it("shows the pause reason and timeout, which only approval-status carries", async () => {
+      // The conversation endpoint this surface also reads returns neither. Sourcing
+      // them from there yielded undefined: a blank reason and a countdown that
+      // never rendered — invisible until a mock stopped inventing the fields.
+      serveConfig(activeConfig());
+      serveDeploymentStatus("READY");
+      servePause([
+        {
+          callId: "call-1",
+          toolName: "createAgent",
+          source: "http",
+          arguments: "{}",
+          argsTruncated: false,
+          gateReason: "http.post:*",
+          requestPinned: false,
+          requestPreview: null,
+        },
+      ]);
+
+      renderWithProviders(<OperatorPage />);
+      await userEvent.type(await screen.findByTestId("operator-input"), "create an agent{enter}");
+
+      const banner = await screen.findByTestId("approval-banner");
+      expect(banner).toHaveTextContent(/Tool approval required/);
+      // The timeout-policy chip renders only when a policy other than
+      // WAIT_INDEFINITELY actually arrived — unlike the countdown itself, this
+      // does not depend on the wall clock.
+      expect(banner).toHaveTextContent(/auto.?reject/i);
     });
 
     it("falls back to the client-side reconstruction when a call carries no preview", async () => {
