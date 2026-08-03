@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -137,9 +138,9 @@ public class RequestRedactor {
     }
 
     /**
-     * Redact the {@code headers}, {@code queryParams} and {@code body} entries of a
-     * request map, as produced by
-     * {@link ai.labs.eddi.engine.httpclient.IRequest#toMap()}.
+     * Redact the {@link IRequest#KEY_HEADERS}, {@link IRequest#KEY_QUERY_PARAMS}
+     * and {@link IRequest#KEY_BODY} entries of a request map, as produced by
+     * {@link IRequest#toMap()}.
      * <p>
      * Each entry is REPLACED with a redacted copy rather than rewritten in place.
      * That distinction is load-bearing for the query parameters:
@@ -153,14 +154,17 @@ public class RequestRedactor {
         if (requestMap == null) {
             return;
         }
-        if (requestMap.get("headers") instanceof Map<?, ?> headers) {
-            requestMap.put("headers", redactHeaders((Map<String, ?>) headers));
+        // The KEY_* constants, not string literals: this map's shape is
+        // IRequest#toMap's contract, and a redactor that spells the keys itself is
+        // one rename away from silently redacting nothing.
+        if (requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> headers) {
+            requestMap.put(IRequest.KEY_HEADERS, redactHeaders((Map<String, ?>) headers));
         }
-        if (requestMap.get("queryParams") instanceof Map<?, ?> queryParams) {
-            requestMap.put("queryParams", redactQueryParams((Map<String, ?>) queryParams));
+        if (requestMap.get(IRequest.KEY_QUERY_PARAMS) instanceof Map<?, ?> queryParams) {
+            requestMap.put(IRequest.KEY_QUERY_PARAMS, redactQueryParams((Map<String, ?>) queryParams));
         }
-        if (requestMap.get("body") instanceof String body) {
-            requestMap.put("body", redactBody(body));
+        if (requestMap.get(IRequest.KEY_BODY) instanceof String body) {
+            requestMap.put(IRequest.KEY_BODY, redactBody(body));
         }
     }
 
