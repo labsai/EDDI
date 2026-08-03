@@ -1,3 +1,6 @@
+import { gateLooksInstalled } from "@/lib/api/operator";
+import type { Agent } from "@/lib/api/agents";
+
 /**
  * Settings inside a gated request body that grant capability beyond the request
  * itself.
@@ -28,7 +31,8 @@ export interface EscalationFlag {
     | "dynamicAgentRecruitment"
     | "autoApproveOnTimeout"
     | "agentCreatedWithoutGate"
-    | "agentCreatedWithBroadEndpoints";
+    | "agentCreatedWithBroadEndpoints"
+    | "agentCreatedWithExternalTools";
   /** Dotted path of the setting within the body, shown verbatim so the approver
    *  can find it in the JSON below. */
   path: string;
@@ -53,13 +57,18 @@ function at(root: unknown, path: string): unknown {
  * switched off would cry wolf on an ordinary group and train approvers to skim
  * past the warning — which costs more than it buys.
  *
- * The last two exist only for a **create** body (`setup_agent` /
- * `create_api_agent` — distinguished by the `agentName` + `systemPrompt` pair
- * every such body carries, checked before either does anything else) and
- * deliberately have no counterpart for an *update*. "This new document has no
- * gate" is answerable by reading the document alone; "this update just removed
- * a gate the document used to have" is a diff question this module cannot
- * answer — it sees one resolved body, never a prior version — which is exactly
+ * `autoApproveOnTimeout` stays even though `agentCreatedWithoutGate` now
+ * subsumes it for a create body: it is the load-bearing check for
+ * `POST /groupstore/groups`, where `GroupHitlConfig.timeoutPolicy` is NOT
+ * demoted the way an inherited agent-level one is. A create carrying it trips
+ * both, which is noisy in the right direction.
+ *
+ * The `agentCreated*` checks exist only for a **create** body (`setup_agent` /
+ * `create_api_agent` — recognised by {@link isAgentCreationBody}, checked
+ * before any of them does anything else) and deliberately have no counterpart
+ * for an *update*. "This new document has no gate" is answerable by reading the
+ * document alone; "this update just removed a gate the document used to have"
+ * is a diff question this module cannot answer — it sees one resolved body, never a prior version — which is exactly
  * why `PUT /agentstore/agents/{id}` and `PUT /groupstore/groups/{id}` stay out
  * of `WRITE_ENDPOINTS` rather than being flagged here instead. See that file's
  * doc comment.
@@ -89,8 +98,32 @@ const CHECKS: readonly {
     path: "hitlConfig",
     matches: (_value, body) => {
       if (!isAgentCreationBody(body)) return false;
-      const requireApproval = at(body, "hitlConfig.toolApprovals.requireApproval");
-      return !Array.isArray(requireApproval) || requireApproval.length === 0;
+      // Delegates to the SAME judgement the operator applies to its own agent
+      // (`gateLooksInstalled`), rather than the "is requireApproval non-empty"
+      // test this used to carry. That test passed three bodies that create a
+      // fully ungated agent: `exempt: ["*"]` (the backend tests exempt FIRST and
+      // short-circuits, so it beats any requireApproval), a decoy
+      // `requireApproval: ["http.get:*"]` that gates only reads, and
+      // `toolApprovals.timeoutPolicy: "AUTO_APPROVE"` — the tool-level policy
+      // the backend honours verbatim, as opposed to the inherited one it
+      // demotes. Holding what we create to a weaker standard than what we run
+      // as was the actual defect; there is now one definition of "has a real
+      // gate" and both callers use it.
+      const hitlConfig = at(body, "hitlConfig");
+      return !gateLooksInstalled({ hitlConfig } as Agent).ok;
+    },
+  },
+  {
+    id: "agentCreatedWithExternalTools",
+    path: "mcpServerUrls",
+    matches: (value, body) => {
+      if (!isAgentCreationBody(body)) return false;
+      // A sibling of the `endpoints` filter and arguably broader: every tool an
+      // external MCP server advertises is attached to the created agent, and
+      // unlike `endpoints` there is no per-verb filter at all — the server
+      // decides what it offers, and it can change what it offers later. Both
+      // create paths accept it.
+      return typeof value === "string" && value.trim() !== "";
     },
   },
   {
@@ -109,10 +142,21 @@ const CHECKS: readonly {
   },
 ];
 
-/** Whether a resolved body is shaped like a setup_agent / create_api_agent
- *  request — the pair of required fields both share. */
+/**
+ * Whether a resolved body is shaped like a setup_agent / create_api_agent
+ * request — the pair of required fields both share.
+ *
+ * `name` is accepted alongside `agentName` because the backend record declares
+ * {@code @JsonAlias("name")} on that component, so `{"name": …, "systemPrompt":
+ * …}` is a fully valid create body — and it is the shape this codebase's own
+ * `SetupAgentRequest` TS interface sends. Requiring only the canonical spelling
+ * meant an accepted alias silenced every create-shape check below, which is the
+ * "alternate JSON shape the backend accepts for the same field" evasion in its
+ * most literal form.
+ */
 function isAgentCreationBody(body: unknown): boolean {
-  return typeof at(body, "agentName") === "string" && typeof at(body, "systemPrompt") === "string";
+  const named = typeof at(body, "agentName") === "string" || typeof at(body, "name") === "string";
+  return named && typeof at(body, "systemPrompt") === "string";
 }
 
 /**

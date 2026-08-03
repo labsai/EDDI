@@ -351,6 +351,24 @@ describe("gateLooksInstalled", () => {
     expect(result.reason).toMatch(/hitlConfig is absent/);
   });
 
+  it("rejects a populated requireApproval that gates only reads", () => {
+    // A decoy: non-empty, so the length check alone accepts it, while every
+    // write on the agent runs unapproved. This is what "the gate is verified"
+    // would otherwise have certified as sound.
+    const result = gateLooksInstalled({
+      hitlConfig: { toolApprovals: { requireApproval: ["http.get:*"], exempt: [] } },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/gates no write method/);
+  });
+
+  it("accepts a broad wildcard as gating writes", () => {
+    // The mirror direction, so the check above is not simply "reject anything
+    // unfamiliar": `*` and `http.*:*` both genuinely cover the write methods.
+    expect(gateLooksInstalled({ hitlConfig: { toolApprovals: { requireApproval: ["*"] } } }).ok).toBe(true);
+    expect(gateLooksInstalled({ hitlConfig: { toolApprovals: { requireApproval: ["http.*:*"] } } }).ok).toBe(true);
+  });
+
   it("rejects hitlConfig with no toolApprovals", () => {
     const result = gateLooksInstalled({ hitlConfig: {} });
     expect(result.ok).toBe(false);

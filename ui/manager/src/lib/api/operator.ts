@@ -383,6 +383,30 @@ export function gateLooksInstalled(agent: Agent): { ok: boolean; reason?: string
   if (!toolApprovals.requireApproval || toolApprovals.requireApproval.length === 0) {
     return { ok: false, reason: "toolApprovals.requireApproval is empty — the gate is inactive" };
   }
+  // Non-empty is not the same as effective. `requireApproval: ["http.get:*"]`
+  // is a populated list that gates only reads, so every write runs unapproved
+  // while the config reads as gated at a glance — a decoy the length check
+  // alone accepts. At least one pattern must actually address a write.
+  //
+  // Known limit, the mirror of the one WRITE_EXEMPT_PREFIXES documents: a gate
+  // written against bare dispatch names (`requireApproval: ["deployAgent"]`)
+  // genuinely gates that write but cannot be recognised as such without the
+  // spec's name-to-method mapping, so it reports as ungated. That direction is
+  // the safe one — it withholds write scope, or raises a warning on a created
+  // agent, rather than certifying a gate nobody verified. `buildToolApprovals`
+  // writes the method-qualified form.
+  const gatesAWrite = toolApprovals.requireApproval.some(
+    (pattern) =>
+      pattern === "*" ||
+      pattern.startsWith("http.*") ||
+      GATED_WRITE_PREFIXES.some((prefix) => pattern.startsWith(prefix)),
+  );
+  if (!gatesAWrite) {
+    return {
+      ok: false,
+      reason: "toolApprovals.requireApproval gates no write method — reads only, so every write runs unapproved",
+    };
+  }
   if (toolApprovals.timeoutPolicy === "AUTO_APPROVE") {
     return { ok: false, reason: "toolApprovals.timeoutPolicy is AUTO_APPROVE" };
   }

@@ -3218,6 +3218,7 @@
         "autoApproveOnTimeout": "Approvals for this resource are granted automatically when they time out, with nobody watching.",
         "agentCreatedWithoutGate": "This agent is being created with no approval gate. Every write it later makes will execute unsupervised.",
         "agentCreatedWithBroadEndpoints": "This agent is being created with write access to its API — not limited to reads.",
+        "agentCreatedWithExternalTools": "This agent is being created with every tool an external MCP server offers. That server decides what those are, and can change them later.",
         "unchecked": "The body was too long to scan for capability grants — read it in full before approving."
       },
       "blockedSelfTarget": "This modifies the operator's own agent ({{agentId}}) — the one change that could remove its future approval gate. Reject it and make the change from that agent's own page instead."

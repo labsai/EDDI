@@ -3197,6 +3197,7 @@
         "autoApproveOnTimeout": "Les approbations de cette ressource sont accordées automatiquement en cas d'expiration du délai, sans surveillance.",
         "agentCreatedWithoutGate": "Cet agent est créé sans passerelle d'approbation. Chaque écriture qu'il effectuera par la suite s'exécutera sans supervision.",
         "agentCreatedWithBroadEndpoints": "Cet agent est créé avec un accès en écriture à son API — non limité aux lectures.",
+        "agentCreatedWithExternalTools": "Cet agent est créé avec l'ensemble des outils qu'un serveur MCP externe propose. C'est ce serveur qui décide lesquels, et il peut les modifier par la suite.",
         "unchecked": "Le corps était trop long pour être analysé à la recherche d'octrois de capacités — lisez-le en entier avant d'approuver."
       },
       "blockedSelfTarget": "Ceci modifie l'agent de l'opérateur lui-même ({{agentId}}) — la seule modification qui pourrait supprimer sa future passerelle d'approbation. Rejetez-la et effectuez plutôt la modification depuis la page de cet agent."

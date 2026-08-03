@@ -3191,6 +3191,7 @@
         "autoApproveOnTimeout": "Freigaben für diese Ressource werden bei Zeitüberschreitung automatisch erteilt — ohne dass jemand mitschaut.",
         "agentCreatedWithoutGate": "Dieser Agent wird ohne Genehmigungs-Gate erstellt. Jeder spätere Schreibvorgang wird unbeaufsichtigt ausgeführt.",
         "agentCreatedWithBroadEndpoints": "Dieser Agent wird mit Schreibzugriff auf seine eigene API erstellt — nicht auf Lesevorgänge beschränkt.",
+        "agentCreatedWithExternalTools": "Dieser Agent wird mit sämtlichen Tools erstellt, die ein externer MCP-Server anbietet. Welche das sind, entscheidet dieser Server, und er kann sie später ändern.",
         "unchecked": "Der Body war zu lang, um ihn auf Berechtigungserweiterungen zu prüfen — lesen Sie ihn vor der Freigabe vollständig."
       },
       "blockedSelfTarget": "Dies ändert den eigenen Agenten des Operators ({{agentId}}) — die eine Änderung, die sein künftiges Genehmigungs-Gate entfernen könnte. Lehnen Sie sie ab und nehmen Sie die Änderung stattdessen auf der Seite dieses Agenten vor."

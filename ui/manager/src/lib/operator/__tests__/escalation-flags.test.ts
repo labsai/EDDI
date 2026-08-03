@@ -117,6 +117,88 @@ describe("detectEscalationFlags", () => {
     ).toEqual([]);
   });
 
+  describe("agentCreatedWithoutGate — evasions that used to pass", () => {
+    it("flags an exempt list broad enough to swallow every gated write", () => {
+      // The backend tests `exempt` FIRST and short-circuits to allowed, so this
+      // beats any requireApproval next to it. The old non-empty-list check
+      // passed it.
+      const flags = detectEscalationFlags(
+        setupAgentBody({
+          hitlConfig: { toolApprovals: { requireApproval: ["http.post:*"], exempt: ["*"] } },
+        }),
+      );
+      expect(flags.map((f) => f.id)).toContain("agentCreatedWithoutGate");
+    });
+
+    it("flags a decoy requireApproval that only gates reads", () => {
+      const flags = detectEscalationFlags(
+        setupAgentBody({ hitlConfig: { toolApprovals: { requireApproval: ["http.get:*"] } } }),
+      );
+      expect(flags.map((f) => f.id)).toContain("agentCreatedWithoutGate");
+    });
+
+    it("flags a tool-level AUTO_APPROVE — the one the backend honours verbatim", () => {
+      // Distinct from hitlConfig.timeoutPolicy, which the backend DEMOTES for
+      // tool pauses. This one auto-executes a gated call with nobody watching.
+      const flags = detectEscalationFlags(
+        setupAgentBody({
+          hitlConfig: {
+            toolApprovals: { requireApproval: ["http.post:*"], timeoutPolicy: "AUTO_APPROVE" },
+          },
+        }),
+      );
+      expect(flags.map((f) => f.id)).toContain("agentCreatedWithoutGate");
+    });
+
+    it("flags a per-rule AUTO_APPROVE aimed at a write", () => {
+      const flags = detectEscalationFlags(
+        setupAgentBody({
+          hitlConfig: {
+            toolApprovals: {
+              requireApproval: ["http.post:*"],
+              rules: [{ match: "http.post:/agentstore/agents", timeoutPolicy: "AUTO_APPROVE" }],
+            },
+          },
+        }),
+      );
+      expect(flags.map((f) => f.id)).toContain("agentCreatedWithoutGate");
+    });
+
+    it("still recognises a create body that uses the accepted 'name' alias", () => {
+      // The backend record carries @JsonAlias("name"), so this is a fully valid
+      // create body — and requiring only `agentName` silenced every check below.
+      const body = JSON.parse(setupAgentBody());
+      body.name = body.agentName;
+      delete body.agentName;
+      delete body.hitlConfig;
+      expect(detectEscalationFlags(JSON.stringify(body)).map((f) => f.id)).toContain(
+        "agentCreatedWithoutGate",
+      );
+    });
+  });
+
+  describe("agentCreatedWithExternalTools", () => {
+    it("flags an MCP server URL, which attaches a whole external tool surface", () => {
+      const flags = detectEscalationFlags(setupAgentBody({ mcpServerUrls: "https://tools.example/mcp" }));
+      expect(flags.map((f) => f.id)).toContain("agentCreatedWithExternalTools");
+    });
+
+    it("stays silent when the field is absent or blank", () => {
+      expect(detectEscalationFlags(setupAgentBody()).map((f) => f.id)).not.toContain(
+        "agentCreatedWithExternalTools",
+      );
+      expect(
+        detectEscalationFlags(setupAgentBody({ mcpServerUrls: "  " })).map((f) => f.id),
+      ).not.toContain("agentCreatedWithExternalTools");
+    });
+
+    it("does not fire on a group create that happens to carry the field name", () => {
+      expect(
+        detectEscalationFlags(groupBody({ mcpServerUrls: "https://tools.example/mcp" })),
+      ).toEqual([]);
+    });
+  });
+
   describe("agentCreatedWithoutGate", () => {
     it("finds nothing when a setup_agent create carries a real gate", () => {
       expect(detectEscalationFlags(setupAgentBody())).toEqual([]);

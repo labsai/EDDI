@@ -14,6 +14,8 @@ const ESCALATION_TEXT: Record<string, string> = {
     "This agent is being created with no approval gate. Every write it later makes will execute unsupervised.",
   agentCreatedWithBroadEndpoints:
     "This agent is being created with write access to its API — not limited to reads.",
+  agentCreatedWithExternalTools:
+    "This agent is being created with every tool an external MCP server offers. That server decides what those are, and can change them later.",
 };
 
 interface RequestPreviewProps {

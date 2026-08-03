@@ -3197,6 +3197,7 @@
         "autoApproveOnTimeout": "As aprovações deste recurso são concedidas automaticamente ao expirar o prazo, sem ninguém a supervisionar.",
         "agentCreatedWithoutGate": "Este agente está a ser criado sem porta de aprovação. Cada escrita que fizer posteriormente será executada sem supervisão.",
         "agentCreatedWithBroadEndpoints": "Este agente está a ser criado com acesso de escrita à sua API — não limitado a leituras.",
+        "agentCreatedWithExternalTools": "Este agente está a ser criado com todas as ferramentas que um servidor MCP externo disponibiliza. É esse servidor que decide quais são, e pode alterá-las mais tarde.",
         "unchecked": "O corpo era demasiado longo para analisar concessões de capacidade — leia-o na íntegra antes de aprovar."
       },
       "blockedSelfTarget": "Isto modifica o próprio agente do operador ({{agentId}}) — a única alteração que poderia remover a sua futura porta de aprovação. Rejeite-a e faça antes a alteração a partir da página do próprio agente."
