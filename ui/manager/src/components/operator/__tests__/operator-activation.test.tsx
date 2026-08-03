@@ -339,6 +339,49 @@ describe("OperatorActivation", () => {
       await userEvent.click(screen.getByTestId("operator-activate"));
       expect(onActivate.mock.calls[0]![0]).toMatchObject({ scope: "read_only" });
     });
+
+    it("re-syncs the prompt body when scope reverts indirectly, not only on an explicit pick", async () => {
+      // handleScopeChange fires only when the radio is clicked. effectiveScope
+      // also moves on its own when authMode stops being caller-identity — and
+      // without the effect, the submitted config pairs read_only endpoints with
+      // a body telling the agent it can create groups and change things.
+      const { onActivate } = await toReviewStepWithCallerIdentity({
+        initial: { ...defaultOperatorConfig(), agentId: "op-1", version: 1 },
+        gate: verifiedGate,
+      });
+      const promptBody = () => (screen.getByTestId("operator-prompt-body") as HTMLTextAreaElement).value;
+
+      await userEvent.click(screen.getByTestId("operator-scope-read_write"));
+      expect(promptBody()).toContain("When you change something");
+
+      await userEvent.click(screen.getByRole("button", { name: /^back$/i }));
+      await userEvent.click(screen.getByTestId("operator-auth-none"));
+      await userEvent.click(screen.getByTestId("operator-next"));
+
+      expect(promptBody()).not.toContain("When you change something");
+      await userEvent.click(screen.getByTestId("operator-activate"));
+      const submitted = onActivate.mock.calls[0]![0];
+      expect(submitted).toMatchObject({ scope: "read_only" });
+      expect(submitted.promptBody).not.toContain("You can create an agent GROUP");
+    });
+
+    it("does not overwrite a customized prompt body when scope reverts indirectly", async () => {
+      // The other half of the contract: an admin who edited the text keeps it,
+      // exactly as an explicit scope flip already guarantees.
+      await toReviewStepWithCallerIdentity({
+        initial: { ...defaultOperatorConfig(), agentId: "op-1", version: 1 },
+        gate: verifiedGate,
+      });
+      await userEvent.click(screen.getByTestId("operator-scope-read_write"));
+      await userEvent.clear(screen.getByTestId("operator-prompt-body"));
+      await userEvent.type(screen.getByTestId("operator-prompt-body"), "My own wording.");
+
+      await userEvent.click(screen.getByRole("button", { name: /^back$/i }));
+      await userEvent.click(screen.getByTestId("operator-auth-none"));
+      await userEvent.click(screen.getByTestId("operator-next"));
+
+      expect(screen.getByTestId("operator-prompt-body")).toHaveValue("My own wording.");
+    });
   });
 
   it("surfaces an activation error instead of failing silently", async () => {

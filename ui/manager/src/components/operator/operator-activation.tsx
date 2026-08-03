@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Loader2, Sparkles, ShieldCheck, ShieldAlert, ShieldQuestion, Lock, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -136,6 +136,32 @@ export function OperatorActivation({
     }
     setScope(next);
   }
+
+  /**
+   * The same swap, for when `effectiveScope` moves WITHOUT the admin touching the
+   * scope radio.
+   *
+   * `handleScopeChange` only fires on an explicit pick, but `effectiveScope` also
+   * changes on its own when `writeScopeAvailable` flips — most realistically when
+   * the admin selects read_write and then changes `authMode` away from
+   * caller-identity further up the form. Scope silently reverts to read_only while
+   * the body still describes write capability, and `handleActivate` submits that
+   * pair: an agent granted read-only endpoints but told it can change things.
+   *
+   * Compared against the PREVIOUS effective scope's default, because by the time
+   * this runs the current one has already changed — testing against the new
+   * default would never match and the body would never re-sync. A customized body
+   * equals neither default and is left alone, same contract as above.
+   */
+  const previousEffectiveScope = useRef(effectiveScope);
+  useEffect(() => {
+    const previous = previousEffectiveScope.current;
+    if (previous === effectiveScope) return;
+    previousEffectiveScope.current = effectiveScope;
+    setPromptBody((current) =>
+      current === defaultOperatorPromptBody(previous) ? defaultOperatorPromptBody(effectiveScope) : current,
+    );
+  }, [effectiveScope]);
 
   /**
    * With OIDC on, `none` produces tool calls with no Authorization header, which

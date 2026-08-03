@@ -3090,7 +3090,7 @@
       "environment": "Umgebung",
       "authMode": "Authentifizierung des Operators",
       "authModeHint": "Der Operator ruft Ihre EDDI-Admin-API auf. Diese Einstellung legt fest, welche Zugangsdaten diese Aufrufe mitführen.",
-      "authNoneBlocked": "Für diese Installation ist die Authentifizierung aktiviert, daher würden nicht authentifizierte Tool-Aufrufe abgelehnt. Der Operator würde erfolgreich deployt und danach bei jeder Abfrage scheitern. Wählen Sie stattdessen „Ihre Identität\".",      "scope": {
+      "authNoneBlocked": "Für diese Installation ist die Authentifizierung aktiviert, daher würden nicht authentifizierte Tool-Aufrufe abgelehnt. Der Operator würde erfolgreich deployt und danach bei jeder Abfrage scheitern. Wählen Sie stattdessen „Ihre Identität“.",      "scope": {
         "label": "Berechtigung",
         "hint": "Was der Operator tun darf. Jede Änderung wartet weiterhin auf Ihre Genehmigung — siehe die Sicherheitsregeln unten.",
         "readOnly": {

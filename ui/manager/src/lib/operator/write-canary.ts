@@ -104,7 +104,12 @@ async function runProbe(
   // but a page reload — same guard as runOperatorCanary.
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), WRITE_CANARY_TIMEOUT_MS);
-  const effectiveSignal = signal ?? timeout.signal;
+  // Both, not `signal ?? timeout.signal`: picking the caller's signal when one is
+  // supplied silently DISABLES the timeout for exactly the callers who cared
+  // enough to pass a signal, and the catch below would still report "timed out"
+  // on their cancellation. AbortSignal.any is Baseline since March 2024 and this
+  // app already targets modern browsers.
+  const effectiveSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
 
   let conversationId: string | null = null;
   try {

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import { runOperatorWriteCanary, enforceWriteCanaryGate, WRITE_CANARY_TARGET_ENDPOINT } from "../write-canary";
+import { WRITE_ENDPOINTS } from "../tool-scopes";
 import type { OperatorConfig, FetchedSpec } from "@/lib/api/operator";
 
 function config(overrides: Partial<OperatorConfig> = {}): OperatorConfig {
@@ -269,6 +270,15 @@ describe("runOperatorWriteCanary", () => {
 
   it("resolves the exact endpoint WRITE_ENDPOINTS would need it to", () => {
     expect(WRITE_CANARY_TARGET_ENDPOINT).toBe("PATCH /descriptorstore/descriptors/{id}");
+  });
+
+  it("probes an endpoint the operator was actually granted", () => {
+    // Pinning the literal above is not enough on its own: if this entry were
+    // dropped from WRITE_ENDPOINTS, the operator would hold no such tool, the
+    // probe could never provoke it, and EVERY read_write activation would report
+    // "unknown" and roll itself back — a total outage of the feature, caused by
+    // an edit in a different file that no test connected to this one.
+    expect(WRITE_ENDPOINTS).toContain(WRITE_CANARY_TARGET_ENDPOINT);
   });
 });
 
