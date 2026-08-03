@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.secrets.SecretResolver;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -297,8 +298,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
             //
             // The cause is still attached to the thrown exception for a caller that
             // needs it; both callers deliberately log only its type.
-            LOGGER.errorf("Could not resolve the request for ApiCall '%s' (%s)", call.getName(), e.getClass().getSimpleName());
-            throw new LifecycleException("could not resolve the request for ApiCall '" + call.getName() + "'", e);
+            String safeName = LogSanitizer.sanitize(call.getName());
+            LOGGER.errorf("Could not resolve the request for ApiCall '%s' (%s)", safeName, e.getClass().getSimpleName());
+            throw new LifecycleException("could not resolve the request for ApiCall '" + safeName + "'", e);
         }
     }
 

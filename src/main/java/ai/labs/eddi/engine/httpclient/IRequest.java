@@ -39,7 +39,17 @@ public interface IRequest {
     String KEY_URI = "uri";
     /** Key of the HTTP method name in {@link #toMap()}. */
     String KEY_METHOD = "method";
-    /** Key of the {@code Map<String, String>} of headers in {@link #toMap()}. */
+    /**
+     * Key of the headers map in {@link #toMap()}.
+     * <p>
+     * Read the values as {@code Object}, not {@code String}: the default
+     * implementation happens to store strings, but this interface has other
+     * implementations and nothing enforces it — which is why
+     * {@code RequestRedactor#redactHeaders} takes {@code Map<String, ?>} and
+     * coerces. The neighbouring {@link #KEY_QUERY_PARAMS} documented a narrower
+     * type than it delivered and that produced a real defect; this one is
+     * deliberately stated loosely rather than optimistically.
+     */
     String KEY_HEADERS = "headers";
     /**
      * Key of the query parameters in {@link #toMap()}.
