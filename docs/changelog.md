@@ -229,6 +229,22 @@ Fourth and last Wave 0 *type* foundation (F5/F6 remain). Ten new `TranscriptEntr
 
 ---
 
+## 🧩 feat(groups): GroupCostLedger (Wave 0, F5) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Fifth Wave 0 foundation, and the first one that had to answer an open question before it could be built: F5's own spec text says "if V1 shows model-call costs are missing from the tracker, close that gap first." V1 (dollar-cost source coverage) had never actually been answered — no changelog entry recorded a finding, despite being informally bundled into an earlier "verify tasks V1, V3–V7" checkbox. Answered now, with file:line evidence: `ToolCostTracker` covers tool executions only; the multi-model cascade's admin-configured $/1M-token pricing is the only other dollar source; a plain non-cascade member turn's own model-completion cost is recorded **nowhere** — `LlmTask`'s own Javadoc says so directly ("There is no token price table for non-cascade tasks, so those contribute tool cost only"). **The gap is real, confirmed — but closing it is I1's job, not F5's**, per the plan's own division of labor (V1: *"if so, I1 must add model-call cost recording"*; the dependency graph has F5 feeding I1, not the reverse). F5 builds the accumulation plumbing against whatever cost signal exists today; I1 (Wave 1) adds the missing signal and the ceiling/attribution logic on top — its own "Guardrails" section already treats a partial cost read as a normal, guarded case ("cost-read failure never kills a discussion... treat 0"), confirming the plan never expected this signal to be complete at Wave 0.
+
+**`GroupCostLedger`** is a stateless static helper (no new bean, no facade constructor change) with two entry points. `accumulateMemberCost` reads `MemoryKeys.AUDIT_COST` — the member's own private conversation's cumulative tracked cost — off the last step of the post-turn snapshot, mirroring `GroupLifecycleOps.propagateDynamicAgentTracking`'s exact existing pattern for reading step data back out of a `SimpleConversationMemorySnapshot`. `accumulateNestedGroupCost` rolls a `MemberType.GROUP` member's child discussion's own `totalCost` up whole once `executeGroupMemberTurn` gets it back — recursive by construction, since the child's members fed it through this same method.
+
+**Set, never added.** `AUDIT_COST` is itself cumulative (`LlmTask.accumulateCost` adds each turn's delta into a running total already), so a second turn's value already includes the first's — `memberCosts.put(agentId, cost)` replacing the entry, not `merge(..., Double::sum)` adding to it, is the only correct reading. `totalCost` is recomputed as the sum of `memberCosts.values()` on every update rather than tracked as its own running accumulator, which keeps it from drifting out of sync under a PARALLEL phase's concurrent member turns and makes a duplicate call for the same turn idempotent. The read-resum sequence is `synchronized` on `gc.getMemberCosts()` — the same per-field-monitor idiom `PhaseExecutionEngine` already uses for the transcript list — since two members finishing in the same instant could otherwise race a stale sum back over a fresher one.
+
+**Attributed before the nested-HITL guard, deliberately.** A nested sub-group that pauses for approval gets cancelled (nested HITL isn't supported in v1) — its cost is rolled up *before* that check, so a cancelled nested discussion still counts the real spend its members already incurred rather than silently dropping it.
+
+16 new tests, mutation-checked: `GroupCostLedgerTest` covers the null/empty/non-`Number` guards, the replace-not-add semantics, multi-member summation, last-step-only reading, and nested rollup, in isolation. `MemberTurnExecutorTest` adds two wiring tests proving `executeAgentTurn` and `executeGroupMemberTurn` actually call into the ledger (not just that the ledger's own logic is correct) — mutation-checked by deleting each call site in turn, which fails exactly its own wiring test, and by reverting `put` to `merge(..., Double::sum)`, which fails exactly the replace-not-add test with the tell-tale double-counted `0.17` instead of `0.12`. Full group/HITL/Slack battery green; Checkstyle unchanged.
+
+---
+
 ## 🧩 refactor(orchestrator): BuiltinToolsProvider + close the three SPI gaps (2026-08-02)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

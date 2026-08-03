@@ -47,6 +47,22 @@ public class GroupConversation {
      * start.
      */
     private Map<String, String> memberDisplayNames = new LinkedHashMap<>();
+    /**
+     * Per-member dollar-cost attribution (Wave 0, F5): agentId → that member's cost
+     * so far. For an individual agent, its own private conversation's cumulative
+     * tracked cost; for a {@code MemberType.GROUP} member, the child discussion's
+     * own {@link #totalCost} rolled up whole. See {@code GroupCostLedger}'s Javadoc
+     * for the known gap this reflects (V1: a non-cascade member turn's own
+     * model-completion cost is not tracked anywhere yet — I1 closes that).
+     * Thread-safe: PARALLEL phases accumulate from multiple member turns
+     * concurrently.
+     */
+    private Map<String, Double> memberCosts = new ConcurrentHashMap<>();
+    /**
+     * Sum of {@link #memberCosts}, recomputed by {@code GroupCostLedger} on every
+     * update.
+     */
+    private double totalCost;
     private int currentPhaseIndex;
     private String currentPhaseName;
     private String synthesizedAnswer;
@@ -445,6 +461,22 @@ public class GroupConversation {
         this.memberConversationIds = memberConversationIds != null
                 ? new ConcurrentHashMap<>(memberConversationIds)
                 : new ConcurrentHashMap<>();
+    }
+
+    public Map<String, Double> getMemberCosts() {
+        return memberCosts;
+    }
+
+    public void setMemberCosts(Map<String, Double> memberCosts) {
+        this.memberCosts = memberCosts != null ? new ConcurrentHashMap<>(memberCosts) : new ConcurrentHashMap<>();
+    }
+
+    public double getTotalCost() {
+        return totalCost;
+    }
+
+    public void setTotalCost(double totalCost) {
+        this.totalCost = totalCost;
     }
 
     public int getCurrentPhaseIndex() {

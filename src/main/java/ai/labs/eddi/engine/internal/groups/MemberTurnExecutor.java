@@ -263,6 +263,9 @@ public class MemberTurnExecutor {
                     // memory to the GroupConversation for lifecycle cleanup.
                     GroupConversationService.propagateDynamicAgentTracking(snapshot, gc);
 
+                    // Wave 0, F5: harvest this member's tracked cost so far.
+                    GroupCostLedger.accumulateMemberCost(gc, member, snapshot);
+
                     responseFuture.complete(response);
                 });
 
@@ -523,6 +526,11 @@ public class MemberTurnExecutor {
             // receive them too (each nested member conversation is granted in turn).
             GroupConversation subConversation = groupConversationService.discuss(subGroupId, input, gc.getUserId(), nextDepth, null,
                     gc.getAttachments());
+
+            // Wave 0, F5: roll the child's cost up into this group's attribution —
+            // before the AWAITING_APPROVAL branch below, so a nested pause that gets
+            // cancelled still counts the real spend its members already incurred.
+            GroupCostLedger.accumulateNestedGroupCost(gc, member, subConversation);
 
             // Phase 5d: Nested group HITL guard — if the sub-group paused for
             // approval, don't extract a partial answer. Nested HITL is not

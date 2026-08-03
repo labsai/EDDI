@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal.groups;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy;
@@ -18,8 +19,12 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -200,5 +205,69 @@ class MemberTurnExecutorTest {
     @Test
     void constructedWithMockedCollaborators_doesNotThrow() {
         assertDoesNotThrow(this::executor);
+    }
+
+    // =================================================================
+    // GroupCostLedger wiring (Wave 0, F5)
+    // =================================================================
+
+    @Test
+    void executeAgentTurn_costTrackedInSnapshot_accumulatesIntoGroupConversation() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+        when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-1", null));
+
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+        var step = new SimpleConversationStep();
+        step.getConversationStep().add(new ConversationStepData(MemoryKeys.AUDIT_COST, 0.07, null, null));
+        snapshot.getConversationSteps().add(step);
+
+        doAnswer(inv -> {
+            inv.getArgument(8, IConversationService.ConversationResponseHandler.class).onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+
+        var executor = new MemberTurnExecutor(conversationService, agentFactory,
+                new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
+                Mockito.mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+
+        executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
+
+        assertEquals(0.07, gc.getMemberCosts().get(AGENT_A));
+        assertEquals(0.07, gc.getTotalCost());
+    }
+
+    @Test
+    void executeGroupMemberTurn_rollsUpChildDiscussionCost() throws Exception {
+        var groupConversationService = Mockito.mock(GroupConversationService.class);
+        var subConversation = new GroupConversation();
+        subConversation.setId("sub-gc-1");
+        subConversation.setSynthesizedAnswer("Nested answer");
+        subConversation.setTotalCost(0.42);
+        when(groupConversationService.discuss(eq("sub-group-1"), any(), any(), anyInt(), any(), any())).thenReturn(subConversation);
+
+        var executor = new MemberTurnExecutor(Mockito.mock(IConversationService.class), Mockito.mock(IAgentFactory.class),
+                new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
+                groupConversationService, new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        var groupMember = new GroupMember("sub-group-1", "Sub Group", 1, null, MemberType.GROUP);
+
+        var entry = executor.executeAgentTurn(groupMember, gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null,
+                null, null);
+
+        assertEquals("Nested answer", entry.content());
+        assertEquals(0.42, gc.getMemberCosts().get("sub-group-1"));
+        assertEquals(0.42, gc.getTotalCost());
     }
 }
