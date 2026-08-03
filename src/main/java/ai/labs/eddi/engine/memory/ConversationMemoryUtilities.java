@@ -281,11 +281,15 @@ public class ConversationMemoryUtilities {
      * <p>
      * This copy therefore carries ONLY per-call {@code callId}/{@code toolName}/
      * {@code source}/{@code gateReason}/{@code argsTruncated} — never
-     * {@code argumentsRaw} or {@code argumentsRedacted} — and leaves
-     * {@code chatTranscriptJson}, {@code traceSoFar}, and {@code fingerprint} null.
-     * Consumers that read tool NAMES (delegated/group/MCP parity via
-     * {@code batch.getCalls().getToolName()}) keep working unchanged. Returns
-     * {@code null} when there is no batch.
+     * {@code argumentsRaw}, {@code argumentsRedacted}, {@code requestFingerprint},
+     * or {@code requestPreview} — and leaves {@code chatTranscriptJson},
+     * {@code traceSoFar}, and {@code fingerprint} null. {@code requestPreview} is
+     * excluded for the same reason as {@code argumentsRedacted}: both are already
+     * redacted at persistence time, so the exclusion is not about a fresh secret
+     * leak — it is that this view's whole contract is "names only", and a request
+     * preview is materially more detail than a name. Consumers that read tool NAMES
+     * (delegated/group/MCP parity via {@code batch.getCalls().getToolName()}) keep
+     * working unchanged. Returns {@code null} when there is no batch.
      */
     private static PendingToolCallBatch namesOnlyPendingToolCalls(PendingToolCallBatch source) {
         if (source == null) {
