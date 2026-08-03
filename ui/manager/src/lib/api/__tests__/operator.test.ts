@@ -239,10 +239,9 @@ describe("provisionOperator", () => {
   });
 
   it("builds the preamble for the scope it sends the endpoint filter for", async () => {
-    // read_write grants no writes while WRITE_ENDPOINTS is empty, so both the
-    // filter and the preamble must still describe a read-only operator. The
-    // pairing is the point: whichever scope is provisioned, the prompt has to
-    // match the tools, or the agent is told about a boundary it is not behind.
+    // The pairing is the point: whichever scope is provisioned, the prompt has
+    // to describe the SAME endpoint filter that was actually sent, or the
+    // agent is told about a capability boundary it is not really behind.
     await provisionOperator({
       agentName: "Op",
       config: config({ scope: "read_write" }),

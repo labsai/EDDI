@@ -57,11 +57,28 @@ describe("tool-scopes", () => {
       );
       expect(READ_ENDPOINTS).toContain("GET /administration/logs");
     });
+
+    it("can see the schedule it might later be asked to disable", () => {
+      // WRITE_ENDPOINTS can bind /disable without this — but an operator that
+      // cannot list schedules would recommend disabling one it cannot name.
+      expect(READ_ENDPOINTS).toContain("GET /schedulestore/schedules");
+    });
   });
 
   describe("write scope", () => {
-    it("is empty until the approval gate ships", () => {
-      expect(WRITE_ENDPOINTS).toEqual([]);
+    it("is exactly the four curated entries — narrow verbs, not a resource-level grant", () => {
+      // Pinned deliberately, not just "non-empty": each entry is chosen so an
+      // approved-but-wrong call is small and reversible (see the doc comment on
+      // WRITE_ENDPOINTS for why each one, and why not PUT /agentstore/agents,
+      // schedule creation, or any DELETE). A silent addition here is exactly as
+      // dangerous as a silent removal from an allow-list — this test catches
+      // either direction.
+      expect(WRITE_ENDPOINTS).toEqual([
+        "PATCH /descriptorstore/descriptors/{id}",
+        "POST /administration/{environment}/deploy/{agentId}",
+        "POST /administration/{environment}/undeploy/{agentId}",
+        "POST /schedulestore/schedules/{scheduleId}/disable",
+      ]);
     });
 
     it("never contains a read verb", () => {
@@ -69,6 +86,27 @@ describe("tool-scopes", () => {
       // required). A mutating GET in this list would sail through ungated.
       const looksLikeARead = WRITE_ENDPOINTS.filter((e) => e.startsWith("GET "));
       expect(looksLikeARead).toEqual([]);
+    });
+
+    it("never contains DELETE — no undo exists in any of these stores", () => {
+      expect(WRITE_ENDPOINTS.filter((e) => e.startsWith("DELETE "))).toEqual([]);
+    });
+
+    it("deploy is paired with undeploy — no rollback would be worse than useless", () => {
+      expect(WRITE_ENDPOINTS).toContain("POST /administration/{environment}/deploy/{agentId}");
+      expect(WRITE_ENDPOINTS).toContain("POST /administration/{environment}/undeploy/{agentId}");
+    });
+
+    it.each([
+      "PUT /agentstore/agents/{id}",
+      "POST /agentstore/agents",
+      "POST /llmstore/llms",
+      "PUT /llmstore/llms/{id}",
+      "POST /schedulestore/schedules",
+      "POST /schedulestore/schedules/{scheduleId}/enable",
+      "POST /schedulestore/schedules/{scheduleId}/fire",
+    ])("excludes %s — a full-document write or attacker persistence", (excluded) => {
+      expect(WRITE_ENDPOINTS).not.toContain(excluded);
     });
 
     // The approval seam: writes must be unreachable, not merely discouraged.
@@ -83,8 +121,12 @@ describe("tool-scopes", () => {
       ).toBe(false);
     });
 
-    it("stays unavailable even with every fact true, while no write endpoints exist", () => {
-      expect(isWriteScopeAvailable(allFacts())).toBe(false);
+    it("becomes available once every fact holds — the seam actually opens, not just closes", () => {
+      // The mirror of every "stays unavailable" test below: this is the one
+      // proving the mechanism WORKS, not just that it fails safe. A regression
+      // that made writes permanently unreachable would pass every other test in
+      // this block while silently breaking the feature.
+      expect(isWriteScopeAvailable(allFacts())).toBe(true);
     });
 
     it.each([
@@ -101,8 +143,16 @@ describe("tool-scopes", () => {
       expect(isWriteScopeAvailable(allFacts({ authMode: "none" }))).toBe(false);
     });
 
-    it("grants no extra endpoints even if read_write is somehow requested", () => {
-      expect(endpointsForScope("read_write")).toEqual([...READ_ENDPOINTS]);
+    it("read_write grants exactly READ_ENDPOINTS plus WRITE_ENDPOINTS, in that order", () => {
+      expect(endpointsForScope("read_write")).toEqual([...READ_ENDPOINTS, ...WRITE_ENDPOINTS]);
+    });
+
+    it("read_only grants no write endpoint, however isWriteScopeAvailable resolves", () => {
+      // isWriteScopeAvailable gates OFFERING read_write; it must never leak into
+      // what read_only itself is provisioned with.
+      for (const write of WRITE_ENDPOINTS) {
+        expect(endpointsForScope("read_only")).not.toContain(write);
+      }
     });
   });
 
@@ -186,10 +236,15 @@ describe("tool-scopes", () => {
       expect(grantsWriteCapability(["PURGE /somewhere"])).toBe(true);
     });
 
-    it("reports no write capability for read_write while the write list is empty", () => {
+    it("agrees with the resolved read_write endpoint set now that it grants writes", () => {
       // Pairs with the prompt test of the same invariant: the scope is an
-      // intent, the resolved endpoint set is the fact.
-      expect(grantsWriteCapability(endpointsForScope("read_write"))).toBe(false);
+      // intent, the resolved endpoint set is the fact — and now that
+      // WRITE_ENDPOINTS is populated, the fact for read_write is "yes".
+      expect(grantsWriteCapability(endpointsForScope("read_write"))).toBe(true);
+    });
+
+    it("still reports no write capability for read_only", () => {
+      expect(grantsWriteCapability(endpointsForScope("read_only"))).toBe(false);
     });
   });
 });

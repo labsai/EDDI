@@ -11,9 +11,10 @@ import { READ_ENDPOINTS, WRITE_ENDPOINTS, endpointsForScope } from "../tool-scop
 /**
  * A granted set that contains a write.
  *
- * Written out rather than taken from `WRITE_ENDPOINTS`, which is empty by
- * design: the write branch has to be provable *before* any write is granted,
- * or it only gets exercised for the first time in the commit that grants one.
+ * Written out rather than taken from `WRITE_ENDPOINTS` directly, so the write
+ * branch stays provable independent of that list's exact current content —
+ * the assertions here describe "a set containing any write", not "today's
+ * four curated endpoints", and shouldn't need updating if that list changes.
  */
 const WITH_A_WRITE = [...READ_ENDPOINTS, "POST /administration/production/deploy/{agentId}"];
 
@@ -110,24 +111,31 @@ describe("buildOperatorSafetyPreamble", () => {
 });
 
 describe("scope wiring", () => {
-  it("describes read_write as read-only while no write is actually granted", () => {
-    // The invariant this whole module exists for: the prompt describes what was
-    // granted, not what the scope is named. Asking for read_write today grants
-    // nothing extra, so claiming write capability would be a lie the model
-    // would then act on.
-    expect(WRITE_ENDPOINTS).toHaveLength(0);
-    expect(safetyPreambleForScope("read_write")).toContain("You are read-only");
-    expect(safetyPreambleForScope("read_write")).toBe(safetyPreambleForScope("read_only"));
+  it("read_write now actually grants a write, and the prompt says so", () => {
+    // The invariant this whole module exists for: the prompt describes what
+    // was granted, not what the scope is named. Now that WRITE_ENDPOINTS is
+    // populated, read_write genuinely differs from read_only — claiming
+    // read-only here would be the lie the module exists to prevent.
+    expect(WRITE_ENDPOINTS.length).toBeGreaterThan(0);
+    expect(safetyPreambleForScope("read_write")).not.toContain("You are read-only");
+    expect(safetyPreambleForScope("read_write")).not.toBe(safetyPreambleForScope("read_only"));
   });
 
-  it("switches branch on the granted set, not the scope name", () => {
-    // The converse of the test above, so the pairing is not vacuous: the same
-    // resolver does flip once a write is present. If this ever fails together
-    // with the test above, the branch is stuck rather than tracking the grant.
-    expect(buildOperatorSafetyPreamble(endpointsForScope("read_write"))).toContain(
-      "You are read-only",
+  it("read_only alone still describes itself as read-only", () => {
+    // The converse of the test above, so the pairing is not vacuous: read_only
+    // must not have been swept into the write branch by a careless resolver
+    // change. If this ever fails together with the test above, the branch is
+    // stuck open rather than tracking the grant.
+    expect(safetyPreambleForScope("read_only")).toContain("You are read-only");
+  });
+
+  it("WITH_A_WRITE and the real read_write endpoint set land in the same branch", () => {
+    // Confirms the hand-written fixture (used everywhere else in this file so
+    // the write branch stays provable independent of WRITE_ENDPOINTS' exact
+    // content) still agrees with reality now that WRITE_ENDPOINTS is real.
+    expect(buildOperatorSafetyPreamble(endpointsForScope("read_write"))).toBe(
+      buildOperatorSafetyPreamble(WITH_A_WRITE),
     );
-    expect(buildOperatorSafetyPreamble(WITH_A_WRITE)).not.toContain("You are read-only");
   });
 });
 
@@ -151,6 +159,18 @@ describe("buildOperatorPromptBody", () => {
 
   it("resolves a scope through the same predicate", () => {
     expect(defaultOperatorPromptBody("read_only")).toBe(buildOperatorPromptBody(READ_ENDPOINTS));
+    expect(defaultOperatorPromptBody("read_write")).toBe(
+      buildOperatorPromptBody(endpointsForScope("read_write")),
+    );
+  });
+
+  it("read_write's default body actually differs from read_only's, now that it grants a write", () => {
+    // The gap this closes: resolving a scope through the same predicate (above)
+    // would pass identically even if endpointsForScope("read_write") silently
+    // stopped granting anything — it would just mean both sides of that
+    // equality collapsed to the read-only body together. This pins the two
+    // scopes to genuinely different output.
+    expect(defaultOperatorPromptBody("read_write")).not.toBe(defaultOperatorPromptBody("read_only"));
   });
 });
 
@@ -160,6 +180,12 @@ describe("buildOperatorSystemPrompt", () => {
     expect(prompt.startsWith(safetyPreambleForScope("read_only"))).toBe(true);
     expect(prompt.endsWith("Custom body.")).toBe(true);
     expect(prompt).toContain("\n\n---\n\n");
+  });
+
+  it("threads read_write through to the write preamble, not the read-only one", () => {
+    const prompt = buildOperatorSystemPrompt("Custom body.", "read_write");
+    expect(prompt.startsWith(safetyPreambleForScope("read_write"))).toBe(true);
+    expect(prompt).toContain("A rejection is final");
   });
 
   it("trims the body so a stray newline cannot detach the separator", () => {

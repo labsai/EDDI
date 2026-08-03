@@ -41,20 +41,60 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /administration/coordinator/status",
   "GET /administration/logs",
   "GET /administration/quotas",
+  // Schedules — added alongside WRITE_ENDPOINTS' schedule disable: without this
+  // the operator could stop a runaway job but never see it to know to.
+  "GET /schedulestore/schedules",
   // Audit
   "GET /auditstore/agent/{agentId}",
 ] as const;
 
 /**
- * Write endpoints — deliberately empty until the human-in-the-loop approval gate
- * ships.
+ * Write endpoints — curated, and deliberately short.
  *
- * Do not populate this by "just adding the safe ones". Creating or updating an
- * agent, editing an LLM config, and creating a schedule are all
- * approval-required: each can install attacker-controlled egress or persistence
- * in a platform the operator reads untrusted content from.
+ * Populated only once the whole chain that makes a write safe actually exists:
+ * the gate itself (backend), provisioning that installs it (setup-api), a
+ * verified read-back of every version (`verifyGateInstalled`), the approval
+ * surface that can resolve a pause (iteration 5), and — the piece that was
+ * missing until now — approval binding to the resolved REQUEST rather than the
+ * tool name, so what an approver sees is what actually runs (backend
+ * `IApiCallExecutor#resolve` + gate-time fingerprint + pre-execution
+ * re-check). See `docs/hitl.md` "Request pinning" in the EDDI backend repo.
+ *
+ * Each entry is deliberately the narrowest verb that solves a real operator
+ * need, chosen so the worst case of an approved-but-wrong write is small and
+ * reversible:
+ *
+ * - `PATCH /descriptorstore/descriptors/{id}` — partial metadata edit only, no
+ *   execution semantics, no egress, no persistence beyond a name/description.
+ *   Also the highest-frequency real request ("tidy this deployment").
+ * - `POST .../deploy/{agentId}` / `.../undeploy/{agentId}` — paired
+ *   deliberately: deploy without rollback is worse than useless in an
+ *   incident. Both can only activate or stop a config a human already
+ *   authored; neither can create behavior. Availability-only blast radius,
+ *   instantly reversible.
+ * - `POST /schedulestore/schedules/{scheduleId}/disable` — the "stop the
+ *   bleeding" verb for a runaway scheduled job burning LLM spend. Asymmetric
+ *   by design: disable is bound, enable/create/fire/retry are not — creating a
+ *   schedule is attacker persistence (a scheduled turn has no human present,
+ *   so an approval prompt never appears), and disabling one is not.
+ *
+ * Deliberately NOT here, regardless of how the request would look:
+ * `PUT /agentstore/agents/{id}` (the operator's own gate lives in that
+ * document — one approved write removes all subsequent gating), any agent- or
+ * LLM-config creation (a full config document is not something an approver
+ * can meaningfully diff), any schedule verb but disable, and every `DELETE`
+ * (no undo exists in any of these stores).
+ *
+ * Because `buildToolApprovals` gates every `http.{post,put,patch,delete}:*`
+ * unconditionally, anything added here is gated the moment it is added — the
+ * failure mode of forgetting to update a pattern list does not exist.
  */
-export const WRITE_ENDPOINTS: readonly string[] = [] as const;
+export const WRITE_ENDPOINTS: readonly string[] = [
+  "PATCH /descriptorstore/descriptors/{id}",
+  "POST /administration/{environment}/deploy/{agentId}",
+  "POST /administration/{environment}/undeploy/{agentId}",
+  "POST /schedulestore/schedules/{scheduleId}/disable",
+] as const;
 
 /**
  * The tool-approval gate installed on every operator agent, read_only included.
