@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ConvergenceConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
@@ -55,6 +56,14 @@ public class PhaseExecutionEngine {
     private final ExecutorService executorService;
     private final CallerIdentityContext callerIdentityContext;
 
+    /**
+     * The {@code memberConversationIds} key the convergence judge's own private
+     * conversation lives under (I2). Deliberately not an agent id, so it can never
+     * collide with a real member's key — a member agent literally named this would
+     * still be keyed by its own id in every other code path.
+     */
+    static final String JUDGE_CONVERSATION_KEY = "__convergence_judge";
+
     public PhaseExecutionEngine(MemberTurnExecutor memberTurnExecutor, GroupContextBuilder contextBuilder,
             ExecutorService executorService, CallerIdentityContext callerIdentityContext) {
         this.memberTurnExecutor = memberTurnExecutor;
@@ -68,6 +77,134 @@ public class PhaseExecutionEngine {
                                        AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
         executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns, 0);
+    }
+
+    /**
+     * Runs the convergence check for one just-finished phase repeat (I2), and
+     * returns what the discussion loop should do next.
+     * <p>
+     * Ordering is deliberate: the deterministic all-abstained check runs first and
+     * short-circuits, so a unanimously silent round never pays for a judge call to
+     * tell it what it already knows. The judge runs only when that fails,
+     * convergence is enabled, {@code minRepeats} has elapsed, and there is a
+     * previous round to compare against.
+     * <p>
+     * A judge failure is never fatal to the discussion: {@code executeAgentTurn}
+     * already converts an agent failure into a SKIPPED/ERROR entry rather than
+     * throwing under the default SKIP policy, and the surrounding catch turns
+     * anything that does escape into "not converged". A convergence check is an
+     * optimization; it must never be the reason a discussion dies.
+     *
+     * @param repeatEntries
+     *            the transcript entries this repeat produced
+     * @param previousRepeatEntries
+     *            the previous repeat's entries, or {@code null} on the first repeat
+     *            — the judge needs a baseline and is skipped without one
+     */
+    public PhaseOutcome checkConvergence(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase, ProtocolConfig protocol,
+                                         int phaseIdx, int repeat, List<GroupMember> speakers, List<TranscriptEntry> repeatEntries,
+                                         List<TranscriptEntry> previousRepeatEntries, GroupDiscussionEventListener listener,
+                                         AtomicInteger turnCounter, int maxTurns) {
+
+        ConvergenceConfig convergence = phase.convergence();
+
+        // The free mechanism, and the only one that runs when convergence is not
+        // configured at all: I4's unanimous PASS is unambiguous evidence on its own
+        // terms, so it needs neither an opt-in nor a minRepeats baseline.
+        if (ConvergenceDetector.allParticipantsAbstained(repeatEntries, speakers != null ? speakers.size() : 0)) {
+            String reason = "All %d participants abstained — nothing further to add".formatted(speakers.size());
+            recordConvergence(gc, phase, phaseIdx, repeat, -1, true, reason, listener);
+            return PhaseOutcome.endRepeats(reason);
+        }
+
+        if (convergence == null || !convergence.enabled()) {
+            return PhaseOutcome.cont();
+        }
+        // repeat is 0-based: with the default minRepeats=2 the first check happens
+        // after the SECOND repeat (repeat index 1), which is the first one that has
+        // a predecessor to differ from.
+        if (repeat + 1 < convergence.minRepeats() || previousRepeatEntries == null || previousRepeatEntries.isEmpty()) {
+            return PhaseOutcome.cont();
+        }
+        // An empty current round means the repeat produced nothing — the turn budget
+        // ran out mid-phase, or every member errored. There is no position to compare,
+        // and a judge handed "(no contributions)" can read silence as agreement and
+        // write a convergence_reached record for a phase that actually ran out of
+        // budget. Skipping is both cheaper and more honest.
+        if (repeatEntries == null || repeatEntries.isEmpty()) {
+            return PhaseOutcome.cont();
+        }
+        // The judge is a real LLM call, so it is subject to the same two budgets every
+        // member turn is. maxTurns: without this a repeats=10 phase adds ten uncapped
+        // calls behind the cap's back. Cost ceiling: the last speaker of this repeat
+        // may have just crossed it, and I1's per-speaker gate cannot have seen that.
+        if (maxTurns > 0 && turnCounter != null && turnCounter.get() >= maxTurns) {
+            return PhaseOutcome.cont();
+        }
+        if (GroupCostLedger.wouldExceedCeiling(gc, protocol)) {
+            return PhaseOutcome.cont();
+        }
+        if (turnCounter != null) {
+            turnCounter.incrementAndGet();
+        }
+
+        var verdict = runJudge(gc, config, phase, protocol, phaseIdx, convergence, repeatEntries, previousRepeatEntries, listener);
+        recordConvergence(gc, phase, phaseIdx, repeat, verdict.agreementScore(), verdict.converged(), verdict.summary(), listener);
+        return verdict.converged() ? PhaseOutcome.endRepeats(verdict.summary()) : PhaseOutcome.cont();
+    }
+
+    private ConvergenceDetector.ConvergenceVerdict runJudge(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
+                                                            ProtocolConfig protocol, int phaseIdx, ConvergenceConfig convergence,
+                                                            List<TranscriptEntry> repeatEntries, List<TranscriptEntry> previousRepeatEntries,
+                                                            GroupDiscussionEventListener listener) {
+        String moderatorAgentId = config.getModeratorAgentId();
+        if (moderatorAgentId == null || moderatorAgentId.isBlank()) {
+            // Nothing to run the judge on. Not an error: a phase can enable
+            // convergence on a group that has no moderator, and the honest outcome
+            // is to keep going rather than to guess.
+            return ConvergenceDetector.ConvergenceVerdict.notConverged("Convergence judge skipped — no moderator agent configured");
+        }
+        if (ConvergenceConfig.JUDGE_SERVICE.equals(convergence.judge())) {
+            LOGGER.warnf("Phase '%s' requests judge=SERVICE, which is not wired yet — falling back to the moderator agent. "
+                    + "See ConvergenceConfig's Javadoc.", phase.name());
+        }
+
+        var judge = new GroupMember(moderatorAgentId, "Convergence Judge", 0, "MODERATOR");
+        String input = ConvergenceDetector.buildJudgeInput(previousRepeatEntries, repeatEntries);
+        try {
+            // JUDGE_CONVERSATION_KEY, not the moderator's agent id: the judge runs the
+            // moderator AGENT but must not share the moderator's CONVERSATION, or its
+            // "reply with ONLY this JSON" prompts become the recent history a later
+            // SYNTHESIS turn (same agent) reads — and the synthesis comes back as JSON.
+            TranscriptEntry judgeEntry = memberTurnExecutor.executeAgentTurn(judge, gc, input, protocol, phaseIdx, phase, null, listener,
+                    null, JUDGE_CONVERSATION_KEY);
+            return ConvergenceDetector.parseJudgeVerdict(judgeEntry != null ? judgeEntry.content() : null, convergence.threshold());
+        } catch (Exception e) {
+            LOGGER.warnf("Convergence judge failed for phase '%s' — continuing without an early exit: %s", phase.name(), e.getMessage());
+            return ConvergenceDetector.ConvergenceVerdict.notConverged("Convergence judge failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Writes the {@code CONVERGENCE} transcript entry and fires the events. The
+     * entry is peer-hidden by F4's visibility matrix, so it informs observers and
+     * the audit trail without becoming something the next speaker reacts to.
+     */
+    private void recordConvergence(GroupConversation gc, DiscussionPhase phase, int phaseIdx, int repeat, double score, boolean converged,
+                                   String reason, GroupDiscussionEventListener listener) {
+        gc.getTranscript().add(new TranscriptEntry(
+                null, "System", reason, phaseIdx, phase.name(),
+                TranscriptEntryType.CONVERGENCE, Instant.now(), null, null));
+        if (listener == null) {
+            return;
+        }
+        listener.onConvergenceChecked(new GroupConversationEventSink.ConvergenceCheckedEvent(
+                phaseIdx, phase.name(), repeat, score, converged, reason));
+        if (converged) {
+            int repeatsSkipped = Math.max(0, Math.max(phase.repeats(), 1) - (repeat + 1));
+            listener.onConvergenceReached(new GroupConversationEventSink.ConvergenceReachedEvent(
+                    phaseIdx, phase.name(), repeat, repeatsSkipped, reason));
+        }
     }
 
     /**

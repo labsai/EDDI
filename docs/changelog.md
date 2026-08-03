@@ -5,6 +5,32 @@
 
 ---
 
+## ✨ feat(groups): Convergence detection + early exit (I2) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+A DELPHI-style phase with `repeats: 4` runs exactly four rounds whether or not the members stopped changing their minds after two — "convergence" was prompt text, not behavior. I2 makes it real.
+
+**Note on ordering:** the plan sequences Wave 1 as I1 → I3 → I4 → I2, with `I4 --> I2` in its dependency graph, because I2's deterministic mechanism consumes I4's PASS. Built here on request, ahead of I4. The deterministic path is implemented and tested but **cannot fire in production** until I4 produces `ABSTAINED` entries — stated in the Javadoc at both the config and the detector, since a mechanism documented as active but structurally dead is worse than one documented as pending.
+
+**Design.** Phase-level `ConvergenceConfig {enabled=false, minRepeats=2, threshold=0.8, judge}`, off by default. Two mechanisms, one exit: unanimous abstention (free, no LLM call, ungated by `minRepeats` — silence is evidence on its own terms), or a judge comparing this round's positions with the previous round's. `PhaseOutcome`/`PhaseExitSignal` (CONTINUE / END_REPEATS / END_DISCUSSION) is the general exit channel I11 and I12 also need; `END_DISCUSSION` has no producer yet but the loop honors it, so adding one later cannot silently degrade it to END_REPEATS.
+
+**Nothing converges on doubt.** Unparseable output, missing score, out-of-range score, judge error — every failure returns "not converged" and the phase runs its remaining rounds exactly as it would have without the feature. Converging on a verdict we couldn't read would silently truncate a discussion the operator paid for; failing to converge costs one round. The threshold is also authoritative over the judge's own `converged` boolean: a model returning `{"agreementScore": 0.3, "converged": true}` does not override the operator's setting.
+
+**A test found a real parser bug.** Jackson's `readTree` parses the first complete JSON value and ignores trailing content, so a judge returning two verdicts — `[{"agreementScore":0.9},{"agreementScore":0.1}]`, whose brace extraction yields two objects in a row — silently converged on the first and discarded the opposite second one. `FAIL_ON_TRAILING_TOKENS` is now enabled and load-bearing, not hygiene.
+
+**An adversarial review pass found a MAJOR defect the tests did not.** The judge runs the *moderator agent*, and `MemberTurnExecutor` keys each private conversation by `member.agentId()` — so every judge call was writing its "reply with ONLY this JSON" prompt and verdict into the **moderator's own conversation**. A later SYNTHESIS phase resolves to that same agent and reads that history as recent context: the synthesized answer would come back as JSON, and each judge call also shipped the full group transcript into that conversation, inflating its window and cost. Fixed with a `conversationKey` override on `executeAgentTurn` (defaulting to the agent id, so no existing caller changes) and a dedicated `__convergence_judge` key.
+
+That fix exposed a second, latent one: `GroupCostLedger` records by *replacement*, so once the judge had its own conversation, attributing it under the moderator's agent id would have **overwritten the moderator's real accumulated cost with the judge's smaller one** — silently shrinking `totalCost` and loosening I1's ceiling. Cost is now attributed under the conversation key, which is what per-conversation cumulative costs actually mean.
+
+Three further gaps from the same pass: the judge was invisible to `maxTurns` (a `repeats: 10` phase could add ten uncapped LLM calls behind the cap's back); it wasn't re-checked against I1's cost ceiling, which the last speaker of a repeat may have just crossed; and it could be handed an empty round after the turn budget ran out, where a judge reading silence as agreement would record a `convergence_reached` for a phase that actually ran out of budget. All three now guarded — the ceiling via a new read-only `wouldExceedCeiling`, deliberately distinct from `enforceCeiling` so declining optional work doesn't emit a duplicate SKIPPED entry or end the phase.
+
+**A mutation check found a weak test of my own.** The "disabled" case passed a `null` config, so the `enabled()` check was never exercised — deleting it left every test green. An operator writing `{"enabled": false}` rather than omitting the block would have gotten judge calls they explicitly turned off. Split into two tests; the explicit-disable one now fails without the check. A second weak assertion (counting moderator transcript entries to prove the judge didn't run) was vacuous, since `runJudge` discards the entry it gets back — replaced with a `verify(..., never())` on the service call.
+
+30 new tests across `ConvergenceDetectorTest` (parse tiers, threshold semantics, abstention counting, config normalization) and `GroupConversationServiceConvergenceTest` (real loop: early exit, all-repeats-run, unparseable-verdict, `minRepeats` gating, both disabled forms, judge-conversation isolation, empty-repeat guard, persist-and-complete). Four mutation checks, all confirmed load-bearing.
+
+---
+
 ## 🔧 fix(orchestrator): three SPI hardening fixes from PR review (2026-08-03)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

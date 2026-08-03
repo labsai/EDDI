@@ -131,6 +131,27 @@ public class MemberTurnExecutor {
                                             DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener,
                                             GroupConversationService.MemberTurnCancellation cancellation)
             throws GroupDiscussionException {
+        return executeAgentTurn(member, gc, input, protocol, phaseIdx, phase, targetAgentId, listener, cancellation, null);
+    }
+
+    /**
+     * @param conversationKey
+     *            which entry of {@code gc.getMemberConversationIds()} this turn's
+     *            private conversation lives under, or {@code null} to use
+     *            {@code member.agentId()} — what every ordinary member turn wants.
+     *            <p>
+     *            Exists for turns that run an <em>existing</em> agent in a role
+     *            distinct from its membership, where sharing that agent's
+     *            conversation would corrupt it. I2's convergence judge is the
+     *            first: it runs the moderator agent, and without a separate key its
+     *            "respond with ONLY this JSON" prompts and verdicts land in the
+     *            moderator's own history — which a later SYNTHESIS phase (also the
+     *            moderator) then reads as recent context, and answers in JSON.
+     */
+    public TranscriptEntry executeAgentTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
+                                            DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener,
+                                            GroupConversationService.MemberTurnCancellation cancellation, String conversationKey)
+            throws GroupDiscussionException {
 
         if (cancellation != null && cancellation.isCancelled()) {
             throw new GroupConversationService.MemberTurnCancelledException();
@@ -164,7 +185,8 @@ public class MemberTurnExecutor {
         }
 
         // Get or create private conversation
-        String privateConvId = gc.getMemberConversationIds().get(member.agentId());
+        String convKey = conversationKey != null ? conversationKey : member.agentId();
+        String privateConvId = gc.getMemberConversationIds().get(convKey);
         boolean firstMemberTurn = privateConvId == null;
         if (privateConvId == null) {
             try {
@@ -174,7 +196,7 @@ public class MemberTurnExecutor {
                 groupContext.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
                 var result = conversationService.startConversation(DEFAULT_ENV, member.agentId(), gc.getUserId(), groupContext);
                 privateConvId = result.conversationId();
-                gc.getMemberConversationIds().put(member.agentId(), privateConvId);
+                gc.getMemberConversationIds().put(convKey, privateConvId);
             } catch (QuotaExceededException qe) {
                 throw new GroupDiscussionException("Tenant quota exceeded: " + qe.getMessage(), qe);
             } catch (Exception e) {
@@ -264,7 +286,14 @@ public class MemberTurnExecutor {
                     GroupConversationService.propagateDynamicAgentTracking(snapshot, gc);
 
                     // Wave 0, F5: harvest this member's tracked cost so far.
-                    GroupCostLedger.accumulateMemberCost(gc, member, snapshot);
+                    // Attributed under the CONVERSATION key, not the agent id: costs
+                    // are per-conversation (AUDIT_COST is that conversation's running
+                    // total), and GroupCostLedger replaces rather than adds. A turn in
+                    // a separate conversation attributed to the agent's own key would
+                    // overwrite that agent's real accumulated cost with this
+                    // conversation's smaller one — silently shrinking totalCost and
+                    // loosening I1's ceiling.
+                    GroupCostLedger.accumulateMemberCost(gc, convKey, snapshot);
 
                     responseFuture.complete(response);
                 });

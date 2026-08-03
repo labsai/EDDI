@@ -43,6 +43,7 @@ import ai.labs.eddi.engine.internal.groups.GroupLifecycleOps;
 import ai.labs.eddi.engine.internal.groups.GroupSigningGuard;
 import ai.labs.eddi.engine.internal.groups.MemberTurnExecutor;
 import ai.labs.eddi.engine.internal.groups.PhaseExecutionEngine;
+import ai.labs.eddi.engine.internal.groups.PhaseOutcome;
 import ai.labs.eddi.engine.internal.groups.TaskForceEngine;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
@@ -629,6 +630,11 @@ public class GroupConversationService implements IGroupConversationService {
         // remaining SYNTHESIS phase" is a skip-ahead, not a stop.
         boolean costCeilingSynthesizeNow = false;
 
+        // I2: set when a phase returns END_DISCUSSION. Nothing produces that signal
+        // yet — I12's facilitator will — but the loop honors it now so adding the
+        // producer later cannot have it silently degrade to "end this phase only".
+        boolean endDiscussionEarly = false;
+
         try {
             // Execute each phase
             for (int phaseIdx = startPhaseIndex; phaseIdx < phases.size(); phaseIdx++) {
@@ -654,6 +660,11 @@ public class GroupConversationService implements IGroupConversationService {
                 if (costCeilingSynthesizeNow && phase.type() != PhaseType.SYNTHESIS) {
                     continue;
                 }
+
+                // I2: the previous repeat's contributions, the baseline the
+                // convergence judge compares against. Scoped to this phase — a
+                // comparison across two different phases would be meaningless.
+                List<TranscriptEntry> previousRepeatEntries = null;
 
                 for (int repeat = 0; repeat < Math.max(phase.repeats(), 1); repeat++) {
 
@@ -703,6 +714,11 @@ public class GroupConversationService implements IGroupConversationService {
                             startSpeakerIdx = resumePoint.speakerIdx();
                         }
                     }
+
+                    // I2: mark where this repeat's entries begin. TranscriptEntry
+                    // carries phaseIndex but no repeat index, so with repeats > 1 the
+                    // only way to say "what this repeat produced" is by position.
+                    int transcriptSizeBeforeRepeat = gc.getTranscript().size();
 
                     // --- Task-oriented phase routing ---
                     if (phase.type() == PhaseType.PLAN || phase.type() == PhaseType.EXECUTE || phase.type() == PhaseType.VERIFY) {
@@ -764,12 +780,50 @@ public class GroupConversationService implements IGroupConversationService {
                         return conversationStore.read(gc.getId());
                     }
 
+                    // I2: convergence is decided BEFORE the persist below so the
+                    // CONVERGENCE transcript entry it may write is included in the
+                    // same document write, but the break happens AFTER it — the
+                    // converged repeat is a real, completed repeat and must still
+                    // persist and fire onPhaseComplete like any other. Deliberately
+                    // different from the cost-ceiling break above, which skips both
+                    // because that repeat did NOT complete.
+                    PhaseOutcome outcome = PhaseOutcome.cont();
+                    // Task phases rewrite entries in place rather than appending, so a
+                    // positional slice does not describe them; convergence is an
+                    // opinion-round concept anyway.
+                    boolean sliceablePhase = phase.type() != PhaseType.PLAN && phase.type() != PhaseType.EXECUTE
+                            && phase.type() != PhaseType.VERIFY;
+                    List<TranscriptEntry> repeatEntries = List.of();
+                    if (sliceablePhase) {
+                        synchronized (gc.getTranscript()) {
+                            int size = gc.getTranscript().size();
+                            repeatEntries = transcriptSizeBeforeRepeat <= size
+                                    ? List.copyOf(gc.getTranscript().subList(transcriptSizeBeforeRepeat, size))
+                                    : List.of();
+                        }
+                        outcome = phaseExecutionEngine.checkConvergence(gc, config, phase, protocol, phaseIdx, repeat, speakers,
+                                repeatEntries, previousRepeatEntries, listener, turnCounter, maxTurns);
+                    }
+
                     gc.setLastModified(Instant.now());
                     conversationStore.update(gc);
 
                     if (listener != null) {
                         listener.onPhaseComplete(new GroupConversationEventSink.PhaseCompleteEvent(phaseIdx, phase.name()));
                     }
+
+                    if (!outcome.isContinue()) {
+                        LOGGER.infof("Phase '%s' of group %s ended early after repeat %d: %s",
+                                phase.name(), gc.getGroupId(), repeat, outcome.reason());
+                        if (outcome.signal() == PhaseOutcome.PhaseExitSignal.END_DISCUSSION) {
+                            // Nothing produces this yet (I12's facilitator will). Handled
+                            // rather than ignored so the signal cannot be added later and
+                            // silently behave as END_REPEATS.
+                            endDiscussionEarly = true;
+                        }
+                        break;
+                    }
+                    previousRepeatEntries = repeatEntries;
                 }
 
                 // R1: Check for cancel BEFORE the HITL gate. After the wave loop
@@ -834,6 +888,14 @@ public class GroupConversationService implements IGroupConversationService {
 
                 // Check again after inner repeat loop in case maxTurns was hit mid-repeat
                 if (turnCounter.get() >= maxTurns) {
+                    break;
+                }
+
+                // I2: END_DISCUSSION ends the phase loop itself, unlike END_REPEATS
+                // which only ended the repeat loop above. Placed after the HITL gate so
+                // an approval that was already due is still honored.
+                if (endDiscussionEarly) {
+                    LOGGER.infof("Group discussion %s ending early after phase %d on an END_DISCUSSION signal", gc.getId(), phaseIdx);
                     break;
                 }
             }

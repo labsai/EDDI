@@ -126,7 +126,7 @@ public class AgentGroupConfiguration {
      * "ROLE:&lt;roleName&gt;" (e.g. "ROLE:DEVIL_ADVOCATE").
      */
     public record DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
-            boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval) {
+            boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence) {
 
         /**
          * Convenience constructor with defaults: participants=ALL,
@@ -143,6 +143,87 @@ public class AgentGroupConfiguration {
         public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
                 boolean targetEachPeer, String inputTemplate, int repeats) {
             this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, false);
+        }
+
+        /**
+         * Backward-compatible constructor without convergence (I2) — {@code null} means
+         * convergence detection is off, which is the default for every phase that
+         * predates I2 and for every style preset (the plan's compat rule: no preset
+         * changes; DELPHI's recommended convergence config is documented rather than
+         * baked in).
+         */
+        public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
+                boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval) {
+            this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, null);
+        }
+    }
+
+    /**
+     * Early-exit detection for a phase whose {@code repeats > 1} (I2). Without this
+     * a DELPHI-style phase always burns exactly {@code repeats} rounds, even once
+     * the members have stopped changing their positions — "convergence" is prompt
+     * text, not behavior.
+     * <p>
+     * Two mechanisms feed one exit path. <b>Deterministic:</b> every participant
+     * abstained this repeat — free, no LLM call, and the reason {@code minRepeats}
+     * does not gate it: unanimous silence is evidence on its own terms, not a
+     * similarity estimate that needs a baseline. <b>Inert until I4 lands</b>: the
+     * {@code ABSTAINED} transcript type exists (F4) but nothing produces one yet,
+     * so today only the semantic mechanism can fire. The detection is written and
+     * tested now because I2 and I4 are separable, and a half-built check added
+     * later next to a working one is how the two silently disagree.
+     * <b>Semantic:</b> a judge compares this repeat's contributions with the
+     * previous repeat's and returns an agreement score. The judge cannot run before
+     * repeat index {@code minRepeats - 1} because it needs a previous repeat to
+     * compare against.
+     *
+     * @param enabled
+     *            off by default — an LLM judge costs a call per repeat, so this is
+     *            opt-in per phase
+     * @param minRepeats
+     *            the judge is skipped until this many repeats have completed
+     *            (default 2: one round establishes positions, the second is the
+     *            first that can differ from it). Values below 2 are raised to 2 —
+     *            there is nothing to compare a first repeat against
+     * @param threshold
+     *            agreement score at or above which the phase is converged (default
+     *            0.8). Compared with {@code >=}, so a judge returning exactly the
+     *            threshold converges
+     * @param judge
+     *            {@code "MODERATOR"} (default) runs the group's configured
+     *            moderator agent as the judge. {@code "SERVICE"} is accepted and
+     *            documented but currently falls back to MODERATOR with a warning:
+     *            the shared {@code SummarizationService} needs LLM provider/model
+     *            coordinates and credentials that {@code AgentGroupConfiguration}
+     *            does not carry, so wiring it needs config this item does not add
+     */
+    public record ConvergenceConfig(boolean enabled, int minRepeats, double threshold, String judge) {
+
+        /**
+         * The lowest {@code minRepeats} that can mean anything — see the record
+         * Javadoc.
+         */
+        public static final int MIN_COMPARABLE_REPEATS = 2;
+        public static final double DEFAULT_THRESHOLD = 0.8;
+        public static final String JUDGE_MODERATOR = "MODERATOR";
+        public static final String JUDGE_SERVICE = "SERVICE";
+
+        /**
+         * Normalizes at the one choke point every reader passes through, so no consumer
+         * has to re-derive defaults from a partially-specified config (a JSON config
+         * naming only {@code enabled} is the common case).
+         */
+        public ConvergenceConfig {
+            minRepeats = Math.max(minRepeats, MIN_COMPARABLE_REPEATS);
+            if (threshold <= 0.0 || threshold > 1.0) {
+                threshold = DEFAULT_THRESHOLD;
+            }
+            judge = judge == null || judge.isBlank() ? JUDGE_MODERATOR : judge.trim().toUpperCase();
+        }
+
+        /** Convenience: enabled with every other setting defaulted. */
+        public ConvergenceConfig(boolean enabled) {
+            this(enabled, MIN_COMPARABLE_REPEATS, DEFAULT_THRESHOLD, JUDGE_MODERATOR);
         }
     }
 

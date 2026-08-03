@@ -206,6 +206,10 @@ public interface IGroupConversationService {
         }
         default void onDecisionReached(GroupConversationEventSink.DecisionReachedEvent event) {
         }
+        default void onConvergenceChecked(GroupConversationEventSink.ConvergenceCheckedEvent event) {
+        }
+        default void onConvergenceReached(GroupConversationEventSink.ConvergenceReachedEvent event) {
+        }
     }
 
     // --- Exceptions ---

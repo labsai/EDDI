@@ -57,7 +57,21 @@ public final class GroupCostLedger {
      * class's own Javadoc — not an error).
      */
     public static void accumulateMemberCost(GroupConversation gc, GroupMember member, SimpleConversationMemorySnapshot snapshot) {
-        if (snapshot == null || snapshot.getConversationSteps() == null || snapshot.getConversationSteps().isEmpty()) {
+        accumulateMemberCost(gc, member != null ? member.agentId() : null, snapshot);
+    }
+
+    /**
+     * @param attributionKey
+     *            the {@code memberCosts} key to record under — normally the
+     *            member's agent id, but the <em>conversation</em> key when a turn
+     *            runs an existing agent in a separate conversation (I2's
+     *            convergence judge). Costs are per-conversation and recorded by
+     *            replacement, so attributing a second conversation under the same
+     *            key would overwrite the first's total rather than add to it.
+     */
+    public static void accumulateMemberCost(GroupConversation gc, String attributionKey, SimpleConversationMemorySnapshot snapshot) {
+        if (attributionKey == null || snapshot == null || snapshot.getConversationSteps() == null
+                || snapshot.getConversationSteps().isEmpty()) {
             return;
         }
         var lastStep = snapshot.getConversationSteps().get(snapshot.getConversationSteps().size() - 1);
@@ -66,7 +80,7 @@ public final class GroupCostLedger {
         }
         for (var stepData : lastStep.getConversationStep()) {
             if (stepData != null && MemoryKeys.AUDIT_COST.equals(stepData.getKey()) && stepData.getValue() instanceof Number cost) {
-                recordAndResum(gc, member.agentId(), cost.doubleValue());
+                recordAndResum(gc, attributionKey, cost.doubleValue());
                 return;
             }
         }
@@ -133,6 +147,22 @@ public final class GroupCostLedger {
                 null, "System", null, phaseIdx, phase.name(),
                 TranscriptEntryType.SKIPPED, Instant.now(), message, null));
         return true;
+    }
+
+    /**
+     * Read-only "is the ceiling already blown?" — no transcript entry, no
+     * {@code costCeilingOutcome}, no policy applied.
+     * <p>
+     * For callers that want to skip optional work rather than end the phase, where
+     * {@link #enforceCeiling} would be wrong twice over: it would append a second
+     * SKIPPED entry for an overspend already reported, and it would set the outcome
+     * flag, converting "skip this optional extra" into "stop the phase". I2's
+     * convergence judge is the case — declining to spend on an optional judge call
+     * is not the same event as a phase running out of budget.
+     */
+    public static boolean wouldExceedCeiling(GroupConversation gc, ProtocolConfig protocol) {
+        Double ceiling = protocol != null ? protocol.maxCostPerDiscussion() : null;
+        return ceiling != null && gc.getTotalCost() > ceiling;
     }
 
     private static void recordAndResum(GroupConversation gc, String agentId, double cost) {

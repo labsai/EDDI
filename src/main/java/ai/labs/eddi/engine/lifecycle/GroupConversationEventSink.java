@@ -50,6 +50,17 @@ public final class GroupConversationEventSink {
      * and I18 (awards) are the eventual producers.
      */
     public static final String EVENT_DECISION_REACHED = "decision_reached";
+    /**
+     * A convergence check ran after a phase repeat (I2). Fires on every check,
+     * converged or not, so an observer can see a phase approaching agreement rather
+     * than only the moment it stops.
+     */
+    public static final String EVENT_CONVERGENCE_CHECKED = "convergence_checked";
+    /**
+     * A phase stopped repeating early because its participants converged (I2).
+     * Always preceded by an {@link #EVENT_CONVERGENCE_CHECKED} for the same repeat.
+     */
+    public static final String EVENT_CONVERGENCE_REACHED = "convergence_reached";
 
     // --- Event payloads ---
 
@@ -122,5 +133,30 @@ public final class GroupConversationEventSink {
      * discussion (Wave 0, F3).
      */
     public record DecisionReachedEvent(GroupConversation.DecisionRecord decision) {
+    }
+
+    /**
+     * A convergence check completed for one phase repeat (I2).
+     *
+     * @param agreementScore
+     *            the judge's 0..1 score, or {@code -1} when no judge ran (the
+     *            all-abstained path, or a parse failure)
+     * @param converged
+     *            whether this check ended the phase's repeats
+     * @param reason
+     *            one-line explanation, already display-ready
+     */
+    public record ConvergenceCheckedEvent(int phaseIndex, String phaseName, int repeat, double agreementScore,
+            boolean converged, String reason) {
+    }
+
+    /**
+     * A phase stopped repeating early because it converged (I2).
+     *
+     * @param repeatsSkipped
+     *            how many further repeats the phase was configured for but will not
+     *            run — the concrete saving
+     */
+    public record ConvergenceReachedEvent(int phaseIndex, String phaseName, int repeat, int repeatsSkipped, String reason) {
     }
 }
