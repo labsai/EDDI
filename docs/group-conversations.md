@@ -80,6 +80,40 @@ create_group(
 )
 ```
 
+### Debate verdicts
+
+When a DEBATE has **two sides and an impartial judge** — i.e. members carry at
+least two distinct roles *and* `moderatorAgentId` names an agent that is not one
+of the debaters — the judgment phase returns a structured verdict alongside its
+prose, on the conversation's `decision` field:
+
+```json
+"decision": {
+  "type": "VERDICT",
+  "winner": "CON",
+  "tally": { "PRO": 4.0, "CON": 9.0 },
+  "outcome": "CON wins (PRO 4/10, CON 9/10) — PRO asserted; CON cited.",
+  "method": "debate-judgment",
+  "decidedAtPhase": "Judgment",
+  "dissents": []
+}
+```
+
+`winner` is `null` for a tie (the tie is stated in `outcome`). The judge is asked
+to score argument quality and factual support, and explicitly *not* assertiveness
+or fluency.
+
+Any of these leaves `decision` unset and the conclusion as ordinary prose — none
+of them is an error:
+
+- **No roles on the members.** Nothing argued PRO, so a PRO-vs-CON score would be
+  invented rather than measured.
+- **No moderator.** The stand-in synthesizer is one of the debaters, and a
+  partisan's call is not the group's finding.
+- **A phase `inputTemplate` of your own.** Your instruction wins; set one if you
+  want a debate to conclude in plain prose.
+- **A judgment the parser cannot read.** The prose conclusion is kept as-is.
+
 ## Nested Groups (Group-of-Groups)
 
 Members can be other groups. The sub-group runs its own discussion and its synthesized answer becomes the member's response.

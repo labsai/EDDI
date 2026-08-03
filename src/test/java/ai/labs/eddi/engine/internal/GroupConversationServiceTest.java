@@ -303,7 +303,7 @@ class GroupConversationServiceTest {
         }
 
         @Test
-        void moderator_withNullModerator_fallsBackToAll() throws Exception {
+        void moderator_withNullModerator_picksOneDeterministicSynthesizer() throws Exception {
             var phase = new DiscussionPhase("Synth", PhaseType.SYNTHESIS, "MODERATOR",
                     AgentGroupConfiguration.TurnOrder.SEQUENTIAL, AgentGroupConfiguration.ContextScope.FULL,
                     false, null, 1);
@@ -313,11 +313,15 @@ class GroupConversationServiceTest {
 
             List<GroupMember> result = invoke(phase, members, null);
 
-            assertEquals(2, result.size());
+            // I3(a): used to return both members. executeDiscussion takes the LAST
+            // SYNTHESIS entry as the answer, so "everyone synthesizes" meant the
+            // conclusion was whatever the last speaker happened to say.
+            assertEquals(1, result.size());
+            assertEquals("a1", result.get(0).agentId(), "lowest speakingOrder synthesizes");
         }
 
         @Test
-        void moderator_withBlankModerator_fallsBackToAll() throws Exception {
+        void moderator_withBlankModerator_picksOneDeterministicSynthesizer() throws Exception {
             var phase = new DiscussionPhase("Synth", PhaseType.SYNTHESIS, "MODERATOR",
                     AgentGroupConfiguration.TurnOrder.SEQUENTIAL, AgentGroupConfiguration.ContextScope.FULL,
                     false, null, 1);

@@ -5,6 +5,46 @@
 
 ---
 
+## ✨ feat(groups): Structured verdicts + deterministic synthesis (I3) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Two independent fixes to how a discussion reaches its conclusion.
+
+**(a) A moderator-less synthesis had no author — it had a winner by accident.** A phase configured `participants: "MODERATOR"` in a group naming no `moderatorAgentId` fell back to *every* member, and `executeDiscussion` takes the **last** SYNTHESIS entry as the answer. So the conclusion of such a discussion was decided by speaking order: whoever happened to go last won, silently, with every other member's synthesis discarded unread. Now exactly one synthesizer speaks — first by `speakingOrder`, the ordering every other phase already uses. This is a behavior change and deliberately so; the old behavior had no defensible reading. Old configs still load and save: `AgentGroupStore` logs a warning at save time rather than rejecting.
+
+**(b) A debate's judgment was prose nothing could read.** DEBATE ends in a SYNTHESIS phase that picks a winner, but the winner existed only as English — a caller wanting to branch on it had to parse the sentence. The judge is now prompted for JSON, which `DebateVerdictParser` reads into `DecisionRecord{type=VERDICT, method="debate-judgment"}` with per-side scores. Three-tier parse (strict → brace extraction → give up), and every failure mode degrades to `type=NONE` carrying the raw text: a malformed judgment costs the structured view, never the discussion.
+
+**The transcript keeps the agent's words; only the answer is rendered.** The JSON is what the judge actually said and is what its signature covers, so rewriting that entry would forge a member's contribution under its own signature. The substitution happens at `setSynthesizedAnswer` instead, guarded by an exact match against the text the verdict was parsed from — a later SYNTHESIS phase that supersedes the judgment keeps its own words.
+
+**Anti-sycophancy** (spec-required): the judgment template directs scoring of argument quality and factual support, and explicitly *not* assertiveness, confidence, fluency, or length — an LLM judge shown two sides reliably rewards the more forceful one. A tie is named as a legitimate verdict so the model does not manufacture a winner.
+
+**Two independent adversarial reviews found a blocker and six real defects**, none of which the passing tests caught.
+
+*The blocker:* two pre-existing tests in other files still asserted the old fallback-to-ALL and were red on the branch. I had searched for them and not found them; only running the wider suite did.
+
+*A verdict fabricated for a debate that had no sides.* `create_group(style="DEBATE")` without `memberRoles` — the shape in our own docs — resolves `ROLE:PRO` to ALL, maps every speaker to the same side, and produces a transcript nobody argued PRO in. The first cut keyed detection on entry types alone, so the judge was still asked to score PRO against CON, and would pick one.
+
+*A partisan judging its own debate.* With (a) in place, a moderator-less DEBATE makes a debater the sole synthesizer — and its own conversation holds "argue the FOR side" as recent context. That is exactly the contamination I2's `JUDGE_CONVERSATION_KEY` exists to prevent, and stamping the result as `DecisionRecord.winner` would present one side's opinion as the group's finding.
+
+Both are closed by moving detection out of `selectDefaultTemplate` (which can only see the transcript) into `GroupContextBuilder.isDebateJudgment`, which also sees the speaker and the roster: a verdict now requires a two-sided roster **and** an impartial judge. A moderator-less debate concludes in prose, which is at least honest about who wrote it. `recordDebateVerdict` calls the same predicate with the same arguments rather than re-deriving the answer, so the prompt and the parse cannot disagree about whether a verdict was ever requested.
+
+*Every DEBATE's answer got shorter.* The first template capped `reasoning` at "2-3 sentences", and that text becomes the discussion's answer — so every existing DEBATE config, and every parent group consuming one as a nested member, would have silently traded a full analysis for one sentence and a scoreline. Uncapped, and the escape hatch (a phase's own `inputTemplate`, which suppresses the verdict path entirely) is now documented at the template.
+
+*The minority report argued with braces.* The dissent round read the transcript entry, so members were asked to disagree with a JSON blob — in public, SSE-streamed `DISSENT` entries. It now reacts to the rendered outcome.
+
+*The save-time warning was inert for preset styles.* It read `getPhases()`, but a preset-style group stores no phases at all — the engine expands the preset at discussion time, and all six presets end in a MODERATOR phase. So the one mitigation for (a)'s behavior change was silent for exactly the configs that hit it. The decision is now a separate `moderatorlessPhaseNames()`, because a log-only method is a decision nothing can pin.
+
+*Case-sensitive score keys.* `normalizeWinner` accepts `"pro"`, but the score lookup was exact-match — so a judge writing lowercase throughout got its winner read and its whole scoreboard silently dropped.
+
+**The test review found four gaps and proved each by mutation** — including that *nothing at any layer asserted the judge was actually prompted with the judgment template*: the engine test mocks the context builder, the end-to-end test mocks the templating engine, and the builder test only covered the other branch of the ternary. Wiring that never selected the template would have left every I3 test green. Also: a `noSynthesisEntry` test that held no reference to the object it claimed to assert on, score bounds untested at 0 and 10 (the exact endpoints the template asks the judge for), and the production verdict→dissents ordering never exercised — only its reverse.
+
+**A Qute check worth keeping.** The judgment template's literal JSON survives rendering only in its single-line form: `{"winner"` renders verbatim, but the same JSON pretty-printed across lines does not — Qute consumes it. `debateJudgmentTemplate_survivesQuteRendering` pins that with a real engine, because every other test in the suite mocks the templating engine and would not have noticed the contract being eaten.
+
+New: `DebateVerdictParser`, `DebateVerdictParserTest`, `GroupConversationServiceVerdictTest`, `AgentGroupStoreTest`, plus a "Debate verdicts" section in `docs/group-conversations.md`.
+
+---
+
 ## ✨ feat(groups): Abstention + minority report (I4) (2026-08-03)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

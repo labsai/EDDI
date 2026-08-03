@@ -13,7 +13,11 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
+import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.Dissent;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -282,5 +286,147 @@ class PhaseExecutionEngineTest {
         assertEquals(2, gc.getTranscript().size());
         assertEquals("b", gc.getTranscript().get(0).targetAgentId());
         assertEquals("a", gc.getTranscript().get(1).targetAgentId());
+    }
+
+    // =================================================================
+    // I3 — recordDebateVerdict
+    // =================================================================
+
+    private DiscussionPhase judgmentPhase(String inputTemplate) {
+        return new DiscussionPhase("Judgment", PhaseType.SYNTHESIS, "MODERATOR", TurnOrder.SEQUENTIAL,
+                ContextScope.FULL, false, inputTemplate, 1, false);
+    }
+
+    private GroupConversation gcWithSynthesis(String content) {
+        var gc = gc();
+        gc.getTranscript().add(new TranscriptEntry("judge", "Judge", content, 1, "Judgment",
+                TranscriptEntryType.SYNTHESIS, Instant.now(), null, null));
+        return gc;
+    }
+
+    private AgentGroupConfiguration debateConfig() {
+        var config = new AgentGroupConfiguration();
+        config.setMembers(List.of(new GroupMember("pro", "Pro", 1, "PRO"), new GroupMember("con", "Con", 2, "CON")));
+        return config;
+    }
+
+    private List<GroupMember> judgeAsSpeaker() {
+        return List.of(new GroupMember("mod", "Moderator", 0, "MODERATOR"));
+    }
+
+    /** Makes the engine's shared predicate report a debate judgment. */
+    private void stubIsJudgment(boolean value) {
+        when(contextBuilder.isDebateJudgment(any(), any(), any(), anyInt(), any())).thenReturn(value);
+    }
+
+    @Test
+    void recordDebateVerdict_afterAJudgment_populatesTheDecision() {
+        var engine = engine();
+        stubIsJudgment(true);
+        var gc = gcWithSynthesis("""
+                {"winner": "CON", "scores": {"PRO": 4, "CON": 9}, "reasoning": "PRO cited nothing."}""");
+
+        assertTrue(engine.recordDebateVerdict(gc, debateConfig(), judgmentPhase(null), 1, judgeAsSpeaker()));
+
+        assertEquals(DecisionType.VERDICT, gc.getDecision().type());
+        assertEquals("CON", gc.getDecision().winner());
+    }
+
+    @Test
+    void recordDebateVerdict_notAJudgment_writesNoDecisionAtAll() {
+        // The engine must not record a "failed parse" for a synthesis that was
+        // never asked to produce JSON — that would put a NONE verdict on every
+        // ordinary discussion and make a real parse failure indistinguishable.
+        var engine = engine();
+        stubIsJudgment(false);
+        var gc = gcWithSynthesis("Both sides made good points.");
+
+        assertFalse(engine.recordDebateVerdict(gc, debateConfig(), judgmentPhase(null), 1, judgeAsSpeaker()));
+
+        assertNull(gc.getDecision());
+    }
+
+    @Test
+    void recordDebateVerdict_asksThePredicateWithTheResolvedSynthesizerAndRoster() {
+        // The whole point of taking speakers + config rather than re-deriving: this
+        // call must see exactly what buildPhaseInput saw, or the two can disagree
+        // about whether a verdict was ever requested.
+        var engine = engine();
+        stubIsJudgment(false);
+        var config = debateConfig();
+        var speakers = judgeAsSpeaker();
+        var gc = gcWithSynthesis("prose");
+
+        engine.recordDebateVerdict(gc, config, judgmentPhase(null), 1, speakers);
+
+        verify(contextBuilder).isDebateJudgment(any(), eq(speakers.get(0)), eq(gc.getTranscript()), eq(1), eq(config.getMembers()));
+    }
+
+    @Test
+    void recordDebateVerdict_unparseableJudgment_recordsNoneAndKeepsTheText() {
+        var engine = engine();
+        stubIsJudgment(true);
+        var gc = gcWithSynthesis("I award this to PRO, narrowly.");
+
+        assertFalse(engine.recordDebateVerdict(gc, debateConfig(), judgmentPhase(null), 1, judgeAsSpeaker()),
+                "a failed parse is not a verdict");
+
+        assertEquals(DecisionType.NONE, gc.getDecision().type());
+        assertEquals("I award this to PRO, narrowly.", gc.getDecision().raw());
+    }
+
+    @Test
+    void recordDebateVerdict_preservesDissentsAlreadyRecorded() {
+        // Ordering insurance: the dissent round normally runs after this, but if a
+        // config ever produces dissents first they must not be dropped by the
+        // verdict replacing the record wholesale.
+        var engine = engine();
+        stubIsJudgment(true);
+        var gc = gcWithSynthesis("""
+                {"winner": "PRO"}""");
+        var dissent = new Dissent("a", "A", "I disagree");
+        gc.setDecision(new DecisionRecord(DecisionType.NONE, null, null, null,
+                List.of(dissent), "dissent-round", "Judgment", null));
+
+        engine.recordDebateVerdict(gc, debateConfig(), judgmentPhase(null), 1, judgeAsSpeaker());
+
+        assertEquals(DecisionType.VERDICT, gc.getDecision().type());
+        assertEquals(List.of(dissent), gc.getDecision().dissents());
+    }
+
+    @Test
+    void recordDebateVerdict_noSynthesisEntry_writesNoDecision() {
+        // A synthesizer that was skipped, errored, or ran out of turn budget leaves
+        // nothing to judge. Recording a phantom NONE record here would also flip
+        // recordDissents onto its merge-onto-existing branch.
+        var engine = engine();
+        stubIsJudgment(true);
+        var gc = gc();
+
+        assertFalse(engine.recordDebateVerdict(gc, debateConfig(), judgmentPhase(null), 1, judgeAsSpeaker()));
+
+        assertNull(gc.getDecision());
+    }
+
+    @Test
+    void recordDebateVerdict_blankSynthesis_writesNoDecision() {
+        var engine = engine();
+        stubIsJudgment(true);
+        var gc = gcWithSynthesis("   ");
+
+        assertFalse(engine.recordDebateVerdict(gc, debateConfig(), judgmentPhase(null), 1, judgeAsSpeaker()));
+
+        assertNull(gc.getDecision());
+    }
+
+    @Test
+    void recordDebateVerdict_noSpeakers_stillAsksThePredicateWithANullSpeaker() {
+        var engine = engine();
+        stubIsJudgment(false);
+        var gc = gcWithSynthesis("prose");
+
+        assertFalse(engine.recordDebateVerdict(gc, debateConfig(), judgmentPhase(null), 1, List.of()));
+
+        verify(contextBuilder).isDebateJudgment(any(), isNull(), any(), anyInt(), any());
     }
 }

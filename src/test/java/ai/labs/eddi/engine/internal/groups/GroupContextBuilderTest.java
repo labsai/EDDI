@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
+import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -324,6 +325,146 @@ class GroupContextBuilderTest {
     @Test
     void selectDefaultTemplate_nonOpinion_usesPresetDefault() {
         assertNotNull(builder.selectDefaultTemplate(phase(PhaseType.CRITIQUE, ContextScope.FULL), List.of(), 0));
+    }
+
+    // =================================================================
+    // I3 — SYNTHESIS after a debate asks for a verdict, not a summary
+    // =================================================================
+
+    private TranscriptEntry entry(TranscriptEntryType type, int phaseIdx) {
+        return new TranscriptEntry(AGENT_A, "Agent A", "said something", phaseIdx, "P" + phaseIdx,
+                type, Instant.now(), null, null);
+    }
+
+    private DiscussionPhase synthesis(String inputTemplate) {
+        return new DiscussionPhase("Judgment", PhaseType.SYNTHESIS, "MODERATOR", TurnOrder.SEQUENTIAL,
+                ContextScope.FULL, false, inputTemplate, 1, false);
+    }
+
+    private GroupMember judge() {
+        return new GroupMember("mod", "Moderator", 0, "MODERATOR");
+    }
+
+    private List<GroupMember> twoSidedRoster() {
+        return List.of(new GroupMember("pro", "Pro", 1, "PRO"), new GroupMember("con", "Con", 2, "CON"));
+    }
+
+    @Test
+    void isDebateJudgment_impartialJudgeAfterArguments_isTrue() {
+        assertTrue(builder.isDebateJudgment(synthesis(null), judge(),
+                List.of(entry(TranscriptEntryType.ARGUMENT, 0)), 1, twoSidedRoster()));
+    }
+
+    @Test
+    void isDebateJudgment_rebuttalsAlsoCount() {
+        assertTrue(builder.isDebateJudgment(synthesis(null), judge(),
+                List.of(entry(TranscriptEntryType.REBUTTAL, 0)), 1, twoSidedRoster()));
+    }
+
+    @Test
+    void isDebateJudgment_withoutADebate_isFalse() {
+        // A brainstorm's synthesis must keep summarizing. Asking it for a PRO/CON
+        // verdict would produce a winner for a discussion that had no sides, and
+        // DebateVerdictParser would then dutifully record it.
+        assertFalse(builder.isDebateJudgment(synthesis(null), judge(),
+                List.of(entry(TranscriptEntryType.OPINION, 0), entry(TranscriptEntryType.CRITIQUE, 0)), 1, twoSidedRoster()));
+    }
+
+    @Test
+    void isDebateJudgment_argumentsFromThisPhaseOrLater_doNotCount() {
+        // A phase cannot judge arguments it has not seen. On a resume the
+        // transcript can already carry entries from later phases of an earlier leg,
+        // which must not retroactively turn a synthesis into a judgment.
+        assertFalse(builder.isDebateJudgment(synthesis(null), judge(),
+                List.of(entry(TranscriptEntryType.ARGUMENT, 1), entry(TranscriptEntryType.REBUTTAL, 5)), 1, twoSidedRoster()));
+    }
+
+    @Test
+    void isDebateJudgment_rosterWithNoSides_isFalse() {
+        // create_group(style="DEBATE") without memberRoles: resolveParticipants
+        // falls back to ALL for "ROLE:PRO", every speaker is mapped to the same
+        // side, and nobody ever argued PRO. Scoring PRO against CON there would
+        // fabricate a winner out of a one-sided discussion.
+        var noRoles = List.of(new GroupMember("a", "A", 1, null), new GroupMember("b", "B", 2, null));
+
+        assertFalse(builder.isDebateJudgment(synthesis(null), judge(),
+                List.of(entry(TranscriptEntryType.ARGUMENT, 0)), 1, noRoles));
+    }
+
+    @Test
+    void isDebateJudgment_oneSidedRoster_isFalse() {
+        var allPro = List.of(new GroupMember("a", "A", 1, "PRO"), new GroupMember("b", "B", 2, "pro"));
+
+        assertFalse(builder.isDebateJudgment(synthesis(null), judge(),
+                List.of(entry(TranscriptEntryType.ARGUMENT, 0)), 1, allPro),
+                "case variants of one role are still one side");
+    }
+
+    @Test
+    void isDebateJudgment_speakerIsADebater_isFalse() {
+        // A moderator-less debate makes a debater the sole synthesizer. Its own
+        // conversation holds "argue the FOR side"; asking it to score PRO vs CON
+        // and stamping the answer as DecisionRecord.winner would present one
+        // side's opinion as the group's finding.
+        var partisan = new GroupMember("pro", "Pro", 1, "PRO");
+
+        assertFalse(builder.isDebateJudgment(synthesis(null), partisan,
+                List.of(entry(TranscriptEntryType.ARGUMENT, 0)), 1, twoSidedRoster()));
+        assertFalse(builder.isDebateJudgment(synthesis(null), new GroupMember("con", "Con", 2, "con"),
+                List.of(entry(TranscriptEntryType.ARGUMENT, 0)), 1, twoSidedRoster()),
+                "role matching must not be case-sensitive, or a lowercase role reads as impartial");
+    }
+
+    @Test
+    void isDebateJudgment_explicitInputTemplate_isFalse() {
+        assertFalse(builder.isDebateJudgment(synthesis("My own template"), judge(),
+                List.of(entry(TranscriptEntryType.ARGUMENT, 0)), 1, twoSidedRoster()),
+                "the config author's own template is their instruction and always wins");
+    }
+
+    @Test
+    void isDebateJudgment_nonSynthesisPhase_isFalse() {
+        assertFalse(builder.isDebateJudgment(phase(PhaseType.REBUTTAL, ContextScope.FULL), judge(),
+                List.of(entry(TranscriptEntryType.ARGUMENT, 0)), 1, twoSidedRoster()));
+    }
+
+    @Test
+    void buildPhaseInput_debateJudgment_rendersTheJudgmentTemplate() throws Exception {
+        // The only test at any layer that asserts what the judge is actually
+        // PROMPTED with: PhaseExecutionEngineTest mocks this whole class, and the
+        // end-to-end test mocks ITemplatingEngine. Without it, wiring that never
+        // selects the judgment template would leave every other I3 test green.
+        when(templatingEngine.processTemplate(any(), any(), eq(ITemplatingEngine.TemplateMode.TEXT))).thenReturn("rendered");
+
+        builder.buildPhaseInput(synthesis(null), judge(), "Q?", List.of(entry(TranscriptEntryType.ARGUMENT, 0)), 1, null, twoSidedRoster());
+
+        var captor = ArgumentCaptor.forClass(String.class);
+        verify(templatingEngine).processTemplate(captor.capture(), any(), eq(ITemplatingEngine.TemplateMode.TEXT));
+        assertEquals(DiscussionStylePresets.TEMPLATE_DEBATE_JUDGMENT, captor.getValue());
+    }
+
+    @Test
+    void buildPhaseInput_plainSynthesis_rendersTheProseTemplate() throws Exception {
+        when(templatingEngine.processTemplate(any(), any(), eq(ITemplatingEngine.TemplateMode.TEXT))).thenReturn("rendered");
+
+        builder.buildPhaseInput(synthesis(null), judge(), "Q?", List.of(entry(TranscriptEntryType.OPINION, 0)), 1, null, twoSidedRoster());
+
+        var captor = ArgumentCaptor.forClass(String.class);
+        verify(templatingEngine).processTemplate(captor.capture(), any(), eq(ITemplatingEngine.TemplateMode.TEXT));
+        assertEquals(DiscussionStylePresets.defaultTemplate(PhaseType.SYNTHESIS), captor.getValue());
+    }
+
+    @Test
+    void buildPhaseInput_explicitTemplate_winsOverTheJudgmentDefault() throws Exception {
+        // The escape hatch for anyone who wants a debate to end in prose.
+        when(templatingEngine.processTemplate(any(), any(), eq(ITemplatingEngine.TemplateMode.TEXT))).thenReturn("rendered");
+
+        builder.buildPhaseInput(synthesis("My own template"), judge(), "Q?",
+                List.of(entry(TranscriptEntryType.ARGUMENT, 0)), 1, null, twoSidedRoster());
+
+        var captor = ArgumentCaptor.forClass(String.class);
+        verify(templatingEngine).processTemplate(captor.capture(), any(), eq(ITemplatingEngine.TemplateMode.TEXT));
+        assertEquals("My own template", captor.getValue());
     }
 
     @Test

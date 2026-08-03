@@ -148,6 +148,47 @@ public final class DiscussionStylePresets {
 
             Synthesize a balanced conclusion with a clear recommendation.""";
 
+    /**
+     * The DEBATE conclusion (I3). Unlike {@link #TEMPLATE_SYNTHESIS}, which asks
+     * for a balanced summary, a debate ends in a <em>judgment</em> — and a judgment
+     * expressed only as prose cannot be read by anything downstream: a caller
+     * wanting the winner has to parse English.
+     * <p>
+     * The scoring directive is the anti-sycophancy half. An LLM judge shown two
+     * sides reliably rewards the more assertive, more fluent, longer argument;
+     * saying so explicitly is the documented mitigation, and without it the verdict
+     * measures rhetoric rather than the case.
+     * <p>
+     * <b>{@code reasoning} is deliberately uncapped.</b> It becomes the
+     * discussion's {@code synthesizedAnswer} (rendered after the verdict line by
+     * {@code DebateVerdictParser}), so every REST/SSE/MCP caller — and every parent
+     * group consuming this one as a nested member — reads it in place of the
+     * balanced prose {@link #TEMPLATE_SYNTHESIS} used to produce. Asking for "2-3
+     * sentences" here would quietly shorten the output of every existing DEBATE
+     * config. A config that wants the old prose conclusion back sets the phase's
+     * {@code inputTemplate}, which suppresses the verdict path entirely.
+     */
+    public static final String TEMPLATE_DEBATE_JUDGMENT = """
+            You are judging a formal debate on the proposition:
+            "{question}"
+
+            Full transcript:
+            {#for entry in transcript}
+            [{entry.phaseName}] {entry.speaker}: "{entry.content}"
+            {/for}
+
+            Score each side on the QUALITY of its argument and the FACTUAL SUPPORT it
+            offered. Explicitly do NOT reward assertiveness, confidence, fluency, or
+            length — a calmly stated, well-evidenced case beats a forceful, unsupported
+            one. A tie is a legitimate verdict; do not manufacture a winner.
+
+            Respond with ONLY this JSON, no other text. Put your full analysis in
+            "reasoning" — which arguments carried, what evidence decided it, and where
+            the losing side came closest. That text is what the group's readers see as
+            the conclusion, so do not abbreviate it:
+            {"winner": "PRO" | "CON" | "TIE", "scores": {"PRO": <0-10>, "CON": <0-10>}, "reasoning": "<your full analysis>"}
+            """;
+
     public static final String TEMPLATE_OPINION_ANONYMOUS = """
             A panel of experts is discussing:
             "{question}"

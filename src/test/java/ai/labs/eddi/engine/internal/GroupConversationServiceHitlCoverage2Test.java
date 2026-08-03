@@ -603,15 +603,36 @@ class GroupConversationServiceHitlCoverage2Test {
 
     @SuppressWarnings("unchecked")
     @Test
-    @DisplayName("resolveParticipants: MODERATOR with no moderator configured → falls back to ALL")
-    void participantsModeratorMissingFallsBackAll() throws Exception {
+    @DisplayName("resolveParticipants: MODERATOR with no moderator configured → one deterministic synthesizer, not ALL")
+    void participantsModeratorMissingPicksFirstBySpeakingOrder() throws Exception {
+        // I3(a), a deliberate behavior change. This used to return every member,
+        // and executeDiscussion takes the LAST SYNTHESIS entry as the answer — so
+        // the conclusion was decided by whoever spoke last. The roster below is
+        // deliberately out of speaking order so "first" cannot be satisfied by
+        // list position, and has 3 members so a fallback-to-ALL cannot pass by
+        // coincidence of size.
         var phase = new DiscussionPhase("Mod", PhaseType.SYNTHESIS,
                 "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false);
-        var members = List.of(member());
+        var members = List.of(new GroupMember("late", "Late", 9, null),
+                new GroupMember("first", "First", 0, null),
+                new GroupMember("middle", "Middle", 4, null));
 
         var result = (List<GroupMember>) invoke(resolveParticipantsMethod(), phase, members, null);
 
-        assertEquals(members.size(), result.size(), "no moderator → ALL");
+        assertEquals(1, result.size(), "no moderator → exactly one synthesizer");
+        assertEquals("first", result.get(0).agentId(), "lowest speakingOrder synthesizes, not last-speaker-wins");
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    @DisplayName("resolveParticipants: MODERATOR with no moderator and no members → empty, not a phantom speaker")
+    void participantsModeratorMissingAndNoMembers() throws Exception {
+        var phase = new DiscussionPhase("Mod", PhaseType.SYNTHESIS,
+                "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false);
+
+        var result = (List<GroupMember>) invoke(resolveParticipantsMethod(), phase, List.<GroupMember>of(), null);
+
+        assertTrue(result.isEmpty());
     }
 
     @SuppressWarnings("unchecked")

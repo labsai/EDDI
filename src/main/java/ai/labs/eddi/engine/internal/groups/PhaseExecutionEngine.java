@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ConvergenceConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
+import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.Dissent;
@@ -216,7 +218,14 @@ public class PhaseExecutionEngine {
             return 0;
         }
 
-        String input = AbstentionDetector.buildDissentInput(synthesis);
+        // I3: after a judged debate the transcript entry holds the judge's JSON.
+        // Asking members to disagree with a serialization format produces DISSENT
+        // entries — public, SSE-streamed, and recorded on the DecisionRecord — that
+        // argue with braces. The rendered outcome is what a human would have been
+        // shown, so it is what the minority reacts to.
+        DecisionRecord decision = gc.getDecision();
+        String reactTo = DebateVerdictParser.isRenderedFrom(decision, synthesis) ? decision.outcome() : synthesis;
+        String input = AbstentionDetector.buildDissentInput(reactTo);
         List<Dissent> collected = new ArrayList<>();
         for (GroupMember member : dissenters) {
             if (maxTurns > 0 && turnCounter != null && turnCounter.get() >= maxTurns) {
@@ -302,6 +311,54 @@ public class PhaseExecutionEngine {
                 .map(TranscriptEntry::content)
                 .orElse(null);
         return fromTranscript != null ? fromTranscript : gc.getSynthesizedAnswer();
+    }
+
+    /**
+     * Reads a debate judgment out of the phase's synthesis into the structured
+     * {@code DecisionRecord} (I3).
+     * <p>
+     * Called for every SYNTHESIS phase; only a phase that actually produced a
+     * judgment writes anything. The check is the same one that chose the judgment
+     * template in the first place — if {@code GroupContextBuilder} did not ask for
+     * a verdict, there is no JSON to find and a prose synthesis would be recorded
+     * as a failed parse, which would be a lie about a phase that was never asked to
+     * produce one.
+     * <p>
+     * Runs BEFORE {@link #runDissentRound} so dissents merge onto the verdict
+     * rather than the verdict overwriting a dissent-only record. It also carries
+     * any dissents already present, so the two orderings both end up whole.
+     * <p>
+     * A config with two judged SYNTHESIS phases lets the later one REPLACE the
+     * earlier verdict, including replacing a clean verdict with a {@code NONE} when
+     * the second judgment fails to parse. That is deliberate: the answer always
+     * comes from the last synthesis, so keeping an earlier winner beside a later,
+     * different conclusion would hand callers a structured verdict the visible
+     * answer contradicts. One conclusion per discussion, and it is the last one.
+     *
+     * @return {@code true} if a verdict was parsed and recorded
+     */
+    public boolean recordDebateVerdict(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase, int phaseIdx,
+                                       List<GroupMember> synthesizers) {
+        GroupMember synthesizer = synthesizers != null && !synthesizers.isEmpty() ? synthesizers.get(0) : null;
+        List<GroupMember> members = config != null ? config.getMembers() : null;
+        if (!contextBuilder.isDebateJudgment(phase, synthesizer, gc.getTranscript(), phaseIdx, members)) {
+            return false;
+        }
+        String judgment = latestSynthesis(gc);
+        if (judgment == null || judgment.isBlank()) {
+            return false;
+        }
+        DecisionRecord existing = gc.getDecision();
+        DecisionRecord decision = DebateVerdictParser.parse(judgment, phase.name(),
+                existing != null ? existing.dissents() : null);
+        gc.setDecision(decision);
+        if (decision.type() == DecisionType.VERDICT) {
+            LOGGER.infof("Group %s recorded a debate verdict at phase '%s': %s", gc.getId(), phase.name(), decision.outcome());
+            return true;
+        }
+        LOGGER.infof("Group %s produced a debate judgment that could not be read as a verdict at phase '%s' — "
+                + "keeping the prose conclusion", gc.getId(), phase.name());
+        return false;
     }
 
     /**

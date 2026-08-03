@@ -35,6 +35,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
 import ai.labs.eddi.engine.internal.groups.GroupHitlCoordinator;
@@ -819,9 +820,17 @@ public class GroupConversationService implements IGroupConversationService {
                     // dissent in both the transcript and the DecisionRecord. Dissent is
                     // a reaction to the final synthesis, not to each draft of it.
                     boolean lastRepeat = repeat == Math.max(phase.repeats(), 1) - 1;
-                    if (phase.type() == PhaseType.SYNTHESIS && config.isRecordDissents() && lastRepeat) {
-                        phaseExecutionEngine.runDissentRound(gc, config, phase, protocol, phaseIdx, speakers, listener,
-                                turnCounter, maxTurns);
+                    if (phase.type() == PhaseType.SYNTHESIS && lastRepeat) {
+                        // I3: read the judgment into DecisionRecord BEFORE the dissent
+                        // round, so dissents merge onto the verdict instead of the
+                        // verdict landing on top of a dissent-only record. Same
+                        // last-repeat reasoning as below — a draft judgment is not the
+                        // decision.
+                        phaseExecutionEngine.recordDebateVerdict(gc, config, phase, phaseIdx, speakers);
+                        if (config.isRecordDissents()) {
+                            phaseExecutionEngine.runDissentRound(gc, config, phase, protocol, phaseIdx, speakers, listener,
+                                    turnCounter, maxTurns);
+                        }
                     }
 
                     gc.setLastModified(Instant.now());
@@ -919,10 +928,20 @@ public class GroupConversationService implements IGroupConversationService {
                 }
             }
 
-            // Extract synthesis from the last SYNTHESIS phase entry
+            // Extract synthesis from the last SYNTHESIS phase entry.
+            //
+            // I3: when that entry is a debate judgment, its content is the JSON the
+            // judge was asked for — correct as the transcript's record of what the
+            // agent said (and the only form the signature covers), but not something
+            // to hand a caller as the discussion's answer. The rendered outcome is
+            // substituted here rather than by rewriting the entry, so the transcript
+            // keeps the agent's own words and the verifiable signature over them.
             gc.getTranscript().stream().filter(e -> e.type() == TranscriptEntryType.SYNTHESIS && e.content() != null)
                     .reduce((first, second) -> second) // last one
-                    .ifPresent(e -> gc.setSynthesizedAnswer(e.content()));
+                    .ifPresent(e -> gc.setSynthesizedAnswer(
+                            DebateVerdictParser.isRenderedFrom(gc.getDecision(), e.content())
+                                    ? gc.getDecision().outcome()
+                                    : e.content()));
 
             // I1: SYNTHESIZE_NOW promises the run still concludes with an answer, but
             // it can only deliver one if a SYNTHESIS phase actually remained after the
@@ -1258,8 +1277,26 @@ public class GroupConversationService implements IGroupConversationService {
 
         if ("MODERATOR".equalsIgnoreCase(participants)) {
             if (moderatorAgentId == null || moderatorAgentId.isBlank()) {
-                LOGGER.warnf("Phase '%s' requires MODERATOR but none configured, " + "falling back to ALL", phase.name());
-                return allMembers;
+                // I3(a): falling back to ALL used to make every member speak in the
+                // synthesis phase, and executeDiscussion takes the LAST SYNTHESIS entry
+                // as the answer — so the conclusion of a moderator-less discussion was
+                // decided by speaking order, not by anything about the content. Whoever
+                // happened to go last won, silently.
+                //
+                // One deterministic synthesizer instead: first by speakingOrder, the
+                // same ordering every other phase already uses. This is a behavior
+                // change, and deliberately so — the old behavior had no defensible
+                // reading. Configs are not rejected at save time (old ones must keep
+                // loading); AgentGroupStore logs a warning instead.
+                List<GroupMember> ordered = orderedBySpeakingOrder(allMembers);
+                if (ordered.isEmpty()) {
+                    LOGGER.warnf("Phase '%s' requires MODERATOR but neither a moderator nor any member is configured", phase.name());
+                    return List.of();
+                }
+                GroupMember synthesizer = ordered.get(0);
+                LOGGER.warnf("Phase '%s' requires MODERATOR but none is configured — using '%s' (first by speakingOrder) as the sole "
+                        + "synthesizer. Configure moderatorAgentId to choose deliberately.", phase.name(), synthesizer.agentId());
+                return List.of(synthesizer);
             }
             return List.of(new GroupMember(moderatorAgentId, "Moderator", 0, "MODERATOR"));
         }
@@ -1276,7 +1313,21 @@ public class GroupConversationService implements IGroupConversationService {
         }
 
         // ALL
-        return allMembers.stream().sorted(Comparator.comparing(m -> m.speakingOrder() != null ? m.speakingOrder() : Integer.MAX_VALUE)).toList();
+        return orderedBySpeakingOrder(allMembers);
+    }
+
+    /**
+     * Members in speaking order, unset orders last. The one ordering the whole
+     * engine uses, extracted so the MODERATOR fallback and ALL cannot disagree
+     * about who "first" is.
+     */
+    private static List<GroupMember> orderedBySpeakingOrder(List<GroupMember> allMembers) {
+        if (allMembers == null) {
+            return List.of();
+        }
+        return allMembers.stream()
+                .sorted(Comparator.comparing(m -> m.speakingOrder() != null ? m.speakingOrder() : Integer.MAX_VALUE))
+                .toList();
     }
 
     // =================================================================

@@ -18,6 +18,7 @@ import org.jboss.logging.Logger;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -63,7 +64,11 @@ public class GroupContextBuilder {
     public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
                                   GroupMember target, List<GroupMember> allMembers) {
 
-        String template = phase.inputTemplate() != null ? phase.inputTemplate() : selectDefaultTemplate(phase, transcript, phaseIdx);
+        String template = phase.inputTemplate() != null
+                ? phase.inputTemplate()
+                : isDebateJudgment(phase, speaker, transcript, phaseIdx, allMembers)
+                        ? DiscussionStylePresets.TEMPLATE_DEBATE_JUDGMENT
+                        : selectDefaultTemplate(phase, transcript, phaseIdx);
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("question", question);
@@ -208,8 +213,12 @@ public class GroupContextBuilder {
      * {@code getDeclaredMethod("selectDefaultTemplate", DiscussionPhase.class, List.class, int.class)},
      * which resolves by exact parameter types, so a narrower signature is not
      * findable — and those tests are the regression net this whole refactor leans
-     * on. They are also the natural inputs for the phase-aware template selection
-     * the plan's Wave 2 adds here.
+     * on.
+     * <p>
+     * I3's debate-judgment selection deliberately does <em>not</em> live here: it
+     * needs the speaker and the roster to decide, and a method that can only see
+     * the transcript would have to guess at both. See {@link #isDebateJudgment},
+     * which {@link #buildPhaseInput} consults first.
      */
     public String selectDefaultTemplate(DiscussionPhase phase, List<TranscriptEntry> transcript, int phaseIdx) {
         if (phase.type() == PhaseType.OPINION) {
@@ -224,6 +233,69 @@ public class GroupContextBuilder {
             return DiscussionStylePresets.TEMPLATE_OPINION_WITH_CONTEXT;
         }
         return DiscussionStylePresets.defaultTemplate(phase.type());
+    }
+
+    /**
+     * Whether {@code speaker} is concluding a two-sided debate, and so should be
+     * asked for a verdict rather than a balanced summary (I3).
+     * <p>
+     * All four conditions are load-bearing, and each rules out a distinct way of
+     * producing a confident structured winner for a discussion that never had one:
+     * <ol>
+     * <li><b>A SYNTHESIS phase with no {@code inputTemplate}.</b> An explicit
+     * template is the config author's own instruction and always wins; asking for
+     * JSON when they asked for something else would silently discard it.</li>
+     * <li><b>Arguments already on the transcript, from a phase before this one.</b>
+     * Read from the transcript rather than from the style field because the phases
+     * that actually ran are what matter: a CUSTOM config arranging ARGUE/REBUTTAL
+     * is still a debate, and a DEBATE-styled config whose argument phases were all
+     * skipped has nothing to judge. Those two entry types come only from
+     * {@code ARGUE}/{@code REBUTTAL} phases (see {@link #mapPhaseToEntryType}).
+     * Entries at {@code phaseIdx} or later are ignored — a phase cannot judge
+     * arguments it has not seen, and a resume can carry later-phase entries from an
+     * earlier leg.</li>
+     * <li><b>At least two distinct roles among the members.</b> The judgment prompt
+     * asks the model to score PRO against CON, so a roster with no sides would have
+     * it invent a winner: {@code create_group(style="DEBATE")} without
+     * {@code memberRoles} makes every speaker argue the same side (see the
+     * {@code ARGUE} branch above, which maps a null role to "AGAINST"), and a
+     * verdict there would be pure fabrication.</li>
+     * <li><b>A speaker who is not one of the debaters.</b> A partisan judging its
+     * own debate reads its own "argue the FOR side" instructions back as recent
+     * context — the contamination I2's {@code JUDGE_CONVERSATION_KEY} exists to
+     * prevent — and stamping the result as {@code DecisionRecord.winner} would
+     * present one side's opinion as the group's finding. A moderator-less debate
+     * therefore concludes in prose, which is at least honest about who wrote
+     * it.</li>
+     * </ol>
+     */
+    public boolean isDebateJudgment(DiscussionPhase phase, GroupMember speaker, List<TranscriptEntry> transcript, int phaseIdx,
+                                    List<GroupMember> allMembers) {
+        if (phase == null || phase.type() != PhaseType.SYNTHESIS || phase.inputTemplate() != null || transcript == null) {
+            return false;
+        }
+        boolean hasArguments = transcript.stream().anyMatch(e -> e != null && e.phaseIndex() < phaseIdx
+                && (e.type() == TranscriptEntryType.ARGUMENT || e.type() == TranscriptEntryType.REBUTTAL));
+        if (!hasArguments) {
+            return false;
+        }
+        Set<String> debatingRoles = debatingRoles(allMembers);
+        if (debatingRoles.size() < 2) {
+            return false;
+        }
+        return speaker == null || speaker.role() == null || !debatingRoles.contains(speaker.role().toUpperCase(Locale.ROOT));
+    }
+
+    /** The distinct, non-blank member roles — the "sides" a debate has. */
+    private static Set<String> debatingRoles(List<GroupMember> allMembers) {
+        if (allMembers == null) {
+            return Set.of();
+        }
+        return allMembers.stream()
+                .map(GroupMember::role)
+                .filter(r -> r != null && !r.isBlank())
+                .map(r -> r.toUpperCase(Locale.ROOT))
+                .collect(Collectors.toSet());
     }
 
     public List<Map<String, Object>> filterByScope(List<TranscriptEntry> transcript, ContextScope scope, int currentPhaseIdx, GroupMember speaker) {
