@@ -351,6 +351,34 @@ class ApiCallExecutorTest {
     }
 
     @Test
+    @DisplayName("a secret in the request BODY is scrubbed before persistence, not just headers")
+    void execute_secretInBody_isRedacted() throws Exception {
+        // Header-name matching cannot see into a body. A config write (create an
+        // agent, set a provider key) carries its credential there, and this map is
+        // persisted to the conversation document.
+        ApiCall call = createSimpleApiCall("body-secret-call", false);
+
+        Map<String, Object> requestMap = new HashMap<>();
+        requestMap.put("headers", new LinkedHashMap<String, Object>());
+        requestMap.put("body", "{\"apiKey\":\"sk-abcdefghijklmnopqrstuvwxyz012345\",\"name\":\"billing\"}");
+        when(mockRequest.toMap()).thenReturn(requestMap);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        var captor = ArgumentCaptor.forClass(Object.class);
+        verify(prePostUtils, atLeastOnce()).createMemoryEntry(
+                eq(currentStep), captor.capture(), contains("Request"), eq("httpCalls"));
+        @SuppressWarnings("unchecked")
+        var capturedMap = (Map<String, Object>) captor.getValue();
+        String persistedBody = String.valueOf(capturedMap.get("body"));
+        assertFalse(persistedBody.contains("sk-abcdefghijklmnopqrstuvwxyz012345"), persistedBody);
+        assertTrue(persistedBody.contains("REDACTED"), persistedBody);
+        // Over-redaction would make the debug record useless — the rest survives.
+        assertTrue(persistedBody.contains("billing"), persistedBody);
+    }
+
+    @Test
     void execute_sensitiveHeaders_areScrubbed() throws Exception {
         ApiCall call = createSimpleApiCall("scrub-call", false);
 

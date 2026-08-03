@@ -32,6 +32,16 @@ Also lands `eddi.operator.write.approval{decision=approved|rejected|timeout}` (a
 
 **Verification note worth recording**: this repo's `@Nested`-only JUnit classes report `Tests run: 0` in the plain-text surefire report even when every test inside passed — already documented in memory from a prior session, and it still cost real time to rediscover mid-session before the XML `<testsuite tests="…">` attribute was checked. Both touched test classes' real results: `RestAgentEngineToolPauseDetailsTest` 11/11, `ConversationMemoryUtilitiesHitlTest` 8/8.
 
+### The preview leaked the body it was supposed to protect (2026-08-03)
+
+Found while scoping the operator's authoring UI, and the reason that scope changed: `RequestRedactor` only ever touched `headers`. Both consumers of a resolved request — the debug record persisted to the conversation document and the approval preview shown to a human — passed the **body** through verbatim. A config write carries its credential in the body, not a header, so a `POST` creating an agent with a provider key would have shown that key in plaintext to whoever approved the pause — routinely a different admin than the one whose turn raised it.
+
+Fixed by giving `RequestRedactor` a `redactBody` (delegating to `SecretRedactionFilter`, the same value-shape scan already behind `argumentsRedacted` — one filter for one class of data, rather than a second scheme that would drift), wired into both `redactRequestMap` and `ResolvedRequest#of`.
+
+The ordering matters more than the redaction. Headers stay fingerprinted **redacted** for the cross-user-approval reason documented above; the body is fingerprinted **raw** and only the stored copy is redacted, because a body has no equivalent legitimate variance (`${caller:token}` is header-only; `${vault:…}` resolves identically both times). Redacting first would hash two *different* credentials to one marker and so to one fingerprint — a swapped secret would pass the pre-execution re-check as an unchanged request. `ResolvedRequest#of` does the redaction itself so no call site can get that order wrong; a test asserts two distinct keys produce distinct fingerprints, and it fails if the redaction is hoisted above the hash. The fingerprint is never exposed to a client, so hashing raw reveals nothing.
+
+The limitation is stated rather than papered over: value-shape matching catches `sk-…`, `sk-ant-…`, bearer tokens and vault refs, not a hand-rolled secret in a generically named field. That is the same limitation `argumentsRedacted` already carries.
+
 **What's left before `WRITE_ENDPOINTS` can actually be populated:** it already has been, on the Manager side — see that repo's own changelog for the write canary, the four curated endpoints, and real `read_write` scope selection. What remains is Manager-side only: render this backend's `requestPreview` in the approval banner in place of the client-side `operationId` reconstruction it was always labelled as a stand-in for, and the agent/group authoring UI (iteration 7).
 
 ---

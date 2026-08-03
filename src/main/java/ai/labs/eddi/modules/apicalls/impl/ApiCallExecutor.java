@@ -277,6 +277,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     : Map.<String, String>of();
             Object body = requestMap.get(IRequest.KEY_BODY);
 
+            // The RAW body goes in: ResolvedRequest redacts it for display itself,
+            // while fingerprinting what was actually resolved. Redacting here
+            // instead would fingerprint the redacted form and make two different
+            // credentials hash identically — see ResolvedRequest#of.
             return ResolvedRequest.of(
                     String.valueOf(requestMap.get(IRequest.KEY_METHOD)),
                     String.valueOf(requestMap.get(IRequest.KEY_URI)),

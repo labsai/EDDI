@@ -185,6 +185,63 @@ class ResolvedRequestTest {
         }
     }
 
+    @Nested
+    @DisplayName("the stored body is redacted, the fingerprinted one is not")
+    class BodyRedaction {
+
+        private static final String KEY = "sk-abcdefghijklmnopqrstuvwxyz012345";
+        private static final String OTHER_KEY = "sk-zyxwvutsrqponmlkjihgfedcba543210";
+
+        @Test
+        void aSecretInTheBodyNeverReachesTheStoredCopy() {
+            // The approver is routinely not the requester, so anything kept here is
+            // shown to someone who was never entrusted with it.
+            var resolved = request("POST", "https://x/y", Map.of(), Map.of(), "{\"apiKey\":\"" + KEY + "\"}");
+            assertFalse(resolved.body().contains(KEY), resolved.body());
+            assertTrue(resolved.body().contains("REDACTED"), resolved.body());
+        }
+
+        @Test
+        void twoDifferentSecretsDoNotShareAFingerprint() {
+            // The reason the body is hashed RAW. Redacting first collapses both of
+            // these to "sk-<REDACTED>", so a swapped credential would sail through
+            // the pre-execution re-check as an unchanged request.
+            assertNotEquals(request("POST", "https://x/y", Map.of(), Map.of(), "{\"apiKey\":\"" + KEY + "\"}").fingerprint(),
+                    request("POST", "https://x/y", Map.of(), Map.of(), "{\"apiKey\":\"" + OTHER_KEY + "\"}").fingerprint());
+        }
+
+        @Test
+        void theSameSecretStillAgreesWithItself() {
+            // Redaction must not make the fingerprint unstable either — the whole
+            // guard is useless if an unchanged request fails its own re-check.
+            assertEquals(request("POST", "https://x/y", Map.of(), Map.of(), "{\"apiKey\":\"" + KEY + "\"}").fingerprint(),
+                    request("POST", "https://x/y", Map.of(), Map.of(), "{\"apiKey\":\"" + KEY + "\"}").fingerprint());
+        }
+
+        @Test
+        void nonSecretBodyContentIsLeftAlone() {
+            // Over-redaction is its own failure: an approver who cannot read the
+            // request cannot meaningfully approve it.
+            var resolved = request("POST", "https://x/y", Map.of(), Map.of(), "{\"name\":\"billing-agent\",\"maxTurns\":5}");
+            assertEquals("{\"name\":\"billing-agent\",\"maxTurns\":5}", resolved.body());
+        }
+
+        @Test
+        void aVaultReferenceIsRedactedToo() {
+            var resolved = request("POST", "https://x/y", Map.of(), Map.of(), "{\"apiKey\":\"${vault:openai-key}\"}");
+            assertFalse(resolved.body().contains("openai-key"), resolved.body());
+        }
+
+        @Test
+        void anUnpinnableCallStillGetsARedactedBody() {
+            // No fingerprint to protect here, but the preview is still shown to a
+            // human — redaction is not conditional on pinning.
+            var resolved = ResolvedRequest.of("POST", "https://x/y", Map.of(), Map.of(), "{\"apiKey\":\"" + KEY + "\"}", false);
+            assertNull(resolved.fingerprint());
+            assertFalse(resolved.body().contains(KEY), resolved.body());
+        }
+    }
+
     @Test
     void nullsAreToleratedRatherThanThrowing() {
         // A call with no body, no query and no headers is ordinary, not an error.
