@@ -109,8 +109,19 @@ const CHECKS: readonly {
       // demotes. Holding what we create to a weaker standard than what we run
       // as was the actual defect; there is now one definition of "has a real
       // gate" and both callers use it.
-      const hitlConfig = at(body, "hitlConfig");
-      return !gateLooksInstalled({ hitlConfig } as Agent).ok;
+      // Shape-normalised before delegating. `gateLooksInstalled` was written
+      // for a typed backend response; this body is arbitrary LLM-composed JSON,
+      // and handing it straight over made a malformed shape THROW during render
+      // — `requireApproval: "http.post:*"` (a string, so `.some` is not a
+      // function), `rules: [{timeoutPolicy}]` with no `match`, and four more.
+      // The nearest boundary is app-level, so the whole page was replaced by
+      // the error fallback and the admin could neither approve NOR reject,
+      // leaving Slack/MCP — where this guard does not run — as the only way to
+      // resolve that pause. A check whose job is to shout "this agent has no
+      // gate" must never be the thing that takes the surface down, and
+      // `rules` without `match` needs no adversary: it is a plausible honest
+      // emission.
+      return !gateLooksInstalled({ hitlConfig: normaliseHitlConfig(at(body, "hitlConfig")) } as Agent).ok;
     },
   },
   {
@@ -154,6 +165,47 @@ const CHECKS: readonly {
  * "alternate JSON shape the backend accepts for the same field" evasion in its
  * most literal form.
  */
+/** Keep only the string entries of a value that should be a string array. */
+function stringsOnly(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+/**
+ * Coerce an arbitrary parsed-JSON `hitlConfig` into the shape
+ * `gateLooksInstalled` expects, dropping anything of the wrong type.
+ *
+ * Dropping rather than repairing is the safe direction here: a malformed
+ * `requireApproval` becomes an EMPTY list, which reads as "no gate" and raises
+ * the warning — the cautious answer for a body nobody can parse confidently.
+ * The alternative, passing it through, throws and takes the page down.
+ */
+function normaliseHitlConfig(raw: unknown): Record<string, unknown> | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const source = raw as Record<string, unknown>;
+  const rawTool = source.toolApprovals;
+  if (typeof rawTool !== "object" || rawTool === null || Array.isArray(rawTool)) {
+    return { timeoutPolicy: source.timeoutPolicy };
+  }
+  const tool = rawTool as Record<string, unknown>;
+  const rules = Array.isArray(tool.rules)
+    ? tool.rules
+        .filter((rule): rule is Record<string, unknown> => typeof rule === "object" && rule !== null && !Array.isArray(rule))
+        // `match` is dereferenced with .startsWith, so a rule without one is
+        // dropped rather than allowed to throw.
+        .filter((rule) => typeof rule.match === "string")
+    : undefined;
+  return {
+    timeoutPolicy: source.timeoutPolicy,
+    toolApprovals: {
+      requireApproval: stringsOnly(tool.requireApproval) ?? [],
+      exempt: stringsOnly(tool.exempt) ?? [],
+      timeoutPolicy: tool.timeoutPolicy,
+      rules,
+    },
+  };
+}
+
 function isAgentCreationBody(body: unknown): boolean {
   const named = typeof at(body, "agentName") === "string" || typeof at(body, "name") === "string";
   return named && typeof at(body, "systemPrompt") === "string";

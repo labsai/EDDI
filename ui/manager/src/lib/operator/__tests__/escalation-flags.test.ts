@@ -177,6 +177,41 @@ describe("detectEscalationFlags", () => {
     });
   });
 
+  describe("malformed hitlConfig must not crash the approval surface", () => {
+    // detectEscalationFlags runs during render, and the nearest boundary is
+    // app-level — so a throw here replaced the whole page with the error
+    // fallback, leaving the admin unable to approve OR reject and pushing the
+    // decision to Slack/MCP, where the self-guard does not run. The body is
+    // arbitrary LLM-composed JSON; every one of these is a plausible emission.
+    it.each([
+      ["requireApproval as a string", { toolApprovals: { requireApproval: "http.post:*" } }],
+      ["requireApproval of numbers", { toolApprovals: { requireApproval: [1, 2] } }],
+      ["requireApproval containing null", { toolApprovals: { requireApproval: [null] } }],
+      ["exempt as a string", { toolApprovals: { requireApproval: ["http.post:*"], exempt: "http.get:*" } }],
+      ["a rule with no match", { toolApprovals: { requireApproval: ["http.post:*"], rules: [{ timeoutPolicy: "AUTO_APPROVE" }] }}],
+      ["rules as a string", { toolApprovals: { requireApproval: ["http.post:*"], rules: "none" } }],
+      ["toolApprovals as an array", { toolApprovals: [] }],
+      ["hitlConfig as a string", "nope"],
+      ["hitlConfig as an array", []],
+    ])("does not throw on %s", (_label, hitlConfig) => {
+      expect(() => detectEscalationFlags(setupAgentBody({ hitlConfig }))).not.toThrow();
+    });
+
+    it("treats an unparseable gate as NO gate, not as a valid one", () => {
+      // The safe direction: a shape nobody can read confidently should raise
+      // the warning, never silently certify the agent as gated.
+      const flags = detectEscalationFlags(
+        setupAgentBody({ hitlConfig: { toolApprovals: { requireApproval: "http.post:*" } } }),
+      );
+      expect(flags.map((f) => f.id)).toContain("agentCreatedWithoutGate");
+    });
+
+    it("still accepts a well-formed gate after normalisation", () => {
+      // The mirror: normalising must not break the valid case it passes through.
+      expect(detectEscalationFlags(setupAgentBody()).map((f) => f.id)).not.toContain("agentCreatedWithoutGate");
+    });
+  });
+
   describe("agentCreatedWithExternalTools", () => {
     it("flags an MCP server URL, which attaches a whole external tool surface", () => {
       const flags = detectEscalationFlags(setupAgentBody({ mcpServerUrls: "https://tools.example/mcp" }));
