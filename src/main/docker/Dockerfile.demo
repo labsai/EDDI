@@ -20,7 +20,7 @@
 # build stage. It exists so the adapter can be demonstrated from a checkout.
 # ─────────────────────────────────────────────────────────────────────────────
 
-FROM maven:3.9-eclipse-temurin-25 AS build
+FROM maven:3-eclipse-temurin-24 AS build
 
 WORKDIR /src
 
