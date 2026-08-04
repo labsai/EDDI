@@ -78,7 +78,7 @@
 #   accessed directly. (example: "foo.example.com,bar.example.com")
 #
 ###
-FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24@sha256:a0c3ecb2af6e1100394721417ba412a9c9088dfadce53b8d98bb95a7bb4d23ea
+FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24@sha256:de073e98f1bb4be12f1454e1685c37db876af845896e0495f4eab0931154f9e4
 
 ### Red Hat Container Certification — required labels
 ARG EDDI_VERSION=6.2.0
@@ -104,17 +104,6 @@ LABEL name="labsai/eddi" \
 ENV LANG='C.utf8' LANGUAGE='C.utf8'
 
 USER root
-
-# TEMPORARY CVE STOPGAP - remove once the base image ships the fixes.
-# ubi9/openjdk-25-runtime:1.24 has not been republished with these, so there is no
-# newer digest to move to (verified against the registry: the tag still resolves to
-# the digest pinned above). Per the Trivy remediation procedure in AGENTS.md, patch
-# the packages in place rather than dropping the digest pin.
-#   CVE-2026-58016  glib2    integer underflow in gio/gdbusintrospection.c
-#   CVE-2026-54369  libacl   symlink traversal privilege escalation
-#   CVE-2026-15308  python3  CPU denial of service in the HTML parser
-# These block the image push now that the Trivy gate enforces (exit-code: 1).
-RUN microdnf update -y glib2 libacl python3 && microdnf clean all
 
 RUN mkdir -p /deployments/tmp/import && \
       chown -R 185:0 /deployments/tmp && \
