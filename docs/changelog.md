@@ -5,6 +5,28 @@
 
 ---
 
+## 🚨 fix(groups): pre-merge review — recruitment was inert, and three of my own fixes were wrong (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+A final two-lens review (code audit + UX) before merge, deliberately pointed at the code the four earlier passes under-sampled. It found that **I7's headline feature never worked**, and that **three fixes from the previous rounds were incomplete or introduced new defects**.
+
+**Recruitment refused every real agent.** `RecruitAgentTool` compared the deployment environment against the string `"unrestricted"` — a **v5 name that has not existed since v6**, surviving only in `V6RenameMigration` and the legacy path filter. `Deployment.Environment` is `{production, test}` and `MongoDeploymentStorage` always stores one, so the comparison was false for every real deployment: **every recruitment refused**, with a message telling the model the agent was not deployed and to go find one that is — sending it back to a tool that keeps returning the same agent. The test suite passed because its `deployment()` helper never set an environment, so every case slipped through the null-guard. Now compares against `Environment.production` (what member turns actually run in), and the helper sets what a real deployment carries — reverting the constant now fails 7 tests.
+
+**A continuation round still reported the previous round's answer.** The earlier fix scoped the transcript *scan* but never cleared the *fields*: the extraction is `.ifPresent(...)` with no else, and `recordDissents` **merges** into an existing `DecisionRecord`. So round 2 kept round 1's `synthesizedAnswer` and verdict, and had round 2's dissents merged onto them. `continueDiscussion` now clears both.
+
+**The peer-targeted denominator was re-broken by the fix that made recruits first-class.** Passing the recruit-inclusive roster as `targets` made it disagree with the loop again in the other direction — 4 speakers over a 3-member target roster run 9 turns; it computed 12, putting I4's unanimous-abstention exit permanently out of reach.
+
+**The CME fix's cancellation guard was over-correction.** The CME is prevented by the *collections* (copy-on-write lists, concurrent maps), not by skipping work — and skipping dropped `propagateDynamicAgentTracking`, the **only** writer of `createdAgentIds`, which teardown iterates to undeploy. An abandoned turn that had created an agent therefore **leaked a real production deployment**. It also dropped the cost accumulation that I1's ceiling bounds. Guard removed; the comment now records why.
+
+**`memberDisplayNames` was the one collection the CME fix missed** — a plain `LinkedHashMap` that Jackson walks unguarded on every persist, and that the round-3 fix then gave a foreign-thread writer. Now a `ConcurrentHashMap`. `setDynamicMembers(null)` also still installed a non-copy-on-write list on its null branch.
+
+`CURRENT_SCHEMA_VERSION` bumped to 3 for `roundStartTranscriptIndex`, per F6's own contract.
+
+**The pattern worth recording:** every one of these sat behind a green suite, and three were introduced *by the fixes for earlier review findings*. Fixing under time pressure without re-verifying the fix is its own defect source — the mutation check is what separates "the code changed" from "the behaviour is pinned", and it has now caught this three separate times on this branch.
+
+---
+
 ## 🐛 fix: the last five branch-review findings (2026-08-04)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

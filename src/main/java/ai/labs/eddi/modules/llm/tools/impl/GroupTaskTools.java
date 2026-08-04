@@ -141,9 +141,15 @@ public class GroupTaskTools {
                     ? "There is nobody on this team to own a new task."
                     : "Nobody here matches \"%s\". %s".formatted(requested, rosterHint());
         }
+        // displayName is nullable and unvalidated (POST /groupstore/groups accepts a
+        // member with only an agentId), and Stream.findFirst() THROWS on a null
+        // element — so an unnamed assignee turned this tool's guaranteed actionable
+        // sentence into an executor exception, and the task was never filed. Every
+        // other consumer of displayName in the codebase guards it; this did not.
         String assignedDisplayName = members.stream()
                 .filter(m -> resolved.equals(m.agentId()))
-                .map(GroupMember::displayName).findFirst().orElse(resolved);
+                .map(m -> m.displayName() != null ? m.displayName() : m.agentId())
+                .findFirst().orElse(resolved);
 
         var result = taskList.addAgentTask(subject, description, dependsOnSubjects,
                 priority != null ? priority : 0, agentId, resolved, assignedDisplayName,

@@ -291,23 +291,23 @@ public class MemberTurnExecutor {
                     }
 
                     // This callback runs on a COORDINATOR thread, not the member-turn
-                    // thread: conversationService.say hands the turn to
-                    // conversationCoordinator.submitInOrder. So it can fire long after the
-                    // orchestrator gave up on this speaker — after a batch deadline, a
-                    // cancel, or a HITL pause — while the loop is serializing the very
-                    // same GroupConversation. Mutating gc from here then races Jackson's
-                    // plain iteration of the tracking lists and throws
-                    // ConcurrentModificationException out of conversationStore.update,
-                    // which executeDiscussion's catch-all turns into a FAILED discussion
-                    // over one slow speaker.
+                    // thread (conversationService.say hands the turn to
+                    // conversationCoordinator.submitInOrder), so it can fire long after
+                    // the orchestrator gave up on this speaker while the loop is
+                    // serializing the same GroupConversation.
                     //
-                    // An abandoned turn's bookkeeping is worth nothing anyway — its
-                    // transcript entry was already written as SKIPPED — so drop it.
-                    if (cancellation != null && cancellation.isCancelled()) {
-                        responseFuture.complete(response);
-                        return;
-                    }
-
+                    // The CME that used to cause is now prevented by the COLLECTIONS —
+                    // createdAgentIds/recruitedAgentIds/dynamicMembers are
+                    // CopyOnWriteArrayList, memberCosts and memberDisplayNames are
+                    // concurrent maps — NOT by skipping the work. An earlier attempt
+                    // returned early here on cancellation; that was over-correction and
+                    // lost two things that are not "abandoned bookkeeping":
+                    // propagateDynamicAgentTracking is the ONLY writer of
+                    // createdAgentIds, which teardown iterates to undeploy — dropping it
+                    // LEAKS a real production deployment the member created — and
+                    // accumulateMemberCost is the sole feed for the totals I1's ceiling
+                    // bounds, so a member that burned its full timeout budget would
+                    // report $0.
                     // Propagate dynamic agent tracking data from the member's conversation
                     // memory to the GroupConversation for lifecycle cleanup.
                     GroupConversationService.propagateDynamicAgentTracking(snapshot, gc);

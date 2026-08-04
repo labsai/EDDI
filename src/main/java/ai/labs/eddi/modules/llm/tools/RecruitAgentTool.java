@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.inject.Vetoed;
@@ -60,7 +61,18 @@ public class RecruitAgentTool {
      */
     static final int RECRUIT_SPEAKING_ORDER = Integer.MAX_VALUE;
 
-    private static final String DEFAULT_ENV = "unrestricted";
+    /**
+     * The environment a recruit must be deployed in — the same one member turns run
+     * in ({@code MemberTurnExecutor.DEFAULT_ENV}), so "deployed" here means
+     * "deployed where this discussion will actually call it".
+     * <p>
+     * This was the string {@code "unrestricted"} — a v5 environment name that
+     * survives only in {@code V6RenameMigration} and the legacy path filter.
+     * {@code Environment} is {@code {production, test}}, and
+     * {@code MongoDeploymentStorage} always stores one, so the comparison was false
+     * for every real deployment and recruitment refused unconditionally.
+     */
+    private static final Environment REQUIRED_ENV = Environment.production;
 
     private final LiveDiscussionRegistry registry;
     private final String groupConversationId;
@@ -176,7 +188,7 @@ public class RecruitAgentTool {
             List<DeploymentInfo> deployments = deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed);
             return deployments != null && deployments.stream()
                     .anyMatch(d -> d != null && agentId.equals(d.getAgentId())
-                            && (d.getEnvironment() == null || DEFAULT_ENV.equalsIgnoreCase(String.valueOf(d.getEnvironment()))));
+                            && (d.getEnvironment() == null || d.getEnvironment() == REQUIRED_ENV));
         } catch (Exception e) {
             LOGGER.warnf("Could not verify deployment of '%s' — refusing recruitment: %s", agentId, e.getMessage());
             return false;

@@ -134,7 +134,12 @@ public class PhaseExecutionEngine {
         // both fired falsely (3 of 6 entries abstaining in a 3-member critique
         // round read as "all 3 abstained" and ended a phase that produced real
         // critiques) and failed to fire when every one of the 6 genuinely did.
-        int expectedTurns = expectedTurnsFor(phase, speakers, GroupConversationService.rosterWithRecruits(config, gc));
+        // config.getMembers(), because that is what executePeerTargetedPhase's own
+        // target loop iterates. Passing the recruit-inclusive roster here made the
+        // denominator disagree with the loop again — 4 speakers over a 3-member
+        // target roster run 9 turns, and this computed 12, putting I4's unanimous-
+        // abstention exit permanently out of reach.
+        int expectedTurns = expectedTurnsFor(phase, speakers, config != null ? config.getMembers() : null);
         if (ConvergenceDetector.allParticipantsAbstained(repeatEntries, expectedTurns)) {
             String reason = "All %d participants abstained — nothing further to add".formatted(expectedTurns);
             recordConvergence(gc, phase, phaseIdx, repeat, -1, true, reason, listener);

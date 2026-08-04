@@ -356,6 +356,14 @@ public class GroupLifecycleOps {
             // to it; without the mark, a round whose synthesis produced nothing
             // adopts the previous round's conclusion as its own.
             gc.setRoundStartTranscriptIndex(gc.getTranscript().size());
+            // Clearing these is the other half, and the previous fix omitted it:
+            // scoping the SCAN cannot change the outcome while the FIELDS still hold
+            // round 1's values. The extraction is `.ifPresent(...)` with no else, and
+            // recordDissents MERGES into an existing DecisionRecord — so a round whose
+            // synthesis produced nothing kept the previous round's answer and verdict,
+            // and had this round's dissents merged onto them.
+            gc.setSynthesizedAnswer(null);
+            gc.setDecision(null);
             gc.setResumeQuestion(question);
             gc.getTranscript().add(new TranscriptEntry(
                     "user", "User", question, 0, "Question",

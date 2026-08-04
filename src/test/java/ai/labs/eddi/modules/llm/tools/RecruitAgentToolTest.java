@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -57,6 +58,11 @@ class RecruitAgentToolTest {
     private DeploymentInfo deployment(String agentId) {
         var info = new DeploymentInfo();
         info.setAgentId(agentId);
+        // The environment a REAL deployment carries. Leaving it null made every test
+        // here pass through the null-guard and hid that the environment comparison
+        // used a v5 name no deployment has had since v6 — i.e. that recruitment was
+        // refused unconditionally in production while this suite stayed green.
+        info.setEnvironment(Environment.production);
         return info;
     }
 

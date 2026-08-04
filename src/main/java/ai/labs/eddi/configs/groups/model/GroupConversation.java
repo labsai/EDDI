@@ -31,7 +31,7 @@ public class GroupConversation {
      * Wave adds a field resume-time logic depends on, and register that version's
      * migration in {@code GroupConversationSchemaMigrations}.
      */
-    public static final int CURRENT_SCHEMA_VERSION = 2;
+    public static final int CURRENT_SCHEMA_VERSION = 3;
     /**
      * The shape this specific document was last written in. Checked before a
      * resume: newer than {@link #CURRENT_SCHEMA_VERSION} refuses (this deployment
@@ -63,7 +63,12 @@ public class GroupConversation {
      * Maps agentId → displayName for all group members. Populated at discussion
      * start.
      */
-    private Map<String, String> memberDisplayNames = new LinkedHashMap<>();
+    // ConcurrentHashMap for the same reason the three lists above are
+    // copy-on-write: Jackson walks this map unguarded on every persist, and
+    // RecruitAgentTool now writes it from a member-turn thread. A plain
+    // LinkedHashMap here re-opens the ConcurrentModificationException that
+    // turns a successful discussion into a FAILED one.
+    private Map<String, String> memberDisplayNames = new ConcurrentHashMap<>();
     /**
      * Per-member dollar-cost attribution (Wave 0, F5): agentId → that member's cost
      * so far. For an individual agent, its own private conversation's cumulative
@@ -659,7 +664,7 @@ public class GroupConversation {
     public void setDynamicMembers(List<AgentGroupConfiguration.GroupMember> dynamicMembers) {
         this.dynamicMembers = dynamicMembers != null
                 ? new CopyOnWriteArrayList<>(dynamicMembers)
-                : Collections.synchronizedList(new ArrayList<>());
+                : new CopyOnWriteArrayList<>();
     }
 
     /**

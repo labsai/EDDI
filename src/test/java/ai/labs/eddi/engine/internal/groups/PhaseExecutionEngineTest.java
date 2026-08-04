@@ -503,4 +503,31 @@ class PhaseExecutionEngineTest {
         assertTrue(engine.recordDebateVerdict(gc, debateConfig(), judgmentPhase(null), 1, judgeAsSpeaker()));
         assertEquals("CON", gc.getDecision().winner());
     }
+
+    @Test
+    void peerTargetedDenominatorMatchesTheLoopEvenWithARecruit() {
+        // executePeerTargetedPhase iterates config.getMembers() for TARGETS while
+        // speakers come from the recruit-inclusive roster. Passing the recruit
+        // roster as targets made the denominator 4x4-4=12 where the loop runs
+        // 4x3-3=9, so I4's unanimous-abstention exit became arithmetically
+        // unreachable for any peer-targeted phase once a recruit existed.
+        var config = new AgentGroupConfiguration();
+        config.setMembers(List.of(member("a"), member("b"), member("c")));
+        var gc = gc();
+        gc.addDynamicMember(new GroupMember("recruit", "Recruit", Integer.MAX_VALUE, null));
+        var speakers = List.of(member("a"), member("b"), member("c"), member("recruit"));
+        var phase = new DiscussionPhase("P", PhaseType.CRITIQUE, "ALL", TurnOrder.SEQUENTIAL,
+                ContextScope.FULL, true, null, 1, false, null, true);
+
+        // 9 abstentions is what the loop actually produces; the exit must fire on it.
+        var entries = new java.util.ArrayList<TranscriptEntry>();
+        for (int i = 0; i < 9; i++) {
+            entries.add(new TranscriptEntry("a", "a", null, 0, "P", TranscriptEntryType.ABSTAINED, Instant.now(), null, null));
+        }
+
+        var outcome = engine().checkConvergence(gc, config, phase, protocol(), 0, 0, speakers, entries, null, null,
+                new AtomicInteger(0), 10);
+
+        assertFalse(outcome.isContinue(), "every scheduled turn abstained — the phase must stop");
+    }
 }
