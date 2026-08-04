@@ -3173,7 +3173,14 @@
       "send": "भेजें",
       "stop": "रोकें",
       "newConversation": "नया वार्तालाप शुरू करें",
-      "transcript": "ऑपरेटर वार्तालाप"
+      "transcript": "ऑपरेटर वार्तालाप",
+      "pauseCompactFallback": "आगे बढ़ने से पहले ऑपरेटर को आपकी अनुमति चाहिए।",
+      "pauseCompactReview": "अनुमोदन के लिए समीक्षा करें →"
+    },
+    "drawer": {
+      "title": "प्लेटफ़ॉर्म ऑपरेटर",
+      "notActivated": "इसे चालू करें और कहीं से भी अपने परिनियोजन से बात करें।",
+      "activate": "प्लेटफ़ॉर्म ऑपरेटर सेट करें"
     },
     "approval": {
       "reconstructedEndpoint": "{{method}} {{path}} (पुनर्निर्मित)",

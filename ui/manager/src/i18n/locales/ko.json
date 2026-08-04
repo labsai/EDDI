@@ -3173,7 +3173,14 @@
       "send": "보내기",
       "stop": "중지",
       "newConversation": "새 대화 시작",
-      "transcript": "오퍼레이터 대화"
+      "transcript": "오퍼레이터 대화",
+      "pauseCompactFallback": "계속하려면 운영자에게 승인이 필요합니다.",
+      "pauseCompactReview": "검토 후 승인 →"
+    },
+    "drawer": {
+      "title": "플랫폼 오퍼레이터",
+      "notActivated": "켜면 어디서든 배포와 대화할 수 있습니다.",
+      "activate": "플랫폼 오퍼레이터 설정"
     },
     "approval": {
       "reconstructedEndpoint": "{{method}} {{path}} (재구성됨)",

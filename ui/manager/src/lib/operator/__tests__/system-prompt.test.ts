@@ -259,6 +259,40 @@ describe("buildOperatorPromptBody", () => {
   });
 });
 
+describe("the app-context section — what screen the admin is on", () => {
+  it("is present regardless of scope — knowing where the admin is does not depend on what is granted", () => {
+    for (const body of [buildOperatorPromptBody(READ_ENDPOINTS), buildOperatorPromptBody(WITH_A_WRITE)]) {
+      expect(body).toContain("{#if context.screen}");
+      expect(body).toContain("currently viewing");
+    }
+  });
+
+  it("references context.screen and the id fields the drawer's route hook actually produces", () => {
+    // Must match useCurrentScreenContext's real field names (screen, agentId,
+    // workflowId, groupId, boardId) exactly — Qute resolves by literal
+    // property name, so a mismatch here renders as silently missing context,
+    // not an error.
+    const body = buildOperatorPromptBody(READ_ENDPOINTS);
+    expect(body).toContain("{context.screen}");
+    expect(body).toContain("{#if context.agentId} (agent {context.agentId}){/if}");
+    expect(body).toContain("{#if context.workflowId} (workflow {context.workflowId}){/if}");
+    expect(body).toContain("{#if context.groupId} (group {context.groupId}){/if}");
+    expect(body).toContain("{#if context.boardId} (workforce board {context.boardId}){/if}");
+  });
+
+  it("degrades to nothing rather than a stray literal when no context was sent", () => {
+    // strict-rendering is off, so a missing context.screen renders empty —
+    // but only if the WHOLE paragraph is behind one {#if}, not just the
+    // interpolations inside it. Assert the guard wraps the paragraph, not
+    // just individual fields.
+    const body = buildOperatorPromptBody(READ_ENDPOINTS);
+    const start = body.indexOf("{#if context.screen}");
+    const viewing = body.indexOf("currently viewing");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(viewing).toBeGreaterThan(start);
+  });
+});
+
 describe("buildOperatorSystemPrompt", () => {
   it("puts the non-editable preamble ahead of the editable body", () => {
     const prompt = buildOperatorSystemPrompt("Custom body.", "read_only");

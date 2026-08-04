@@ -3173,7 +3173,14 @@
       "send": "送信",
       "stop": "停止",
       "newConversation": "新しい会話を開始",
-      "transcript": "オペレーターとの会話"
+      "transcript": "オペレーターとの会話",
+      "pauseCompactFallback": "続行する前にオペレーターの承認が必要です。",
+      "pauseCompactReview": "確認して承認 →"
+    },
+    "drawer": {
+      "title": "プラットフォームオペレーター",
+      "notActivated": "有効にすると、どこからでもデプロイとチャットできます。",
+      "activate": "プラットフォームオペレーターを設定"
     },
     "approval": {
       "reconstructedEndpoint": "{{method}} {{path}}（再構築）",

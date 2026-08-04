@@ -6,6 +6,7 @@ import { server } from "@/test/mocks/server";
 import { OperatorPage } from "../operator";
 import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY } from "@/lib/api/operator";
 import type { OperatorConfig } from "@/lib/api/operator";
+import { useOperatorChatStore } from "@/hooks/use-operator-chat";
 
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({
@@ -58,6 +59,12 @@ describe("OperatorPage", () => {
   beforeEach(() => {
     // jsdom has no scrollIntoView; the chat auto-scroll effect calls it.
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    // This page mounts the real useOperatorChat, backed by a module-level
+    // store — without this, a pause or conversationId left by one test's
+    // render leaks into the next and fires unmocked requests against handlers
+    // server.resetHandlers() already removed (MSW is configured to hard-error
+    // on those, per src/test/setup.ts).
+    useOperatorChatStore.getState().reset();
     server.resetHandlers();
     server.use(
       http.get("*/secretstore/secrets/health", () =>

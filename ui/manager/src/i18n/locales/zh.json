@@ -3173,7 +3173,14 @@
       "send": "发送",
       "stop": "停止",
       "newConversation": "开始新会话",
-      "transcript": "操作员对话"
+      "transcript": "操作员对话",
+      "pauseCompactFallback": "操作员需要你的批准才能继续。",
+      "pauseCompactReview": "查看并批准 →"
+    },
+    "drawer": {
+      "title": "平台操作员",
+      "notActivated": "开启后，你可以随时随地与你的部署对话。",
+      "activate": "设置平台操作员"
     },
     "approval": {
       "reconstructedEndpoint": "{{method}} {{path}}（重建）",

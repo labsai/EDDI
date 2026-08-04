@@ -3200,7 +3200,14 @@
       "send": "Send",
       "stop": "Stop",
       "newConversation": "Start a new conversation",
-      "transcript": "Operator conversation"
+      "transcript": "Operator conversation",
+      "pauseCompactFallback": "The operator needs your approval before continuing.",
+      "pauseCompactReview": "Review to approve →"
+    },
+    "drawer": {
+      "title": "Platform Operator",
+      "notActivated": "Turn on the Platform Operator to chat with your deployment from anywhere.",
+      "activate": "Set up the Platform Operator"
     },
     "approval": {
       "reconstructedEndpoint": "{{method}} {{path}} (reconstructed)",

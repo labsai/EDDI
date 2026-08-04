@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Send, Square, RotateCcw, AlertTriangle, Bot, User } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Send, Square, RotateCcw, AlertTriangle, Bot, User, PauseCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatActivity } from "@/components/chat/chat-activity";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
@@ -10,7 +11,7 @@ import type { PipelineEvent } from "@/hooks/use-debug-events";
 import type { HitlVerdict, PauseDetails, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
 import { cn } from "@/lib/utils";
 
-interface OperatorChatProps {
+export interface OperatorChatProps {
   messages: ChatMessage[];
   events: PipelineEvent[];
   /** Completed turns' traces, keyed by the agent message they belong to. */
@@ -41,13 +42,28 @@ interface OperatorChatProps {
   isResolvingPause: boolean;
   /** Set only when resuming or awaiting the resumed turn's outcome failed. */
   resolveError: string | null;
-  onDecide: (verdict: HitlVerdict, note?: string, toolDecisions?: Record<string, ToolCallDecision>) => void;
+  /** Required for `pauseSurface: "banner"` (the only renderer of `ApprovalBanner`,
+   *  its one caller). Optional so `pauseSurface: "compact"` callers, which never
+   *  reach that branch, are not forced to pass a no-op. */
+  onDecide?: (verdict: HitlVerdict, note?: string, toolDecisions?: Record<string, ToolCallDecision>) => void;
   /** Calls the approver must not be able to approve here, with the reason —
    *  see `ApprovalBannerProps.blockedCalls` and `self-guard.ts`. */
   blockedCalls?: readonly { callId: string; reason: string }[];
   /** Rendered per gated call above its redacted arguments — see
    *  `ApprovalBannerProps.renderCallExtra`. */
   renderCallExtra?: (call: PendingToolCallView) => ReactNode;
+  /**
+   * How a pause renders. Default `"banner"` — the full `ApprovalBanner`, with
+   * per-call review and redacted request previews.
+   *
+   * `"compact"` is for the drawer: a docked panel has no room to review a
+   * gated write responsibly (a cramped preview invites rubber-stamping, and
+   * `ApprovalBanner` is security-reviewed for its one full-width surface, not
+   * duplicated into a second one). Compact shows the reason and a link to the
+   * full page, where the real banner renders — same conversation, same pause,
+   * already there.
+   */
+  pauseSurface?: "banner" | "compact";
 }
 
 export function OperatorChat({
@@ -70,6 +86,7 @@ export function OperatorChat({
   onDecide,
   blockedCalls,
   renderCallExtra,
+  pauseSurface = "banner",
 }: OperatorChatProps) {
   const { t } = useTranslation();
   const [input, setInput] = useState("");
@@ -170,7 +187,33 @@ export function OperatorChat({
         {/* Inline in the transcript, same placement as a group discussion's
             pause (discussion-transcript.tsx) — the decision belongs where the
             conversation that is waiting on it is, not on a separate page. */}
-        {isPaused && (
+        {isPaused && pauseSurface === "compact" && (
+          <div
+            className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+            role="alert"
+            data-testid="operator-chat-compact-pause"
+          >
+            <div className="flex items-start gap-2">
+              <PauseCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="flex-1">
+                {pauseReason ||
+                  t(
+                    "operator.chat.pauseCompactFallback",
+                    "The operator needs your approval before continuing.",
+                  )}
+              </span>
+            </div>
+            <Link
+              to="/manage/operator"
+              className="self-start text-xs font-medium underline hover:no-underline"
+              data-testid="operator-chat-compact-pause-link"
+            >
+              {t("operator.chat.pauseCompactReview", "Review to approve →")}
+            </Link>
+          </div>
+        )}
+
+        {isPaused && pauseSurface === "banner" && (
           <ApprovalBanner
             surface="regular"
             pauseReason={pauseReason ?? undefined}
@@ -183,7 +226,7 @@ export function OperatorChat({
             requireExplicitPerCall
             blockedCalls={blockedCalls}
             renderCallExtra={renderCallExtra}
-            onDecide={(verdict, note, _taskApprovals, toolDecisions) => onDecide(verdict, note, toolDecisions)}
+            onDecide={(verdict, note, _taskApprovals, toolDecisions) => onDecide?.(verdict, note, toolDecisions)}
           />
         )}
 

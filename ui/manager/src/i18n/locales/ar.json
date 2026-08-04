@@ -3197,7 +3197,14 @@
       "send": "إرسال",
       "stop": "إيقاف",
       "newConversation": "بدء محادثة جديدة",
-      "transcript": "محادثة المُشغّل"
+      "transcript": "محادثة المُشغّل",
+      "pauseCompactFallback": "يحتاج المشغّل إلى موافقتك قبل المتابعة.",
+      "pauseCompactReview": "مراجعة للموافقة →"
+    },
+    "drawer": {
+      "title": "مُشغّل المنصة",
+      "notActivated": "فعّله للدردشة مع نشرك من أي مكان.",
+      "activate": "إعداد مُشغّل المنصة"
     },
     "approval": {
       "reconstructedEndpoint": "{{method}} {{path}} (معاد إنشاؤه)",

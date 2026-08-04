@@ -3179,7 +3179,14 @@
       "send": "Enviar",
       "stop": "Detener",
       "newConversation": "Iniciar una conversación nueva",
-      "transcript": "Conversación con el operador"
+      "transcript": "Conversación con el operador",
+      "pauseCompactFallback": "El operador necesita tu aprobación para continuar.",
+      "pauseCompactReview": "Revisar para aprobar →"
+    },
+    "drawer": {
+      "title": "Operador de plataforma",
+      "notActivated": "Actívalo para chatear con tu despliegue desde cualquier lugar.",
+      "activate": "Configurar el operador de plataforma"
     },
     "approval": {
       "reconstructedEndpoint": "{{method}} {{path}} (reconstruido)",

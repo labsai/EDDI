@@ -3173,7 +3173,14 @@
       "send": "Senden",
       "stop": "Stoppen",
       "newConversation": "Neue Konversation beginnen",
-      "transcript": "Operator-Konversation"
+      "transcript": "Operator-Konversation",
+      "pauseCompactFallback": "Der Operator benötigt Ihre Zustimmung, bevor er fortfahren kann.",
+      "pauseCompactReview": "Zur Genehmigung prüfen →"
+    },
+    "drawer": {
+      "title": "Plattform-Operator",
+      "notActivated": "Aktivieren Sie ihn, um von überall mit Ihrem Deployment zu chatten.",
+      "activate": "Plattform-Operator einrichten"
     },
     "approval": {
       "reconstructedEndpoint": "{{method}} {{path}} (rekonstruiert)",

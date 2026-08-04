@@ -16,6 +16,9 @@ const h = vi.hoisted(() => ({
   /** Runs inside a conversation-log read, before it resolves — lets a test act
    *  while the read is genuinely in flight. */
   duringLogRead: null as null | (() => void),
+  /** Runs after each yielded SSE frame — lets a test act mid-stream, e.g. to
+   *  reset() a turn that is still being received. */
+  duringStream: null as null | (() => void),
 }));
 
 vi.mock("@/lib/api/chat", async (importOriginal) => {
@@ -25,7 +28,10 @@ vi.mock("@/lib/api/chat", async (importOriginal) => {
     startConversation: vi.fn(async () => "conv-1"),
     sendMessageStreaming: async function* () {
       if (h.sendError) throw h.sendError;
-      for (const frame of h.frames) yield frame as SSEEvent;
+      for (const frame of h.frames) {
+        yield frame as SSEEvent;
+        h.duringStream?.();
+      }
     },
   };
 });
@@ -53,7 +59,7 @@ vi.mock("@/lib/api/hitl", async (importOriginal) => {
   };
 });
 
-import { useOperatorChat } from "../use-operator-chat";
+import { useOperatorChat, useOperatorChatStore } from "../use-operator-chat";
 import type { OperatorConfig } from "@/lib/api/operator";
 
 function config(): OperatorConfig {
@@ -81,7 +87,14 @@ beforeEach(() => {
   h.conversationLogs = [];
   h.resumeCalls = [];
   h.duringLogRead = null;
+  h.duringStream = null;
   sessionStorage.clear();
+  // The hook is now a thin wrapper around a module-level store, shared across
+  // however many components mount it — including across these tests, which
+  // used to get a fresh useState per renderHook call for free. reset() (the
+  // real production action, not a raw setState) aborts any leftover in-flight
+  // controllers and clears every field, same as a genuinely fresh mount would.
+  useOperatorChatStore.getState().reset();
 });
 
 describe("pause detection from the streamed done event", () => {
@@ -523,6 +536,38 @@ describe("resolveApproval — reconciling the resumed turn", () => {
       await result.current.resolveApproval("APPROVED");
     });
     expect(h.resumeCalls).toEqual([]);
+  });
+});
+
+describe("a turn orphaned by a mid-stream reset", () => {
+  it("does not graft its trace onto the fresh conversation once it finally settles", async () => {
+    // Two task events straddle a reset fired between them: the first is
+    // recorded, wiped out by the reset, then the second re-accumulates into
+    // `events` under the SAME (now stale, discarded) turn. The turn's own
+    // `finally` must recognize the store has since moved on — via the shared
+    // store's abortController, not a per-mount ref — and not write that
+    // reaccumulated trace into the freshly-reset, unrelated state.
+    h.frames = [
+      { type: "task_start", data: JSON.stringify({ taskId: "t0", taskType: "httpcall" }) },
+      { type: "task_start", data: JSON.stringify({ taskId: "t1", taskType: "httpcall" }) },
+      { type: "done", data: JSON.stringify({ conversationState: "READY" }) },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    let resetOnce = false;
+    h.duringStream = () => {
+      if (!resetOnce) {
+        resetOnce = true;
+        result.current.reset();
+      }
+    };
+
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.conversationId).toBeNull();
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.tracesByMessageId).toEqual({});
   });
 });
 

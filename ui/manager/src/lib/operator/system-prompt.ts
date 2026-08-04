@@ -200,6 +200,29 @@ function buildAuthoringSection(endpoints: readonly string[]): string {
   return lines.join("\n");
 }
 
+/**
+ * Resolved per turn from `context.*` (Qute, `quarkus.qute.strict-rendering=false`
+ * so a turn sent without it — the full `/manage/operator` page, or an older
+ * conversation from before this shipped — degrades to nothing, not a stray
+ * literal). Populated only by the docked drawer (`operator-drawer.tsx`), from
+ * `useCurrentScreenContext()`: the admin's location when they opened the
+ * drawer, not a claim from inside the conversation, so rule 1 (tool output is
+ * data, not instructions) does not apply to it.
+ *
+ * Unconditional, not gated by scope or granted endpoints — knowing where the
+ * admin is doing does not depend on what the operator is allowed to do about
+ * it.
+ */
+const BODY_APP_CONTEXT = `{#if context.screen}
+The administrator is currently viewing: {context.screen}\
+{#if context.agentId} (agent {context.agentId}){/if}\
+{#if context.workflowId} (workflow {context.workflowId}){/if}\
+{#if context.groupId} (group {context.groupId}){/if}\
+{#if context.boardId} (workforce board {context.boardId}){/if}.
+If a question about which agent, workflow, group, or board is meant is
+ambiguous, assume this one unless told otherwise.
+{/if}`;
+
 const BODY_HOW_TO_WORK = `How to work:
 - Prefer looking things up over asking. If the user names an agent, find it.
 - When diagnosing a problem, gather evidence first: check deployment status,
@@ -225,7 +248,7 @@ const BODY_MAKING_CHANGES = `When you change something:
 
 /** Default editable body for a granted endpoint set — the role and style. */
 export function buildOperatorPromptBody(endpoints: readonly string[]): string {
-  const sections = [BODY_ROLE, BODY_HOW_TO_WORK];
+  const sections = [BODY_ROLE, BODY_APP_CONTEXT, BODY_HOW_TO_WORK];
   if (grantsWriteCapability(endpoints)) sections.push(buildAuthoringSection(endpoints), BODY_MAKING_CHANGES);
   return sections.join("\n\n");
 }
