@@ -211,4 +211,35 @@ class AgentOrchestratorLocalToolAssemblyTest {
         assertTrue(names.contains("calculate"), "BuiltinToolsProvider dropped: " + names);
         assertTrue(names.contains("converseWithAgent"), "DynamicAgentToolsProvider dropped from assembly: " + names);
     }
+
+    @Test
+    void lazyStrategyWithBuiltInsDisabled_assemblesNothing() {
+        // Fidelity with the pre-R2 path: collectEnabledTools returned BEFORE its
+        // LAZY branch when enableBuiltInTools was null/false. Without that gate an
+        // agent with built-ins off, LAZY, and no http/mcp/a2a tools goes from an
+        // empty toolSpecs — which makes buildToolList return null and the turn fall
+        // back to legacy non-tool completion — to a single discover_tools spec,
+        // entering the full tool loop to be offered a meta-tool that can activate
+        // nothing. Different request shape, different cost.
+        var task = task(false, null);
+        task.setToolLoadingStrategy(LlmConfiguration.ToolLoadingStrategy.LAZY);
+
+        var setup = orchestrator().buildToolSetup(task, memory());
+
+        assertTrue(setup.toolSpecs().isEmpty(),
+                "an agent with built-ins disabled must not be handed discover_tools: " + setup.toolSpecs());
+    }
+
+    @Test
+    void lazyStrategyWithBuiltInsEnabled_stillOffersDiscoverTools() {
+        // The positive case, so the gate above cannot pass by LAZY never
+        // contributing at all.
+        var task = task(true, List.of("calculator"));
+        task.setToolLoadingStrategy(LlmConfiguration.ToolLoadingStrategy.LAZY);
+
+        var names = orchestrator().buildToolSetup(task, memory()).toolSpecs().stream()
+                .map(dev.langchain4j.agent.tool.ToolSpecification::name).toList();
+
+        assertTrue(names.contains("discover_tools"), "LAZY must still advertise the meta-tool: " + names);
+    }
 }

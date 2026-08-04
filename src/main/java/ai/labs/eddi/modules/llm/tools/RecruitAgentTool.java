@@ -125,6 +125,13 @@ public class RecruitAgentTool {
             gc.addDynamicMember(recruit);
             gc.getRecruitedAgentIds().add(wanted);
         }
+        // memberDisplayNames is seeded once from the CONFIG roster and only when it
+        // is still empty, so a recruit never lands in it. That map is what
+        // followUpWithMember resolves a human-typed name against, and what the
+        // "which member did you mean?" error lists — so without this, a recruit the
+        // user just watched join could not be addressed by name and rendered as a
+        // raw agent id.
+        gc.addMemberDisplayName(wanted, recruit.displayName());
 
         String note = "%s recruited %s as %s: %s".formatted(
                 recruiterAgentId != null ? recruiterAgentId : "A member", wanted,

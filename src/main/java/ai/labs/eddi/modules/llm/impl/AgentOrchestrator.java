@@ -637,7 +637,19 @@ class AgentOrchestrator implements IAgentOrchestrator {
         // just contributed, so it can only be built here — between the two phases —
         // and it must land before the builtInSpecs snapshot, exactly as it did when
         // collectEnabledTools appended it to the list reflection then ran over.
-        if (task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY) {
+        //
+        // Gated on built-ins being enabled, restoring the pre-R2 shape: the path this
+        // replaced (collectEnabledTools) returned BEFORE its LAZY branch when
+        // enableBuiltInTools was null/false. Without the gate, an agent with
+        // built-ins off, LAZY, and no http/mcp/a2a tools went from an empty toolSpecs
+        // — which makes buildToolList return null and the turn fall back to legacy
+        // non-tool completion — to a single discover_tools spec, entering the full
+        // tool loop and being offered a meta-tool that can activate nothing. A
+        // different request shape and a different cost, from a refactor billed as a
+        // pure move.
+        Boolean builtInsEnabled = task.getEnableBuiltInTools();
+        if (task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY
+                && builtInsEnabled != null && builtInsEnabled) {
             merger.addContribution("builtin", discoverToolsContribution(merger.specsSoFar(), task));
         }
 

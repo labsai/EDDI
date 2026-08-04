@@ -313,4 +313,24 @@ class GroupSigningGuardTest {
             }
         };
     }
+
+    @Test
+    void versionZeroResolvesToTheLegacyKey_evenAfterAVersionedListIsAdded() {
+        // Entries signed before key versioning carry signatureKeyVersion 0. Once an
+        // operator onboards a keys list starting at v1 — the normal rotation path —
+        // a version-exact lookup returned null for every one of them, and peer
+        // verification logged authentic entries as unverifiable. Version 0 MEANS
+        // "signed against the legacy publicKey field", so that field is its key.
+        var identity = new AgentConfiguration.AgentIdentity();
+        identity.setPublicKey("legacy-key");
+
+        assertEquals("legacy-key", identity.getKeyForVersion(0), "no versioned keys yet");
+
+        identity.setKeys(List.of(new AgentPublicKey(1, "v1-key", 0L, Long.MAX_VALUE)));
+
+        assertEquals("legacy-key", identity.getKeyForVersion(0),
+                "a pre-rotation entry must still verify after the keys list is onboarded");
+        assertEquals("v1-key", identity.getKeyForVersion(1), "versioned lookup is unaffected");
+        assertNull(identity.getKeyForVersion(2), "an unknown version is still unknown");
+    }
 }

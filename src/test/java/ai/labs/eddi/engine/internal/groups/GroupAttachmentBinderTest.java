@@ -38,7 +38,11 @@ class GroupAttachmentBinderTest {
     void materialize_base64_storesAndBinds() throws Exception {
         var store = mock(IAttachmentStore.class);
         var binder = new GroupAttachmentBinder(store, DEFAULT_TENANT);
-        when(store.store(any(), eq("image/png"), eq("a.png"), eq("gc-1"), eq(DEFAULT_TENANT)))
+        // eq(decoded bytes), not any(): with any() in the payload position, replacing
+        // the Base64 decode with getBytes(UTF_8) — persisting every inline attachment
+        // as its base64 TEXT rather than the file — passed this test.
+        when(store.store(eq("png".getBytes(java.nio.charset.StandardCharsets.UTF_8)), eq("image/png"), eq("a.png"), eq("gc-1"),
+                eq(DEFAULT_TENANT)))
                 .thenReturn(new IAttachmentStore.Attachment("ref-1", "a.png", "image/png", 3, "gc-1"));
 
         var inline = new Attachment();

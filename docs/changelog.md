@@ -5,6 +5,24 @@
 
 ---
 
+## 🐛 fix: the last five branch-review findings (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+**Signature verification reported authentic entries as unverifiable after a key rotation.** An entry signed before key versioning carries `signatureKeyVersion = 0`, and `getKeyForVersion(0)` returned the legacy `publicKey` field *only while the versioned `keys` list was empty*. Onboarding a keys list starting at v1 — the normal rotation path — therefore made every pre-rotation entry resolve to `null`, and peer verification logged "No public key found … cannot verify signature" for entries that were perfectly valid. The commit that introduced the version-exact lookup was fixing a real rotation-window bug; it just dropped `getKeyValidAt`'s `.orElse(publicKey)` fallback along with it. Version 0 *means* "signed against the legacy field", so that field is its key regardless of what has been added since.
+
+**LAZY + built-ins disabled entered the tool loop instead of falling back to legacy chat** — an R2 fidelity break. The path R2 replaced returned *before* its LAZY branch when `enableBuiltInTools` was null/false; the new one added `discover_tools` unconditionally. An agent with built-ins off, LAZY, and no http/mcp/a2a tools went from an empty `toolSpecs` (which makes `buildToolList` return null and the turn fall back to non-tool completion) to a single spec, entering the full tool loop to be offered a meta-tool that can activate nothing. Different request shape, different cost, from a refactor billed as a pure move.
+
+**A recruit could not be addressed by name.** `memberDisplayNames` is seeded once from the config roster and only while still empty, so a runtime recruit never entered it — and that map is what `followUpWithMember` resolves a human-typed name against, and what the "which member did you mean?" error lists.
+
+**F15's executor-shadowing assertion was stranded on dead code.** The production collision branch is correct — it `continue`s before touching executors — but the only test asserting so ran against `mergeExternalTools`, which has no production caller. On the live path, a branch that overwrote the executor while leaving spec count and provenance tag intact would have gone unnoticed, and a remote MCP server advertising `calculator` would have served every calculator call. Now pinned where the code actually runs.
+
+**`GroupAttachmentBinderTest` matched the stored payload with `any()`**, so replacing the Base64 decode with `getBytes(UTF_8)` — persisting every inline attachment as its base64 *text* rather than the file — passed.
+
+**Process note.** All five were mutation-checked, and **three survived the first pass**: the code fix was present but nothing pinned it, which is the exact defect class this review round was chartered to find. The fixes are only complete now that `versionZeroResolvesToTheLegacyKey_evenAfterAVersionedListIsAdded`, `lazyStrategyWithBuiltInsDisabled_assemblesNothing` and `recruit_isAddressableByDisplayName` each fail when their fix is reverted.
+
+---
+
 ## ✅ test(orchestrator): two gates that a real regression would have shipped green
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

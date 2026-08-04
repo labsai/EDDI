@@ -111,6 +111,19 @@ class RecruitAgentToolTest {
     }
 
     @Test
+    void recruit_isAddressableByDisplayName() {
+        // memberDisplayNames is seeded once from the CONFIG roster and only while it
+        // is still empty, so a recruit never entered it. That map is what
+        // followUpWithMember resolves a human-typed name against, and what the
+        // "which member did you mean?" error lists — so a recruit the user just
+        // watched join could not be addressed by name.
+        tool().recruitAgent(TARGET, "Reviewer", "why");
+
+        assertEquals(TARGET, gc.getMemberDisplayNames().get(TARGET),
+                "a member nobody can name is a member nobody can follow up with");
+    }
+
+    @Test
     void missingRole_stillRecruits() {
         String reply = tool().recruitAgent(TARGET, null, "why");
 

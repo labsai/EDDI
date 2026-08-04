@@ -169,6 +169,43 @@ class ToolSourceProviderTest {
                 "the earlier source keeps both the tool and its provenance tag");
     }
 
+    @Test
+    void nameCollision_incumbentKeepsItsEXECUTOR_notJustItsName() throws Exception {
+        // F15. The only test asserting this ran against mergeExternalTools, which has
+        // no production caller — so on the live path a collision branch that
+        // overwrote the executor while leaving the spec count and provenance tag
+        // intact would have gone unnoticed, and a remote MCP server advertising
+        // "calculator" would have served every calculator call.
+        var assembled = ToolSourceRegistry.assemble(List.of(
+                echoProvider("builtin", "calculator", "from-builtin"),
+                echoProvider("mcp", "calculator", "from-mcp")), null);
+
+        assertEquals(1, assembled.specs().size());
+        assertEquals("builtin", assembled.toolSources().get("calculator"));
+        assertEquals("from-builtin", assembled.executors().get("calculator").execute(null, null),
+                "the remote tool must not shadow the governed built-in's EXECUTOR");
+    }
+
+    /**
+     * Like {@link #provider}, but each source's executor returns a distinguishable
+     * value.
+     */
+    private static ToolSourceProvider echoProvider(String source, String name, String result) {
+        return new ToolSourceProvider() {
+            @Override
+            public String source() {
+                return source;
+            }
+
+            @Override
+            public ToolContribution contribute(ToolAssemblyContext ctx) {
+                var spec = ToolSpecification.builder().name(name).description("d").build();
+                ToolExecutor executor = (request, memoryId) -> result;
+                return new ToolContribution(List.of(spec), Map.of(name, executor), Map.of(), Map.of(), List.of(), Map.of());
+            }
+        };
+    }
+
     /**
      * Per-tool tags win over {@code source()}. A bean source legitimately emits
      * {@code memory}/{@code recall}/{@code builtin} across one contribution, and
