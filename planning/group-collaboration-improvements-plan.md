@@ -1,6 +1,28 @@
 # Group Collaboration Improvements — Implementation Plan (Revision 2.1)
 
-> **Status:** Ready for implementation · **Date:** 2026-07-29 (Rev 2) · re-aligned against `main` 2026-08-01 (Rev 2.1, post-merge of `e20d510a6`)
+> **Status:** **Wave R, Wave 0 and part of Waves 1–2 are IMPLEMENTED** on `refactor/group-service-split` (PR [#626](https://github.com/labsai/EDDI/pull/626)) · **Date:** 2026-07-29 (Rev 2) · re-aligned against `main` 2026-08-01 (Rev 2.1) · implementation status added 2026-08-04
+>
+> ### Implementation status (2026-08-04)
+>
+> | Item | Status |
+> | --- | --- |
+> | **Wave R** — R1 (`GroupConversationService` → 8 collaborators), R2 (`AgentOrchestrator` → `ToolSourceProvider` SPI), R3 (`ConversationService` → HITL + step runner) | ✅ **Done** |
+> | **Wave 0** — F1 registry, F2 ResumePoint, F3 DecisionRecord, F4 entry types + visibility, F5 cost ledger, F6 schema versioning | ✅ **Done** |
+> | **Wave 1** — I1 cost ceiling, I2 convergence, I3 verdicts + deterministic synthesis, I4 abstention + minority report | ✅ **Done** |
+> | **Wave 2** — I5 agent-filed tasks, I7 recruitment + configurable delegation timeout | ✅ **Done** |
+> | **Wave 2** — I6, I8, I9, I14, I17 | ⬜ Not started |
+> | **Wave 3** — I10, I11, I12, I13, I18 | ⬜ Not started |
+>
+> **Known gaps in what shipped** — read before building on these:
+>
+> - **I1's ceiling cannot fire for an ordinary group.** `AUDIT_COST` is written only from `cascadeCostUsd + toolCostUsd`, so a plain (non-cascade, no priced tool) model call contributes **$0**. `totalCost` stays 0, the ceiling never trips, and `memberCosts`/`totalCost` are serialized into the public payload as if authoritative. Pricing model calls is a prerequisite for I13's budgets.
+> - **I7's cost sub-budget was not built.** `IConversationService.say()` has no budget parameter and single-agent conversations have no ceiling mechanism; only group `discuss()` does. Given the item above, a ceiling there would bound a number that is mostly zero.
+> - **`decision_reached` never fires.** I3 sets `DecisionRecord` but no producer calls the sink event, so verdicts appear over REST/MCP but never on SSE or Slack. `SlackGroupDiscussionListener.onDecisionReached` is currently dead code.
+> - **Nested-group cost is overwritten, not accumulated.** `accumulateNestedGroupCost` keys by `agentId` and each nested turn is a fresh child discussion starting at 0, so only the last child's spend survives.
+> - **`allowAbstention` on a SYNTHESIS phase** yields a `COMPLETED` discussion with no answer.
+> - **Parallel-phase late entries are lost.** After the batch deadline, a member finishing milliseconds late has its real entry replaced by SKIPPED. Both obvious fixes were tried and rejected (one extends the deadline that exists to bound the phase; the other loses the entries entirely) — recovering it needs the deadline contract renegotiated.
+>
+> **Deliberate deviations from this plan, with reasons recorded in `docs/changelog.md`:** I3 requires a two-sided roster *and* an impartial judge before producing a verdict (a role-less or moderator-less debate concludes in prose rather than fabricating a winner); I5 assigns every filed task at creation (an unowned task is never scheduled by the EXECUTE wave, so "the loop will assign it later" was not true).
 > **Scope:** Refactoring workstream R1–R3, foundations F1–F6, items I1–I14 + I17–I18. Items **I15 (cross-team process DAGs) and I16 (A2A remote members) are explicitly out of scope** — do not start them.
 > **Audience:** A coding agent with **no prior context**. Everything needed is in this document plus the referenced files. Read [AGENTS.md](../AGENTS.md) first and follow its workflow protocol: branch from `origin/main` (never push a `claude/*` branch name), changelog entry in the same commit as the work, conventional commits, **no AI co-author trailers**, ask before pushing, never force-push.
 >
