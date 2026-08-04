@@ -122,8 +122,7 @@ class GroupTaskToolsTest {
         // itself as tasks progressed.
         tools().addGroupTask("Filed work", "d", null, null, null);
         String id = tasks().get(0).id();
-
-        gc.getTaskList().assignTask(id, "agent-b", "Ben");
+        // Filed tasks arrive ASSIGNED now, so the loop's next transition is start().
         assertEquals(AGENT, gc.getTaskList().findById(id).createdByAgentId(), "lost on assign");
 
         gc.getTaskList().startTask(id);
@@ -315,14 +314,34 @@ class GroupTaskToolsTest {
     }
 
     @Test
-    void omittedOrAll_leavesTheTaskForTheLoopToAssign() {
-        // "ALL" is deliberately not round-robined here: round-robin keys off a task
-        // index the loop assigns, and a filed task has no position in the plan.
+    void omittedOrAll_stillGetsAnOwner_andRoundRobinsAcrossTheTeam() {
+        // An unassigned task is NEVER picked up: assignTask is only called from the
+        // PLAN phase, and the EXECUTE wave schedules
+        // findExecutableTasks().filter(assignedAgentId != null). Leaving a filed task
+        // PENDING therefore meant it silently never ran — and under TASK-granularity
+        // HITL the leftover executable task re-paused the phase until the
+        // no-progress guard failed the whole discussion.
         tools().addGroupTask("A", "d", null, null, null);
         tools().addGroupTask("B", "d", null, null, "ALL");
 
-        assertTrue(tasks().stream().allMatch(t -> t.status() == TaskStatus.PENDING));
-        assertTrue(tasks().stream().allMatch(t -> t.assignedAgentId() == null));
+        assertTrue(tasks().stream().allMatch(t -> t.status() == TaskStatus.ASSIGNED), "an unowned task never runs");
+        assertTrue(tasks().stream().allMatch(t -> t.assignedAgentId() != null));
+        assertNotEquals(tasks().get(0).assignedAgentId(), tasks().get(1).assignedAgentId(),
+                "successive filings spread across the team rather than piling onto one member");
+        assertTrue(tasks().stream().noneMatch(t -> "mod".equals(t.assignedAgentId())),
+                "the moderator is excluded from round-robin, as it is for planned tasks");
+    }
+
+    @Test
+    void filedTaskIsSchedulableByTheWaveLoopsOwnFilter() {
+        // The gate that actually matters. findExecutableTasks() alone returns PENDING
+        // unowned tasks too, so asserting only that was the test passing for the
+        // wrong reason.
+        tools().addGroupTask("Real work", "d", null, null, null);
+
+        assertTrue(gc.getTaskList().findExecutableTasks().stream()
+                .filter(t -> t.assignedAgentId() != null)
+                .anyMatch(t -> "Real work".equals(t.subject())));
     }
 
     // =================================================================

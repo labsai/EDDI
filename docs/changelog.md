@@ -5,6 +5,32 @@
 
 ---
 
+## 🔒 fix(groups): branch review — cross-discussion write, ungated recruitment, orphaned tasks (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Findings from a four-lens adversarial review of the whole branch. Every one is a defect I introduced in I5/I7 or an interaction I missed.
+
+**IDOR: the two new write tools were authorized by a caller-supplied string.** `Conversation.createContextData` stores *every* caller context key verbatim as `context:<key>` with no reserved-key filter, and `AgentOrchestrator` reads `context:groupConversationId` straight back out. Both new providers gated on `liveDiscussionRegistry.get(id).isPresent()` — which asks "does this discussion exist?", not "may you write to it". Any `eddi-user` could start a private conversation, name another discussion's id (enumerable via the REST list endpoints), and have `addGroupTask`/`recruitAgent` bound to a discussion they have no relationship with — filing tasks other groups' members then execute, or injecting a speaker. Fixed with `LiveDiscussionRegistry.getForMember(gcId, conversationId)`: the caller's own conversation must appear in that discussion's `memberConversationIds`, which only the discussion itself writes. Existence is not authorization.
+
+**`recruitAgent` was tagged `builtin`, not `dynamic`.** `ToolObjectReflector.sourceForBuiltInTool` enumerates the dynamic-agent tools by class name and I never added the new one, so the highest-privilege of them — it mutates a live roster — fell to the `builtin` default. The documented operator config `requireApproval: ["dynamic:*"] / exempt: ["builtin:*"]` therefore gated its four siblings and **actively exempted** it, since exempt beats require.
+
+**A group that never configured `dynamicAgents` had recruitment on.** The field is null by default, `MemberTurnExecutor` skipped injecting the context variable when null, and the provider fell back to the *standalone* permissive default (creation, recruitment and delegation all true). That default exists for a lone agent with those tools whitelisted; inheriting it inside a group meant an operator who never opted in got roster mutation. Group turns now always receive an explicit config — a disabled one when the group configured none.
+
+**`GroupTaskToolsProvider` ignored the agent's own capability switch.** Every sibling provider returns empty when `enableBuiltInTools` is off; mine didn't, so a group opting in handed write tools to a member whose own config says it has none — and flipped a zero-tool member out of legacy chat into a tool loop.
+
+**Agent-filed tasks were never executed.** `assignTask` is only ever called from the PLAN phase, and the EXECUTE wave schedules `findExecutableTasks().filter(assignedAgentId != null)`. A task filed without `assignToRole` stayed PENDING and unowned forever — so the tool's own promise ("the team will pick it up") was false, and under TASK-granularity HITL the leftover executable task re-paused the phase until the no-progress guard **failed the whole discussion**. Every filed task now gets an owner through the same resolver the PLAN phase uses, round-robined by task count. My test asserted `findExecutableTasks()` contained the task — true, but not the gate that matters.
+
+**The per-discussion task cap was advisory.** Counted outside `SharedTaskList`'s monitor, so five concurrent speakers against a cap of 20 with 19 filed all passed and produced 24. Moved inside the same lock as the insert, where the duplicate and cycle checks already were.
+
+**A converging synthesis phase skipped its own verdict and dissent round.** The I3/I4 block was gated on `lastRepeat`, but I2's convergence break is evaluated *after* it — so a phase converging on repeat 1 of 3 exited having recorded no `DecisionRecord`, and the answer extraction then handed the caller the raw judgment JSON, which is exactly what I3's rendering exists to prevent.
+
+**The peer-targeted turn count assumed speakers and targets are the same list.** They are not: speakers come from the resolved participants (recruit-inclusive, or a `ROLE:` subset), targets from the configured roster. `n*(n-1)` over-counted for a role-scoped phase (2 reviewers of 5 members run 8 turns, not 2 — so 2 abstentions among 8 ended a round that produced 6 real critiques) and under-counted once I7 let a recruit speak, making I4's unanimity exit arithmetically unreachable.
+
+Also: `totalCost` is now `volatile` (written under `memberCosts`' monitor by parallel member turns, read unsynchronized by both ceiling checks — no happens-before edge, and a non-volatile 64-bit read may tear); `CURRENT_SCHEMA_VERSION` bumped to 2, which F6's own contract required once resume-time logic began depending on `recruitedAgentIds`.
+
+---
+
 ## ✨ feat(groups): Runtime recruitment + delegation timeout (I7) (2026-08-04)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

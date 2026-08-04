@@ -31,10 +31,14 @@ import java.util.stream.Collectors;
  * task filed now is picked up next wave with no scheduler changes.
  * <p>
  * <b>Two tools, deliberately.</b> There is no claim or complete tool: the wave
- * loop owns every task-state transition, and a second writer racing it would
- * corrupt the state machine that decides what runs next. Assignment belongs to
- * the loop for the same reason — a filed task is PENDING, and the loop assigns
- * it like any other.
+ * loop owns every task-state <em>transition</em>, and a second writer racing it
+ * would corrupt the state machine that decides what runs next.
+ * <p>
+ * Initial assignment is the one exception, and it has to be: the EXECUTE wave
+ * only schedules tasks that already have an assignee, and nothing outside the
+ * PLAN phase ever assigns one. A task filed without an owner would never run —
+ * so every filed task is given one here, through the same resolver the PLAN
+ * phase uses.
  * <p>
  * <b>Mutates the live discussion, never the store.</b> The loop persists the
  * whole {@link GroupConversation} document after each phase, so a tool writing
@@ -100,7 +104,7 @@ public class GroupTaskTools {
                                   required = false) List<String> dependsOnSubjects,
                                @P(value = "0 = highest priority. Omit for normal.", required = false) Integer priority,
                                @P(value = "Who should own this: a role as \"ROLE:Reviewer\", or a member's exact name. "
-                                       + "Omit to let the team assign it.",
+                                       + "Omit to have it assigned to the next member in turn.",
                                   required = false) String assignToRole) {
 
         GroupConversation gc = liveDiscussion();
@@ -116,32 +120,34 @@ public class GroupTaskTools {
             return "You have already filed %d task(s) this turn, which is the limit. Raise the most important remaining one next round."
                     .formatted(config.maxPerTurn());
         }
-        long alreadyFiledByAgents = taskList.all().stream().filter(t -> t.createdByAgentId() != null).count();
-        if (alreadyFiledByAgents >= config.maxAgentAddedTasksPerDiscussion()) {
-            return "The task list is full for this discussion (%d agent-filed tasks). Finish existing tasks instead of adding more."
-                    .formatted(config.maxAgentAddedTasksPerDiscussion());
-        }
 
-        String assignedAgentId = null;
-        String assignedDisplayName = null;
-        if (assignToRole != null && !assignToRole.isBlank() && !"ALL".equalsIgnoreCase(assignToRole.trim())) {
-            // "ALL" and omission both mean "no preference", and are deliberately NOT
-            // round-robined here even though the shared resolver would: round-robin
-            // keys off a task INDEX the loop assigns, and an agent-filed task has no
-            // position in the planned list. Leaving it PENDING lets the loop place it
-            // the same way it places every other unowned task.
-            final String resolved = TaskForceEngine.resolveAssignee(assignToRole.trim(), members, moderatorAgentId, 0);
-            if (resolved == null) {
-                return "Nobody here matches \"%s\". %s".formatted(assignToRole.trim(), rosterHint());
-            }
-            assignedAgentId = resolved;
-            assignedDisplayName = members.stream()
-                    .filter(m -> resolved.equals(m.agentId()))
-                    .map(GroupMember::displayName).findFirst().orElse(resolved);
+        // EVERY filed task gets an owner, including when the caller expressed no
+        // preference. An unassigned task is not "assigned later by the loop" — that
+        // was wrong: assignTask is only ever called from the PLAN phase, and the
+        // EXECUTE wave schedules `findExecutableTasks().filter(assignedAgentId !=
+        // null)`. A PENDING unowned task is therefore invisible to the wave forever,
+        // so the tool's promise that the team would pick it up was false, and under
+        // TASK-granularity HITL the leftover executable task re-paused the phase
+        // until the no-progress guard failed the whole discussion.
+        //
+        // "ALL"/omitted round-robins through the same resolver the PLAN phase uses,
+        // indexed by the current task count so successive filings spread across the
+        // team rather than piling onto one member.
+        boolean noPreference = assignToRole == null || assignToRole.isBlank() || "ALL".equalsIgnoreCase(assignToRole.trim());
+        String requested = noPreference ? "ALL" : assignToRole.trim();
+        final String resolved = TaskForceEngine.resolveAssignee(requested, members, moderatorAgentId, taskList.size());
+        if (resolved == null) {
+            return noPreference
+                    ? "There is nobody on this team to own a new task."
+                    : "Nobody here matches \"%s\". %s".formatted(requested, rosterHint());
         }
+        String assignedDisplayName = members.stream()
+                .filter(m -> resolved.equals(m.agentId()))
+                .map(GroupMember::displayName).findFirst().orElse(resolved);
 
         var result = taskList.addAgentTask(subject, description, dependsOnSubjects,
-                priority != null ? priority : 0, agentId, assignedAgentId, assignedDisplayName);
+                priority != null ? priority : 0, agentId, resolved, assignedDisplayName,
+                config.maxAgentAddedTasksPerDiscussion());
         if (!result.accepted()) {
             return result.rejectionReason();
         }
@@ -153,9 +159,8 @@ public class GroupTaskTools {
         LOGGER.infof("Agent '%s' filed task '%s' on group conversation %s (owner: %s)",
                 agentId, result.task().subject(), groupConversationId,
                 result.task().assignedAgentId() != null ? result.task().assignedAgentId() : "unassigned");
-        return result.task().assignedDisplayName() != null
-                ? "Filed \"%s\" for %s.".formatted(result.task().subject(), result.task().assignedDisplayName())
-                : "Filed \"%s\". The team will pick it up in a later round.".formatted(result.task().subject());
+        return "Filed \"%s\" for %s. They pick it up in the next round."
+                .formatted(result.task().subject(), result.task().assignedDisplayName());
     }
 
     @Tool("List the group's shared tasks with their status, so you can see what is already planned before filing new work.")

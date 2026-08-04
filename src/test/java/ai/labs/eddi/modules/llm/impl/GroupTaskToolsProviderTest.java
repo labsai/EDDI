@@ -10,6 +10,8 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupTaskConfig
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
+import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,6 +35,7 @@ class GroupTaskToolsProviderTest {
 
     private static final String GC_ID = "gc-1";
     private static final String GROUP_ID = "group-1";
+    private static final String MEMBER_CONV = "member-conv-1";
 
     private LiveDiscussionRegistry registry;
     private IAgentGroupStore groupStore;
@@ -44,6 +47,9 @@ class GroupTaskToolsProviderTest {
         var gc = new GroupConversation();
         gc.setId(GC_ID);
         gc.setGroupId(GROUP_ID);
+        // The caller's own conversation must be one of the discussion's member
+        // conversations — existence of the discussion is not authorization.
+        gc.getMemberConversationIds().put("agent-a", MEMBER_CONV);
         registry.register(gc);
         when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(resourceId());
     }
@@ -70,7 +76,15 @@ class GroupTaskToolsProviderTest {
     }
 
     private ToolAssemblyContext ctx(String groupConversationId) {
-        return new ToolAssemblyContext(null, null, null, null, "user-1", "agent-a", groupConversationId);
+        return ctx(groupConversationId, MEMBER_CONV, true);
+    }
+
+    private ToolAssemblyContext ctx(String groupConversationId, String callerConversationId, boolean builtInsEnabled) {
+        var memory = mock(IConversationMemory.class);
+        lenient().when(memory.getConversationId()).thenReturn(callerConversationId);
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(builtInsEnabled);
+        return new ToolAssemblyContext(memory, task, null, null, "user-1", "agent-a", groupConversationId);
     }
 
     private GroupTaskToolsProvider provider() {
@@ -142,6 +156,26 @@ class GroupTaskToolsProviderTest {
         // (which ~34 test classes build) leaves both null.
         assertTrue(new GroupTaskToolsProvider(null, groupStore).contribute(ctx(GC_ID)).specs().isEmpty());
         assertTrue(new GroupTaskToolsProvider(registry, null).contribute(ctx(GC_ID)).specs().isEmpty());
+    }
+
+    @Test
+    void anotherUsersDiscussion_contributesNothing() throws Exception {
+        // groupConversationId arrives as a caller-supplied context variable, so any
+        // principal can name any discussion id. Gating on existence alone let an
+        // outsider bind these write tools to someone else's running discussion.
+        when(groupStore.read(GROUP_ID, 1)).thenReturn(groupWith(new GroupTaskConfig(true, 20, 3)));
+
+        assertTrue(provider().contribute(ctx(GC_ID, "not-a-member-conversation", true)).specs().isEmpty(),
+                "membership must be checked, not merely discussion existence");
+        assertTrue(provider().contribute(ctx(GC_ID, null, true)).specs().isEmpty());
+    }
+
+    @Test
+    void agentWithBuiltInToolsDisabled_contributesNothing() throws Exception {
+        // A group opting in must not widen another agent's own capability switch.
+        when(groupStore.read(GROUP_ID, 1)).thenReturn(groupWith(new GroupTaskConfig(true, 20, 3)));
+
+        assertTrue(provider().contribute(ctx(GC_ID, MEMBER_CONV, false)).specs().isEmpty());
     }
 
     @Test

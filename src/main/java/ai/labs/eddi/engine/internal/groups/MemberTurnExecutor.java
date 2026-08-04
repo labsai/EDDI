@@ -224,9 +224,18 @@ public class MemberTurnExecutor {
 
         // Pass group-level dynamic agent guardrails to member agents so that
         // AgentOrchestrator can enforce caps, allowed providers/models, etc.
-        if (gc.getDynamicAgentConfig() != null) {
-            context.put("dynamicAgentConfig", new Context(Context.ContextType.object, gc.getDynamicAgentConfig()));
-        }
+        // Injected even when the group configured none, and that is the point. A
+        // member turn that finds no dynamicAgentConfig in its context falls back to
+        // DynamicAgentToolsProvider's STANDALONE default, which is fully permissive
+        // (creation, recruitment and delegation all on). That default exists for a
+        // lone agent with those tools whitelisted; inheriting it inside a group means
+        // a discussion whose operator never wrote a dynamicAgents block silently
+        // permits roster mutation. An absent group config means "not opted in", so
+        // send an explicitly disabled one rather than nothing.
+        var dynamicAgentConfig = gc.getDynamicAgentConfig() != null
+                ? gc.getDynamicAgentConfig()
+                : new AgentGroupConfiguration.DynamicAgentConfig();
+        context.put("dynamicAgentConfig", new Context(Context.ContextType.object, dynamicAgentConfig));
 
         // Share discussion attachments with this member on its first turn: grant the
         // member conversation access to group-owned blobs and inject attachment_*.

@@ -60,7 +60,19 @@ class GroupTaskToolsProvider implements ToolSourceProvider {
         if (groupConversationId == null || liveDiscussionRegistry == null || groupStore == null) {
             return ToolContribution.empty();
         }
-        var live = liveDiscussionRegistry.get(groupConversationId);
+        // The agent's own capability switch still applies. A group opting in cannot
+        // hand write tools to a member whose config says it has no built-in tools —
+        // that is the group widening another agent's privileges, and it also flips a
+        // zero-tool member out of legacy chat mode into a tool loop.
+        Boolean enableBuiltInTools = ctx.task() != null ? ctx.task().getEnableBuiltInTools() : null;
+        if (enableBuiltInTools == null || !enableBuiltInTools) {
+            return ToolContribution.empty();
+        }
+        // Membership, not existence. groupConversationId arrives as a caller-supplied
+        // context variable, so `get(id).isPresent()` authorizes nothing — see
+        // LiveDiscussionRegistry#getForMember.
+        String callerConversationId = ctx.memory() != null ? ctx.memory().getConversationId() : null;
+        var live = liveDiscussionRegistry.getForMember(groupConversationId, callerConversationId);
         if (live.isEmpty()) {
             return ToolContribution.empty();
         }

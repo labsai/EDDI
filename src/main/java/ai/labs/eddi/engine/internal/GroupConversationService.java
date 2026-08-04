@@ -819,7 +819,14 @@ public class GroupConversationService implements IGroupConversationService {
                     // otherwise run the whole round once per repeat, duplicating every
                     // dissent in both the transcript and the DecisionRecord. Dissent is
                     // a reaction to the final synthesis, not to each draft of it.
-                    boolean lastRepeat = repeat == Math.max(phase.repeats(), 1) - 1;
+                    // The LAST repeat, or an earlier one that is ending the phase anyway.
+                    // Keying only off `lastRepeat` meant a phase that converged (or whose
+                    // participants all abstained) on repeat 1 of 3 broke out below without
+                    // ever recording its verdict or running its dissent round — and with no
+                    // DecisionRecord, the answer extraction then handed the caller the raw
+                    // judgment JSON, which is the exact defect I3's rendering exists to
+                    // prevent.
+                    boolean lastRepeat = repeat == Math.max(phase.repeats(), 1) - 1 || !outcome.isContinue();
                     if (phase.type() == PhaseType.SYNTHESIS && lastRepeat) {
                         // I3: read the judgment into DecisionRecord BEFORE the dissent
                         // round, so dissents merge onto the verdict instead of the

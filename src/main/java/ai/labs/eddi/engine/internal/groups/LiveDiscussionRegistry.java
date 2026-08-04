@@ -91,6 +91,38 @@ public class LiveDiscussionRegistry {
      * {@code groupConversationId} context var and must turn an empty result into an
      * actionable error string for the LLM, never an exception.
      */
+    /**
+     * The live discussion ONLY if {@code conversationId} is one of its member
+     * conversations.
+     * <p>
+     * {@link #get} must not be used to authorize a tool. The
+     * {@code groupConversationId} that reaches a tool provider arrives as a
+     * <em>caller-supplied context variable</em> — {@code Conversation}'s context
+     * map is stored verbatim as {@code context:*} step data with no reserved-key
+     * filter — so any principal who can start a conversation can name any
+     * discussion id they like. Gating a write tool on {@code get(id).isPresent()}
+     * therefore authorizes nothing: it only asks "does this discussion exist?",
+     * which for an enumerable id is always yes.
+     * <p>
+     * The conversation id, by contrast, is not forgeable in the same way: it is the
+     * conversation the caller is demonstrably talking in, and it appears in
+     * {@code memberConversationIds} only because the discussion itself put it there
+     * when it created that member's turn. Requiring the pair to match is what makes
+     * "I am a member of this discussion" a checked claim rather than an asserted
+     * one.
+     *
+     * @param conversationId
+     *            the caller's own conversation, from conversation memory
+     */
+    public Optional<GroupConversation> getForMember(String groupConversationId, String conversationId) {
+        if (groupConversationId == null || conversationId == null) {
+            return Optional.empty();
+        }
+        return get(groupConversationId)
+                .filter(gc -> gc.getMemberConversationIds() != null
+                        && gc.getMemberConversationIds().containsValue(conversationId));
+    }
+
     public Optional<GroupConversation> get(String groupConversationId) {
         return Optional.ofNullable(live.get(groupConversationId));
     }

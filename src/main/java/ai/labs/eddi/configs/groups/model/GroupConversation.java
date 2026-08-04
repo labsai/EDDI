@@ -30,7 +30,7 @@ public class GroupConversation {
      * Wave adds a field resume-time logic depends on, and register that version's
      * migration in {@code GroupConversationSchemaMigrations}.
      */
-    public static final int CURRENT_SCHEMA_VERSION = 1;
+    public static final int CURRENT_SCHEMA_VERSION = 2;
     /**
      * The shape this specific document was last written in. Checked before a
      * resume: newer than {@link #CURRENT_SCHEMA_VERSION} refuses (this deployment
@@ -78,7 +78,14 @@ public class GroupConversation {
      * Sum of {@link #memberCosts}, recomputed by {@code GroupCostLedger} on every
      * update.
      */
-    private double totalCost;
+    // volatile: written under memberCosts' monitor by parallel member turns, but
+    // read
+    // unsynchronized by enforceCeiling/wouldExceedCeiling on the orchestrator
+    // thread.
+    // Without it there is no happens-before edge, so a ceiling can silently fail to
+    // fire after a PARALLEL batch — and a non-volatile 64-bit read may tear (JLS
+    // 17.7).
+    private volatile double totalCost;
     private int currentPhaseIndex;
     private String currentPhaseName;
     private String synthesizedAnswer;

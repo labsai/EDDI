@@ -191,9 +191,14 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // one without the other is either a dead end or an ungated roster write.
         // Additionally requires a live group discussion: recruiting into a
         // standalone conversation has no roster to join.
+        // getForMember, not get: groupConversationId is a caller-supplied context
+        // variable, so existence is not authorization. Without the membership check
+        // any principal who can start a conversation could name another discussion's
+        // id and recruit into it.
+        String callerConversationId = memory != null ? memory.getConversationId() : null;
         if (whitelist.contains("recruit_agent") && dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()
                 && groupConversationId != null && liveDiscussionRegistry != null
-                && liveDiscussionRegistry.get(groupConversationId).isPresent()) {
+                && liveDiscussionRegistry.getForMember(groupConversationId, callerConversationId).isPresent()) {
             tools.add(new RecruitAgentTool(liveDiscussionRegistry, groupConversationId, parentAgentId,
                     dynamicConfig, deploymentStore));
             LOGGER.debugf("[DYNAMIC] RecruitAgentTool enabled for agent='%s'", sanitize(parentAgentId));

@@ -248,7 +248,7 @@ public class SharedTaskList {
      */
     public synchronized AddTaskResult addAgentTask(String subject, String description, List<String> dependsOnSubjects,
                                                    int priority, String createdByAgentId) {
-        return addAgentTask(subject, description, dependsOnSubjects, priority, createdByAgentId, null, null);
+        return addAgentTask(subject, description, dependsOnSubjects, priority, createdByAgentId, null, null, 0);
     }
 
     /**
@@ -262,13 +262,28 @@ public class SharedTaskList {
      * discarding the owner the filing agent asked for. One lock, one visible state.
      *
      * @param assignedAgentId
-     *            resolved owner, or {@code null} to leave the task PENDING for the
-     *            wave loop to assign as it would any other
+     *            resolved owner; the caller must resolve one, because the EXECUTE
+     *            wave only schedules tasks that already have an assignee
+     * @param maxAgentAddedTasks
+     *            per-discussion cap on agent-filed tasks, enforced here under the
+     *            same monitor as the insert; {@code 0} disables it (the
+     *            non-agent-authored path)
      */
     public synchronized AddTaskResult addAgentTask(String subject, String description, List<String> dependsOnSubjects,
                                                    int priority, String createdByAgentId, String assignedAgentId,
-                                                   String assignedDisplayName) {
+                                                   String assignedDisplayName, int maxAgentAddedTasks) {
 
+        // The per-discussion cap belongs INSIDE this monitor. Counting outside it let
+        // every speaker of a PARALLEL phase read the same under-limit count and all
+        // pass together — 5 concurrent callers against a cap of 20 with 19 filed
+        // produced 24. The cap exists precisely as the unbounded-growth guard for an
+        // LLM that can call this in a loop, so an advisory one is no guard at all.
+        if (maxAgentAddedTasks > 0 && createdByAgentId != null
+                && tasks.stream().filter(t -> t.createdByAgentId() != null).count() >= maxAgentAddedTasks) {
+            return AddTaskResult.rejected(
+                    "The task list is full for this discussion (%d agent-filed tasks). Finish existing tasks instead of adding more."
+                            .formatted(maxAgentAddedTasks));
+        }
         if (subject == null || subject.isBlank()) {
             return AddTaskResult.rejected("A task needs a subject.");
         }

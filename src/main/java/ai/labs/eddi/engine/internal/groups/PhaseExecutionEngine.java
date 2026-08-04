@@ -134,7 +134,7 @@ public class PhaseExecutionEngine {
         // both fired falsely (3 of 6 entries abstaining in a 3-member critique
         // round read as "all 3 abstained" and ended a phase that produced real
         // critiques) and failed to fire when every one of the 6 genuinely did.
-        int expectedTurns = expectedTurnsFor(phase, speakers);
+        int expectedTurns = expectedTurnsFor(phase, speakers, config != null ? config.getMembers() : null);
         if (ConvergenceDetector.allParticipantsAbstained(repeatEntries, expectedTurns)) {
             String reason = "All %d participants abstained — nothing further to add".formatted(expectedTurns);
             recordConvergence(gc, phase, phaseIdx, repeat, -1, true, reason, listener);
@@ -293,14 +293,31 @@ public class PhaseExecutionEngine {
      * things per turn order — the kind of mismatch that reads as correct until a
      * three-member critique round quietly ends itself.
      */
-    private static int expectedTurnsFor(DiscussionPhase phase, List<GroupMember> speakers) {
+    private static int expectedTurnsFor(DiscussionPhase phase, List<GroupMember> speakers, List<GroupMember> targets) {
         int n = speakers != null ? speakers.size() : 0;
         if (n == 0) {
             return 0;
         }
-        // Mirrors executePeerTargetedPhase's own loop: each speaker addresses every
-        // OTHER member, and the roster it iterates is the phase's speaker list.
-        return phase.targetEachPeer() ? n * (n - 1) : n;
+        if (!phase.targetEachPeer()) {
+            return n;
+        }
+        // Peer-targeted turns are speakers x targets MINUS the self-pairs, and the
+        // two lists are not the same list: speakers come from the phase's resolved
+        // participants (recruits included, or a ROLE: subset), targets from the
+        // configured roster. Assuming n*(n-1) was only correct when they coincided.
+        // It over-counted for a ROLE:-scoped phase (2 reviewers of 5 members run 8
+        // turns, not 2) and under-counted once I7 let a recruit speak (4 speakers
+        // over a 3-member roster run 9 turns, not 12) — and since I4's unanimity
+        // test compares an exact count against this number, a wrong denominator
+        // either fires the early exit over a round that produced real critiques, or
+        // makes it arithmetically unreachable.
+        List<GroupMember> targetList = targets != null && !targets.isEmpty() ? targets : speakers;
+        int m = targetList.size();
+        long selfPairs = speakers.stream()
+                .filter(sp -> sp != null && sp.agentId() != null)
+                .filter(sp -> targetList.stream().anyMatch(t -> t != null && sp.agentId().equals(t.agentId())))
+                .count();
+        return (int) (((long) n * m) - selfPairs);
     }
 
     /** The most recent synthesis text, which is what dissenters are reacting to. */
