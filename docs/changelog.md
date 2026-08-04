@@ -1027,6 +1027,28 @@ Added `planning/group-collaboration-improvements-plan.md` — the Rev 2.1 implem
 The dedicated `Attachments` nested test class (12 tests) moved from `GroupConversationServiceTest` to a new focused `GroupAttachmentBinderTest`, testing the extracted class directly instead of through the facade. Baselined the full 12-class/470-test `GroupConversationService*Test` suite before touching any code (all green; JaCoCo: 82% instruction / 72% branch on the class) — that is this refactor's regression budget going forward. Re-ran the same suite plus the new test class after the extraction: still all green, 470 tests total (458 in the `GroupConversationService` family + 12 in the new class), `./mvnw clean compile` clean, formatter + Checkstyle clean.
 
 **What's next:** R1 steps 2–10 (extract `GroupContextBuilder`, `GroupSigningGuard`, `MemberTurnExecutor`, `PhaseExecutionEngine`, `TaskForceEngine`, `GroupHitlCoordinator`, `GroupLifecycleOps`, then the graceful-shutdown wiring commit) per `planning/group-collaboration-improvements-plan.md` §3.1, each its own commit. R2 (`AgentOrchestrator` tool-source SPI) and R3 (`ConversationService` HITL split) follow. Full sequencing in the plan's §7 dependency graph.
+## 🔒 fix(docker): move to the republished UBI base and retire the microdnf stopgap (2026-08-04)
+
+**Repo:** EDDI (`fix/base-image-cve-2026-47063`)
+
+The Trivy gate on `main` fails the image push: `CVE-2026-47063` (HIGH, "Enhance Jar handling", Oracle CPU 2026-07) against `java-25-openjdk-headless` and `java-25-openjdk-crypto-adapter` at `1:25.0.3.0.9-1.el9`, fixed in `1:25.0.4.0.7-1.1.el9`. The JDK is baked into the base layer, so nothing in our own build could have introduced it.
+
+**Digest update, not a second stopgap.** Red Hat republished `ubi9/openjdk-25-runtime:1.24` on 2026-07-29 (build `1.24-3`); the tag now resolves to `sha256:de073e98…` instead of the pinned `sha256:a0c3ecb2…`. Its errata list carries `RHSA-2026:42899`, which is exactly the JDK rebuild Trivy asks for. Per the remediation procedure in AGENTS.md this is the clean fix — the pin moves, it is never dropped.
+
+**The temporary `microdnf update` line is gone.** It was added when no fixed digest existed for glib2/libacl/python3. The new base bakes all three fixes, verified against Red Hat security data rather than assumed:
+
+| CVE | Fixed in | Advisory in the new image |
+| --- | -------- | ------------------------- |
+| CVE-2026-58016 (glib2) | `glib2-2.68.4-19.el9_8.2` | RHSA-2026:42089 ✓ |
+| CVE-2026-54369 (libacl) | `acl-2.4.0-1.el9_8` | RHSA-2026:42736 ✓ |
+| CVE-2026-15308 (python3) | `python3.9-3.9.25-7.el9_8.2` | RHSA-2026:39798 ✓ |
+
+Retiring it also removes a build-time network dependency and a layer from the runtime image. The risk of going back to baked packages — that an erratum newer than the 2026-07-29 build exists, which `microdnf` would have pulled and the base would not — was checked: the Red Hat CVE feed lists nothing for `glib2`, `acl`, `python3.9` or `java-25-openjdk` after 2026-07-25.
+
+**Verification.** Reproduced the CI gate locally — `mvnw package`, `docker build`, then Trivy 0.70.0 with the exact settings from `ci.yml` (`--severity CRITICAL,HIGH --ignore-unfixed --exit-code 1`): **exit 0, redhat 9.8 row clean**, against the previous run's 2 HIGH. The runtime image reports `openjdk version "25.0.4" (Red_Hat-25.0.4.0.7-1)`, and `rpm -q` in the built image confirms `glib2-2.68.4-19.el9_8.2`, `libacl-2.4.0-1.el9_8` and `python3-3.9.25-7.el9_8.2` — the stopgap versions, now inherited rather than installed. `1.24` is still the newest tag stream (`1.25`–`1.29` and `2.0` all 404). No other file pins the old digest; `ContainerBaseIT` references the tag only.
+
+---
+
 ## 🎚️ feat(hitl): per-endpoint approval friction (2026-08-01)
 
 **Repo:** EDDI (`feat/operator-write-capability`)
