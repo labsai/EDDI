@@ -5,6 +5,28 @@
 
 ---
 
+## 🧭 feat(operator): a context-aware side-chat drawer, reachable from Manager and Workforce (2026-08-04)
+
+**Repo:** EDDI-Manager (`feat/operator-write-scope`)
+
+The operator existed only as a dedicated page at `/manage/operator` — Manager-only, full-page-only, no idea what screen the admin was actually looking at when they opened it. Added a floating-launcher drawer (`operator-drawer.tsx`) mounted once in `AppLayout` and once in each of `WorkforceLayout`'s three viewport branches (mobile/tablet/desktop) — a self-positioned `fixed` panel, since those four layouts share no common chrome slot the way the existing `ChatDrawer` shares `AppLayout`'s one.
+
+**Shared conversation, not a second one.** The drawer reuses `useOperatorChat`/`useOperatorConfig` directly rather than standing up a parallel chat — same react-query cache, same conversation. That required promoting `use-operator-chat.ts`'s state off local `useState` onto a Zustand store (`useOperatorChatStore`): today, even the full page silently drops its visible transcript on remount (the backend conversation survives via the `sessionStorage`-remembered id, but `messages` restarts empty), because nothing shared it. The wrapper hook keeps the exact same public API, so `operator.tsx`'s call sites are unchanged.
+
+That refactor was stress-tested by a dedicated Plan-agent pass before writing it, which caught four things a naive `useState`→Zustand translation would have gotten wrong: `set()` merges rather than replaces (so `reset()` must explicitly null the three promoted-from-`useRef` fields, not just the public ones); the eslint-disables in `operator.tsx` don't disappear on their own (the rule flags the *shape* of `chat.reset()`, unrelated to the state container); a second existing test file (`operator.test.tsx`, not just the hook's own test) mounts the real hook and needed the same reset; and `context` (see below) has to be a call-time argument to `send()`, never a store field, or two mounted surfaces would race to overwrite each other's screen context. Mutation-tested the one real bug risk (the merge trap): reverting the internal-field nulling in `reset()` let an orphaned turn — one whose conversation was reset mid-stream — graft its trace onto the fresh state; a new test (`use-operator-chat.test.tsx`) drives exactly that interleaving and fails without the fix.
+
+**Pause handling doesn't duplicate `ApprovalBanner`.** That component is security-reviewed for one full-width surface (redacted previews, self-guard, blocked-calls) — a docked drawer has no room to review a gated write responsibly, and forking a second smaller copy is exactly the "two systems drift apart" trap this whole feature has spent most of its review cycles closing. `operator-chat.tsx` gained one prop, `pauseSurface?: "banner" | "compact"` (default `"banner"`, zero diff for the full page); compact renders the pause reason plus a link to `/manage/operator`, where the real banner picks up the identical pause — same conversation, no re-ask.
+
+**Context flows through a transport that already existed and was unused.** `sendMessageStreaming`'s `InputData` has had an optional `context?: Record<string, unknown>` field since well before this — it flows into the backend's per-turn `{context.x}` Qute variable, the documented mechanism for exactly this. Nothing populated it. Added `useCurrentScreenContext()` (route → `{screen, agentId, workflowId, groupId, boardId}`, matched via `matchPath` against an ordered table — the drawer lives above the routed `<Outlet/>`, so `useParams()` can't see it there, and `matchPath` has no cross-pattern ranking, so literal routes have to precede the param routes they'd otherwise collide with) and thread its output into `send(input, context)` from the drawer only (the full page's own location is always just "the operator page" — not informative). A new unconditional section of the system prompt (`BODY_APP_CONTEXT`, Qute-conditional so it degrades to nothing when no context was sent) reads it back as `{context.screen}` etc. Zero backend changes. Existing operators pick this up on their next reconfigure, same as every other prompt-body change in this feature.
+
+**Caught live, not by the test suite:** the mobile Workforce viewport has a `fixed bottom-0 h-16` tab bar (`WorkforceBottomTabs`) that jsdom can't lay out, so nothing in the automated suite could have caught the drawer's default `bottom-6` sitting ~40px inside it. Found by actually resizing a running dev-server browser to the mobile breakpoint and reading `getBoundingClientRect()`; fixed with a `clearsBottomTabBar` prop (mirrors the same layout's own `<main className="pb-20">`, used only on mobile), verified the fix live, then added a regression test asserting the class difference (`operator-drawer.test.tsx`) since geometry itself isn't observable in jsdom.
+
+i18n: `operator.chat.pauseCompact{Fallback,Review}`, `operator.drawer.{title,notActivated,activate}` — all 11 locales.
+
+**Verification:** typecheck and lint clean; full suite 309 files / 4642 tests green (+4 files / +26 tests over baseline); production build succeeds; manual pass in a live dev server (MSW mock backend) across Manager and all three Workforce viewport branches, including the mobile fix above.
+
+---
+
 ## 🔒 fix(hitl): a resume verdict that resolved to null was one comparison away from executing as approved (2026-08-03)
 
 **Repo:** EDDI (`feat/operator-request-fingerprint`)
