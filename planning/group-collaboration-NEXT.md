@@ -46,10 +46,21 @@ group `totalCost` stays 0, **I1's `maxCostPerDiscussion` ceiling can never trip*
 `memberCosts`/`totalCost` are serialized into the public REST payload as if authoritative.
 A user reading `$0.00` believes it.
 
-**Why it is small:** the pricing arithmetic and the config fields already exist —
-`CascadingModelExecutor.computeCost()` reads `inputPricePer1M`/`outputPricePer1M` from
-`CascadeStep`/`ModelCascadeConfig`. Token usage is *already* accumulated on the ordinary path
-(`responseMetadata.get("tokenUsage")`). **Only the price is missing at the non-cascade level.**
+**Why it is small (verified 2026-08-04, not assumed):** the pricing arithmetic and the config
+fields already exist — `CascadingModelExecutor.computeCost()` (~line 717) reads
+`inputPricePer1M`/`outputPricePer1M` from `CascadeStep`/`ModelCascadeConfig`. And **all three
+non-cascade paths already emit token usage** into `responseMetadata`:
+
+| Path | Emits `tokenUsage` at |
+| --- | --- |
+| agent / tool loop | `ToolLoopRunner` ~:175 |
+| legacy chat | `LegacyChatExecutor` ~:123 |
+| streaming legacy chat | `StreamingLegacyChatExecutor` ~:566 |
+
+All of them produce the keys `computeCost` already reads — the first two via
+`ToolContextBudget.tokenUsageMap` (`TOKEN_USAGE_FIELDS = inputTokens, outputTokens,
+totalTokens`), the third building the same shape inline. **So only the price is missing at the
+non-cascade level.** No new plumbing, no token-counting work.
 
 **Approach:**
 1. Add `inputPricePer1M` / `outputPricePer1M` to the plain LLM task config (same names, same
