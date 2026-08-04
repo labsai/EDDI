@@ -290,6 +290,24 @@ public class MemberTurnExecutor {
                         response = "[Agent failed to produce output — conversation entered ERROR state]";
                     }
 
+                    // This callback runs on a COORDINATOR thread, not the member-turn
+                    // thread: conversationService.say hands the turn to
+                    // conversationCoordinator.submitInOrder. So it can fire long after the
+                    // orchestrator gave up on this speaker — after a batch deadline, a
+                    // cancel, or a HITL pause — while the loop is serializing the very
+                    // same GroupConversation. Mutating gc from here then races Jackson's
+                    // plain iteration of the tracking lists and throws
+                    // ConcurrentModificationException out of conversationStore.update,
+                    // which executeDiscussion's catch-all turns into a FAILED discussion
+                    // over one slow speaker.
+                    //
+                    // An abandoned turn's bookkeeping is worth nothing anyway — its
+                    // transcript entry was already written as SKIPPED — so drop it.
+                    if (cancellation != null && cancellation.isCancelled()) {
+                        responseFuture.complete(response);
+                        return;
+                    }
+
                     // Propagate dynamic agent tracking data from the member's conversation
                     // memory to the GroupConversation for lifecycle cleanup.
                     GroupConversationService.propagateDynamicAgentTracking(snapshot, gc);

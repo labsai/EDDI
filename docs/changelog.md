@@ -5,6 +5,28 @@
 
 ---
 
+## 🐛 fix(groups): branch review, round 2 — CME on persist, registry leak, ceiling-vs-HITL (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Concurrency and lifecycle findings from the same review.
+
+**Abandoned member turns could fail a whole discussion.** `conversationService.say` hands the turn to the coordinator, so its response callback runs on a *coordinator* thread and fired unconditionally — including long after a batch deadline, cancel or pause had abandoned that speaker. It mutated `gc` (`propagateDynamicAgentTracking`, cost attribution) while the loop was serializing the same object, so Jackson's plain iteration of the tracking lists threw `ConcurrentModificationException` out of `conversationStore.update`, and `executeDiscussion`'s catch-all turned one slow speaker into a **FAILED** discussion. The callback now drops its bookkeeping once cancellation is observed — an abandoned turn's entry was already written as SKIPPED, so it was worth nothing anyway. `GroupHitlCoordinator` already documented this hazard ("CME-safe serialization") without the loop's own persist being guarded.
+
+`createdAgentIds`, `recruitedAgentIds` and `dynamicMembers` are now `CopyOnWriteArrayList`. `synchronizedList` makes each `add` atomic but does **not** make unguarded iteration safe, and these three are iterated without a monitor on every persist and at teardown. The transcript deliberately stays `synchronizedList` — it grows large enough that copying per entry would be quadratic.
+
+**F1's registry leaked, and could hand a tool a dead instance.** `register` sat ~80 lines *above* the `try` whose `finally` removes it, despite both the Javadoc and the call-site comment asserting removal is unconditional. Any throw in that window — reachable via an unguarded `config.getMembers().stream()` that NPEs on a stored config with `"members": null`, which every other site guards — left the entry in a map with no eviction. Worse than the leak: a task or recruit tool would then resolve that dead instance, accept the write, and tell the model it succeeded for a mutation nothing will ever persist. Registration moved inside the try; the NPE guarded.
+
+**A phase abandoned by the cost ceiling still paused for human approval.** The SYNTHESIZE_NOW skip-ahead guard sits at the top of the phase loop, so it only protects *subsequent* phases — the phase that actually blew the budget fell straight through to the HITL gate. That stranded the discussion `AWAITING_APPROVAL` for an approval the run would never act on, and on resume re-tripped the ceiling in the next non-SYNTHESIS phase, appending a second identical SKIPPED entry and re-incrementing the hit counter. The guard's own comment states this requirement verbatim; it simply could not see the current phase.
+
+Also: `ToolSourceRegistry.isCausedByInterrupt` walked cause chains forever. Its `cause != cause.getCause()` test only rejects a self-cycle, which `Throwable.initCause` already makes impossible; the reachable shape is A→B→A, which spins at 100% CPU inside the handler whose purpose is to stop one bad provider taking assembly down. Now hop-bounded.
+
+**Two test fixes worth naming, because both were passing for the wrong reason.** `PhaseExecutionEngineTest` stubbed the *6-arg* `buildPhaseInput` while the engine only calls the 7-arg one, so all 19 tests ran with `input == null` — an implementation that dropped the phase rendering entirely and passed the raw question through passed the whole class. Correcting the stub was **not sufficient**: a mutation check with the rendering deleted still passed, because every verification had `any()` in the input position. Only asserting `eq("rendered-input")` kills it. And `GroupSigningGuardTest` used `anyInt()` against `read(String, Integer)` — `anyInt()` does not match `null`, so a regression calling `read(id, null)` satisfied a `verify(never())` vacuously.
+
+**One finding deliberately left open, with the reason recorded in the code.** After the batch deadline, later speakers' `get()` returns immediately, so a member finishing a millisecond late loses its real entry to a SKIPPED one. Both obvious fixes are worse: a bounded drain extends the phase past the deadline that exists to bound it (a 3s budget became 8s), and cancelling the futures makes `get()` throw `CancellationException`, which neither catch handles, losing those entries entirely (5 SKIPPED entries became 1). `parallelPhase_appliesOneDeadlineAcrossAllMembers` caught both attempts. Containing the orphan's *writes* is what mattered and is now done; recovering the late entry needs the deadline contract renegotiated, which is its own change.
+
+---
+
 ## 🔒 fix(groups): branch review — cross-discussion write, ungated recruitment, orphaned tasks (2026-08-04)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

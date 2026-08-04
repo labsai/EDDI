@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
@@ -162,7 +163,10 @@ class GroupSigningGuardTest {
 
         assertDoesNotThrow(() -> guard().verifyPriorEntriesIfRequired(AGENT_A, gc()));
 
-        verify(agentStore, never()).read(eq(AGENT_A), anyInt());
+        // any(), not anyInt(): read(String, Integer) takes a BOXED Integer, and
+        // anyInt() does not match null — so a regression that called read(id, null)
+        // would satisfy this verify vacuously while the store read fired on every turn.
+        verify(agentStore, never()).read(eq(AGENT_A), any());
     }
 
     @Test

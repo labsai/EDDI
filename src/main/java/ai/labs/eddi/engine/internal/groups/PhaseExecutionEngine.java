@@ -605,6 +605,24 @@ public class PhaseExecutionEngine {
                 // The batch deadline passed — release every speaker still waiting on a
                 // response, not just this one.
                 cancellation.cancel();
+                // KNOWN BOUND, deliberately not "fixed" here: because the deadline is
+                // already spent, every later speaker's get() returns immediately, so a
+                // member that finishes a millisecond late has its real entry — already
+                // computed, signed and cost-attributed — replaced by this SKIPPED one,
+                // and its body runs on into the next phase.
+                //
+                // A bounded drain after cancel() looks like the fix and is not: it
+                // extends the phase past the very deadline that exists to bound it
+                // (parallelBatchBudgetSeconds), which
+                // parallelPhase_appliesOneDeadlineAcrossAllMembers correctly rejects —
+                // it caught a 3s budget becoming 8s. Cancelling the futures instead
+                // makes get() throw CancellationException, which neither catch here
+                // handles, so those speakers lose their SKIPPED entry entirely; that
+                // same test caught 5 entries becoming 1. Containing the orphan's
+                // WRITES is what actually matters, and MemberTurnExecutor's response
+                // callback now drops its gc mutations once cancellation is observed.
+                // Recovering the late entry needs the deadline contract renegotiated,
+                // which is its own change.
                 gc.getTranscript().add(new TranscriptEntry("unknown", "Unknown", null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
                         Instant.now(), "Timeout", null));
             } catch (ExecutionException e) {

@@ -53,7 +53,12 @@ class PhaseExecutionEngineTest {
     private PhaseExecutionEngine engine() {
         memberTurnExecutor = mock(MemberTurnExecutor.class);
         contextBuilder = mock(GroupContextBuilder.class);
-        when(contextBuilder.buildPhaseInput(any(), any(), any(), any(), anyInt(), any())).thenReturn("rendered-input");
+        // The 7-ARG overload — the only one PhaseExecutionEngine calls. Stubbing the
+        // 6-arg one left every turn running with a null input, so a regression that
+        // dropped the phase rendering entirely and passed the raw question through
+        // would not have failed a single test here.
+        when(contextBuilder.buildPhaseInput(any(), any(), any(), any(), anyInt(), any(), any()))
+                .thenReturn("rendered-input");
         return new PhaseExecutionEngine(memberTurnExecutor, contextBuilder,
                 Executors.newVirtualThreadPerTaskExecutor(), new CallerIdentityContext(null, null));
     }
@@ -98,7 +103,13 @@ class PhaseExecutionEngineTest {
         assertEquals("a", gc.getTranscript().get(0).speakerAgentId());
         assertEquals("b", gc.getTranscript().get(1).speakerAgentId());
         assertEquals(2, turnCounter.get());
-        verify(memberTurnExecutor, times(2)).executeAgentTurn(any(), eq(gc), any(), any(), eq(0), any(), isNull(), isNull());
+        // eq("rendered-input"), not any(), in the INPUT position. Every verification
+        // here used any() there, so nothing observed what the member was actually
+        // prompted with — an implementation that skipped GroupContextBuilder and
+        // passed the raw question through (no role, no transcript scope, no debate
+        // framing) passed this whole class.
+        verify(memberTurnExecutor, times(2))
+                .executeAgentTurn(any(), eq(gc), eq("rendered-input"), any(), eq(0), any(), isNull(), isNull());
     }
 
     @Test

@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -103,9 +104,19 @@ public class GroupConversation {
     private int round = 1;
     private SharedTaskList taskList;
     /** Agents dynamically added during the discussion (recruited or created). */
-    private List<AgentGroupConfiguration.GroupMember> dynamicMembers = Collections.synchronizedList(new ArrayList<>());
+    private List<AgentGroupConfiguration.GroupMember> dynamicMembers = new CopyOnWriteArrayList<>();
     /** Agent IDs created during this discussion (for lifecycle cleanup). */
-    private List<String> createdAgentIds = Collections.synchronizedList(new ArrayList<>());
+    // CopyOnWriteArrayList, not synchronizedList: these three are iterated without
+    // a monitor by Jackson every time the loop persists the whole document, and by
+    // cleanup on teardown, while member turns and the recruit/task tools append to
+    // them. synchronizedList makes each add atomic but does NOT make unguarded
+    // iteration safe — a concurrent add throws ConcurrentModificationException out
+    // of conversationStore.update, which executeDiscussion's catch-all converts
+    // into a FAILED discussion. All three are small (agent ids, roster additions)
+    // and append-mostly, so copy-on-write's per-write copy is the right trade;
+    // the transcript deliberately stays synchronizedList because it grows large
+    // enough that copying on every entry would be quadratic.
+    private List<String> createdAgentIds = new CopyOnWriteArrayList<>();
 
     /**
      * Agents recruited into this discussion at runtime (I7).
@@ -116,7 +127,7 @@ public class GroupConversation {
      * would take it away from every other conversation using it. Two lists because
      * they mean two different things at teardown.
      */
-    private List<String> recruitedAgentIds = Collections.synchronizedList(new ArrayList<>());
+    private List<String> recruitedAgentIds = new CopyOnWriteArrayList<>();
     /** Agent IDs explicitly retained by the creating agent (skip cleanup). */
     private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
     private int pausedAtPhaseIndex = -1;
@@ -622,7 +633,7 @@ public class GroupConversation {
 
     public void setDynamicMembers(List<AgentGroupConfiguration.GroupMember> dynamicMembers) {
         this.dynamicMembers = dynamicMembers != null
-                ? Collections.synchronizedList(new ArrayList<>(dynamicMembers))
+                ? new CopyOnWriteArrayList<>(dynamicMembers)
                 : Collections.synchronizedList(new ArrayList<>());
     }
 
@@ -644,14 +655,14 @@ public class GroupConversation {
 
     public void setRecruitedAgentIds(List<String> recruitedAgentIds) {
         this.recruitedAgentIds = recruitedAgentIds != null
-                ? Collections.synchronizedList(new ArrayList<>(recruitedAgentIds))
-                : Collections.synchronizedList(new ArrayList<>());
+                ? new CopyOnWriteArrayList<>(recruitedAgentIds)
+                : new CopyOnWriteArrayList<>();
     }
 
     public void setCreatedAgentIds(List<String> createdAgentIds) {
         this.createdAgentIds = createdAgentIds != null
-                ? Collections.synchronizedList(new ArrayList<>(createdAgentIds))
-                : Collections.synchronizedList(new ArrayList<>());
+                ? new CopyOnWriteArrayList<>(createdAgentIds)
+                : new CopyOnWriteArrayList<>();
     }
 
     public Set<String> getRetainedAgentIds() {

@@ -157,7 +157,7 @@ public class GroupConversationService implements IGroupConversationService {
      * separately — until then this is a bound that can genuinely be hit, not an
      * unreachable guard.
      */
-    private static final int MEMBER_TURN_CANCEL_DRAIN_SECONDS = 5;
+    public static final int MEMBER_TURN_CANCEL_DRAIN_SECONDS = 5;
 
     private final IAgentGroupStore groupStore;
     private final IGroupConversationStore conversationStore;
@@ -553,15 +553,6 @@ public class GroupConversationService implements IGroupConversationService {
             counterGroupDiscussion.increment();
         }
 
-        // F1: publish the live instance this leg runs with. Covers both a fresh
-        // start and a resume re-entry (this method is the single entry point for
-        // both), so a tool call landing mid-phase always resolves the exact
-        // GroupConversation the loop is currently mutating — never a stale one from
-        // before a resume. Removed unconditionally in the finally block below.
-        if (liveDiscussionRegistry != null) {
-            liveDiscussionRegistry.register(gc);
-        }
-
         ProtocolConfig resolvedProtocol = resolveProtocol(config);
         // I1: a nested discussion runs under the tighter of its own ceiling and the
         // budget its parent had left. Applied here (once, at the top of the leg)
@@ -617,7 +608,9 @@ public class GroupConversationService implements IGroupConversationService {
             if (gc.getRound() <= 1) {
                 listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(gc.getId(), gc.getGroupId(), question,
                         config.getStyle() != null ? config.getStyle().name() : "ROUND_TABLE", phases.size(),
-                        config.getMembers().stream().map(GroupMember::agentId).toList()));
+                        config.getMembers() != null
+                                ? config.getMembers().stream().map(GroupMember::agentId).toList()
+                                : List.of()));
             } else {
                 listener.onRoundStart(new GroupConversationEventSink.RoundStartEvent(
                         gc.getId(), gc.getRound(), question, phases.size()));
@@ -637,6 +630,23 @@ public class GroupConversationService implements IGroupConversationService {
         boolean endDiscussionEarly = false;
 
         try {
+            // F1: publish the live instance this leg runs with. Covers both a fresh
+            // start and a resume re-entry (this method is the single entry point for
+            // both), so a tool call landing mid-phase always resolves the exact
+            // GroupConversation the loop is currently mutating — never a stale one
+            // from before a resume.
+            //
+            // INSIDE the try, because the finally below is what removes it. Sitting
+            // above the try meant any throw in the ~80 lines of setup that followed
+            // — e.g. the unguarded config.getMembers().stream() a few lines down,
+            // which NPEs on a stored config with "members": null — leaked the entry
+            // forever in a map with no eviction. Worse than the leak: a task or
+            // recruit tool would then resolve that dead instance, accept the write
+            // and tell the model it succeeded, for a mutation nothing will persist.
+            if (liveDiscussionRegistry != null) {
+                liveDiscussionRegistry.register(gc);
+            }
+
             // Execute each phase
             for (int phaseIdx = startPhaseIndex; phaseIdx < phases.size(); phaseIdx++) {
                 DiscussionPhase phase = phases.get(phaseIdx);
@@ -883,7 +893,17 @@ public class GroupConversationService implements IGroupConversationService {
                 // PHASE-level: gate on requiresApproval() AND NOT taskLevelHitl.
                 // Phase 5b: TASK granularity only applies to EXECUTE phases (they have
                 // a SharedTaskList). Non-EXECUTE phases fall back to PHASE-style pause.
-                if (phase.requiresApproval()) {
+                // The skip-ahead guard at the top of the loop only protects SUBSEQUENT
+                // phases. costCeilingSynthesizeNow is set while running THIS phase and
+                // breaks the repeat loop, so control falls straight through to here —
+                // and the phase that just blew the budget pauses for an approval this
+                // run will never act on. That strands the discussion AWAITING_APPROVAL
+                // and, on resume, re-trips the ceiling in the next non-SYNTHESIS phase,
+                // appending a second identical SKIPPED entry and re-incrementing the
+                // hit counter, which is exactly the "one overspend reported as many"
+                // the repeat-loop break exists to prevent. The guard's own comment
+                // states this requirement; it just could not see this phase.
+                if (phase.requiresApproval() && !costCeilingSynthesizeNow) {
                     if (taskLevelHitl && phase.type() == PhaseType.EXECUTE) {
                         // TASK granularity: pause if tasks await approval — or if an
                         // aborted wave (timeout/error) left executable tasks behind.

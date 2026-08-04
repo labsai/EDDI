@@ -250,10 +250,26 @@ public final class ToolSourceRegistry {
      * otherwise spin here, inside the very handler whose job is to keep one bad
      * provider from taking the assembly down.
      */
+    /**
+     * Deeper than any real wrapper chain, shallow enough that a cycle cannot spin.
+     */
+    private static final int MAX_CAUSE_CHAIN_HOPS = 64;
+
     private static boolean isCausedByInterrupt(Throwable t) {
-        for (Throwable cause = t; cause != null && cause != cause.getCause(); cause = cause.getCause()) {
+        // Bounded by hop count, not by a self-cycle test. `cause != cause.getCause()`
+        // only rejects A -> A, which Throwable.initCause already makes impossible
+        // (it throws IllegalArgumentException when cause == this). The reachable
+        // shape is a 2-cycle A -> B -> A, which initCause permits and which that
+        // test walks forever — inside the very handler whose job is to stop one bad
+        // provider taking assembly down, so the failure is a pegged CPU with no
+        // timeout above it.
+        int hops = 0;
+        for (Throwable cause = t; cause != null && hops < MAX_CAUSE_CHAIN_HOPS; cause = cause.getCause(), hops++) {
             if (cause instanceof InterruptedException) {
                 return true;
+            }
+            if (cause == cause.getCause()) {
+                break;
             }
         }
         return false;
