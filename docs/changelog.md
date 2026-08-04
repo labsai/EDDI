@@ -5,6 +5,20 @@
 
 ---
 
+## 🐛 fix(orchestrator): MCP tool-name collision could run a different server's tool (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+From PR review comments.
+
+**Two MCP servers exposing the same tool name produced a spec/executor mismatch.** `McpToolsProvider.discover` added every spec to a list while writing executors into a **map**, so a duplicate name left two specs and only the *last* server's executor. `ToolSourceRegistry` then keeps the *first* spec and looks the executor up by name — pairing server A's signature with server B's implementation. The model is shown one tool's contract and a different tool runs. One careless or hostile MCP server can take over another's tool name this way. Now first-write-wins within the provider, a spec is only added when its executor is present, and the collision is logged with the `toolsBlacklist` remedy named.
+
+**A null guard of mine implied a nullability the surrounding code does not honour.** `addDynamicAgentTools` dereferences `memory` unconditionally three lines before the `memory != null ?` I had added for `getConversationId()` — so a null would have thrown long earlier, and guarding only that one line read as though one path were protected and the others overlooked. Removed.
+
+Also assessed and **declined**, with reasoning rather than silence: a static-analysis finding that `getRecruitedAgentIds()` exposes internal state. `RecruitAgentTool` deliberately synchronizes on that list to make its cap check atomic, and it is a `CopyOnWriteArrayList`; returning a defensive copy would break the mutator to satisfy a heuristic. A third comment (`RecruitAgentTool` untagged in `ToolObjectReflector`) was filed against a SHA predating the commit that fixed it.
+
+---
+
 ## 🚨 fix(groups): pre-merge review — recruitment was inert, and three of my own fixes were wrong (2026-08-04)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

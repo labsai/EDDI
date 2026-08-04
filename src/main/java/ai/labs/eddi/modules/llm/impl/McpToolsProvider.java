@@ -150,11 +150,26 @@ class McpToolsProvider implements ToolSourceProvider {
                     if (blacklist != null && blacklist.contains(name))
                         continue;
 
-                    toolSpecs.add(spec);
+                    // First-write-wins WITHIN this provider, and only when the spec has
+                    // an executor. Without it, two MCP servers exposing the same tool
+                    // name put two specs in the list while `executors` (a map) kept the
+                    // LAST server's — and the registry then pairs the FIRST spec with
+                    // that executor. The model is shown one server's signature and a
+                    // different server's tool runs, which is a tool-confusion bug one
+                    // hostile or careless server can trigger against another's name.
                     ToolExecutor executor = result.executors().get(name);
-                    if (executor != null) {
-                        executors.put(name, executor);
+                    if (executor == null) {
+                        LOGGER.warnf("mcpcalls tool '%s' has a specification but no executor — skipping", name);
+                        continue;
                     }
+                    if (executors.containsKey(name)) {
+                        LOGGER.warnf("mcpcalls tool name collision: '%s' is exposed by more than one MCP server — "
+                                + "keeping the first and dropping the duplicate. Use 'toolsBlacklist' on the losing "
+                                + "server to make the choice explicit.", name);
+                        continue;
+                    }
+                    toolSpecs.add(spec);
+                    executors.put(name, executor);
                 }
             }
 

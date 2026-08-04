@@ -195,7 +195,12 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // variable, so existence is not authorization. Without the membership check
         // any principal who can start a conversation could name another discussion's
         // id and recruit into it.
-        String callerConversationId = memory != null ? memory.getConversationId() : null;
+        // No null-check: this method already dereferences memory unconditionally above
+        // (getAgentId/getUserId/seedCreatedAgentIds), so a null would have thrown long
+        // before here. A guard only on this line implied a nullability the rest of the
+        // method does not honour, which reads as though one path were safe and the
+        // others overlooked.
+        String callerConversationId = memory.getConversationId();
         if (whitelist.contains("recruit_agent") && dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()
                 && groupConversationId != null && liveDiscussionRegistry != null
                 && liveDiscussionRegistry.getForMember(groupConversationId, callerConversationId).isPresent()) {
