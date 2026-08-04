@@ -134,7 +134,7 @@ public class PhaseExecutionEngine {
         // both fired falsely (3 of 6 entries abstaining in a 3-member critique
         // round read as "all 3 abstained" and ended a phase that produced real
         // critiques) and failed to fire when every one of the 6 genuinely did.
-        int expectedTurns = expectedTurnsFor(phase, speakers, config != null ? config.getMembers() : null);
+        int expectedTurns = expectedTurnsFor(phase, speakers, GroupConversationService.rosterWithRecruits(config, gc));
         if (ConvergenceDetector.allParticipantsAbstained(repeatEntries, expectedTurns)) {
             String reason = "All %d participants abstained — nothing further to add".formatted(expectedTurns);
             recordConvergence(gc, phase, phaseIdx, repeat, -1, true, reason, listener);
@@ -204,9 +204,14 @@ public class PhaseExecutionEngine {
                 ? Set.of()
                 : synthesizers.stream().map(GroupMember::agentId).filter(Objects::nonNull).collect(Collectors.toSet());
 
-        List<GroupMember> dissenters = config.getMembers() == null
+        // The EFFECTIVE roster, recruits included. Reading config.getMembers() here
+        // meant a recruited member never got a dissent turn — it could speak in
+        // every phase but was structurally unable to register a minority view,
+        // which is the one thing the minority report exists to capture.
+        List<GroupMember> effectiveRoster = GroupConversationService.rosterWithRecruits(config, gc);
+        List<GroupMember> dissenters = effectiveRoster.isEmpty()
                 ? List.of()
-                : config.getMembers().stream()
+                : effectiveRoster.stream()
                         .filter(m -> m.agentId() != null && !synthesizerIds.contains(m.agentId()))
                         // A GROUP member's "one short turn" would recurse into an entire
                         // nested sub-discussion, whose concatenated transcript then
@@ -357,7 +362,7 @@ public class PhaseExecutionEngine {
     public boolean recordDebateVerdict(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase, int phaseIdx,
                                        List<GroupMember> synthesizers) {
         GroupMember synthesizer = synthesizers != null && !synthesizers.isEmpty() ? synthesizers.get(0) : null;
-        List<GroupMember> members = config != null ? config.getMembers() : null;
+        List<GroupMember> members = GroupConversationService.rosterWithRecruits(config, gc);
         if (!contextBuilder.isDebateJudgment(phase, synthesizer, gc.getTranscript(), phaseIdx, members)) {
             return false;
         }
@@ -485,7 +490,8 @@ public class PhaseExecutionEngine {
                 listener.onSpeakerStart(
                         new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
             }
-            String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null, config.getMembers());
+            String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null,
+                    GroupConversationService.rosterWithRecruits(config, gc));
             TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(entry);
             if (listener != null) {
@@ -560,7 +566,7 @@ public class PhaseExecutionEngine {
                 .map(speaker -> CompletableFuture.supplyAsync(callerIdentityContext.withIdentitySupplying(phaseCaller, () -> {
                     try {
                         String input = contextBuilder.buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null,
-                                config.getMembers());
+                                GroupConversationService.rosterWithRecruits(config, gc));
                         return memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
                     } catch (MemberTurnCancelledException e) {
                         // The orchestrator stopped waiting for this batch — surface the
@@ -688,7 +694,8 @@ public class PhaseExecutionEngine {
                     listener.onSpeakerStart(
                             new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
                 }
-                String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target, config.getMembers());
+                String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target,
+                        GroupConversationService.rosterWithRecruits(config, gc));
                 TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId(),
                         listener);
                 gc.getTranscript().add(entry);

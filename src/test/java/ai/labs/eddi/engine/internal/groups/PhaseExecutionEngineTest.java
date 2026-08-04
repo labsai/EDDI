@@ -440,4 +440,32 @@ class PhaseExecutionEngineTest {
 
         verify(contextBuilder).isDebateJudgment(any(), isNull(), any(), anyInt(), any());
     }
+
+    // =================================================================
+    // Branch review — recruits must be first-class in roster-keyed paths
+    // =================================================================
+
+    @Test
+    void dissentRound_includesRecruitedMembers() throws Exception {
+        // A recruit could speak in every phase but was structurally unable to
+        // register a minority view, because runDissentRound read the CONFIG roster
+        // rather than the effective one. That is the single thing the minority
+        // report exists to capture.
+        var engine = engine();
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any(), any()))
+                .thenAnswer(inv -> new TranscriptEntry(((GroupMember) inv.getArgument(0)).agentId(),
+                        ((GroupMember) inv.getArgument(0)).agentId(), "I disagree", 1, "Judgment",
+                        TranscriptEntryType.OPINION, Instant.now(), null, null));
+        var config = new AgentGroupConfiguration();
+        config.setMembers(List.of(member("configured")));
+        var gc = gcWithSynthesis("A synthesis everyone reacts to.");
+        gc.addDynamicMember(new GroupMember("recruit", "Recruit", Integer.MAX_VALUE, null));
+
+        int dissents = engine.runDissentRound(gc, config, judgmentPhase(null), protocol(), 1,
+                List.of(member("synthesizer")), null, new AtomicInteger(0), 10);
+
+        assertEquals(2, dissents, "the recruit gets a dissent turn like any other member");
+        assertTrue(gc.getTranscript().stream()
+                .anyMatch(e -> e.type() == TranscriptEntryType.DISSENT && "recruit".equals(e.speakerAgentId())));
+    }
 }

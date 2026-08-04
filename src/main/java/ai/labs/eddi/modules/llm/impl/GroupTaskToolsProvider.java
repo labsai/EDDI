@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupTaskConfig;
+import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.modules.llm.tools.impl.GroupTaskTools;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
@@ -83,7 +84,11 @@ class GroupTaskToolsProvider implements ToolSourceProvider {
         }
 
         var tools = List.<Object>of(new GroupTaskTools(liveDiscussionRegistry, groupConversationId, config, ctx.agentId(),
-                groupConfiguration.getMembers(), groupConfiguration.getModeratorAgentId()));
+                // Recruits included: otherwise assignToRole cannot name a member the
+                // model just watched join, and rosterHint() omits them from the list of
+                // who exists.
+                GroupConversationService.rosterWithRecruits(groupConfiguration, live.get()),
+                groupConfiguration.getModeratorAgentId()));
         var reflected = ToolObjectReflector.reflect(tools);
         return new ToolContribution(reflected.specs(), reflected.executors(), reflected.toolSources(), Map.of(),
                 List.of(), reflected.toolCanonicalNames());

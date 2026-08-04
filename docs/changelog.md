@@ -5,6 +5,21 @@
 
 ---
 
+## 🐛 fix(groups): branch review, round 3 — recruits were second-class everywhere (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+I7 wired recruits into `resolveParticipants`, so they *speak* — but only two sites in the codebase used the recruit-inclusive roster. Everything else still keyed off `config.getMembers()`, so a recruited member was a speaker no other feature recognised as a member:
+
+- **It never got a dissent turn.** `runDissentRound` filtered the config roster, so a recruit could argue in every phase and was structurally unable to register a minority view — the one thing the minority report exists to capture.
+- **`addGroupTask(assignToRole=…)` could not name it**, and the `rosterHint()` on failure listed a team that omitted the member the model had just watched join.
+- **The peer-visibility and team-filter paths** (`buildPhaseInput`'s `allMembers`, used by `ARGUE`/`REBUTTAL` to decide which arguments are *opposing*) treated it as neither teammate nor opponent.
+- **`recordDebateVerdict`'s two-sided-roster check** could not see a recruit's role, so recruiting the second side of a debate still produced no verdict.
+
+`rosterWithRecruits` is now static and is the single roster source across `PhaseExecutionEngine` and `GroupTaskToolsProvider`. Pinned by `dissentRound_includesRecruitedMembers`, mutation-checked: reverting that one call to `config.getMembers()` fails it.
+
+---
+
 ## 🐛 fix(groups): branch review, round 2 — CME on persist, registry leak, ceiling-vs-HITL (2026-08-04)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

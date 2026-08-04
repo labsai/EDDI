@@ -1316,7 +1316,7 @@ public class GroupConversationService implements IGroupConversationService {
      * points into, and move the denominator I2's convergence check and I4's
      * unanimity test already computed for the round in flight.
      */
-    public List<GroupMember> rosterWithRecruits(AgentGroupConfiguration config, GroupConversation gc) {
+    public static List<GroupMember> rosterWithRecruits(AgentGroupConfiguration config, GroupConversation gc) {
         List<GroupMember> configured = config.getMembers() != null ? config.getMembers() : List.of();
         if (gc == null || gc.getDynamicMembers() == null || gc.getDynamicMembers().isEmpty()) {
             return configured;
