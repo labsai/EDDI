@@ -138,6 +138,51 @@ Fixed by removing the literal rather than suppressing the finding: the test is a
 
 ---
 
+## 🔓 fix(ci): secret scanning could never pass on a pull request from a fork (2026-07-31)
+
+**Repo:** EDDI (`ci/gitleaks-cli-for-forks`)
+
+The **Secret Scanning** job failed on every pull request opened from a fork. On #623 it was the *only* failing check: twelve passed and seven were skipped. Nothing downstream was blocked: two jobs list `gitleaks` in `needs:` and neither is stopped by it. `docker` is gated on `github.event_name == 'push'` and skips on pull requests; `notify-slack` runs `if: always()` and reads `needs.gitleaks.result` only to pick a status icon, so every fork pull request posted a Slack card with a red Secret Scan marker. The cost is narrower than a blocked pipeline but not harmless: an outside contributor cannot get a green run, a permanently red check trains reviewers to ignore that check, and it cannot be made a required status without blocking every fork.
+
+**Two causes, stacked.** `gitleaks/gitleaks-action` requires a paid `GITLEAKS_LICENSE` for repositories owned by an organization, and GitHub deliberately withholds repository secrets from `pull_request` runs that originate in a fork. So the license was absent by design, not by misconfiguration, and no amount of secret management on this side would have supplied it. The failure is structural rather than incidental, and the open pull requests are a natural experiment. Of the 21 open, 12 come from forks: all 9 that have a Secret Scanning result failed it, and the other 3 never ran it. Of the 9 from branches in this repository, 7 passed, 1 has no result, and 1 (#430, a Dependabot bump last updated in May) failed — its logs have since expired, so that one is unattributed rather than explained. Dependabot is not the discriminator: five other Dependabot pull requests pass.
+
+**The scanner and its wrapper have different licenses.** The `gitleaks` CLI itself is MIT and needs no key at all — only the Action wrapper is commercially licensed. Running the binary directly restores coverage on forks, which is precisely where an unreviewed secret is most likely to arrive. The two alternatives both lose that: dropping the job to `continue-on-error` keeps it green while scanning nothing, and gating it on `github.event.pull_request.head.repo.fork` skips forks outright.
+
+**Pinned by version and checksum, following the existing convention.** This repository already installs a third-party binary this way: `PREFLIGHT_VERSION` and `PREFLIGHT_SHA256` sit in the workflow-level `env:` block and the install step pipes the recorded hash through `sha256sum -c -`. `GITLEAKS_VERSION` and `GITLEAKS_SHA256` join them there and the install step mirrors that shape, so a retagged or substituted release fails the step rather than executing. This is stronger than the commit-pinned Action it replaces: the Action pin covers the wrapper, not the binary the wrapper downloads at runtime. Output is redacted with `--redact=100`, so a real finding never prints the secret into a public log.
+
+**Design decision — scan the event's commits, never the full history.** A whole-repository scan on a full-depth checkout reports **61 findings across 16 commits, dated 2016 to 2026**. Most are in files deleted years ago: Keycloak property files from 2016-2019, vendored licence HTML from 2022, an old `keycloak-dev.json`. The licence files are plainly false positives, licence prose tripping `generic-api-key`. Several of the old Keycloak entries are UUID-shaped, which is what a real Keycloak client secret looks like, so they are worth a maintainer's eye even though the files are long gone and the history is public either way. No values are reproduced here or in the pull request. Whatever their status, none is something a contributor could fix, so repo-wide scope would fail the build for everyone. Scoping to the event range keeps the same scope `gitleaks-action` used, so this is not a coverage change.
+
+**Correction to an earlier revision of this entry.** It said 82 findings across 9 commits, concentrated in `docs/gdpr-compliance.md` and test fixtures, and called all 82 false positives. That was measured on a **shallow clone**: at the graft boundary a commit appears to add entire files, which both inflated the count and misattributed it. On a full-depth checkout, which is what `fetch-depth: 0` gives CI, the real figure is 61 across 16 commits with a different profile. The blanket "all false positives" reading was also not supported by the measurement. The conclusion is unchanged; the numbers behind it were wrong and are corrected here.
+
+**Design decision — the scanner's own config comes from the base branch on a pull request.** The checkout on a pull request is the contributor's tree, and gitleaks reads two files from it: `.gitleaksignore` (fingerprint allowlist) and `.gitleaks.toml` (auto-detected config). Those two files are the whole surface: `gitleaks.toml` without the dot and `.gitleaks.yaml` are not auto-detected, which I checked rather than assumed. Either can switch a finding off. Verified by building the attack: commit a secret, read back the fingerprint gitleaks reports, add it to `.gitleaksignore` in the same pull request, and the scan passes clean. A permissive `[allowlist] regexes` in an added `.gitleaks.toml` does the same, and the repository has no `.gitleaks.toml` today, so adding one meets nothing. `--gitleaks-ignore-path` does not help: the flag is honoured but the repository-root file is still read alongside it. Restoring both from `base.sha` before scanning does, and it keeps the base's own legitimate entries. This was not a regression — `gitleaks-action` read the checked-out config the same way — but fork pull requests were never scanned before, so there was nothing to bypass; making fork scanning work is what makes the boundary matter.
+
+**Design decision — a range that cannot be resolved is an error, not an empty scan.** On a pull request the step requires both `base.sha` and `head.sha` to exist in the checkout and exits non-zero with a `::error::` annotation if either is missing. The tempting fallback is to narrow the range and carry on, but that converts a broken fetch into a scan that passes without having looked at anything — the failure mode that is worst here, because it is invisible. Only the push path falls back, to the tip commit, and it logs that it did. `fetch-depth: 0` on the checkout is what makes both SHAs reachable and is now load-bearing rather than incidental.
+
+**Verification.** Both steps were extracted from the committed YAML and executed verbatim against this repository with the real 8.30.1 binary. Nine scan cases, three install cases and two configuration-bypass cases:
+
+| Case | Expected | Result |
+| --- | --- | --- |
+| Pull request, valid range, no secrets | pass | exit 0 |
+| Pull request, `base.sha` unresolvable | fail loudly | exit 1, `::error::`, scanner never invoked |
+| Pull request, `head.sha` unresolvable | fail loudly | exit 1, `::error::`, scanner never invoked |
+| Pull request, empty range | pass | 0 commits scanned, exit 0 |
+| Pull request planting a Bearer token of 40 hex characters | fail | `leaks found: 1`, exit 1 |
+| Push, valid `before` | pass | exit 0 |
+| Push, `before` all zeros (new branch) | tip commit, logged | exit 0 |
+| Push, `before` absent from the checkout | tip commit, logged | exit 0 |
+| Event that is neither push nor pull request | tip commit, logged | exit 0 |
+| Install, correct version | pass | checksum `OK`, ELF x86-64 extracted |
+| Install, tampered tarball | reject | `sha256sum -c` exit 1 |
+| Install, nonexistent version tag | fail, leave nothing behind | exit 22, no binary written |
+| Fork allowlists its own secret via `.gitleaksignore` | blocked | exit 1; base's own entries kept |
+| Fork adds a permissive `.gitleaks.toml` | blocked | exit 1; file removed, logged |
+
+The detection test matters because the first attempt at it used the AWS documentation example key, which gitleaks allowlists — it reported clean, which would have made a scanner that detects nothing look correct. The planted-secret case is what proves the job is not vacuous.
+
+**Files:** `.github/workflows/ci.yml` (the `gitleaks` job only; no other job, and no application code, is touched).
+
+---
+
 ## 🧨 fix(secrets): export was corrupting the configs it exported (2026-07-30)
 
 **Repo:** EDDI (`fix/code-review-validation`)

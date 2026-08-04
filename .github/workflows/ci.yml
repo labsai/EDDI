@@ -16,6 +16,8 @@ env:
   # Pin preflight version + hash — update both when upgrading
   PREFLIGHT_VERSION: "1.17.1"
   PREFLIGHT_SHA256: "15f58d0de7212ac948706515f824d0d2f42b94c11fa85cdb1bc08ad8993226ca"
+  GITLEAKS_VERSION: "8.30.1"
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
 
 jobs:
   # ─── Job 0: Detect Changes ──────────────────────────────────────
@@ -368,11 +370,85 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+      # The gitleaks CLI is MIT-licensed and needs no key; only the Action
+      # wrapper requires a paid GITLEAKS_LICENSE for org-owned repos. GitHub
+      # does not expose repository secrets to pull_request runs originating in
+      # a fork, so that action failed on every outside contribution. Installed
+      # from a pinned version + sha256, the same way preflight is installed.
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          echo "Installing gitleaks ${GITLEAKS_VERSION}..."
+          curl -sSfL --retry 3 --retry-delay 2 --retry-all-errors \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            -o gitleaks.tar.gz
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          chmod +x gitleaks
+          ./gitleaks version
+
+      # On a pull request the checkout is the contributor's code, and that
+      # includes any .gitleaksignore or .gitleaks.toml it adds. Either file can
+      # switch findings off, so without this a fork could allowlist its own
+      # secret in the same pull request that introduces it. Taking both from
+      # the base branch means a config change takes effect once it is merged
+      # and reviewed, rather than while it is still being proposed.
+      - name: Take the gitleaks config from the base branch
+        if: github.event_name == 'pull_request'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          for f in .gitleaksignore .gitleaks.toml; do
+            if git cat-file -e "$PR_BASE:$f" 2> /dev/null; then
+              git show "$PR_BASE:$f" > "$f"
+              echo "restored $f from the base branch"
+            elif [ -e "$f" ]; then
+              rm -f "$f"
+              echo "removed $f, which this pull request adds and the base branch does not have"
+            fi
+          done
+
+      # Scan only the commits this event introduces, which is what
+      # gitleaks-action did. A full-depth scan reports 61 pre-existing findings
+      # across 16 commits dated 2016 to 2026, most of them in files deleted
+      # years ago, so scanning everything would fail the build on day one for
+      # reasons no PR author can fix.
+      - name: Scan commits in this event
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ZERO=0000000000000000000000000000000000000000
+
+          have() { git cat-file -e "$1^{commit}" 2> /dev/null; }
+
+          if [ "$EVENT" = "pull_request" ]; then
+            # Both ends must resolve. Quietly narrowing the range here would
+            # turn a fetch problem into a scan that passes without looking.
+            for sha in "$PR_BASE" "$PR_HEAD"; do
+              if ! have "$sha"; then
+                echo "::error::gitleaks: $sha is not in this checkout, so the pull request was not scanned. Check that actions/checkout still uses fetch-depth: 0."
+                exit 1
+              fi
+            done
+            LOG_OPTS="--no-merges $PR_BASE..$PR_HEAD"
+            echo "scanning pull request range $PR_BASE..$PR_HEAD"
+          elif [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != "$ZERO" ] && have "$PUSH_BEFORE"; then
+            LOG_OPTS="--no-merges $PUSH_BEFORE..$PUSH_AFTER"
+            echo "scanning pushed range $PUSH_BEFORE..$PUSH_AFTER"
+          else
+            # New branch, tag, or a force-push that orphaned the old tip: there
+            # is no range to diff against, so scan the tip commit and say so.
+            LOG_OPTS="--no-merges -n 1"
+            echo "no usable base commit for this $EVENT, scanning only $PUSH_AFTER"
+          fi
+
+          ./gitleaks git --redact=100 --no-banner --exit-code 1 --log-opts="$LOG_OPTS" .
 
   # ─── Job 2e: CycloneDX SBOM Generation ─────────────────────────
   sbom:
