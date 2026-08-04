@@ -327,12 +327,27 @@ public class PhaseExecutionEngine {
 
     /** The most recent synthesis text, which is what dissenters are reacting to. */
     private static String latestSynthesis(GroupConversation gc) {
-        String fromTranscript = gc.getTranscript().stream()
-                .filter(e -> e.type() == TranscriptEntryType.SYNTHESIS && e.content() != null)
-                .reduce((first, second) -> second)
-                .map(TranscriptEntry::content)
-                .orElse(null);
-        return fromTranscript != null ? fromTranscript : gc.getSynthesizedAnswer();
+        List<TranscriptEntry> transcript = gc.getTranscript();
+        // THIS round's entries only. A continuation re-runs every phase from index 0
+        // against a transcript that still holds the previous round's, and an entry
+        // carries no round — so an unscoped scan let a round whose synthesis
+        // produced nothing (judge undeployed, timed out, abstained, or the ceiling
+        // fired) silently adopt the previous round's conclusion: its verdict, the
+        // dissents raised against it, and the answer, all attributed to a question
+        // this round never answered. Also drops the getSynthesizedAnswer() fallback
+        // for the same reason — that field still holds the prior round's answer.
+        int from = Math.max(0, Math.min(gc.getRoundStartTranscriptIndex(), transcript.size()));
+        synchronized (transcript) {
+            for (int i = transcript.size() - 1; i >= from; i--) {
+                TranscriptEntry e = transcript.get(i);
+                if (e != null && e.type() == TranscriptEntryType.SYNTHESIS && e.content() != null) {
+                    return e.content();
+                }
+            }
+        }
+        // Only a first round may fall back to the answer field: there is no earlier
+        // round for it to have come from.
+        return from == 0 ? gc.getSynthesizedAnswer() : null;
     }
 
     /**

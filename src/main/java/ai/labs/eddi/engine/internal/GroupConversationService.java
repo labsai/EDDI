@@ -963,7 +963,14 @@ public class GroupConversationService implements IGroupConversationService {
             // to hand a caller as the discussion's answer. The rendered outcome is
             // substituted here rather than by rewriting the entry, so the transcript
             // keeps the agent's own words and the verifiable signature over them.
-            gc.getTranscript().stream().filter(e -> e.type() == TranscriptEntryType.SYNTHESIS && e.content() != null)
+            // Scoped to THIS round (see GroupConversation#roundStartTranscriptIndex).
+            // Unscoped, a continuation whose synthesis produced nothing kept the
+            // previous round's answer and reported COMPLETED — and because the
+            // answer was then non-null, the "completed without an answer" guard
+            // below stayed silent about it.
+            int roundStart = Math.max(0, Math.min(gc.getRoundStartTranscriptIndex(), gc.getTranscript().size()));
+            gc.getTranscript().stream().skip(roundStart)
+                    .filter(e -> e.type() == TranscriptEntryType.SYNTHESIS && e.content() != null)
                     .reduce((first, second) -> second) // last one
                     .ifPresent(e -> gc.setSynthesizedAnswer(
                             DebateVerdictParser.isRenderedFrom(gc.getDecision(), e.content())

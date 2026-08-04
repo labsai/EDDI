@@ -102,6 +102,31 @@ public class GroupConversation {
     private int depth;
     /** Current discussion round (1-based). Incremented by continueDiscussion(). */
     private int round = 1;
+
+    /**
+     * Index into {@link #transcript} where the CURRENT round's entries begin.
+     * <p>
+     * A continuation re-runs every phase from index 0 against a transcript that
+     * still holds the previous round's entries, and a transcript entry carries no
+     * round of its own — only a phase index, which repeats each round. So "the
+     * latest SYNTHESIS" is ambiguous across rounds unless something marks where
+     * this round started. Without it, a round whose synthesis produced nothing
+     * (judge undeployed, timed out, abstained, or the cost ceiling fired) silently
+     * adopted the PREVIOUS round's conclusion: the verdict, the dissents raised
+     * against it, and the answer itself, all reported as this round's, for a
+     * question this round never answered.
+     * <p>
+     * Zero for a first round, which is exactly "the whole transcript".
+     */
+    private int roundStartTranscriptIndex;
+
+    public int getRoundStartTranscriptIndex() {
+        return roundStartTranscriptIndex;
+    }
+
+    public void setRoundStartTranscriptIndex(int roundStartTranscriptIndex) {
+        this.roundStartTranscriptIndex = roundStartTranscriptIndex;
+    }
     private SharedTaskList taskList;
     /** Agents dynamically added during the discussion (recruited or created). */
     private List<AgentGroupConfiguration.GroupMember> dynamicMembers = new CopyOnWriteArrayList<>();

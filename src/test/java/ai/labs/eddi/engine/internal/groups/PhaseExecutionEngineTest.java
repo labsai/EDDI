@@ -468,4 +468,39 @@ class PhaseExecutionEngineTest {
         assertTrue(gc.getTranscript().stream()
                 .anyMatch(e -> e.type() == TranscriptEntryType.DISSENT && "recruit".equals(e.speakerAgentId())));
     }
+
+    @Test
+    void aLaterRoundNeverAdoptsAnEarlierRoundsConclusion() {
+        // Round 2 of a DEBATE whose judge fails (undeployed, timed out, abstained,
+        // or the cost ceiling fired) leaves a SKIPPED entry with null content. An
+        // unscoped scan then found ROUND 1's judgment and recorded it as round 2's
+        // verdict, ran the dissent round against round 1's conclusion, and reported
+        // COMPLETED with an answer to a question round 2 never answered.
+        var engine = engine();
+        stubIsJudgment(true);
+        var gc = gcWithSynthesis("""
+                {"winner": "PRO", "scores": {"PRO": 9, "CON": 2}}""");
+        // A continuation begins here: everything above belongs to round 1.
+        gc.setRound(2);
+        gc.setRoundStartTranscriptIndex(gc.getTranscript().size());
+        gc.getTranscript().add(new TranscriptEntry(null, "System", null, 1, "Judgment",
+                TranscriptEntryType.SKIPPED, Instant.now(), "Timeout", null));
+
+        assertFalse(engine.recordDebateVerdict(gc, debateConfig(), judgmentPhase(null), 1, judgeAsSpeaker()));
+
+        assertNull(gc.getDecision(), "round 1's verdict must not be reported as round 2's");
+    }
+
+    @Test
+    void aFirstRoundStillSeesItsOwnSynthesis() {
+        // roundStartTranscriptIndex is 0 for a first round, i.e. the whole
+        // transcript — the scoping must not break the ordinary case.
+        var engine = engine();
+        stubIsJudgment(true);
+        var gc = gcWithSynthesis("""
+                {"winner": "CON", "scores": {"PRO": 3, "CON": 8}}""");
+
+        assertTrue(engine.recordDebateVerdict(gc, debateConfig(), judgmentPhase(null), 1, judgeAsSpeaker()));
+        assertEquals("CON", gc.getDecision().winner());
+    }
 }

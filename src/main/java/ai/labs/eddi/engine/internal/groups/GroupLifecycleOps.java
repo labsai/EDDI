@@ -351,6 +351,11 @@ public class GroupLifecycleOps {
             // the stale round-1 one. Uses a dedicated field (not originalQuestion, which
             // the UI shows as the conversation title) so continuations don't rewrite it.
             gc.setRound(gc.getRound() + 1);
+            // Mark where this round's transcript begins, BEFORE appending its
+            // question. Everything that asks "what did this round conclude?" scopes
+            // to it; without the mark, a round whose synthesis produced nothing
+            // adopts the previous round's conclusion as its own.
+            gc.setRoundStartTranscriptIndex(gc.getTranscript().size());
             gc.setResumeQuestion(question);
             gc.getTranscript().add(new TranscriptEntry(
                     "user", "User", question, 0, "Question",

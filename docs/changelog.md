@@ -5,6 +5,28 @@
 
 ---
 
+## 🐛 fix(groups): a continuation round could report the previous round's conclusion (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+`latestSynthesis` and the answer extraction both scanned the **whole** transcript for the last SYNTHESIS entry. A continuation re-runs every phase from index 0 against a transcript that still holds the previous round's entries, and a transcript entry carries no round of its own — only a phase index, which repeats each round. So "the latest synthesis" was ambiguous across rounds.
+
+The consequence, for a round 2 whose synthesis produced nothing — judge undeployed, timed out, abstained, or the cost ceiling fired, all of which leave a SKIPPED entry with null content:
+
+- `recordDebateVerdict` parsed **round 1's** judgment and stored it as round 2's `DecisionRecord`, stamped with round 2's phase name;
+- `runDissentRound` asked every member where they disagreed with round 1's conclusion and filed the replies as round 2's dissents;
+- the answer extraction picked round 1's SYNTHESIS entry, so `synthesizedAnswer` was non-null and the "completed without an answer" guard stayed silent.
+
+The conversation reported `COMPLETED`, with a structured verdict and a minority report, for a question round 2 never answered.
+
+Fixed with `GroupConversation.roundStartTranscriptIndex` — the index where the current round's entries begin, stamped by `continueDiscussion` when it bumps the round. Both scans start there. The `getSynthesizedAnswer()` fallback is dropped for any round past the first, since that field also still holds the prior round's answer; a first round has index 0, which is exactly "the whole transcript", so the ordinary case is unchanged.
+
+A transcript entry could have carried its round instead, but that is a 15th component on a record already constructed positionally in ~30 places — a marker on the conversation says the same thing without that blast radius.
+
+Pinned by `aLaterRoundNeverAdoptsAnEarlierRoundsConclusion` and `aFirstRoundStillSeesItsOwnSynthesis`; mutation-checked by resetting the scope to 0.
+
+---
+
 ## 🐛 fix(groups): branch review, round 3 — recruits were second-class everywhere (2026-08-04)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
