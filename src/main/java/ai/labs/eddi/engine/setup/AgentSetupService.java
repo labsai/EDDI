@@ -394,16 +394,6 @@ public class AgentSetupService {
     }
 
     /**
-     * Creates one McpCalls resource per comma-separated server URL, recording each
-     * location in {@code createdResources}. Returns null when no URLs were given,
-     * which is what {@code createWorkflowConfig} expects for "no MCP step".
-     * <p>
-     * Shared by {@code setupAgent} and {@code createApiAgent} so an API agent can
-     * hold both the tools generated from its OpenAPI spec and an MCP server's —
-     * previously only the former, which made "REST plus MCP" unreachable through
-     * the wizard.
-     */
-    /**
      * Validates every MCP server URL before any of them is written.
      * <p>
      * {@code McpCallsConfiguration.validate()} rejects a non-http(s) URL at save
@@ -429,6 +419,17 @@ public class AgentSetupService {
             }
         }
     }
+
+    /**
+     * Creates one McpCalls resource per comma-separated server URL, recording each
+     * location in {@code createdResources}. Returns null when no URLs were given,
+     * which is what {@code createWorkflowConfig} expects for "no MCP step".
+     * <p>
+     * Shared by {@code setupAgent} and {@code createApiAgent} so an API agent can
+     * hold both the tools generated from its OpenAPI spec and an MCP server's —
+     * previously only the former, which made "REST plus MCP" unreachable through
+     * the wizard.
+     */
 
     private List<String> createMcpCallsResources(String mcpServerUrls, String agentName, Map<String, Object> createdResources)
             throws Exception {

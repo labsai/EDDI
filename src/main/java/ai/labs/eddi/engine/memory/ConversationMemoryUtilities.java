@@ -353,6 +353,13 @@ public class ConversationMemoryUtilities {
     }
 
     /**
+     * Stands in for a stripped fingerprint. A constant, so it carries none of the
+     * digest — but non-null, so {@code PendingToolCall#isRequestPinned()} (which
+     * derives from the field) keeps reporting the truth.
+     */
+    static final String REDACTED_FINGERPRINT = "<REDACTED>";
+
+    /**
      * Strips the request fingerprints from a snapshot about to be returned in FULL
      * to an approver.
      * <p>
@@ -378,13 +385,6 @@ public class ConversationMemoryUtilities {
      * {@link #redactRawPendingToolCallsForRead}: both operate on a snapshot freshly
      * loaded for one request, never on shared state.
      */
-    /**
-     * Stands in for a stripped fingerprint. A constant, so it carries none of the
-     * digest — but non-null, so {@code PendingToolCall#isRequestPinned()} (which
-     * derives from the field) keeps reporting the truth.
-     */
-    static final String REDACTED_FINGERPRINT = "<REDACTED>";
-
     public static ConversationMemorySnapshot stripRequestFingerprintsForRead(ConversationMemorySnapshot snapshot) {
         if (snapshot == null || snapshot.getHitlPendingToolCalls() == null
                 || snapshot.getHitlPendingToolCalls().getCalls() == null) {

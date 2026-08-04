@@ -2866,14 +2866,6 @@ class AgentOrchestrator {
     }
 
     /**
-     * Discovers httpcall configurations from the workflow and creates
-     * ToolSpecification + ToolExecutor for each ApiCall.
-     * <p>
-     * Traverses: memory → agentId/version → AgentConfiguration → workflows →
-     * WorkflowConfiguration → filter httpcall steps → load ApiCallsConfiguration →
-     * create tools from each ApiCall.
-     */
-    /**
      * Template data for one httpcall tool invocation: conversation memory plus the
      * model's arguments merged over it.
      * <p>
@@ -2914,6 +2906,15 @@ class AgentOrchestrator {
         }
         return templateData;
     }
+
+    /**
+     * Discovers httpcall configurations from the workflow and creates
+     * ToolSpecification + ToolExecutor for each ApiCall.
+     * <p>
+     * Traverses: memory → agentId/version → AgentConfiguration → workflows →
+     * WorkflowConfiguration → filter httpcall steps → load ApiCallsConfiguration →
+     * create tools from each ApiCall.
+     */
 
     HttpCallToolsResult discoverHttpCallTools(IConversationMemory memory) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();

@@ -156,32 +156,6 @@ public class RequestRedactor {
     }
 
     /**
-     * Redact a request URI.
-     * <p>
-     * The URI was the one field of a resolved request that carried no redaction of
-     * any kind, which made it the leak the rest of this class exists to prevent: a
-     * credential templated into the path —
-     * {@code "/v1/invoices?api_key=${vault:k}"} — is resolved to its live value by
-     * {@code ApiCallExecutor#buildRequest} before the URI is ever built, and the
-     * same value then appeared REDACTED in {@code queryParams} and PLAINTEXT in
-     * {@code uri}, adjacent fields of one JSON object shown to an approver who is
-     * routinely not the person whose turn raised the pause.
-     * <p>
-     * Two passes, because a URI has two places to hide one:
-     * <ul>
-     * <li>the query string is split and each value run through
-     * {@link #redactQueryParamValue} — the SAME function the {@code queryParams}
-     * map uses, so the two views of one credential cannot disagree;</li>
-     * <li>whatever remains (scheme, userinfo, host, path) goes through
-     * {@link #redactBody}'s value-shape scan, which catches
-     * {@code https://user:sk-…@host} and a key segment inside a path.</li>
-     * </ul>
-     * <p>
-     * Static and null-tolerant for the same reason as {@link #redactBody}:
-     * {@link ResolvedRequest#of} applies it without an executor, keeping
-     * "fingerprint the raw, store the redacted" resolved in exactly one place.
-     */
-    /**
      * Shape-scan the part of a URI before any query string, WITHOUT letting the
      * scan eat the authority.
      * <p>
@@ -219,6 +193,33 @@ public class RequestRedactor {
 
         return beforeQuery.substring(0, authorityStart) + safeAuthority + redactBody(path);
     }
+
+    /**
+     * Redact a request URI.
+     * <p>
+     * The URI was the one field of a resolved request that carried no redaction of
+     * any kind, which made it the leak the rest of this class exists to prevent: a
+     * credential templated into the path —
+     * {@code "/v1/invoices?api_key=${vault:k}"} — is resolved to its live value by
+     * {@code ApiCallExecutor#buildRequest} before the URI is ever built, and the
+     * same value then appeared REDACTED in {@code queryParams} and PLAINTEXT in
+     * {@code uri}, adjacent fields of one JSON object shown to an approver who is
+     * routinely not the person whose turn raised the pause.
+     * <p>
+     * Two passes, because a URI has two places to hide one:
+     * <ul>
+     * <li>the query string is split and each value run through
+     * {@link #redactQueryParamValue} — the SAME function the {@code queryParams}
+     * map uses, so the two views of one credential cannot disagree;</li>
+     * <li>whatever remains (scheme, userinfo, host, path) goes through
+     * {@link #redactBody}'s value-shape scan, which catches
+     * {@code https://user:sk-…@host} and a key segment inside a path.</li>
+     * </ul>
+     * <p>
+     * Static and null-tolerant for the same reason as {@link #redactBody}:
+     * {@link ResolvedRequest#of} applies it without an executor, keeping
+     * "fingerprint the raw, store the redacted" resolved in exactly one place.
+     */
 
     /**
      * Redact one query value from a URI, judging it in its DECODED form.
