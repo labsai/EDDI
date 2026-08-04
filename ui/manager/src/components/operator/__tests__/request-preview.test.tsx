@@ -1,6 +1,15 @@
-import { describe, it, expect } from "vitest";
-import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { http, HttpResponse } from "msw";
+import { server } from "@/test/mocks/server";
+
+const authState = vi.hoisted(() => ({ roles: [] as string[], method: "none" as "none" | "keycloak" }));
+
+vi.mock("@/hooks/use-auth", () => ({
+  useAuth: () => ({ authenticated: true, loading: false, user: null, roles: authState.roles, method: authState.method, login: () => {}, logout: () => {} }),
+  useHasRole: (role: string) => authState.method === "none" || authState.roles.includes(role),
+}));
 import { RequestPreview } from "@/components/operator/request-preview";
 import type { ResolvedRequestPreview } from "@/lib/api/hitl";
 
@@ -212,5 +221,125 @@ describe("RequestPreview", () => {
       );
       expect(screen.getByTestId("request-preview-escalations-call-1")).toHaveAttribute("role", "alert");
     });
+  });
+});
+
+/* ─── Whole-document PUT diff ─── */
+
+const STORED = { id: "r1", name: "Greeting rules", threshold: 5, description: "unchanged" };
+const PROPOSED = { ...STORED, threshold: 9 };
+
+function putPreview(overrides: Partial<ResolvedRequestPreview> = {}): ResolvedRequestPreview {
+  return {
+    method: "PUT",
+    uri: "http://localhost:7070/rulestore/rulesets/r1?version=3",
+    queryParams: { version: "3" },
+    headers: {},
+    body: JSON.stringify(PROPOSED, null, 2),
+    bodyTruncated: false,
+    ...overrides,
+  };
+}
+
+function serveStored(body: Record<string, unknown> | null = STORED, status = 200) {
+  server.use(
+    http.get("*/rulestore/rulesets/r1", () =>
+      status === 200 ? HttpResponse.json(body) : HttpResponse.json({ message: "no" }, { status }),
+    ),
+  );
+}
+
+describe("RequestPreview — whole-document PUT diff", () => {
+  beforeEach(() => {
+    authState.roles = [];
+    authState.method = "none";
+    server.resetHandlers();
+  });
+
+  it("shows what CHANGES rather than only the whole proposed document", async () => {
+    // The gap this closes: approving a one-line edit to a large config meant
+    // finding that line by eye in a 128px scroll box.
+    serveStored();
+    renderWithProviders(<RequestPreview preview={putPreview()} pinned callId="c1" />);
+
+    const diff = await screen.findByTestId("request-preview-diff-c1");
+    expect(diff).toHaveTextContent(/threshold/);
+  });
+
+  it("keeps the full proposed document reachable behind a toggle", async () => {
+    // The diff is a reading aid; approval still covers the whole document.
+    serveStored();
+    renderWithProviders(<RequestPreview preview={putPreview()} pinned callId="c1" />);
+    await screen.findByTestId("request-preview-diff-c1");
+
+    expect(screen.queryByTestId("request-preview-body-c1")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("request-preview-body-toggle-c1"));
+    expect(screen.getByTestId("request-preview-body-c1")).toHaveTextContent(/threshold/);
+  });
+
+  it("warns that redacted credentials will diff as false changes", async () => {
+    serveStored();
+    renderWithProviders(
+      <RequestPreview
+        preview={putPreview({ body: JSON.stringify({ ...PROPOSED, apiKey: "<REDACTED>" }, null, 2) })}
+        pinned
+        callId="c1"
+      />,
+    );
+    expect(await screen.findByTestId("request-preview-diff-redaction-note-c1")).toBeInTheDocument();
+  });
+
+  it("does NOT diff a truncated body — that would report everything after the cut as deleted", async () => {
+    serveStored();
+    renderWithProviders(
+      <RequestPreview preview={putPreview({ bodyTruncated: true })} pinned callId="c1" />,
+    );
+    await waitFor(() => expect(screen.getByTestId("request-preview-body-c1")).toBeInTheDocument());
+    expect(screen.queryByTestId("request-preview-diff-c1")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the raw body when the stored version can't be read", async () => {
+    serveStored(null, 500);
+    renderWithProviders(<RequestPreview preview={putPreview()} pinned callId="c1" />);
+
+    expect(await screen.findByTestId("request-preview-diff-unavailable-c1")).toHaveTextContent(
+      /couldn't load/i,
+    );
+    expect(screen.getByTestId("request-preview-body-c1")).toBeInTheDocument();
+  });
+
+  it("does not even attempt the read for a role that lacks editor access", async () => {
+    // Reading the stored document is eddi-admin/eddi-editor only, and this
+    // surface is used by eddi-approver — whose whole job is approving.
+    authState.method = "keycloak";
+    authState.roles = ["eddi-approver"];
+    let requested = false;
+    server.use(
+      http.get("*/rulestore/rulesets/r1", () => {
+        requested = true;
+        return HttpResponse.json(STORED);
+      }),
+    );
+
+    renderWithProviders(<RequestPreview preview={putPreview()} pinned callId="c1" />);
+
+    expect(await screen.findByTestId("request-preview-diff-unavailable-c1")).toHaveTextContent(
+      /editor access/i,
+    );
+    expect(screen.getByTestId("request-preview-body-c1")).toBeInTheDocument();
+    await waitFor(() => expect(requested).toBe(false));
+  });
+
+  it("leaves a non-document write (a sub-resource verb) rendering exactly as before", () => {
+    renderWithProviders(
+      <RequestPreview
+        preview={putPreview({ uri: "http://x/agentstore/agents/a1/updateResourceUri?version=1" })}
+        pinned
+        callId="c1"
+      />,
+    );
+    expect(screen.getByTestId("request-preview-body-c1")).toBeInTheDocument();
+    expect(screen.queryByTestId("request-preview-diff-c1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("request-preview-diff-unavailable-c1")).not.toBeInTheDocument();
   });
 });

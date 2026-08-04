@@ -1,6 +1,12 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ShieldAlert } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ShieldAlert, Loader2 } from "lucide-react";
 import { detectEscalationFlags } from "@/lib/operator/escalation-flags";
+import { resolveConfigWriteTarget, bodyHasRedactions } from "@/lib/operator/config-write-target";
+import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
+import { getResource } from "@/lib/api/resources";
+import { useAuth } from "@/hooks/use-auth";
 import type { ResolvedRequestPreview } from "@/lib/api/hitl";
 
 /** Approver-facing text per escalating setting — see `escalation-flags.ts`. */
@@ -47,6 +53,40 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
   // exceed the preview cap (up to 100 members), which would put a capability
   // grant past the cut and silently unflagged. Say so instead.
   const escalationCheckIncomplete = preview.bodyTruncated && escalations.length === 0;
+
+  /**
+   * Whole-document `PUT`s get a diff against what is currently stored.
+   *
+   * NOT offered for a truncated body: diffing a body that was cut mid-document
+   * reports every line after the cut as deleted. That is not a degraded diff,
+   * it is a wrong one, and it points the wrong way — toward "this write removes
+   * most of the config".
+   */
+  const writeTarget = preview.bodyTruncated ? null : resolveConfigWriteTarget(preview);
+  // Reading the stored document needs eddi-admin/eddi-editor, and this surface
+  // is used by eddi-approver — whose entire job is approving. Gate the fetch
+  // rather than firing a 403 on every pause, and say plainly that the
+  // comparison is unavailable instead of showing a broken one.
+  const { method: authMethod, roles } = useAuth();
+  const canReadStoredDocument =
+    authMethod === "none" || roles.includes("eddi-admin") || roles.includes("eddi-editor");
+
+  const currentDocument = useQuery({
+    queryKey: [
+      "operator-config-diff",
+      writeTarget?.resourceType.slug,
+      writeTarget?.id,
+      writeTarget?.version,
+    ],
+    queryFn: () => getResource(writeTarget!.resourceType, writeTarget!.id, writeTarget!.version),
+    enabled: Boolean(writeTarget) && canReadStoredDocument,
+    staleTime: Infinity, // The base version is immutable; EDDI writes version+1.
+    retry: false,
+  });
+
+  const diffUnavailable = Boolean(writeTarget) && (!canReadStoredDocument || currentDocument.isError);
+  const showDiff = Boolean(writeTarget) && currentDocument.isSuccess;
+  const [showFullBody, setShowFullBody] = useState(false);
 
   return (
     <div className="mb-1.5 space-y-1" data-testid={`request-preview-${callId}`}>
@@ -118,13 +158,90 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
           )}
         </p>
       )}
+      {showDiff && (
+        <div data-testid={`request-preview-diff-${callId}`}>
+          <p className="mb-1 text-[10px] font-medium text-muted-foreground">
+            {t("operator.approval.diffHeading", "Changes against the stored version {{version}}", {
+              version: writeTarget!.version,
+            })}
+          </p>
+          <ResourceDiffViewer
+            sourceContent={preview.body ?? ""}
+            targetContent={JSON.stringify(currentDocument.data)}
+          />
+          {bodyHasRedactions(preview.body) && (
+            <p
+              className="mt-1 text-[10px] text-amber-700 dark:text-amber-400"
+              data-testid={`request-preview-diff-redaction-note-${callId}`}
+            >
+              {t(
+                "operator.approval.diffRedactionNote",
+                "Credential values are redacted in the proposed version, so they appear as changes here even when unchanged.",
+              )}
+            </p>
+          )}
+        </div>
+      )}
+      {currentDocument.isLoading && writeTarget && (
+        <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+          {t("operator.approval.diffLoading", "Loading the stored version to compare against…")}
+        </p>
+      )}
+      {diffUnavailable && (
+        <p className="text-[10px] text-muted-foreground" data-testid={`request-preview-diff-unavailable-${callId}`}>
+          {canReadStoredDocument
+            ? t(
+                "operator.approval.diffFailed",
+                "Couldn't load the stored version to compare against — the full proposed document is below.",
+              )
+            : t(
+                "operator.approval.diffForbidden",
+                "Comparing against the stored version needs editor access — the full proposed document is below.",
+              )}
+        </p>
+      )}
+
       {preview.body != null && preview.body !== "" && (
-        <pre
-          className="max-h-32 overflow-auto rounded bg-muted/60 p-2 text-[11px] leading-relaxed text-foreground"
-          data-testid={`request-preview-body-${callId}`}
-        >
-          {preview.body}
-        </pre>
+        <>
+          {/* Always reachable, never replaced by the diff: the diff is a
+              reading aid, but approval covers the whole document, and the old
+              fixed 128px box made "read it in full before approving" advice
+              the UI could not actually support. */}
+          {showDiff && (
+            <button
+              type="button"
+              onClick={() => setShowFullBody((open) => !open)}
+              className="text-[10px] font-medium text-primary underline hover:no-underline"
+              aria-expanded={showFullBody}
+              data-testid={`request-preview-body-toggle-${callId}`}
+            >
+              {showFullBody
+                ? t("operator.approval.hideFullRequest", "Hide the full proposed document")
+                : t("operator.approval.showFullRequest", "Show the full proposed document")}
+            </button>
+          )}
+          {(!showDiff || showFullBody) && (
+            <>
+              <pre
+                className={`${showFullBody ? "max-h-[32rem]" : "max-h-32"} overflow-auto rounded bg-muted/60 p-2 text-[11px] leading-relaxed text-foreground`}
+                data-testid={`request-preview-body-${callId}`}
+              >
+                {preview.body}
+              </pre>
+              {!showDiff && !showFullBody && (
+                <button
+                  type="button"
+                  onClick={() => setShowFullBody(true)}
+                  className="text-[10px] font-medium text-primary underline hover:no-underline"
+                  data-testid={`request-preview-body-expand-${callId}`}
+                >
+                  {t("operator.approval.expandBody", "Expand")}
+                </button>
+              )}
+            </>
+          )}
+        </>
       )}
       {preview.bodyTruncated && (
         <p className="text-[10px] text-muted-foreground">
