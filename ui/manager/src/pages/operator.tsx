@@ -104,7 +104,7 @@ export function OperatorPage() {
       callId: hit.callId,
       reason: t(
         "operator.approval.blockedSelfTarget",
-        "This modifies the operator's own agent ({{agentId}}) — the one change that could remove its future approval gate. Reject it and make the change from that agent's own page instead.",
+        "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page.",
         { agentId: hit.agentId },
       ),
     }));
@@ -429,6 +429,9 @@ export function OperatorPage() {
           timeoutPolicy={approvalStatus.data?.timeoutPolicy}
           approvalTimeout={approvalStatus.data?.approvalTimeout}
           pauseDetails={chat.isPaused ? approvalStatus.data?.pauseDetails : undefined}
+          pauseDetailsPending={chat.isPaused && approvalStatus.isLoading}
+          pauseDetailsError={chat.isPaused && approvalStatus.isError}
+          onRetryPauseDetails={() => void approvalStatus.refetch()}
           isResolvingPause={chat.isResolvingPause}
           resolveError={chat.resolveError}
           onDecide={handleDecide}

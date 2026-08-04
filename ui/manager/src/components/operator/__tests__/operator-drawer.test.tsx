@@ -9,17 +9,20 @@ import type { OperatorConfig } from "@/lib/api/operator";
 import { useOperatorChatStore } from "@/hooks/use-operator-chat";
 import { useOperatorDrawerStore } from "@/hooks/use-operator-drawer";
 
+const authState = vi.hoisted(() => ({ roles: [] as string[], method: "none" as "none" | "keycloak" }));
+
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({
     authenticated: true,
     loading: false,
     user: null,
-    roles: [],
-    method: "none" as const,
+    roles: authState.roles,
+    method: authState.method,
     login: () => {},
     logout: () => {},
   }),
-  useHasRole: () => true,
+  // Mirrors the real implementation: every role is granted when auth is off.
+  useHasRole: (role: string) => authState.method === "none" || authState.roles.includes(role),
 }));
 
 const VAR_URL = `*/variablestore/variables/default/${OPERATOR_VARIABLE_KEY}`;
@@ -47,6 +50,8 @@ function activeConfig(overrides: Partial<OperatorConfig> = {}): OperatorConfig {
 describe("OperatorDrawer", () => {
   beforeEach(() => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    authState.roles = [];
+    authState.method = "none";
     useOperatorChatStore.getState().reset();
     useOperatorDrawerStore.setState({ isOpen: false });
     server.resetHandlers();
@@ -65,6 +70,57 @@ describe("OperatorDrawer", () => {
     serveConfig(activeConfig());
     renderWithProviders(<OperatorDrawer />, { initialRoute: "/manage/operator" });
     expect(screen.queryByTestId("operator-drawer-fab")).not.toBeInTheDocument();
+  });
+
+  describe("when the signed-in user cannot read the operator config", () => {
+    // The config lives in the global variable store, which the backend limits
+    // to eddi-admin/eddi-editor. This component mounts on EVERY page of both
+    // shells, so an ungated read is a 403 per navigation for every other role
+    // — eddi-approver most of all, since approving is that role's entire job.
+    it("renders no launcher at all for a role that lacks both", async () => {
+      authState.method = "keycloak";
+      authState.roles = ["eddi-approver"];
+      let requested = false;
+      server.use(
+        http.get(VAR_URL, () => {
+          requested = true;
+          return HttpResponse.json({ message: "forbidden" }, { status: 403 });
+        }),
+      );
+
+      renderWithProviders(<OperatorDrawer />, { initialRoute: "/manage/approvals" });
+
+      expect(screen.queryByTestId("operator-drawer-fab")).not.toBeInTheDocument();
+      // Not merely hidden — the privileged request must never be issued.
+      await waitFor(() => expect(requested).toBe(false));
+    });
+
+    it("still renders for an editor, who is allowed to read it", async () => {
+      authState.method = "keycloak";
+      authState.roles = ["eddi-editor"];
+      serveConfig(activeConfig());
+      renderWithProviders(<OperatorDrawer />, { initialRoute: "/manage/agents" });
+      expect(await screen.findByTestId("operator-drawer-fab")).toBeInTheDocument();
+    });
+
+    it("renders nothing rather than an unusable activation CTA when the read 403s anyway", async () => {
+      // Belt-and-braces for a deployment whose roles are mapped differently
+      // than the check above assumes: a failed read means we cannot know
+      // whether an operator already exists, and inviting the user to set up a
+      // second one is the worst available guess.
+      authState.method = "keycloak";
+      authState.roles = ["eddi-admin"];
+      server.use(http.get(VAR_URL, () => HttpResponse.json({ message: "forbidden" }, { status: 403 })));
+
+      renderWithProviders(<OperatorDrawer />, { initialRoute: "/manage/agents" });
+
+      // The launcher renders optimistically while the read is in flight, so
+      // this waits for it to be withdrawn once the 403 lands — asserting on
+      // the panel's contents instead would pass trivially, the panel being
+      // closed either way.
+      await waitFor(() => expect(screen.queryByTestId("operator-drawer-fab")).not.toBeInTheDocument());
+      expect(screen.queryByTestId("operator-drawer-activate-link")).not.toBeInTheDocument();
+    });
   });
 
   it("clears WorkforceBottomTabs' 64px bar on mobile when told to, instead of sitting under it", () => {

@@ -2759,6 +2759,7 @@
   },
   "hitl": {
     "loadingApprovalDetails": "Freigabedetails werden geladen …",
+    "approvalDetailsError": "Es konnte nicht geladen werden, was diese Anfrage bewirken würde, daher kann sie hier nicht genehmigt werden. Ablehnen ist weiterhin sicher.",
     "awaitingHuman": "Warten auf Mensch",
     "awaitingApproval": "Warten auf Genehmigung",
     "approve": "Genehmigen",
@@ -3201,7 +3202,7 @@
         "agentCreatedWithExternalTools": "Dieser Agent wird mit sämtlichen Tools erstellt, die ein externer MCP-Server anbietet. Welche das sind, entscheidet dieser Server, und er kann sie später ändern.",
         "unchecked": "Der Body war zu lang, um ihn auf Berechtigungserweiterungen zu prüfen — lesen Sie ihn vor der Freigabe vollständig."
       },
-      "blockedSelfTarget": "Dies ändert den eigenen Agenten des Operators ({{agentId}}) — die eine Änderung, die sein künftiges Genehmigungs-Gate entfernen könnte. Lehnen Sie sie ab und nehmen Sie die Änderung stattdessen auf der Seite dieses Agenten vor."
+      "blockedSelfTarget": "Ein Agent darf seine eigene Definition nicht ändern, und diese Anfrage betrifft den eigenen Agenten des Operators ({{agentId}}). Solange sie enthalten ist, kann der gesamte Stapel nicht genehmigt werden — lehnen Sie ab und nehmen Sie diese Änderung auf der Seite dieses Agenten vor."
     },
     "starters": {
       "whatsDeployed": "Was ist derzeit deployt?",

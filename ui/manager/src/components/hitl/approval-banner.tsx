@@ -45,11 +45,25 @@ interface ApprovalBannerProps {
   pauseDetails?: PauseDetails | null;
   /** Whether the mutation is in-flight. */
   isSubmitting?: boolean;
-  /** True while the structured pause details are still loading (or failed to
-   *  load) for a paused conversation. Blocks Approve so the reviewer can't
-   *  blind approve-all before knowing whether this is a RULE or TOOL_CALL pause;
-   *  Reject/Cancel stay available (both are safe with details unknown). */
+  /** True while the structured pause details are still loading for a paused
+   *  conversation. Blocks Approve so the reviewer can't blind approve-all
+   *  before knowing whether this is a RULE or TOOL_CALL pause; Reject/Cancel
+   *  stay available (both are safe with details unknown). */
   pauseDetailsPending?: boolean;
+  /**
+   * True when loading those details FAILED, as distinct from still loading.
+   *
+   * Both block Approve, and must — but they are not the same thing to a human.
+   * Folding a failure into `pauseDetailsPending` (as every caller here used to)
+   * left a pulsing "Loading approval details…" on screen forever with Approve
+   * permanently disabled, no error, and no way to retry: a dead end on the one
+   * surface the whole feature exists for. Callers pass their query's own error
+   * flag, and `onRetryPauseDetails` to offer a way out.
+   */
+  pauseDetailsError?: boolean;
+  /** Retries the pause-details read. Renders a Retry action when provided
+   *  alongside `pauseDetailsError`. */
+  onRetryPauseDetails?: () => void;
   /** Called when the user submits a decision. `toolDecisions` is populated only
    *  for a TOOL_CALL pause (per-call verdicts / amended arguments). */
   onDecide: (
@@ -152,6 +166,8 @@ export function ApprovalBanner({
   pauseDetails,
   isSubmitting,
   pauseDetailsPending,
+  pauseDetailsError,
+  onRetryPauseDetails,
   onDecide,
   onCancel,
   requireExplicitPerCall = false,
@@ -613,11 +629,37 @@ export function ApprovalBanner({
         </p>
       )}
 
-      {pauseDetailsPending && (
+      {pauseDetailsPending && !pauseDetailsError && (
         <p className="mb-2 flex items-center gap-1 text-xs text-muted-foreground" data-testid="approval-details-pending">
           <Clock className="h-3 w-3 animate-pulse" aria-hidden="true" />
           {t("hitl.loadingApprovalDetails", "Loading approval details…")}
         </p>
+      )}
+
+      {pauseDetailsError && (
+        <div
+          className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
+          role="alert"
+          data-testid="approval-details-error"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="flex-1">
+            {t(
+              "hitl.approvalDetailsError",
+              "Couldn't load what this request would do, so it can't be approved from here. Rejecting is still safe.",
+            )}
+          </span>
+          {onRetryPauseDetails && (
+            <button
+              type="button"
+              onClick={onRetryPauseDetails}
+              className="rounded border border-destructive/40 px-2 py-1 font-medium transition-colors hover:bg-destructive/20"
+              data-testid="approval-details-retry"
+            >
+              {t("common.retry", "Retry")}
+            </button>
+          )}
+        </div>
       )}
 
       {/* Action buttons */}

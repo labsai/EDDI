@@ -96,10 +96,12 @@ export function ConversationDetailPage() {
 
   // Structured pause details (incl. TOOL_CALL per-call tool names + redacted
   // arguments) — fetched only while the conversation is actually paused.
-  const { data: approvalStatus } = useApprovalStatus(
-    id,
-    conversation?.conversationState === "AWAITING_HUMAN",
-  );
+  const {
+    data: approvalStatus,
+    isLoading: approvalStatusLoading,
+    isError: approvalStatusError,
+    refetch: refetchApprovalStatus,
+  } = useApprovalStatus(id, conversation?.conversationState === "AWAITING_HUMAN");
 
   // The Platform Operator's own agent, so this surface can apply the same
   // refusal and the same per-call review requirement the operator screen and
@@ -120,7 +122,7 @@ export function ConversationDetailPage() {
       callId: hit.callId,
       reason: t(
         "operator.approval.blockedSelfTarget",
-        "This modifies the operator's own agent ({{agentId}}) — the one change that could remove its future approval gate. Reject it and make the change from that agent's own page instead.",
+        "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page.",
         { agentId: hit.agentId },
       ),
     }));
@@ -291,7 +293,13 @@ export function ConversationDetailPage() {
           timeoutPolicy={approvalStatus?.timeoutPolicy}
           approvalTimeout={approvalStatus?.approvalTimeout}
           pauseDetails={approvalStatus?.pauseDetails ?? null}
-          pauseDetailsPending={!approvalStatus}
+          // The query's own flags rather than `!approvalStatus` — see the same
+          // change in approvals.tsx. All three approval surfaces derive this
+          // identically now, so the same pause can no longer be approvable on
+          // one and permanently blocked on another.
+          pauseDetailsPending={approvalStatusLoading}
+          pauseDetailsError={approvalStatusError}
+          onRetryPauseDetails={() => void refetchApprovalStatus()}
           isSubmitting={resumeMutation.isPending || cancelMutation.isPending}
           // The THIRD approval surface, and the one an admin reaches by clicking
           // a conversation id in the approvals inbox — the natural "let me see

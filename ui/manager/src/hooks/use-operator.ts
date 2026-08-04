@@ -35,12 +35,25 @@ export const operatorKeys = {
 
 /* ─── Config ─── */
 
-/** The operator config blob. `null` means "never activated". */
-export function useOperatorConfig() {
+/**
+ * The operator config blob. `null` means "never activated".
+ *
+ * `enabled` exists for callers that mount somewhere this read is not
+ * guaranteed to be permitted. The config lives in the global variable store,
+ * which is `@RolesAllowed({"eddi-admin", "eddi-editor"})` on the backend — so
+ * for any other role (`eddi-approver`, most notably) this 403s rather than
+ * 404s, and `readOperatorConfig` rethrows anything that is not a 404. A caller
+ * mounted on every page would turn that into a failed request on every
+ * navigation for every non-admin. Defaults to `true`: the operator screen and
+ * the dashboard card are admin surfaces already, and an admin who genuinely
+ * cannot read it needs the error, not silence.
+ */
+export function useOperatorConfig(enabled = true) {
   return useQuery({
     queryKey: operatorKeys.config,
     queryFn: readOperatorConfig,
     staleTime: 30_000,
+    enabled,
   });
 }
 
@@ -213,6 +226,18 @@ export function useActivateOperator() {
       return { config: next, canary, gate, writeCanary };
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: operatorKeys.all });
+    },
+    // A failed activation mutates server state as surely as a successful one:
+    // the provisioning rollback above and `enforceWriteCanaryGate`'s
+    // `resetOperator` both DELETE agents and clear the config variable before
+    // throwing. Without this the cache still holds the pre-activation config,
+    // so cancelling out of the form lands on a page reporting an active
+    // operator, with Check-connection / Deactivate / Delete all pointed at an
+    // agent id that no longer exists — every one of them a 404. Invalidating on
+    // both outcomes is the only version of this that matches what the server
+    // actually did.
+    onError: () => {
       qc.invalidateQueries({ queryKey: operatorKeys.all });
     },
   });

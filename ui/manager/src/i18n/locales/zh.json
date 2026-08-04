@@ -2759,6 +2759,7 @@
   },
   "hitl": {
     "loadingApprovalDetails": "正在加载审批详情…",
+    "approvalDetailsError": "无法加载此请求将执行的内容，因此无法在此批准。拒绝仍然是安全的。",
     "awaitingHuman": "等待人工",
     "awaitingApproval": "等待审批",
     "approve": "批准",
@@ -3201,7 +3202,7 @@
         "agentCreatedWithExternalTools": "该智能体正在创建时被授予外部 MCP 服务器提供的全部工具。具体有哪些工具由该服务器决定，并且它之后可以更改。",
         "unchecked": "正文过长,无法扫描是否存在权限授予——请在批准前完整阅读。"
       },
-      "blockedSelfTarget": "此更改会修改操作员自身的智能体（{{agentId}}）——这是唯一可能移除其未来审批关卡的更改。请拒绝，改为在该智能体自己的页面上进行此更改。"
+      "blockedSelfTarget": "智能体不能修改自身定义，而此请求指向操作员自己的智能体（{{agentId}}）。只要它存在，整批请求都无法批准——请拒绝，并在该智能体自己的页面上进行此更改。"
     },
     "starters": {
       "whatsDeployed": "现在部署了哪些内容？",

@@ -2765,6 +2765,7 @@
   },
   "hitl": {
     "loadingApprovalDetails": "Carregando detalhes de aprovação…",
+    "approvalDetailsError": "Não foi possível carregar o que este pedido faria, por isso não pode ser aprovado aqui. Rejeitar continua a ser seguro.",
     "awaitingHuman": "Aguardando humano",
     "awaitingApproval": "Aguardando aprovação",
     "approve": "Aprovar",
@@ -3207,7 +3208,7 @@
         "agentCreatedWithExternalTools": "Este agente está a ser criado com todas as ferramentas que um servidor MCP externo disponibiliza. É esse servidor que decide quais são, e pode alterá-las mais tarde.",
         "unchecked": "O corpo era demasiado longo para analisar concessões de capacidade — leia-o na íntegra antes de aprovar."
       },
-      "blockedSelfTarget": "Isto modifica o próprio agente do operador ({{agentId}}) — a única alteração que poderia remover a sua futura porta de aprovação. Rejeite-a e faça antes a alteração a partir da página do próprio agente."
+      "blockedSelfTarget": "Um agente não pode alterar a sua própria definição, e este pedido visa o próprio agente do operador ({{agentId}}). Enquanto estiver presente, todo o lote não pode ser aprovado — rejeite-o e faça esta alteração a partir da página desse agente."
     },
     "starters": {
       "whatsDeployed": "O que está implantado neste momento?",

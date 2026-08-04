@@ -38,6 +38,20 @@ export interface OperatorChatProps {
   /** Structured RULE/TOOL_CALL detail from GET …/approval-status. `undefined`
    *  while it is still loading — distinct from `null` (nothing to show). */
   pauseDetails?: PauseDetails | null;
+  /**
+   * Loading/failure state of that read, taken from the caller's own query
+   * rather than inferred here.
+   *
+   * This used to be derived locally as `pauseDetails === undefined`, which
+   * cannot tell "still loading" from "the request failed" — so a failed read
+   * showed a loading spinner forever with Approve disabled and no way out. It
+   * also disagreed with the other two approval surfaces, which derived it
+   * differently again and landed on the permissive side. See
+   * `ApprovalBannerProps.pauseDetailsError`.
+   */
+  pauseDetailsPending?: boolean;
+  pauseDetailsError?: boolean;
+  onRetryPauseDetails?: () => void;
   /** Whether a submitted decision is being resumed and awaited. */
   isResolvingPause: boolean;
   /** Set only when resuming or awaiting the resumed turn's outcome failed. */
@@ -81,6 +95,9 @@ export function OperatorChat({
   timeoutPolicy,
   approvalTimeout,
   pauseDetails,
+  pauseDetailsPending,
+  pauseDetailsError,
+  onRetryPauseDetails,
   isResolvingPause,
   resolveError,
   onDecide,
@@ -221,7 +238,12 @@ export function OperatorChat({
             timeoutPolicy={timeoutPolicy}
             approvalTimeout={approvalTimeout}
             pauseDetails={pauseDetails ?? null}
-            pauseDetailsPending={pauseDetails === undefined}
+            // Falls back to the old local derivation only when the caller
+            // supplies neither flag, so a caller that has not been updated
+            // still blocks Approve rather than silently enabling it.
+            pauseDetailsPending={pauseDetailsPending ?? (pauseDetailsError ? false : pauseDetails === undefined)}
+            pauseDetailsError={pauseDetailsError}
+            onRetryPauseDetails={onRetryPauseDetails}
             isSubmitting={isResolvingPause}
             requireExplicitPerCall
             blockedCalls={blockedCalls}

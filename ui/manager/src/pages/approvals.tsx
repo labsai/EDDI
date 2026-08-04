@@ -118,7 +118,7 @@ function ApprovalQueueRow({
       callId: hit.callId,
       reason: t(
         "operator.approval.blockedSelfTarget",
-        "This modifies the operator's own agent ({{agentId}}) — the one change that could remove its future approval gate. Reject it and make the change from that agent's own page instead.",
+        "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page.",
         { agentId: hit.agentId },
       ),
     }));
@@ -250,7 +250,15 @@ function ApprovalQueueRow({
               timeoutPolicy={item.timeoutPolicy ?? undefined}
               approvalTimeout={item.approvalTimeout ?? undefined}
               pauseDetails={approvalStatus.data?.pauseDetails ?? null}
-              pauseDetailsPending={!approvalStatus.data}
+              // The query's own flags, not `!data`: that conflated a failed
+              // read with a successful one carrying no pauseDetails, and
+              // resolved the latter to "not pending" — enabling Approve on
+              // the surface where an approver has the LEAST context, while
+              // the operator chat blocked it for the same pause. All three
+              // approval surfaces now derive this identically.
+              pauseDetailsPending={approvalStatus.isLoading}
+              pauseDetailsError={approvalStatus.isError}
+              onRetryPauseDetails={() => void approvalStatus.refetch()}
               isSubmitting={isSubmitting}
               requireExplicitPerCall
               blockedCalls={blockedCalls}

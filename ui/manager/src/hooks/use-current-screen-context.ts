@@ -105,6 +105,49 @@ const ROUTE_TABLE: readonly RouteEntry[] = [
  * location rather than through the route tree, works regardless of where it
  * is called from — at the cost of needing its own ordered table above.
  */
+/**
+ * How the backend actually models a per-turn context entry.
+ *
+ * `InputData.context` is `Map<String, Context>` — NOT `Map<String, String>` —
+ * where `Context` is `{type, value}` (`ai.labs.eddi.engine.model.Context`).
+ * Sending a bare string makes Jackson fail to construct a `Context` and the
+ * whole `POST /agents/{id}/stream` 400s before the conversation is touched, and
+ * a `Context` with a null `type` NPEs in `ConversationMemoryUtilities
+ * .prepareContext`'s switch. Every other producer in this app already wraps
+ * (`use-chat.ts`'s `secretInput`, `attachments.ts`'s attachment refs); this
+ * exists so the operator drawer cannot forget to.
+ *
+ * `prepareContext` unwraps `.value` into the template map, so a value sent this
+ * way is read back as plain `{context.screen}` in the system prompt.
+ */
+export type ContextPayload = Record<string, { type: "string"; value: string }>;
+
+/**
+ * Converts a screen context to the wire shape, dropping empty entries.
+ *
+ * Ids are validated, not just forwarded: they come from the URL path, and this
+ * value is spliced into the NON-EDITABLE half of the system prompt — the half
+ * deliberately kept out of the admin's reach so prompt text cannot be talked
+ * away. A crafted link (`/manage/agentview/x%0A%0AIgnore all previous…`) would
+ * otherwise arrive inside that preamble looking like a platform instruction.
+ * Real ids are hex object-ids or slugs, so anything outside this class is
+ * dropped rather than sanitised — a missing id degrades to a vaguer prompt,
+ * which is strictly better than a poisoned one.
+ */
+const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function toContextPayload(context: CurrentScreenContext): ContextPayload {
+  const payload: ContextPayload = {};
+  for (const [key, value] of Object.entries(context)) {
+    if (typeof value !== "string" || value.length === 0) continue;
+    // `screen` is ours — one of a fixed set of literals in ROUTE_TABLE — so it
+    // needs no validation. Everything else is URL-derived.
+    if (key !== "screen" && !SAFE_ID.test(value)) continue;
+    payload[key] = { type: "string", value };
+  }
+  return payload;
+}
+
 export function useCurrentScreenContext(): CurrentScreenContext {
   const location = useLocation();
   for (const entry of ROUTE_TABLE) {

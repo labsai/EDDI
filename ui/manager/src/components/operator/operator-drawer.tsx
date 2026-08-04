@@ -7,8 +7,9 @@ import { OperatorChat } from "@/components/operator/operator-chat";
 import { useOperatorConfig } from "@/hooks/use-operator";
 import { useOperatorChat } from "@/hooks/use-operator-chat";
 import { useOperatorDrawerStore } from "@/hooks/use-operator-drawer";
-import { useCurrentScreenContext } from "@/hooks/use-current-screen-context";
+import { useCurrentScreenContext, toContextPayload } from "@/hooks/use-current-screen-context";
 import { useApprovalStatus } from "@/hooks/use-hitl";
+import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 
 export interface OperatorDrawerProps {
@@ -39,7 +40,24 @@ export function OperatorDrawer({ clearsBottomTabBar = false }: OperatorDrawerPro
   const close = useOperatorDrawerStore((s) => s.close);
   const toggle = useOperatorDrawerStore((s) => s.toggle);
 
-  const { data: config, isLoading: configLoading } = useOperatorConfig();
+  // The operator config lives in the global variable store, which the backend
+  // restricts to eddi-admin/eddi-editor. Unlike every other caller of this
+  // hook — all of them admin screens someone navigated to deliberately — this
+  // component is mounted on EVERY page of both shells, so an ungated read here
+  // is a 403 on every navigation for every other role (`eddi-approver` above
+  // all, whose whole job is the approvals inbox). Both roles are checked
+  // because the backend allows either; `useHasRole` returns true for all roles
+  // when auth is off, so a no-auth deployment is unaffected.
+  // One `useAuth()` rather than two `useHasRole()` calls behind `||`: the
+  // short-circuit makes the second a conditional hook call, which
+  // react-hooks/rules-of-hooks rejects (and `npm run lint` is a CI step). It
+  // survives at runtime today only because useHasRole bottoms out in
+  // useContext, which claims no hook slot — one useMemo added inside it and
+  // this crashes every page of both shells.
+  const { method: authMethod, roles } = useAuth();
+  const canReadOperatorConfig =
+    authMethod === "none" || roles.includes("eddi-admin") || roles.includes("eddi-editor");
+  const { data: config, isLoading: configLoading, isError: configError } = useOperatorConfig(canReadOperatorConfig);
   const chat = useOperatorChat(config);
   // Mirrors operator.tsx's own preference for approval-status's pauseReason
   // over the chat hook's derived one: the hook's is null on some pause paths
@@ -61,12 +79,24 @@ export function OperatorDrawer({ clearsBottomTabBar = false }: OperatorDrawerPro
   // at the same time in this tab.
   if (location.pathname.startsWith("/manage/operator")) return null;
 
+  // No launcher at all rather than an "activate it" call-to-action nobody
+  // without these roles could act on. `configError` covers the same ground
+  // empirically: if the read failed anyway (roles mapped differently than this
+  // check assumes), we cannot know whether the operator is even on, and
+  // offering to set up a second one is the worst possible guess.
+  if (!canReadOperatorConfig || configError) return null;
+
   const isActive = Boolean(config?.enabled && config?.agentId);
 
   return (
     <div
       className={cn(
-        "fixed end-6 z-40 flex flex-col items-end gap-3",
+        // z-30, not z-40: both shells render their mobile/tablet nav backdrop
+        // at z-40 and this component AFTER them, so at equal z-index the later
+        // DOM node wins and the launcher painted over an open nav overlay —
+        // clickable, and in Workforce's tablet branch that overlay is
+        // `aria-modal="true"`, so it opened a second panel on top of a modal.
+        "fixed end-6 z-30 flex flex-col items-end gap-3",
         clearsBottomTabBar ? "bottom-20" : "bottom-6",
       )}
     >
@@ -105,7 +135,7 @@ export function OperatorDrawer({ clearsBottomTabBar = false }: OperatorDrawerPro
                 tracesByMessageId={chat.tracesByMessageId}
                 isStreaming={chat.isStreaming}
                 error={chat.error}
-                onSend={(input) => chat.send(input, { ...screenContext })}
+                onSend={(input) => chat.send(input, toContextPayload(screenContext))}
                 onStop={chat.stop}
                 onReset={chat.reset}
                 isPaused={chat.isPaused}
