@@ -2765,6 +2765,7 @@
   },
   "hitl": {
     "loadingApprovalDetails": "Cargando detalles de aprobación…",
+    "pendingCount": "{{count}} pendientes de aprobación",
     "approvalDetailsError": "No se pudo cargar lo que haría esta solicitud, así que no puede aprobarse desde aquí. Rechazarla sigue siendo seguro.",
     "awaitingHuman": "Esperando humano",
     "awaitingApproval": "Esperando aprobación",
@@ -3187,6 +3188,7 @@
     "drawer": {
       "title": "Operador de plataforma",
       "notActivated": "Actívalo para chatear con tu despliegue desde cualquier lugar.",
+      "titleAwaiting": "Operador de plataforma: una decisión te espera",
       "activate": "Configurar el operador de plataforma"
     },
     "approval": {

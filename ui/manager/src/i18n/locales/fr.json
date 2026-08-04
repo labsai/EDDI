@@ -2765,6 +2765,7 @@
   },
   "hitl": {
     "loadingApprovalDetails": "Chargement des détails d’approbation…",
+    "pendingCount": "{{count}} en attente d'approbation",
     "approvalDetailsError": "Impossible de charger ce que ferait cette requête, elle ne peut donc pas être approuvée ici. La rejeter reste sans risque.",
     "awaitingHuman": "En attente humaine",
     "awaitingApproval": "En attente d'approbation",
@@ -3187,6 +3188,7 @@
     "drawer": {
       "title": "Opérateur de plateforme",
       "notActivated": "Activez-le pour discuter avec votre déploiement depuis n'importe où.",
+      "titleAwaiting": "Opérateur de plateforme — une décision vous attend",
       "activate": "Configurer l'opérateur de plateforme"
     },
     "approval": {

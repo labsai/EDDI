@@ -2790,6 +2790,7 @@
   },
   "hitl": {
     "loadingApprovalDetails": "Loading approval details…",
+    "pendingCount": "{{count}} awaiting approval",
     "approvalDetailsError": "Couldn't load what this request would do, so it can't be approved from here. Rejecting is still safe.",
     "awaitingHuman": "Awaiting Human",
     "awaitingApproval": "Awaiting Approval",
@@ -3208,6 +3209,7 @@
     "drawer": {
       "title": "Platform Operator",
       "notActivated": "Turn on the Platform Operator to chat with your deployment from anywhere.",
+      "titleAwaiting": "Platform Operator — a decision is waiting on you",
       "activate": "Set up the Platform Operator"
     },
     "approval": {

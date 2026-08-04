@@ -2759,6 +2759,7 @@
   },
   "hitl": {
     "loadingApprovalDetails": "正在加载审批详情…",
+    "pendingCount": "{{count}} 项待批准",
     "approvalDetailsError": "无法加载此请求将执行的内容，因此无法在此批准。拒绝仍然是安全的。",
     "awaitingHuman": "等待人工",
     "awaitingApproval": "等待审批",
@@ -3181,6 +3182,7 @@
     "drawer": {
       "title": "平台操作员",
       "notActivated": "开启后，你可以随时随地与你的部署对话。",
+      "titleAwaiting": "平台操作员——有一项决定在等你",
       "activate": "设置平台操作员"
     },
     "approval": {

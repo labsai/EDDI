@@ -2759,6 +2759,7 @@
   },
   "hitl": {
     "loadingApprovalDetails": "Freigabedetails werden geladen …",
+    "pendingCount": "{{count}} warten auf Genehmigung",
     "approvalDetailsError": "Es konnte nicht geladen werden, was diese Anfrage bewirken würde, daher kann sie hier nicht genehmigt werden. Ablehnen ist weiterhin sicher.",
     "awaitingHuman": "Warten auf Mensch",
     "awaitingApproval": "Warten auf Genehmigung",
@@ -3181,6 +3182,7 @@
     "drawer": {
       "title": "Plattform-Operator",
       "notActivated": "Aktivieren Sie ihn, um von überall mit Ihrem Deployment zu chatten.",
+      "titleAwaiting": "Plattform-Operator — eine Entscheidung wartet auf Sie",
       "activate": "Plattform-Operator einrichten"
     },
     "approval": {

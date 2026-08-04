@@ -203,3 +203,89 @@ describe("OperatorDrawer", () => {
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
   });
 });
+
+describe("OperatorDrawer — keyboard and pending-approval affordances", () => {
+  beforeEach(() => {
+    authState.roles = [];
+    authState.method = "none";
+    useOperatorChatStore.getState().reset();
+    useOperatorDrawerStore.setState({ isOpen: false });
+    server.resetHandlers();
+    server.use(
+      http.get("*/secretstore/secrets/health", () =>
+        HttpResponse.json({ status: "UP", provider: "local", available: true }),
+      ),
+      http.get("*/secretstore/secrets/default", () => HttpResponse.json([])),
+      http.get("*/administration/:env/deploymentstatus/:agentId", () =>
+        HttpResponse.json({ status: "READY" }),
+      ),
+      http.get("*/pending-approvals", () => HttpResponse.json([])),
+    );
+  });
+
+  it("closes on Escape", async () => {
+    serveConfig(activeConfig());
+    renderWithProviders(<OperatorDrawer />, { initialRoute: "/manage/agents" });
+    await userEvent.click(screen.getByTestId("operator-drawer-fab"));
+    expect(await screen.findByTestId("operator-drawer-panel")).toBeInTheDocument();
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByTestId("operator-drawer-panel")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("returns focus to the launcher when it closes", async () => {
+    serveConfig(activeConfig());
+    renderWithProviders(<OperatorDrawer />, { initialRoute: "/manage/agents" });
+    const fab = screen.getByTestId("operator-drawer-fab");
+    await userEvent.click(fab);
+    await screen.findByTestId("operator-drawer-panel");
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(fab).toHaveFocus());
+  });
+
+  it("does not steal focus to the launcher on first mount", async () => {
+    // The restore is for a real open→close transition; without the guard every
+    // page load would yank focus to the launcher.
+    serveConfig(activeConfig());
+    renderWithProviders(<OperatorDrawer />, { initialRoute: "/manage/agents" });
+    await waitFor(() => expect(screen.getByTestId("operator-drawer-fab")).toBeInTheDocument());
+    expect(screen.getByTestId("operator-drawer-fab")).not.toHaveFocus();
+  });
+
+  it("marks the launcher when a decision is waiting, from SERVER state", async () => {
+    // isPaused is only ever set by a turn THIS tab streamed, so after a reload
+    // — or a pause raised elsewhere — the launcher would look idle while the
+    // operator sat blocked.
+    serveConfig(activeConfig());
+    server.use(
+      http.get("*/pending-approvals", () =>
+        HttpResponse.json([
+          { conversationId: "other-conv", agentId: "op-1", pauseType: "TOOL_CALL", pausedAt: null },
+        ]),
+      ),
+    );
+
+    renderWithProviders(<OperatorDrawer />, { initialRoute: "/manage/agents" });
+
+    expect(await screen.findByTestId("operator-drawer-pending-dot")).toBeInTheDocument();
+    expect(screen.getByTestId("operator-drawer-fab")).toHaveAccessibleName(/waiting on you/i);
+  });
+
+  it("leaves the launcher unmarked when the pending approval belongs to another agent", async () => {
+    serveConfig(activeConfig());
+    server.use(
+      http.get("*/pending-approvals", () =>
+        HttpResponse.json([
+          { conversationId: "c9", agentId: "some-other-agent", pauseType: "RULE", pausedAt: null },
+        ]),
+      ),
+    );
+
+    renderWithProviders(<OperatorDrawer />, { initialRoute: "/manage/agents" });
+    await waitFor(() => expect(screen.getByTestId("operator-drawer-fab")).toBeInTheDocument());
+    expect(screen.queryByTestId("operator-drawer-pending-dot")).not.toBeInTheDocument();
+  });
+});

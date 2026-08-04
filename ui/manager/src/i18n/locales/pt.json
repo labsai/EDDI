@@ -2765,6 +2765,7 @@
   },
   "hitl": {
     "loadingApprovalDetails": "Carregando detalhes de aprovação…",
+    "pendingCount": "{{count}} a aguardar aprovação",
     "approvalDetailsError": "Não foi possível carregar o que este pedido faria, por isso não pode ser aprovado aqui. Rejeitar continua a ser seguro.",
     "awaitingHuman": "Aguardando humano",
     "awaitingApproval": "Aguardando aprovação",
@@ -3187,6 +3188,7 @@
     "drawer": {
       "title": "Operador da plataforma",
       "notActivated": "Ative-o para conversar com a sua implantação a partir de qualquer lugar.",
+      "titleAwaiting": "Operador da plataforma — uma decisão aguarda por si",
       "activate": "Configurar o operador da plataforma"
     },
     "approval": {

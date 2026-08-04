@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { usePendingApprovals } from "@/hooks/use-hitl";
 import {
   LayoutDashboard,
   Bot,
@@ -124,6 +125,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     retry: 1, // Don't retry infinitely if offline
   });
 
+  // Shares its query key with the approvals page, so mounting this in the
+  // sidebar adds an observer rather than a second poll. The endpoint allows
+  // eddi-approver alongside admin/editor/user, so every role that can act on
+  // an approval can also see that one is waiting.
+  const { data: pendingApprovals } = usePendingApprovals();
+  const pendingApprovalCount = pendingApprovals?.length ?? 0;
+
   /** User initials for avatar */
   const initials = showUser
     ? [user.firstName, user.lastName]
@@ -246,7 +254,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                     end={item.path === "/manage" || item.path === "/manage/conversations"}
                     className={({ isActive }) =>
                       cn(
-                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all",
+                        "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all",
                         "hover:bg-sidebar-accent/10 hover:text-sidebar-accent",
                         isActive
                           ? "border-s-2 border-sidebar-accent bg-sidebar-accent/10 text-sidebar-accent"
@@ -259,6 +267,27 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                   >
                     <item.icon className="h-5 w-5 shrink-0" aria-hidden="true" />
                     {!collapsed && <span>{label}</span>}
+                    {/* Nothing else in the app says a decision is waiting on
+                        you — an approval sits paused until someone happens to
+                        open this page. The count is the whole point, so it is
+                        rendered even collapsed, where it becomes a dot on the
+                        icon. */}
+                    {item.path === "/manage/approvals" && pendingApprovalCount > 0 && (
+                      <span
+                        className={cn(
+                          "ms-auto inline-flex items-center justify-center rounded-full bg-amber-500 font-semibold text-white",
+                          collapsed
+                            ? "absolute top-1.5 end-1.5 h-2 w-2"
+                            : "h-5 min-w-5 px-1.5 text-[11px]",
+                        )}
+                        data-testid="nav-approvals-badge"
+                        aria-label={t("hitl.pendingCount", "{{count}} awaiting approval", {
+                          count: pendingApprovalCount,
+                        })}
+                      >
+                        {!collapsed && (pendingApprovalCount > 99 ? "99+" : pendingApprovalCount)}
+                      </span>
+                    )}
                   </NavLink>
                   );
                 })}

@@ -2759,6 +2759,7 @@
   },
   "hitl": {
     "loadingApprovalDetails": "承認の詳細を読み込んでいます…",
+    "pendingCount": "{{count}} 件が承認待ち",
     "approvalDetailsError": "このリクエストが何を行うかを読み込めなかったため、ここでは承認できません。拒否は引き続き安全です。",
     "awaitingHuman": "人間待ち",
     "awaitingApproval": "承認待ち",
@@ -3181,6 +3182,7 @@
     "drawer": {
       "title": "プラットフォームオペレーター",
       "notActivated": "有効にすると、どこからでもデプロイとチャットできます。",
+      "titleAwaiting": "プラットフォームオペレーター — 判断をお待ちしています",
       "activate": "プラットフォームオペレーターを設定"
     },
     "approval": {

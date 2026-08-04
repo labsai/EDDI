@@ -2759,6 +2759,7 @@
   },
   "hitl": {
     "loadingApprovalDetails": "승인 세부 정보를 불러오는 중…",
+    "pendingCount": "{{count}}건 승인 대기 중",
     "approvalDetailsError": "이 요청이 무엇을 하는지 불러오지 못해 여기서는 승인할 수 없습니다. 거부는 여전히 안전합니다.",
     "awaitingHuman": "사람 대기 중",
     "awaitingApproval": "승인 대기 중",
@@ -3181,6 +3182,7 @@
     "drawer": {
       "title": "플랫폼 오퍼레이터",
       "notActivated": "켜면 어디서든 배포와 대화할 수 있습니다.",
+      "titleAwaiting": "플랫폼 오퍼레이터 — 결정이 기다리고 있습니다",
       "activate": "플랫폼 오퍼레이터 설정"
     },
     "approval": {

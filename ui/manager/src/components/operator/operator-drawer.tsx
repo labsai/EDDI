@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, Link } from "react-router-dom";
 import { Sparkles, X, Loader2 } from "lucide-react";
@@ -8,7 +8,7 @@ import { useOperatorConfig } from "@/hooks/use-operator";
 import { useOperatorChat } from "@/hooks/use-operator-chat";
 import { useOperatorDrawerStore } from "@/hooks/use-operator-drawer";
 import { useCurrentScreenContext, toContextPayload } from "@/hooks/use-current-screen-context";
-import { useApprovalStatus } from "@/hooks/use-hitl";
+import { useApprovalStatus, usePendingApprovals } from "@/hooks/use-hitl";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 
@@ -74,6 +74,67 @@ export function OperatorDrawer({ clearsBottomTabBar = false }: OperatorDrawerPro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
+  /**
+   * Escape closes, focus moves in on open and back to the launcher on close.
+   *
+   * The panel is rendered BEFORE the launcher in the DOM (the flex column puts
+   * it visually above), so without moving focus deliberately a keyboard user
+   * who activates the launcher tabs *past* the drawer into the rest of the
+   * page and has to shift-tab backwards to reach what they just opened. Not a
+   * focus trap: this panel is non-modal by design — the page behind it stays
+   * usable — so trapping would be wrong. `WorkforceLayout`'s nav drawer IS
+   * modal and does trap; the difference is deliberate.
+   */
+  const panelRef = useRef<HTMLDivElement>(null);
+  const fabRef = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      // Only restore focus on a real open→close transition, never on mount,
+      // or every page load would steal focus to the launcher.
+      if (wasOpen.current) fabRef.current?.focus();
+      wasOpen.current = false;
+      return;
+    }
+    wasOpen.current = true;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    // rAF so the panel has been laid out before we look for something to focus.
+    const raf = requestAnimationFrame(() => {
+      const target = panelRef.current?.querySelector<HTMLElement>(
+        'input, button, [href], select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      target?.focus();
+    });
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      cancelAnimationFrame(raf);
+    };
+  }, [isOpen, close]);
+
+  /**
+   * Whether a decision is waiting on someone, from SERVER state rather than
+   * this tab's chat store.
+   *
+   * `isPaused` is only ever set by a turn this tab streamed, so after a reload
+   * — or when the pause was raised in another tab, or by a scheduled run — the
+   * launcher would look idle while the operator sat blocked. The pending list
+   * is the same query the sidebar badge and the approvals inbox read, so this
+   * costs no extra request, and it is readable by every role that can act on
+   * an approval.
+   */
+  const { data: pendingApprovals } = usePendingApprovals();
+  const operatorHasPendingApproval =
+    chat.isPaused ||
+    (pendingApprovals ?? []).some(
+      (item) =>
+        (chat.conversationId && item.conversationId === chat.conversationId) ||
+        (config?.agentId && item.agentId === config.agentId),
+    );
+
   // Redundant with the page you're already on, and structurally the one
   // guard that keeps two OperatorChat instances from ever being interactive
   // at the same time in this tab.
@@ -102,6 +163,8 @@ export function OperatorDrawer({ clearsBottomTabBar = false }: OperatorDrawerPro
     >
       {isOpen && (
         <div
+          ref={panelRef}
+          id="operator-drawer-panel"
           className="flex h-[32rem] w-96 max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl"
           role="complementary"
           aria-label={t("operator.drawer.title", "Platform Operator")}
@@ -165,13 +228,28 @@ export function OperatorDrawer({ clearsBottomTabBar = false }: OperatorDrawerPro
       )}
 
       <button
+        ref={fabRef}
         onClick={toggle}
-        className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105"
+        className="relative flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105"
         title={t("operator.drawer.title", "Platform Operator")}
-        aria-label={t("operator.drawer.title", "Platform Operator")}
+        aria-label={
+          operatorHasPendingApproval
+            ? t("operator.drawer.titleAwaiting", "Platform Operator — a decision is waiting on you")
+            : t("operator.drawer.title", "Platform Operator")
+        }
         aria-expanded={isOpen}
+        aria-controls={isOpen ? "operator-drawer-panel" : undefined}
         data-testid="operator-drawer-fab"
       >
+        {/* The pause is silent otherwise: the conversation simply stops and
+            waits, with nothing anywhere saying so. */}
+        {operatorHasPendingApproval && !isOpen && (
+          <span
+            className="absolute -top-0.5 -end-0.5 h-3.5 w-3.5 rounded-full border-2 border-background bg-amber-500"
+            data-testid="operator-drawer-pending-dot"
+            aria-hidden="true"
+          />
+        )}
         {isOpen ? <X className="h-5 w-5" aria-hidden="true" /> : <Sparkles className="h-5 w-5" aria-hidden="true" />}
       </button>
     </div>

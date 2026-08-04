@@ -2783,6 +2783,7 @@
   },
   "hitl": {
     "loadingApprovalDetails": "جارٍ تحميل تفاصيل الموافقة…",
+    "pendingCount": "{{count}} بانتظار الموافقة",
     "approvalDetailsError": "تعذّر تحميل ما سيفعله هذا الطلب، لذا لا يمكن الموافقة عليه من هنا. الرفض ما زال آمنًا.",
     "awaitingHuman": "في انتظار الإنسان",
     "awaitingApproval": "في انتظار الموافقة",
@@ -3205,6 +3206,7 @@
     "drawer": {
       "title": "مُشغّل المنصة",
       "notActivated": "فعّله للدردشة مع نشرك من أي مكان.",
+      "titleAwaiting": "مُشغّل المنصة — قرار بانتظارك",
       "activate": "إعداد مُشغّل المنصة"
     },
     "approval": {
