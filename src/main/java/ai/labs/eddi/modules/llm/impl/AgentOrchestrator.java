@@ -1051,20 +1051,6 @@ class AgentOrchestrator {
     }
 
     /**
-     * Merge one source of externally-discovered tools into the registry, refusing
-     * any name that is already taken.
-     * <p>
-     * Finding F15: the merge used to be {@code toolSpecs.addAll} +
-     * {@code toolExecutors.putAll}. Specs accumulated in a List, so a duplicate
-     * name reached the model TWICE, while executors went into a Map where the last
-     * write won — a remote MCP server advertising {@code calculator} silently
-     * replaced the built-in one for every call the model made.
-     * {@code toolsWhitelist} filters by name and cannot express "must not collide".
-     * <p>
-     * Precedence follows merge order: built-in beats http beats mcp beats a2a. The
-     * loser is dropped, never silently substituted, and every collision is logged.
-     */
-    /**
      * Drop every request resolver whose name is not owned by a surviving http tool.
      * <p>
      * {@link #mergeExternalTools} resolves a name collision by DROPPING the
@@ -1082,6 +1068,20 @@ class AgentOrchestrator {
         resolvers.keySet().removeIf(name -> !"http".equals(toolSources.get(name)));
     }
 
+    /**
+     * Merge one source of externally-discovered tools into the registry, refusing
+     * any name that is already taken.
+     * <p>
+     * Finding F15: the merge used to be {@code toolSpecs.addAll} +
+     * {@code toolExecutors.putAll}. Specs accumulated in a List, so a duplicate
+     * name reached the model TWICE, while executors went into a Map where the last
+     * write won — a remote MCP server advertising {@code calculator} silently
+     * replaced the built-in one for every call the model made.
+     * {@code toolsWhitelist} filters by name and cannot express "must not collide".
+     * <p>
+     * Precedence follows merge order: built-in beats http beats mcp beats a2a. The
+     * loser is dropped, never silently substituted, and every collision is logged.
+     */
     static void mergeExternalTools(List<ToolSpecification> incomingSpecs, Map<String, ToolExecutor> incomingExecutors, String source,
                                    List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors, Map<String, String> toolSources) {
         if (incomingSpecs == null || incomingSpecs.isEmpty()) {
