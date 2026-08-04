@@ -5,6 +5,20 @@
 
 ---
 
+## ✅ test(orchestrator): two gates that a real regression would have shipped green
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Both found by the branch review's test-quality lens, and both **verified by mutation before writing the test** — the claims were exact.
+
+**`AgentOrchestratorLocalToolAssemblyTest` was vacuous for 4 of its 5 tool sources.** Its shared `memory()` stub deliberately keeps the contextual and dynamic-agent sources quiet so the old-vs-new comparison isolates the paths — but the consequence was that all 8 tests compared only the nine plain built-in beans. Deleting `contextualToolsProvider()` and `dynamicAgentToolsProvider()` outright from `buildToolSetup`'s phase-1 list — which would silently remove `UserMemoryTool`, `ConversationRecallTool` and every dynamic-agent tool from every agent in the deployment — passed the entire class. Confirmed by running it. The new test names a dynamic-agent tool in the whitelist, so it pins the *provider set* rather than the bean list; with the providers deleted it now fails.
+
+**`DynamicAgentToolsProvider.contribute`'s `enableBuiltInTools` gate had zero coverage.** Its own Javadoc calls it "the highest-blast-radius gate in this class", and no test called `contribute()` at all — every existing test drove `addDynamicAgentTools` directly, one layer below the gate. Deleting it would hand an agent configured `enableBuiltInTools: false`, but carrying a stale whitelist still naming `create_sub_agent`/`teardown_agent`, tools that deploy and delete real agents. Now covered on both the off and unset paths, plus the positive case so the negative one cannot pass by the provider simply never contributing.
+
+One correction worth recording: my first version of the assembly assertion used the canonical slug (`calculator`) where the assembled spec carries the `@Tool` method name (`calculate`). The test failed immediately and correctly.
+
+---
+
 ## 🐛 fix(groups): a continuation round could report the previous round's conclusion (2026-08-04)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

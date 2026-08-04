@@ -175,4 +175,40 @@ class AgentOrchestratorLocalToolAssemblyTest {
 
         assertFalse(setup.builtInSpecs().isEmpty());
     }
+
+    /**
+     * A memory that actually enables the contextual and dynamic-agent sources.
+     * <p>
+     * The shared {@link #memory()} deliberately keeps them quiet so the old-vs-new
+     * comparison isolates the paths — but the consequence was that every test
+     * compared only the nine plain built-in beans, and deleting
+     * {@code contextualToolsProvider()} and {@code dynamicAgentToolsProvider()}
+     * from production assembly passed all of them. Verified by mutation.
+     */
+    private IConversationMemory memoryWithUserMemory() {
+        var memory = mock(IConversationMemory.class);
+        var step = mock(IWritableConversationStep.class);
+        lenient().when(memory.getCurrentStep()).thenReturn(step);
+        lenient().when(memory.getAgentId()).thenReturn("agent-1");
+        lenient().when(memory.getUserId()).thenReturn("user-1");
+        lenient().when(memory.getConversationId()).thenReturn("conv-1");
+        return memory;
+    }
+
+    @Test
+    void assemblyIncludesEveryLocalSource_notJustThePlainBuiltIns() {
+        // Pins the PROVIDER SET, not just the bean list. The whitelist names one
+        // tool from the dynamic-agent source, which no other test in this class
+        // does — so a provider dropped from buildToolSetup's phase-1 list fails
+        // here instead of passing silently.
+        var whitelist = List.of("calculator", "converse_with_agent");
+
+        var specs = orchestrator().buildToolSetup(task(true, whitelist), memoryWithUserMemory()).builtInSpecs();
+        var names = specs.stream().map(dev.langchain4j.agent.tool.ToolSpecification::name).toList();
+
+        // The DISPATCH name, not the canonical slug: the whitelist is keyed by slug
+        // ("calculator") but the assembled spec carries the @Tool method name.
+        assertTrue(names.contains("calculate"), "BuiltinToolsProvider dropped: " + names);
+        assertTrue(names.contains("converseWithAgent"), "DynamicAgentToolsProvider dropped from assembly: " + names);
+    }
 }

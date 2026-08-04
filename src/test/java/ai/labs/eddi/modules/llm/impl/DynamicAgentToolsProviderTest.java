@@ -7,6 +7,9 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -145,5 +148,48 @@ class DynamicAgentToolsProviderTest {
     @Test
     void constructedWithMockedCollaborators_doesNotThrow() {
         assertDoesNotThrow(this::provider);
+    }
+
+    // =================================================================
+    // contribute() — the enableBuiltInTools gate (branch review)
+    // =================================================================
+
+    private ToolAssemblyContext assemblyCtx(Boolean enableBuiltInTools, List<String> whitelist) {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(enableBuiltInTools);
+        var memory = mock(IConversationMemory.class);
+        lenient().when(memory.getCurrentStep()).thenReturn(mock(IWritableConversationStep.class));
+        lenient().when(memory.getConversationId()).thenReturn("conv-1");
+        return new ToolAssemblyContext(memory, task, whitelist, null, "user-1", "agent-1", null);
+    }
+
+    @Test
+    void contribute_builtInToolsDisabled_contributesNothing() {
+        // This class's own Javadoc calls it "the highest-blast-radius gate in this
+        // class", and nothing called contribute() at all — every test drove
+        // addDynamicAgentTools directly. Deleting the gate would hand an agent
+        // configured enableBuiltInTools:false, but carrying a stale whitelist that
+        // still names create_sub_agent / teardown_agent, tools that deploy and
+        // delete real agents in production.
+        var whitelist = List.of("create_sub_agent", "converse_with_agent", "teardown_agent");
+
+        assertTrue(provider().contribute(assemblyCtx(false, whitelist)).specs().isEmpty());
+        assertTrue(provider().contribute(assemblyCtx(null, whitelist)).specs().isEmpty(),
+                "unset means off — that is the documented default");
+    }
+
+    @Test
+    void contribute_builtInToolsEnabled_contributesTheWhitelistedTools() {
+        // The positive case, so the gate test above cannot pass by the provider
+        // simply never contributing anything.
+        var contribution = provider().contribute(assemblyCtx(true, List.of("converse_with_agent")));
+
+        assertFalse(contribution.specs().isEmpty(), "an enabled agent must still get its whitelisted tools");
+        assertTrue(contribution.specs().stream().anyMatch(spec -> spec.name().equals("converseWithAgent")));
+    }
+
+    @Test
+    void contribute_emptyWhitelist_contributesNothing() {
+        assertTrue(provider().contribute(assemblyCtx(true, List.of())).specs().isEmpty());
     }
 }
