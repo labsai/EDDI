@@ -208,8 +208,12 @@ what it finds. Off by default. Worth knowing before touching it:
   or deleting it there breaks the operator screen.
 - **Its capability boundary is the allow-list** in `src/lib/operator/tool-scopes.ts`
   — an allow-list, never a deny-list, because a deny-list silently grants any
-  endpoint the backend adds later. `WRITE_ENDPOINTS` holds four curated writes;
-  offering them at all is additionally gated by `isWriteScopeAvailable`
+  endpoint the backend adds later. `WRITE_ENDPOINTS` holds 22 entries — read the
+  constant rather than this line, and read its doc comment before adding to it:
+  what is excluded (every `DELETE`, the full agent and group document PUTs, and
+  every `llmstore` write — each because that document carries an approval gate
+  of its own) is as deliberate as what is included.
+  Offering any of them is additionally gated by `isWriteScopeAvailable`
   (backend HITL support, an already-verified gate, caller-identity auth, and a
   mounted approval surface all have to hold — see `operator-activation.tsx`).
   Granting `read_write` runs a write canary (`write-canary.ts`) that provokes

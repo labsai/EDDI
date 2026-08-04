@@ -175,7 +175,19 @@ async function runProbe(
       return {
         outcome: "fail",
         toolCalls,
-        error: "The write executed without pausing for approval. The approval gate is not protecting this operator.",
+        // Says what was changed, not only that the gate failed. On this path the
+        // probe's descriptor rename EXECUTED: a real agent in this deployment now
+        // has " [operator-write-canary]" appended to its name, permanently. The
+        // rollback that follows deletes the operator — i.e. the only thing that
+        // could have undone it — so an admin told merely "the gate is broken" is
+        // left with silent config drift they were never informed of. The probe
+        // deliberately does not know WHICH agent (it tells the model to pick any
+        // one), so the honest thing is to say so and name the marker to search
+        // for.
+        error:
+          "The write executed without pausing for approval — the approval gate is not protecting this operator. " +
+          "The probe's test write went through, so one agent in this deployment now has \" [operator-write-canary]\" " +
+          "appended to its name. Search your agents for that text and rename it back.",
         durationMs: Date.now() - startedAt,
       };
     }

@@ -129,17 +129,40 @@ export function useActivateOperator() {
       // 201 does not mean deployed, and the id can come back as "unknown".
       assertProvisioned(result);
 
-      onStage?.("resolving-version");
-      const version = await resolveAgentVersion(result);
+      // Everything from here to the config write is rolled back on failure.
+      // provisionOperator DEPLOYS the agent, so a throw in any of these steps
+      // used to leave a live agent bound to the whole admin-API surface and
+      // running as the caller's identity — while the operator screen still said
+      // "off", because the config variable it reads was never written. It was
+      // invisible, unmanaged, and a retry made a second one:
+      // removeSupersededAgent only ever cleans up the agent recorded in the
+      // config. The write-canary path below already rolls back for exactly this
+      // reason; these three steps simply never got the same treatment.
+      let version: number;
+      let next: OperatorConfig;
+      try {
+        onStage?.("resolving-version");
+        version = await resolveAgentVersion(result);
 
-      onStage?.("saving");
-      const next: OperatorConfig = {
-        ...config,
-        enabled: true,
-        agentId: result.agentId,
-        version,
-      };
-      await writeOperatorConfig(next);
+        onStage?.("saving");
+        next = {
+          ...config,
+          enabled: true,
+          agentId: result.agentId,
+          version,
+        };
+        await writeOperatorConfig(next);
+      } catch (provisioningError) {
+        // Best-effort: the original failure is what the admin needs to see, and
+        // a cleanup that itself fails must not replace it. `version` may be
+        // unresolved, so fall back to 1 — the version provisionOperator creates.
+        try {
+          await removeSupersededAgent({ ...config, agentId: result.agentId, version: 1 });
+        } catch {
+          // Left deployed; the rethrown error below is still the honest report.
+        }
+        throw provisioningError;
+      }
 
       // Retire the agent this activation replaced, so repeated reconfiguration
       // doesn't accumulate deployed operators.
