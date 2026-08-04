@@ -51,7 +51,8 @@ public class RequestRedactor {
         }
         String name = headerName.toLowerCase(Locale.ROOT);
         return name.contains("authorization") || name.contains("api-key") || name.contains("api_key") || name.contains("apikey")
-                || name.contains("x-api-key") || name.contains("token") || name.contains("secret") || name.contains("credential");
+                || name.contains("x-api-key") || name.contains("token") || name.contains("secret") || name.contains("credential")
+                || name.contains("password");
     }
 
     /**

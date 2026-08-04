@@ -77,6 +77,18 @@ class RequestRedactorTest {
         }
 
         @Test
+        void aHeaderNamedPasswordIsRedactedByNameAlone() {
+            // "hunter2" alone matches no value shape — SecretRedactionFilter's
+            // generic rule needs the credential name INSIDE the value (e.g.
+            // "password=hunter2"), not sitting in a separate header name. Only
+            // isSensitiveHeaderName can catch this, and until now it didn't
+            // recognize "password" despite this class's own javadoc listing it
+            // as a recognized credential name (see the generic-rule reference
+            // above redactUri).
+            assertEquals(RequestRedactor.REDACTED, redactor.redactHeaderValue("X-Password", "hunter2"));
+        }
+
+        @Test
         void anOrdinaryHeaderIsLeftIntact() {
             // Over-redaction is its own failure: an approver who cannot read the
             // request cannot meaningfully approve it.
@@ -146,6 +158,17 @@ class RequestRedactorTest {
             String redacted = map.get(IRequest.KEY_URI).toString();
             assertFalse(redacted.contains(KEY), redacted);
             assertTrue(redacted.startsWith("https://token:8200/"), redacted);
+        }
+
+        @Test
+        void aQueryParamNamedPasswordIsRedactedByNameAlone() {
+            // redactQueryParamValue shares isSensitiveHeaderName with header
+            // redaction — this is the same name-check gap, on the other channel
+            // it feeds.
+            var map = new HashMap<String, Object>();
+            map.put(IRequest.KEY_URI, "https://x/y?password=hunter2");
+            redactor.redactRequestMap(map);
+            assertFalse(map.get(IRequest.KEY_URI).toString().contains("hunter2"), map.get(IRequest.KEY_URI).toString());
         }
 
         @Test
