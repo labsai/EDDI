@@ -1,32 +1,6 @@
 # Group Collaboration Improvements — Implementation Plan (Revision 2.1)
 
-> **Status:** **Wave R, Wave 0 and part of Waves 1–2 are IMPLEMENTED** on `refactor/group-service-split` (PR [#626](https://github.com/labsai/EDDI/pull/626)) · **Date:** 2026-07-29 (Rev 2) · re-aligned against `main` 2026-08-01 (Rev 2.1) · implementation status added 2026-08-04
->
-> ### Implementation status (2026-08-04)
->
-> | Item | Status |
-> | --- | --- |
-> | **Wave R** — R1 (`GroupConversationService` → 8 collaborators), R2 (`AgentOrchestrator` → `ToolSourceProvider` SPI), R3 (`ConversationService` → HITL + step runner) | ✅ **Done** |
-> | **Wave 0** — F1 registry, F2 ResumePoint, F3 DecisionRecord, F4 entry types + visibility, F5 cost ledger, F6 schema versioning | ✅ **Done** |
-> | **Wave 1** — I1 cost ceiling, I2 convergence, I3 verdicts + deterministic synthesis, I4 abstention + minority report | ✅ **Done** |
-> | **Wave 2** — I5 agent-filed tasks, I7 recruitment + configurable delegation timeout | ✅ **Done** |
-> | **Wave 2** — I6, I8, I9, I14, I17 | ⬜ Not started |
-> | **Wave 3** — I10, I11, I12, I13, I18 | ⬜ Not started |
->
-> **Known gaps in what shipped** — read before building on these:
->
-> - **I1's ceiling cannot fire for an ordinary group.** `AUDIT_COST` is written only from `cascadeCostUsd + toolCostUsd`, so a plain (non-cascade, no priced tool) model call contributes **$0**. `totalCost` stays 0, the ceiling never trips, and `memberCosts`/`totalCost` are serialized into the public payload as if authoritative. Pricing model calls is a prerequisite for I13's budgets.
-> - **I7's cost sub-budget was not built.** `IConversationService.say()` has no budget parameter and single-agent conversations have no ceiling mechanism; only group `discuss()` does. Given the item above, a ceiling there would bound a number that is mostly zero.
-> - **`decision_reached` never fires.** I3 sets `DecisionRecord` but no producer calls the sink event, so verdicts appear over REST/MCP but never on SSE or Slack. `SlackGroupDiscussionListener.onDecisionReached` is currently dead code.
-> - **Nested-group cost is overwritten, not accumulated.** `accumulateNestedGroupCost` keys by `agentId` and each nested turn is a fresh child discussion starting at 0, so only the last child's spend survives.
-> - **`allowAbstention` on a SYNTHESIS phase** yields a `COMPLETED` discussion with no answer.
-> - **Parallel-phase late entries are lost.** After the batch deadline, a member finishing milliseconds late has its real entry replaced by SKIPPED. Both obvious fixes were tried and rejected (one extends the deadline that exists to bound the phase; the other loses the entries entirely) — recovering it needs the deadline contract renegotiated.
->
-> **Deliberate deviations from this plan, with reasons recorded in `docs/changelog.md`:** I3 requires a two-sided roster *and* an impartial judge before producing a verdict (a role-less or moderator-less debate concludes in prose rather than fabricating a winner); I5 assigns every filed task at creation (an unowned task is never scheduled by the EXECUTE wave, so "the loop will assign it later" was not true).
-> **Scope:** Refactoring workstream R1–R3, foundations F1–F6, items I1–I14 + I17–I18. Items **I15 (cross-team process DAGs) and I16 (A2A remote members) are explicitly out of scope** — do not start them.
-> **Audience:** A coding agent with **no prior context**. Everything needed is in this document plus the referenced files. Read [AGENTS.md](../AGENTS.md) first and follow its workflow protocol: branch from `origin/main` (never push a `claude/*` branch name), changelog entry in the same commit as the work, conventional commits, **no AI co-author trailers**, ask before pushing, never force-push.
->
-> **Changed from Rev 1:** (a) a new **Wave R refactoring workstream** decomposes the three monolith classes (`GroupConversationService` 3,962 lines, `AgentOrchestrator` 2,460 lines, `ConversationService` 2,489 lines) so features land in clean homes — R1 gates the group features, R2 gates the tool features; (b) an external research review was analyzed — its adopted findings appear as foundation **F6 (state schema versioning)**, new items **I17 (Shared Artifacts)** and **I18 (bid-based task assignment)**, plus template-level anti-sycophancy directives and extensions to I7/I9/I13/I14; its rejected findings are listed with reasons in §6; (c) sequencing updated accordingly.
+> **Status, sequencing and what to do next: [`group-collaboration-NEXT.md`](group-collaboration-NEXT.md)** — that file is the single source of truth for *what is done and what to build next*. **This file is the design reference only** and deliberately does not track status; read the one section for the item you are building. · **Date:** 2026-07-29 (Rev 2) · re-aligned against `main` 2026-08-01 (Rev 2.1)
 >
 > **Changed in Rev 2.1 (post-merge alignment):** every load-bearing claim was re-verified against merged `main`. All core theses hold (last-speaker-wins, debate team-filter defect, no group cost ceiling, recruitment roster gap, V7 asymmetry, zero identifier collisions with planned names). Deltas folded in: (a) main **partially shipped I7's delegation hardening** (`maxDelegationsPerTask` now enforced per turn; new `maxDelegationDepth`/`allowedDelegationTargets`; `allowRecruitment` now gates capability *discovery* — roster entry is still missing) — I7 re-scoped; (b) **V2 is resolved**: group-visibility memory is user-scoped by design, so I8 now specifies an *additive* synthetic-team-owner query branch instead of widening group visibility; (c) `GroupConversationService` gained a **cooperative-cancellation cluster** and documented lock ordering that R1's extractions must preserve; (d) new **graceful-shutdown machinery** exists that `ConversationService` participates in but the group service does not — wired in as an explicit R1 follow-up commit; (e) all line counts/anchors refreshed (the three classes are now 4,417 / 2,725 / 2,698 lines; the test net grew to 40 classes / ~27,500 lines); (f) new REST/Bean-Validation ceilings (`MAX_MEMBERS=100`, `MAX_DISCUSSION_ROUNDS=50`, request-size caps) set the validation conventions all new config fields must follow.
 

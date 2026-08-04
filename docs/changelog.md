@@ -5,6 +5,25 @@
 
 ---
 
+## 📋 docs(plan): a single handoff file so a new session knows what to build next (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+New `planning/group-collaboration-NEXT.md`. The implementation plan is 500+ lines of *design* and carried no status, so picking the work back up meant re-deriving what had shipped from git history — which is exactly how the earlier sessions lost time.
+
+**Status now lives in exactly one file.** The status block added to the plan earlier today was collapsed to a pointer rather than duplicated: two files tracking status drift, and the stale one is always the one that gets read. The plan is now explicitly the design reference, NEXT.md the sequencing authority.
+
+**What it records that git history does not:**
+
+- **Two defects to fix before any new feature** — N1: `AUDIT_COST` sums `cascadeCostUsd + toolCostUsd` only, so an ordinary model call prices at $0, I1's ceiling can never trip, and `$0.00` is served over REST as if authoritative. Scoped while writing this: the arithmetic and the `inputPricePer1M`/`outputPricePer1M` fields already exist in `CascadingModelExecutor.computeCost`, and token usage is already accumulated on the ordinary path — only the price is missing at the non-cascade level, so this is small and stays config-driven (no hardcoded provider price table; prices are an agent-designer concern). N2: I9 windowing, a live ~quadratic cost bug that every later item makes worse.
+- **An ordered queue with dependencies** — I17/I14/I8 are unblocked and parallelize; I12 and I13 are late because they *compose* the earlier items and building them first means building them twice; I10 ships last so templates only reference features that exist.
+- **The gaps that are not on the critical path**, including the two whose obvious fixes were tried and rejected (parallel-phase late entries), so the next session does not re-attempt them.
+- **The conventions that cost time on this branch** — `@Vetoed` on `@Tool` classes (no unit test catches it; the app just won't start), `getForMember` not `get` for caller-supplied ids, the mutation-check discipline that caught three wrong fixes, the red-out-of-the-box local baseline, and that a CONFLICTING PR never runs `ci.yml` while still looking green.
+
+**Files:** `planning/group-collaboration-NEXT.md` (new), `planning/group-collaboration-improvements-plan.md` (status block → pointer).
+
+---
+
 ## 🐛 fix(orchestrator): MCP tool-name collision could run a different server's tool (2026-08-04)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
