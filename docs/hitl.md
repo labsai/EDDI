@@ -386,9 +386,20 @@ Query parameters get the same treatment as the body — hashed as resolved, reda
 
 Body and query redaction are by **value shape**, not field name — a body is caller-defined JSON (or another format entirely) with no fixed key vocabulary to match on the way headers have. `SecretRedactionFilter` (the same filter behind `argumentsRedacted`) removes OpenAI/Anthropic-style keys, bearer tokens and vault references wherever they appear. A hand-rolled secret in a generically named field, matching none of those shapes, is not caught — the same limitation the redacted tool arguments already carry, and the reason a config write that must carry a credential belongs behind a vault reference rather than a literal.
 
-**A call can be unpinned**, and that is a deliberate degrade, not a bug: every non-`http` tool (builtin/mcp/a2a — there is no HTTP request on this side of the boundary to pin), and any `http` call whose config carries `preRequest.propertyInstructions` (those write to conversation memory, so resolving them ahead of execution would apply them twice). An unpinned call (`requestFingerprint == null`) is approved on name and arguments alone, exactly as before pinning existed — nothing is ever refused on a comparison that was never sound. An **amended** call (`amendedArguments` set) is likewise never fingerprint-checked: the approver rewrote the request themselves, so the pin describes the request they replaced.
+**A call can be unpinned**, and that is a deliberate degrade, not a bug. A call is left unpinnable whenever `execute()` could legitimately build a request that `resolve()` did not — the guard is "never pin what cannot be honoured", so the set is defined by that property rather than by a list of features:
 
-Three situations fail **closed** instead — refused, not silently allowed — because "cannot verify" is a different answer than "unchanged": the tool disappeared from the workflow between pause and resume, re-resolution throws, or the call's config gained `preRequest.propertyInstructions` mid-pause (a pinned call becoming unpinnable). Treating any of these as "unchanged" would make reconfiguring an agent while a human is deciding the way around the guard.
+| Unpinnable when | Why `execute()` can diverge from `resolve()` |
+| --- | --- |
+| The tool is not `http` (builtin/mcp/a2a) | There is no HTTP request on this side of the boundary to pin. |
+| `preRequest.propertyInstructions` is set | Those write to conversation memory, so resolving them ahead of execution would apply them twice. |
+| `fireAndForget` **and** `preRequest.batchRequests` | The batch expands at execution time into N requests, none of them the single one that was previewed. |
+| `postResponse.retryApiCallInstruction` with `maxRetries >= 1` | `buildRequest` sits inside the retry loop, and each attempt re-renders templates against a memory that the previous attempt wrote to (`{…Error}`, `{…HttpCode}`, `{responseObjectName}`). Attempt 2 is a request nobody previewed. |
+
+The retry row is the easy one to trip over: `RetryApiCallInstruction.maxRetries` **defaults to 3**, so `"postResponse": {"retryApiCallInstruction": {}}` is by itself enough to unpin an otherwise-pinnable write — and a retry can fire on a **2xx** response when `responseValuePathMatchers` matches, not only on `retryOnHttpCodes`. Read `requestPinned` per call; do not infer it from the endpoint.
+
+An unpinned call (`requestFingerprint == null`) is approved on name and arguments alone, exactly as before pinning existed — nothing is ever refused on a comparison that was never sound. An **amended** call (`amendedArguments` set) is likewise never fingerprint-checked: the approver rewrote the request themselves, so the pin describes the request they replaced.
+
+Three situations fail **closed** instead — refused, not silently allowed — because "cannot verify" is a different answer than "unchanged": the tool disappeared from the workflow between pause and resume, re-resolution throws, or the call's config gained any of the unpinnable properties above mid-pause (a pinned call becoming unpinnable — adding `propertyInstructions`, or a `retryApiCallInstruction`, while a human is deciding). Treating any of these as "unchanged" would make reconfiguring an agent while a human is deciding the way around the guard.
 
 ### The execution journal (at-most-once)
 
