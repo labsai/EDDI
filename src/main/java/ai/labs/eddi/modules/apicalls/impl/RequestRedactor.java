@@ -220,6 +220,35 @@ public class RequestRedactor {
         return beforeQuery.substring(0, authorityStart) + safeAuthority + redactBody(path);
     }
 
+    /**
+     * Redact one query value from a URI, judging it in its DECODED form.
+     * <p>
+     * The scan has to see what the value actually is. {@code HttpClientWrapper}
+     * decodes into {@code queryParamsMap}, but {@code toMap()} hands back the raw
+     * {@code uri.toString()} — so the same credential arrives here still encoded,
+     * and percent-encoding defeats the shape rules outright: a bearer token becomes
+     * {@code Bearer%20aaaa…}, which the {@code Bearer\s+…} rule no longer matches,
+     * and a {@code ${vault:…}} reference survives as {@code $%7Bvault%3A…}. The
+     * result was a credential redacted in {@code queryParams} and plaintext one
+     * field away in {@code uri} — the exact pair of adjacent contradictory fields
+     * this method was added to stop.
+     * <p>
+     * The ORIGINAL value is emitted when nothing matched, so the preview keeps
+     * showing what is genuinely on the wire; only a value the scan actually hit is
+     * replaced. A malformed escape falls back to scanning the raw form rather than
+     * skipping the check.
+     */
+    private static String redactQueryValueDecoded(String name, String rawValue) {
+        String decoded = rawValue;
+        try {
+            decoded = java.net.URLDecoder.decode(rawValue, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException malformedEscape) {
+            // Keep the raw form — an unparseable escape is no reason to skip the scan.
+        }
+        String redacted = redactQueryParamValue(name, decoded);
+        return redacted.equals(decoded) ? rawValue : redacted;
+    }
+
     public static String redactUri(String uri) {
         if (uri == null) {
             return null;
@@ -251,7 +280,7 @@ public class RequestRedactor {
                 continue;
             }
             String name = pair.substring(0, eq);
-            redactedQuery.append(name).append('=').append(redactQueryParamValue(name, pair.substring(eq + 1)));
+            redactedQuery.append(name).append('=').append(redactQueryValueDecoded(name, pair.substring(eq + 1)));
         }
         return beforeQuery + "?" + redactedQuery + fragment;
     }

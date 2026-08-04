@@ -149,6 +149,40 @@ class RequestRedactorTest {
         }
 
         @Test
+        void aPercentEncodedCredentialInTheUriIsStillRedacted() {
+            // The scan must see what the value IS. HttpClientWrapper decodes into
+            // queryParamsMap but toMap() hands back the raw uri, so the same
+            // credential arrives here encoded — and encoding defeats the shape
+            // rules: "Bearer aaa…" becomes "Bearer%20aaa…", which no longer
+            // matches Bearer\s+. That produced a value redacted in queryParams and
+            // plaintext one field away in uri.
+            var map = new HashMap<String, Object>();
+            map.put(IRequest.KEY_URI, "https://x/y?auth=" + java.net.URLEncoder.encode(BEARER, java.nio.charset.StandardCharsets.UTF_8));
+            redactor.redactRequestMap(map);
+            String redacted = map.get(IRequest.KEY_URI).toString();
+            assertFalse(redacted.contains("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), redacted);
+        }
+
+        @Test
+        void anEncodedVaultReferenceIsStillRedacted() {
+            var map = new HashMap<String, Object>();
+            map.put(IRequest.KEY_URI, "https://x/y?k=" + java.net.URLEncoder.encode("${vault:billing}", java.nio.charset.StandardCharsets.UTF_8));
+            redactor.redactRequestMap(map);
+            assertFalse(map.get(IRequest.KEY_URI).toString().contains("billing"), map.get(IRequest.KEY_URI).toString());
+        }
+
+        @Test
+        void anOrdinaryEncodedValueKeepsItsONTHEWIREForm() {
+            // Only a value the scan actually hit is replaced. Everything else is
+            // emitted as-is, so the preview keeps showing what is genuinely sent
+            // rather than a decoded approximation of it.
+            var map = new HashMap<String, Object>();
+            map.put(IRequest.KEY_URI, "https://x/y?q=hello%20world&n=1");
+            redactor.redactRequestMap(map);
+            assertEquals("https://x/y?q=hello%20world&n=1", map.get(IRequest.KEY_URI));
+        }
+
+        @Test
         void aNullMapDoesNotThrow() {
             assertDoesNotThrow(() -> redactor.redactRequestMap(null));
         }
