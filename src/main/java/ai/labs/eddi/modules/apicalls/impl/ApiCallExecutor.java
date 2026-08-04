@@ -344,8 +344,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * resolve — the question a fingerprint's soundness actually turns on.
      * <p>
      * It used to ask something narrower ("does this call have pre-request property
-     * instructions"), and the gap between the two questions was the only fail-open
-     * in the pinning design. Both misses below produce a call that is PINNED, whose
+     * instructions"), and the gap between the two questions was the fail-open in
+     * the pinning design. Each miss below produces a call that is PINNED, whose
      * gate-time and pre-execution resolutions agree with each other — because both
      * skip the divergence — while {@code execute} sends something else entirely.
      * The guard then passes on a comparison that was never sound:
@@ -377,7 +377,23 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         // One resolved request cannot stand for N. Guarded on fireAndForget too
         // because that is what selects the batching branch in execute().
-        return Boolean.TRUE.equals(call.getFireAndForget()) && preRequest != null && preRequest.getBatchRequests() != null;
+        if (Boolean.TRUE.equals(call.getFireAndForget()) && preRequest != null && preRequest.getBatchRequests() != null) {
+            return true;
+        }
+        // Same argument, different loop: buildRequest sits INSIDE execute()'s
+        // retry do-while, and between attempts the shared templateDataObjects
+        // map gains {responseObjectName}, …Error, …HttpCode and the response
+        // headers. A call whose path, body or headers template any of those
+        // sends attempts 2..N as requests that were never resolved, never
+        // previewed and never fingerprinted — while the approver saw only
+        // attempt 1. Keyed on the instruction being present and actually able
+        // to fire (maxRetries >= 1), which is exactly what retryCall() tests.
+        var postResponse = call.getPostResponse();
+        if (postResponse instanceof ai.labs.eddi.configs.apicalls.model.HttpPostResponse httpPostResponse) {
+            var retry = httpPostResponse.getRetryApiCallInstruction();
+            return retry != null && retry.getMaxRetries() >= 1;
+        }
+        return false;
     }
 
     private IResponse executeAndMeasureRequest(ApiCall call, IRequest request, boolean retryCall, int amountOfExecutions)

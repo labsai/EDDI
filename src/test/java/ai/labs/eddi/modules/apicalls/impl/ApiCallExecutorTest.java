@@ -456,6 +456,48 @@ class ApiCallExecutorTest {
     }
 
     @Test
+    @DisplayName("a retryable call is unpinnable — attempts 2..N are rebuilt from mutated template data")
+    void resolve_withRetryInstruction_isNotPinned() throws Exception {
+        // buildRequest sits INSIDE execute()'s retry do-while, and between
+        // attempts the shared templateDataObjects map gains the response object,
+        // its error, its httpCode and the response headers. A call templating any
+        // of those sends attempts 2..N as requests nobody resolved, previewed or
+        // fingerprinted — while the approver saw only attempt 1. Same "one
+        // resolved request cannot stand for N" argument as the batched
+        // fire-and-forget case.
+        ApiCall call = createSimpleApiCall("retry-call", false);
+        var postResponse = new HttpPostResponse();
+        var retry = new RetryApiCallInstruction();
+        retry.setMaxRetries(2);
+        postResponse.setRetryApiCallInstruction(retry);
+        call.setPostResponse(postResponse);
+        stubRequestMap();
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNull(resolved.fingerprint(), "a call that can retry must not claim a fingerprint");
+        assertFalse(resolved.isPinned());
+    }
+
+    @Test
+    @DisplayName("a retry instruction that cannot fire (maxRetries 0) stays pinned")
+    void resolve_withDisabledRetryInstruction_remainsPinned() throws Exception {
+        // Mirrors retryCall()'s own test (maxRetries >= 1), so a present-but-inert
+        // instruction does not needlessly unpin an otherwise verifiable call.
+        ApiCall call = createSimpleApiCall("no-retry-call", false);
+        var postResponse = new HttpPostResponse();
+        var retry = new RetryApiCallInstruction();
+        retry.setMaxRetries(0);
+        postResponse.setRetryApiCallInstruction(retry);
+        call.setPostResponse(postResponse);
+        stubRequestMap();
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNotNull(resolved.fingerprint(), "an inert retry instruction must not unpin the call");
+    }
+
+    @Test
     @DisplayName("an ordinary call is still pinned — the divergence check is not a blanket opt-out")
     void resolve_withOrdinaryCall_remainsPinned() throws Exception {
         // The mirror direction. Widening the predicate must not quietly unpin
