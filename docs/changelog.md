@@ -5,6 +5,26 @@
 
 ---
 
+## 📌 chore(ci): close the last two OpenSSF gaps — pinned demo images, ungated CodeQL (2026-08-05)
+
+**Repo:** EDDI (`chore/scorecard-pinned-deps-and-sast`)
+
+Two medium-weight checks sat at 9/10. Both were one-line causes.
+
+**Pinned-Dependencies.** `src/main/docker/Dockerfile.demo` was never brought in line with the digest-pinning procedure in AGENTS.md that the production `Dockerfile` already follows — `maven:3.9-eclipse-temurin-25` (line 23) and `eclipse-temurin:25-jre` (line 46) were tag-only. Both now carry `@sha256:` digests. The digests were resolved directly from the Docker Hub registry API rather than copied from the Scorecard warning, and matched it exactly.
+
+**SAST.** `ci.yml` gated the CodeQL job behind `detect-changes`, on this premise:
+
+> Always runs on push to main (OpenSSF Scorecard checks all default-branch commits).
+
+That premise is wrong. Scorecard's SAST check reads check runs on the **PR head commit** — `checks/raw/sast.go` calls `ListCheckRunsForRef(pr.HeadSHA)` — so scanning `main` on push is invisible to it, and any docs-only PR that skipped CodeQL was counted as an unscanned commit. Hence `28 commits out of 30 are checked with a SAST tool`. The gate (and the now-unnecessary `needs: detect-changes`) is removed, so CodeQL runs on every PR.
+
+Impact is limited to `pull_request` events: CodeQL already ran unconditionally on pushes, and the `docker` job that lists `codeql` in its `needs` is push-only, so its gating is unaffected. The cost is a `mvnw compile -DskipTests` on docs-only PRs.
+
+**Scoring note.** Both checks are Medium weight; each is worth ~0.05 on the aggregate. Deliberately *not* addressed: `Signed-Releases`, which is `-1` ("no releases found" — every release has zero attached assets). It is excluded from the aggregate while inconclusive, and a signed-but-unattested artifact scores only 8, which would *lower* the overall score. Only full SLSA provenance (10) would beat leaving it alone. Container signing does not count — the check inspects GitHub release assets, never a registry.
+
+---
+
 ## 🔒 fix(docker): move to the republished UBI base and retire the microdnf stopgap (2026-08-04)
 
 **Repo:** EDDI (`fix/base-image-cve-2026-47063`)
