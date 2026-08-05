@@ -2813,7 +2813,7 @@
     "toolApprovalHint": "Approuver applique vos choix par appel (les appels que vous n'avez pas modifiés sont approuvés). Rejeter rejette l'ensemble du lot.",
     "toolApprovalHintExplicit": "Chaque appel doit être approuvé ou rejeté individuellement avant de pouvoir approuver le lot. Rejeter rejette l'ensemble du lot.",
     "explicitReviewMissing": "Examinez chaque appel ci-dessus avant d'approuver.",
-    "redactionCaveat": "Les arguments affichés ci-dessous sont expurgés — une valeur secrète apparaît comme « [REDACTED] », pas omise.",
+    "redactionCaveat": "Les arguments affichés ci-dessous sont expurgés — une valeur secrète apparaît comme « <REDACTED> », pas omise.",
     "gateReason": "Motif correspondant",
     "argsTruncated": "arguments tronqués",
     "amendArguments": "Modifier les arguments (facultatif)",

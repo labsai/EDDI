@@ -2813,7 +2813,7 @@
     "toolApprovalHint": "Aprovar aplica as suas escolhas por chamada (as chamadas que não alterou são aprovadas). Rejeitar rejeita todo o lote.",
     "toolApprovalHintExplicit": "Cada chamada precisa da sua própria aprovação ou rejeição antes de poder aprovar o lote. Rejeitar rejeita todo o lote.",
     "explicitReviewMissing": "Reveja cada chamada acima antes de aprovar.",
-    "redactionCaveat": "Os argumentos mostrados abaixo estão ocultados — um valor secreto aparece como \"[REDACTED]\", não é omitido.",
+    "redactionCaveat": "Os argumentos mostrados abaixo estão ocultados — um valor secreto aparece como \"<REDACTED>\", não é omitido.",
     "gateReason": "Padrão correspondente",
     "argsTruncated": "argumentos truncados",
     "amendArguments": "Alterar argumentos (opcional)",

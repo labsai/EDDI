@@ -2807,7 +2807,7 @@
     "toolApprovalHint": "승인은 호출별 선택을 적용합니다(변경하지 않은 호출은 승인됩니다). 거부는 전체 배치를 거부합니다.",
     "toolApprovalHintExplicit": "배치를 승인하려면 각 호출마다 개별적으로 승인 또는 거부해야 합니다. 거부는 전체 배치를 거부합니다.",
     "explicitReviewMissing": "승인하기 전에 위의 모든 호출을 검토하세요.",
-    "redactionCaveat": "아래에 표시된 인수는 마스킹되어 있습니다 — 비밀 값은 생략되지 않고 \"[REDACTED]\"로 표시됩니다.",
+    "redactionCaveat": "아래에 표시된 인수는 마스킹되어 있습니다 — 비밀 값은 생략되지 않고 \"<REDACTED>\"로 표시됩니다.",
     "gateReason": "일치한 패턴",
     "argsTruncated": "인수 잘림",
     "amendArguments": "인수 수정 (선택 사항)",

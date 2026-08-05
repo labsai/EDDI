@@ -123,22 +123,29 @@ describe("OperatorDrawer", () => {
     });
   });
 
-  it("clears WorkforceBottomTabs' 64px bar on mobile when told to, instead of sitting under it", () => {
-    // Caught live in the browser at the mobile breakpoint: the default
-    // bottom-6 put ~40px of the launcher under WorkforceBottomTabs (fixed,
-    // h-16, bottom-0). bottom-20 clears it with margin to spare.
+  it("sits clear of the Workforce mobile shell's own bottom furniture when told to", () => {
+    // Two separate findings landed here. First, live in the browser: at the
+    // original bottom-6 the launcher sat ~40px inside WorkforceBottomTabs
+    // (fixed, h-16, bottom-0). Then a review caught the worse one — the
+    // Workforce dashboard has its OWN MobileFab at `fixed bottom-24 z-40
+    // sm:hidden`, which overlapped this z-30 launcher and won the hit test,
+    // so tapping the operator launcher navigated to /workforce/new. bottom-40
+    // (160px) clears MobileFab's 152px top edge.
+    //
+    // The default moved too: bottom-6 collided with sonner's toast viewport
+    // and ChatDrawer's Send button in the Manager's own bottom-right corner.
     serveConfig(activeConfig());
     const { container: withoutClearance } = renderWithProviders(<OperatorDrawer />, {
       initialRoute: "/manage/agents",
     });
-    expect(withoutClearance.querySelector('[class*="bottom-6"]')).toBeInTheDocument();
-    expect(withoutClearance.querySelector('[class*="bottom-20"]')).not.toBeInTheDocument();
+    expect(withoutClearance.querySelector('[class*="bottom-24"]')).toBeInTheDocument();
+    expect(withoutClearance.querySelector('[class*="bottom-40"]')).not.toBeInTheDocument();
 
     const { container: withClearance } = renderWithProviders(<OperatorDrawer clearsBottomTabBar />, {
       initialRoute: "/manage/agents",
     });
-    expect(withClearance.querySelector('[class*="bottom-20"]')).toBeInTheDocument();
-    expect(withClearance.querySelector('[class*="bottom-6"]')).not.toBeInTheDocument();
+    expect(withClearance.querySelector('[class*="bottom-40"]')).toBeInTheDocument();
+    expect(withClearance.querySelector('[class*="bottom-24"]')).not.toBeInTheDocument();
   });
 
   it("starts closed, showing only the launcher", async () => {

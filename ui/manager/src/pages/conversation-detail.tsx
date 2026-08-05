@@ -41,7 +41,6 @@ import { extractInput, extractOutput, extractActions } from "@/lib/api/conversat
 import { useNavigate } from "react-router-dom";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { RequestPreview } from "@/components/operator/request-preview";
-import { useOperatorConfig } from "@/hooks/use-operator";
 import { findSelfTargetedCalls } from "@/lib/operator/self-guard";
 import {
   useResumeConversation,
@@ -103,15 +102,6 @@ export function ConversationDetailPage() {
     refetch: refetchApprovalStatus,
   } = useApprovalStatus(id, conversation?.conversationState === "AWAITING_HUMAN");
 
-  // The Platform Operator's own agent, so this surface can apply the same
-  // refusal and the same per-call review requirement the operator screen and
-  // the approvals inbox do. Without it, clicking a conversation id in the
-  // inbox — the natural way to get more context before deciding — landed on a
-  // strictly weaker version of the same decision.
-  const operatorConfig = useOperatorConfig();
-  const operatorAgentId = operatorConfig.data?.agentId ?? undefined;
-  const isOperatorConversation =
-    !!operatorAgentId && !!conversation?.agentId && conversation.agentId === operatorAgentId;
   const blockedCalls = useMemo(() => {
     const details = approvalStatus?.pauseDetails;
     const pending = details?.type === "TOOL_CALL" ? details.calls : undefined;
@@ -311,11 +301,17 @@ export function ConversationDetailPage() {
           // Every conversation: strictly more information about what a gated
           // call actually sends. No approver is worse off for seeing it.
           renderCallExtra={renderCallExtra}
-          // Scoped to the operator's own conversations rather than forced on
-          // all of them: it exists because a swept-in call THERE executes an
-          // unreviewed write against the platform itself. Enabling it globally
-          // would change the review contract for unrelated agents.
-          requireExplicitPerCall={isOperatorConversation}
+          // Unconditional, matching the approvals inbox and the operator chat.
+          // It used to be scoped to operator conversations, keyed on the
+          // operator config's agentId — but that read is admin/editor-only, so
+          // for an eddi-approver it 403s, the flag silently resolves false, and
+          // the ONE role whose whole job is approving got the weakest review
+          // contract of the three surfaces. That is the same inertness the
+          // blockedCalls memo below documents and avoids. Requiring a verdict
+          // per gated call is right for any multi-call batch anyway, whichever
+          // agent raised it — which is why the other two surfaces never
+          // conditioned it.
+          requireExplicitPerCall
           onDecide={(
             verdict: HitlVerdict,
             note?: string,

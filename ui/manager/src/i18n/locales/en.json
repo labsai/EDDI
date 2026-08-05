@@ -2838,7 +2838,7 @@
     "toolApprovalHint": "Approve applies your per-call choices (calls you didn't change are approved). Reject rejects the whole batch.",
     "toolApprovalHintExplicit": "Every call needs its own Approve or Reject before you can approve the batch. Reject rejects the whole batch.",
     "explicitReviewMissing": "Review every call above before approving.",
-    "redactionCaveat": "Arguments shown below are redacted — a secret value appears as \"[REDACTED]\", not omitted.",
+    "redactionCaveat": "Arguments shown below are redacted — a secret value appears as \"<REDACTED>\", not omitted.",
     "gateReason": "Matched pattern",
     "argsTruncated": "arguments truncated",
     "amendArguments": "Amend arguments (optional)",

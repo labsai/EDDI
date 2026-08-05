@@ -2807,7 +2807,7 @@
     "toolApprovalHint": "「承認」は呼び出しごとの選択を適用します（変更していない呼び出しは承認されます）。「拒否」はバッチ全体を拒否します。",
     "toolApprovalHintExplicit": "バッチを承認する前に、各呼び出しごとに個別の承認または拒否が必要です。「拒否」はバッチ全体を拒否します。",
     "explicitReviewMissing": "承認する前に、上記のすべての呼び出しを確認してください。",
-    "redactionCaveat": "以下に表示される引数はマスク済みです — 秘密の値は省略されるのではなく「[REDACTED]」と表示されます。",
+    "redactionCaveat": "以下に表示される引数はマスク済みです — 秘密の値は省略されるのではなく「<REDACTED>」と表示されます。",
     "gateReason": "一致したパターン",
     "argsTruncated": "引数は切り詰められました",
     "amendArguments": "引数を修正（任意）",

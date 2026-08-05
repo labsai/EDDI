@@ -456,12 +456,16 @@ export function ApprovalBanner({
           </p>
           {/* The backend never sends raw arguments to a client — only the
               redacted, size-capped form. A secret inside the payload reads as
-              the literal text "[REDACTED]" here, which is correct, but an
+              the literal text "<REDACTED>" here — the marker must match
+              `RequestRedactor.REDACTED` / `SecretRedactionFilter` exactly,
+              because this sentence is telling an approver what string to look
+              for. It said "[REDACTED]" until a review caught it, which sent
+              them hunting for something that never appears; an
               approver who doesn't know that can mistake it for "nothing
               sensitive was in this call" rather than "something was, and it was
               hidden from you". */}
           <p className="text-[11px] text-muted-foreground" data-testid="redaction-caveat">
-            {t("hitl.redactionCaveat", "Arguments shown below are redacted — a secret value appears as \"[REDACTED]\", not omitted.")}
+            {t("hitl.redactionCaveat", "Arguments shown below are redacted — a secret value appears as \"<REDACTED>\", not omitted.")}
           </p>
           {toolPause.calls.map((call) => (
             <ToolCallRow
@@ -666,7 +670,21 @@ export function ApprovalBanner({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          disabled={isSubmitting || pauseDetailsPending || explicitReviewMissing || approvalBlocked}
+          // `pauseDetailsError` belongs here as much as `pauseDetailsPending`:
+          // when the read FAILED, `pauseDetails` is null, so `blockedCalls` is
+          // empty and `explicitReviewMissing` is false — every other guard in
+          // this list silently evaluates to "nothing to object to" precisely
+          // because we know nothing. Omitting it (as this did when the error
+          // state was introduced) left the screen rendering "it can't be
+          // approved from here" above a live Approve that resumed the whole
+          // batch with no per-call decisions, executing calls nobody saw.
+          disabled={
+            isSubmitting ||
+            pauseDetailsPending ||
+            pauseDetailsError ||
+            explicitReviewMissing ||
+            approvalBlocked
+          }
           onClick={() => setConfirmAction("APPROVED")}
           className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
           data-testid="approve-button"

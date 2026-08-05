@@ -2807,7 +2807,7 @@
     "toolApprovalHint": "批准将应用你对每次调用的选择（未更改的调用将被批准）。拒绝将拒绝整批调用。",
     "toolApprovalHintExplicit": "每次调用都需要单独批准或拒绝，然后才能批准整批。拒绝将拒绝整批调用。",
     "explicitReviewMissing": "在批准之前，请先审查上面的每一次调用。",
-    "redactionCaveat": "下方显示的参数已脱敏 — 敏感值会显示为“[REDACTED]”，而不是被省略。",
+    "redactionCaveat": "下方显示的参数已脱敏 — 敏感值会显示为“<REDACTED>”，而不是被省略。",
     "gateReason": "匹配的模式",
     "argsTruncated": "参数已截断",
     "amendArguments": "修改参数（可选）",

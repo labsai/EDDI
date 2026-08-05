@@ -342,7 +342,12 @@ describe("ApprovalBanner", () => {
       renderWithProviders(
         <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} />,
       );
-      expect(screen.getByTestId("redaction-caveat")).toHaveTextContent("[REDACTED]");
+      // The marker must be the one the backend actually emits
+      // (`RequestRedactor.REDACTED` / `SecretRedactionFilter` = "<REDACTED>").
+      // This asserted "[REDACTED]", pinning the wrong string in place: the
+      // caveat tells an approver which text to look for, and that text never
+      // appears in any payload.
+      expect(screen.getByTestId("redaction-caveat")).toHaveTextContent("<REDACTED>");
     });
 
     it("renders renderCallExtra content for each call", () => {
@@ -487,5 +492,60 @@ describe("ApprovalBanner", () => {
       expect(screen.getByTestId("approve-button")).not.toBeDisabled();
       expect(screen.queryByTestId("explicit-review-missing")).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("a failed pause-details read must not be approvable", () => {
+  // The regression this pins: when the read FAILS, pauseDetails is null — so
+  // blockedCalls is empty, explicitReviewMissing is false, and every other
+  // guard in the disabled list evaluates to "nothing to object to" precisely
+  // BECAUSE we know nothing. Approve was left enabled, under a message saying
+  // it couldn't be approved, and resumed the whole batch with no per-call
+  // decisions — executing calls nobody had seen.
+  it("disables Approve when the details failed to load", () => {
+    const onDecide = vi.fn();
+    renderWithProviders(
+      <ApprovalBanner
+        surface="regular"
+        pauseReason="Creating a new agent"
+        pauseDetails={null}
+        pauseDetailsPending={false}
+        pauseDetailsError
+        onDecide={onDecide}
+      />,
+    );
+
+    expect(screen.getByTestId("approval-details-error")).toBeInTheDocument();
+    expect(screen.getByTestId("approve-button")).toBeDisabled();
+  });
+
+  it("still allows Reject, which is safe without knowing the detail", () => {
+    renderWithProviders(
+      <ApprovalBanner
+        surface="regular"
+        pauseReason="Creating a new agent"
+        pauseDetails={null}
+        pauseDetailsPending={false}
+        pauseDetailsError
+        onDecide={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("reject-button")).not.toBeDisabled();
+  });
+
+  it("offers a retry that calls back", () => {
+    const onRetry = vi.fn();
+    renderWithProviders(
+      <ApprovalBanner
+        surface="regular"
+        pauseDetails={null}
+        pauseDetailsPending={false}
+        pauseDetailsError
+        onRetryPauseDetails={onRetry}
+        onDecide={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("approval-details-retry"));
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });

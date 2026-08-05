@@ -14,10 +14,16 @@ import { cn } from "@/lib/utils";
 
 export interface OperatorDrawerProps {
   /**
-   * The Workforce mobile layout's `WorkforceBottomTabs` is a `fixed bottom-0
-   * h-16` (64px) bar — the same reason that layout's own `<main>` carries a
-   * `pb-20` it does not use anywhere else. Without this, the launcher's
-   * default `bottom-6` sits ~40px into that bar rather than above it.
+   * Raises the launcher clear of the Workforce mobile shell's own bottom
+   * furniture: `WorkforceBottomTabs` (`fixed bottom-0 h-16`, plus a
+   * safe-area inset) AND `workforce-dashboard`'s `MobileFab`
+   * (`fixed bottom-24 z-40 sm:hidden`, so 96–152px up).
+   *
+   * That second one is why this is not merely cosmetic. At the old `bottom-20`
+   * the two launchers overlapped by 40 vertical points over most of their
+   * width, and `MobileFab` is z-40 against this component's z-30 — so it won
+   * the hit test and tapping the operator launcher navigated to
+   * `/workforce/new` instead. `bottom-40` (160px) clears MobileFab's top edge.
    */
   clearsBottomTabBar?: boolean;
 }
@@ -158,7 +164,12 @@ export function OperatorDrawer({ clearsBottomTabBar = false }: OperatorDrawerPro
         // clickable, and in Workforce's tablet branch that overlay is
         // `aria-modal="true"`, so it opened a second panel on top of a modal.
         "fixed end-6 z-30 flex flex-col items-end gap-3",
-        clearsBottomTabBar ? "bottom-20" : "bottom-6",
+        // Not `bottom-6`: that corner is already occupied on the Manager side
+        // by sonner's toast viewport (bottom-right, z-999999999 — it covered
+        // the launcher outright while any toast was up) and by `ChatDrawer`'s
+        // composer, whose Send button this `fixed` element painted over by
+        // roughly half. 96px clears both.
+        clearsBottomTabBar ? "bottom-40" : "bottom-24",
       )}
     >
       {isOpen && (

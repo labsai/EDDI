@@ -240,8 +240,12 @@ export function OperatorChat({
             pauseDetails={pauseDetails ?? null}
             // Falls back to the old local derivation only when the caller
             // supplies neither flag, so a caller that has not been updated
-            // still blocks Approve rather than silently enabling it.
-            pauseDetailsPending={pauseDetailsPending ?? (pauseDetailsError ? false : pauseDetails === undefined)}
+            // still blocks Approve rather than silently enabling it. The
+            // earlier `pauseDetailsError ? false : …` branch here did the
+            // opposite — it resolved the error case to "not pending", which
+            // was only safe if the banner separately blocked on the error
+            // flag, and it did not.
+            pauseDetailsPending={pauseDetailsPending ?? pauseDetails === undefined}
             pauseDetailsError={pauseDetailsError}
             onRetryPauseDetails={onRetryPauseDetails}
             isSubmitting={isResolvingPause}

@@ -2807,7 +2807,7 @@
     "toolApprovalHint": "Freigeben wendet deine Auswahl je Aufruf an (nicht geänderte Aufrufe werden freigegeben). Ablehnen lehnt den gesamten Stapel ab.",
     "toolApprovalHintExplicit": "Jeder Aufruf braucht eine eigene Freigabe oder Ablehnung, bevor du den Stapel freigeben kannst. Ablehnen lehnt den gesamten Stapel ab.",
     "explicitReviewMissing": "Prüfe jeden Aufruf oben, bevor du freigibst.",
-    "redactionCaveat": "Die unten angezeigten Argumente sind geschwärzt — ein geheimer Wert erscheint als „[REDACTED]“, nicht weggelassen.",
+    "redactionCaveat": "Die unten angezeigten Argumente sind geschwärzt — ein geheimer Wert erscheint als „<REDACTED>“, nicht weggelassen.",
     "gateReason": "Übereinstimmendes Muster",
     "argsTruncated": "Argumente gekürzt",
     "amendArguments": "Argumente ändern (optional)",
