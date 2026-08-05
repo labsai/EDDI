@@ -32,10 +32,14 @@ tool surfaces → a `ToolSourceProvider`.
 
 ---
 
-## 2. Do these two first
+## 2. Do these three first
 
-These are not new features. They are **defects in what already shipped**, and both later items
-depend on them. Do them as one small PR before starting any Wave 2 feature.
+These are not new features. They are **defects in what already shipped**, and later items depend
+on them. Do them as one small PR before starting any Wave 2 feature.
+
+None of the three blocks the merge of #626 — N1 and N3 cannot misbehave until something else
+changes (see each item) — but all three get *harder* the longer they wait, and N3 stops being
+free the moment this ships.
 
 ### N1 — Price ordinary model calls *(S — do this first)*
 
@@ -90,6 +94,51 @@ and truncation-fallback requirements are easy to miss and both have tests specif
 **Sequencing note:** N1 first, because I9's summarization calls cost money and should be
 attributable the moment they exist.
 
+### N3 — F6's migration ladder never runs on legacy documents *(S — do it before this ships)*
+
+Found in the round-5 review of #626. Three related defects in the F6 foundation.
+
+**(a) The version field masquerades as current.** `GroupConversation` (~:44) declares:
+
+```java
+private int schemaVersion = CURRENT_SCHEMA_VERSION;   // = 3
+```
+
+Every group conversation in production today was written **before** F6 existed — `main` has
+*zero* occurrences of `schemaVersion` in that class — so those documents have no such key.
+Jackson leaves the initialiser standing, and they load claiming **schema 3**, the current
+version, while being version-1-shaped. `prepareForResume` then loops `for (v = 3; v < 3; ...)`
+— zero iterations. **The migration ladder never runs on exactly the documents it exists for.**
+
+Verified by deserialising a document with no `schemaVersion` key: it reported `3`.
+
+*Impact today: zero* — `MIGRATIONS` is empty and all three bumps happened inside the unreleased
+#626, so no released build ever wrote a versioned document. *Impact at the first non-additive
+bump:* a v1-shaped document either skips its transform or receives a `3→4` transform written
+for a v3-shaped document.
+
+**Fix:** default the field to a legacy sentinel (`1`) and stamp `CURRENT_SCHEMA_VERSION` at the
+single creation point, `GroupConversationService` ~:1692. The initialiser alone cannot
+distinguish "absent" from "current" — Jackson runs the no-arg constructor either way — so the
+stamp must be at creation, not in the field declaration.
+
+**Do it before #626 ships.** It is free only while no production document carries a version;
+afterwards it needs a real data migration to tell v1-shaped from v3-shaped documents apart.
+
+⚠️ `ConversationMemorySnapshot` ~:35 has the identical pattern. It is correct *by coincidence*
+(its `CURRENT` is `1`, which is also the floor) and inherits this bug the moment it bumps to 2.
+Fix both, or the single-conversation side repeats the group side's mistake.
+
+**(b) Stale Javadoc.** `GroupConversationSchemaMigrations` (~:31-33) asserts
+`CURRENT_SCHEMA_VERSION` is `1`, "the first version that has ever existed, so there is nothing
+yet to migrate from." It is `3`. Someone adding v4 reads that and does not realise the
+identity-default path has already been exercised twice.
+
+**(c) The case that matters is untested.** `GroupConversationSchemaMigrationsTest` covers only
+documents that *have* a version. Nothing deserialises a document without the field — which is
+every document in production, and is why (a) survived four review rounds. Add that test first,
+watch it fail, then fix (a).
+
 ---
 
 ## 3. The queue after that
@@ -136,6 +185,22 @@ Recorded so they are not rediscovered. Fix opportunistically, or fold into a rel
   already does). Latent today — copy-on-write list, single mutator.
 - **`docs/group-conversations.md` drift:** REST/MCP tables omit the HITL and lifecycle
   endpoints; the task-status table omits `BLOCKED`/`AWAITING_APPROVAL`.
+
+### Checked and cleared — do not re-investigate
+
+Each of these looks like a bug on a first read. All three were traced to ground in the round-5
+review and are sound; the reasoning is recorded so the next reviewer does not spend the time again.
+
+- **`ToolLoopResumer` ~:161 falls through a null verdict into the approved path.** Unreachable:
+  all five entry surfaces reject a null top-level verdict first — `RestAgentEngine` ~:366,
+  `RestGroupConversation` ~:413 and ~:579, `McpHitlTools` ~:215 and ~:395,
+  `SlackInteractivityHandler` ~:209. `HitlVerdict.fromString` returning null for an
+  unrecognised value (rather than throwing) is deliberate and is caught at every surface.
+- **`McpToolsProvider`'s first-write-wins collision check.** Correct — `executors` is declared
+  at ~:116, *outside* the per-server loop at ~:127, so cross-server collisions are genuinely
+  detected. (Loop-scoped, it would have been decorative.)
+- **The HITL tool journal (claim → replay → outcome-unknown).** Sound, including the
+  crash-inside-the-tool case, which reports `EXECUTION_OUTCOME_UNKNOWN` rather than guessing.
 
 ---
 

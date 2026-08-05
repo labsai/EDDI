@@ -5,6 +5,24 @@
 
 ---
 
+## 🔍 review(groups): round 5 — F6's migration ladder never runs on legacy documents (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Fifth review pass, deliberately aimed at what the previous four had covered *least* rather than re-walking the group tools: the schema migrations (they decide the fate of stored production documents) and the HITL tool-loop resume path.
+
+**`GroupConversation.schemaVersion` defaults to `CURRENT_SCHEMA_VERSION`, so legacy documents claim to be current.** Every group conversation in production was written before F6 existed — `main` has zero occurrences of the field — so those documents have no such key, Jackson leaves the initialiser standing, and they load reporting schema **3** while being version-1-shaped. `prepareForResume` then loops `for (v = 3; v < 3; ...)`: zero iterations. The migration ladder never runs on exactly the documents F6 was built to protect. Proven by deserialising a key-less document rather than reasoning about Jackson's semantics — it reported 3.
+
+Impact today is zero (`MIGRATIONS` is empty, and all three bumps happened inside this unreleased branch, so no released build ever wrote a versioned document). Impact at the first non-additive bump is real: a v1-shaped document either skips its transform or receives a `3→4` transform meant for a v3-shaped one. `ConversationMemorySnapshot` carries the identical pattern and is correct only by coincidence — its `CURRENT` is 1, which is also the floor — so it inherits the bug on its first bump.
+
+Filed as **N3** in `planning/group-collaboration-NEXT.md` alongside two companions: the `MIGRATIONS` Javadoc still asserts `CURRENT_SCHEMA_VERSION` is 1 and "there is nothing yet to migrate from" (it is 3), and `GroupConversationSchemaMigrationsTest` covers only documents that *have* a version — never the key-less case that is every document in production, which is why this survived four review rounds. **Not fixed on this branch on purpose:** it cannot fire today, and pushing it would invalidate a green CI for a latent bug. It is flagged do-it-before-#626-ships, because the fix is free only while no production document carries a version.
+
+**Three suspicions traced to ground and cleared,** recorded in NEXT.md so the next reviewer does not repeat the work: `ToolLoopResumer`'s null-verdict fallthrough into the approved path is unreachable (all five entry surfaces reject a null verdict first); the `McpToolsProvider` collision fix from the previous commit is correct because `executors` is method-scoped rather than loop-scoped — worth re-deriving given three of this session's fixes were themselves wrong; and the HITL tool journal handles crash-inside-the-tool honestly.
+
+**Files:** `planning/group-collaboration-NEXT.md`, `docs/changelog.md`.
+
+---
+
 ## 📋 docs(plan): a single handoff file so a new session knows what to build next (2026-08-04)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
