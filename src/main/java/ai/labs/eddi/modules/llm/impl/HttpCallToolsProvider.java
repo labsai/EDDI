@@ -13,10 +13,14 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
@@ -54,6 +58,14 @@ class HttpCallToolsProvider implements ToolSourceProvider {
 
     private static final Logger LOGGER = Logger.getLogger(HttpCallToolsProvider.class);
     private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
+
+    /**
+     * Cap for tool arguments echoed into a log line. Deliberately small: a log is
+     * for identifying WHICH call failed to parse, not for reproducing its payload,
+     * and an unbounded model-supplied string is a log-flooding vector on top of the
+     * redaction concern below.
+     */
+    private static final int ARGS_LOG_MAX_BYTES = 512;
 
     /**
      * Keys produced by {@link IMemoryItemConverter#convert} that carry
@@ -122,6 +134,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> executors = new HashMap<>();
         Map<String, String> endpoints = new HashMap<>();
+        Map<String, ToolRequestResolver> resolvers = new HashMap<>();
 
         try {
             LOGGER.infof("Discovering httpcall tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
@@ -160,26 +173,15 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                                 apiRequest.getMethod().toLowerCase(Locale.ROOT) + ":" + normalizeEndpointPath(apiRequest.getPath()));
                     }
 
+                    // Resolving and executing MUST build their template data the same
+                    // way: the fingerprint pinned at gate time is only meaningful if it
+                    // describes the request execution will actually construct.
+                    resolvers.put(apiCall.getName(),
+                            toolRequest -> apiCallExecutor.resolve(apiCall, memory, templateDataFor(memory, toolRequest), targetServerUrl));
+
                     executors.put(apiCall.getName(), (toolRequest, memoryId) -> {
                         try {
-                            Map<String, Object> templateData = memoryItemConverter.convert(memory);
-
-                            if (toolRequest.arguments() != null && !toolRequest.arguments().isBlank()) {
-                                try {
-                                    @SuppressWarnings("unchecked")
-                                    Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
-                                    safeTemplateMerge(templateData, args);
-                                } catch (IOException e) {
-                                    // The argument payload itself is deliberately not logged: it is
-                                    // model-generated from conversation content and routinely carries
-                                    // user identifiers, free text, or credentials destined for an
-                                    // httpcall body. Length is enough to tell truncation from
-                                    // malformed JSON, which is what this warning is actually for.
-                                    LOGGER.warnf("Failed to parse tool arguments for httpcall tool '%s' (%d chars): %s",
-                                            apiCall.getName(), toolRequest.arguments().length(), e.getMessage());
-                                }
-                            }
-
+                            Map<String, Object> templateData = templateDataFor(memory, toolRequest);
                             Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl);
 
                             String serialized = jsonSerialization.serialize(result);
@@ -200,7 +202,68 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             LOGGER.warn("Failed to discover httpcall tools from workflow", e);
         }
 
-        return new ToolContribution(toolSpecs, executors, Map.of(), endpoints);
+        return new ToolContribution(toolSpecs, executors, Map.of(), endpoints, List.of(), Map.of(), resolvers);
+    }
+
+    /**
+     * Template data for one httpcall tool invocation: conversation memory plus the
+     * model's arguments merged over it.
+     * <p>
+     * Shared by the executor and the resolver on purpose. The gate-time fingerprint
+     * only means anything if it was computed from the same inputs execution will
+     * use — two copies of this merge would eventually disagree, and the guard would
+     * then reject correct calls (or, worse, pass altered ones).
+     */
+    private Map<String, Object> templateDataFor(IConversationMemory memory, ToolExecutionRequest toolRequest) {
+        Map<String, Object> templateData = memoryItemConverter.convert(memory);
+        if (toolRequest.arguments() != null && !toolRequest.arguments().isBlank()) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
+                safeTemplateMerge(templateData, args);
+            } catch (IOException e) {
+                // Redacted and capped, never raw: these are model-supplied arguments
+                // that routinely carry credentials — the pause record keeps only a
+                // SecretRedactionFilter'd copy for exactly this reason, and a log line
+                // is no safer a place for the plaintext than that record was.
+                //
+                // The throwable is deliberately NOT passed: a Jackson parse error
+                // quotes the offending source in its own message, which would undo the
+                // redaction on the line right next to it. See errorType.
+                // Order is load-bearing. Redact FIRST, on the full string: capping
+                // first would cut a credential mid-token, and the fragment left behind
+                // no longer matches the shape rules — a partial secret in the log
+                // instead of a marker. Sanitize LAST: these arguments are model-chosen
+                // and therefore prompt-injectable, and SecretRedactionFilter only
+                // substitutes secret-shaped VALUES — it leaves \r and \n untouched, so
+                // a model could forge whole log records in the HITL audit stream. The
+                // tool name beside it was already sanitized for exactly this reason;
+                // the argument string is the more attacker-controllable of the two.
+                LOGGER.warnf("Failed to parse arguments for tool '%s' (%s): %s", sanitize(toolRequest.name()), errorType(e),
+                        sanitize(capUtf8(SecretRedactionFilter.redact(toolRequest.arguments()), ARGS_LOG_MAX_BYTES)));
+            }
+        }
+        return templateData;
+    }
+
+    /**
+     * The only part of a failure from the request-resolution path that is safe to
+     * log: its type.
+     * <p>
+     * Not the throwable and not its message. These failures come out of template
+     * rendering and request building, so the message routinely quotes the material
+     * being rendered — Jackson in particular appends a snippet of the offending
+     * source, which puts the credential straight back into the log line that
+     * carefully redacted it. The type alone is what an operator triages on; the
+     * payload is already available, redacted, in the same message.
+     */
+    private static String errorType(Throwable e) {
+        return e == null ? "unknown" : e.getClass().getSimpleName();
+    }
+
+    /** @see ToolApprovalGateSupport#capUtf8 */
+    private static String capUtf8(String s, int maxBytes) {
+        return ToolApprovalGateSupport.capUtf8(s, maxBytes);
     }
 
     /**

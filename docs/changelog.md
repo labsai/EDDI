@@ -5,6 +5,27 @@
 
 ---
 
+## 🔀 merge: bring `origin/main` (PR #627 HITL request pinning) into the branch (2026-08-07)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+`main` merged PR #627 — ~50 commits of HITL request *pinning* (an approval binds to the resolved HTTP request, re-checked immediately before execution) plus redaction hardening. It edited the pre-extraction `ConversationService` and `AgentOrchestrator` while this branch was busy decomposing both, so the conflict is "logic moved here / logic changed there". Resolved by **porting main's behaviour into the extracted homes**, not by picking a side.
+
+**Only two files conflicted; the other 20 of main's changed files are byte-identical to `origin/main` after the merge** (verified file-by-file, not assumed).
+
+- **`ConversationService` → `ConversationHitlService`.** Main's only behavioural change here was a defence-in-depth fail-closed guard rejecting a resume whose verdict resolved to null. Ported to the extracted service, then verified all six callers (`RestAgentEngine`, `McpHitlTools`, `SlackInteractivityHandler`, `HitlTimeoutHandler`, `MemberTurnExecutor`, the facade) reach it with no bypass, and that the two *internal* callers always set a verdict so the new guard cannot break them.
+- **`AgentOrchestrator` → the R2 collaborators.** `ToolRequestResolver` became a real SPI type (`tools.spi`) rather than a nested interface; `ToolContribution`/`ToolSourceRegistry.Assembled`/`ToolSetup` now carry `toolRequestResolvers`; resolution + pinning moved to `HttpCallToolsProvider` (a single `templateDataFor` shared by executor and resolver, so the pinned fingerprint describes the request execution actually builds), `ToolApprovalGateSupport.pinResolvedRequest`, and `ToolLoopResumer.requestChangedSinceApproval`.
+
+**Main's `pruneResolversToSurvivingHttpTools` was deliberately NOT ported — the invariant is now structural.** That sweep existed because `mergeExternalTools` registered resolvers before the collision verdict was known, so a builtin that won a name could be pinned against the losing http tool's request (an approver shown a preview of a request that never runs, and the pre-execution re-check comparing against that same fabricated request). `ToolSourceRegistry` copies a resolver only *after* the spec owning the name is accepted, so a loser's resolver is never carried. Main's two tests were ported to assert the property at its new enforcement point, and **mutation-checked**: moving the resolver copy above the collision check makes `droppedHttpToolLosesItsResolver` fail while `survivingHttpToolKeepsItsResolver` still passes — the guard is proven, and proven not to be a blanket wipe.
+
+**A silent test-seam break, found and fixed.** Main's two "does pinning *apply*" tests spy `AgentOrchestrator` and stub `buildToolSetup` to inject a resolver. After R2, `ToolLoopResumer` resolved the setup through the orchestrator reference captured at *construction* — so the spy no longer intercepted. One test failed loudly; the other **passed for the wrong reason**, because the refusal envelope text is identical for every refusal reason, so "resolver missing entirely" reads the same as "fingerprint changed". Exactly the failure mode main added those tests to prevent. Fixed by having the facade build the setup and pass it down (also dropping one use of the back-reference). Mutation-checked: neutering the fingerprint comparison now fails `pinnedCallWithChangedRequestIsRefusedInTheLoop`, which it did not before.
+
+**One regression avoided by taking our side.** Main's `sourceForBuiltInTool` does not tag `RecruitAgentTool` as `dynamic`. Our `ToolObjectReflector` does — that is the I7 fix that stops a documented `requireApproval:["dynamic:*"]` missing it while `exempt:["builtin:*"]` un-gates it. Taking main's version would have silently reopened that approval-gate hole.
+
+Suite at the environmental baseline (13,954 run; 8 failures / 294 errors, all loopback/network/embedding — none in the merged surfaces). Checkstyle clean.
+
+---
+
 ## 🔍 review(groups): round 5 — F6's migration ladder never runs on legacy documents (2026-08-04)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
@@ -1086,6 +1107,113 @@ Retiring it also removes a build-time network dependency and a layer from the ru
 
 ---
 
+## 🧭 feat(operator): a context-aware side-chat drawer, reachable from Manager and Workforce (2026-08-04)
+
+**Repo:** EDDI-Manager (`feat/operator-write-scope`)
+
+The operator existed only as a dedicated page at `/manage/operator` — Manager-only, full-page-only, no idea what screen the admin was actually looking at when they opened it. Added a floating-launcher drawer (`operator-drawer.tsx`) mounted once in `AppLayout` and once in each of `WorkforceLayout`'s three viewport branches (mobile/tablet/desktop) — a self-positioned `fixed` panel, since those four layouts share no common chrome slot the way the existing `ChatDrawer` shares `AppLayout`'s one.
+
+**Shared conversation, not a second one.** The drawer reuses `useOperatorChat`/`useOperatorConfig` directly rather than standing up a parallel chat — same react-query cache, same conversation. That required promoting `use-operator-chat.ts`'s state off local `useState` onto a Zustand store (`useOperatorChatStore`): today, even the full page silently drops its visible transcript on remount (the backend conversation survives via the `sessionStorage`-remembered id, but `messages` restarts empty), because nothing shared it. The wrapper hook keeps the exact same public API, so `operator.tsx`'s call sites are unchanged.
+
+That refactor was stress-tested by a dedicated Plan-agent pass before writing it, which caught four things a naive `useState`→Zustand translation would have gotten wrong: `set()` merges rather than replaces (so `reset()` must explicitly null the three promoted-from-`useRef` fields, not just the public ones); the eslint-disables in `operator.tsx` don't disappear on their own (the rule flags the *shape* of `chat.reset()`, unrelated to the state container); a second existing test file (`operator.test.tsx`, not just the hook's own test) mounts the real hook and needed the same reset; and `context` (see below) has to be a call-time argument to `send()`, never a store field, or two mounted surfaces would race to overwrite each other's screen context. Mutation-tested the one real bug risk (the merge trap): reverting the internal-field nulling in `reset()` let an orphaned turn — one whose conversation was reset mid-stream — graft its trace onto the fresh state; a new test (`use-operator-chat.test.tsx`) drives exactly that interleaving and fails without the fix.
+
+**Pause handling doesn't duplicate `ApprovalBanner`.** That component is security-reviewed for one full-width surface (redacted previews, self-guard, blocked-calls) — a docked drawer has no room to review a gated write responsibly, and forking a second smaller copy is exactly the "two systems drift apart" trap this whole feature has spent most of its review cycles closing. `operator-chat.tsx` gained one prop, `pauseSurface?: "banner" | "compact"` (default `"banner"`, zero diff for the full page); compact renders the pause reason plus a link to `/manage/operator`, where the real banner picks up the identical pause — same conversation, no re-ask.
+
+**Context flows through a transport that already existed and was unused.** `sendMessageStreaming`'s `InputData` has had an optional `context?: Record<string, unknown>` field since well before this — it flows into the backend's per-turn `{context.x}` Qute variable, the documented mechanism for exactly this. Nothing populated it. Added `useCurrentScreenContext()` (route → `{screen, agentId, workflowId, groupId, boardId}`, matched via `matchPath` against an ordered table — the drawer lives above the routed `<Outlet/>`, so `useParams()` can't see it there, and `matchPath` has no cross-pattern ranking, so literal routes have to precede the param routes they'd otherwise collide with) and thread its output into `send(input, context)` from the drawer only (the full page's own location is always just "the operator page" — not informative). A new unconditional section of the system prompt (`BODY_APP_CONTEXT`, Qute-conditional so it degrades to nothing when no context was sent) reads it back as `{context.screen}` etc. Zero backend changes. Existing operators pick this up on their next reconfigure, same as every other prompt-body change in this feature.
+
+**Caught live, not by the test suite:** the mobile Workforce viewport has a `fixed bottom-0 h-16` tab bar (`WorkforceBottomTabs`) that jsdom can't lay out, so nothing in the automated suite could have caught the drawer's default `bottom-6` sitting ~40px inside it. Found by actually resizing a running dev-server browser to the mobile breakpoint and reading `getBoundingClientRect()`; fixed with a `clearsBottomTabBar` prop (mirrors the same layout's own `<main className="pb-20">`, used only on mobile), verified the fix live, then added a regression test asserting the class difference (`operator-drawer.test.tsx`) since geometry itself isn't observable in jsdom.
+
+i18n: `operator.chat.pauseCompact{Fallback,Review}`, `operator.drawer.{title,notActivated,activate}` — all 11 locales.
+
+**Verification:** typecheck and lint clean; full suite 309 files / 4642 tests green (+4 files / +26 tests over baseline); production build succeeds; manual pass in a live dev server (MSW mock backend) across Manager and all three Workforce viewport branches, including the mobile fix above.
+
+---
+
+## 🔒 fix(hitl): a resume verdict that resolved to null was one comparison away from executing as approved (2026-08-03)
+
+**Repo:** EDDI (`feat/operator-request-fingerprint`)
+
+Found by an automated review comment on [#627](https://github.com/labsai/EDDI/pull/627) (Copilot), on `AgentOrchestrator.resumeToolLoop`'s per-call verdict resolution: `HitlVerdict verdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : topVerdict` falls back to `topVerdict` with no null check, and the only gate downstream is `if (verdict == REJECTED) { ...skip... }` — a null verdict is not `== REJECTED`, so it silently fell through to the execute branch. The metric emitted alongside it made this worse, not just neutral: `recordWriteApprovalDecision`'s `verdict == APPROVED ? "approved" : "rejected"` would have tagged the very same call `"rejected"` while it executed — the telemetry that should have caught the bug in production would have shown the opposite of what happened.
+
+Traced every caller of the shared choke point (`ConversationService.resumeConversation`) before concluding this was live: `RestAgentEngine` (`decision.getVerdict() == null` → 400), `SlackInteractivityHandler` (`verdictFor` checked before `ParsedAction` exists), `McpHitlTools` (`parseVerdictOrNull` checked before the tool call proceeds), `HitlTimeoutHandler` (verdict is a hardcoded `APPROVED`/`REJECTED` ternary), `GroupConversationService`'s member-tool-pause auto-resolution (hardcoded `REJECTED`) — all five independently guarantee a non-null top-level verdict today. Not exploitable as the code stands, but fragile: the invariant was enforced four separate times, never once at the method every one of them funnels through, so a sixth caller (or a refactor of any of the five) could silently reintroduce the gap with nothing to catch it.
+
+Fixed at both ends rather than patching the symptom:
+- **`ConversationService.resumeConversation`** now rejects `decision == null || decision.getVerdict() == null` up front with `IllegalArgumentException`, mirroring `RestAgentEngine`'s existing message — enforced once, for every current and future caller, instead of assumed five times over.
+- **`AgentOrchestrator`**, per Copilot's specific suggestion: normalizes an (now theoretically unreachable, but no longer trusted blindly) unresolved verdict to `REJECTED` before either the metric emit or the execution check, so the two can never disagree with each other again.
+
+Mutation-verified both independently: reverting the `ConversationService` guard makes the new null-decision/null-verdict tests fail with `ResourceNotFoundException` instead of `IllegalArgumentException` (proving the check, not something else, produces the 400); reverting the `AgentOrchestrator` normalization makes `unresolvedVerdictFailsClosed` fail on `journalStore.tryClaim` actually being invoked — i.e. with the fix removed, the call really does execute. Both restored and re-verified green (`ConversationServiceHitlCoverage2Test` 14/14, `AgentOrchestratorResumeToolLoopTest` 12/12, `ConversationServiceResumeTest` 18/18).
+
+Also landed on this branch: reattached `auditOutcomeUnknown`'s Javadoc, separated from its method by the request-pinning commit's insertion point (also a review finding, cosmetic — see the commit itself).
+
+---
+
+## 🔓 feat(setup): let the standard agent-setup path install a HITL gate too (2026-08-03)
+
+**Repo:** EDDI (`feat/operator-request-fingerprint`)
+
+`CreateApiAgentRequest` (the OpenAPI-spec agent path) has carried a `hitlConfig` field since the setup-api gate provisioning work referenced above — `SetupAgentRequest` (the "standard" agent path: behavior rules + LLM + output, no OpenAPI spec) never got the same field, so every agent it created had `hitlConfig == null` and no gate. Added the field, mirroring `CreateApiAgentRequest`'s reasoning exactly: validated up front (`HitlConfigValidation.validate`, same as `createApiAgent`), wired onto `AgentConfiguration` at creation time — before `createAgent()` is called, never via a later PUT, for the same "v1 must ship gated or a redeploy reaches an ungated version" reason documented on `createApiAgent`. Deliberately absent from the MCP `setup_agent` tool's arguments (stays `null`, same as `create_api_agent`) — that tool already lets the caller choose the created agent's tool surface, so also letting it choose the approval gate would be a caller-controlled way to produce an ungated agent. Provisioning a gated agent goes through `POST /administration/agents/setup` directly, which the JAX-RS layer deserializes with no such restriction.
+
+Closes a real, previously undocumented gap: this was the one remaining agent-creation path with no `hitlConfig` support at all — a prerequisite for letting the operator provision *any* type of agent (not just OpenAPI-spec ones) with an approval gate installed from v1.
+
+New coverage: `HitlConfigWiringTests` (`AgentSetupServiceTest`) asserts — via `ArgumentCaptor<AgentConfiguration>` — that the exact `hitlConfig` object reaches `createAgent()`, and that an absent one leaves the agent ungated rather than inventing a default. This assertion didn't previously exist for either `setupAgent` or `createApiAgent`; adding it for the new path closed the gap for both. Mutation-tested: removing the `setHitlConfig` call fails `hitlConfigReachesTheCreatedAgentConfiguration` (asserted `null` where the real object was expected); restored and re-verified 95/95 green.
+
+**Verification.** Full `mvnw test` run checked against the documented environmental baseline (~288 no-network loopback errors in `Web*ToolTest`, 8 pre-existing failures in `EmbeddingModelFactoryBranchTest`); this run: 313 errors / 8 failures, none in a touched class.
+
+---
+
+## 🔒 feat(hitl): approval binds to the resolved request, not the tool name (2026-08-03)
+
+**Repo:** EDDI (`feat/operator-request-fingerprint`, branched from `main` after PR #625 merged — the per-endpoint-friction entry below plus setup-api gate provisioning, docs-over-REST, and `mcpServerUrls`; builds on the foundation laid in [#622](#-featoperator-the-foundation-for-an-agent-that-can-safely-write-2026-07-29))
+
+Closes the gap the operator write-scope plan (`planning/operator-write-scope-plan.md` §3) flagged as the reason `WRITE_ENDPOINTS` had to stay empty: an approver of a gated `http` call saw the tool's name and the model's raw arguments, never the actual request. Method, path, query and body are only produced inside `ApiCallExecutor#execute`, **after** approval — so what an approver signed off on and what ran could, in principle, differ.
+
+**Four commits, one seam apiece:**
+
+1. `IApiCallExecutor#resolve` — builds the request `execute` would send, without sending it. Deliberately weaker than `execute`: it skips `preRequest.propertyInstructions` because those write to conversation memory and previewing a call must never do that, so a call that has them comes back with no fingerprint rather than one that doesn't match what execution will actually build. Shares one redaction definition (`RequestRedactor`, extracted from `ApiCallExecutor`'s private scrub) between the conversation-memory debug record and the approval preview, so the two paths cannot drift apart on what counts as a credential.
+2. Gate time: each gated httpcall tool is resolved, and a redacted preview plus a SHA-256 fingerprint are persisted on the pause (`PendingToolCall.requestPreview` / `.requestFingerprint`). The fingerprint deliberately hashes the **redacted** request, not the live one — `ApiCallExecutor` resolves `${caller:token}` into `Authorization`, the approver is routinely a different person than whoever's turn raised the pause, and fingerprinting the live header would mismatch on every cross-user approval (the normal case), which would just get the check disabled. Canonicalization is length-prefixed rather than delimiter-joined, so a body containing a crafted newline cannot impersonate an extra header field and collide.
+3. Resume time: an approved, pinned call is re-resolved and refused — synthetic `NOT_EXECUTED`, audited as `hitl.tool.request_changed` (tool + callId + reason, never the request) — if the fingerprint moved. This is the actual enforcement; everything before it was groundwork. Three situations fail *closed* rather than being waved through: the tool vanished from the workflow across the pause, re-resolution throws, or the call's config gained `preRequest.propertyInstructions` mid-pause. "Cannot verify" is a different answer than "unchanged" — treating it as the latter would make reconfiguring an agent while a human decides the way around the guard.
+4. `eddi.operator.write.approval{decision=approved|rejected|timeout}` — the rubber-stamping signal the plan's metrics table calls for, emitted the instant a gated call's verdict is resolved regardless of what happens to it afterwards. `timeout` is its own bucket (`decidedBy == "system:timeout"`, from `HitlTimeoutHandler`) rather than folded into `approved`/`rejected` — an unattended auto-approval inflating "approved" would defeat the point of the metric.
+
+**Two metrics the backend cannot honestly emit itself.** `eddi.operator.canary` (+`.duration`) and `eddi.operator.gate.verified` describe facts the Manager establishes client-side — the write canary is a synthetic conversation it drives in the browser, gate verification is it re-reading every version of the operator agent document — and this codebase has no first-class notion of "the operator" to hang a server-side event on. `POST /administration/operator/{canary-result,gate-status}` (`eddi-admin`) exists purely to relay those already-established facts onto `/q/metrics`, so on-call doesn't need a Manager tab open. **Not a verification endpoint** — a report is trusted at face value, which is why it sits behind the same tier that can provision the operator at all. The gauge defaults to 0 before any report arrives, which is indistinguishable from "activated, and broken"; that ambiguity is real and this signal alone doesn't resolve it.
+
+**Verification.** Full `mvnw validate` + `mvnw test` run checked against the documented environmental baseline (no-network loopback failures in `Web*ToolTest`); none of the touched classes appear in the failure list. The fingerprint discrimination properties (method/URI/query/body/header changes each move the hash; header casing, ordering, and redacted-credential values do not) and the enforcement decision (pinned+changed → refused; unpinned, amended, or matching → proceeds; unresolvable → fails closed) are both covered with dedicated unit tests. Four mutations applied against the enforcement path, each confirmed to kill exactly the tests guarding that branch; one applied against the timeout-tagging logic, confirmed to kill only the two timeout tests and leave approved/rejected untouched.
+
+Documented in [`docs/hitl.md`](hitl.md) (new §"Request pinning — approval binds to a request, not a tool name"; Operations metrics list extended).
+
+### Two more commits on the same branch: the preview reaches the wire, and everything above gets a real metric (2026-08-03)
+
+The pinning above persisted `requestPreview`/`requestFingerprint` on the pause record, but nothing external ever read them back — `RestAgentEngine.buildToolCallPauseDetails` builds its response as an explicit field-by-field map, so a new model field is invisible to a caller until something puts it there. `GET .../approval-status` now surfaces `requestPinned` and, when pinned, the redacted `requestPreview` (`method`/`uri`/`queryParams`/`headers`/`body`/`bodyTruncated`) per call — this is what an approver actually reads, replacing what the Manager previously had to guess by reconstructing an `operationId` against a separately-fetched spec. The raw fingerprint stays internal; it means nothing to a human. `namesOnlyPendingToolCalls` — the security-motivated projection for the generic (non-approver) read surfaces — needed no code change, since it's an explicit allow-list and a field it was never told to copy is absent by construction; only its doc comment needed the two new field names added.
+
+Also lands `eddi.operator.write.approval{decision=approved|rejected|timeout}` (a real backend-native metric — the orchestrator observes every gated-call verdict directly) and the relay endpoints `POST /administration/operator/{canary-result,gate-status}` for the two metrics the backend cannot honestly emit itself.
+
+**Verification note worth recording**: this repo's `@Nested`-only JUnit classes report `Tests run: 0` in the plain-text surefire report even when every test inside passed — already documented in memory from a prior session, and it still cost real time to rediscover mid-session before the XML `<testsuite tests="…">` attribute was checked. Both touched test classes' real results: `RestAgentEngineToolPauseDetailsTest` 11/11, `ConversationMemoryUtilitiesHitlTest` 8/8.
+
+### The preview leaked the body it was supposed to protect (2026-08-03)
+
+Found while scoping the operator's authoring UI, and the reason that scope changed: `RequestRedactor` only ever touched `headers`. Both consumers of a resolved request — the debug record persisted to the conversation document and the approval preview shown to a human — passed the **body** through verbatim. A config write carries its credential in the body, not a header, so a `POST` creating an agent with a provider key would have shown that key in plaintext to whoever approved the pause — routinely a different admin than the one whose turn raised it.
+
+Fixed by giving `RequestRedactor` a `redactBody` (delegating to `SecretRedactionFilter`, the same value-shape scan already behind `argumentsRedacted` — one filter for one class of data, rather than a second scheme that would drift), wired into both `redactRequestMap` and `ResolvedRequest#of`.
+
+The ordering matters more than the redaction. Headers stay fingerprinted **redacted** for the cross-user-approval reason documented above; the body is fingerprinted **raw** and only the stored copy is redacted, because a body has no equivalent legitimate variance (`${caller:token}` is header-only; `${vault:…}` resolves identically both times). Redacting first would hash two *different* credentials to one marker and so to one fingerprint — a swapped secret would pass the pre-execution re-check as an unchanged request. `ResolvedRequest#of` does the redaction itself so no call site can get that order wrong; a test asserts two distinct keys produce distinct fingerprints, and it fails if the redaction is hoisted above the hash. The fingerprint is never exposed to a client, so hashing raw reveals nothing.
+
+The limitation is stated rather than papered over: value-shape matching catches `sk-…`, `sk-ant-…`, bearer tokens and vault refs, not a hand-rolled secret in a generically named field. That is the same limitation `argumentsRedacted` already carries.
+
+### Review findings on the PR — pinning was silently not applying (2026-08-03)
+
+Three defects found by automated review on [#627](https://github.com/labsai/EDDI/pull/627), all in the pinning path, all fixed with tests that fail without the fix.
+
+**Query parameters broke pinning entirely.** `IRequest#toMap` returns them as `Map<String, List<String>>` — `HttpClientWrapper` accumulates repeats — but `resolve` cast that to `Map<String, String>`. The cast erases cleanly and then throws `ClassCastException` inside the fingerprint canonicaliser, which `pinResolvedRequest` catches and downgrades to "approved unpinned". So **every gated endpoint carrying a query parameter was silently unpinned**, `POST .../deploy/{agentId}?version=N` — a granted write — among them. The headline guarantee of this PR did not apply where it mattered most, and nothing failed loudly. Fixed by normalising both shapes, canonicalising one length-prefixed field per value (so `?tag=a&tag=b` cannot be forged by a single value containing the display separator), and correcting the `KEY_QUERY_PARAMS` javadoc that asserted the wrong type.
+
+**Query parameters were not redacted.** Same class as the body leak above and missed for the same reason — `?api_key=…` is a conventional credential channel, and the query string is shown to the approver. Redacted for display, hashed raw, exactly as the body is.
+
+**A dropped tool kept its resolver.** `mergeExternalTools` resolves a name collision by dropping the incoming tool, but the resolver was registered before that verdict was known. A builtin that won a collision against an http tool of the same name would then be pinned against the *dropped* tool's request — the approver shown a preview of a call that never runs, and the pre-execution check comparing against that same fabricated request and passing. Resolvers are now pruned to names a surviving http tool actually owns.
+
+Also: the tool name in the resolve-failure WARN now goes through `sanitize` (it is model-chosen and could forge log records), and the docs no longer claim `requestPinned: false` implies `requestPreview: null` — a call with `preRequest.propertyInstructions` is previewed best-effort *and* left unpinnable, so both are true at once.
+
+**`WRITE_ENDPOINTS` is now populated**, on the Manager side — see that repo's own changelog for the write canary, the curated endpoints (four operational verbs plus group create), real `read_write` scope selection, and the approval banner rendering this backend's `requestPreview` in place of the client-side `operationId` reconstruction it was always labelled as a stand-in for. Nothing further is required on this side.
+
+---
+
 ## 🎚️ feat(hitl): per-endpoint approval friction (2026-08-01)
 
 **Repo:** EDDI (`feat/operator-write-capability`)
@@ -1194,6 +1322,51 @@ Coverage is now: file bodies → `StrictBoundaryShippedConfigsTest` (32 document
 The same CI run also went red on Gitleaks: `generic-api-key` at `SecretScrubberTest.java:238`, from a key-shaped literal in the test added for the scrubber fix. gitleaks-action scans a PR's new commits, so the identical literal that has sat in that file for ages stayed green while the new line was flagged.
 
 Fixed by removing the literal rather than suppressing the finding: the test is about **field-name** detection, so it now uses a deliberately low-entropy value. That is a better test as well as a quieter one — with a key-shaped value the entropy heuristic could have redacted it and the assertion would have passed for the wrong reason. A third assertion pins that a non-secret field keeps the same value, so the check is provably field-name-driven rather than blanket.
+
+---
+
+## 🔓 fix(ci): secret scanning could never pass on a pull request from a fork (2026-07-31)
+
+**Repo:** EDDI (`ci/gitleaks-cli-for-forks`)
+
+The **Secret Scanning** job failed on every pull request opened from a fork. On #623 it was the *only* failing check: twelve passed and seven were skipped. Nothing downstream was blocked: two jobs list `gitleaks` in `needs:` and neither is stopped by it. `docker` is gated on `github.event_name == 'push'` and skips on pull requests; `notify-slack` runs `if: always()` and reads `needs.gitleaks.result` only to pick a status icon, so every fork pull request posted a Slack card with a red Secret Scan marker. The cost is narrower than a blocked pipeline but not harmless: an outside contributor cannot get a green run, a permanently red check trains reviewers to ignore that check, and it cannot be made a required status without blocking every fork.
+
+**Two causes, stacked.** `gitleaks/gitleaks-action` requires a paid `GITLEAKS_LICENSE` for repositories owned by an organization, and GitHub deliberately withholds repository secrets from `pull_request` runs that originate in a fork. So the license was absent by design, not by misconfiguration, and no amount of secret management on this side would have supplied it. The failure is structural rather than incidental, and the open pull requests are a natural experiment. Of the 21 open, 12 come from forks: all 9 that have a Secret Scanning result failed it, and the other 3 never ran it. Of the 9 from branches in this repository, 7 passed, 1 has no result, and 1 (#430, a Dependabot bump last updated in May) failed — its logs have since expired, so that one is unattributed rather than explained. Dependabot is not the discriminator: five other Dependabot pull requests pass.
+
+**The scanner and its wrapper have different licenses.** The `gitleaks` CLI itself is MIT and needs no key at all — only the Action wrapper is commercially licensed. Running the binary directly restores coverage on forks, which is precisely where an unreviewed secret is most likely to arrive. The two alternatives both lose that: dropping the job to `continue-on-error` keeps it green while scanning nothing, and gating it on `github.event.pull_request.head.repo.fork` skips forks outright.
+
+**Pinned by version and checksum, following the existing convention.** This repository already installs a third-party binary this way: `PREFLIGHT_VERSION` and `PREFLIGHT_SHA256` sit in the workflow-level `env:` block and the install step pipes the recorded hash through `sha256sum -c -`. `GITLEAKS_VERSION` and `GITLEAKS_SHA256` join them there and the install step mirrors that shape, so a retagged or substituted release fails the step rather than executing. This is stronger than the commit-pinned Action it replaces: the Action pin covers the wrapper, not the binary the wrapper downloads at runtime. Output is redacted with `--redact=100`, so a real finding never prints the secret into a public log.
+
+**Design decision — scan the event's commits, never the full history.** A whole-repository scan on a full-depth checkout reports **61 findings across 16 commits, dated 2016 to 2026**. Most are in files deleted years ago: Keycloak property files from 2016-2019, vendored licence HTML from 2022, an old `keycloak-dev.json`. The licence files are plainly false positives, licence prose tripping `generic-api-key`. Several of the old Keycloak entries are UUID-shaped, which is what a real Keycloak client secret looks like, so they are worth a maintainer's eye even though the files are long gone and the history is public either way. No values are reproduced here or in the pull request. Whatever their status, none is something a contributor could fix, so repo-wide scope would fail the build for everyone. Scoping to the event range keeps the same scope `gitleaks-action` used, so this is not a coverage change.
+
+**Correction to an earlier revision of this entry.** It said 82 findings across 9 commits, concentrated in `docs/gdpr-compliance.md` and test fixtures, and called all 82 false positives. That was measured on a **shallow clone**: at the graft boundary a commit appears to add entire files, which both inflated the count and misattributed it. On a full-depth checkout, which is what `fetch-depth: 0` gives CI, the real figure is 61 across 16 commits with a different profile. The blanket "all false positives" reading was also not supported by the measurement. The conclusion is unchanged; the numbers behind it were wrong and are corrected here.
+
+**Design decision — the scanner's own config comes from the base branch on a pull request.** The checkout on a pull request is the contributor's tree, and gitleaks reads two files from it: `.gitleaksignore` (fingerprint allowlist) and `.gitleaks.toml` (auto-detected config). Those two files are the whole surface: `gitleaks.toml` without the dot and `.gitleaks.yaml` are not auto-detected, which I checked rather than assumed. Either can switch a finding off. Verified by building the attack: commit a secret, read back the fingerprint gitleaks reports, add it to `.gitleaksignore` in the same pull request, and the scan passes clean. A permissive `[allowlist] regexes` in an added `.gitleaks.toml` does the same, and the repository has no `.gitleaks.toml` today, so adding one meets nothing. `--gitleaks-ignore-path` does not help: the flag is honoured but the repository-root file is still read alongside it. Restoring both from `base.sha` before scanning does, and it keeps the base's own legitimate entries. This was not a regression — `gitleaks-action` read the checked-out config the same way — but fork pull requests were never scanned before, so there was nothing to bypass; making fork scanning work is what makes the boundary matter.
+
+**Design decision — a range that cannot be resolved is an error, not an empty scan.** On a pull request the step requires both `base.sha` and `head.sha` to exist in the checkout and exits non-zero with a `::error::` annotation if either is missing. The tempting fallback is to narrow the range and carry on, but that converts a broken fetch into a scan that passes without having looked at anything — the failure mode that is worst here, because it is invisible. Only the push path falls back, to the tip commit, and it logs that it did. `fetch-depth: 0` on the checkout is what makes both SHAs reachable and is now load-bearing rather than incidental.
+
+**Verification.** Both steps were extracted from the committed YAML and executed verbatim against this repository with the real 8.30.1 binary. Nine scan cases, three install cases and two configuration-bypass cases:
+
+| Case | Expected | Result |
+| --- | --- | --- |
+| Pull request, valid range, no secrets | pass | exit 0 |
+| Pull request, `base.sha` unresolvable | fail loudly | exit 1, `::error::`, scanner never invoked |
+| Pull request, `head.sha` unresolvable | fail loudly | exit 1, `::error::`, scanner never invoked |
+| Pull request, empty range | pass | 0 commits scanned, exit 0 |
+| Pull request planting a Bearer token of 40 hex characters | fail | `leaks found: 1`, exit 1 |
+| Push, valid `before` | pass | exit 0 |
+| Push, `before` all zeros (new branch) | tip commit, logged | exit 0 |
+| Push, `before` absent from the checkout | tip commit, logged | exit 0 |
+| Event that is neither push nor pull request | tip commit, logged | exit 0 |
+| Install, correct version | pass | checksum `OK`, ELF x86-64 extracted |
+| Install, tampered tarball | reject | `sha256sum -c` exit 1 |
+| Install, nonexistent version tag | fail, leave nothing behind | exit 22, no binary written |
+| Fork allowlists its own secret via `.gitleaksignore` | blocked | exit 1; base's own entries kept |
+| Fork adds a permissive `.gitleaks.toml` | blocked | exit 1; file removed, logged |
+
+The detection test matters because the first attempt at it used the AWS documentation example key, which gitleaks allowlists — it reported clean, which would have made a scanner that detects nothing look correct. The planted-secret case is what proves the job is not vacuous.
+
+**Files:** `.github/workflows/ci.yml` (the `gitleaks` job only; no other job, and no application code, is touched).
 
 ---
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -336,6 +337,112 @@ class AgentOrchestratorResumeToolLoopTest {
                 .findFirst().orElse(null);
         assertNotNull(rejectionMsg, "a REJECTED_BY_REVIEWER result must be appended");
         assertTrue(rejectionMsg.contains("policy forbids this"), "note must be embedded in the envelope");
+    }
+
+    @Test
+    @DisplayName("a pinned call whose request MOVED is refused at the call site — not executed, not claimed")
+    void pinnedCallWithChangedRequestIsRefusedInTheLoop() throws Exception {
+        // requestChangedSinceApproval has good unit tests, but nothing exercised
+        // the branch that CALLS it: every test here builds a task with
+        // enableHttpCallTools=false, so toolRequestResolvers is always empty and
+        // the refusal is unreachable. The whole block could be deleted and the
+        // suite stayed green — i.e. pinning was proven to compute correctly and
+        // not proven to apply. This drives the real loop with a resolver present.
+        var task = twoToolTask();
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var gated = gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}");
+        gated.setRequestFingerprint("fingerprint-recorded-at-gate-time");
+        var batch = batchWith(0, List.of(gated), List.of(r1));
+
+        // Re-resolution now yields a DIFFERENT fingerprint — the tamper case.
+        ToolRequestResolver movedResolver = req -> ai.labs.eddi.modules.apicalls.impl.ResolvedRequest.of("POST",
+                "https://eddi.example/agentstore/agents/attacker-choice", Map.of(), Map.of(), "{}", true);
+        var spied = spy(orchestrator);
+        doAnswer(invocation -> {
+            var real = (AgentOrchestrator.ToolSetup) invocation.callRealMethod();
+            return new AgentOrchestrator.ToolSetup(real.toolSpecs(), real.toolExecutors(), real.toolSources(),
+                    real.builtInSpecs(), real.toolCanonicalNames(), real.toolEndpoints(), Map.of("calculate", movedResolver));
+        }).when(spied).buildToolSetup(any(), any());
+
+        ChatModel chatModel = mock(ChatModel.class);
+        var captor = ArgumentCaptor.forClass(ChatRequest.class);
+        when(chatModel.chat(captor.capture())).thenReturn(text("I could not perform that action."));
+
+        var result = spied.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
+
+        assertEquals("I could not perform that action.", result.response());
+        // The three things the refusal must actually do, none of which the unit
+        // tests of the predicate could observe:
+        verify(calculatorTool, never()).calculate(anyString());
+        verify(journalStore, never()).tryClaim(anyString(), anyString(), anyString(), anyString(), anyString());
+        var refusal = captor.getValue().messages().stream()
+                .filter(m -> m instanceof ToolExecutionResultMessage)
+                .map(m -> ((ToolExecutionResultMessage) m).text())
+                .filter(t -> t.contains("NOT_EXECUTED"))
+                .findFirst().orElse(null);
+        assertNotNull(refusal, "the model must be told the call did not run");
+        assertTrue(refusal.contains("changed after it was approved"), refusal);
+    }
+
+    @Test
+    @DisplayName("a pinned call whose request is UNCHANGED still executes — the guard is not a blanket refusal")
+    void pinnedCallWithMatchingRequestStillExecutes() throws Exception {
+        // The mirror direction. Without it, a guard that refused everything would
+        // pass the test above and silently break every gated write in production.
+        var task = twoToolTask();
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var gated = gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}");
+
+        ToolRequestResolver stableResolver = req -> ai.labs.eddi.modules.apicalls.impl.ResolvedRequest.of("POST",
+                "https://eddi.example/agentstore/agents/a1", Map.of(), Map.of(), "{}", true);
+        // Pin it to whatever that resolver actually produces, so gate time and
+        // resume time genuinely agree.
+        gated.setRequestFingerprint(stableResolver.resolve(r1).fingerprint());
+        var batch = batchWith(0, List.of(gated), List.of(r1));
+
+        var spied = spy(orchestrator);
+        doAnswer(invocation -> {
+            var real = (AgentOrchestrator.ToolSetup) invocation.callRealMethod();
+            return new AgentOrchestrator.ToolSetup(real.toolSpecs(), real.toolExecutors(), real.toolSources(),
+                    real.builtInSpecs(), real.toolCanonicalNames(), real.toolEndpoints(), Map.of("calculate", stableResolver));
+        }).when(spied).buildToolSetup(any(), any());
+
+        when(journalStore.tryClaim(anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(true);
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("42"));
+
+        spied.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
+
+        verify(journalStore).tryClaim(anyString(), anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("unresolved verdict (no top-level, no per-call override) fails closed: treated as REJECTED, not executed")
+    void unresolvedVerdictFailsClosed() throws Exception {
+        // ConversationService.resumeConversation rejects a null decision.verdict
+        // before this method is ever reached in production — every real caller
+        // (REST, Slack, MCP, timeout auto-resolution) already guarantees one. This
+        // constructs the otherwise-unreachable case directly (decision.verdict left
+        // unset, no per-call override for the pending call) to prove
+        // resumeToolLoop's OWN fallback also fails closed rather than trusting that
+        // upstream guarantee alone — the not-REJECTED-so-must-be-approved shape is
+        // exactly the fail-open Copilot flagged on AgentOrchestrator.java.
+        var task = twoToolTask();
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("I could not perform that action."));
+
+        var unresolved = new HitlDecision();
+        unresolved.setDecidedBy("reviewer-1");
+        // verdict deliberately left null.
+
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, unresolved, true);
+
+        assertEquals("I could not perform that action.", result.response());
+        verify(calculatorTool, never()).calculate(anyString());
+        verify(journalStore, never()).tryClaim(anyString(), anyString(), anyString(), anyString(), anyString());
     }
 
     @Test

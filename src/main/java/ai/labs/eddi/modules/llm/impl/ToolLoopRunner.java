@@ -401,7 +401,8 @@ class ToolLoopRunner {
                             // 3) snapshot + persist the pending batch, then abort the loop
                             PendingToolCallBatch batch = gateSupport.buildPendingBatch(currentMessages, gateResult, task, memory,
                                     i, ToolApprovalGateSupport.activatedToolNames(isLazy, activeSpecs), trace, pausesSoFar + 1, llmTaskIndex,
-                                    toolSources, effectiveToolApprovals, transcriptMaxBytes, ruleByCallId, governingRule);
+                                    toolSources, effectiveToolApprovals, transcriptMaxBytes, ruleByCallId, governingRule,
+                                    setup.toolRequestResolvers());
                             memory.setHitlPendingToolCalls(batch);
                             ToolApprovalGateSupport.incrementToolPauseCount(memory, pausesSoFar);
                             throw new ToolApprovalRequiredException(

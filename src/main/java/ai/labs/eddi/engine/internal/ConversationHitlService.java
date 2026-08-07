@@ -209,6 +209,12 @@ class ConversationHitlService {
                                    ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
                                    ConversationResponseHandler handler)
             throws ResourceStoreException, ResourceNotFoundException {
+        // See resumeConversation's @throws IllegalArgumentException javadoc
+        // (IConversationService) for why this is checked here rather than trusted
+        // from each caller.
+        if (decision == null || decision.getVerdict() == null) {
+            throw new IllegalArgumentException("decision.verdict is required (APPROVED or REJECTED)");
+        }
         // B3: a resume enqueues a FULL turn through the same coordinator the shutdown
         // drain is waiting on, so admitting one during the drain both extends the
         // drain and risks the turn being SIGKILLed halfway. Rejected here, BEFORE the

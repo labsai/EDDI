@@ -569,7 +569,7 @@ class AgentSetupServiceTest {
         @DisplayName("throws when agent name is null")
         void nullAgentName() {
             var request = new SetupAgentRequest(null, "prompt", "openai", "gpt-4",
-                    "key", null, null, null, null, null, null, null, null, null);
+                    "key", null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.setupAgent(request));
         }
@@ -578,7 +578,7 @@ class AgentSetupServiceTest {
         @DisplayName("throws when system prompt is blank")
         void blankPrompt() {
             var request = new SetupAgentRequest("Test Agent", "", "openai", "gpt-4",
-                    "key", null, null, null, null, null, null, null, null, null);
+                    "key", null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.setupAgent(request));
         }
@@ -587,7 +587,7 @@ class AgentSetupServiceTest {
         @DisplayName("throws when cloud provider has no API key")
         void cloudProviderNoApiKey() {
             var request = new SetupAgentRequest("Test Agent", "prompt", "openai", "gpt-4",
-                    null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.setupAgent(request));
         }
@@ -598,12 +598,173 @@ class AgentSetupServiceTest {
             // ollama doesn't need an API key, but will fail at REST store call
             // — the validation itself should pass
             var request = new SetupAgentRequest("Test Agent", "prompt", "ollama", "llama3",
-                    null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null);
             // Will throw AgentSetupException at the REST call level, not validation
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.setupAgent(request));
             // Should NOT be "API key is required"
             assertFalse(ex.getMessage().contains("API key is required"));
+        }
+
+        @Test
+        @DisplayName("an unusable approval pattern is refused BEFORE any resource is created")
+        void invalidHitlConfigRefusedBeforeAnyResourceIsCreated() throws Exception {
+            // Mirrors createApiAgent's own guard, added in the same place for the same
+            // reason: without this, a bad pattern would surface only after the parser,
+            // behaviour, LLM and workflow had all been created, leaving every one
+            // orphaned. Asserted by proving no store was even asked for.
+            var restInterfaceFactory = mock(IRestInterfaceFactory.class);
+            var guardedService = new AgentSetupService(restInterfaceFactory,
+                    mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
+
+            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
+            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            toolApprovals.setRequireApproval(List.of("mcp:/agentstore/agents"));
+            hitl.setToolApprovals(toolApprovals);
+
+            var request = new SetupAgentRequest("Test Agent", "prompt", "openai", "gpt-4",
+                    "key", null, null, null, null, null, null, null, null, null, hitl);
+
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                    () -> guardedService.setupAgent(request));
+            assertTrue(ex.getMessage().startsWith("Invalid hitlConfig:"), ex.getMessage());
+            org.mockito.Mockito.verify(restInterfaceFactory, org.mockito.Mockito.never()).get(any());
+        }
+
+        @Test
+        @DisplayName("a valid hitlConfig passes the up-front check and reaches resource creation")
+        void validHitlConfigPassesTheUpFrontCheck() throws Exception {
+            // Mutation guard for the test above: the guard must reject only what is
+            // actually invalid.
+            var restInterfaceFactory = mock(IRestInterfaceFactory.class);
+            var guardedService = new AgentSetupService(restInterfaceFactory,
+                    mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
+
+            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
+            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.delete:*"));
+            toolApprovals.setExempt(List.of("http.get:*"));
+            hitl.setToolApprovals(toolApprovals);
+
+            var request = new SetupAgentRequest("Test Agent", "prompt", "openai", "gpt-4",
+                    "key", null, null, null, null, null, null, null, null, null, hitl);
+
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                    () -> guardedService.setupAgent(request));
+            assertFalse(ex.getMessage().startsWith("Invalid hitlConfig:"),
+                    "a valid gate must not be refused by the up-front check; got: " + ex.getMessage());
+        }
+    }
+
+    // ==================== hitlConfig actually reaches the created agent
+    // ====================
+
+    /**
+     * The up-front validation tests above prove a bad gate is refused before any
+     * resource exists. Neither they, nor any other test in this file, prove the
+     * other half: that a GOOD gate actually ends up on the
+     * {@code AgentConfiguration} passed to {@code IRestAgentStore.createAgent} —
+     * the one line (`agentConfig.setHitlConfig(request.hitlConfig())`) that is the
+     * entire point of this field existing. Mocks every REST store on the minimal
+     * path (no MCP servers, no intro message) so step 7 is actually reached.
+     */
+    @Nested
+    @DisplayName("hitlConfig reaches the created agent")
+    class HitlConfigWiringTests {
+
+        private Response located(String location) {
+            var response = mock(Response.class);
+            when(response.getHeaderString("Location")).thenReturn(location);
+            return response;
+        }
+
+        private IRestInterfaceFactory wireMinimalHappyPath(
+                                                           org.mockito.ArgumentCaptor<ai.labs.eddi.configs.agents.model.AgentConfiguration> agentCaptor)
+                throws Exception {
+            var factory = mock(IRestInterfaceFactory.class);
+
+            // Each Response built as its own statement, never as a nested
+            // when(...)-inside-when(...) argument expression: Mockito's stubbing
+            // is recorded through a single ongoing-stub slot, and a nested
+            // when()/thenReturn() pair started before the outer one completes
+            // leaves BOTH unfinished (UnfinishedStubbingException) — not a
+            // compile error, only a test-time one, so this is worth spelling out.
+            var parserResponse = located("/parserstore/parsers/000000000000000000000001?version=1");
+            var parserStore = mock(ai.labs.eddi.configs.parser.IRestParserStore.class);
+            when(parserStore.createParser(any())).thenReturn(parserResponse);
+            when(factory.get(ai.labs.eddi.configs.parser.IRestParserStore.class)).thenReturn(parserStore);
+
+            var ruleSetResponse = located("/rulestore/rulesets/000000000000000000000002?version=1");
+            var ruleSetStore = mock(ai.labs.eddi.configs.rules.IRestRuleSetStore.class);
+            when(ruleSetStore.createRuleSet(any())).thenReturn(ruleSetResponse);
+            when(factory.get(ai.labs.eddi.configs.rules.IRestRuleSetStore.class)).thenReturn(ruleSetStore);
+
+            var llmResponse = located("/llmstore/llms/000000000000000000000003?version=1");
+            var llmStore = mock(ai.labs.eddi.configs.llm.IRestLlmStore.class);
+            when(llmStore.createLlm(any())).thenReturn(llmResponse);
+            when(factory.get(ai.labs.eddi.configs.llm.IRestLlmStore.class)).thenReturn(llmStore);
+
+            var workflowResponse = located("/workflowstore/workflows/000000000000000000000004?version=1");
+            var workflowStore = mock(ai.labs.eddi.configs.workflows.IRestWorkflowStore.class);
+            when(workflowStore.createWorkflow(any())).thenReturn(workflowResponse);
+            when(factory.get(ai.labs.eddi.configs.workflows.IRestWorkflowStore.class)).thenReturn(workflowStore);
+
+            var agentResponse = located("/agentstore/agents/000000000000000000000005?version=1");
+            var agentStore = mock(ai.labs.eddi.configs.agents.IRestAgentStore.class);
+            when(agentStore.createAgent(agentCaptor.capture())).thenReturn(agentResponse);
+            when(factory.get(ai.labs.eddi.configs.agents.IRestAgentStore.class)).thenReturn(agentStore);
+
+            // patchDescriptor fires after every creation; an unstubbed mock returning
+            // null for it is fine, but factory.get(...) still has to resolve the class.
+            when(factory.get(ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore.class))
+                    .thenReturn(mock(ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore.class));
+
+            return factory;
+        }
+
+        @Test
+        @DisplayName("a configured hitlConfig is set on the AgentConfiguration handed to createAgent")
+        void hitlConfigReachesTheCreatedAgentConfiguration() throws Exception {
+            var agentCaptor = org.mockito.ArgumentCaptor.forClass(ai.labs.eddi.configs.agents.model.AgentConfiguration.class);
+            var factory = wireMinimalHappyPath(agentCaptor);
+            var wiredService = new AgentSetupService(factory, mock(IRestAgentAdministration.class), mock(ISecretProvider.class),
+                    "http://localhost:11434");
+
+            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
+            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.delete:*"));
+            toolApprovals.setExempt(List.of("http.get:*"));
+            hitl.setToolApprovals(toolApprovals);
+
+            // deploy=false: this test is about the AgentConfiguration handed to
+            // createAgent, not about deployment, which would need an
+            // IRestAgentAdministration mock too.
+            var request = new SetupAgentRequest("Billing Agent", "You are helpful.", "anthropic", "claude-sonnet-4-6",
+                    "sk-test", null, null, null, null, null, null, null, false, null, hitl);
+
+            wiredService.setupAgent(request);
+
+            assertSame(hitl, agentCaptor.getValue().getHitlConfig(),
+                    "the exact hitlConfig from the request must reach the created agent, not a copy or null");
+        }
+
+        @Test
+        @DisplayName("an absent hitlConfig leaves the created agent ungated — the pre-existing default")
+        void absentHitlConfigLeavesTheAgentUngated() throws Exception {
+            // The mirror of the test above: this field is opt-in. A caller that
+            // supplies none must not have one silently invented for them — that
+            // would be a correctness bug in the other direction.
+            var agentCaptor = org.mockito.ArgumentCaptor.forClass(ai.labs.eddi.configs.agents.model.AgentConfiguration.class);
+            var factory = wireMinimalHappyPath(agentCaptor);
+            var wiredService = new AgentSetupService(factory, mock(IRestAgentAdministration.class), mock(ISecretProvider.class),
+                    "http://localhost:11434");
+
+            var request = new SetupAgentRequest("Billing Agent", "You are helpful.", "anthropic", "claude-sonnet-4-6",
+                    "sk-test", null, null, null, null, null, null, null, false, null, null);
+
+            wiredService.setupAgent(request);
+
+            assertNull(agentCaptor.getValue().getHitlConfig());
         }
     }
 

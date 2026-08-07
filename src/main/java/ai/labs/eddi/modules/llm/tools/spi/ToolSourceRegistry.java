@@ -66,12 +66,21 @@ public final class ToolSourceRegistry {
      *            already falls back to the dispatch name, and writing identity
      *            entries would change the map the rate-limit, pricing and
      *            cache-scope lookups see
+     * @param toolRequestResolvers
+     *            dispatch name → {@link ToolRequestResolver}, http source only.
+     *            Copied into the merged map ONLY when the spec that owns the name
+     *            actually survives collision resolution below — a name a later
+     *            source lost still had its resolver registered before that verdict
+     *            was known, and carrying it forward would let an approver be shown
+     *            a preview of, and the pre-execution re-check compare against, a
+     *            request that is not the one about to run.
      * @param failures
      *            every provider's structured failures, concatenated
      */
     public record Assembled(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
             Map<String, String> toolSources, Map<String, String> toolEndpoints,
-            Map<String, String> toolCanonicalNames, List<ProviderFailure> failures) {
+            Map<String, String> toolCanonicalNames, Map<String, ToolRequestResolver> toolRequestResolvers,
+            List<ProviderFailure> failures) {
     }
 
     /**
@@ -115,6 +124,7 @@ public final class ToolSourceRegistry {
         private final Map<String, String> toolSources = new LinkedHashMap<>();
         private final Map<String, String> toolEndpoints = new LinkedHashMap<>();
         private final Map<String, String> toolCanonicalNames = new LinkedHashMap<>();
+        private final Map<String, ToolRequestResolver> toolRequestResolvers = new LinkedHashMap<>();
         private final List<ProviderFailure> failures = new ArrayList<>();
 
         private Merger() {
@@ -159,7 +169,8 @@ public final class ToolSourceRegistry {
 
         public Assembled build() {
             return new Assembled(List.copyOf(specs), Map.copyOf(executors), Map.copyOf(toolSources),
-                    Map.copyOf(toolEndpoints), Map.copyOf(toolCanonicalNames), List.copyOf(failures));
+                    Map.copyOf(toolEndpoints), Map.copyOf(toolCanonicalNames), Map.copyOf(toolRequestResolvers),
+                    List.copyOf(failures));
         }
 
         private void merge(String source, ToolContribution contribution) {
@@ -203,6 +214,13 @@ public final class ToolSourceRegistry {
                 String canonical = contribution.toolCanonicalNames().get(name);
                 if (canonical != null) {
                     toolCanonicalNames.put(name, canonical);
+                }
+                // Only reached once the spec above has actually been accepted, so a
+                // resolver registered for a name that then loses a later collision is
+                // never copied in — see the field's javadoc on Assembled.
+                var resolver = contribution.toolRequestResolvers().get(name);
+                if (resolver != null) {
+                    toolRequestResolvers.put(name, resolver);
                 }
             }
         }

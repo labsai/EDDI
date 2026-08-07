@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
@@ -434,7 +435,10 @@ public class RestAgentEngine implements IRestAgentEngine {
                                     + "is awaiting approval — use the summary view")
                             .build();
                 }
-                return Response.ok(snapshot).build();
+                // The fingerprint is internal: it digests the RAW body and query
+                // values, which is exactly what the preview beside it redacts.
+                // See ConversationMemoryUtilities#stripRequestFingerprintsForRead.
+                return Response.ok(ConversationMemoryUtilities.stripRequestFingerprintsForRead(snapshot)).build();
             }
             // Bookmark fields describe the pause — suppress them once the
             // conversation left AWAITING_HUMAN so stale fields (e.g. after a
@@ -500,6 +504,15 @@ public class RestAgentEngine implements IRestAgentEngine {
             callView.put("arguments", call.getArgumentsRedacted());
             callView.put("argsTruncated", call.isArgsTruncated());
             callView.put("gateReason", call.getGateReason());
+            // The approver's honest replacement for guessing a method/path from a
+            // tool name: what this call actually resolves to, already redacted at
+            // gate time. requestPinned tells the caller whether that preview is
+            // backed by a fingerprint that will be re-checked immediately before
+            // execution (see IApiCallExecutor#resolve) — false for every non-http
+            // tool, so a client must not read its absence as "this call is
+            // somehow less real", only "there is nothing to preview here".
+            callView.put("requestPinned", call.isRequestPinned());
+            callView.put("requestPreview", toRequestPreviewView(call.getRequestPreview()));
             calls.add(callView);
 
             if (pauseEpoch != null && call.getCallId() != null) {
@@ -515,6 +528,33 @@ public class RestAgentEngine implements IRestAgentEngine {
                         : List.of());
         details.put("outcomeUnknown", outcomeUnknown);
         return details;
+    }
+
+    /**
+     * View of a {@link PendingToolCallBatch.ResolvedRequestPreview}, or
+     * {@code null} when the call could not be resolved ahead of execution (every
+     * non-http tool, and an http call whose config could not be previewed without
+     * side effects — see {@code IApiCallExecutor#resolve}).
+     * <p>
+     * Explicit field-by-field like the rest of this method rather than handing back
+     * the POJO for Jackson to serialize: this keeps the exposed shape under the
+     * same review as {@code arguments} above, and the redaction already happened
+     * before this object was ever persisted — nothing here is sensitive to begin
+     * with, but the pattern of "build the view explicitly" stays uniform across
+     * every field in {@code callView}.
+     */
+    private Map<String, Object> toRequestPreviewView(PendingToolCallBatch.ResolvedRequestPreview preview) {
+        if (preview == null) {
+            return null;
+        }
+        var view = new LinkedHashMap<String, Object>();
+        view.put("method", preview.getMethod());
+        view.put("uri", preview.getUri());
+        view.put("queryParams", preview.getQueryParams() != null ? preview.getQueryParams() : Map.of());
+        view.put("headers", preview.getHeaders() != null ? preview.getHeaders() : Map.of());
+        view.put("body", preview.getBody());
+        view.put("bodyTruncated", preview.isBodyTruncated());
+        return view;
     }
 
     private Map<String, Object> buildRulePauseDetails(ConversationMemorySnapshot snapshot) {

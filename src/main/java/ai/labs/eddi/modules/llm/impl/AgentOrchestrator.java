@@ -34,6 +34,7 @@ import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceRegistry;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -518,7 +519,13 @@ class AgentOrchestrator implements IAgentOrchestrator {
                                           HitlDecision decision, boolean toolHitlEnabled,
                                           JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
-        return toolLoopResumer.resumeToolLoop(chatModel, task, memory, batch, decision, toolHitlEnabled, jsonPolicy);
+        // buildToolSetup is called HERE, on this instance, rather than inside the
+        // resumer through its back-reference: the resumer captured the orchestrator at
+        // construction, so resolving it there would bypass a spy/override of this
+        // method — and the toolRequestResolvers map it produces is what enforces
+        // request pinning on resume.
+        return toolLoopResumer.resumeToolLoop(chatModel, task, memory, batch, decision, toolHitlEnabled, jsonPolicy,
+                buildToolSetup(task, memory));
     }
 
     /** Journal-stored result cap (bytes) — matches the journal store's own cap. */
@@ -604,10 +611,17 @@ class AgentOrchestrator implements IAgentOrchestrator {
      *            token the agent designer actually configured
      *            ({@code searchWeb → websearch}); tools that are configured under
      *            their dispatch name (http/mcp/a2a) are simply absent
+     * @param toolRequestResolvers
+     *            dispatch name → how to resolve what the tool would send, http
+     *            source only. Populated by the registry only for names whose http
+     *            spec actually survived collision resolution, so a builtin that won
+     *            a collision can never be pinned against the losing http tool's
+     *            request
      */
     record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
             Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
-            Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints) {
+            Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints,
+            Map<String, ToolRequestResolver> toolRequestResolvers) {
     }
 
     /**
@@ -664,7 +678,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         var assembled = merger.build();
         return new ToolSetup(new ArrayList<>(assembled.specs()), new HashMap<>(assembled.executors()),
                 new HashMap<>(assembled.toolSources()), builtInSpecs, assembled.toolCanonicalNames(),
-                assembled.toolEndpoints());
+                assembled.toolEndpoints(), assembled.toolRequestResolvers());
     }
 
     /**
@@ -903,7 +917,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
                                            Map<String, String> toolSources, ToolApprovalsConfig effectiveToolApprovals,
                                            int transcriptMaxBytes) {
         return buildPendingBatch(currentMessages, gateResult, task, memory, iterationIndex, activatedToolNames, trace,
-                pauseCountThisTurn, llmTaskIndex, toolSources, effectiveToolApprovals, transcriptMaxBytes, Map.of(), null);
+                pauseCountThisTurn, llmTaskIndex, toolSources, effectiveToolApprovals, transcriptMaxBytes, Map.of(), null, Map.of());
     }
 
     /** @see ToolApprovalGateSupport#buildPendingBatch */
@@ -914,10 +928,22 @@ class AgentOrchestrator implements IAgentOrchestrator {
                                            Map<String, String> toolSources, ToolApprovalsConfig effectiveToolApprovals,
                                            int transcriptMaxBytes,
                                            Map<String, ToolApprovalsConfig.ApprovalRule> ruleByCallId,
-                                           ToolApprovalsConfig.ApprovalRule governingRule) {
+                                           ToolApprovalsConfig.ApprovalRule governingRule,
+                                           Map<String, ToolRequestResolver> resolvers) {
         return gateSupport.buildPendingBatch(currentMessages, gateResult, task, memory, iterationIndex,
                 activatedToolNames, trace, pauseCountThisTurn, llmTaskIndex, toolSources, effectiveToolApprovals,
-                transcriptMaxBytes, ruleByCallId, governingRule);
+                transcriptMaxBytes, ruleByCallId, governingRule, resolvers);
+    }
+
+    /** @see ToolLoopResumer#requestChangedSinceApproval */
+    String requestChangedSinceApproval(PendingToolCallBatch.PendingToolCall c, String amendedArguments,
+                                       Map<String, ToolRequestResolver> resolvers) {
+        return toolLoopResumer.requestChangedSinceApproval(c, amendedArguments, resolvers);
+    }
+
+    /** @see ToolApprovalGateSupport#recordWriteApprovalDecision */
+    void recordWriteApprovalDecision(HitlDecision.HitlVerdict verdict, String decidedBy) {
+        gateSupport.recordWriteApprovalDecision(verdict, decidedBy);
     }
 
     /** Caps a string to at most maxBytes UTF-8 bytes without splitting a char. */
@@ -1157,8 +1183,14 @@ class AgentOrchestrator implements IAgentOrchestrator {
      *            Names come from {@code operationId} or a slug, which drift; the
      *            method and path are what the agent designer actually wrote in the
      *            endpoint allow-list.
+     * @param resolvers
+     *            tool name → how to resolve what it would send, without sending it
+     *            (request pinning). Only httpcall tools have one — a builtin, MCP
+     *            or A2A tool is not an HTTP request this side of the boundary, so
+     *            there is nothing to pin.
      */
-    record HttpCallToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors, Map<String, String> endpoints) {
+    record HttpCallToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors, Map<String, String> endpoints,
+            Map<String, ToolRequestResolver> resolvers) {
     }
 
     // Kept as declared delegators (not inlined) since they're reflected/hard
@@ -1172,7 +1204,8 @@ class AgentOrchestrator implements IAgentOrchestrator {
 
     HttpCallToolsResult discoverHttpCallTools(IConversationMemory memory) {
         var contribution = httpCallToolsProvider.discover(memory);
-        return new HttpCallToolsResult(contribution.specs(), contribution.executors(), contribution.toolEndpoints());
+        return new HttpCallToolsResult(contribution.specs(), contribution.executors(), contribution.toolEndpoints(),
+                contribution.toolRequestResolvers());
     }
 
     // Kept as a declared delegator (not inlined). Logic extracted to

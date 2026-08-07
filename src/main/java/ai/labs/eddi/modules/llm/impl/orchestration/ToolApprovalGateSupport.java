@@ -8,12 +8,15 @@ import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
@@ -33,6 +36,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * The tool-approval gate's supporting cast (R2 step 4): per-turn pause
@@ -208,6 +213,11 @@ public class ToolApprovalGateSupport {
      *            the single rule governing this pause (strictest of the above), or
      *            null; persisted so the post-pause resolvers read the same answer
      *            this gate computed
+     * @param resolvers
+     *            per httpcall tool name, how to resolve what it would send —
+     *            {@code ToolSetup#toolRequestResolvers}. Absent entries (every
+     *            non-http tool) leave the call unpinned, which is the pre-pinning
+     *            behaviour.
      */
     public PendingToolCallBatch buildPendingBatch(List<ChatMessage> currentMessages,
                                                   ToolApprovalGate.GateResult gateResult, LlmConfiguration.Task task, IConversationMemory memory,
@@ -215,7 +225,8 @@ public class ToolApprovalGateSupport {
                                                   int pauseCountThisTurn, int llmTaskIndex, Map<String, String> toolSources,
                                                   ToolApprovalsConfig effectiveToolApprovals, int transcriptMaxBytes,
                                                   Map<String, ToolApprovalsConfig.ApprovalRule> ruleByCallId,
-                                                  ToolApprovalsConfig.ApprovalRule governingRule) {
+                                                  ToolApprovalsConfig.ApprovalRule governingRule,
+                                                  Map<String, ToolRequestResolver> resolvers) {
         PendingToolCallBatch batch = new PendingToolCallBatch();
         batch.setPauseEpoch(UUID.randomUUID().toString());
         batch.setLlmTaskId(task.getId());
@@ -270,6 +281,7 @@ public class ToolApprovalGateSupport {
             // on a batch should be able to tell which call brought it.
             var callRule = req.id() != null ? ruleByCallId.get(req.id()) : null;
             call.setMatchedRule(callRule != null ? callRule.getMatch() : null);
+            pinResolvedRequest(call, req, resolvers);
             calls.add(call);
         }
         batch.setCalls(calls);
@@ -284,6 +296,94 @@ public class ToolApprovalGateSupport {
         batch.setFingerprint(fingerprint(gateResult.gated()));
 
         return batch;
+    }
+
+    /**
+     * Resolve what this gated call would send, and pin it to the pause.
+     * <p>
+     * Records both the redacted preview (so the approver sees the actual request
+     * rather than a tool name) and its fingerprint (so the request can be
+     * re-checked immediately before execution).
+     * <p>
+     * <b>Never fails the pause.</b> A tool with no resolver — every non-http source
+     * — and a resolve that throws both leave the call simply unpinned, which is
+     * exactly the behaviour that existed before pinning: approval on name and
+     * arguments. Letting a template error here abort the batch would turn a display
+     * feature into a way to kill a turn, and the honest failure mode for "we could
+     * not determine the request" is to say so, not to guess.
+     */
+    private void pinResolvedRequest(PendingToolCallBatch.PendingToolCall call, ToolExecutionRequest req,
+                                    Map<String, ToolRequestResolver> resolvers) {
+
+        var resolver = resolvers != null ? resolvers.get(req.name()) : null;
+        if (resolver == null) {
+            return;
+        }
+        try {
+            ResolvedRequest resolved = resolver.resolve(req);
+            call.setRequestFingerprint(resolved.fingerprint());
+            call.setRequestPreview(toPreview(resolved));
+        } catch (Exception e) {
+            // sanitize: the tool name is model-chosen, so it can carry newlines or
+            // control characters and forge log records. The throwable is omitted
+            // because this failure comes out of request building, whose message
+            // routinely quotes the request being built.
+            LOGGER.warnf("Could not resolve the request for gated tool '%s' (%s); it will be approved unpinned.", sanitize(req.name()),
+                    e.getClass().getSimpleName());
+        }
+    }
+
+    /** The persisted, display-shaped view of a resolved request. */
+    private static PendingToolCallBatch.ResolvedRequestPreview toPreview(ResolvedRequest resolved) {
+        var preview = new PendingToolCallBatch.ResolvedRequestPreview();
+        preview.setMethod(resolved.method());
+        preview.setUri(resolved.uri());
+        preview.setQueryParams(resolved.queryParams());
+        preview.setHeaders(resolved.headers());
+
+        String body = resolved.body();
+        if (body != null && body.getBytes(StandardCharsets.UTF_8).length > PendingToolCallBatch.PREVIEW_BODY_MAX_BYTES) {
+            // Capped for display only — the fingerprint above was computed over the
+            // whole body, so truncating here cannot weaken the pre-execution check.
+            preview.setBody(capUtf8(body, PendingToolCallBatch.PREVIEW_BODY_MAX_BYTES));
+            preview.setBodyTruncated(true);
+        } else {
+            preview.setBody(body);
+            preview.setBodyTruncated(false);
+        }
+        return preview;
+    }
+
+    /**
+     * {@code eddi.operator.write.approval} — one per gated call the moment its
+     * verdict is resolved, regardless of what happens to it afterwards (truncated
+     * args, a changed-request refusal, and a successful execution are all still an
+     * instance of a human's — or the timeout policy's — decision).
+     * <p>
+     * "write" describes the mechanism, not the source: any call reaching this loop
+     * was gated by {@code toolApprovals.requireApproval}, whether it dispatches
+     * over http, mcp, or a2a. Restricting the tag to http-sourced calls would
+     * silently exclude a gated MCP tool that writes to an external system, which is
+     * exactly the rubber-stamping risk this counter exists to surface.
+     * <p>
+     * {@code decidedBy} distinguishes a real decision from one the timeout policy
+     * made ({@code HitlTimeoutHandler}, {@code decidedBy = "system:timeout"}) —
+     * folding those into {@code approved}/{@code rejected} would count an operator
+     * walking away from their desk as an approval, which is the opposite of what
+     * "approvals ≫ rejections is a rubber-stamping signal" is trying to detect.
+     * <p>
+     * Tagged only with the decision outcome — never a tool name, argument, or
+     * conversation id.
+     */
+    public void recordWriteApprovalDecision(HitlDecision.HitlVerdict verdict, String decidedBy) {
+        try {
+            String decisionTag = "system:timeout".equals(decidedBy)
+                    ? "timeout"
+                    : verdict == HitlDecision.HitlVerdict.APPROVED ? "approved" : "rejected";
+            Metrics.globalRegistry.counter("eddi.operator.write.approval", "decision", decisionTag).increment();
+        } catch (Exception e) {
+            LOGGER.debugf("write.approval metric emit failed: %s", e.getMessage());
+        }
     }
 
     /** Caps a string to at most maxBytes UTF-8 bytes without splitting a char. */

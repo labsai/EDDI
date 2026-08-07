@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
+import ai.labs.eddi.modules.llm.tools.spi.ToolSourceRegistry;
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -116,6 +119,55 @@ class AgentOrchestratorToolGovernanceTest {
 
             assertTrue(specs.isEmpty());
             assertFalse(executors.containsKey("orphan"));
+        }
+
+        /**
+         * One source's contribution of a single named tool, optionally with a resolver.
+         */
+        private static ToolContribution contribution(String name, String executorMarker, ToolRequestResolver resolver) {
+            return new ToolContribution(List.of(ToolSpecification.builder().name(name).build()),
+                    Map.of(name, executor(executorMarker)), Map.of(), Map.of(), List.of(), Map.of(),
+                    resolver != null ? Map.of(name, resolver) : Map.of());
+        }
+
+        @Test
+        @DisplayName("an http tool that LOSES a name collision does not keep its request resolver")
+        void droppedHttpToolLosesItsResolver() {
+            // Otherwise the builtin that won the name would be pinned against the
+            // dropped http tool's request: the approver is shown a preview of a
+            // request that will never run, and the pre-execution re-check compares
+            // against that same fabricated request and passes.
+            //
+            // Enforced structurally rather than by a cleanup pass: ToolSourceRegistry
+            // copies a resolver only AFTER the spec that owns the name has been
+            // accepted, so a losing tool's resolver is never carried in the first
+            // place. (main did the same job with a pruneResolversToSurvivingHttpTools
+            // sweep, which its mergeExternalTools flow needed because resolvers were
+            // registered before the collision verdict was known.)
+            var assembled = ToolSourceRegistry.newMerger()
+                    .addContribution("builtin", contribution("calculator", "builtin", null))
+                    .addContribution("http", contribution("calculator", "http", req -> {
+                        throw new AssertionError("the dropped http tool's resolver must never be consulted");
+                    }))
+                    .build();
+
+            assertFalse(assembled.toolRequestResolvers().containsKey("calculator"),
+                    "the losing http tool's resolver must never reach the assembled setup");
+            assertEquals("builtin", assembled.toolSources().get("calculator"));
+        }
+
+        @Test
+        @DisplayName("an http tool that WINS its name keeps its resolver — the guard is not a blanket wipe")
+        void survivingHttpToolKeepsItsResolver() {
+            var assembled = ToolSourceRegistry.newMerger()
+                    .addContribution("http", contribution("deployAgent", "http", req -> null))
+                    // A later mcp tool of the same name is the one dropped here.
+                    .addContribution("mcp", contribution("deployAgent", "mcp", null))
+                    .build();
+
+            assertTrue(assembled.toolRequestResolvers().containsKey("deployAgent"),
+                    "the http tool owns the name, so pinning must stay available");
+            assertEquals("http", assembled.toolSources().get("deployAgent"));
         }
     }
 

@@ -124,6 +124,16 @@ public class AgentSetupService {
         if (!isLocalLLM && (request.apiKey() == null || request.apiKey().isBlank())) {
             throw new AgentSetupException("API key is required for cloud LLM providers (anthropic, openai, gemini)");
         }
+        // Validate the HITL config HERE, before a single resource exists — same
+        // reasoning as createApiAgent: AgentStore.create validates it too, but only
+        // at step 7, and a bad pattern would otherwise surface after the parser,
+        // behaviour, LLM and workflow had all been created, leaving every one of
+        // them orphaned.
+        try {
+            HitlConfigValidation.validate(request.hitlConfig());
+        } catch (IllegalArgumentException e) {
+            throw new AgentSetupException("Invalid hitlConfig: " + e.getMessage(), e);
+        }
         validateMcpServerUrls(request.mcpServerUrls());
 
         var params = resolveParamsValidated(request.provider(), request.model(), request.deploy(), request.environment());
@@ -193,6 +203,11 @@ public class AgentSetupService {
             // --- Step 7: Create Agent ---
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(List.of(URI.create(workflowLocation)));
+            // The gate is installed on v1 of the agent document. It has to be created
+            // WITH the agent rather than PUT afterwards: an update writes version + 1 and
+            // leaves the ungated v1 reachable by a redeploy, so a two-step provision would
+            // ship an agent that can be returned to an ungated state.
+            agentConfig.setHitlConfig(request.hitlConfig());
             Response agentResponse = getRestStore(IRestAgentStore.class).createAgent(agentConfig);
             String agentLocation = agentResponse.getHeaderString("Location");
             String agentId = extractIdFromLocation(agentLocation);
@@ -379,16 +394,6 @@ public class AgentSetupService {
     }
 
     /**
-     * Creates one McpCalls resource per comma-separated server URL, recording each
-     * location in {@code createdResources}. Returns null when no URLs were given,
-     * which is what {@code createWorkflowConfig} expects for "no MCP step".
-     * <p>
-     * Shared by {@code setupAgent} and {@code createApiAgent} so an API agent can
-     * hold both the tools generated from its OpenAPI spec and an MCP server's —
-     * previously only the former, which made "REST plus MCP" unreachable through
-     * the wizard.
-     */
-    /**
      * Validates every MCP server URL before any of them is written.
      * <p>
      * {@code McpCallsConfiguration.validate()} rejects a non-http(s) URL at save
@@ -414,6 +419,17 @@ public class AgentSetupService {
             }
         }
     }
+
+    /**
+     * Creates one McpCalls resource per comma-separated server URL, recording each
+     * location in {@code createdResources}. Returns null when no URLs were given,
+     * which is what {@code createWorkflowConfig} expects for "no MCP step".
+     * <p>
+     * Shared by {@code setupAgent} and {@code createApiAgent} so an API agent can
+     * hold both the tools generated from its OpenAPI spec and an MCP server's —
+     * previously only the former, which made "REST plus MCP" unreachable through
+     * the wizard.
+     */
 
     private List<String> createMcpCallsResources(String mcpServerUrls, String agentName, Map<String, Object> createdResources)
             throws Exception {

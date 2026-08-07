@@ -12,10 +12,12 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -52,12 +54,18 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * post-approval execution quietly diverge from normal execution, which is
  * exactly the kind of drift nobody notices until an audit.
  * <p>
- * Holds a reference back to {@link AgentOrchestrator} for the two things resume
- * genuinely needs from the facade: {@code buildToolSetup}, so the resumed turn
- * rebuilds tooling through the same provider assembly the live path used, and
- * {@code collectEnabledTools} for the history-rebuild fallback. Same pattern
- * and same safety argument as {@code MemberTurnExecutor}'s self-reference in R1
- * — the constructor only stores it.
+ * Holds a reference back to {@link AgentOrchestrator} for what the
+ * history-rebuild fallback needs from the facade ({@code collectEnabledTools}
+ * and the shared {@code conversationHistoryBuilder}). Same pattern and same
+ * safety argument as {@code MemberTurnExecutor}'s self-reference in R1 — the
+ * constructor only stores it.
+ * <p>
+ * The {@code ToolSetup} is <em>passed in</em> rather than resolved through that
+ * back-reference. The reference is captured at construction, so calling
+ * {@code buildToolSetup} on it would bypass an override of that method on the
+ * instance actually invoked — and since the setup carries the
+ * {@code toolRequestResolvers} map that enforces request pinning, the seam that
+ * detaches is precisely the one a test injects a resolver through.
  * <p>
  * The cost baseline is snapshotted before the verdict loop, not after: that
  * loop charges the conversation's cost tracker for every approved call, so a
@@ -91,15 +99,16 @@ class ToolLoopResumer {
     }
 
     /**
-     * As
-     * {@link #resumeToolLoop(ChatModel, LlmConfiguration.Task, IConversationMemory, PendingToolCallBatch, HitlDecision, boolean)},
-     * but carrying the JSON response-format policy so the continuation's requests
-     * match what the live loop would have sent.
+     * The resume path itself. Reached through
+     * {@code AgentOrchestrator#resumeToolLoop}, which supplies {@code setup} and
+     * the JSON response-format policy so the continuation's requests match what the
+     * live loop would have sent.
      */
     AgentOrchestrator.ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory,
                                                      PendingToolCallBatch batch,
                                                      HitlDecision decision, boolean toolHitlEnabled,
-                                                     JsonResponseFormatPolicy jsonPolicy)
+                                                     JsonResponseFormatPolicy jsonPolicy,
+                                                     AgentOrchestrator.ToolSetup setup)
             throws LifecycleException {
 
         String conversationId = memory.getConversationId();
@@ -115,8 +124,12 @@ class ToolLoopResumer {
         // before any tool runs; this is the same contract.
         double toolCostBefore = toolLoopRunner.conversationToolCost(conversationId);
 
-        // ── Step 2: rebuild tooling via the shared setup (SAME as the live path) ──
-        AgentOrchestrator.ToolSetup setup = orchestrator.buildToolSetup(task, memory);
+        // Step 2 (tooling rebuilt via the shared setup, SAME as the live path) is the
+        // caller's job: AgentOrchestrator#resumeToolLoop calls buildToolSetup and
+        // hands the result down. Resolving it here through the back-reference instead
+        // would bind the call to the orchestrator captured at construction, which
+        // silently detaches the seam a test spies on — and the resolver map this
+        // method reads to enforce request pinning is exactly what such a test injects.
         boolean isLazy = task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY;
 
         // Restore the active-spec surface. For LAZY, reactivate exactly the specs that
@@ -158,9 +171,17 @@ class ToolLoopResumer {
 
         for (PendingToolCallBatch.PendingToolCall c : batch.getCalls()) {
             ToolCallDecision cd = perCall.get(c.getCallId());
-            HitlDecision.HitlVerdict verdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : topVerdict;
+            HitlDecision.HitlVerdict resolvedVerdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : topVerdict;
+            // Every current caller of resumeConversation validates a non-null verdict
+            // before this point, so resolvedVerdict should never actually be null — but
+            // the check that guarantees it lives in each caller, not here. Fail closed
+            // rather than trust that invariant silently: the REJECTED check below is the
+            // only thing standing between an unresolved verdict and executing a gated
+            // call, and "not REJECTED" is a dangerous way to spell "approved".
+            HitlDecision.HitlVerdict verdict = resolvedVerdict != null ? resolvedVerdict : HitlDecision.HitlVerdict.REJECTED;
             String note = cd != null ? cd.getNote() : decision.getNote();
             String amended = cd != null ? cd.getAmendedArguments() : null;
+            gateSupport.recordWriteApprovalDecision(verdict, decision.getDecidedBy());
 
             if (verdict == HitlDecision.HitlVerdict.REJECTED) {
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), rejectionEnvelope(c.getToolName(), note)));
@@ -177,6 +198,18 @@ class ToolLoopResumer {
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
                         "{\"status\":\"NOT_EXECUTED\",\"reason\":\"arguments exceeded the persistable size cap\"}"));
                 trace.add(Map.of("type", "hitl_not_executed", "tool", c.getToolName(), "callId", c.getCallId()));
+                continue;
+            }
+
+            // Approval binds to a REQUEST, not to a tool name: re-resolve now and refuse
+            // if what is about to be sent is not what was approved. Checked before the
+            // journal claim so a refusal consumes nothing and stays replayable.
+            String changed = requestChangedSinceApproval(c, amended, setup.toolRequestResolvers());
+            if (changed != null) {
+                auditRequestChanged(memory, c, changed);
+                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
+                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"the request changed after it was approved\"}"));
+                trace.add(Map.of("type", "hitl_request_changed", "tool", c.getToolName(), "callId", c.getCallId(), "detail", changed));
                 continue;
             }
 
@@ -376,6 +409,67 @@ class ToolLoopResumer {
             LOGGER.warnf("HITL resume: JSON envelope serialization failed: %s", e.getMessage());
             return "{\"status\":\"ERROR\",\"reason\":\"could not serialize result envelope\"}";
         }
+    }
+
+    /**
+     * Whether the request this approved call would now send differs from the one
+     * that was approved — the check that makes an approval bind to a request.
+     *
+     * @return null when the call may proceed, otherwise a short reason for the
+     *         audit trail and trace
+     */
+    String requestChangedSinceApproval(PendingToolCallBatch.PendingToolCall c, String amendedArguments,
+                                       Map<String, ToolRequestResolver> resolvers) {
+
+        if (!c.isRequestPinned()) {
+            // Never pinned, so there is nothing to compare: every non-http tool, and
+            // any call that could not be resolved ahead of execution. Enforcing here
+            // would reject calls on a comparison that was never sound.
+            return null;
+        }
+        if (amendedArguments != null) {
+            // The approver rewrote the arguments themselves. The pinned fingerprint
+            // describes the request they replaced, so comparing against it would refuse
+            // every amendment. An amendment is already a deliberate, audited act by the
+            // same human whose approval the pin exists to honour.
+            return null;
+        }
+
+        var resolver = resolvers.get(c.getToolName());
+        if (resolver == null) {
+            // Pinned at gate time and unresolvable now: the tool is gone from the
+            // workflow, or the agent was reconfigured across the pause. We cannot show
+            // that what runs is what was approved, so it does not run.
+            return "the tool is no longer available to re-check the approved request";
+        }
+        try {
+            ResolvedRequest current = resolver.resolve(rebuiltRequest(c));
+            if (current.fingerprint() == null) {
+                return "the request could no longer be resolved for comparison";
+            }
+            if (!current.fingerprint().equals(c.getRequestFingerprint())) {
+                return "the resolved request no longer matches the approved fingerprint";
+            }
+            return null;
+        } catch (Exception e) {
+            // Fail closed: a pinned call whose request cannot be re-derived is exactly
+            // the case this check exists for. Type only, no throwable — a request-build
+            // failure quotes the material being rendered, which would undo the
+            // redaction on the line beside it.
+            LOGGER.warnf("Could not re-resolve the request for approved tool '%s' (%s); refusing to execute it.", sanitize(c.getToolName()),
+                    e.getClass().getSimpleName());
+            return "the request could not be re-resolved before execution";
+        }
+    }
+
+    /**
+     * Records that an approved call was refused because its request no longer
+     * matched. Deliberately logs no argument, body or header — only the tool, the
+     * call id and the fixed reason.
+     */
+    void auditRequestChanged(IConversationMemory memory, PendingToolCallBatch.PendingToolCall c, String reason) {
+        LOGGER.warnf("hitl.tool.request_changed: approved tool '%s' (callId '%s') for conversation '%s' was NOT executed — %s.",
+                sanitize(c.getToolName()), sanitize(c.getCallId()), sanitize(memory.getConversationId()), sanitize(reason));
     }
 
     /**

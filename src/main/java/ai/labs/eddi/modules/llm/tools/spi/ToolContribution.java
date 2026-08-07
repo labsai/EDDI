@@ -32,6 +32,10 @@ import java.util.Map;
  *            dispatch name → {@code "post:/path"} (http source only — feeds
  *            endpoint-qualified approval patterns); empty for every other
  *            source
+ * @param toolRequestResolvers
+ *            dispatch name → {@link ToolRequestResolver} (http source only —
+ *            approval binds to the resolved request, not just the tool name);
+ *            empty for every other source, exactly like {@code toolEndpoints}
  * @param failures
  *            structured per-server/per-tool discovery failures (MCP-style);
  *            empty when the source has nothing to report
@@ -48,7 +52,7 @@ import java.util.Map;
  */
 public record ToolContribution(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
         Map<String, String> toolSources, Map<String, String> toolEndpoints, List<ProviderFailure> failures,
-        Map<String, String> toolCanonicalNames) {
+        Map<String, String> toolCanonicalNames, Map<String, ToolRequestResolver> toolRequestResolvers) {
 
     /**
      * Defensively copies every component to an immutable view.
@@ -71,22 +75,40 @@ public record ToolContribution(List<ToolSpecification> specs, Map<String, ToolEx
         toolEndpoints = toolEndpoints == null ? Map.of() : Map.copyOf(toolEndpoints);
         failures = failures == null ? List.of() : List.copyOf(failures);
         toolCanonicalNames = toolCanonicalNames == null ? Map.of() : Map.copyOf(toolCanonicalNames);
+        toolRequestResolvers = toolRequestResolvers == null ? Map.of() : Map.copyOf(toolRequestResolvers);
     }
 
     /**
      * Convenience for an externally-discovered source: no failures, and no
      * canonical names (http/mcp/a2a tools are configured under their dispatch name,
-     * so there is no second slug to record).
+     * so there is no second slug to record). No resolvers either — only
+     * {@code HttpCallToolsProvider} uses the overload that supplies them.
      */
     public ToolContribution(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
             Map<String, String> toolSources, Map<String, String> toolEndpoints) {
-        this(specs, executors, toolSources, toolEndpoints, List.of(), Map.of());
+        this(specs, executors, toolSources, toolEndpoints, List.of(), Map.of(), Map.of());
     }
 
-    /** Convenience for a source that reports failures but no canonical names. */
+    /**
+     * Convenience for a source that reports failures but no canonical names or
+     * resolvers.
+     */
     public ToolContribution(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
             Map<String, String> toolSources, Map<String, String> toolEndpoints, List<ProviderFailure> failures) {
-        this(specs, executors, toolSources, toolEndpoints, failures, Map.of());
+        this(specs, executors, toolSources, toolEndpoints, failures, Map.of(), Map.of());
+    }
+
+    /**
+     * Convenience for a source that supplies canonical names but no resolvers —
+     * every object-producing source (builtin, contextual, dynamic, attachment,
+     * group-task, and the LAZY {@code discover_tools} meta-tool). Only
+     * {@code HttpCallToolsProvider} resolves to an HTTP request, so it is the sole
+     * caller of the canonical constructor.
+     */
+    public ToolContribution(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
+            Map<String, String> toolSources, Map<String, String> toolEndpoints, List<ProviderFailure> failures,
+            Map<String, String> toolCanonicalNames) {
+        this(specs, executors, toolSources, toolEndpoints, failures, toolCanonicalNames, Map.of());
     }
 
     /**
@@ -94,6 +116,6 @@ public record ToolContribution(List<ToolSpecification> specs, Map<String, ToolEx
      * failed.
      */
     public static ToolContribution empty() {
-        return new ToolContribution(List.of(), Map.of(), Map.of(), Map.of(), List.of(), Map.of());
+        return new ToolContribution(List.of(), Map.of(), Map.of(), Map.of(), List.of(), Map.of(), Map.of());
     }
 }
