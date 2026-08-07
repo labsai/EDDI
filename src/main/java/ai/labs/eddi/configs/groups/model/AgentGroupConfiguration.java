@@ -62,6 +62,87 @@ public class AgentGroupConfiguration {
     private List<TaskDefinition> tasks;
     /** Dynamic agent creation and recruitment configuration. */
     private DynamicAgentConfig dynamicAgents;
+    /**
+     * After each SYNTHESIS phase, give every participant who did NOT write the
+     * synthesis one short turn to state where they still materially disagree (I4).
+     * Non-PASS replies become public {@code DISSENT} transcript entries and
+     * populate {@code DecisionRecord.dissents}.
+     * <p>
+     * Opt-in because it costs one extra short call per non-synthesizer. It is
+     * nonetheless the honest design: the alternative is asking the synthesizer to
+     * report the disagreement with its own synthesis, and an author summarizing the
+     * objections to their own summary is exactly the failure mode a minority report
+     * exists to prevent.
+     */
+    private boolean recordDissents;
+
+    /**
+     * Whether and how far members may file their own tasks mid-discussion (I5).
+     * {@code null} means the tools are absent entirely, which is also what a
+     * default-constructed {@link GroupTaskConfig} means.
+     */
+    private GroupTaskConfig taskListConfig;
+
+    public GroupTaskConfig getTaskListConfig() {
+        return taskListConfig;
+    }
+
+    public void setTaskListConfig(GroupTaskConfig taskListConfig) {
+        this.taskListConfig = taskListConfig;
+    }
+
+    /**
+     * Governs agent-filed tasks (I5). The task list is otherwise written only by
+     * the PLAN phase and by config, so work an agent <em>discovers</em> while
+     * executing — a missing migration, an untested edge case — dies in prose. The
+     * wave loop already re-queries {@code findExecutableTasks()} each wave, so a
+     * filed task flows into execution with no scheduler changes.
+     * <p>
+     * <b>Off by default, and deliberately so.</b> An LLM that can file work can
+     * file it in a loop; the caps below are the bound. There is no permissive
+     * standalone default anywhere — a discussion that does not opt in never sees
+     * the tools at all.
+     *
+     * @param allowAgentTaskCreation
+     *            master switch. {@code false} (default) means the tools are not
+     *            assembled, not merely rejected at call time — an absent tool costs
+     *            no prompt tokens and cannot be argued with
+     * @param maxAgentAddedTasksPerDiscussion
+     *            ceiling on agent-filed tasks across the whole discussion (default
+     *            20). Non-positive values fall back to the default rather than
+     *            meaning "unlimited": an unbounded write surface for an LLM is
+     *            never the intent behind a mistyped 0
+     * @param maxPerTurn
+     *            ceiling within a single member turn (default 3). Separate from the
+     *            discussion cap because the failure modes differ — a runaway turn
+     *            files twenty tasks in one breath, where a discussion-long drift
+     *            files one per turn for forty turns
+     */
+    public record GroupTaskConfig(boolean allowAgentTaskCreation, int maxAgentAddedTasksPerDiscussion, int maxPerTurn) {
+
+        public static final int DEFAULT_MAX_PER_DISCUSSION = 20;
+        public static final int DEFAULT_MAX_PER_TURN = 3;
+
+        /**
+         * Normalizes at the one choke point every reader passes through, so no consumer
+         * re-derives defaults from a partially-specified config — a JSON naming only
+         * {@code allowAgentTaskCreation} is the common case. Same shape as
+         * {@link ConvergenceConfig}'s compact constructor.
+         */
+        public GroupTaskConfig {
+            if (maxAgentAddedTasksPerDiscussion <= 0) {
+                maxAgentAddedTasksPerDiscussion = DEFAULT_MAX_PER_DISCUSSION;
+            }
+            if (maxPerTurn <= 0) {
+                maxPerTurn = DEFAULT_MAX_PER_TURN;
+            }
+        }
+
+        /** Disabled, with both caps at their defaults. */
+        public GroupTaskConfig() {
+            this(false, DEFAULT_MAX_PER_DISCUSSION, DEFAULT_MAX_PER_TURN);
+        }
+    }
 
     /**
      * A member of the group. Members can be individual agents or nested groups.
@@ -126,7 +207,8 @@ public class AgentGroupConfiguration {
      * "ROLE:&lt;roleName&gt;" (e.g. "ROLE:DEVIL_ADVOCATE").
      */
     public record DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
-            boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval) {
+            boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
+            boolean allowAbstention) {
 
         /**
          * Convenience constructor with defaults: participants=ALL,
@@ -143,6 +225,94 @@ public class AgentGroupConfiguration {
         public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
                 boolean targetEachPeer, String inputTemplate, int repeats) {
             this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, false);
+        }
+
+        /**
+         * Backward-compatible constructor without convergence (I2) — {@code null} means
+         * convergence detection is off, which is the default for every phase that
+         * predates I2 and for every style preset (the plan's compat rule: no preset
+         * changes; DELPHI's recommended convergence config is documented rather than
+         * baked in).
+         */
+        public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
+                boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval) {
+            this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, null);
+        }
+
+        /**
+         * Backward-compatible constructor without {@code allowAbstention} (I4) —
+         * {@code false} means every participant must produce a contribution, which is
+         * the behavior of every phase that predates I4 and of every style preset.
+         */
+        public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
+                boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence) {
+            this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence, false);
+        }
+    }
+
+    /**
+     * Early-exit detection for a phase whose {@code repeats > 1} (I2). Without this
+     * a DELPHI-style phase always burns exactly {@code repeats} rounds, even once
+     * the members have stopped changing their positions — "convergence" is prompt
+     * text, not behavior.
+     * <p>
+     * Two mechanisms feed one exit path. <b>Deterministic:</b> every participant
+     * abstained this repeat — free, no LLM call, and the reason {@code minRepeats}
+     * does not gate it: unanimous silence is evidence on its own terms, not a
+     * similarity estimate that needs a baseline. Requires a phase with
+     * {@code allowAbstention} (I4), which is what produces the {@code ABSTAINED}
+     * entries it counts. <b>Semantic:</b> a judge compares this repeat's
+     * contributions with the previous repeat's and returns an agreement score. The
+     * judge cannot run before repeat index {@code minRepeats - 1} because it needs
+     * a previous repeat to compare against.
+     *
+     * @param enabled
+     *            off by default — an LLM judge costs a call per repeat, so this is
+     *            opt-in per phase
+     * @param minRepeats
+     *            the judge is skipped until this many repeats have completed
+     *            (default 2: one round establishes positions, the second is the
+     *            first that can differ from it). Values below 2 are raised to 2 —
+     *            there is nothing to compare a first repeat against
+     * @param threshold
+     *            agreement score at or above which the phase is converged (default
+     *            0.8). Compared with {@code >=}, so a judge returning exactly the
+     *            threshold converges
+     * @param judge
+     *            {@code "MODERATOR"} (default) runs the group's configured
+     *            moderator agent as the judge. {@code "SERVICE"} is accepted and
+     *            documented but currently falls back to MODERATOR with a warning:
+     *            the shared {@code SummarizationService} needs LLM provider/model
+     *            coordinates and credentials that {@code AgentGroupConfiguration}
+     *            does not carry, so wiring it needs config this item does not add
+     */
+    public record ConvergenceConfig(boolean enabled, int minRepeats, double threshold, String judge) {
+
+        /**
+         * The lowest {@code minRepeats} that can mean anything — see the record
+         * Javadoc.
+         */
+        public static final int MIN_COMPARABLE_REPEATS = 2;
+        public static final double DEFAULT_THRESHOLD = 0.8;
+        public static final String JUDGE_MODERATOR = "MODERATOR";
+        public static final String JUDGE_SERVICE = "SERVICE";
+
+        /**
+         * Normalizes at the one choke point every reader passes through, so no consumer
+         * has to re-derive defaults from a partially-specified config (a JSON config
+         * naming only {@code enabled} is the common case).
+         */
+        public ConvergenceConfig {
+            minRepeats = Math.max(minRepeats, MIN_COMPARABLE_REPEATS);
+            if (threshold <= 0.0 || threshold > 1.0) {
+                threshold = DEFAULT_THRESHOLD;
+            }
+            judge = judge == null || judge.isBlank() ? JUDGE_MODERATOR : judge.trim().toUpperCase();
+        }
+
+        /** Convenience: enabled with every other setting defaulted. */
+        public ConvergenceConfig(boolean enabled) {
+            this(enabled, MIN_COMPARABLE_REPEATS, DEFAULT_THRESHOLD, JUDGE_MODERATOR);
         }
     }
 
@@ -199,17 +369,48 @@ public class AgentGroupConfiguration {
      *            runaway discussions from misconfigured rounds. 0 or negative = use
      *            default (50). When exceeded, remaining phases are skipped and
      *            synthesis proceeds with whatever transcript exists.
+     * @param maxCostPerDiscussion
+     *            dollar ceiling on {@code GroupConversation#getTotalCost()} (I1).
+     *            {@code null} = unlimited. Checked before each turn and before each
+     *            {@code TaskForceEngine} EXECUTE wave — an already-dispatched,
+     *            in-flight turn may still push the total past the ceiling; that
+     *            overshoot is accepted, not prevented. A non-positive value is
+     *            treated as {@code null} (unlimited) at save time, with a warning —
+     *            see {@code AgentGroupStore}.
+     * @param onCostExceeded
+     *            what to do once {@code maxCostPerDiscussion} is hit. {@code null}
+     *            defaults to {@code SYNTHESIZE_NOW} (see the constructor).
      */
     public record ProtocolConfig(int agentTimeoutSeconds, MemberFailurePolicy onAgentFailure, int maxRetries,
-            MemberUnavailablePolicy onMemberUnavailable, int maxTurns) {
+            MemberUnavailablePolicy onMemberUnavailable, int maxTurns, Double maxCostPerDiscussion, CostPolicy onCostExceeded) {
+
+        /**
+         * Canonical constructor — normalizes a {@code null} {@link #onCostExceeded} to
+         * {@link CostPolicy#SYNTHESIZE_NOW} so every reader can treat the field as
+         * non-null, the same way {@link #maxTurns}'s 0-or-negative-means-default is
+         * normalized at the read site rather than pushed onto every caller.
+         */
+        public ProtocolConfig {
+            if (onCostExceeded == null) {
+                onCostExceeded = CostPolicy.SYNTHESIZE_NOW;
+            }
+        }
 
         /**
          * Backward-compatible constructor — defaults maxTurns to 0 (engine default:
-         * 50).
+         * 50), cost ceiling to unlimited.
          */
         public ProtocolConfig(int agentTimeoutSeconds, MemberFailurePolicy onAgentFailure, int maxRetries,
                 MemberUnavailablePolicy onMemberUnavailable) {
             this(agentTimeoutSeconds, onAgentFailure, maxRetries, onMemberUnavailable, 0);
+        }
+
+        /**
+         * Backward-compatible constructor — defaults the cost ceiling to unlimited.
+         */
+        public ProtocolConfig(int agentTimeoutSeconds, MemberFailurePolicy onAgentFailure, int maxRetries,
+                MemberUnavailablePolicy onMemberUnavailable, int maxTurns) {
+            this(agentTimeoutSeconds, onAgentFailure, maxRetries, onMemberUnavailable, maxTurns, null, null);
         }
 
         public enum MemberFailurePolicy {
@@ -218,6 +419,21 @@ public class AgentGroupConfiguration {
 
         public enum MemberUnavailablePolicy {
             SKIP, FAIL
+        }
+
+        /**
+         * What happens once {@link #maxCostPerDiscussion} is exceeded (I1).
+         */
+        public enum CostPolicy {
+            /**
+             * Stop scheduling new turns; jump ahead to the next remaining SYNTHESIS phase,
+             * if any.
+             */
+            SYNTHESIZE_NOW,
+            /**
+             * Fail the discussion immediately (state FAILED), with an actionable reason.
+             */
+            ABORT
         }
     }
 
@@ -301,6 +517,14 @@ public class AgentGroupConfiguration {
 
     public void setDynamicAgents(DynamicAgentConfig dynamicAgents) {
         this.dynamicAgents = dynamicAgents;
+    }
+
+    public boolean isRecordDissents() {
+        return recordDissents;
+    }
+
+    public void setRecordDissents(boolean recordDissents) {
+        this.recordDissents = recordDissents;
     }
 
     /**
@@ -407,6 +631,29 @@ public class AgentGroupConfiguration {
          * message was enough to start it.
          */
         private int maxDelegationDepth = 3;
+
+        /**
+         * Seconds a delegating agent waits for its delegate's turn before giving up
+         * (I7). Previously hard-coded to 60 in {@code ConverseWithAgentTool}, which is
+         * far too short for a delegate that itself runs tools or a nested discussion,
+         * and far too long for a fan-out of quick lookups — the caller blocks a virtual
+         * thread and the model waits for the whole budget.
+         * <p>
+         * Non-positive values fall back to the default rather than meaning "wait
+         * forever": an unbounded wait here is how a delegation cycle became a hang
+         * before the depth cap existed.
+         */
+        private int delegationTimeoutSeconds = DEFAULT_DELEGATION_TIMEOUT_SECONDS;
+
+        public static final int DEFAULT_DELEGATION_TIMEOUT_SECONDS = 60;
+
+        public int getDelegationTimeoutSeconds() {
+            return delegationTimeoutSeconds > 0 ? delegationTimeoutSeconds : DEFAULT_DELEGATION_TIMEOUT_SECONDS;
+        }
+
+        public void setDelegationTimeoutSeconds(int delegationTimeoutSeconds) {
+            this.delegationTimeoutSeconds = delegationTimeoutSeconds;
+        }
 
         /**
          * Agent IDs this agent may delegate to via {@code converse_with_agent}.

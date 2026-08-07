@@ -204,6 +204,12 @@ public interface IGroupConversationService {
         }
         default void onMemberPauseSkipped(GroupConversationEventSink.MemberPauseSkippedEvent event) {
         }
+        default void onDecisionReached(GroupConversationEventSink.DecisionReachedEvent event) {
+        }
+        default void onConvergenceChecked(GroupConversationEventSink.ConvergenceCheckedEvent event) {
+        }
+        default void onConvergenceReached(GroupConversationEventSink.ConvergenceReachedEvent event) {
+        }
     }
 
     // --- Exceptions ---

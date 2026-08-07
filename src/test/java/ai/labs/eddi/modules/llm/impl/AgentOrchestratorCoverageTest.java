@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -1195,7 +1196,7 @@ class AgentOrchestratorCoverageTest {
     }
 
     /** One gated http call, with whatever resolver the test wants to supply. */
-    private PendingToolCallBatch batchWithResolver(AgentOrchestrator.ToolRequestResolver resolver) {
+    private PendingToolCallBatch batchWithResolver(ToolRequestResolver resolver) {
         var deploy = ToolExecutionRequest.builder().id("c1").name("deployAgent").arguments("{\"id\":\"a1\"}").build();
         var gr = new ToolApprovalGate.GateResult(List.of(deploy), List.of(), Map.of("c1", "http.post:*"));
         List<ChatMessage> msgs = List.of(UserMessage.from("deploy it"), AiMessage.from(List.of(deploy)));

@@ -80,6 +80,86 @@ create_group(
 )
 ```
 
+### Debate verdicts
+
+When a DEBATE has **two sides and an impartial judge** — i.e. members carry at
+least two distinct roles *and* `moderatorAgentId` names an agent that is not one
+of the debaters — the judgment phase returns a structured verdict alongside its
+prose, on the conversation's `decision` field:
+
+```json
+"decision": {
+  "type": "VERDICT",
+  "winner": "CON",
+  "tally": { "PRO": 4.0, "CON": 9.0 },
+  "outcome": "CON wins (PRO 4/10, CON 9/10) — PRO asserted; CON cited.",
+  "method": "debate-judgment",
+  "decidedAtPhase": "Judgment",
+  "dissents": []
+}
+```
+
+`winner` is `null` for a tie (the tie is stated in `outcome`). The judge is asked
+to score argument quality and factual support, and explicitly *not* assertiveness
+or fluency.
+
+Any of these leaves `decision` unset and the conclusion as ordinary prose — none
+of them is an error:
+
+- **No roles on the members.** Nothing argued PRO, so a PRO-vs-CON score would be
+  invented rather than measured.
+- **No moderator.** The stand-in synthesizer is one of the debaters, and a
+  partisan's call is not the group's finding.
+- **A phase `inputTemplate` of your own.** Your instruction wins; set one if you
+  want a debate to conclude in plain prose.
+- **A judgment the parser cannot read.** The prose conclusion is kept as-is.
+
+## Agent-filed tasks
+
+Work an agent *discovers* mid-discussion — a missing migration, an untested
+edge case — would otherwise die in prose: the shared task list is written only
+by the PLAN phase and by config. Turning on `taskListConfig` gives members two
+tools, `addGroupTask` and `listGroupTasks`, and a filed task is picked up by the
+next execution wave with no other changes.
+
+```json
+"taskListConfig": {
+  "allowAgentTaskCreation": true,
+  "maxAgentAddedTasksPerDiscussion": 20,
+  "maxPerTurn": 3
+}
+```
+
+**Off by default, and absent rather than refusing when off.** A tool that is not
+assembled costs no prompt tokens and cannot be argued with; one that exists and
+always says no invites retries. The tools appear only when the turn belongs to a
+live group discussion whose config sets `allowAgentTaskCreation: true` — a
+standalone agent, a paused discussion, or an unreadable config all yield no
+tools.
+
+`addGroupTask(subject, description, dependsOnSubjects?, priority?, assignToRole?)`
+
+- **`dependsOnSubjects`** names other tasks by their *subject*, as
+  `listGroupTasks` prints them. An unknown name is refused, not dropped —
+  silently filing a task without its dependency schedules it immediately, which
+  is the opposite of what was asked.
+- **`assignToRole`** takes `"ROLE:Reviewer"` or a member's exact name, and files
+  the task already assigned. Omitting it (or passing `"ALL"`) leaves the task
+  for the wave loop to assign, as it does any other. An unmatched role is
+  refused with the available roles named.
+- Refusals are sentences aimed at the model: duplicate subject, unknown
+  dependency, circular dependency, subject over 200 chars, description over
+  4,000, and either cap being reached.
+
+**No claim or complete tools.** The wave loop owns every task-state transition;
+a second writer racing it would corrupt the state machine that decides what runs
+next. Filing is the only agent-side write.
+
+Both caps are enforced independently: `maxPerTurn` bounds a runaway single turn,
+`maxAgentAddedTasksPerDiscussion` bounds slow drift across a long discussion. The
+discussion cap counts only agent-filed tasks, so a large planned backlog does not
+exhaust it. A rejected call does not consume the per-turn budget.
+
 ## Nested Groups (Group-of-Groups)
 
 Members can be other groups. The sub-group runs its own discussion and its synthesized answer becomes the member's response.
@@ -233,7 +313,30 @@ During TASK_FORCE (or any group) discussions, agents with the appropriate LLM to
 | `CreateSubAgentTool` | Create a new ephemeral agent with a specific system prompt |
 | `ConverseWithAgentTool` | Delegate a sub-task to an existing deployed agent |
 | `FindAgentsByCapabilityTool` | Discover agents by capability keywords |
+| `RecruitAgentTool` | Bring a discovered agent into the discussion as a member |
 | `TeardownAgentTool` | Clean up dynamically created agents |
+
+#### Recruitment
+
+Discovery and recruitment are two halves of one capability, and both are gated by
+`allowRecruitment`. `findAgentsByCapability` locates a specialist;
+`recruitAgent(agentId, role, reason)` brings it in.
+
+A recruit **joins from the next round**, never mid-round — a roster that changed
+while a round was running would move the speaker index a paused discussion
+resumes from, and change the denominator the convergence and unanimity checks
+already computed for the round in flight. The recruitment is recorded as a
+`FACILITATION` transcript entry naming the recruiter, the recruit, the role and
+the reason, so the rest of the team can see why the roster changed.
+
+Recruitment is refused, with an actionable message, when the agent is not
+deployed, is already a member, is the recruiter itself, or when
+`maxRecruitedAgentsPerDiscussion` is reached.
+
+**Recruits are never torn down.** They are pre-existing deployed agents the
+discussion borrowed, so `TeardownAgentTool` and end-of-discussion cleanup leave
+them alone — undeploying one would take it away from every other conversation
+using it. Only agents the discussion *created* are cleaned up.
 
 #### DynamicAgentConfig
 
@@ -268,6 +371,7 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `allowDelegation` | `true` | Allow delegating sub-tasks to other agents |
 | `maxCreatedAgentsPerDiscussion` | `5` | Cap on new agents created per discussion |
 | `maxRecruitedAgentsPerDiscussion` | `10` | Cap on recruited agents per discussion |
+| `delegationTimeoutSeconds` | `60` | How long a delegating agent waits for its delegate's turn. Non-positive falls back to the default |
 | `maxDelegationsPerTask` | `3` | Cap on delegations per task |
 | `lifecyclePolicy` | `EPHEMERAL` | `EPHEMERAL`, `KEEP_DEPLOYED`, `UNDEPLOY_ONLY`, or `AGENT_DECIDES` |
 | `inheritParentModel` | `true` | Created agents inherit the parent agent's model |

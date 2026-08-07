@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
+import ai.labs.eddi.modules.llm.tools.spi.ToolSourceRegistry;
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -118,6 +121,15 @@ class AgentOrchestratorToolGovernanceTest {
             assertFalse(executors.containsKey("orphan"));
         }
 
+        /**
+         * One source's contribution of a single named tool, optionally with a resolver.
+         */
+        private static ToolContribution contribution(String name, String executorMarker, ToolRequestResolver resolver) {
+            return new ToolContribution(List.of(ToolSpecification.builder().name(name).build()),
+                    Map.of(name, executor(executorMarker)), Map.of(), Map.of(), List.of(), Map.of(),
+                    resolver != null ? Map.of(name, resolver) : Map.of());
+        }
+
         @Test
         @DisplayName("an http tool that LOSES a name collision does not keep its request resolver")
         void droppedHttpToolLosesItsResolver() {
@@ -125,41 +137,37 @@ class AgentOrchestratorToolGovernanceTest {
             // dropped http tool's request: the approver is shown a preview of a
             // request that will never run, and the pre-execution re-check compares
             // against that same fabricated request and passes.
-            List<ToolSpecification> specs = new ArrayList<>(List.of(ToolSpecification.builder().name("calculator").build()));
-            Map<String, ToolExecutor> executors = new HashMap<>(Map.of("calculator", executor("builtin")));
-            Map<String, String> sources = new HashMap<>(Map.of("calculator", "builtin"));
+            //
+            // Enforced structurally rather than by a cleanup pass: ToolSourceRegistry
+            // copies a resolver only AFTER the spec that owns the name has been
+            // accepted, so a losing tool's resolver is never carried in the first
+            // place. (main did the same job with a pruneResolversToSurvivingHttpTools
+            // sweep, which its mergeExternalTools flow needed because resolvers were
+            // registered before the collision verdict was known.)
+            var assembled = ToolSourceRegistry.newMerger()
+                    .addContribution("builtin", contribution("calculator", "builtin", null))
+                    .addContribution("http", contribution("calculator", "http", req -> {
+                        throw new AssertionError("the dropped http tool's resolver must never be consulted");
+                    }))
+                    .build();
 
-            AgentOrchestrator.mergeExternalTools(List.of(ToolSpecification.builder().name("calculator").build()),
-                    Map.of("calculator", executor("http")), "http", specs, executors, sources);
-            Map<String, AgentOrchestrator.ToolRequestResolver> resolvers = new HashMap<>();
-            resolvers.put("calculator", req -> {
-                throw new AssertionError("the dropped http tool's resolver must never be consulted");
-            });
-
-            AgentOrchestrator.pruneResolversToSurvivingHttpTools(resolvers, sources);
-
-            assertFalse(resolvers.containsKey("calculator"), "the losing http tool's resolver must be pruned");
+            assertFalse(assembled.toolRequestResolvers().containsKey("calculator"),
+                    "the losing http tool's resolver must never reach the assembled setup");
+            assertEquals("builtin", assembled.toolSources().get("calculator"));
         }
 
         @Test
-        @DisplayName("an http tool that WINS its name keeps its resolver — pruning is not a blanket wipe")
+        @DisplayName("an http tool that WINS its name keeps its resolver — the guard is not a blanket wipe")
         void survivingHttpToolKeepsItsResolver() {
-            List<ToolSpecification> specs = new ArrayList<>();
-            Map<String, ToolExecutor> executors = new HashMap<>();
-            Map<String, String> sources = new HashMap<>();
+            var assembled = ToolSourceRegistry.newMerger()
+                    .addContribution("http", contribution("deployAgent", "http", req -> null))
+                    // A later mcp tool of the same name is the one dropped here.
+                    .addContribution("mcp", contribution("deployAgent", "mcp", null))
+                    .build();
 
-            AgentOrchestrator.mergeExternalTools(List.of(ToolSpecification.builder().name("deployAgent").build()),
-                    Map.of("deployAgent", executor("http")), "http", specs, executors, sources);
-            // A later mcp tool of the same name is the one dropped here.
-            AgentOrchestrator.mergeExternalTools(List.of(ToolSpecification.builder().name("deployAgent").build()),
-                    Map.of("deployAgent", executor("mcp")), "mcp", specs, executors, sources);
-
-            Map<String, AgentOrchestrator.ToolRequestResolver> resolvers = new HashMap<>();
-            resolvers.put("deployAgent", req -> null);
-
-            AgentOrchestrator.pruneResolversToSurvivingHttpTools(resolvers, sources);
-
-            assertTrue(resolvers.containsKey("deployAgent"), "the http tool owns the name, so pinning must stay available");
+            assertTrue(assembled.toolRequestResolvers().containsKey("deployAgent"),
+                    "the http tool owns the name, so pinning must stay available");
+            assertEquals("http", assembled.toolSources().get("deployAgent"));
         }
     }
 

@@ -4,61 +4,39 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
-import ai.labs.eddi.configs.apicalls.model.ApiCall;
-import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
-import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
-import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
-import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
-import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
-import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
-import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
-import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
-import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.engine.memory.IData;
-import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
-import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.setup.AgentSetupService;
-import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
-import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
-import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
-import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
-import ai.labs.eddi.modules.llm.tools.ToolCacheService;
-import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
+import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
+import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
+import ai.labs.eddi.modules.llm.tools.spi.ToolSourceRegistry;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
-import ai.labs.eddi.modules.llm.tools.ToolInvocation;
-import ai.labs.eddi.modules.llm.tools.ToolNameResolver;
-import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
-import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
-import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
-import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
-import ai.labs.eddi.modules.llm.tools.FindAgentsByCapabilityTool;
-import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -66,13 +44,11 @@ import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.TokenCountEstimator;
 import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.chat.request.ChatRequest;
-import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.TokenUsage;
-import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
-import io.micrometer.core.instrument.Metrics;
 import jakarta.enterprise.context.ApplicationScoped;
+import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
+import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
@@ -80,19 +56,9 @@ import org.jboss.logging.Logger;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import ai.labs.eddi.utils.LogSanitizer;
-
-import java.net.URI;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-
-import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * Executes the tool-calling agent loop against a ChatModel.
@@ -116,14 +82,16 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * injects.
  */
 @ApplicationScoped
-class AgentOrchestrator {
+class AgentOrchestrator implements IAgentOrchestrator {
     private static final Logger LOGGER = Logger.getLogger(AgentOrchestrator.class);
-    private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
-    private static final String MCPCALLS_TYPE = "eddi://ai.labs.mcpcalls";
 
-    /** Well-known data keys for dynamic agent lifecycle tracking. */
-    public static final String KEY_DYNAMIC_CREATED_AGENT_IDS = "dynamic:created_agent_ids";
-    public static final String KEY_DYNAMIC_RETAINED_AGENT_IDS = "dynamic:retained_agent_ids";
+    /**
+     * Well-known data keys for dynamic agent lifecycle tracking. Aliases of the
+     * {@link DynamicAgentToolsProvider} constants (R2 step 2) — kept declared here
+     * because tests reference them by this class name.
+     */
+    public static final String KEY_DYNAMIC_CREATED_AGENT_IDS = DynamicAgentToolsProvider.KEY_DYNAMIC_CREATED_AGENT_IDS;
+    public static final String KEY_DYNAMIC_RETAINED_AGENT_IDS = DynamicAgentToolsProvider.KEY_DYNAMIC_RETAINED_AGENT_IDS;
 
     // === Tool-level HITL (tool-approval gate) ===
     /** Step-data key holding this turn's cumulative gated-pause count (int). */
@@ -131,18 +99,19 @@ class AgentOrchestrator {
     /** Default max pauses per turn when the config does not specify one. */
     private static final int DEFAULT_MAX_PAUSES_PER_TURN = 3;
     /** Default transcript serialization cap (bytes). */
-    private static final int DEFAULT_TRANSCRIPT_MAX_BYTES = PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT;
+    static final int DEFAULT_TRANSCRIPT_MAX_BYTES = PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT;
     /** Approver-facing pause reason cap (chars). */
     private static final int PAUSE_REASON_MAX_CHARS = 500;
 
     /**
      * Fallback for {@code LlmConfiguration.Task#getMaxToolContextTokens()} when a
-     * stored config carries an explicit {@code null} (the POJO's own field default
-     * is the same number, so this only covers deserialized nulls).
+     * stored config carries an explicit {@code null}. Alias of
+     * {@link ToolContextBudget#DEFAULT_MAX_TOOL_CONTEXT_TOKENS} (R2 step 3) kept
+     * declared here since it is reflected/referenced by class name in tests.
      *
      * @see #enforceToolContextBudget
      */
-    static final int DEFAULT_MAX_TOOL_CONTEXT_TOKENS = 60_000;
+    static final int DEFAULT_MAX_TOOL_CONTEXT_TOKENS = ToolContextBudget.DEFAULT_MAX_TOOL_CONTEXT_TOKENS;
 
     /**
      * Deployment-wide fallback for {@code LlmConfiguration.Task#getEnforceBudget()}
@@ -174,7 +143,7 @@ class AgentOrchestrator {
      * {@code @ApplicationScoped} bean in PR #604 — that makes
      * {@code @ConfigProperty} viable for *instance* state, but not for this one.)
      */
-    private static final boolean BUDGET_ENFORCE_DEFAULT = resolveBudgetEnforceDefault();
+    static final boolean BUDGET_ENFORCE_DEFAULT = resolveBudgetEnforceDefault();
 
     private static boolean resolveBudgetEnforceDefault() {
         try {
@@ -202,7 +171,7 @@ class AgentOrchestrator {
      * @param task
      *            the configured LLM task about to run
      */
-    private static void warnAboutUnenforcedBudgets(LlmConfiguration.Task task) {
+    static void warnAboutUnenforcedBudgets(LlmConfiguration.Task task) {
         if (task.getMaxBudgetPerConversation() == null || task.getEnforceBudget() != null || BUDGET_ENFORCE_DEFAULT) {
             return;
         }
@@ -226,6 +195,20 @@ class AgentOrchestrator {
     private final ToolApprovalGate toolApprovalGate = new ToolApprovalGate();
     private final ChatTranscriptCodec chatTranscriptCodec = new ChatTranscriptCodec();
 
+    /**
+     * Gate supporting cast, extracted to {@link ToolApprovalGateSupport} (R2 step
+     * 4).
+     */
+    private final ToolApprovalGateSupport gateSupport = new ToolApprovalGateSupport(chatTranscriptCodec);
+
+    /**
+     * The live tool-calling loop, extracted to {@link ToolLoopRunner} (R2 step 5).
+     */
+    private final ToolLoopRunner toolLoopRunner;
+
+    /** The HITL resume path, extracted to {@link ToolLoopResumer} (R2 step 5). */
+    private final ToolLoopResumer toolLoopResumer;
+
     // Built-in tools
     private final CalculatorTool calculatorTool;
     private final DateTimeTool dateTimeTool;
@@ -237,16 +220,9 @@ class AgentOrchestrator {
     private final WeatherTool weatherTool;
     private final FetchToolResponsePageTool fetchToolResponsePageTool;
     private final ToolExecutionService toolExecutionService;
-    private final McpToolProviderManager mcpToolProviderManager;
     private final A2AToolProviderManager a2aToolProviderManager;
 
     // For httpcall auto-discovery from workflow
-    private final IRestAgentStore restAgentStore;
-    private final IRestWorkflowStore restWorkflowStore;
-    private final IResourceClientLibrary resourceClientLibrary;
-    private final IApiCallExecutor apiCallExecutor;
-    private final IJsonSerialization jsonSerialization;
-    private final IMemoryItemConverter memoryItemConverter;
     private final IUserMemoryStore userMemoryStore;
     private final ToolResponseTruncator toolResponseTruncator;
     private final TenantQuotaService tenantQuotaService;
@@ -279,6 +255,19 @@ class AgentOrchestrator {
     volatile AttachmentTextExtractor attachmentTextExtractor;
 
     /**
+     * I5's two dependencies, field-injected rather than constructor-injected for
+     * the same reason as the stores above: the orchestrator is constructed directly
+     * by a large number of test classes, and widening the constructor would touch
+     * every one. {@code GroupTaskToolsProvider} treats either being null as "no
+     * task tools", which is also what a non-group turn means.
+     */
+    @Inject
+    volatile LiveDiscussionRegistry liveDiscussionRegistry;
+
+    @Inject
+    volatile IAgentGroupStore agentGroupStore;
+
+    /**
      * Test seam for supplying the attachment services to a directly-constructed
      * orchestrator (CDI populates the fields above in production). Previously this
      * was the sole wiring path, pushed in by {@code LlmTask}'s
@@ -293,7 +282,7 @@ class AgentOrchestrator {
 
     // HITL tool-approval resume dependencies (Task 9)
     private final IHitlToolJournalStore journalStore;
-    private final ConversationHistoryBuilder conversationHistoryBuilder;
+    final ConversationHistoryBuilder conversationHistoryBuilder;
 
     /**
      * The SAME estimator factory {@code LlmTask} uses to window conversation
@@ -301,7 +290,37 @@ class AgentOrchestrator {
      * second estimator: one accounting rule for both halves of the request means a
      * budget expressed in tokens keeps meaning the same thing wherever it is set.
      */
-    private final TokenCounterFactory tokenCounterFactory;
+
+    /**
+     * In-turn tool-context budget enforcement, extracted to
+     * {@link ToolContextBudget} (R2 step 3). Constructed here (not a CDI bean, per
+     * the collaborator pattern rule 3.0-4) since its only dependency —
+     * {@code tokenCounterFactory} — is already a constructor parameter.
+     * <p>
+     * Named {@code toolContextBudgetGuard}, not {@code toolContextBudget} — {@code
+     * runToolCallLoop} already has a local {@code int toolContextBudget} (the
+     * resolved token ceiling) that would otherwise shadow this field.
+     */
+    private final ToolContextBudget toolContextBudgetGuard;
+
+    /**
+     * Httpcall tool discovery, extracted to {@link HttpCallToolsProvider} (R2 step
+     * 2). Constructed here since all six dependencies it needs are already
+     * constructor parameters.
+     */
+    private final HttpCallToolsProvider httpCallToolsProvider;
+
+    /**
+     * MCP tool discovery, extracted to {@link McpToolsProvider} (R2 step 2).
+     */
+    private final McpToolsProvider mcpToolsProvider;
+
+    /**
+     * The nine plain built-in tool beans, extracted to {@link BuiltinToolsProvider}
+     * (R2 step 2). Constructed here rather than per call because every one of its
+     * dependencies is a {@code final} constructor-injected bean.
+     */
+    private final BuiltinToolsProvider builtinToolsProvider;
 
     @Inject
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
@@ -325,15 +344,8 @@ class AgentOrchestrator {
         this.pdfReaderTool = pdfReaderTool;
         this.weatherTool = weatherTool;
         this.toolExecutionService = toolExecutionService;
-        this.mcpToolProviderManager = mcpToolProviderManager;
         this.a2aToolProviderManager = a2aToolProviderManager;
         this.fetchToolResponsePageTool = fetchToolResponsePageTool;
-        this.restAgentStore = restAgentStore;
-        this.restWorkflowStore = restWorkflowStore;
-        this.resourceClientLibrary = resourceClientLibrary;
-        this.apiCallExecutor = apiCallExecutor;
-        this.jsonSerialization = jsonSerialization;
-        this.memoryItemConverter = memoryItemConverter;
         this.userMemoryStore = userMemoryStore;
         this.toolResponseTruncator = toolResponseTruncator;
         this.tenantQuotaService = tenantQuotaService;
@@ -345,7 +357,16 @@ class AgentOrchestrator {
         this.agentStore = agentStore;
         this.journalStore = journalStore;
         this.conversationHistoryBuilder = conversationHistoryBuilder;
-        this.tokenCounterFactory = tokenCounterFactory;
+        this.toolContextBudgetGuard = new ToolContextBudget(tokenCounterFactory);
+        this.httpCallToolsProvider = new HttpCallToolsProvider(restAgentStore, restWorkflowStore, resourceClientLibrary,
+                apiCallExecutor, jsonSerialization, memoryItemConverter);
+        this.mcpToolsProvider = new McpToolsProvider(restAgentStore, restWorkflowStore, resourceClientLibrary, mcpToolProviderManager);
+        this.toolLoopRunner = new ToolLoopRunner(toolExecutionService, toolResponseTruncator, tenantQuotaService,
+                memorySnapshotService, toolApprovalGate, gateSupport, toolContextBudgetGuard);
+        this.toolLoopResumer = new ToolLoopResumer(this, toolLoopRunner, gateSupport, chatTranscriptCodec, journalStore);
+        this.builtinToolsProvider = new BuiltinToolsProvider(calculatorTool, dateTimeTool, webSearchTool,
+                dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
+                fetchToolResponsePageTool);
     }
 
     /**
@@ -438,9 +459,11 @@ class AgentOrchestrator {
      *            that rejects JSON mode alongside function calling (Gemini) is
      *            never sent both.
      */
-    ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, LlmConfiguration.Task task,
-                                          IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
-                                          int transcriptMaxBytes, JsonResponseFormatPolicy jsonPolicy)
+    @Override
+    public ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages,
+                                                 LlmConfiguration.Task task,
+                                                 IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
+                                                 int transcriptMaxBytes, JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
         // Discover + register all tools (built-in + http + mcp + a2a) — the SAME
@@ -489,266 +512,34 @@ class AgentOrchestrator {
         return resumeToolLoop(chatModel, task, memory, batch, decision, toolHitlEnabled, JsonResponseFormatPolicy.DISABLED);
     }
 
-    /**
-     * As
-     * {@link #resumeToolLoop(ChatModel, LlmConfiguration.Task, IConversationMemory, PendingToolCallBatch, HitlDecision, boolean)},
-     * but carrying the JSON response-format policy so the continuation's requests
-     * match what the live loop would have sent.
-     */
-    ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory, PendingToolCallBatch batch,
-                                   HitlDecision decision, boolean toolHitlEnabled,
-                                   JsonResponseFormatPolicy jsonPolicy)
+    /** @see ToolLoopResumer#resumeToolLoop */
+    @Override
+    public ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory,
+                                          PendingToolCallBatch batch,
+                                          HitlDecision decision, boolean toolHitlEnabled,
+                                          JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
-
-        String conversationId = memory.getConversationId();
-        String pauseEpoch = batch.getPauseEpoch();
-        List<Map<String, Object>> trace = new ArrayList<>();
-
-        // Tool-cost baseline, snapshotted BEFORE the verdict loop below — that loop
-        // runs every human-approved gated call through executeToolWrapped, which
-        // charges the conversation's cost tracker. A baseline taken after it would
-        // already contain those charges, so the delta reported as toolCostUsd (and
-        // hence the audit ledger's dollar figure) would exclude exactly the calls a
-        // human explicitly approved. The live path (executeWithTools) snapshots
-        // before any tool runs; this is the same contract.
-        double toolCostBefore = conversationToolCost(conversationId);
-
-        // ── Step 2: rebuild tooling via the shared setup (SAME as the live path) ──
-        ToolSetup setup = buildToolSetup(task, memory);
-        boolean isLazy = task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY;
-
-        // Restore the active-spec surface. For LAZY, reactivate exactly the specs that
-        // were active at pause time (activatedToolNames); otherwise the full set.
-        List<ToolSpecification> activeSpecs = restoreActiveSpecs(setup, isLazy, batch.getActivatedToolNames());
-
-        // ── Step 1: reconstitute the transcript (primary) or fall back to rebuild ──
-        List<ChatMessage> currentMessages = new ArrayList<>();
-        boolean transcriptRestored = false;
-        if (!batch.isTranscriptOmitted() && batch.getChatTranscriptJson() != null) {
-            try {
-                currentMessages.addAll(chatTranscriptCodec.deserialize(batch.getChatTranscriptJson()));
-                transcriptRestored = true;
-            } catch (ChatTranscriptCodec.TranscriptCodecException e) {
-                LOGGER.warnf("HITL resume: transcript restore failed (%s) — falling back to history rebuild for conversation '%s'",
-                        e.getMessage(), sanitize(conversationId));
-            }
-        }
-        if (!transcriptRestored) {
-            currentMessages.addAll(fallbackRebuildMessages(task, memory, batch));
-        }
-        trace.add(Map.of("type", "hitl_resume", "transcriptRestored", transcriptRestored));
-
-        // ── Step 3: apply verdicts in batch order ──
-        Set<String> clearedCallIds = new HashSet<>();
-        Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
-        HitlDecision.HitlVerdict topVerdict = decision.getVerdict();
-        Map<String, ToolCallDecision> perCall = decision.getToolDecisions() != null ? decision.getToolDecisions() : Map.of();
-
-        // Per-request execution controls (mirrors the live loop).
-        boolean enableRateLimiting = task.getEnableRateLimiting() != null ? task.getEnableRateLimiting() : true;
-        boolean enableCaching = task.getEnableToolCaching() != null ? task.getEnableToolCaching() : true;
-        boolean enableCostTracking = task.getEnableCostTracking() != null ? task.getEnableCostTracking() : true;
-        int defaultRateLimit = task.getDefaultRateLimit() != null ? task.getDefaultRateLimit() : 100;
-        Map<String, Integer> toolRateLimits = task.getToolRateLimits();
-        Map<String, String> toolCanonicalNames = setup.toolCanonicalNames();
-        Double maxBudget = task.getMaxBudgetPerConversation();
-        List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
-
-        for (PendingToolCallBatch.PendingToolCall c : batch.getCalls()) {
-            ToolCallDecision cd = perCall.get(c.getCallId());
-            HitlDecision.HitlVerdict resolvedVerdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : topVerdict;
-            // Every current caller of resumeConversation validates a non-null verdict
-            // before this point, so resolvedVerdict should never actually be null —
-            // but the check that guarantees it lives in each caller, not here. Fail
-            // closed rather than trust that invariant silently: the REJECTED check
-            // below is the only thing standing between an unresolved verdict and
-            // executing a gated call, and "not REJECTED" is a dangerous way to spell
-            // "approved".
-            HitlDecision.HitlVerdict verdict = resolvedVerdict != null ? resolvedVerdict : HitlDecision.HitlVerdict.REJECTED;
-            String note = cd != null ? cd.getNote() : decision.getNote();
-            String amended = cd != null ? cd.getAmendedArguments() : null;
-            recordWriteApprovalDecision(verdict, decision.getDecidedBy());
-
-            if (verdict == HitlDecision.HitlVerdict.REJECTED) {
-                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), rejectionEnvelope(c.getToolName(), note)));
-                trace.add(Map.of("type", "hitl_rejected", "tool", c.getToolName(), "callId", c.getCallId()));
-                continue;
-            }
-
-            // APPROVED (top-level default or per-call) below.
-
-            // Truncated raw args can't be honestly executed (the approver never saw the
-            // full args and the raw bytes are incomplete). Validation already blocks
-            // amendments on these — approving yields an honest non-execution.
-            if (c.isArgsTruncated()) {
-                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
-                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"arguments exceeded the persistable size cap\"}"));
-                trace.add(Map.of("type", "hitl_not_executed", "tool", c.getToolName(), "callId", c.getCallId()));
-                continue;
-            }
-
-            // Approval binds to a REQUEST, not to a tool name: re-resolve now and
-            // refuse if what is about to be sent is not what was approved. Checked
-            // before the journal claim so a refusal consumes nothing and stays
-            // replayable.
-            String changed = requestChangedSinceApproval(c, amended, setup.toolRequestResolvers());
-            if (changed != null) {
-                auditRequestChanged(memory, c, changed);
-                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
-                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"the request changed after it was approved\"}"));
-                trace.add(Map.of("type", "hitl_request_changed", "tool", c.getToolName(), "callId", c.getCallId(), "detail", changed));
-                continue;
-            }
-
-            // Journal protocol — at-most-once across crashes/re-approvals.
-            if (journalStore.tryClaim(conversationId, pauseEpoch, c.getCallId(), c.getToolName(), decision.getDecidedBy())) {
-                String args = amended != null ? amended : c.getArgumentsRaw();
-                ToolExecutionRequest req = rebuiltRequest(c, args);
-                // Full per-request pipeline (checkpoint, budget, executeToolWrapped,
-                // truncation, trace). Its own auto-checkpoint fires ONLY here.
-                String result = executeSingleToolCallResult(req, memory, trace, toolExecutors, toolRateLimits,
-                        toolCanonicalNames, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
-                        enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
-                journalStore.markExecuted(conversationId, pauseEpoch, c.getCallId(), capUtf8(result, JOURNAL_RESULT_MAX_BYTES));
-                String envelope = amended != null ? amendedEnvelope(result) : result;
-                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), envelope));
-                clearedCallIds.add(c.getCallId());
-            } else {
-                // Duplicate claim — a prior attempt already ran (or crashed mid-tool).
-                var prior = journalStore.find(conversationId, pauseEpoch, c.getCallId());
-                if (prior.isPresent() && prior.get().status() == IHitlToolJournalStore.Status.EXECUTED) {
-                    // Replay the stored result — NEVER re-execute (no checkpoint re-fire).
-                    currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), prior.get().resultCapped()));
-                    trace.add(Map.of("type", "hitl_replayed", "tool", c.getToolName(), "callId", c.getCallId()));
-                    clearedCallIds.add(c.getCallId());
-                } else {
-                    // EXECUTING (crash inside the tool) — honest at-most-once outcome.
-                    currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
-                            "{\"status\":\"EXECUTION_OUTCOME_UNKNOWN\",\"message\":\"a previous execution attempt was interrupted; "
-                                    + "it may or may not have taken effect — verify externally before retrying\"}"));
-                    auditOutcomeUnknown(memory, c);
-                    trace.add(Map.of("type", "hitl_outcome_unknown", "tool", c.getToolName(), "callId", c.getCallId()));
-                    clearedCallIds.add(c.getCallId());
-                }
-            }
-        }
-
-        // ── Step 4: continue the SAME loop from the next iteration (budget-continuous)
-        // ──
-        // The gate resolves the SAME way the live path did (LlmTask.executeTask): the
-        // cluster-wide eddi.hitl.tool.enabled kill-switch nulls the config (gate
-        // inert), otherwise task override else agent default, so NEW calls in the
-        // continuation re-gate → re-pause. Approved ids are pre-cleared so they are
-        // never re-gated if the model reissues them. Threading toolHitlEnabled here
-        // keeps the resume path from re-arming an approval flow an operator disabled.
-        ToolApprovalsConfig effectiveToolApprovals = null;
-        if (toolHitlEnabled) {
-            effectiveToolApprovals = task.getToolApprovals() != null
-                    ? task.getToolApprovals()
-                    : memory.getAgentToolApprovalsConfig();
-        }
-        int llmTaskIndex = batch.getLlmTaskIndex();
-
-        // Transcript cap: resumeToolLoop replays the ALREADY-serialized transcript
-        // via ChatTranscriptCodec#deserialize (no cap involved) and never threads the
-        // configured value in (LlmTask does not resolve it for the resume path). If
-        // this continuation re-gates a fresh call and re-pauses, the resulting batch
-        // is capped at the constant default here — a defensible, rare-path fallback
-        // rather than widening resumeToolLoop's signature for the primary knob, which
-        // governs the initial pause.
-        TokenUsage[] tokenHolder = new TokenUsage[1];
-        String response = runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
-                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, DEFAULT_TRANSCRIPT_MAX_BYTES, tokenHolder,
-                jsonPolicy);
-
-        // ── Step 5: merge the pre-pause trace with the resume trace ──
-        List<Map<String, Object>> mergedTrace = new ArrayList<>();
-        if (batch.getTraceSoFar() != null) {
-            mergedTrace.addAll(batch.getTraceSoFar());
-        }
-        mergedTrace.addAll(trace);
-
-        Map<String, Object> responseMetadata = new HashMap<>();
-        if (tokenHolder[0] != null) {
-            responseMetadata.put("tokenUsage", tokenUsageMap(tokenHolder[0]));
-        }
-        responseMetadata.put("toolCostUsd", toolCostDelta(conversationId, toolCostBefore));
-        return new ExecutionResult(response, mergedTrace, responseMetadata);
+        // buildToolSetup is called HERE, on this instance, rather than inside the
+        // resumer through its back-reference: the resumer captured the orchestrator at
+        // construction, so resolving it there would bypass a spy/override of this
+        // method — and the toolRequestResolvers map it produces is what enforces
+        // request pinning on resume.
+        return toolLoopResumer.resumeToolLoop(chatModel, task, memory, batch, decision, toolHitlEnabled, jsonPolicy,
+                buildToolSetup(task, memory));
     }
 
     /** Journal-stored result cap (bytes) — matches the journal store's own cap. */
-    private static final int JOURNAL_RESULT_MAX_BYTES = 32_768;
+    static final int JOURNAL_RESULT_MAX_BYTES = 32_768;
 
-    /**
-     * Cap for tool arguments echoed into a log line. Deliberately small: a log is
-     * for identifying WHICH call failed to parse, not for reproducing its payload,
-     * and an unbounded model-supplied string is a log-flooding vector on top of the
-     * redaction concern.
-     */
-    private static final int ARGS_LOG_MAX_BYTES = 512;
-
-    /**
-     * Restores the active-spec surface on resume. For EAGER, every registered spec.
-     * For LAZY, exactly the specs that were active at pause time (by name), falling
-     * back to the LAZY-initial surface when the recorded names are absent.
-     */
+    /** @see ToolLoopResumer#restoreActiveSpecs */
     private static List<ToolSpecification> restoreActiveSpecs(ToolSetup setup, boolean isLazy, List<String> activatedToolNames) {
-        if (!isLazy) {
-            return setup.toolSpecs();
-        }
-        if (activatedToolNames == null || activatedToolNames.isEmpty()) {
-            return computeInitialActiveSpecs(setup, true);
-        }
-        Set<String> names = new HashSet<>(activatedToolNames);
-        List<ToolSpecification> restored = new ArrayList<>();
-        for (ToolSpecification spec : setup.toolSpecs()) {
-            if (names.contains(spec.name())) {
-                restored.add(spec);
-            }
-        }
-        return restored.isEmpty() ? computeInitialActiveSpecs(setup, true) : restored;
+        return ToolLoopResumer.restoreActiveSpecs(setup, isLazy, activatedToolNames);
     }
 
-    /**
-     * Rebuilds the base history exactly as a fresh turn would (the ONE sanctioned
-     * history rebuild on resume) and appends a reconstructed {@link AiMessage}
-     * carrying the batch's gated calls, so the appended results bind by call id.
-     * Intra-turn prior iterations are lost — accepted trade-off when the transcript
-     * cannot be restored. Uses the task's own (untemplated) system/prompt params;
-     * the orchestrator has no templating engine, and this degraded path only needs
-     * to carry the gated AiMessage so the appended results bind by call id.
-     */
+    /** @see ToolLoopResumer#fallbackRebuildMessages */
     private List<ChatMessage> fallbackRebuildMessages(LlmConfiguration.Task task, IConversationMemory memory,
                                                       PendingToolCallBatch batch) {
-        String systemMessage = "";
-        String prompt = null;
-        boolean includeFirstAgentMessage = true;
-        int logSizeLimit = task.getConversationHistoryLimit() != null ? task.getConversationHistoryLimit() : -1;
-        if (task.getParameters() != null) {
-            Object sys = task.getParameters().get("systemMessage");
-            if (sys != null) {
-                systemMessage = sys.toString();
-            }
-            Object p = task.getParameters().get("prompt");
-            if (p != null) {
-                prompt = p.toString();
-            }
-            Object inc = task.getParameters().get("includeFirstAgentMessage");
-            if (inc != null) {
-                includeFirstAgentMessage = Boolean.parseBoolean(inc.toString());
-            }
-        }
-
-        List<ChatMessage> base = conversationHistoryBuilder.buildMessages(memory, systemMessage, prompt, logSizeLimit,
-                includeFirstAgentMessage, null, 0);
-
-        List<ChatMessage> messages = new ArrayList<>(base);
-        List<ToolExecutionRequest> requests = new ArrayList<>();
-        for (PendingToolCallBatch.PendingToolCall c : batch.getCalls()) {
-            requests.add(rebuiltRequest(c));
-        }
-        messages.add(AiMessage.from(requests));
-        return messages;
+        return toolLoopResumer.fallbackRebuildMessages(task, memory, batch);
     }
 
     /**
@@ -761,169 +552,42 @@ class AgentOrchestrator {
      * when the gate is inert (pre-HITL byte-identical) or no id is missing.
      */
     private static AiMessage normalizeToolCallIds(AiMessage aiMessage, ToolApprovalsConfig effectiveToolApprovals) {
-        boolean gateActive = effectiveToolApprovals != null
-                && effectiveToolApprovals.getRequireApproval() != null
-                && !effectiveToolApprovals.getRequireApproval().isEmpty();
-        if (!gateActive || !aiMessage.hasToolExecutionRequests()) {
-            return aiMessage;
-        }
-        List<ToolExecutionRequest> requests = aiMessage.toolExecutionRequests();
-        if (requests.stream().allMatch(r -> r.id() != null)) {
-            return aiMessage;
-        }
-        List<ToolExecutionRequest> normalized = new ArrayList<>(requests.size());
-        for (ToolExecutionRequest r : requests) {
-            if (r.id() == null) {
-                normalized.add(ToolExecutionRequest.builder()
-                        .id("gen-" + UUID.randomUUID())
-                        .name(r.name())
-                        .arguments(r.arguments() != null ? r.arguments() : "")
-                        .build());
-            } else {
-                normalized.add(r);
-            }
-        }
-        String text = aiMessage.text();
-        return text != null && !text.isBlank()
-                ? AiMessage.from(text, normalized)
-                : AiMessage.from(normalized);
+        return ToolApprovalGateSupport.normalizeToolCallIds(aiMessage, effectiveToolApprovals);
     }
 
     /** Rebuilds a provider-safe request from a pending call (original raw args). */
+    /** @see ToolLoopResumer#rebuiltRequest */
     private static ToolExecutionRequest rebuiltRequest(PendingToolCallBatch.PendingToolCall c) {
-        return rebuiltRequest(c, c.getArgumentsRaw());
+        return ToolLoopResumer.rebuiltRequest(c);
     }
 
-    /**
-     * Rebuilds a request binding by the original call id with the given arguments.
-     */
+    /** @see ToolLoopResumer#rebuiltRequest */
     private static ToolExecutionRequest rebuiltRequest(PendingToolCallBatch.PendingToolCall c, String args) {
-        return ToolExecutionRequest.builder()
-                .id(c.getCallId())
-                .name(c.getToolName())
-                .arguments(args != null ? args : "")
-                .build();
+        return ToolLoopResumer.rebuiltRequest(c, args);
     }
 
-    /**
-     * Builds the reviewer-rejection envelope with the tool name and free-text note
-     * JSON-escaped via Jackson — NEVER string-concatenated with raw reviewer text.
-     */
+    /** @see ToolLoopResumer#rejectionEnvelope */
     private String rejectionEnvelope(String toolName, String note) {
-        Map<String, Object> envelope = new LinkedHashMap<>();
-        envelope.put("status", "REJECTED_BY_REVIEWER");
-        envelope.put("tool", toolName);
-        envelope.put("note", note != null ? note : "");
-        envelope.put("instruction", "The reviewer declined this action. Do not retry this exact call; "
-                + "explain the situation to the user and offer alternatives.");
-        return toJson(envelope);
+        return toolLoopResumer.rejectionEnvelope(toolName, note);
     }
 
-    /**
-     * Wraps an executed amended-args result so the model knows why it may differ.
-     */
+    /** @see ToolLoopResumer#amendedEnvelope */
     private String amendedEnvelope(String result) {
-        Map<String, Object> envelope = new LinkedHashMap<>();
-        envelope.put("status", "EXECUTED");
-        envelope.put("argsAmendedByReviewer", true);
-        envelope.put("result", result);
-        return toJson(envelope);
+        return toolLoopResumer.amendedEnvelope(result);
     }
 
     /**
      * Reusable Jackson mapper for approver/model-facing envelopes (escapes text).
      */
-    private static final ObjectMapper ENVELOPE_MAPPER = new ObjectMapper();
 
-    /**
-     * Jackson serialization for approver/model-facing JSON envelopes. All embedded
-     * reviewer/tool text is escaped by Jackson — NEVER string-concatenated.
-     */
+    /** @see ToolLoopResumer#toJson */
     private static String toJson(Object value) {
-        try {
-            return ENVELOPE_MAPPER.writeValueAsString(value);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            // Fall back to a minimal, safe envelope rather than propagating — the
-            // resume must still complete. Effectively unreachable for the small maps
-            // serialized here.
-            LOGGER.warnf("HITL resume: JSON envelope serialization failed: %s", e.getMessage());
-            return "{\"status\":\"ERROR\",\"reason\":\"could not serialize result envelope\"}";
-        }
+        return ToolLoopResumer.toJson(value);
     }
 
-    /**
-     * Whether the request this approved call would now send differs from the one
-     * that was approved — the check that makes an approval bind to a request.
-     *
-     * @return null when the call may proceed, otherwise a short reason for the
-     *         audit trail and trace
-     */
-    String requestChangedSinceApproval(PendingToolCallBatch.PendingToolCall c, String amendedArguments,
-                                       Map<String, ToolRequestResolver> resolvers) {
-
-        if (!c.isRequestPinned()) {
-            // Never pinned, so there is nothing to compare: every non-http tool, and
-            // any call that could not be resolved ahead of execution. Enforcing here
-            // would reject calls on a comparison that was never sound.
-            return null;
-        }
-        if (amendedArguments != null) {
-            // The approver rewrote the arguments themselves. The pinned fingerprint
-            // describes the request they replaced, so comparing against it would
-            // refuse every amendment. An amendment is already a deliberate, audited
-            // act by the same human whose approval the pin exists to honour.
-            return null;
-        }
-
-        var resolver = resolvers.get(c.getToolName());
-        if (resolver == null) {
-            // Pinned at gate time and unresolvable now: the tool is gone from the
-            // workflow, or the agent was reconfigured across the pause. We cannot
-            // show that what runs is what was approved, so it does not run.
-            return "the tool is no longer available to re-check the approved request";
-        }
-        try {
-            ResolvedRequest current = resolver.resolve(rebuiltRequest(c));
-            if (current.fingerprint() == null) {
-                return "the request could no longer be resolved for comparison";
-            }
-            if (!current.fingerprint().equals(c.getRequestFingerprint())) {
-                return "the resolved request no longer matches the approved fingerprint";
-            }
-            return null;
-        } catch (Exception e) {
-            // Fail closed: a pinned call whose request cannot be re-derived is
-            // exactly the case this check exists for. Type only, no throwable —
-            // see errorType.
-            LOGGER.warnf("Could not re-resolve the request for approved tool '%s' (%s); refusing to execute it.", sanitize(c.getToolName()),
-                    errorType(e));
-            return "the request could not be re-resolved before execution";
-        }
-    }
-
-    /**
-     * Records that an approved call was refused because its request no longer
-     * matched. Deliberately logs no argument, body or header — only the tool, the
-     * call id and the fixed reason.
-     */
-    void auditRequestChanged(IConversationMemory memory, PendingToolCallBatch.PendingToolCall c, String reason) {
-        LOGGER.warnf("hitl.tool.request_changed: approved tool '%s' (callId '%s') for conversation '%s' was NOT executed — %s.",
-                sanitize(c.getToolName()), sanitize(c.getCallId()), sanitize(memory.getConversationId()), sanitize(reason));
-    }
-
-    /**
-     * Records an at-most-once outcome-unknown event. No lightweight
-     * {@code hitl.tool.*} audit collector is reachable from this task (the
-     * {@link ai.labs.eddi.engine.audit.model.AuditEntry} record is built by the
-     * LifecycleManager per-task with HMAC context we do not have here), so —
-     * exactly as the config-drift path does — this WARN-logs with a distinctive
-     * marker that operators can alert on. Package-private + overridable so tests
-     * can assert it fired.
-     */
+    /** @see ToolLoopResumer#auditOutcomeUnknown */
     void auditOutcomeUnknown(IConversationMemory memory, PendingToolCallBatch.PendingToolCall c) {
-        LOGGER.warnf("hitl.tool.outcome_unknown: approved tool '%s' (callId '%s') for conversation '%s' had an interrupted prior execution; "
-                + "outcome is unknown — verify externally before retrying.",
-                sanitize(c.getToolName()), sanitize(c.getCallId()), sanitize(memory.getConversationId()));
+        toolLoopResumer.auditOutcomeUnknown(memory, c);
     }
 
     /**
@@ -947,6 +611,12 @@ class AgentOrchestrator {
      *            token the agent designer actually configured
      *            ({@code searchWeb → websearch}); tools that are configured under
      *            their dispatch name (http/mcp/a2a) are simply absent
+     * @param toolRequestResolvers
+     *            dispatch name → how to resolve what the tool would send, http
+     *            source only. Populated by the registry only for names whose http
+     *            spec actually survived collision resolution, so a builtin that won
+     *            a collision can never be pinned against the losing http tool's
+     *            request
      */
     record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
             Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
@@ -962,110 +632,80 @@ class AgentOrchestrator {
      * tools — returning the fully populated {@link ToolSetup}.
      */
     ToolSetup buildToolSetup(LlmConfiguration.Task task, IConversationMemory memory) {
-        // Collect enabled built-in tools
-        List<Object> tools = collectEnabledTools(task, memory);
+        var ctx = toolAssemblyContext(task, memory);
+        var merger = ToolSourceRegistry.newMerger();
 
-        // Discover httpcall tools from workflow (auto-discovery)
-        boolean enableHttpCallTools = task.getEnableHttpCallTools() == null || task.getEnableHttpCallTools();
-        HttpCallToolsResult httpCallTools = enableHttpCallTools ? discoverHttpCallTools(memory) : null;
+        // Phase 1 — the object-producing sources, in exactly the order
+        // collectAllBuiltInTools added them: the nine plain beans, then user memory
+        // and conversation recall, then the dynamic-agent block, then readAttachment
+        // last. That last position is why AttachmentToolsProvider exists separately
+        // from ContextualToolsProvider. Every one is a provider now, so a single
+        // failing source costs the turn only its own tools.
+        var contextual = contextualToolsProvider();
+        merger.addAll(List.of(builtinToolsProvider, contextual, dynamicAgentToolsProvider(),
+                new GroupTaskToolsProvider(liveDiscussionRegistry, agentGroupStore),
+                new AttachmentToolsProvider(contextual)), ctx);
 
-        // Discover mcpcalls tools from workflow (auto-discovery)
-        boolean enableMcpCallTools = task.getEnableMcpCallTools() == null || task.getEnableMcpCallTools();
-        McpToolProviderManager.McpToolsResult mcpCallWorkflowTools = enableMcpCallTools ? discoverMcpCallTools(memory) : null;
-
-        // Discover A2A agent tools (if configured)
-        A2AToolProviderManager.A2AToolsResult a2aTools = null;
-        List<A2AAgentConfig> a2aAgents = task.getA2aAgents();
-        if (a2aAgents != null && !a2aAgents.isEmpty()) {
-            a2aTools = a2aToolProviderManager.discoverTools(a2aAgents);
+        // LAZY registers every built-in's executor but shows the model only
+        // discover_tools until it asks. The meta-tool advertises the specs phase 1
+        // just contributed, so it can only be built here — between the two phases —
+        // and it must land before the builtInSpecs snapshot, exactly as it did when
+        // collectEnabledTools appended it to the list reflection then ran over.
+        //
+        // Gated on built-ins being enabled, restoring the pre-R2 shape: the path this
+        // replaced (collectEnabledTools) returned BEFORE its LAZY branch when
+        // enableBuiltInTools was null/false. Without the gate, an agent with
+        // built-ins off, LAZY, and no http/mcp/a2a tools went from an empty toolSpecs
+        // — which makes buildToolList return null and the turn fall back to legacy
+        // non-tool completion — to a single discover_tools spec, entering the full
+        // tool loop and being offered a meta-tool that can activate nothing. A
+        // different request shape and a different cost, from a refactor billed as a
+        // pure move.
+        Boolean builtInsEnabled = task.getEnableBuiltInTools();
+        if (task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY
+                && builtInsEnabled != null && builtInsEnabled) {
+            merger.addContribution("builtin", discoverToolsContribution(merger.specsSoFar(), task));
         }
 
-        // Build tool specifications and executors from built-in tool objects.
-        // toolSources maps dispatch name → provenance ("builtin"/"http"/"mcp"/…) so
-        // the gate can match qualified "source:name" patterns; missing entries are
-        // tolerated (the gate falls back to bare-name matching).
-        List<ToolSpecification> toolSpecs = new ArrayList<>();
-        Map<String, ToolExecutor> toolExecutors = new HashMap<>();
-        Map<String, String> toolSources = new HashMap<>();
-        Map<String, String> toolEndpoints = new HashMap<>();
-        Map<String, String> toolCanonicalNames = new HashMap<>();
+        // The LAZY activation target: what phase 1 produced, before any external
+        // source merges in.
+        List<ToolSpecification> builtInSpecs = merger.specsSoFar();
 
-        for (Object tool : tools) {
-            // CDI proxies don't carry @Tool annotations — resolve to actual bean class
-            Class<?> toolClass = tool.getClass();
-            if (toolClass.getName().contains("_ClientProxy") || toolClass.getName().contains("$$")) {
-                toolClass = toolClass.getSuperclass();
-            }
+        // Phase 2 — the externally-discovered sources. Merged after phase 1 so a
+        // remote tool can never displace a governed built-in of the same name.
+        merger.addAll(List.of(httpCallToolsProvider, mcpToolsProvider, a2aToolsProvider()), ctx);
 
-            // Resolved from the UNWRAPPED class on purpose: tool.getClass() would be
-            // "CalculatorTool_ClientProxy" under CDI, which no resolver case matches, and
-            // every built-in would silently fall back to its dispatch name again.
-            String canonicalToolName = ToolNameResolver.canonicalForClass(toolClass.getSimpleName());
-
-            var specs = ToolSpecifications.toolSpecificationsFrom(toolClass);
-            toolSpecs.addAll(specs);
-
-            // Find methods annotated with @Tool and map them to executors
-            for (java.lang.reflect.Method method : toolClass.getDeclaredMethods()) {
-                if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
-                    dev.langchain4j.agent.tool.Tool toolAnnotation = method.getAnnotation(dev.langchain4j.agent.tool.Tool.class);
-                    String toolName = toolAnnotation.name().isEmpty() ? method.getName() : toolAnnotation.name();
-                    toolExecutors.put(toolName, new DefaultToolExecutor(tool, method));
-                    toolSources.put(toolName, sourceForBuiltInTool(tool));
-                    toolCanonicalNames.put(toolName, canonicalToolName != null ? canonicalToolName : toolName);
-                }
-            }
-        }
-
-        // Copy built-in specs before merging external ones — LAZY activation needs it.
-        List<ToolSpecification> builtInSpecs = new ArrayList<>(toolSpecs);
-
-        Map<String, ToolRequestResolver> toolRequestResolvers = new HashMap<>();
-
-        // Merge httpcall tools discovered from workflow (if any)
-        if (httpCallTools != null) {
-            mergeExternalTools(httpCallTools.toolSpecs(), httpCallTools.executors(), "http", toolSpecs, toolExecutors, toolSources);
-            // Endpoint provenance travels beside the source so an approval pattern can
-            // address what a tool calls, not just what it is named.
-            toolEndpoints.putAll(httpCallTools.endpoints());
-            // Only httpcall tools resolve to an HTTP request, so only they can be
-            // pinned. Pruned below once every source has merged — a name whose http
-            // tool LOST a collision must not keep its resolver.
-            toolRequestResolvers.putAll(httpCallTools.resolvers());
-        }
-
-        // Merge mcpcalls tools discovered from workflow (if any)
-        if (mcpCallWorkflowTools != null) {
-            mergeExternalTools(mcpCallWorkflowTools.toolSpecs(), mcpCallWorkflowTools.executors(), "mcp", toolSpecs, toolExecutors, toolSources);
-        }
-
-        // Merge A2A agent tools (if any)
-        if (a2aTools != null) {
-            mergeExternalTools(a2aTools.toolSpecs(), a2aTools.executors(), "a2a", toolSpecs, toolExecutors, toolSources);
-        }
-
-        pruneResolversToSurvivingHttpTools(toolRequestResolvers, toolSources);
-
-        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames), Map.copyOf(toolEndpoints),
-                Map.copyOf(toolRequestResolvers));
+        var assembled = merger.build();
+        return new ToolSetup(new ArrayList<>(assembled.specs()), new HashMap<>(assembled.executors()),
+                new HashMap<>(assembled.toolSources()), builtInSpecs, assembled.toolCanonicalNames(),
+                assembled.toolEndpoints(), assembled.toolRequestResolvers());
     }
 
     /**
-     * Drop every request resolver whose name is not owned by a surviving http tool.
+     * The {@code discover_tools} meta-tool as a contribution, advertising
+     * {@code availableSpecs}.
      * <p>
-     * {@link #mergeExternalTools} resolves a name collision by DROPPING the
-     * incoming tool and leaving the incumbent in place, but the dropped tool's
-     * resolver was registered before that verdict was known. Left in, a builtin (or
-     * mcp/a2a) tool that won a collision would be pinned against the losing http
-     * tool's request: the approver would be shown a preview of a request that is
-     * not the one about to run, and the pre-execution re-check would compare
-     * against it too — a fabricated request passing as a verified one.
-     * <p>
-     * Run after every source has merged, so {@code toolSources} already records the
-     * final owner of each name.
+     * Reflected here rather than inside a provider because it is not a tool source
+     * at all — it is a view over what the other local sources contributed, and no
+     * provider can see that from inside its own {@code contribute}.
      */
-    static void pruneResolversToSurvivingHttpTools(Map<String, ToolRequestResolver> resolvers, Map<String, String> toolSources) {
-        resolvers.keySet().removeIf(name -> !"http".equals(toolSources.get(name)));
+    private ToolContribution discoverToolsContribution(List<ToolSpecification> availableSpecs,
+                                                       LlmConfiguration.Task task) {
+        var discoverTool = new DiscoverToolsTool(availableSpecs, task.getMaxToolsInContext());
+        LOGGER.infof("LAZY tool loading: %d built-in tools + discover_tools meta-tool registered", availableSpecs.size());
+        var reflected = ToolObjectReflector.reflect(List.of(discoverTool));
+        return new ToolContribution(reflected.specs(), reflected.executors(), reflected.toolSources(), Map.of(),
+                List.of(), reflected.toolCanonicalNames());
+    }
+
+    /**
+     * A2A tool discovery, extracted to {@link A2AToolsProvider} (R2 step 2).
+     * Constructed per call for symmetry with the other per-call providers; its one
+     * dependency is constructor-injected, so this could be hoisted if it ever
+     * mattered.
+     */
+    private A2AToolsProvider a2aToolsProvider() {
+        return new A2AToolsProvider(a2aToolProviderManager);
     }
 
     /**
@@ -1111,572 +751,64 @@ class AgentOrchestrator {
         }
     }
 
-    /**
-     * Computes the specs the LLM initially sees given a {@link ToolSetup}. For
-     * EAGER, that is every registered spec. For LAZY, only {@code discover_tools}
-     * plus the external (http/mcp/a2a) specs — the built-ins stay hidden until
-     * discovery activates them. Shared by the live loop and resume so both present
-     * an identical initial surface. Returns a fresh mutable list (LAZY activation
-     * mutates it in place).
-     */
+    /** @see ToolLoopRunner#computeInitialActiveSpecs */
     private static List<ToolSpecification> computeInitialActiveSpecs(ToolSetup setup, boolean isLazy) {
-        if (!isLazy) {
-            return setup.toolSpecs();
-        }
-        // External = every registered spec whose name is not a built-in spec name.
-        Set<String> builtInNames = new HashSet<>();
-        for (ToolSpecification spec : setup.builtInSpecs()) {
-            builtInNames.add(spec.name());
-        }
-        List<ToolSpecification> activeSpecs = new ArrayList<>();
-        int externalCount = 0;
-        for (ToolSpecification spec : setup.toolSpecs()) {
-            if ("discover_tools".equals(spec.name())) {
-                activeSpecs.add(spec);
-            } else if (!builtInNames.contains(spec.name())) {
-                activeSpecs.add(spec);
-                externalCount++;
-            }
-        }
-        LOGGER.infof("LAZY mode: presenting %d specs initially (discover_tools + %d external)",
-                activeSpecs.size(), externalCount);
-        return activeSpecs;
+        return ToolLoopRunner.computeInitialActiveSpecs(setup, isLazy);
     }
 
-    /**
-     * Executes the tool-calling loop using direct ChatModel API against a pre-built
-     * {@link ToolSetup} (shared with the resume path).
-     */
+    /** @see ToolLoopRunner#executeWithTools */
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, ToolSetup setup,
                                              LlmConfiguration.Task task, IConversationMemory memory,
                                              ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
                                              JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
-
-        Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
-        Map<String, String> toolSources = setup.toolSources();
-        List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
-
-        boolean isLazy = task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY;
-
-        // Active specs: what the LLM currently sees (LAZY starts narrow).
-        List<ToolSpecification> activeSpecs = computeInitialActiveSpecs(setup, isLazy);
-
-        // Build message list with system message if provided
-        List<ChatMessage> messages = new ArrayList<>();
-        if (!isNullOrEmpty(systemMessage)) {
-            messages.add(SystemMessage.from(systemMessage));
-        }
-        messages.addAll(chatMessages);
-
-        // Trace for tool calls
-        List<Map<String, Object>> trace = new ArrayList<>();
-
-        // Live path: iteration loop starts at 0, no pre-cleared call ids.
-        String conversationId = memory != null ? memory.getConversationId() : null;
-        double toolCostBefore = conversationToolCost(conversationId);
-        TokenUsage[] tokenHolder = new TokenUsage[1];
-        String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0,
-                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, Set.of(), transcriptMaxBytes, tokenHolder, jsonPolicy);
-
-        Map<String, Object> responseMetadata = new HashMap<>();
-        if (tokenHolder[0] != null) {
-            responseMetadata.put("tokenUsage", tokenUsageMap(tokenHolder[0]));
-        }
-        responseMetadata.put("toolCostUsd", toolCostDelta(conversationId, toolCostBefore));
-        return new ExecutionResult(response, trace, responseMetadata);
+        return toolLoopRunner.executeWithTools(chatModel, systemMessage, chatMessages, setup, task, memory,
+                effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, jsonPolicy);
     }
 
-    /**
-     * Accumulated tool cost for a conversation, or {@code 0.0} when nothing has
-     * been tracked for it yet — {@link ToolCostTracker#getConversationCosts}
-     * returns null for an untracked conversation.
-     */
+    /** @see ToolLoopRunner#conversationToolCost */
     private double conversationToolCost(String conversationId) {
-        if (conversationId == null || toolExecutionService == null) {
-            return 0.0;
-        }
-        ToolCostTracker tracker = toolExecutionService.getCostTracker();
-        if (tracker == null) {
-            return 0.0;
-        }
-        ToolCostTracker.ConversationCostMetrics metrics = tracker.getConversationCosts(conversationId);
-        return metrics != null ? metrics.getTotalCost() : 0.0;
+        return toolLoopRunner.conversationToolCost(conversationId);
     }
 
-    /**
-     * Dollar cost the tools of THIS model call added, as the difference between two
-     * snapshots of the conversation total. Clamped at zero because
-     * {@link ToolCostTracker#resetConversation} can fire between the snapshots and
-     * would otherwise yield a negative "cost".
-     */
+    /** @see ToolLoopRunner#toolCostDelta */
     private double toolCostDelta(String conversationId, double costBefore) {
-        return Math.max(0.0, conversationToolCost(conversationId) - costBefore);
+        return toolLoopRunner.toolCostDelta(conversationId, costBefore);
     }
 
-    /**
-     * The single shared tool-calling loop, wrapped in
-     * {@link AgentExecutionHelper#executeWithRetry}. Used by the live path (start
-     * iteration 0, empty {@code clearedCallIds}) and by {@link #resumeToolLoop}
-     * (start iteration {@code batch.getIterationIndex()+1}, {@code clearedCallIds}
-     * = the human-approved ids so they are never re-gated). A fresh gated batch
-     * throws {@link ToolApprovalRequiredException} to re-pause — the retry guard
-     * lets it escape unchanged.
-     *
-     * @param initialMessages
-     *            the message list the loop starts from (defensively copied inside);
-     *            for resume this already carries the replayed transcript + the
-     *            verdict-applied tool results
-     * @param startIteration
-     *            first loop index — carries budget continuity across a pause
-     * @param clearedCallIds
-     *            call ids a human already approved this pause; never re-gated
-     * @param transcriptMaxBytes
-     *            the configured cap (bytes) for freezing the transcript into a
-     *            {@link PendingToolCallBatch} if this iteration re-pauses
-     * @param jsonPolicy
-     *            decides, per request, whether {@code ResponseFormat.JSON} is set;
-     *            resolved against whether THAT request carries tool specifications
-     */
+    /** @see ToolLoopRunner#runToolCallLoop */
     private String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
                                    List<Map<String, Object>> trace, int startIteration, ToolSetup setup, boolean isLazy,
                                    LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
                                    int llmTaskIndex, Set<String> clearedCallIds, int transcriptMaxBytes, TokenUsage[] tokenHolder,
                                    JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
-
-        Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
-        Map<String, String> toolSources = setup.toolSources();
-        Map<String, String> toolCanonicalNames = setup.toolCanonicalNames();
-        List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
-
-        boolean enableRateLimiting = task.getEnableRateLimiting() != null ? task.getEnableRateLimiting() : true;
-        boolean enableCaching = task.getEnableToolCaching() != null ? task.getEnableToolCaching() : true;
-        boolean enableCostTracking = task.getEnableCostTracking() != null ? task.getEnableCostTracking() : true;
-        int defaultRateLimit = task.getDefaultRateLimit() != null ? task.getDefaultRateLimit() : 100;
-        Map<String, Integer> toolRateLimits = task.getToolRateLimits();
-        Double maxBudget = task.getMaxBudgetPerConversation();
-        String conversationId = memory.getConversationId();
-
-        // In-turn tool-context ceiling. Resolved once per loop: <= 0 disables the
-        // guard entirely (and skips estimator construction with it).
-        int toolContextBudget = task.getMaxToolContextTokens() != null
-                ? task.getMaxToolContextTokens()
-                : DEFAULT_MAX_TOOL_CONTEXT_TOKENS;
-        TokenCountEstimator toolContextEstimator = toolContextBudget > 0 ? resolveToolContextEstimator(task) : null;
-
-        return AgentExecutionHelper.executeWithRetry(() -> {
-            // A retry REPLAYS this whole lambda, so anything the previous attempt
-            // accumulated must be discarded — otherwise a turn that retried once
-            // reports (and bills) roughly double the tokens it actually used.
-            tokenHolder[0] = null;
-            List<ChatMessage> currentMessages = new ArrayList<>(initialMessages);
-            // Per-message token memo, local to this attempt: messages are immutable and
-            // re-counted on every iteration, so without it a 10-iteration loop tokenizes
-            // the first tool result ten times. Lives on the call stack — the orchestrator
-            // is a shared singleton and must stay stateless.
-            Map<ChatMessage, Integer> toolContextTokenMemo = new IdentityHashMap<>();
-            int maxIterations = task.getMaxToolIterations() != null ? task.getMaxToolIterations() : 10;
-
-            // Engine-enforced counterweight: strict mode caps iterations
-            var counterweight = task.getCounterweight();
-            if (counterweight != null && counterweight.isEnabled()
-                    && "strict".equalsIgnoreCase(counterweight.getLevel())) {
-                int strictCap = 5;
-                if (maxIterations > strictCap) {
-                    LOGGER.infof("Counterweight strict mode: capping tool iterations from %d to %d",
-                            maxIterations, strictCap);
-                    maxIterations = strictCap;
-                }
-            }
-
-            for (int i = startIteration; i < maxIterations; i++) {
-                // Cooperative cancellation: if this step was interrupted (e.g. a cascade
-                // per-step timeout called future.cancel(true)), stop before issuing another
-                // model call — avoids launching further side-effectful tools on a step whose
-                // result will be discarded. Thread.interrupted() also CLEARS the flag so it
-                // cannot leak to any later work on this thread.
-                if (Thread.interrupted()) {
-                    throw new LifecycleException("Agent execution cancelled (interrupted)");
-                }
-
-                // Keep the accumulated tool traffic inside its aggregate ceiling BEFORE
-                // the request is built — this is the only point at which the loop knows
-                // everything it is about to send. Without it the list only ever grows and
-                // a tool-heavy turn hard-fails mid-loop on a provider context-window 400.
-                if (toolContextEstimator != null) {
-                    enforceToolContextBudget(currentMessages, toolContextBudget, toolContextEstimator,
-                            toolContextTokenMemo, trace, conversationId);
-                }
-
-                ChatRequest.Builder requestBuilder = ChatRequest.builder().messages(currentMessages);
-
-                boolean toolsInRequest = !activeSpecs.isEmpty();
-                if (toolsInRequest) {
-                    requestBuilder.toolSpecifications(activeSpecs);
-                }
-
-                // API-level JSON, decided against THIS request's tool surface. Baking it
-                // into the model instead would put it on every request the cached model
-                // ever serves — the Gemini 400 documented in docs/changelog.md.
-                if (jsonPolicy != null) {
-                    var responseFormat = jsonPolicy.resolve(toolsInRequest);
-                    if (responseFormat != null) {
-                        requestBuilder.responseFormat(responseFormat);
-                    }
-                }
-
-                ChatRequest chatRequest = requestBuilder.build();
-
-                ChatResponse chatResponse = chatModel.chat(chatRequest);
-                AiMessage aiMessage = normalizeToolCallIds(chatResponse.aiMessage(), effectiveToolApprovals);
-                currentMessages.add(aiMessage);
-
-                // Accumulate token usage for cost/observability reporting.
-                if (chatResponse.metadata() != null && chatResponse.metadata().tokenUsage() != null) {
-                    tokenHolder[0] = sumTokens(tokenHolder[0], chatResponse.metadata().tokenUsage());
-                }
-
-                if (aiMessage.hasToolExecutionRequests()) {
-                    // === Tool-approval gate (tool-level HITL) ===
-                    // Split the batch into gated (require human approval) and allowed
-                    // calls. clearedCallIds carries the human-approved ids on resume so
-                    // they are never re-gated. Inert when effectiveToolApprovals is
-                    // null/empty — byte-identical to the pre-HITL path.
-                    var gateResult = toolApprovalGate.classify(aiMessage.toolExecutionRequests(), toolSources, setup.toolEndpoints(),
-                            effectiveToolApprovals, clearedCallIds);
-
-                    if (!gateResult.gated().isEmpty()) {
-                        int pausesSoFar = readToolPauseCount(memory);
-                        if (pausesSoFar >= maxPausesPerTurn(effectiveToolApprovals)) {
-                            // Fail-closed: the pause budget for this turn is spent —
-                            // do not pause and do not execute the gated calls; tell
-                            // the model to stop asking so the loop can still finish
-                            // with the ungated results.
-                            for (ToolExecutionRequest gatedReq : gateResult.gated()) {
-                                currentMessages.add(ToolExecutionResultMessage.from(gatedReq,
-                                        "{\"status\":\"DENIED\",\"reason\":\"approval-pause limit for this turn reached; do not retry\"}"));
-                                Map<String, Object> capStep = new HashMap<>();
-                                capStep.put("type", "tool_error");
-                                capStep.put("tool", gatedReq.name());
-                                capStep.put("error", "hitl_pause_cap");
-                                trace.add(capStep);
-                            }
-                            // Task 10 — the pause-cap guard fired: record it as a guard
-                            // (metric + audit) HERE where the audit context lives (the
-                            // memory's audit collector, set by ConversationService on the
-                            // say/resume paths). AgentOrchestrator is not CDI and has no
-                            // MeterRegistry, so the metric uses the Micrometer global
-                            // registry (same idiom as LifecycleManager). Emitted once per
-                            // capped batch, carrying the gated fingerprint.
-                            recordPauseCapGuard(memory, fingerprint(gateResult.gated()));
-                            // ungated calls still execute below
-                        } else {
-                            // 1) execute the ungated calls of this batch normally
-                            for (ToolExecutionRequest allowedReq : gateResult.allowed()) {
-                                executeSingleToolCall(allowedReq, memory, currentMessages, trace, toolExecutors,
-                                        toolRateLimits, toolCanonicalNames, defaultRateLimit, maxBudget, conversationId,
-                                        enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
-                            }
-                            // Abandoned-thread guard: a cascade step that timed out (or
-                            // the agentTimeout watchdog on the live path) cancels the future
-                            // via cancel(true), interrupting THIS thread — but it keeps
-                            // running to here on the shared live memory while the caller has
-                            // already moved on. Committing pause state now would leave a
-                            // stale batch on a conversation the caller abandoned (self-heals
-                            // at next turn start) or overwrite a later step's real pause.
-                            // Abort WITHOUT mutating shared memory: throw the interrupted
-                            // signal instead of the pause. NOT ToolApprovalRequiredException,
-                            // which would commit a pause with a null batch. The guarantee
-                            // here is only that this abandoned thread never writes stale/
-                            // overwriting pause state; the resulting terminal state is
-                            // fail-safe either way — a cascade discards the Future's exception
-                            // entirely, and on the live path AgentExecutionHelper.executeWithRetry
-                            // re-wraps this into a plain LifecycleException so the turn settles
-                            // to ERROR (where the watchdog fired it already persisted
-                            // EXECUTION_INTERRUPTED). Both are recoverable by the next say.
-                            if (Thread.currentThread().isInterrupted()) {
-                                throw new LifecycleException.LifecycleInterruptedException(
-                                        "Tool-approval pause abandoned: executing thread was interrupted before commit");
-                            }
-                            // 2) resolve the per-tool friction rule (iteration 1). Done HERE,
-                            // once, because this is the last place the gated calls' endpoints
-                            // exist — the persisted batch keeps names and sources only, so an
-                            // endpoint-addressed rule could never be re-matched downstream.
-                            var ruleByCallId = ToolApprovalRules.matchByCallId(gateResult.gated(), toolSources,
-                                    setup.toolEndpoints(), effectiveToolApprovals);
-                            var governingRule = ToolApprovalRules.governing(ruleByCallId.values());
-                            recordRuleMatches(ruleByCallId.values());
-                            // 3) snapshot + persist the pending batch, then abort the loop
-                            PendingToolCallBatch batch = buildPendingBatch(currentMessages, gateResult, task, memory,
-                                    i, activatedToolNames(isLazy, activeSpecs), trace, pausesSoFar + 1, llmTaskIndex,
-                                    toolSources, effectiveToolApprovals, transcriptMaxBytes, ruleByCallId, governingRule,
-                                    setup.toolRequestResolvers());
-                            memory.setHitlPendingToolCalls(batch);
-                            incrementToolPauseCount(memory, pausesSoFar);
-                            throw new ToolApprovalRequiredException(
-                                    buildPauseReason(effectiveToolApprovals, gateResult, governingRule), batch);
-                        }
-                    }
-
-                    // Execute the allowed calls (was: aiMessage.toolExecutionRequests()).
-                    // When the gate is inert, gateResult.allowed() == the full batch.
-                    for (ToolExecutionRequest toolRequest : gateResult.allowed()) {
-                        // Cooperative cancellation before each (potentially side-effectful) tool.
-                        // Thread.interrupted() clears the flag so it cannot leak to later work.
-                        if (Thread.interrupted()) {
-                            throw new LifecycleException("Agent execution cancelled (interrupted) before tool: " + toolRequest.name());
-                        }
-
-                        executeSingleToolCall(toolRequest, memory, currentMessages, trace, toolExecutors,
-                                toolRateLimits, toolCanonicalNames, defaultRateLimit, maxBudget, conversationId,
-                                enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
-                    }
-                } else {
-                    return aiMessage.text();
-                }
-            }
-
-            // Loop exhausted its iteration budget. The last message is usually the
-            // model's final AiMessage; on resume with a spent budget it may instead be
-            // a verdict-applied tool result — guard the cast either way.
-            ChatMessage last = currentMessages.get(currentMessages.size() - 1);
-            if (last instanceof AiMessage aiLast) {
-                return aiLast.text() != null ? aiLast.text() : "Max tool iterations reached";
-            }
-            return "Max tool iterations reached";
-        }, task, "Agent execution");
+        return toolLoopRunner.runToolCallLoop(chatModel, initialMessages, activeSpecs, trace, startIteration, setup, isLazy,
+                task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, transcriptMaxBytes, tokenHolder, jsonPolicy);
     }
 
-    // ─── In-turn tool-context budget (D6b) ───
+    // ─── In-turn tool-context budget (D6b) — extracted to ToolContextBudget (R2
+    // step 3). Kept as declared delegators (not inlined) since they're reflected
+    // or referenced by class name in tests and, for sumTokens/tokenUsageMap, by
+    // LegacyChatExecutor/CascadingModelExecutor/LlmTask. ───
 
-    /**
-     * Resolves the estimator used to meter the in-turn tool context, reusing
-     * {@link TokenCounterFactory} so the tool half of a request is counted by the
-     * same rule as the history half.
-     * <p>
-     * The task's declared type/model may still carry unresolved global-variable
-     * references at this point ({@code LlmTask} resolves them for the model lookup,
-     * not for the task POJO), and an unknown model name can make a provider
-     * tokenizer refuse to construct. Both outcomes fall back to the approximate
-     * chars/4 estimator rather than propagating: a safety ceiling that throws is
-     * worse than a slightly imprecise one.
-     */
-    private TokenCountEstimator resolveToolContextEstimator(LlmConfiguration.Task task) {
-        try {
-            Map<String, String> parameters = task.getParameters();
-            String modelName = parameters != null ? LlmTask.resolveModelName(parameters) : null;
-            return tokenCounterFactory.getEstimator(task.getType(), modelName);
-        } catch (Exception e) {
-            LOGGER.debugf("Tool-context budget: falling back to the approximate token estimator (%s)", e.getMessage());
-            return tokenCounterFactory.getEstimator(null, null);
-        }
-    }
-
-    /**
-     * Drops the oldest complete tool exchanges from {@code messages} until the
-     * accumulated in-turn tool context fits inside {@code budgetTokens}.
-     *
-     * <p>
-     * A <em>tool exchange</em> is an {@link AiMessage} carrying tool-execution
-     * requests plus the run of {@link ToolExecutionResultMessage}s that answers it.
-     * Eviction operates on whole exchanges and nothing else, which is the entire
-     * point: dropping a result without its requesting {@code AiMessage} leaves an
-     * unanswerable {@code tool_call_id}, and dropping the {@code AiMessage} without
-     * its results leaves a tool call the provider will reject — the eviction would
-     * then <em>cause</em> the 400 it exists to prevent. System, user and
-     * assistant-prose messages are never candidates; conversation history is
-     * governed by {@code maxContextTokens}/{@code conversationHistoryLimit}, not by
-     * this guard.
-     * </p>
-     *
-     * <p>
-     * The most recent exchange is never evicted. When it alone exceeds the budget
-     * there is nothing eviction can do — the model asked for those results and must
-     * see them — so the method logs the overrun and lets the request through
-     * unchanged, exactly as today. That case is what {@code toolResponseLimits} is
-     * for.
-     * </p>
-     *
-     * <p>
-     * Eviction is silent to the model on purpose: no gap-marker message is
-     * injected. A {@code SystemMessage} mid-transcript is not portable across the
-     * twelve supported providers (several hoist system content to a dedicated
-     * top-level field), and a {@code UserMessage} would fabricate a turn the user
-     * never took. The loss is instead reported to the agent designer through the
-     * execution trace, a Micrometer counter and a WARN log.
-     * </p>
-     *
-     * <p>
-     * Static and fully parameterized — the orchestrator is an application-scoped
-     * singleton and holds no per-conversation state.
-     * </p>
-     *
-     * @param messages
-     *            the live message list; mutated in place
-     * @param budgetTokens
-     *            the aggregate ceiling; callers skip this method entirely when it
-     *            is not positive
-     * @param tokenMemo
-     *            per-attempt cache of message → token count
-     * @param trace
-     *            execution trace; receives one {@code tool_context_evicted} entry
-     *            per eviction round
-     */
     static void enforceToolContextBudget(List<ChatMessage> messages, int budgetTokens, TokenCountEstimator estimator,
                                          Map<ChatMessage, Integer> tokenMemo, List<Map<String, Object>> trace,
                                          String conversationId) {
-
-        List<int[]> exchanges = findToolExchanges(messages);
-        // Nothing to trade away: with one exchange (or none) the only candidate is the
-        // one the model is waiting on.
-        if (exchanges.size() < 2) {
-            return;
-        }
-
-        int total = 0;
-        for (int[] range : exchanges) {
-            for (int i = range[0]; i <= range[1]; i++) {
-                total += tokensOf(messages.get(i), estimator, tokenMemo);
-            }
-        }
-        if (total <= budgetTokens) {
-            return;
-        }
-
-        int tokensBefore = total;
-        int evictedExchanges = 0;
-        int evictedMessages = 0;
-        while (total > budgetTokens && evictedExchanges < exchanges.size() - 1) {
-            int[] range = exchanges.get(evictedExchanges);
-            for (int i = range[0]; i <= range[1]; i++) {
-                total -= tokensOf(messages.get(i), estimator, tokenMemo);
-            }
-            evictedMessages += range[1] - range[0] + 1;
-            evictedExchanges++;
-        }
-
-        // Remove highest index first so the earlier ranges stay valid. Ranges are
-        // removed individually rather than as one span so that anything sitting
-        // between two exchanges is left untouched.
-        for (int k = evictedExchanges - 1; k >= 0; k--) {
-            int[] range = exchanges.get(k);
-            messages.subList(range[0], range[1] + 1).clear();
-        }
-
-        boolean withinBudget = total <= budgetTokens;
-
-        Map<String, Object> evictionStep = new HashMap<>();
-        evictionStep.put("type", "tool_context_evicted");
-        evictionStep.put("evictedExchanges", evictedExchanges);
-        evictionStep.put("evictedMessages", evictedMessages);
-        evictionStep.put("tokensBefore", tokensBefore);
-        evictionStep.put("tokensAfter", total);
-        evictionStep.put("budgetTokens", budgetTokens);
-        evictionStep.put("withinBudget", withinBudget);
-        trace.add(evictionStep);
-
-        try {
-            Metrics.globalRegistry.counter("eddi.llm.tool_context.evictions",
-                    "outcome", withinBudget ? "within_budget" : "still_over_budget").increment(evictedExchanges);
-        } catch (Exception e) {
-            LOGGER.debugf("tool-context eviction metric emit failed: %s", e.getMessage());
-        }
-
-        LOGGER.warnf("llm.tool_context.evicted: conversation '%s' accumulated %d tokens of tool context against "
-                + "maxToolContextTokens=%d; dropped the %d oldest tool exchange(s) (%d messages), now %d tokens.%s "
-                + "The model can no longer see those tool results — lower maxToolIterations, set toolResponseLimits, "
-                + "or raise maxToolContextTokens.",
-                sanitize(conversationId), tokensBefore, budgetTokens, evictedExchanges, evictedMessages, total,
-                withinBudget ? "" : " STILL OVER BUDGET: the most recent exchange alone exceeds the ceiling and is never evicted.");
+        ToolContextBudget.enforceToolContextBudget(messages, budgetTokens, estimator, tokenMemo, trace, conversationId);
     }
 
-    /**
-     * Locates every tool exchange in message order. Each entry is an inclusive
-     * {@code [start, end]} index pair whose {@code start} is an {@link AiMessage}
-     * with tool-execution requests and whose {@code end} is the last
-     * {@link ToolExecutionResultMessage} immediately following it.
-     */
-    private static List<int[]> findToolExchanges(List<ChatMessage> messages) {
-        List<int[]> exchanges = new ArrayList<>();
-        for (int i = 0; i < messages.size(); i++) {
-            if (messages.get(i) instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
-                int end = i;
-                while (end + 1 < messages.size() && messages.get(end + 1) instanceof ToolExecutionResultMessage) {
-                    end++;
-                }
-                exchanges.add(new int[]{i, end});
-                i = end;
-            }
-        }
-        return exchanges;
-    }
-
-    /** Memoized token count for one message, falling back to chars/4 on failure. */
-    private static int tokensOf(ChatMessage message, TokenCountEstimator estimator, Map<ChatMessage, Integer> memo) {
-        Integer cached = memo.get(message);
-        if (cached != null) {
-            return cached;
-        }
-        String text = TokenCounterFactory.extractText(message);
-        int tokens;
-        try {
-            tokens = estimator.estimateTokenCountInText(text);
-        } catch (Exception e) {
-            // A provider tokenizer that rejects a payload must not abort the turn; an
-            // approximate count still keeps the ceiling meaningful.
-            tokens = text.length() / 4;
-        }
-        memo.put(message, tokens);
-        return tokens;
-    }
-
-    /**
-     * Sum two (possibly null) TokenUsage values field-by-field, tolerating nulls.
-     * Package-private for direct unit testing of the accumulation arithmetic.
-     */
     static TokenUsage sumTokens(TokenUsage a, TokenUsage b) {
-        if (a == null) {
-            return b;
-        }
-        if (b == null) {
-            return a;
-        }
-        return new TokenUsage(sumInt(a.inputTokenCount(), b.inputTokenCount()), sumInt(a.outputTokenCount(), b.outputTokenCount()),
-                sumInt(a.totalTokenCount(), b.totalTokenCount()));
+        return ToolContextBudget.sumTokens(a, b);
     }
 
-    static Integer sumInt(Integer a, Integer b) {
-        return (a != null ? a : 0) + (b != null ? b : 0);
-    }
+    static final List<String> TOKEN_USAGE_FIELDS = ToolContextBudget.TOKEN_USAGE_FIELDS;
 
-    /**
-     * The three token-usage count keys of the map {@link #tokenUsageMap} produces,
-     * in reporting order. Shared by every consumer that merges usage maps.
-     */
-    static final List<String> TOKEN_USAGE_FIELDS = List.of("inputTokens", "outputTokens", "totalTokens");
-
-    /**
-     * Convert a TokenUsage into a template/audit-friendly map with non-null counts.
-     */
     static Map<String, Object> tokenUsageMap(TokenUsage usage) {
-        Map<String, Object> map = new HashMap<>();
-        map.put("inputTokens", usage.inputTokenCount() != null ? usage.inputTokenCount() : 0);
-        map.put("outputTokens", usage.outputTokenCount() != null ? usage.outputTokenCount() : 0);
-        map.put("totalTokens", usage.totalTokenCount() != null ? usage.totalTokenCount() : 0);
-        return map;
+        return ToolContextBudget.tokenUsageMap(usage);
     }
 
-    /**
-     * Executes a single tool call through the full per-request pipeline:
-     * auto-checkpoint, trace entry, per-conversation budget check, tenant cost
-     * budget check, executor dispatch (via {@link ToolExecutionService} for rate
-     * limiting/caching/cost tracking), response truncation, result trace, and LAZY
-     * activation. Extracted verbatim from the live loop so the live path and Task
-     * 9's resume path share ONE copy.
-     * <p>
-     * Package-private for direct unit testing of the gate.
-     */
+    /** @see ToolLoopRunner#executeSingleToolCall */
     void executeSingleToolCall(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
                                Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
@@ -1685,24 +817,12 @@ class AgentOrchestrator {
                                boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                LlmConfiguration.Task task, boolean isLazy,
                                List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
-        // Live path: run the full pipeline, then append the raw result verbatim.
-        String toolResult = executeSingleToolCallResult(toolRequest, memory, trace, toolExecutors, toolRateLimits,
+        toolLoopRunner.executeSingleToolCall(toolRequest, memory, currentMessages, trace, toolExecutors, toolRateLimits,
                 toolCanonicalNames, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
                 enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
-        currentMessages.add(ToolExecutionResultMessage.from(toolRequest, toolResult));
     }
 
-    /**
-     * Runs the full per-request pipeline (auto-checkpoint, trace entry,
-     * per-conversation budget check, tenant cost budget check, executor dispatch
-     * via {@link ToolExecutionService}, response truncation, result trace, LAZY
-     * activation) and RETURNS the resulting tool-result string WITHOUT appending it
-     * to any message list. The live loop appends the raw result; the resume path
-     * needs the string to journal it and to build the amended-args envelope, so it
-     * appends its own (possibly-enveloped) message. This is the single shared
-     * per-request pipeline for both paths — the auto-checkpoint fires here (and
-     * only here) so replayed/outcome-unknown resume calls never re-checkpoint.
-     */
+    /** @see ToolLoopRunner#executeSingleToolCallResult */
     String executeSingleToolCallResult(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                        List<Map<String, Object>> trace,
                                        Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
@@ -1711,305 +831,65 @@ class AgentOrchestrator {
                                        boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                        LlmConfiguration.Task task, boolean isLazy,
                                        List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
-        // Auto-checkpoint before tool execution (Wave 4)
-        if (memorySnapshotService != null) {
-            try {
-                memorySnapshotService.createCheckpoint(
-                        memory, "before_tool:" + toolRequest.name(),
-                        AgentOrchestrator.class.getSimpleName());
-            } catch (Exception cpEx) {
-                LOGGER.warnf("Auto-checkpoint failed before tool '%s': %s",
-                        toolRequest.name(), cpEx.getMessage());
-            }
-        }
-
-        Map<String, Object> callStep = new HashMap<>();
-        callStep.put("type", "tool_call");
-        callStep.put("tool", toolRequest.name());
-        callStep.put("arguments", toolRequest.arguments());
-        trace.add(callStep);
-
-        // Check per-conversation TOOL budget before executing tool.
-        //
-        // Enforcement is opt-in: enforceBudget on the task wins, otherwise
-        // BUDGET_ENFORCE_DEFAULT (false unless eddi.tools.budget.enforce-by-default
-        // says so). Built-in tools priced at $0.00 until this release, so enforcing
-        // by default would make those ceilings bind for the first time on upgrade.
-        // A ceiling left unenforced is named once in a startup-style WARN rather
-        // than passing silently. Cost tracking itself is unaffected by the flag.
-        warnAboutUnenforcedBudgets(task);
-        boolean enforceBudget = task.getEnforceBudget() != null ? task.getEnforceBudget() : BUDGET_ENFORCE_DEFAULT;
-        if (enforceBudget && maxBudget != null && conversationId != null
-                && !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
-            String budgetError = "Budget exceeded for conversation " + conversationId;
-            LOGGER.warn(sanitize(budgetError));
-
-            Map<String, Object> budgetStep = new HashMap<>();
-            budgetStep.put("type", "tool_error");
-            budgetStep.put("tool", toolRequest.name());
-            budgetStep.put("error", budgetError);
-            trace.add(budgetStep);
-
-            return "Error: " + budgetError;
-        }
-
-        // Check tenant-level monthly cost budget (MCP governance)
-        if (tenantQuotaService != null) {
-            var costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
-            if (!costCheck.allowed()) {
-                LOGGER.warnf("Tenant cost budget exceeded during tool call: %s", costCheck.reason());
-
-                Map<String, Object> quotaStep = new HashMap<>();
-                quotaStep.put("type", "tool_error");
-                quotaStep.put("tool", toolRequest.name());
-                quotaStep.put("error", costCheck.reason());
-                trace.add(quotaStep);
-
-                return "Error: " + costCheck.reason();
-            }
-        }
-
-        // Execute through ToolExecutionService for rate limiting, caching, cost
-        // tracking
-        ToolExecutor executor = toolExecutors.get(toolRequest.name());
-        String toolResult;
-        if (executor != null) {
-            // A built-in is DISPATCHED under its @Tool method name ("calculate") but
-            // CONFIGURED under its whitelist slug ("calculator"). Resolve the slug once,
-            // here, and hand both names down: only the price and the cache TTL are looked
-            // up by slug, everything that identifies the individual call is not.
-            String canonicalName = ToolNameResolver.canonical(toolRequest.name(), toolCanonicalNames);
-            int rateLimit = resolveRateLimit(toolRateLimits, toolRequest.name(), canonicalName, defaultRateLimit);
-            Double priceOverride = resolveOverride(task.getToolPricing(), toolRequest.name(), canonicalName);
-
-            // Partition the tool-result cache by identity, so one user's result can never
-            // be served back to another. A null tag means no usable identity was
-            // available; ToolExecutionService then bypasses the cache entirely. Both
-            // names go in: toolCacheScopes shares its key vocabulary with toolRateLimits
-            // and toolPricing, so a slug-keyed narrowing override has to bind here too.
-            String cacheScopeTag = ToolCacheService.resolveScopeTag(toolRequest.name(), canonicalName, task.getToolCacheScopes(),
-                    task.getDefaultToolCacheScope(), memory != null ? memory.getUserId() : null, conversationId);
-
-            var invocation = new ToolInvocation(toolRequest.name(), canonicalName, priceOverride);
-            toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
-                    () -> executor.execute(toolRequest, null), enableRateLimiting, enableCaching, enableCostTracking, rateLimit);
-        } else {
-            toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
-        }
-
-        // Apply response truncation (MCP governance)
-        toolResult = toolResponseTruncator.truncateIfNeeded(
-                toolRequest.name(), toolResult, task.getToolResponseLimits(),
-                task.getType(), task.getParameters());
-
-        Map<String, Object> resultStep = new HashMap<>();
-        resultStep.put("type", "tool_result");
-        resultStep.put("tool", toolRequest.name());
-        resultStep.put("result", toolResult);
-        trace.add(resultStep);
-
-        // LAZY mode: after discover_tools returns, activate the matching built-in specs
-        if (isLazy && "discover_tools".equals(toolRequest.name())) {
-            activateDiscoveredTools(toolResult, builtInSpecs, activeSpecs);
-        }
-
-        return toolResult;
+        return toolLoopRunner.executeSingleToolCallResult(toolRequest, memory, trace, toolExecutors, toolRateLimits,
+                toolCanonicalNames, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
+                enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
     }
 
-    /**
-     * Resolves the per-minute rate limit for one call: an entry keyed on the
-     * dispatch name wins, then the canonical slug, then the task default.
-     *
-     * <p>
-     * Dispatch-name-first keeps a config that pins a single method
-     * ({@code {"searchNews": 5}}) more specific than one that covers the whole tool
-     * ({@code {"websearch": 30}}), and is what makes the documented slug form bind
-     * at all — a built-in's dispatch name never equals its slug.
-     * </p>
-     *
-     * <p>
-     * Note that only the LIMIT is slug-resolved; the bucket itself lives in
-     * {@code ToolRateLimiter} under the dispatch name. {@code {"websearch": 30}}
-     * therefore grants {@code searchWeb}, {@code searchNews} and
-     * {@code searchWikipedia} 30 calls/min <em>each</em>, not 30 between them.
-     * </p>
-     */
+    /** @see ToolLoopRunner#resolveRateLimit */
     static int resolveRateLimit(Map<String, Integer> toolRateLimits, String dispatchName, String canonicalName,
                                 int defaultRateLimit) {
-        if (toolRateLimits == null) {
-            return defaultRateLimit;
-        }
-        Integer limit = toolRateLimits.get(dispatchName);
-        if (limit == null) {
-            limit = toolRateLimits.get(canonicalName);
-        }
-        return limit != null ? limit : defaultRateLimit;
+        return ToolLoopRunner.resolveRateLimit(toolRateLimits, dispatchName, canonicalName, defaultRateLimit);
     }
 
-    /**
-     * Resolves an operator price override for one call, dispatch name before
-     * canonical slug (same precedence as {@link #resolveRateLimit}). Returns
-     * {@code null} when no override applies, leaving the default price table in
-     * charge.
-     */
+    /** @see ToolLoopRunner#resolveOverride */
     static Double resolveOverride(Map<String, Double> toolPricing, String dispatchName, String canonicalName) {
-        if (toolPricing == null) {
-            return null;
-        }
-        Double price = toolPricing.get(dispatchName);
-        return price != null ? price : toolPricing.get(canonicalName);
+        return ToolLoopRunner.resolveOverride(toolPricing, dispatchName, canonicalName);
     }
 
     // ─── Tool-approval gate helpers ───
-
-    /**
-     * The only part of a failure from the request-resolution path that is safe to
-     * log: its type.
-     * <p>
-     * Not the throwable and not its message. These failures come out of template
-     * rendering and request building, so the message routinely quotes the material
-     * being rendered — Jackson in particular appends a snippet of the offending
-     * source ({@code at [Source: (String)"{\"apiKey\":\"sk-…"]}), which puts the
-     * credential straight back into the log line that carefully redacted it. The
-     * type alone is what an operator triages on; the payload is already available,
-     * redacted, in the same message.
-     */
-    private static String errorType(Throwable e) {
-        return e == null ? "unknown" : e.getClass().getSimpleName();
-    }
-
-    /** Maps a built-in tool instance to its gate source tag. */
-    private static String sourceForBuiltInTool(Object tool) {
-        Class<?> c = tool.getClass();
-        if (c.getName().contains("_ClientProxy") || c.getName().contains("$$")) {
-            c = c.getSuperclass();
-        }
-        String simple = c.getSimpleName();
-        return switch (simple) {
-            case "UserMemoryTool" -> "memory";
-            case "ConversationRecallTool" -> "recall";
-            case "CreateSubAgentTool", "ConverseWithAgentTool", "FindAgentsByCapabilityTool", "TeardownAgentTool" -> "dynamic";
-            default -> "builtin";
-        };
-    }
+    //
+    // Bodies moved to ToolApprovalGateSupport (R2 step 4). These stay as declared
+    // delegators with identical signatures and modifiers, because several
+    // characterization tests reach them via
+    // AgentOrchestrator.class.getDeclaredMethod(...), which resolves only methods
+    // declared on this exact class, and buildPendingBatch is called directly as an
+    // instance method in eight places.
 
     /** Reads this turn's cumulative gated-pause count (0 when absent). */
     private static int readToolPauseCount(IConversationMemory memory) {
-        var step = memory.getCurrentStep();
-        if (step == null) {
-            return 0;
-        }
-        IData<Integer> data = step.getLatestData(KEY_TOOL_PAUSE_COUNT);
-        if (data == null || data.getResult() == null) {
-            return 0;
-        }
-        return data.getResult();
+        return ToolApprovalGateSupport.readToolPauseCount(memory);
     }
 
     /** Writes the incremented gated-pause count for this turn. */
     private static void incrementToolPauseCount(IConversationMemory memory, int pausesSoFar) {
-        var step = memory.getCurrentStep();
-        if (step != null) {
-            step.storeData(new Data<>(KEY_TOOL_PAUSE_COUNT, pausesSoFar + 1));
-        }
+        ToolApprovalGateSupport.incrementToolPauseCount(memory, pausesSoFar);
     }
 
     /** Effective max pauses per turn (default 3, clamped 1..10). */
     private static int maxPausesPerTurn(ToolApprovalsConfig cfg) {
-        if (cfg == null || cfg.getMaxPausesPerTurn() == null) {
-            return DEFAULT_MAX_PAUSES_PER_TURN;
-        }
-        return Math.max(1, Math.min(10, cfg.getMaxPausesPerTurn()));
+        return ToolApprovalGateSupport.maxPausesPerTurn(cfg);
     }
 
-    /**
-     * {@code eddi.operator.write.approval} — one per gated call the moment its
-     * verdict is resolved, regardless of what happens to it afterwards (truncated
-     * args, a changed-request refusal, and a successful execution are all still an
-     * instance of a human's — or the timeout policy's — decision).
-     * <p>
-     * "write" describes the mechanism, not the source: any call reaching this loop
-     * was gated by {@code toolApprovals.requireApproval}, whether it dispatches
-     * over http, mcp, or a2a. Restricting the tag to http-sourced calls would
-     * silently exclude a gated MCP tool that writes to an external system, which is
-     * exactly the rubber-stamping risk this counter exists to surface.
-     * <p>
-     * {@code decidedBy} distinguishes a real decision from one the timeout policy
-     * made ({@link HitlTimeoutHandler}, {@code decidedBy = "system:timeout"}) —
-     * folding those into {@code approved}/{@code rejected} would count an operator
-     * walking away from their desk as an approval, which is the opposite of what
-     * "approvals ≫ rejections is a rubber-stamping signal" is trying to detect.
-     * <p>
-     * Tagged only with the decision outcome — never a tool name, argument, or
-     * conversation id.
-     */
-    void recordWriteApprovalDecision(HitlDecision.HitlVerdict verdict, String decidedBy) {
-        try {
-            String decisionTag = "system:timeout".equals(decidedBy)
-                    ? "timeout"
-                    : verdict == HitlDecision.HitlVerdict.APPROVED ? "approved" : "rejected";
-            Metrics.globalRegistry.counter("eddi.operator.write.approval", "decision", decisionTag).increment();
-        } catch (Exception e) {
-            LOGGER.debugf("write.approval metric emit failed: %s", e.getMessage());
-        }
-    }
-
-    /**
-     * Counts which friction rules actually fire, tagged by the CONFIGURED pattern —
-     * never a URL, credential, tool argument or user id, so cardinality is bounded
-     * by the size of the agent's {@code rules} list. Deduplicated per pause: a
-     * batch where three calls match {@code http.delete:*} increments once, so the
-     * counter reads "how often did this rule govern a review", not "how many calls
-     * did the model happen to bundle". Best-effort, like the other guard metrics: a
-     * failure here must never break the LLM loop.
-     */
+    /** @see ToolApprovalGateSupport#recordRuleMatches */
     private void recordRuleMatches(Collection<ToolApprovalsConfig.ApprovalRule> matched) {
-        try {
-            matched.stream().filter(Objects::nonNull).map(ToolApprovalsConfig.ApprovalRule::getMatch)
-                    .filter(Objects::nonNull).distinct()
-                    .forEach(match -> Metrics.globalRegistry.counter("eddi.hitl.rule.matched", "match", match).increment());
-        } catch (Exception e) {
-            LOGGER.debugf("hitl rule metric emit failed: %s", e.getMessage());
-        }
+        gateSupport.recordRuleMatches(matched);
     }
 
     /** Names activated in LAZY mode (for resume reactivation); empty otherwise. */
     private static List<String> activatedToolNames(boolean isLazy, List<ToolSpecification> activeSpecs) {
-        if (!isLazy) {
-            return List.of();
-        }
-        return activeSpecs.stream().map(ToolSpecification::name).toList();
+        return ToolApprovalGateSupport.activatedToolNames(isLazy, activeSpecs);
     }
 
     /** First non-blank of the two, or null. */
     private static String firstNonBlank(String preferred, String fallback) {
-        if (preferred != null && !preferred.isBlank()) {
-            return preferred;
-        }
-        return fallback != null && !fallback.isBlank() ? fallback : null;
+        return ToolApprovalGateSupport.firstNonBlank(preferred, fallback);
     }
 
-    /**
-     * Builds the approver-facing pause reason: the governing rule's
-     * {@code pauseReason} if it set one, else {@code cfg.pauseReason}, with
-     * {@code {toolNames}} replaced by the comma-joined gated names and defaulting
-     * to "Tool call requires approval: names". Redacted and capped at 500 chars.
-     */
+    /** @see ToolApprovalGateSupport#buildPauseReason */
     private static String buildPauseReason(ToolApprovalsConfig cfg, ToolApprovalGate.GateResult gateResult,
                                            ToolApprovalsConfig.ApprovalRule rule) {
-        String names = gateResult.gated().stream().map(ToolExecutionRequest::name).distinct()
-                .reduce((a, b) -> a + ", " + b).orElse("");
-        String template = firstNonBlank(rule != null ? rule.getPauseReason() : null,
-                cfg != null ? cfg.getPauseReason() : null);
-        if (template == null) {
-            template = "Tool call requires approval: {toolNames}";
-        }
-        String reason = template.replace("{toolNames}", names);
-        reason = SecretRedactionFilter.redact(reason);
-        if (reason.length() > PAUSE_REASON_MAX_CHARS) {
-            reason = reason.substring(0, PAUSE_REASON_MAX_CHARS);
-        }
-        return reason;
+        return ToolApprovalGateSupport.buildPauseReason(cfg, gateResult, rule);
     }
 
     /**
@@ -2040,29 +920,7 @@ class AgentOrchestrator {
                 pauseCountThisTurn, llmTaskIndex, toolSources, effectiveToolApprovals, transcriptMaxBytes, Map.of(), null, Map.of());
     }
 
-    /**
-     * Snapshots the interrupted tool-call batch into a durable
-     * {@link PendingToolCallBatch}. All approver-facing strings are secret-redacted
-     * and size-capped.
-     *
-     * @param transcriptMaxBytes
-     *            the configured cap (bytes) for serializing {@code currentMessages}
-     *            — resolved by {@code LlmTask} from
-     *            {@code eddi.hitl.tool.transcript-max-bytes} (default
-     *            {@link PendingToolCallBatch#TRANSCRIPT_MAX_BYTES_DEFAULT}).
-     * @param ruleByCallId
-     *            per gated call, the {@code toolApprovals.rules} entry tuning it —
-     *            recorded for approver visibility only
-     * @param governingRule
-     *            the single rule governing this pause (strictest of the above), or
-     *            null; persisted so the post-pause resolvers read the same answer
-     *            this gate computed
-     * @param resolvers
-     *            per httpcall tool name, how to resolve what it would send —
-     *            {@code ToolSetup#toolRequestResolvers}. Absent entries (every
-     *            non-http tool) leave the call unpinned, which is the pre-pinning
-     *            behaviour.
-     */
+    /** @see ToolApprovalGateSupport#buildPendingBatch */
     PendingToolCallBatch buildPendingBatch(List<ChatMessage> currentMessages, ToolApprovalGate.GateResult gateResult,
                                            LlmConfiguration.Task task, IConversationMemory memory, int iterationIndex,
                                            List<String> activatedToolNames, List<Map<String, Object>> trace,
@@ -2072,280 +930,68 @@ class AgentOrchestrator {
                                            Map<String, ToolApprovalsConfig.ApprovalRule> ruleByCallId,
                                            ToolApprovalsConfig.ApprovalRule governingRule,
                                            Map<String, ToolRequestResolver> resolvers) {
-        PendingToolCallBatch batch = new PendingToolCallBatch();
-        batch.setPauseEpoch(UUID.randomUUID().toString());
-        batch.setLlmTaskId(task.getId());
-        batch.setLlmTaskIndex(llmTaskIndex);
-        // Fix #1: persist the EXACT effective tool-approval config that gated this
-        // batch (task-level override when the task set one, else the agent-level
-        // default) so the post-pause resolvers in ConversationService and
-        // Conversation.resolvePendingMessage read the task-scoped config that produced
-        // the pause instead of re-deriving from the agent level only.
-        batch.setEffectiveToolApprovals(effectiveToolApprovals);
-        batch.setEffectiveRule(governingRule);
-        // workflowId is informational; the authoritative pause bookmark carries the
-        // paused workflow id (set by the LifecycleManager → Conversation pause commit).
-        batch.setIterationIndex(iterationIndex);
-        batch.setActivatedToolNames(activatedToolNames);
-        batch.setPauseCountThisTurn(pauseCountThisTurn);
-        batch.setAutoApproveCount(0);
-
-        // Serialize the transcript (capped); omitted flag drives fallback on resume.
-        ChatTranscriptCodec.CodecResult codecResult = chatTranscriptCodec.serialize(currentMessages, transcriptMaxBytes);
-        batch.setChatTranscriptJson(codecResult.json());
-        batch.setTranscriptOmitted(codecResult.omitted());
-
-        // Per gated call: cap raw args, redact + cap redacted args, carry gate reason.
-        List<PendingToolCallBatch.PendingToolCall> calls = new ArrayList<>();
-        for (ToolExecutionRequest req : gateResult.gated()) {
-            var call = new PendingToolCallBatch.PendingToolCall();
-            String callId = req.id() != null ? req.id() : "gen-" + UUID.randomUUID();
-            call.setCallId(callId);
-            call.setToolName(req.name());
-            String source = toolSources.getOrDefault(req.name(), "unknown");
-            call.setSource(source);
-
-            String rawArgs = req.arguments() != null ? req.arguments() : "";
-            byte[] rawBytes = rawArgs.getBytes(StandardCharsets.UTF_8);
-            if (rawBytes.length > PendingToolCallBatch.ARGS_RAW_MAX_BYTES) {
-                call.setArgumentsRaw(capUtf8(rawArgs, PendingToolCallBatch.ARGS_RAW_MAX_BYTES));
-                call.setArgsTruncated(true);
-            } else {
-                call.setArgumentsRaw(rawArgs);
-                call.setArgsTruncated(false);
-            }
-
-            String redacted = SecretRedactionFilter.redact(rawArgs);
-            call.setArgumentsRedacted(capUtf8(redacted, PendingToolCallBatch.ARGS_REDACTED_MAX_BYTES));
-
-            // gateReason: the matched pattern (by call id), fall back to bare name.
-            String reason = req.id() != null ? gateResult.gateReasonByCallId().get(req.id()) : null;
-            call.setGateReason(reason);
-            // matchedRule: which friction rule tuned THIS call, which is not necessarily
-            // the one governing the pause — an approver seeing a five-minute auto-reject
-            // on a batch should be able to tell which call brought it.
-            var callRule = req.id() != null ? ruleByCallId.get(req.id()) : null;
-            call.setMatchedRule(callRule != null ? callRule.getMatch() : null);
-            pinResolvedRequest(call, req, resolvers);
-            calls.add(call);
-        }
-        batch.setCalls(calls);
-
-        // Ungated calls of this batch that already executed (approver visibility).
-        batch.setExecutedUngatedCallNames(gateResult.allowed().stream().map(ToolExecutionRequest::name).toList());
-
-        // Deep copy of trace with each entry's "result" string capped.
-        batch.setTraceSoFar(capTrace(trace));
-
-        // Fingerprint over sorted gated (name + "|" + arguments).
-        batch.setFingerprint(fingerprint(gateResult.gated()));
-
-        return batch;
+        return gateSupport.buildPendingBatch(currentMessages, gateResult, task, memory, iterationIndex,
+                activatedToolNames, trace, pauseCountThisTurn, llmTaskIndex, toolSources, effectiveToolApprovals,
+                transcriptMaxBytes, ruleByCallId, governingRule, resolvers);
     }
 
-    /**
-     * Resolve what this gated call would send, and pin it to the pause.
-     *
-     * <p>
-     * Records both the redacted preview (so the approver sees the actual request
-     * rather than a tool name) and its fingerprint (so the request can be
-     * re-checked immediately before execution).
-     *
-     * <p>
-     * <b>Never fails the pause.</b> A tool with no resolver — every non-http source
-     * — and a resolve that throws both leave the call simply unpinned, which is
-     * exactly the behaviour that existed before pinning: approval on name and
-     * arguments. Letting a template error here abort the batch would turn a display
-     * feature into a way to kill a turn, and the honest failure mode for "we could
-     * not determine the request" is to say so, not to guess.
-     */
-    private void pinResolvedRequest(PendingToolCallBatch.PendingToolCall call, ToolExecutionRequest req,
-                                    Map<String, ToolRequestResolver> resolvers) {
-
-        var resolver = resolvers.get(req.name());
-        if (resolver == null) {
-            return;
-        }
-        try {
-            ResolvedRequest resolved = resolver.resolve(req);
-            call.setRequestFingerprint(resolved.fingerprint());
-            call.setRequestPreview(toPreview(resolved));
-        } catch (Exception e) {
-            // sanitize: the tool name is model-chosen, so it can carry newlines or
-            // control characters and forge log records — same treatment as every
-            // other name-bearing log statement in this class. The throwable is
-            // omitted for the reason given on errorType: this failure comes out of
-            // request building, whose message quotes the request being built.
-            LOGGER.warnf("Could not resolve the request for gated tool '%s' (%s); it will be approved unpinned.", sanitize(req.name()),
-                    errorType(e));
-        }
+    /** @see ToolLoopResumer#requestChangedSinceApproval */
+    String requestChangedSinceApproval(PendingToolCallBatch.PendingToolCall c, String amendedArguments,
+                                       Map<String, ToolRequestResolver> resolvers) {
+        return toolLoopResumer.requestChangedSinceApproval(c, amendedArguments, resolvers);
     }
 
-    /** The persisted, display-shaped view of a resolved request. */
-    private static PendingToolCallBatch.ResolvedRequestPreview toPreview(ResolvedRequest resolved) {
-        var preview = new PendingToolCallBatch.ResolvedRequestPreview();
-        preview.setMethod(resolved.method());
-        preview.setUri(resolved.uri());
-        preview.setQueryParams(resolved.queryParams());
-        preview.setHeaders(resolved.headers());
-
-        String body = resolved.body();
-        if (body != null && body.getBytes(StandardCharsets.UTF_8).length > PendingToolCallBatch.PREVIEW_BODY_MAX_BYTES) {
-            // Capped for display only — the fingerprint above was computed over the
-            // whole body, so truncating here cannot weaken the pre-execution check.
-            preview.setBody(capUtf8(body, PendingToolCallBatch.PREVIEW_BODY_MAX_BYTES));
-            preview.setBodyTruncated(true);
-        } else {
-            preview.setBody(body);
-            preview.setBodyTruncated(false);
-        }
-        return preview;
+    /** @see ToolApprovalGateSupport#recordWriteApprovalDecision */
+    void recordWriteApprovalDecision(HitlDecision.HitlVerdict verdict, String decidedBy) {
+        gateSupport.recordWriteApprovalDecision(verdict, decidedBy);
     }
 
     /** Caps a string to at most maxBytes UTF-8 bytes without splitting a char. */
     private static String capUtf8(String s, int maxBytes) {
-        if (s == null) {
-            return null;
-        }
-        byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
-        if (bytes.length <= maxBytes) {
-            return s;
-        }
-        int end = maxBytes;
-        // Back off to a char boundary (avoid splitting a multi-byte sequence).
-        while (end > 0 && (bytes[end] & 0xC0) == 0x80) {
-            end--;
-        }
-        return new String(bytes, 0, end, StandardCharsets.UTF_8);
+        return ToolApprovalGateSupport.capUtf8(s, maxBytes);
     }
 
     /** Deep-copies the trace, capping each entry's "result" string. */
     private static List<Map<String, Object>> capTrace(List<Map<String, Object>> trace) {
-        List<Map<String, Object>> copy = new ArrayList<>();
-        for (Map<String, Object> entry : trace) {
-            Map<String, Object> e = new HashMap<>(entry);
-            Object result = e.get("result");
-            if (result instanceof String rs && rs.getBytes(StandardCharsets.UTF_8).length > PendingToolCallBatch.TRACE_ENTRY_MAX_BYTES) {
-                e.put("result", capUtf8(rs, PendingToolCallBatch.TRACE_ENTRY_MAX_BYTES));
-            }
-            copy.add(e);
-        }
-        return copy;
+        return ToolApprovalGateSupport.capTrace(trace);
     }
 
-    /** sha256Hex of sorted gated (name + "|" + arguments) joined by newline. */
+    /** sha256Hex of sorted gated (name + pipe + arguments) joined by newline. */
     private static String fingerprint(List<ToolExecutionRequest> gated) {
-        List<String> parts = new ArrayList<>();
-        for (ToolExecutionRequest req : gated) {
-            parts.add(req.name() + "|" + (req.arguments() != null ? req.arguments() : ""));
-        }
-        Collections.sort(parts);
-        String joined = String.join("\n", parts);
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest(joined.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(hash.length * 2);
-            for (byte b : hash) {
-                sb.append(Character.forDigit((b >> 4) & 0xF, 16));
-                sb.append(Character.forDigit(b & 0xF, 16));
-            }
-            return sb.toString();
-        } catch (java.security.NoSuchAlgorithmException e) {
-            // SHA-256 is guaranteed present on every JVM; treat as unreachable.
-            throw new IllegalStateException("SHA-256 unavailable", e);
-        }
+        return ToolApprovalGateSupport.fingerprint(gated);
     }
 
-    /**
-     * Task 10 — records the pause-cap guard activation as BOTH a metric
-     * ({@code eddi_hitl_tool_guard_count{guard=pause_cap}}) and an audit-ledger
-     * entry ({@code hitl.tool.pause_cap}). The metric uses the Micrometer global
-     * registry (AgentOrchestrator is not CDI and has no injected registry — same
-     * idiom as {@code LifecycleManager}); the audit is submitted through the live
-     * memory's audit collector (the seam that carries the audit context, wired by
-     * {@code ConversationService} on the say/resume paths). Best-effort: any
-     * failure is swallowed so guard bookkeeping never breaks the LLM loop.
-     */
+    /** @see ToolApprovalGateSupport#recordPauseCapGuard */
     private void recordPauseCapGuard(IConversationMemory memory, String fingerprint) {
-        try {
-            Metrics.globalRegistry.counter("eddi_hitl_tool_guard_count", "guard", "pause_cap").increment();
-        } catch (Exception e) {
-            LOGGER.debugf("pause_cap metric emit failed: %s", e.getMessage());
-        }
-        try {
-            var collector = memory.getAuditCollector();
-            if (collector == null) {
-                return;
-            }
-            var detail = new LinkedHashMap<String, Object>();
-            detail.put("guard", "pause_cap");
-            detail.put("decidedBy", "system:pause-cap");
-            detail.put("automated", true);
-            if (fingerprint != null) {
-                detail.put("fingerprint", fingerprint);
-            }
-            collector.collect(new ai.labs.eddi.engine.audit.model.AuditEntry(
-                    UUID.randomUUID().toString(), memory.getConversationId(), null, null, memory.getUserId(),
-                    null, -1, "hitl.tool.pause_cap", "hitl", -1, 0L,
-                    Map.of(), detail, null, null, List.of(), 0.0,
-                    java.time.Instant.now(), null, null));
-        } catch (Exception e) {
-            LOGGER.debugf("pause_cap audit emit failed: %s", e.getMessage());
-        }
+        gateSupport.recordPauseCapGuard(memory, fingerprint);
     }
 
-    /**
-     * Parses the discover_tools JSON result and activates matching built-in tool
-     * specs so the LLM can call them on subsequent iterations.
-     */
+    /** @see ToolLoopRunner#activateDiscoveredTools */
     private void activateDiscoveredTools(String discoverResult,
                                          List<ToolSpecification> builtInSpecs,
                                          List<ToolSpecification> activeSpecs) {
-        try {
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode root = mapper.readTree(discoverResult);
-            JsonNode toolsNode = root.get("tools");
-            if (toolsNode == null || !toolsNode.isArray()) {
-                return;
-            }
-
-            Set<String> discoveredNames = new HashSet<>();
-            for (JsonNode tool : toolsNode) {
-                if (tool.has("name")) {
-                    discoveredNames.add(tool.get("name").asText());
-                }
-            }
-
-            // Add matching specs (skip discover_tools itself and already-active specs)
-            Set<String> activeNames = new HashSet<>();
-            for (ToolSpecification spec : activeSpecs) {
-                activeNames.add(spec.name());
-            }
-
-            int activated = 0;
-            for (ToolSpecification spec : builtInSpecs) {
-                if (discoveredNames.contains(spec.name()) && !activeNames.contains(spec.name())) {
-                    activeSpecs.add(spec);
-                    activated++;
-                }
-            }
-
-            LOGGER.infof("LAZY activation: %d tools activated from discovery (%s)",
-                    activated, discoveredNames);
-        } catch (Exception e) {
-            LOGGER.warnf("Failed to parse discover_tools result for LAZY activation: %s",
-                    e.getMessage());
-        }
+        toolLoopRunner.activateDiscoveredTools(discoverResult, builtInSpecs, activeSpecs);
     }
 
     /**
-     * Collects enabled built-in tools based on task configuration.
+     * Collects enabled built-in tools based on task configuration, as tool
+     * <em>objects</em>.
      * <p>
      * When {@link LlmConfiguration.ToolLoadingStrategy#LAZY} is set, ALL tools are
      * returned (so executors get registered), plus a {@link DiscoverToolsTool}
      * meta-tool. The {@code executeWithTools} method handles presenting only
      * {@code discover_tools} spec initially and activating matching specs after
      * discovery.
+     * <p>
+     * <b>No production caller since the R2 rewiring.</b> {@code buildToolSetup} now
+     * assembles the same sources through {@link ToolSourceRegistry}, which works in
+     * specs and executors rather than objects. This method survives because several
+     * characterization tests call it directly, and it deliberately routes through
+     * the very same provider instances so the two paths cannot drift: a change to
+     * any provider's enablement rule shows up here too.
+     * {@code AgentOrchestratorLocalToolAssemblyTest} pins that the two agree tool
+     * for tool — without it, this method would be exactly the kind of dead
+     * lookalike that keeps a test suite green while production diverges.
      */
     List<Object> collectEnabledTools(LlmConfiguration.Task task, IConversationMemory memory) {
         List<Object> tools = new ArrayList<>();
@@ -2394,103 +1040,24 @@ class AgentOrchestrator {
         List<Object> tools = new ArrayList<>();
         List<String> whitelist = task.getBuiltInToolsWhitelist();
 
+        // The nine plain tool beans, in catalog order — one call now serves both the
+        // whitelist and no-whitelist cases, because "no whitelist" has always meant
+        // "every entry applies". Previously these nine were listed twice, once per
+        // branch; see BuiltinToolsProvider for why that duplication was worth
+        // removing.
+        var assemblyContext = toolAssemblyContext(task, memory);
+        tools.addAll(builtinToolsProvider.collect(assemblyContext));
+
         if (whitelist != null && !whitelist.isEmpty()) {
-            // Only add tools that are explicitly listed in the whitelist
-            if (whitelist.contains("calculator"))
-                tools.add(calculatorTool);
-            if (whitelist.contains("datetime"))
-                tools.add(dateTimeTool);
-            if (whitelist.contains("websearch"))
-                tools.add(webSearchTool);
-            if (whitelist.contains("dataformatter"))
-                tools.add(dataFormatterTool);
-            if (whitelist.contains("webscraper"))
-                tools.add(webScraperTool);
-            if (whitelist.contains("textsummarizer"))
-                tools.add(textSummarizerTool);
-            if (whitelist.contains("pdfreader"))
-                tools.add(pdfReaderTool);
-            if (whitelist.contains("weather"))
-                tools.add(weatherTool);
-            if (whitelist.contains("fetch_page") || whitelist.contains("fetch_tool_response_page"))
-                tools.add(fetchToolResponsePageTool);
             if (whitelist.contains("usermemory"))
                 addUserMemoryToolIfEnabled(tools, memory);
             if (whitelist.contains("conversationRecall"))
                 addConversationRecallToolIfEnabled(tools, task, memory);
-            // Dynamic agent tools (whitelist-gated, shared tracking lists)
-            {
-                // Finding F17: this list used to start EMPTY on every buildToolList call,
-                // i.e. once per LLM task execution — so maxCreatedAgentsPerDiscussion was
-                // enforced per TURN, and a 5-member x 3-phase discussion with the default
-                // cap of 5 could deploy up to 75 agents to production. Seed it with the
-                // agents already created in this conversation so the cap actually bounds
-                // the discussion.
-                List<String> sharedCreatedIds = new java.util.concurrent.CopyOnWriteArrayList<>(seedCreatedAgentIds(memory));
-                Set<String> sharedRetainedIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
-                String parentAgentId = memory.getAgentId();
-                String userId = memory.getUserId();
-                DynamicAgentConfig dynamicConfig = resolveDynamicAgentConfig(memory);
-
-                boolean anyDynamicToolAdded = false;
-                if (whitelist.contains("create_sub_agent") && agentSetupService != null && conversationService != null) {
-                    tools.add(new CreateSubAgentTool(agentSetupService,
-                            conversationService, parentAgentId, userId, dynamicConfig,
-                            sharedCreatedIds, sharedRetainedIds));
-                    LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s' (%d already created)",
-                            sanitize(parentAgentId), sharedCreatedIds.size());
-                    anyDynamicToolAdded = true;
-                }
-                if (whitelist.contains("converse_with_agent") && conversationService != null) {
-                    // Findings F18/I4: the tool used to take only (service, userId) and
-                    // consult no guardrails at all — allowDelegation was never read and
-                    // nothing bounded delegation depth or target.
-                    int delegationDepth = resolveDelegationDepth(memory);
-                    tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth));
-                    LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
-                            sanitize(parentAgentId), delegationDepth);
-                }
-                // Finding I4: allowRecruitment was documented as an enforced cap but was
-                // never read. Capability lookup is the recruitment entry point, so it is
-                // gated here.
-                if (whitelist.contains("find_agents_by_capability") && capabilityRegistryService != null) {
-                    if (dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()) {
-                        tools.add(new FindAgentsByCapabilityTool(capabilityRegistryService));
-                        LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool enabled for agent='%s'", sanitize(parentAgentId));
-                    } else {
-                        LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool suppressed for agent='%s': allowRecruitment is off",
-                                sanitize(parentAgentId));
-                    }
-                }
-                if (whitelist.contains("teardown_agent") && agentFactory != null && agentStore != null) {
-                    tools.add(new TeardownAgentTool(agentFactory, agentStore, deploymentStore, sharedCreatedIds, sharedRetainedIds));
-                    LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
-                    anyDynamicToolAdded = true;
-                }
-
-                // Store tracking lists in memory step data so GroupConversationService
-                // can read them from the snapshot after each member turn and propagate
-                // to GroupConversation for lifecycle cleanup (Copilot PR review fix).
-                // The lists are stored by reference — after tool execution, they'll
-                // contain all agent IDs accumulated during this turn.
-                if (anyDynamicToolAdded) {
-                    memory.getCurrentStep().storeData(
-                            new ai.labs.eddi.engine.memory.model.Data<>(KEY_DYNAMIC_CREATED_AGENT_IDS, sharedCreatedIds));
-                    memory.getCurrentStep().storeData(
-                            new ai.labs.eddi.engine.memory.model.Data<>(KEY_DYNAMIC_RETAINED_AGENT_IDS, sharedRetainedIds));
-                }
-            }
+            // Dynamic agent tools (whitelist-gated, shared tracking lists) —
+            // extracted to DynamicAgentToolsProvider (R2 step 2). Constructed per
+            // call since deploymentStore is field-injected (see that class's Javadoc).
+            dynamicAgentToolsProvider().addDynamicAgentTools(tools, whitelist, memory);
         } else {
-            // No whitelist — add all built-in tools
-            tools.add(calculatorTool);
-            tools.add(dateTimeTool);
-            tools.add(webSearchTool);
-            tools.add(dataFormatterTool);
-            tools.add(webScraperTool);
-            tools.add(textSummarizerTool);
-            tools.add(pdfReaderTool);
-            tools.add(weatherTool);
-            tools.add(fetchToolResponsePageTool);
             // Auto-add user memory tool if agent has it enabled
             addUserMemoryToolIfEnabled(tools, memory);
             // Auto-add conversation recall tool if rolling summary is active
@@ -2520,273 +1087,88 @@ class AgentOrchestrator {
     }
 
     /**
-     * Constructs and adds a UserMemoryTool if the agent has persistent user memory
-     * enabled. The tool is created per-invocation with conversation-specific
-     * context.
-     */
-    private void addUserMemoryToolIfEnabled(List<Object> tools, IConversationMemory memory) {
-        AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
-        if (config == null || userMemoryStore == null)
-            return;
-
-        // Extract groupIds from conversation properties (injected by
-        // GroupConversationService)
-        List<String> groupIds = List.of();
-        var props = memory.getConversationProperties();
-        if (props != null) {
-            Object groupIdProp = props.get("groupId");
-            if (groupIdProp instanceof Property p && p.getValueString() != null) {
-                groupIds = List.of(p.getValueString());
-            }
-        }
-
-        var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config);
-        tools.add(tool);
-        LOGGER.infof("[MEMORY] UserMemoryTool enabled for agent='%s', user='%s', groups=%s", sanitize(memory.getAgentId()),
-                sanitize(memory.getUserId()), groupIds.stream().map(g -> sanitize(g)).toList());
-    }
-
-    /**
-     * Constructs and adds a ConversationRecallTool if a rolling summary is active.
-     * The tool is created per-invocation with the conversation's output list and
-     * the summary step boundary.
-     */
-    private void addConversationRecallToolIfEnabled(List<Object> tools, LlmConfiguration.Task task, IConversationMemory memory) {
-        // Only add if rolling summary is configured and a summary exists
-        var summaryConfig = task.getConversationSummary();
-        if (summaryConfig == null || !summaryConfig.isEnabled())
-            return;
-
-        String existingSummary = ConversationSummarizer.readSummary(memory);
-        if (existingSummary == null)
-            return;
-
-        int throughStep = ConversationSummarizer.readSummaryThroughStep(memory);
-        var tool = new ConversationRecallTool(List.copyOf(memory.getConversationOutputs()), throughStep, summaryConfig.getMaxRecallTurns());
-        tools.add(tool);
-        LOGGER.infof("[RECALL] ConversationRecallTool enabled: summaryThroughStep=%d, maxRecallTurns=%d", throughStep,
-                summaryConfig.getMaxRecallTurns());
-    }
-
-    /**
-     * Constructs and adds a {@link ReadAttachmentTool} when this conversation has
-     * attachments — from this turn or any earlier one — giving the LLM on-demand
-     * access to attachment text (recall of an earlier turn's file, oversize files
-     * not inlined, page-targeted PDF reads). The conversation id is implicit — the
-     * tool never takes it as a parameter.
+     * The turn's {@link ToolAssemblyContext}, built once and shared by every
+     * provider so they all read one consistent snapshot.
      * <p>
-     * Gating on the current turn alone defeated the tool's main purpose: a file is
-     * inlined only on the turn it arrives, so a follow-up question about it reached
-     * a model with neither the document nor any way to fetch it — and the model
-     * would answer that no file had ever been shared.
+     * {@code dynamicAgentConfig} in particular is resolved here rather than inside
+     * each provider: it can come from a group-injected context variable, and two
+     * providers resolving it independently could disagree if the step data changed
+     * between reads.
      */
-    private void addReadAttachmentToolIfEnabled(List<Object> tools, IConversationMemory memory) {
-        if (attachmentStore == null || attachmentTextExtractor == null) {
-            return;
-        }
-        if (memory == null || memory.getCurrentStep() == null) {
-            return;
-        }
-        // Exact-match read (getData, not the prefix-scanning getLatestData):
-        // "attachments"
-        // is a prefix of the attachments:extracts/errors keys the forwarder persists.
-        IData<List<?>> attachmentData = memory.getCurrentStep().getData(MemoryKeys.ATTACHMENTS);
-        // Coerced, not raw-counted: on a resumed turn these are maps, and a raw
-        // count would also count entries that are not attachments at all.
-        //
-        // Restricted to blob-backed files, matching attachmentsFromPreviousTurns:
-        // the tool can only serve what the attachment store holds. An inline or
-        // URL-only attachment is already inlined by AttachmentForwarder on this
-        // turn, so offering a tool whose listAttachments would report nothing
-        // would only contradict the document sitting in the same message.
-        int thisTurn = attachmentData == null
-                ? 0
-                : (int) AttachmentContextExtractor.attachmentsFrom(attachmentData.getResult()).stream()
-                        .filter(attachment -> attachment.getStorageRef() != null)
-                        .count();
-        // Memory-only scan — no attachment-store round trip on turns without files.
-        int earlierTurns = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).size();
-        if (thisTurn == 0 && earlierTurns == 0) {
-            return;
-        }
-        var tool = new ReadAttachmentTool(attachmentStore, attachmentTextExtractor, memory.getConversationId());
-        tools.add(tool);
-        LOGGER.infof(
-                "[ATTACHMENTS] ReadAttachmentTool enabled for conversation='%s' (%d this turn, %d from earlier turns)",
-                sanitize(memory.getConversationId()), thisTurn, earlierTurns);
+    ToolAssemblyContext toolAssemblyContext(LlmConfiguration.Task task, IConversationMemory memory) {
+        return new ToolAssemblyContext(memory, task, task.getBuiltInToolsWhitelist(),
+                DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory),
+                memory.getUserId(), memory.getAgentId(), groupConversationIdOf(memory));
     }
 
     /**
-     * Resolves the DynamicAgentConfig for the current conversation. If the agent is
-     * participating in a group discussion, the group's {@link DynamicAgentConfig}
-     * is passed via context variable {@code dynamicAgentConfig} by
-     * {@code GroupConversationService}. If no group config is present (standalone
-     * agent), a permissive default is used.
-     *
-     * @param memory
-     *            the conversation memory to check for group context
-     * @return the resolved DynamicAgentConfig — group-level if available,
-     *         permissive default otherwise
+     * The {@code groupConversationId} context variable, or null outside a group
+     * discussion. Read defensively — this runs on every turn, group or not, and a
+     * malformed context value must not cost the agent its entire tool set.
      */
-    private DynamicAgentConfig resolveDynamicAgentConfig(IConversationMemory memory) {
-        // Check if GroupConversationService injected a DynamicAgentConfig via context
-        var currentStep = memory.getCurrentStep();
-        if (currentStep != null) {
-            var contextData = currentStep.getLatestData("context:dynamicAgentConfig");
-            if (contextData != null) {
-                Object value = contextData.getResult();
-                if (value instanceof Context ctx && ctx.getValue() instanceof DynamicAgentConfig groupConfig) {
-                    LOGGER.debugf("[DYNAMIC] Using group-level DynamicAgentConfig for agent='%s'", sanitize(memory.getAgentId()));
-                    return groupConfig;
-                }
+    private static String groupConversationIdOf(IConversationMemory memory) {
+        try {
+            var currentStep = memory.getCurrentStep();
+            if (currentStep == null) {
+                return null;
             }
-        }
-        // Fallback: standalone agent — use permissive defaults
-        return createDefaultDynamicConfig();
-    }
-
-    /**
-     * Finding F17: the agent IDs already created in this conversation, so
-     * {@code maxCreatedAgentsPerDiscussion} bounds every turn of a conversation
-     * rather than a single turn. The list used to start EMPTY on every
-     * {@code buildToolList} call — i.e. once per LLM task execution — so a 5-member
-     * × 3-phase discussion with the default cap of 5 could deploy up to 75 agents.
-     * <p>
-     * Two sources are consulted, in order:
-     * <ol>
-     * <li>a {@code dynamicCreatedAgentIds} context variable — an injection point
-     * for an orchestrator that owns the true discussion-wide total. <b>Nothing in
-     * {@code src/main} writes it today</b>: {@code GroupConversationService}
-     * propagates member → group ({@code propagateDynamicAgentTracking}) but does
-     * not inject the running total back into the per-turn member context alongside
-     * {@code groupId}/{@code groupDepth}. Until it does, the cap bounds each MEMBER
-     * conversation across the whole discussion, not the discussion total across
-     * members;</li>
-     * <li>every {@code dynamic:created_agent_ids} entry already written to this
-     * conversation's memory by an earlier turn — the source that actually carries
-     * the count today.</li>
-     * </ol>
-     * Returns a de-duplicated list, never null.
-     */
-    static List<String> seedCreatedAgentIds(IConversationMemory memory) {
-        Set<String> seeded = new LinkedHashSet<>();
-
-        var currentStep = memory.getCurrentStep();
-        if (currentStep != null) {
-            IData<Object> contextData = currentStep.getLatestData("context:dynamicCreatedAgentIds");
-            if (contextData != null && contextData.getResult() instanceof Context ctx) {
-                collectAgentIds(ctx.getValue(), seeded);
+            var data = currentStep.getLatestData("context:groupConversationId");
+            if (data != null && data.getResult() instanceof Context ctx && ctx.getValue() != null) {
+                return String.valueOf(ctx.getValue());
             }
-        }
-
-        var allSteps = memory.getAllSteps();
-        if (allSteps != null) {
-            List<IData<Object>> priorEntries = allSteps.getAllLatestData(KEY_DYNAMIC_CREATED_AGENT_IDS);
-            if (priorEntries != null) {
-                for (IData<Object> entry : priorEntries) {
-                    if (entry != null) {
-                        collectAgentIds(entry.getResult(), seeded);
-                    }
-                }
-            }
-        }
-
-        return new ArrayList<>(seeded);
-    }
-
-    /**
-     * Add every String element of {@code value} (if it is a collection) to sink.
-     */
-    private static void collectAgentIds(Object value, Set<String> sink) {
-        if (value instanceof Collection<?> collection) {
-            for (Object element : collection) {
-                if (element instanceof String agentId && !agentId.isBlank()) {
-                    sink.add(agentId);
-                }
-            }
-        } else if (value instanceof String single && !single.isBlank()) {
-            sink.add(single);
-        }
-    }
-
-    /**
-     * Finding F18: how many delegation hops led to the current conversation.
-     * {@code ConverseWithAgentTool} propagates this as a {@code delegationDepth}
-     * context variable on the callee's start context AND on every message it sends,
-     * mirroring the {@code groupDepth} mechanism. 0 when a human started the
-     * conversation.
-     * <p>
-     * The current step is consulted first — that is where the per-turn context
-     * lands. Earlier steps are the fallback: the start context materializes on step
-     * 0 only, and a turn issued without the delegation context (a resume, or any
-     * other caller saying into the delegated conversation) must not silently reset
-     * an already-delegated conversation back to depth 0. Without that fallback the
-     * guard is inert on exactly the turns that matter.
-     */
-    static int resolveDelegationDepth(IConversationMemory memory) {
-        String contextKey = "context:" + ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH;
-
-        var currentStep = memory.getCurrentStep();
-        if (currentStep != null) {
-            Integer depth = parseDelegationDepth(currentStep.getLatestData(contextKey));
-            if (depth != null) {
-                return depth;
-            }
-        }
-
-        var allSteps = memory.getAllSteps();
-        if (allSteps != null) {
-            List<IData<Object>> priorEntries = allSteps.getAllLatestData(contextKey);
-            if (priorEntries != null) {
-                int deepest = 0;
-                for (IData<Object> entry : priorEntries) {
-                    Integer depth = parseDelegationDepth(entry);
-                    if (depth != null) {
-                        deepest = Math.max(deepest, depth);
-                    }
-                }
-                return deepest;
-            }
-        }
-
-        return 0;
-    }
-
-    /**
-     * The hop count carried by a {@code context:delegationDepth} entry, or
-     * {@code null} when the entry is absent, not a {@link Context}, or carries a
-     * non-numeric value.
-     */
-    private static Integer parseDelegationDepth(IData<Object> contextData) {
-        if (contextData == null || !(contextData.getResult() instanceof Context ctx)) {
-            return null;
-        }
-        Object value = ctx.getValue();
-        if (value instanceof Number number) {
-            return Math.max(0, number.intValue());
-        }
-        if (value instanceof String text) {
-            try {
-                return Math.max(0, Integer.parseInt(text.trim()));
-            } catch (NumberFormatException e) {
-                LOGGER.debugf("Ignoring non-numeric delegationDepth context value '%s'", sanitize(text));
-            }
+        } catch (Exception e) {
+            LOGGER.debugf("groupConversationId context lookup failed: %s", e.getMessage());
         }
         return null;
     }
 
     /**
-     * Creates a default DynamicAgentConfig for agents without explicit group
-     * config. Used when individual agents have dynamic agent tools in their
-     * whitelist.
+     * User-memory / conversation-recall / attachment tool construction, extracted
+     * to {@link ContextualToolsProvider} (R2 step 2). Constructed per call —
+     * {@link #attachmentStore} and {@link #attachmentTextExtractor} are
+     * field-injected and still null when this class's constructor runs.
      */
-    private DynamicAgentConfig createDefaultDynamicConfig() {
-        var config = new DynamicAgentConfig();
-        config.setEnabled(true);
-        config.setAllowCreation(true);
-        config.setAllowRecruitment(true);
-        config.setAllowDelegation(true);
-        return config;
+    private ContextualToolsProvider contextualToolsProvider() {
+        return new ContextualToolsProvider(userMemoryStore, attachmentStore, attachmentTextExtractor);
+    }
+
+    // Kept as declared delegators (not inlined) — each has two call sites in
+    // collectAllBuiltInTools' whitelist/no-whitelist branches. Logic extracted to
+    // ContextualToolsProvider (R2 step 2).
+
+    private void addUserMemoryToolIfEnabled(List<Object> tools, IConversationMemory memory) {
+        contextualToolsProvider().addUserMemoryToolIfEnabled(tools, memory);
+    }
+
+    private void addConversationRecallToolIfEnabled(List<Object> tools, LlmConfiguration.Task task, IConversationMemory memory) {
+        contextualToolsProvider().addConversationRecallToolIfEnabled(tools, task, memory);
+    }
+
+    private void addReadAttachmentToolIfEnabled(List<Object> tools, IConversationMemory memory) {
+        contextualToolsProvider().addReadAttachmentToolIfEnabled(tools, memory);
+    }
+
+    /**
+     * Dynamic-agent tool construction, extracted to
+     * {@link DynamicAgentToolsProvider} (R2 step 2). Constructed per call — not
+     * once in the constructor like the http/mcp providers — because
+     * {@link #deploymentStore} is field-injected and still null when this class's
+     * constructor runs; see that class's Javadoc.
+     */
+    private DynamicAgentToolsProvider dynamicAgentToolsProvider() {
+        return new DynamicAgentToolsProvider(agentSetupService, capabilityRegistryService, conversationService,
+                agentFactory, agentStore, deploymentStore, liveDiscussionRegistry);
+    }
+
+    // Kept as declared delegators (not inlined) since tests reference them by
+    // class name. Logic extracted to DynamicAgentToolsProvider (R2 step 2).
+
+    static List<String> seedCreatedAgentIds(IConversationMemory memory) {
+        return DynamicAgentToolsProvider.seedCreatedAgentIds(memory);
+    }
+
+    static int resolveDelegationDepth(IConversationMemory memory) {
+        return DynamicAgentToolsProvider.resolveDelegationDepth(memory);
     }
 
     // --- Httpcall auto-discovery from workflow ---
@@ -2801,283 +1183,42 @@ class AgentOrchestrator {
      *            Names come from {@code operationId} or a slug, which drift; the
      *            method and path are what the agent designer actually wrote in the
      *            endpoint allow-list.
+     * @param resolvers
+     *            tool name → how to resolve what it would send, without sending it
+     *            (request pinning). Only httpcall tools have one — a builtin, MCP
+     *            or A2A tool is not an HTTP request this side of the boundary, so
+     *            there is nothing to pin.
      */
     record HttpCallToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors, Map<String, String> endpoints,
             Map<String, ToolRequestResolver> resolvers) {
     }
 
-    /**
-     * Resolves what an httpcall tool would send, without sending it.
-     * <p>
-     * Only httpcall tools have one. A builtin, MCP or A2A tool is not an HTTP
-     * request this side of the boundary, so there is nothing to pin — those calls
-     * pause and are approved on their name and arguments alone, exactly as before.
-     */
-    @FunctionalInterface
-    interface ToolRequestResolver {
-        ResolvedRequest resolve(ToolExecutionRequest toolRequest) throws LifecycleException;
-    }
+    // Kept as declared delegators (not inlined) since they're reflected/hard
+    // class-referenced in tests. Logic extracted to HttpCallToolsProvider (R2
+    // step 2); buildToolSetup's merge flow is unchanged, so this still returns
+    // the legacy HttpCallToolsResult shape (adapted from the new ToolContribution).
 
-    /**
-     * Normalise a configured path to the shape an approval pattern is written in.
-     * <p>
-     * The config accepts three shapes for the same endpoint — {@code /a/b},
-     * {@code a/b}, and an absolute {@code https://host/a/b} (see
-     * {@code ApiCallExecutor#buildRequest}, which applies the same leading-slash
-     * rule). Storing the raw value would make {@code http.post:/a/b} miss two of
-     * them, and a require-pattern that misses is an ungated write.
-     * <p>
-     * An absolute URL keeps only its path, so the same pattern matches however the
-     * target server was configured.
-     */
     static String normalizeEndpointPath(String rawPath) {
-        String path = rawPath.trim();
-        // Request.path defaults to "", and an empty path means the target server's
-        // root — ApiCallExecutor sends the request to targetServerUrl unchanged.
-        // Returning "" here would make the key "post:", which no pattern can match,
-        // so a root endpoint would be silently ungateable.
-        if (path.isEmpty()) {
-            return "/";
-        }
-        // Only a real absolute URL, not merely a path that happens to begin "http".
-        // ApiCallExecutor tests startsWith("http"), which is loose enough that a
-        // relative path like "httpcalls/agents" would be parsed as a URI here — and an
-        // opaque one collapses to an empty path, losing the endpoint entirely.
-        String lower = path.toLowerCase(Locale.ROOT);
-        if (lower.startsWith("http://") || lower.startsWith("https://")) {
-            try {
-                String extracted = URI.create(path).getPath();
-                // A URL with no path ("https://host", "https://host?x=1") yields an
-                // empty path. Left empty the endpoint key would be "post:", which no
-                // pattern expecting a leading slash can match — and an unmatched
-                // require-pattern is an ungated call. A root endpoint is "/".
-                path = extracted == null || extracted.isEmpty() ? "/" : extracted;
-            } catch (IllegalArgumentException e) {
-                // Not parseable as a URI — a templated host, most likely. Leave it be:
-                // matching something odd is better than throwing during discovery.
-                LOGGER.debugf("Could not normalise endpoint path '%s' for approval matching", LogSanitizer.sanitize(rawPath));
-                return path;
-            }
-        }
-        if (!path.isEmpty() && !path.startsWith("/")) {
-            path = "/" + path;
-        }
-        return path;
+        return HttpCallToolsProvider.normalizeEndpointPath(rawPath);
     }
-
-    /**
-     * Template data for one httpcall tool invocation: conversation memory plus the
-     * model's arguments merged over it.
-     * <p>
-     * Shared by the executor and the resolver on purpose. The gate-time fingerprint
-     * only means anything if it was computed from the same inputs execution will
-     * use — two copies of this merge would eventually disagree, and the guard would
-     * then reject correct calls (or, worse, pass altered ones).
-     */
-    private Map<String, Object> templateDataFor(IConversationMemory memory, ToolExecutionRequest toolRequest) {
-        Map<String, Object> templateData = memoryItemConverter.convert(memory);
-        if (toolRequest.arguments() != null && !toolRequest.arguments().isBlank()) {
-            try {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
-                safeTemplateMerge(templateData, args);
-            } catch (IOException e) {
-                // Redacted and capped, never raw: these are model-supplied arguments
-                // that routinely carry credentials — the pause record keeps only a
-                // SecretRedactionFilter'd copy for exactly this reason, and a log
-                // line is no safer a place for the plaintext than that record was.
-                //
-                // The throwable is deliberately NOT passed: a Jackson parse error
-                // quotes the offending source in its own message, which would undo
-                // the redaction on the line right next to it. See errorType.
-                // Order is load-bearing. Redact FIRST, on the full string: capping
-                // first would cut a credential mid-token, and the fragment left
-                // behind no longer matches the shape rules — a partial secret in
-                // the log instead of a marker. Sanitize LAST: these arguments are
-                // model-chosen and therefore prompt-injectable, and
-                // SecretRedactionFilter only substitutes secret-shaped VALUES — it
-                // leaves \r and \n untouched, so a model could forge whole log
-                // records in the HITL audit stream. The tool name beside it was
-                // already sanitized for exactly this reason; the argument string
-                // is the more attacker-controllable of the two.
-                LOGGER.warnf("Failed to parse arguments for tool '%s' (%s): %s", sanitize(toolRequest.name()), errorType(e),
-                        sanitize(capUtf8(SecretRedactionFilter.redact(toolRequest.arguments()), ARGS_LOG_MAX_BYTES)));
-            }
-        }
-        return templateData;
-    }
-
-    /**
-     * Discovers httpcall configurations from the workflow and creates
-     * ToolSpecification + ToolExecutor for each ApiCall.
-     * <p>
-     * Traverses: memory → agentId/version → AgentConfiguration → workflows →
-     * WorkflowConfiguration → filter httpcall steps → load ApiCallsConfiguration →
-     * create tools from each ApiCall.
-     */
 
     HttpCallToolsResult discoverHttpCallTools(IConversationMemory memory) {
-        List<ToolSpecification> toolSpecs = new ArrayList<>();
-        Map<String, ToolExecutor> executors = new HashMap<>();
-        Map<String, String> endpoints = new HashMap<>();
-        Map<String, ToolRequestResolver> resolvers = new HashMap<>();
-
-        try {
-            LOGGER.infof("Discovering httpcall tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
-
-            var stepConfigs = WorkflowTraversal.discoverConfigs(memory, HTTPCALLS_TYPE, ApiCallsConfiguration.class, restAgentStore,
-                    restWorkflowStore, resourceClientLibrary);
-
-            for (var stepConfig : stepConfigs) {
-                ApiCallsConfiguration httpCallsConfig = stepConfig.config();
-                String targetServerUrl = httpCallsConfig.getTargetServerUrl();
-
-                for (ApiCall apiCall : httpCallsConfig.getHttpCalls()) {
-                    if (apiCall.getName() == null || apiCall.getName().isBlank()) {
-                        continue;
-                    }
-
-                    ToolSpecification.Builder specBuilder = ToolSpecification.builder().name(apiCall.getName())
-                            .description(apiCall.getDescription() != null ? apiCall.getDescription() : "Execute " + apiCall.getName());
-
-                    if (apiCall.getParameters() != null && !apiCall.getParameters().isEmpty()) {
-                        var schemaBuilder = dev.langchain4j.model.chat.request.json.JsonObjectSchema.builder();
-                        for (var param : apiCall.getParameters().entrySet()) {
-                            schemaBuilder.addStringProperty(param.getKey(), param.getValue() != null ? param.getValue() : param.getKey());
-                        }
-                        schemaBuilder.required(new ArrayList<>(apiCall.getParameters().keySet()));
-                        specBuilder.parameters(schemaBuilder.build());
-                    }
-
-                    toolSpecs.add(specBuilder.build());
-
-                    // Record what this tool actually calls, so approval patterns can be
-                    // written against the endpoint rather than the generated name.
-                    var apiRequest = apiCall.getRequest();
-                    if (apiRequest != null && apiRequest.getMethod() != null && apiRequest.getPath() != null) {
-                        endpoints.put(apiCall.getName(),
-                                apiRequest.getMethod().toLowerCase(Locale.ROOT) + ":" + normalizeEndpointPath(apiRequest.getPath()));
-                    }
-
-                    // Resolving and executing MUST build their template data the same
-                    // way: the fingerprint pinned at gate time is only meaningful if
-                    // it describes the request execution will actually construct.
-                    resolvers.put(apiCall.getName(),
-                            toolRequest -> apiCallExecutor.resolve(apiCall, memory, templateDataFor(memory, toolRequest), targetServerUrl));
-
-                    executors.put(apiCall.getName(), (toolRequest, memoryId) -> {
-                        try {
-                            Map<String, Object> templateData = templateDataFor(memory, toolRequest);
-
-                            Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl);
-
-                            String serialized = jsonSerialization.serialize(result);
-                            LOGGER.info("Httpcall tool '" + apiCall.getName() + "' result: keys=" + result.keySet() + " size=" + serialized.length());
-                            return serialized;
-                        } catch (Exception e) {
-                            LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
-                            String errorMsg = e.getMessage() != null ? e.getMessage() : "Unknown error";
-                            String escaped = new String(JsonStringEncoder.getInstance().quoteAsString(errorMsg));
-                            return "{\"error\": \"" + escaped + "\"}";
-                        }
-                    });
-                }
-            }
-
-            LOGGER.info("Discovered " + toolSpecs.size() + " httpcall tools from workflow");
-        } catch (Exception e) {
-            LOGGER.warn("Failed to discover httpcall tools from workflow", e);
-        }
-
-        return new HttpCallToolsResult(toolSpecs, executors, endpoints, resolvers);
+        var contribution = httpCallToolsProvider.discover(memory);
+        return new HttpCallToolsResult(contribution.specs(), contribution.executors(), contribution.toolEndpoints(),
+                contribution.toolRequestResolvers());
     }
 
-    // --- McpCalls auto-discovery from workflow ---
-
-    /**
-     * Discovers mcpcalls configurations from the workflow and creates filtered
-     * ToolSpecification + ToolExecutor pairs via McpToolProviderManager.
-     * <p>
-     * Traverses: memory → agentId/version → AgentConfiguration → workflows →
-     * WorkflowConfiguration → filter mcpCalls steps → load McpCallsConfiguration →
-     * apply whitelist/blacklist → return filtered tools.
-     */
+    // Kept as a declared delegator (not inlined). Logic extracted to
+    // McpToolsProvider (R2 step 2); buildToolSetup's merge flow is unchanged, so
+    // this still returns the legacy McpToolsResult shape.
     McpToolProviderManager.McpToolsResult discoverMcpCallTools(IConversationMemory memory) {
-        List<ToolSpecification> toolSpecs = new ArrayList<>();
-        Map<String, ToolExecutor> executors = new HashMap<>();
-
-        try {
-            LOGGER.infof("Discovering mcpcalls tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
-
-            var stepConfigs = WorkflowTraversal.discoverConfigs(memory, MCPCALLS_TYPE, McpCallsConfiguration.class, restAgentStore, restWorkflowStore,
-                    resourceClientLibrary);
-
-            for (var stepConfig : stepConfigs) {
-                McpCallsConfiguration mcpCallsConfig = stepConfig.config();
-
-                // Build server config from McpCallsConfiguration
-                McpServerConfig serverConfig = new McpServerConfig();
-                serverConfig.setUrl(mcpCallsConfig.getMcpServerUrl());
-                serverConfig.setName(mcpCallsConfig.getName());
-                serverConfig.setTransport(mcpCallsConfig.getTransport());
-                serverConfig.setApiKey(mcpCallsConfig.getApiKey());
-                serverConfig.setTimeoutMs(mcpCallsConfig.getTimeoutMs());
-
-                // Discover tools from this MCP server
-                McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(serverConfig));
-
-                // Apply whitelist/blacklist filtering
-                List<String> whitelist = mcpCallsConfig.getToolsWhitelist();
-                List<String> blacklist = mcpCallsConfig.getToolsBlacklist();
-
-                for (ToolSpecification spec : result.toolSpecs()) {
-                    String name = spec.name();
-                    if (whitelist != null && !whitelist.isEmpty() && !whitelist.contains(name))
-                        continue;
-                    if (blacklist != null && blacklist.contains(name))
-                        continue;
-
-                    toolSpecs.add(spec);
-                    ToolExecutor executor = result.executors().get(name);
-                    if (executor != null) {
-                        executors.put(name, executor);
-                    }
-                }
-            }
-
-            LOGGER.info("Discovered " + toolSpecs.size() + " mcpcalls tools from workflow");
-        } catch (Exception e) {
-            LOGGER.warn("Failed to discover mcpcalls tools from workflow", e);
-        }
-
-        return new McpToolProviderManager.McpToolsResult(toolSpecs, executors);
+        return mcpToolsProvider.discover(memory);
     }
 
-    // ─── Template data protection ───
-
-    /**
-     * Keys produced by {@link IMemoryItemConverter#convert} that carry
-     * authenticated identity and session state. LLM-provided tool arguments must
-     * never override these — a prompt-injection attack could otherwise manipulate
-     * userId/agentId in HTTP call templates.
-     */
-    private static final Set<String> RESERVED_TEMPLATE_KEYS = Set.of(
-            "context", "properties", "memory",
-            "userInfo", "conversationInfo", "conversationLog");
-
-    /**
-     * Merge LLM tool arguments into template data, blocking any keys that collide
-     * with internal pipeline data. Blocked keys are logged as warnings so config
-     * authors can rename their parameters if needed.
-     */
+    // Kept as a declared delegator (not inlined) since it's reflected in tests.
+    // Logic + RESERVED_TEMPLATE_KEYS extracted to HttpCallToolsProvider (R2 step
+    // 2).
     private static void safeTemplateMerge(Map<String, Object> templateData, Map<String, Object> args) {
-        for (var entry : args.entrySet()) {
-            if (RESERVED_TEMPLATE_KEYS.contains(entry.getKey())) {
-                LOGGER.warnf("Blocked LLM tool argument '%s' — collides with reserved template key. " +
-                        "Rename the httpcall parameter to avoid this conflict.", entry.getKey());
-                continue;
-            }
-            templateData.put(entry.getKey(), entry.getValue());
-        }
+        HttpCallToolsProvider.safeTemplateMerge(templateData, args);
     }
 }

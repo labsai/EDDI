@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -25,6 +26,22 @@ import java.util.concurrent.ConcurrentHashMap;
  * @author ginccc
  */
 public class GroupConversation {
+    /**
+     * Current document shape this code understands (Wave 0, F6). Bump whenever a
+     * Wave adds a field resume-time logic depends on, and register that version's
+     * migration in {@code GroupConversationSchemaMigrations}.
+     */
+    public static final int CURRENT_SCHEMA_VERSION = 3;
+    /**
+     * The shape this specific document was last written in. Checked before a
+     * resume: newer than {@link #CURRENT_SCHEMA_VERSION} refuses (this deployment
+     * predates the document), older runs registered migrations forward. A pause can
+     * sit in storage for days — long enough for a deploy to land in between — so
+     * this is the group side's document-shape guard, alongside the existing
+     * per-resume config-drift check (bookmarked phase vs. current config) that
+     * guards a different axis. See {@code GroupConversationSchemaMigrations}.
+     */
+    private int schemaVersion = CURRENT_SCHEMA_VERSION;
     private String id;
     private String groupId;
     private String userId;
@@ -46,18 +63,101 @@ public class GroupConversation {
      * Maps agentId → displayName for all group members. Populated at discussion
      * start.
      */
-    private Map<String, String> memberDisplayNames = new LinkedHashMap<>();
+    // ConcurrentHashMap for the same reason the three lists above are
+    // copy-on-write: Jackson walks this map unguarded on every persist, and
+    // RecruitAgentTool now writes it from a member-turn thread. A plain
+    // LinkedHashMap here re-opens the ConcurrentModificationException that
+    // turns a successful discussion into a FAILED one.
+    private Map<String, String> memberDisplayNames = new ConcurrentHashMap<>();
+    /**
+     * Per-member dollar-cost attribution (Wave 0, F5): agentId → that member's cost
+     * so far. For an individual agent, its own private conversation's cumulative
+     * tracked cost; for a {@code MemberType.GROUP} member, the child discussion's
+     * own {@link #totalCost} rolled up whole. See {@code GroupCostLedger}'s Javadoc
+     * for the known gap this reflects (V1: a non-cascade member turn's own
+     * model-completion cost is not tracked anywhere yet — I1 closes that).
+     * Thread-safe: PARALLEL phases accumulate from multiple member turns
+     * concurrently.
+     */
+    private Map<String, Double> memberCosts = new ConcurrentHashMap<>();
+    /**
+     * Sum of {@link #memberCosts}, recomputed by {@code GroupCostLedger} on every
+     * update.
+     */
+    // volatile: written under memberCosts' monitor by parallel member turns, but
+    // read
+    // unsynchronized by enforceCeiling/wouldExceedCeiling on the orchestrator
+    // thread.
+    // Without it there is no happens-before edge, so a ceiling can silently fail to
+    // fire after a PARALLEL batch — and a non-volatile 64-bit read may tear (JLS
+    // 17.7).
+    private volatile double totalCost;
     private int currentPhaseIndex;
     private String currentPhaseName;
     private String synthesizedAnswer;
+    /**
+     * Typed outcome of the discussion (Wave 0, F3) — verdict, vote, agreement or
+     * award. {@code null} until a decision-producing feature (I3 verdicts, I11
+     * agreements, I14 votes, I18 awards) sets it; none of those exist yet, so this
+     * is {@code null} for every discussion today. {@link #synthesizedAnswer} is
+     * always prose; {@code decision} is the structured form of a conclusion when
+     * one of those features ran.
+     */
+    private DecisionRecord decision;
     private int depth;
     /** Current discussion round (1-based). Incremented by continueDiscussion(). */
     private int round = 1;
+
+    /**
+     * Index into {@link #transcript} where the CURRENT round's entries begin.
+     * <p>
+     * A continuation re-runs every phase from index 0 against a transcript that
+     * still holds the previous round's entries, and a transcript entry carries no
+     * round of its own — only a phase index, which repeats each round. So "the
+     * latest SYNTHESIS" is ambiguous across rounds unless something marks where
+     * this round started. Without it, a round whose synthesis produced nothing
+     * (judge undeployed, timed out, abstained, or the cost ceiling fired) silently
+     * adopted the PREVIOUS round's conclusion: the verdict, the dissents raised
+     * against it, and the answer itself, all reported as this round's, for a
+     * question this round never answered.
+     * <p>
+     * Zero for a first round, which is exactly "the whole transcript".
+     */
+    private int roundStartTranscriptIndex;
+
+    public int getRoundStartTranscriptIndex() {
+        return roundStartTranscriptIndex;
+    }
+
+    public void setRoundStartTranscriptIndex(int roundStartTranscriptIndex) {
+        this.roundStartTranscriptIndex = roundStartTranscriptIndex;
+    }
     private SharedTaskList taskList;
     /** Agents dynamically added during the discussion (recruited or created). */
-    private List<AgentGroupConfiguration.GroupMember> dynamicMembers = Collections.synchronizedList(new ArrayList<>());
+    private List<AgentGroupConfiguration.GroupMember> dynamicMembers = new CopyOnWriteArrayList<>();
     /** Agent IDs created during this discussion (for lifecycle cleanup). */
-    private List<String> createdAgentIds = Collections.synchronizedList(new ArrayList<>());
+    // CopyOnWriteArrayList, not synchronizedList: these three are iterated without
+    // a monitor by Jackson every time the loop persists the whole document, and by
+    // cleanup on teardown, while member turns and the recruit/task tools append to
+    // them. synchronizedList makes each add atomic but does NOT make unguarded
+    // iteration safe — a concurrent add throws ConcurrentModificationException out
+    // of conversationStore.update, which executeDiscussion's catch-all converts
+    // into a FAILED discussion. All three are small (agent ids, roster additions)
+    // and append-mostly, so copy-on-write's per-write copy is the right trade;
+    // the transcript deliberately stays synchronizedList because it grows large
+    // enough that copying on every entry would be quadratic.
+    private List<String> createdAgentIds = new CopyOnWriteArrayList<>();
+
+    /**
+     * Agents recruited into this discussion at runtime (I7).
+     * <p>
+     * Deliberately NOT merged into {@link #createdAgentIds}: that list drives
+     * {@code cleanupEphemeralAgents}, which undeploys what the discussion created.
+     * A recruit is a pre-existing agent this discussion borrowed, so undeploying it
+     * would take it away from every other conversation using it. Two lists because
+     * they mean two different things at teardown.
+     */
+    private List<String> recruitedAgentIds = new CopyOnWriteArrayList<>();
     /** Agent IDs explicitly retained by the creating agent (skip cleanup). */
     private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
     private int pausedAtPhaseIndex = -1;
@@ -67,6 +167,15 @@ public class GroupConversation {
     private HitlPauseType hitlPauseType;
     /** Human-readable reason for the pause (from HITL gate). */
     private String hitlPauseReason;
+    /**
+     * Where inside a SEQUENTIAL phase's speaker list a pause landed (Wave 0, F2).
+     * {@code null} for every pause today — {@code PHASE} and {@code TASK} pauses
+     * (the only kinds that exist) both land at a phase/task boundary, never
+     * mid-speaker-list. Exists for I6 (human as a group member), which pauses
+     * between one speaker and the next within a running SEQUENTIAL phase; see
+     * {@link ResumePoint}'s own Javadoc for why PARALLEL phases never set this.
+     */
+    private ResumePoint resumePoint;
     /** Timeout policy copied from config at pause time (Phase 6d). */
     private HitlTimeoutPolicy hitlTimeoutPolicy;
     /**
@@ -103,6 +212,29 @@ public class GroupConversation {
      */
     @JsonIgnore
     private transient List<Attachment> attachments;
+
+    /**
+     * Set by a phase executor (I1) when a turn/wave observes
+     * {@code getTotalCost() > protocol.maxCostPerDiscussion()}, naming the policy
+     * that fired. Read back by {@code executeDiscussion}'s own phase loop right
+     * after the phase-execution call returns, then cleared — a same-leg, read-once
+     * signal, exactly like {@link #resumePoint}, not a persisted fact about the
+     * discussion. {@code null} means no ceiling has fired (the common case, and the
+     * only possible value while {@code maxCostPerDiscussion} is unset).
+     */
+    @JsonIgnore
+    private transient AgentGroupConfiguration.ProtocolConfig.CostPolicy costCeilingOutcome;
+
+    /**
+     * A parent discussion's remaining cost budget at the moment it dispatched this
+     * nested one (I1), or {@code null} for a top-level discussion (and for a parent
+     * that has no ceiling of its own). The discussion runs under
+     * {@code min(own configured ceiling, this)} — see
+     * {@code GroupConversationService.effectiveCostCeiling}. Transient: it is a
+     * property of one dispatch, not of the stored discussion.
+     */
+    @JsonIgnore
+    private transient Double inheritedCostCeiling;
 
     /**
      * A single entry in the discussion transcript. Each entry records one agent's
@@ -176,7 +308,170 @@ public class GroupConversation {
         /** Verification assessment from the VERIFY phase. */
         VERIFICATION,
         /** User-to-member or member-to-user follow-up exchange between rounds. */
-        FOLLOW_UP
+        FOLLOW_UP,
+        /**
+         * A speaker declined to add anything new this round (I4). Peer-hidden — see
+         * {@code GroupContextBuilder#filterByScope}'s visibility matrix (Wave 0, F4).
+         */
+        ABSTAINED,
+        /**
+         * A member's recorded disagreement with a synthesis (I4). Peer-visible.
+         */
+        DISSENT,
+        /**
+         * A convergence judge's agreement-score result (I2). Peer-hidden.
+         */
+        CONVERGENCE,
+        /**
+         * A facilitator's bounded intervention (I12). Peer-hidden.
+         */
+        FACILITATION,
+        /**
+         * A cast ballot (I14). Peer-hidden while its own phase is still running (blind
+         * ballot); visible once that phase completes.
+         */
+        VOTE,
+        /**
+         * A negotiation offer (I11). Peer-visible.
+         */
+        PROPOSAL,
+        /**
+         * A negotiation counter-offer or concession (I11). Peer-visible.
+         */
+        BARGAIN,
+        /**
+         * A human group member's contribution (I6). Peer-visible.
+         */
+        HUMAN_INPUT,
+        /**
+         * Retrospective phase output, feeding group memory (I8). Peer-visible.
+         */
+        RETRO,
+        /**
+         * A bid for a task assignment (I18). Peer-hidden while its own phase is still
+         * running (blind bid); visible once that phase completes.
+         */
+        BID
+    }
+
+    /**
+     * A pause landing inside a running SEQUENTIAL phase's speaker list, rather than
+     * at a phase boundary (Wave 0, F2). Lets a resume skip the speakers that
+     * already ran before the pause instead of re-running the whole phase.
+     * <p>
+     * <b>PARALLEL phases never produce one of these.</b> A parallel phase fans
+     * every speaker out at once and joins at the end; there is no "speaker N of the
+     * batch already ran, N+1 didn't" state to bookmark — a parallel resume always
+     * re-runs the entire fan-out from the paused snapshot. That is idempotent by
+     * design (each member turn is independent and the results only join once, at
+     * the end), so re-running members that "already" produced a transcript entry
+     * before the pause is not a correctness problem the way it would be for a
+     * stateful sequential turn order — it is simply redundant LLM calls, which a
+     * future optimization could avoid but this feature does not need to.
+     *
+     * @param phaseIdx
+     *            the phase this pause happened inside — matched against
+     *            {@code executeDiscussion}'s current phase before the speaker
+     *            offset is honored, so a resume of a <em>different</em> phase (or
+     *            of a discussion whose phase list changed underneath it) never
+     *            misapplies a stale offset
+     * @param repeatIdx
+     *            which repeat of that phase (phases with {@code repeats() > 1}) the
+     *            pause landed on. Only the repeat matching this value gets the
+     *            {@code speakerIdx} offset — earlier repeats of the <em>same</em>
+     *            phase are not skipped and replay from their own first speaker, the
+     *            same way a phase-level ({@code
+     *            HitlPauseType.TASK}) resume already replays a whole phase from its
+     *            first speaker. A producer that pauses mid-repeat on a phase with
+     *            {@code repeats() > 1} accepts that replay; a repeat-level start
+     *            offset would avoid it but is outside this feature.
+     * @param speakerIdx
+     *            index into the phase's resolved speaker list of the speaker the
+     *            pause landed on; on resume, speakers before this index are skipped
+     *            rather than re-run
+     * @param pauseKind
+     *            free-text tag for observability (REST/MCP status payloads) — not
+     *            consulted by any resume logic, which keys off this record's mere
+     *            presence rather than what kind of mid-phase pause it names
+     */
+    public record ResumePoint(int phaseIdx, int repeatIdx, int speakerIdx, String pauseKind) {
+    }
+
+    /**
+     * What kind of conclusion a {@link DecisionRecord} represents (Wave 0, F3).
+     */
+    public enum DecisionType {
+        /** A debate judged to a winner (I3). */
+        VERDICT,
+        /** A tallied ballot (I14). */
+        VOTE,
+        /** A negotiated compromise both sides accepted (I11). */
+        AGREEMENT,
+        /** A task/turn awarded by bid (I18). */
+        AWARD,
+        /** No structured decision was produced — prose-only conclusion. */
+        NONE
+    }
+
+    /**
+     * One member's recorded disagreement with a decision (Wave 0, F3).
+     *
+     * @param agentId
+     *            the dissenting member
+     * @param displayName
+     *            human-readable name, for display without a roster lookup
+     * @param position
+     *            the member's own short statement of where they disagree
+     */
+    public record Dissent(String agentId, String displayName, String position) {
+    }
+
+    /**
+     * Typed outcome of a discussion, or of one decision-producing phase within it
+     * (Wave 0, F3). Today the only conclusion a discussion produces is
+     * {@link #synthesizedAnswer}, which is always prose — callers that want to
+     * branch on a winner, a tally, or a vote count have to parse it. This is the
+     * structured alternative, populated by whichever decision-producing feature ran
+     * (I3 verdicts, I11 agreements, I14 votes, I18 awards); {@code null} until one
+     * of those exists.
+     * <p>
+     * A parse failure in the producing feature's own judgment/tally step must never
+     * fail the discussion — the convention each of those features follows is to
+     * fall back to {@code type=NONE} with {@link #raw} set to the unparsed text,
+     * rather than to leave {@link GroupConversation#getDecision()} {@code null} and
+     * lose the source material.
+     *
+     * @param type
+     *            what kind of decision this is
+     * @param outcome
+     *            human-readable one-liner summarizing the result, for display
+     *            without interpreting {@link #tally}
+     * @param winner
+     *            the winning side/option/agent, if this decision has one;
+     *            {@code null} for a tie, a non-competitive agreement, or
+     *            {@code type=NONE}
+     * @param tally
+     *            nullable structured detail specific to {@link #type} — option to
+     *            weight for {@code VOTE}, side to score for {@code VERDICT}, bidder
+     *            to bid for {@code AWARD}
+     * @param dissents
+     *            members who disagreed with this decision; empty (never
+     *            {@code null}) when nobody dissented or dissent-recording is off
+     * @param method
+     *            free-text tag naming the mechanism that produced this decision,
+     *            e.g. {@code "debate-judgment"}, {@code "majority"},
+     *            {@code "approval"}, {@code "negotiation"}, {@code "arbitration"},
+     *            {@code "bid-award"} — not an enum, since new methods are expected
+     *            to be added by later features without touching this record
+     * @param decidedAtPhase
+     *            name of the phase that produced this decision
+     * @param raw
+     *            the unparsed source text the producing feature judged/tallied,
+     *            kept for audit even when {@link #type} is {@code NONE} because
+     *            parsing failed
+     */
+    public record DecisionRecord(DecisionType type, String outcome, String winner, Map<String, Object> tally, List<Dissent> dissents,
+            String method, String decidedAtPhase, String raw) {
     }
 
     public enum GroupConversationState {
@@ -197,6 +492,14 @@ public class GroupConversation {
     }
 
     // --- Getters/Setters ---
+
+    public int getSchemaVersion() {
+        return schemaVersion;
+    }
+
+    public void setSchemaVersion(int schemaVersion) {
+        this.schemaVersion = schemaVersion;
+    }
 
     public String getId() {
         return id;
@@ -266,6 +569,22 @@ public class GroupConversation {
                 : new ConcurrentHashMap<>();
     }
 
+    public Map<String, Double> getMemberCosts() {
+        return memberCosts;
+    }
+
+    public void setMemberCosts(Map<String, Double> memberCosts) {
+        this.memberCosts = memberCosts != null ? new ConcurrentHashMap<>(memberCosts) : new ConcurrentHashMap<>();
+    }
+
+    public double getTotalCost() {
+        return totalCost;
+    }
+
+    public void setTotalCost(double totalCost) {
+        this.totalCost = totalCost;
+    }
+
     public int getCurrentPhaseIndex() {
         return currentPhaseIndex;
     }
@@ -288,6 +607,14 @@ public class GroupConversation {
 
     public void setSynthesizedAnswer(String synthesizedAnswer) {
         this.synthesizedAnswer = synthesizedAnswer;
+    }
+
+    public DecisionRecord getDecision() {
+        return decision;
+    }
+
+    public void setDecision(DecisionRecord decision) {
+        this.decision = decision;
     }
 
     public int getDepth() {
@@ -336,8 +663,8 @@ public class GroupConversation {
 
     public void setDynamicMembers(List<AgentGroupConfiguration.GroupMember> dynamicMembers) {
         this.dynamicMembers = dynamicMembers != null
-                ? Collections.synchronizedList(new ArrayList<>(dynamicMembers))
-                : Collections.synchronizedList(new ArrayList<>());
+                ? new CopyOnWriteArrayList<>(dynamicMembers)
+                : new CopyOnWriteArrayList<>();
     }
 
     /**
@@ -352,10 +679,20 @@ public class GroupConversation {
         return createdAgentIds;
     }
 
+    public List<String> getRecruitedAgentIds() {
+        return recruitedAgentIds;
+    }
+
+    public void setRecruitedAgentIds(List<String> recruitedAgentIds) {
+        this.recruitedAgentIds = recruitedAgentIds != null
+                ? new CopyOnWriteArrayList<>(recruitedAgentIds)
+                : new CopyOnWriteArrayList<>();
+    }
+
     public void setCreatedAgentIds(List<String> createdAgentIds) {
         this.createdAgentIds = createdAgentIds != null
-                ? Collections.synchronizedList(new ArrayList<>(createdAgentIds))
-                : Collections.synchronizedList(new ArrayList<>());
+                ? new CopyOnWriteArrayList<>(createdAgentIds)
+                : new CopyOnWriteArrayList<>();
     }
 
     public Set<String> getRetainedAgentIds() {
@@ -480,6 +817,30 @@ public class GroupConversation {
 
     public void setHitlPauseReason(String hitlPauseReason) {
         this.hitlPauseReason = hitlPauseReason;
+    }
+
+    public ResumePoint getResumePoint() {
+        return resumePoint;
+    }
+
+    public void setResumePoint(ResumePoint resumePoint) {
+        this.resumePoint = resumePoint;
+    }
+
+    public AgentGroupConfiguration.ProtocolConfig.CostPolicy getCostCeilingOutcome() {
+        return costCeilingOutcome;
+    }
+
+    public void setCostCeilingOutcome(AgentGroupConfiguration.ProtocolConfig.CostPolicy costCeilingOutcome) {
+        this.costCeilingOutcome = costCeilingOutcome;
+    }
+
+    public Double getInheritedCostCeiling() {
+        return inheritedCostCeiling;
+    }
+
+    public void setInheritedCostCeiling(Double inheritedCostCeiling) {
+        this.inheritedCostCeiling = inheritedCostCeiling;
     }
 
     public HitlTimeoutPolicy getHitlTimeoutPolicy() {

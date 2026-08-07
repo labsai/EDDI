@@ -1,0 +1,295 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.modules.llm.tools.spi;
+
+import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.service.tool.ToolExecutor;
+import org.jboss.logging.Logger;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Iterates {@link ToolSourceProvider}s in a fixed order and merges their
+ * {@link ToolContribution}s into one assembled result (R2 step 2 — the rewiring
+ * this SPI existed for).
+ * <p>
+ * <b>Isolation is the point.</b> Before this, one failing tool source could
+ * abort assembly for every other source: a single unreachable MCP server, or a
+ * malformed httpcall config, and the agent silently lost its calculator too.
+ * Every {@code contribute} call is wrapped, so a provider that throws
+ * contributes nothing and the loop continues. Providers are still expected not
+ * to throw — this is the backstop, not the excuse.
+ * <p>
+ * <b>Order is fixed and load-bearing.</b> Providers are supplied in the order
+ * their tools should appear in the model's spec list, and merge is
+ * first-write-wins per dispatch name: an earlier source's tool is never
+ * displaced by a later source registering the same name. That makes collisions
+ * between, say, a built-in and an MCP tool resolve deterministically instead of
+ * by whichever map happened to be merged last, and it means an operator cannot
+ * shadow a governed built-in by naming an MCP tool after it. Collisions log at
+ * WARN, because a silently-dropped tool reads to an agent designer as "the
+ * model ignored my tool".
+ * <p>
+ * The drop rules are {@code AgentOrchestrator#mergeExternalTools}' rules,
+ * carried over verbatim so the rewiring changed no behaviour: a spec with no
+ * name, or with no executor to dispatch to, is skipped with a WARN rather than
+ * offered to the model as a tool that cannot possibly run.
+ */
+public final class ToolSourceRegistry {
+
+    private static final Logger LOGGER = Logger.getLogger(ToolSourceRegistry.class);
+
+    private ToolSourceRegistry() {
+        // static utility — use assemble() or newMerger()
+    }
+
+    /**
+     * The merged result of every provider's contribution for one turn.
+     *
+     * @param specs
+     *            every contributed spec, in provider order then contribution order
+     * @param executors
+     *            dispatch name → executor
+     * @param toolSources
+     *            dispatch name → provenance tag, per-tool where the provider
+     *            supplied one and {@code provider.source()} otherwise
+     * @param toolEndpoints
+     *            dispatch name → {@code "post:/path"}, http source only
+     * @param toolCanonicalNames
+     *            dispatch name → configuration slug. Absent, not defaulted, for
+     *            sources that supply none: {@code ToolNameResolver.canonical}
+     *            already falls back to the dispatch name, and writing identity
+     *            entries would change the map the rate-limit, pricing and
+     *            cache-scope lookups see
+     * @param toolRequestResolvers
+     *            dispatch name → {@link ToolRequestResolver}, http source only.
+     *            Copied into the merged map ONLY when the spec that owns the name
+     *            actually survives collision resolution below — a name a later
+     *            source lost still had its resolver registered before that verdict
+     *            was known, and carrying it forward would let an approver be shown
+     *            a preview of, and the pre-execution re-check compare against, a
+     *            request that is not the one about to run.
+     * @param failures
+     *            every provider's structured failures, concatenated
+     */
+    public record Assembled(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
+            Map<String, String> toolSources, Map<String, String> toolEndpoints,
+            Map<String, String> toolCanonicalNames, Map<String, ToolRequestResolver> toolRequestResolvers,
+            List<ProviderFailure> failures) {
+    }
+
+    /**
+     * Runs every provider in order and merges the results.
+     *
+     * @param providers
+     *            in the order their tools should appear; a {@code null} entry is
+     *            skipped so a caller can pass a conditionally-built list without
+     *            filtering first
+     * @param ctx
+     *            the turn's assembly context, shared by every provider so they all
+     *            see one consistent snapshot
+     */
+    public static Assembled assemble(List<ToolSourceProvider> providers, ToolAssemblyContext ctx) {
+        Merger merger = newMerger();
+        merger.addAll(providers, ctx);
+        return merger.build();
+    }
+
+    /**
+     * A merge in progress.
+     * <p>
+     * Exists because tool assembly is not one uniform pass. The LAZY loading
+     * strategy has to build its {@code discover_tools} meta-tool from the specs the
+     * <em>object-producing</em> sources contributed, and the orchestrator has to
+     * snapshot exactly those same specs as {@code builtInSpecs} (what LAZY later
+     * activates against) before the externally-discovered sources merge in. Both
+     * need a look at the half-assembled state, which a single {@code assemble} call
+     * cannot offer — while still sharing one collision namespace across the whole
+     * turn, which two independent {@code assemble} calls would lose.
+     */
+    public static Merger newMerger() {
+        return new Merger();
+    }
+
+    /** @see #newMerger() */
+    public static final class Merger {
+
+        private final List<ToolSpecification> specs = new ArrayList<>();
+        private final Map<String, ToolExecutor> executors = new LinkedHashMap<>();
+        private final Map<String, String> toolSources = new LinkedHashMap<>();
+        private final Map<String, String> toolEndpoints = new LinkedHashMap<>();
+        private final Map<String, String> toolCanonicalNames = new LinkedHashMap<>();
+        private final Map<String, ToolRequestResolver> toolRequestResolvers = new LinkedHashMap<>();
+        private final List<ProviderFailure> failures = new ArrayList<>();
+
+        private Merger() {
+        }
+
+        /** Runs one provider and merges its contribution. Never throws. */
+        public Merger add(ToolSourceProvider provider, ToolAssemblyContext ctx) {
+            if (provider == null) {
+                return this;
+            }
+            merge(provider.source(), contributeSafely(provider, ctx));
+            return this;
+        }
+
+        /** Runs each provider in order, skipping {@code null} entries. */
+        public Merger addAll(List<ToolSourceProvider> providers, ToolAssemblyContext ctx) {
+            for (ToolSourceProvider provider : providers) {
+                add(provider, ctx);
+            }
+            return this;
+        }
+
+        /**
+         * Merges a contribution that no provider produced — the LAZY
+         * {@code discover_tools} meta-tool, which can only be built once the sources it
+         * advertises have already contributed.
+         */
+        public Merger addContribution(String source, ToolContribution contribution) {
+            merge(source, contribution != null ? contribution : ToolContribution.empty());
+            return this;
+        }
+
+        /**
+         * The specs merged so far, as an independent copy.
+         * <p>
+         * This is how the orchestrator takes its {@code builtInSpecs} snapshot at the
+         * boundary between the object-producing and externally-discovered sources.
+         */
+        public List<ToolSpecification> specsSoFar() {
+            return List.copyOf(specs);
+        }
+
+        public Assembled build() {
+            return new Assembled(List.copyOf(specs), Map.copyOf(executors), Map.copyOf(toolSources),
+                    Map.copyOf(toolEndpoints), Map.copyOf(toolCanonicalNames), Map.copyOf(toolRequestResolvers),
+                    List.copyOf(failures));
+        }
+
+        private void merge(String source, ToolContribution contribution) {
+            failures.addAll(contribution.failures());
+
+            for (ToolSpecification spec : contribution.specs()) {
+                String name = spec.name();
+                if (name == null) {
+                    LOGGER.warnf("Skipping %s tool with no name", source);
+                    continue;
+                }
+                if (executors.containsKey(name)) {
+                    String incumbent = toolSources.getOrDefault(name, "builtin");
+                    // Deliberately does NOT name toolsBlacklist: that setting exists
+                    // only on McpCallsConfiguration, so recommending it for an http or
+                    // a2a collision sends an operator hunting for a knob their source
+                    // does not have — during an incident, at that.
+                    LOGGER.warnf("Tool name collision: %s tool '%s' clashes with the already-registered %s tool of "
+                            + "the same name — the %s tool is DROPPED and the %s tool keeps the name. Rename the "
+                            + "colliding tool in its own source config (for MCP servers, 'toolsBlacklist' can "
+                            + "exclude it instead).", source, name, incumbent, source, incumbent);
+                    continue;
+                }
+                ToolExecutor executor = contribution.executors().get(name);
+                if (executor == null) {
+                    LOGGER.warnf("%s tool '%s' has a specification but no executor — skipping", source, name);
+                    continue;
+                }
+
+                specs.add(spec);
+                executors.put(name, executor);
+                // Per-tool tag where the provider supplied one (bean sources emit
+                // memory/recall/builtin across a single contribution); the provider's own
+                // source() only as fallback. See ToolSourceProvider#source.
+                toolSources.put(name, contribution.toolSources().getOrDefault(name, source));
+
+                String endpoint = contribution.toolEndpoints().get(name);
+                if (endpoint != null) {
+                    toolEndpoints.put(name, endpoint);
+                }
+                String canonical = contribution.toolCanonicalNames().get(name);
+                if (canonical != null) {
+                    toolCanonicalNames.put(name, canonical);
+                }
+                // Only reached once the spec above has actually been accepted, so a
+                // resolver registered for a name that then loses a later collision is
+                // never copied in — see the field's javadoc on Assembled.
+                var resolver = contribution.toolRequestResolvers().get(name);
+                if (resolver != null) {
+                    toolRequestResolvers.put(name, resolver);
+                }
+            }
+        }
+    }
+
+    /**
+     * One provider's contribution, or {@link ToolContribution#empty()} if it threw.
+     * <p>
+     * Catches {@link Throwable} rather than {@link Exception} on purpose. The
+     * realistic non-Exception here is {@code NoClassDefFoundError} or
+     * {@code LinkageError} from an optional integration whose dependency is absent
+     * at runtime — precisely a per-source problem that must not take the other
+     * sources down with it. {@code Error}s that genuinely indicate a doomed JVM
+     * ({@code OutOfMemoryError}, {@code StackOverflowError}) will resurface at the
+     * next allocation regardless, so swallowing them here delays nothing.
+     */
+    private static ToolContribution contributeSafely(ToolSourceProvider provider, ToolAssemblyContext ctx) {
+        try {
+            ToolContribution contribution = provider.contribute(ctx);
+            return contribution != null ? contribution : ToolContribution.empty();
+        } catch (Throwable t) {
+            // Restore the interrupt before swallowing: a provider that was interrupted
+            // mid-discovery clears the flag on the way out, and this catch is broad
+            // enough to hide that from every later blocking call on this thread.
+            // Walks the cause chain rather than testing t itself — the providers that
+            // actually block are the network ones (MCP/A2A discovery), and those
+            // surface an interrupt wrapped in ExecutionException or
+            // CompletionException far more often than bare.
+            if (isCausedByInterrupt(t)) {
+                Thread.currentThread().interrupt();
+            }
+            // Pass the throwable, not t.toString(): a NoClassDefFoundError/LinkageError
+            // from an optional integration — the case this catch exists for — is
+            // near-undiagnosable without the stack trace naming the missing class.
+            LOGGER.warnf(t, "Tool source '%s' failed to contribute and was skipped — the remaining sources still assemble",
+                    provider.source());
+            return ToolContribution.empty();
+        }
+    }
+
+    /**
+     * Whether {@code t} is, or wraps, an {@link InterruptedException}. Bounded and
+     * cycle-safe: a self-referential cause chain (rare, but legal — a
+     * {@code Throwable} can be its own cause via {@code initCause} misuse) would
+     * otherwise spin here, inside the very handler whose job is to keep one bad
+     * provider from taking the assembly down.
+     */
+    /**
+     * Deeper than any real wrapper chain, shallow enough that a cycle cannot spin.
+     */
+    private static final int MAX_CAUSE_CHAIN_HOPS = 64;
+
+    private static boolean isCausedByInterrupt(Throwable t) {
+        // Bounded by hop count, not by a self-cycle test. `cause != cause.getCause()`
+        // only rejects A -> A, which Throwable.initCause already makes impossible
+        // (it throws IllegalArgumentException when cause == this). The reachable
+        // shape is a 2-cycle A -> B -> A, which initCause permits and which that
+        // test walks forever — inside the very handler whose job is to stop one bad
+        // provider taking assembly down, so the failure is a pegged CPU with no
+        // timeout above it.
+        int hops = 0;
+        for (Throwable cause = t; cause != null && hops < MAX_CAUSE_CHAIN_HOPS; cause = cause.getCause(), hops++) {
+            if (cause instanceof InterruptedException) {
+                return true;
+            }
+            if (cause == cause.getCause()) {
+                break;
+            }
+        }
+        return false;
+    }
+}

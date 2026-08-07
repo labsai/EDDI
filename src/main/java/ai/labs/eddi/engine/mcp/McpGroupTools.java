@@ -355,6 +355,7 @@ public class McpGroupTools {
     @Tool(description = "Read a group conversation including its full transcript, task list "
             + "(for TASK_FORCE discussions with per-task status, assignments, and results), "
             + "dynamic agent tracking (createdAgentIds, retainedAgentIds), synthesized answer, "
+            + "structured decision record (verdict/vote/agreement/award, if one was reached), "
             + "and conversation state. Use this to poll for completion after start_group_discussion, "
             + "or to inspect task-level results after a TASK_FORCE discussion.")
     public String read_group_conversation(

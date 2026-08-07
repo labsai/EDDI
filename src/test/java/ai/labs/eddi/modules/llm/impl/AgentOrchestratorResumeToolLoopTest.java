@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -354,7 +355,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var batch = batchWith(0, List.of(gated), List.of(r1));
 
         // Re-resolution now yields a DIFFERENT fingerprint — the tamper case.
-        AgentOrchestrator.ToolRequestResolver movedResolver = req -> ai.labs.eddi.modules.apicalls.impl.ResolvedRequest.of("POST",
+        ToolRequestResolver movedResolver = req -> ai.labs.eddi.modules.apicalls.impl.ResolvedRequest.of("POST",
                 "https://eddi.example/agentstore/agents/attacker-choice", Map.of(), Map.of(), "{}", true);
         var spied = spy(orchestrator);
         doAnswer(invocation -> {
@@ -392,7 +393,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
         var gated = gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}");
 
-        AgentOrchestrator.ToolRequestResolver stableResolver = req -> ai.labs.eddi.modules.apicalls.impl.ResolvedRequest.of("POST",
+        ToolRequestResolver stableResolver = req -> ai.labs.eddi.modules.apicalls.impl.ResolvedRequest.of("POST",
                 "https://eddi.example/agentstore/agents/a1", Map.of(), Map.of(), "{}", true);
         // Pin it to whatever that resolver actually produces, so gate time and
         // resume time genuinely agree.

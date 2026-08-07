@@ -620,18 +620,20 @@ class GroupConversationServiceUncoveredBranchTest {
         }
 
         @Test
-        @DisplayName("MODERATOR with null moderatorAgentId falls back to ALL")
+        @DisplayName("MODERATOR with null moderatorAgentId picks one deterministic synthesizer")
         void moderatorNull() throws Exception {
             var phase = new DiscussionPhase("Synth", PhaseType.SYNTHESIS, "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1);
             var allMembers = List.of(
                     new GroupMember("a1", "Agent 1", 0, null),
                     new GroupMember("a2", "Agent 2", 1, null));
             var result = invokeResolveParticipants(phase, allMembers, null);
-            assertEquals(2, result.size());
+            // I3(a): one deterministic synthesizer, not every member.
+            assertEquals(1, result.size());
+            assertEquals("a1", result.getFirst().agentId());
         }
 
         @Test
-        @DisplayName("MODERATOR with blank moderatorAgentId falls back to ALL")
+        @DisplayName("MODERATOR with blank moderatorAgentId picks one deterministic synthesizer")
         void moderatorBlank() throws Exception {
             var phase = new DiscussionPhase("Synth", PhaseType.SYNTHESIS, "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1);
             var allMembers = List.of(new GroupMember("a1", "Agent 1", 0, null));

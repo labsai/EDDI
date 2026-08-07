@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -38,6 +39,7 @@ class GroupConversationTest {
         assertEquals(0, gc.getCurrentPhaseIndex());
         assertNull(gc.getCurrentPhaseName());
         assertNull(gc.getSynthesizedAnswer());
+        assertNull(gc.getDecision());
         assertEquals(0, gc.getDepth());
         assertEquals(1, gc.getRound());
         assertNull(gc.getCreated());
@@ -58,6 +60,7 @@ class GroupConversationTest {
         gc.setCurrentPhaseIndex(2);
         gc.setCurrentPhaseName("Peer Critique");
         gc.setSynthesizedAnswer("EDDI is a middleware.");
+        gc.setDecision(new DecisionRecord(DecisionType.VERDICT, "PRO wins", "PRO", null, List.of(), "debate-judgment", "Judgment", null));
         gc.setDepth(1);
         gc.setCreated(now);
         gc.setLastModified(now);
@@ -75,6 +78,8 @@ class GroupConversationTest {
         assertEquals(2, gc.getCurrentPhaseIndex());
         assertEquals("Peer Critique", gc.getCurrentPhaseName());
         assertEquals("EDDI is a middleware.", gc.getSynthesizedAnswer());
+        assertEquals(DecisionType.VERDICT, gc.getDecision().type());
+        assertEquals("PRO", gc.getDecision().winner());
         assertEquals(1, gc.getDepth());
         assertEquals(now, gc.getCreated());
         assertEquals(now, gc.getLastModified());
@@ -209,6 +214,51 @@ class GroupConversationTest {
         }
     }
 
+    // ==================== DecisionRecord (Wave 0, F3) ====================
+
+    @Nested
+    @DisplayName("DecisionRecord")
+    class DecisionRecordTests {
+
+        @Test
+        @DisplayName("record fields accessible via accessors")
+        void recordFields() {
+            var dissent = new Dissent("agent-2", "Agent Two", "I still disagree");
+            var decision = new DecisionRecord(DecisionType.VOTE, "Option A wins 3-1", "Option A",
+                    Map.of("Option A", 3, "Option B", 1), List.of(dissent), "majority", "Voting", "raw ballot text");
+
+            assertEquals(DecisionType.VOTE, decision.type());
+            assertEquals("Option A wins 3-1", decision.outcome());
+            assertEquals("Option A", decision.winner());
+            assertEquals(3, decision.tally().get("Option A"));
+            assertEquals(1, decision.dissents().size());
+            assertEquals("agent-2", decision.dissents().get(0).agentId());
+            assertEquals("majority", decision.method());
+            assertEquals("Voting", decision.decidedAtPhase());
+            assertEquals("raw ballot text", decision.raw());
+        }
+
+        @Test
+        @DisplayName("nullable fields (winner, tally) may be null")
+        void nullableFields() {
+            var decision = new DecisionRecord(DecisionType.NONE, null, null, null, List.of(), "debate-judgment", "Judgment", "unparseable");
+
+            assertNull(decision.winner());
+            assertNull(decision.tally());
+            assertTrue(decision.dissents().isEmpty());
+        }
+
+        @Test
+        @DisplayName("Dissent record fields accessible via accessors")
+        void dissentFields() {
+            var dissent = new Dissent("agent-3", "Agent Three", "The evidence was insufficient");
+
+            assertEquals("agent-3", dissent.agentId());
+            assertEquals("Agent Three", dissent.displayName());
+            assertEquals("The evidence was insufficient", dissent.position());
+        }
+    }
+
     // ==================== Enums ====================
 
     @Nested
@@ -219,7 +269,7 @@ class GroupConversationTest {
         @DisplayName("TranscriptEntryType — all values")
         void transcriptEntryTypes() {
             var values = TranscriptEntryType.values();
-            assertEquals(15, values.length);
+            assertEquals(25, values.length);
             assertNotNull(TranscriptEntryType.valueOf("QUESTION"));
             assertNotNull(TranscriptEntryType.valueOf("SYNTHESIS"));
             assertNotNull(TranscriptEntryType.valueOf("SKIPPED"));
@@ -227,6 +277,17 @@ class GroupConversationTest {
             assertNotNull(TranscriptEntryType.valueOf("TASK_RESULT"));
             assertNotNull(TranscriptEntryType.valueOf("VERIFICATION"));
             assertNotNull(TranscriptEntryType.valueOf("FOLLOW_UP"));
+            // Wave 0, F4
+            assertNotNull(TranscriptEntryType.valueOf("ABSTAINED"));
+            assertNotNull(TranscriptEntryType.valueOf("DISSENT"));
+            assertNotNull(TranscriptEntryType.valueOf("CONVERGENCE"));
+            assertNotNull(TranscriptEntryType.valueOf("FACILITATION"));
+            assertNotNull(TranscriptEntryType.valueOf("VOTE"));
+            assertNotNull(TranscriptEntryType.valueOf("PROPOSAL"));
+            assertNotNull(TranscriptEntryType.valueOf("BARGAIN"));
+            assertNotNull(TranscriptEntryType.valueOf("HUMAN_INPUT"));
+            assertNotNull(TranscriptEntryType.valueOf("RETRO"));
+            assertNotNull(TranscriptEntryType.valueOf("BID"));
         }
 
         @Test
@@ -240,6 +301,18 @@ class GroupConversationTest {
             assertNotNull(GroupConversationState.valueOf("AWAITING_APPROVAL"));
             assertNotNull(GroupConversationState.valueOf("CLOSED"));
             assertNotNull(GroupConversationState.valueOf("CANCELLED"));
+        }
+
+        @Test
+        @DisplayName("DecisionType — all values")
+        void decisionTypes() {
+            var values = DecisionType.values();
+            assertEquals(5, values.length);
+            assertNotNull(DecisionType.valueOf("VERDICT"));
+            assertNotNull(DecisionType.valueOf("VOTE"));
+            assertNotNull(DecisionType.valueOf("AGREEMENT"));
+            assertNotNull(DecisionType.valueOf("AWARD"));
+            assertNotNull(DecisionType.valueOf("NONE"));
         }
     }
 

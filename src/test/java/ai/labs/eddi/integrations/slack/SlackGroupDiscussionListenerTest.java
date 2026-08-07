@@ -4,11 +4,15 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.Dissent;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -439,5 +443,54 @@ class SlackGroupDiscussionListenerTest {
         listener.onMemberPauseSkipped(new GroupConversationEventSink.MemberPauseSkippedEvent(
                 "a1", "Alice", 0, "Phase 1", "gated action"));
         verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("skipped"));
+    }
+
+    // ─── Decision reached (Wave 0, F3) ───
+
+    @Test
+    void onDecisionReached_verdict_postsTypeOutcomeAndWinner() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        var decision = new DecisionRecord(DecisionType.VERDICT, "PRO wins on argument quality", "PRO",
+                Map.of("PRO", 8, "CON", 5), List.of(), "debate-judgment", "Judgment", "raw text");
+
+        listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(decision));
+
+        // ROUND_TABLE is an EXPANDED style, so this posts channel-level (null
+        // thread) — verified three times against the same single invocation.
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("VERDICT"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("PRO wins on argument quality"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Winner: *PRO*"));
+    }
+
+    @Test
+    void onDecisionReached_withDissents_includesDissentCount() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        var dissents = List.of(new Dissent("a1", "Alice", "I still disagree"));
+        var decision = new DecisionRecord(DecisionType.AGREEMENT, "Compromise reached", null, null, dissents, "negotiation", "Bargain", null);
+
+        listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(decision));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Dissents: 1"));
+    }
+
+    @Test
+    void onDecisionReached_noneType_doesNotPost() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        var decision = new DecisionRecord(DecisionType.NONE, null, null, null, List.of(), "debate-judgment", "Judgment", "unparseable text");
+
+        listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(decision));
+
+        // Only the onGroupStart post — a NONE decision (parse-failure fallback) is
+        // the producing feature's own concern, not something to surface in Slack.
+        verify(slackApi, times(1)).postMessage(any(), any(), any(), any());
+    }
+
+    @Test
+    void onDecisionReached_nullDecision_doesNotThrowOrPost() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        assertDoesNotThrow(() -> listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(null)));
+
+        verify(slackApi, times(1)).postMessage(any(), any(), any(), any());
     }
 }

@@ -18,6 +18,21 @@ import java.util.*;
  * @author ginccc
  */
 public class ConversationMemorySnapshot {
+    /**
+     * Current document shape this code understands (Wave 0, F6). Bump whenever a
+     * Wave adds a field resume-time logic depends on, and register that version's
+     * migration in {@code ConversationSchemaMigrations}. Mirrors {@code
+     * GroupConversation#CURRENT_SCHEMA_VERSION} for the single-conversation HITL
+     * resume path.
+     */
+    public static final int CURRENT_SCHEMA_VERSION = 1;
+    /**
+     * The shape this specific document was last written in. Checked before a
+     * resume: newer than {@link #CURRENT_SCHEMA_VERSION} refuses (this deployment
+     * predates the document), older runs registered migrations forward. See
+     * {@code ConversationSchemaMigrations}.
+     */
+    private int schemaVersion = CURRENT_SCHEMA_VERSION;
     private String conversationId;
     private String agentId;
     private Integer agentVersion;
@@ -64,6 +79,14 @@ public class ConversationMemorySnapshot {
     @Override
     public int hashCode() {
         return conversationSteps != null ? conversationSteps.hashCode() : 0;
+    }
+
+    public int getSchemaVersion() {
+        return schemaVersion;
+    }
+
+    public void setSchemaVersion(int schemaVersion) {
+        this.schemaVersion = schemaVersion;
     }
 
     @JsonProperty("_id")

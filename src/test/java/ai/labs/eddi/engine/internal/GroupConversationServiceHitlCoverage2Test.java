@@ -603,15 +603,36 @@ class GroupConversationServiceHitlCoverage2Test {
 
     @SuppressWarnings("unchecked")
     @Test
-    @DisplayName("resolveParticipants: MODERATOR with no moderator configured → falls back to ALL")
-    void participantsModeratorMissingFallsBackAll() throws Exception {
+    @DisplayName("resolveParticipants: MODERATOR with no moderator configured → one deterministic synthesizer, not ALL")
+    void participantsModeratorMissingPicksFirstBySpeakingOrder() throws Exception {
+        // I3(a), a deliberate behavior change. This used to return every member,
+        // and executeDiscussion takes the LAST SYNTHESIS entry as the answer — so
+        // the conclusion was decided by whoever spoke last. The roster below is
+        // deliberately out of speaking order so "first" cannot be satisfied by
+        // list position, and has 3 members so a fallback-to-ALL cannot pass by
+        // coincidence of size.
         var phase = new DiscussionPhase("Mod", PhaseType.SYNTHESIS,
                 "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false);
-        var members = List.of(member());
+        var members = List.of(new GroupMember("late", "Late", 9, null),
+                new GroupMember("first", "First", 0, null),
+                new GroupMember("middle", "Middle", 4, null));
 
         var result = (List<GroupMember>) invoke(resolveParticipantsMethod(), phase, members, null);
 
-        assertEquals(members.size(), result.size(), "no moderator → ALL");
+        assertEquals(1, result.size(), "no moderator → exactly one synthesizer");
+        assertEquals("first", result.get(0).agentId(), "lowest speakingOrder synthesizes, not last-speaker-wins");
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    @DisplayName("resolveParticipants: MODERATOR with no moderator and no members → empty, not a phantom speaker")
+    void participantsModeratorMissingAndNoMembers() throws Exception {
+        var phase = new DiscussionPhase("Mod", PhaseType.SYNTHESIS,
+                "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false);
+
+        var result = (List<GroupMember>) invoke(resolveParticipantsMethod(), phase, List.<GroupMember>of(), null);
+
+        assertTrue(result.isEmpty());
     }
 
     @SuppressWarnings("unchecked")
@@ -669,6 +690,58 @@ class GroupConversationServiceHitlCoverage2Test {
 
         assertEquals(2, result.size());
         assertEquals("a", result.get(0).agentId(), "sorted by speakingOrder");
+    }
+
+    // =================================================================
+    // I7 — rosterWithRecruits
+    // =================================================================
+
+    @SuppressWarnings("unchecked")
+    private List<GroupMember> roster(AgentGroupConfiguration config, GroupConversation gc) throws Exception {
+        return (List<GroupMember>) invoke(method("rosterWithRecruits", AgentGroupConfiguration.class, GroupConversation.class),
+                config, gc);
+    }
+
+    private AgentGroupConfiguration configWith(List<GroupMember> members) {
+        var config = new AgentGroupConfiguration();
+        config.setMembers(members);
+        return config;
+    }
+
+    @Test
+    @DisplayName("rosterWithRecruits: recruits are appended to the configured roster")
+    void rosterIncludesRecruits() throws Exception {
+        var gc = new GroupConversation();
+        gc.addDynamicMember(new GroupMember("recruit", "Recruit", Integer.MAX_VALUE, "Reviewer"));
+
+        var result = roster(configWith(List.of(new GroupMember("a1", "A", 0, null))), gc);
+
+        assertEquals(2, result.size(), "a recruit that never reaches the speaker list can never speak");
+        assertEquals("a1", result.get(0).agentId());
+        assertEquals("recruit", result.get(1).agentId(), "recruits go last, so configured speaking order is untouched");
+    }
+
+    @Test
+    @DisplayName("rosterWithRecruits: no recruits leaves the configured roster untouched")
+    void rosterWithoutRecruitsIsUnchanged() throws Exception {
+        var configured = List.of(new GroupMember("a1", "A", 0, null));
+
+        assertEquals(configured, roster(configWith(configured), new GroupConversation()));
+        assertEquals(configured, roster(configWith(configured), null));
+    }
+
+    @Test
+    @DisplayName("rosterWithRecruits: an id already configured is not duplicated")
+    void rosterDeduplicates() throws Exception {
+        // Defence in depth: RecruitAgentTool refuses an existing member, but a
+        // persisted document from an older build could carry the overlap, and a
+        // duplicated member would speak twice per phase.
+        var gc = new GroupConversation();
+        gc.addDynamicMember(new GroupMember("a1", "A", Integer.MAX_VALUE, null));
+
+        var result = roster(configWith(List.of(new GroupMember("a1", "A", 0, null))), gc);
+
+        assertEquals(1, result.size());
     }
 
     // =================================================================

@@ -188,7 +188,7 @@ class CascadingModelExecutor {
      *             if all steps fail without producing any usable response
      */
     CascadeResult execute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
-                          LlmConfiguration.Task task, IConversationMemory memory, AgentOrchestrator agentOrchestrator,
+                          LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                           Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
                           ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws LifecycleException {
@@ -202,7 +202,7 @@ class CascadingModelExecutor {
      * overload never gates a tool call.
      */
     CascadeResult execute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
-                          LlmConfiguration.Task task, IConversationMemory memory, AgentOrchestrator agentOrchestrator,
+                          LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                           Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming)
             throws LifecycleException {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
@@ -210,7 +210,7 @@ class CascadingModelExecutor {
     }
 
     private CascadeResult doExecute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
-                                    LlmConfiguration.Task task, IConversationMemory memory, AgentOrchestrator agentOrchestrator,
+                                    LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                                     Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
                                     ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws LifecycleException {
@@ -581,7 +581,7 @@ class CascadingModelExecutor {
     private StepResult executeStepWithTimeout(ChatModel chatModel, StreamingChatModel streamingModel, ConversationEventSink eventSink,
                                               List<ChatMessage> messages, String systemMessage, String evaluationStrategy,
                                               LlmConfiguration.Task task, IConversationMemory memory,
-                                              AgentOrchestrator agentOrchestrator, boolean useAgentMode, ChatModel judgeModel,
+                                              IAgentOrchestrator agentOrchestrator, boolean useAgentMode, ChatModel judgeModel,
                                               HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy, long timeoutMs,
                                               ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws Exception {
@@ -663,7 +663,7 @@ class CascadingModelExecutor {
      * downgraded to judge/heuristic by {@link #resolveEffectiveStrategy}.
      */
     private StepResult executeAgentModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
-                                            LlmConfiguration.Task task, IConversationMemory memory, AgentOrchestrator agentOrchestrator,
+                                            LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                                             ChatModel judgeModel, HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy,
                                             ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws LifecycleException {
