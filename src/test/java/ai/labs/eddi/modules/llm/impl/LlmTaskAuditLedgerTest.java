@@ -312,6 +312,48 @@ class LlmTaskAuditLedgerTest {
         assertNull(stored.get(MemoryKeys.AUDIT_COST));
     }
 
+    @Test
+    @DisplayName("a plain priced model call accumulates its token cost — the common case is no longer $0")
+    void plainPricedCallAccumulatesTokenCost() throws Exception {
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any())).thenReturn(null);
+        when(chatModel.chat(anyList())).thenReturn(response("answer", 1000, 500, 1500));
+
+        var t = task("taskA");
+        t.setInputPricePer1M(1.0);
+        t.setOutputPricePer1M(2.0);
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        // 1000/1M * $1.00 + 500/1M * $2.00
+        assertEquals(0.002, auditCost(), 1e-9,
+                "an ordinary model call with configured prices must reach the ledger — I1's group ceiling reads this");
+    }
+
+    @Test
+    @DisplayName("a priced agent-mode turn sums its token cost with the tracked tool spend")
+    void plainPricedAgentModeSumsTokenAndToolCost() throws Exception {
+        agentReturns("done", new ArrayList<>(),
+                Map.of("tokenUsage", Map.of("inputTokens", 1000, "outputTokens", 500, "totalTokens", 1500),
+                        "toolCostUsd", 0.005));
+
+        var t = task("taskA");
+        t.setInputPricePer1M(1.0);
+        t.setOutputPricePer1M(2.0);
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        assertEquals(0.007, auditCost(), 1e-9, "token cost and tool cost are both real spend and must both be counted");
+    }
+
+    @Test
+    @DisplayName("an unpriced plain call still contributes exactly $0 — no behaviour change without prices")
+    void unpricedPlainCallStaysFree() throws Exception {
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any())).thenReturn(null);
+        when(chatModel.chat(anyList())).thenReturn(response("answer", 1000, 500, 1500));
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(task("taskA"))));
+
+        assertNull(stored.get(MemoryKeys.AUDIT_COST), "null prices mean unpriced — the cost key must stay absent");
+    }
+
     // ==================== cascade ====================
 
     @Test
@@ -346,6 +388,33 @@ class LlmTaskAuditLedgerTest {
         var tokenUsage = auditMap(MemoryKeys.AUDIT_TOKEN_USAGE);
         assertNotNull(tokenUsage);
         assertEquals(1000L, tokenUsage.get("inputTokens"));
+    }
+
+    @Test
+    @DisplayName("a cascade run with task-level prices set is priced by the cascade alone — never twice")
+    void cascadeIgnoresTaskLevelPricesSoTokensAreNeverPricedTwice() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("none");
+        cascade.setInputPricePer1M(1.0);
+        cascade.setOutputPricePer1M(2.0);
+        var step = new CascadeStep();
+        step.setType("openai");
+        step.setTimeoutMs(5000L);
+        cascade.setSteps(List.of(step));
+
+        when(chatModel.chat(anyList())).thenReturn(response("cascade answer", 1000, 500, 1500));
+
+        var t = task("taskA");
+        // Deliberately absurd task-level prices: if the plain-call pricing path also
+        // ran for a cascade turn, the assertion below would be off by dollars.
+        t.setInputPricePer1M(1000.0);
+        t.setOutputPricePer1M(1000.0);
+        t.setModelCascade(cascade);
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        assertEquals(0.002, auditCost(), 1e-9,
+                "cascade steps price themselves; task-level prices apply to plain calls only");
     }
 
     /**

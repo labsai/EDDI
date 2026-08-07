@@ -5,6 +5,26 @@
 
 ---
 
+## 💰 fix(llm): N1 — price ordinary model calls so the ledger's common case is no longer $0 (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+First of the three pre-feature defects from `planning/group-collaboration-NEXT.md` §2. `AUDIT_COST` was written from `cascadeCostUsd + toolCostUsd` only, so a plain model call — no cascade, no priced tool — contributed **$0.00**: I1's `maxCostPerDiscussion` ceiling could never trip for an ordinary group, and `memberCosts`/`totalCost` were served over REST as if authoritative.
+
+- **`LlmConfiguration.Task` gains `inputPricePer1M`/`outputPricePer1M`** — same names and nullable semantics as the cascade fields (null = unpriced, contributes $0), so nothing changes for anyone not setting prices. Config-driven per Golden Rule 1: no hardcoded provider price table — it would be wrong within weeks.
+- **The pricing arithmetic now lives once, in `TokenPricing.cost()`.** `CascadingModelExecutor.computeCost` (step→cascade price resolution) and `LlmTask.accumulateAuditEvidence` (task-level prices for plain calls) both delegate — the formula cannot drift between paths (§4.7 unification rule).
+- **Precedence is explicit, not accidental:** `accumulateAuditEvidence` discriminates on the presence of the `cascadeCostUsd` metadata key, which the cascade branch always writes. A cascade run is priced by its steps alone; task-level prices apply only to non-cascade calls — cascade steps may target entirely different models, so inheriting the task price would price the wrong model. (This matches the precedence concern pre-filed in `docs/superpowers/specs/2026-07-21-manager-coverage-backend-design.md`.) Pinned by a test with deliberately absurd task prices on a cascade turn.
+- **Validation:** negative task-level prices fail deployment (`CascadeConfigValidator`, same new-field hard-error rationale as cascade pricing; the validator now also runs its task-level block for cascade-less tasks).
+- **`GroupCostLedger`'s "Known gap (V1)" Javadoc** rewritten — the gap is closed; `totalCost` remains a lower bound only for members whose configs carry no prices.
+
+**Tests** (`LlmTaskAuditLedgerTest`, `CascadeConfigValidatorTest`): plain priced legacy call accumulates the expected dollars; priced agent-mode turn sums token + tool cost; unpriced call still writes no cost key; cascade with absurd task prices set is priced by the cascade alone; negative task price throws at deploy. **Mutation-checked:** reverting the pricing line to `0.0` fails exactly the two new priced-plain-call tests and nothing else.
+
+The group-side chain (AUDIT_COST → `GroupCostLedger` → ceiling policies ABORT/SYNTHESIZE_NOW) was already pinned end-to-end by `GroupConversationServiceCostCeilingTest` with stubbed member cost; what could not exist before this fix — a plain call producing nonzero AUDIT_COST — is now the pinned link.
+
+**Files:** `LlmConfiguration.java`, `TokenPricing.java` (new), `CascadingModelExecutor.java`, `LlmTask.java`, `CascadeConfigValidator.java`, `GroupCostLedger.java`, `docs/langchain.md`, tests.
+
+---
+
 ## 🔀 merge: bring `origin/main` (PR #627 HITL request pinning) into the branch (2026-08-07)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

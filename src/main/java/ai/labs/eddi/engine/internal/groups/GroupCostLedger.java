@@ -22,17 +22,13 @@ import java.util.Locale;
  * {@code memberCosts}/{@code totalCost} (Wave 0, F5), and enforces
  * {@code ProtocolConfig#maxCostPerDiscussion} against it (I1).
  * <p>
- * <b>Known gap (V1, confirmed):</b> {@link MemoryKeys#AUDIT_COST} — the value
- * this class reads — is written by {@code LlmTask.accumulateCost} from
- * {@code cascadeCostUsd + toolCostUsd} only. There is no dollar price table for
- * a non-cascade model completion anywhere in this codebase today
- * ({@code LlmTask}'s own Javadoc says so directly), so a member's own turn
- * contributes {@code $0} here unless the group's LLM config uses the
- * multi-model cascade (priced) or the turn called a priced tool. This is a
- * real, known undercount for the common case, not a bug in this class — I1 is
- * where model-call cost recording gets added, reusing whatever price source it
- * settles on. Until then, {@code totalCost} is a lower bound, not the true
- * total.
+ * <b>Coverage note:</b> {@link MemoryKeys#AUDIT_COST} — the value this class
+ * reads — sums the member conversation's LLM token spend (cascade step pricing,
+ * or the task-level {@code inputPricePer1M}/{@code outputPricePer1M} for plain
+ * calls) and its tracked tool cost. Pricing is config-driven with no built-in
+ * provider price table, so a member whose LLM config carries no prices still
+ * contributes {@code $0} of token cost here — for such members
+ * {@code totalCost} remains a lower bound.
  * <p>
  * Both {@code memberCosts} and the recomputed {@code totalCost} are set, never
  * incremented by a delta — each call replaces the member's entry with its

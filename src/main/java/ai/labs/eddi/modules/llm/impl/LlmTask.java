@@ -697,7 +697,7 @@ public class LlmTask implements ILifecycleTask {
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
 
-            accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task.getId());
+            accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
         }
 
         // Store tool trace if available
@@ -785,19 +785,26 @@ public class LlmTask implements ILifecycleTask {
      * plus every escalated cascade step and tool-loop iteration inside each. The
      * ledger has to report the turn's total, but {@code getLatestData} is
      * last-write-wins, so each contributor read-modify-writes rather than
-     * overwriting. Cost is the sum of the two dollar signals that actually exist:
-     * configured cascade LLM pricing and tracked tool cost. There is no token price
-     * table for non-cascade tasks, so those contribute tool cost only.
+     * overwriting. Cost sums the LLM token spend and the tracked tool cost. A
+     * cascade run prices its own steps and reports the total as
+     * {@code cascadeCostUsd}; a plain call is priced here from the task-level
+     * {@code inputPricePer1M}/{@code outputPricePer1M} — the key presence
+     * discriminates, so cascade tokens are never priced twice. Unpriced configs
+     * contribute $0 exactly as before.
      */
     private void accumulateAuditEvidence(IWritableConversationStep currentStep, Map<String, Object> responseMetadata,
-                                         List<Map<String, Object>> toolTrace, String llmTaskId) {
+                                         List<Map<String, Object>> toolTrace, Task task) {
         if (responseMetadata != null) {
-            if (responseMetadata.get("tokenUsage") instanceof Map<?, ?> tokenUsage) {
+            Map<?, ?> tokenUsage = responseMetadata.get("tokenUsage") instanceof Map<?, ?> tu ? tu : null;
+            if (tokenUsage != null) {
                 accumulateTokenUsage(currentStep, tokenUsage);
             }
-            accumulateCost(currentStep, asDouble(responseMetadata.get("cascadeCostUsd")) + asDouble(responseMetadata.get("toolCostUsd")));
+            double llmCostUsd = responseMetadata.containsKey("cascadeCostUsd")
+                    ? asDouble(responseMetadata.get("cascadeCostUsd"))
+                    : TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(), tokenUsage);
+            accumulateCost(currentStep, llmCostUsd + asDouble(responseMetadata.get("toolCostUsd")));
         }
-        accumulateToolCalls(currentStep, toolTrace, llmTaskId);
+        accumulateToolCalls(currentStep, toolTrace, task.getId());
     }
 
     private void accumulateTokenUsage(IWritableConversationStep currentStep, Map<?, ?> delta) {
@@ -1087,7 +1094,7 @@ public class LlmTask implements ILifecycleTask {
             // Known gap: the continuation's tokenUsage covers only the post-resume model
             // calls (see the comment above) — the pre-pause segment is not recoverable
             // here, so a paused turn's ledger entry under-reports by that segment.
-            accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task.getId());
+            accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
         }
 
         // Tool trace (mirror executeTask)
