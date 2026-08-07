@@ -5,6 +5,20 @@
 
 ---
 
+## 🧮 fix(groups): nested-group cost is summed per child discussion, not overwritten (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+The N1 fold-in flagged in `planning/group-collaboration-NEXT.md` §4. `GroupCostLedger.accumulateNestedGroupCost` keyed `memberCosts` by the GROUP member's `agentId`, but every turn of a GROUP member spawns a **fresh child discussion** whose `totalCost` starts at 0 — and the map records by replacement (idempotency invariant: one key = one conversation's cumulative cost). So child N's total replaced child N−1's, only the last child's spend survived the re-sum, and the parent's ceiling checks ran against an undercount.
+
+Fix keeps the replacement invariant instead of breaking it with deltas: the attribution key is now `agentId:childConversationId` — one key per child conversation, replacement stays idempotent, multiple children of the same member sum. A child without an id falls back to the plain agentId (old behaviour). No production reader indexes `memberCosts` by agentId — the map is serialized whole.
+
+`MemberTurnExecutorTest.executeGroupMemberTurn_rollsUpChildDiscussionCost` pinned the old single-key shape and was updated to the new contract. New `GroupCostLedgerTest` case: two children ($1.00, $0.50) of one member total $1.50, not $0.50. **Mutation-checked:** reverting to the agentId key fails exactly that new test.
+
+**Files:** `GroupCostLedger.java`, `GroupCostLedgerTest.java`, `MemberTurnExecutorTest.java`.
+
+---
+
 ## 💰 fix(llm): N1 — price ordinary model calls so the ledger's common case is no longer $0 (2026-08-07)
 
 **Repo:** EDDI (`fix/group-pre-feature-defects`)

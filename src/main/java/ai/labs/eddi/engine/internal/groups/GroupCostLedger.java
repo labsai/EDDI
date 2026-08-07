@@ -87,12 +87,23 @@ public final class GroupCostLedger {
      * this group's attribution, whole — the child's own {@code totalCost} already
      * reflects everything its own members accumulated (recursively, via this same
      * method for individual members).
+     * <p>
+     * Keyed per <em>child discussion</em>, not per member: {@code memberCosts}
+     * records by replacement, which is only idempotent when one key means one
+     * conversation's cumulative cost. Every turn of a GROUP member spawns a fresh
+     * child discussion whose {@code totalCost} starts at 0, so keying by agentId
+     * alone replaced child N−1's whole spend with child N's and only the last child
+     * survived the sum. The suffix restores the map's invariant; a child without an
+     * id (not yet persisted) falls back to the plain agentId.
      */
     public static void accumulateNestedGroupCost(GroupConversation gc, GroupMember member, GroupConversation subConversation) {
         if (subConversation == null) {
             return;
         }
-        recordAndReSum(gc, member.agentId(), subConversation.getTotalCost());
+        String attributionKey = subConversation.getId() != null
+                ? member.agentId() + ":" + subConversation.getId()
+                : member.agentId();
+        recordAndReSum(gc, attributionKey, subConversation.getTotalCost());
     }
 
     /**
