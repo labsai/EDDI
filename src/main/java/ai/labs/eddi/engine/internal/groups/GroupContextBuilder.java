@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.VoteConfig;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
@@ -184,6 +185,14 @@ public class GroupContextBuilder {
             }
             case VERIFY -> {
                 // Completed tasks populated by executeTaskPhase
+            }
+            case VOTE -> {
+                // I14: the ballot prompt renders the options and the JSON contract.
+                // Scope is NONE (save-time enforced), so no transcript context rides
+                // along — blindness is structural, not this template's doing.
+                var voteConfig = phase.voteConfig() != null ? phase.voteConfig() : new VoteConfig();
+                data.put("options", VoteTallyEngine.resolveOptions(voteConfig, transcript));
+                data.put("ballotContract", VoteTallyEngine.ballotContract(voteConfig.method()));
             }
             default -> {
                 // All PhaseType values handled above; default required by checkstyle
@@ -370,6 +379,9 @@ public class GroupContextBuilder {
             case PLAN -> TranscriptEntryType.PLAN;
             case EXECUTE -> TranscriptEntryType.TASK_RESULT;
             case VERIFY -> TranscriptEntryType.VERIFICATION;
+            // I14: ballots are VOTE entries — peer-hidden while their phase runs
+            // (F4's commit-reveal), public once it completes.
+            case VOTE -> TranscriptEntryType.VOTE;
         };
     }
 

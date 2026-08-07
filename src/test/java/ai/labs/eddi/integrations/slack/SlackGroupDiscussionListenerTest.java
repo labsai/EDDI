@@ -493,4 +493,33 @@ class SlackGroupDiscussionListenerTest {
 
         verify(slackApi, times(1)).postMessage(any(), any(), any(), any());
     }
+
+    // ─── Vote tally block (I14) ───
+
+    @Test
+    void onDecisionReached_voteWithTally_postsTheTallyBlock() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        var tally = Map.<String, Object>of(
+                "totals", Map.of("Ship it", 2.0, "Hold it", 1.0),
+                "validBallots", 3, "participants", 3);
+        var decision = new DecisionRecord(DecisionType.VOTE, "\"Ship it\" wins.", "Ship it", tally, List.of(),
+                "vote", "Ballot", null);
+
+        listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(decision));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Tally:"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Ship it — 2.0"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Ballots: 3 of 3"));
+    }
+
+    @Test
+    void onDecisionReached_voteWithMalformedTally_stillPostsWithoutThrowing() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        var decision = new DecisionRecord(DecisionType.VOTE, "outcome", "X",
+                Map.of("totals", "not-a-map"), List.of(), "vote", "Ballot", null);
+
+        assertDoesNotThrow(() -> listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(decision)));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Winner: *X*"));
+    }
 }

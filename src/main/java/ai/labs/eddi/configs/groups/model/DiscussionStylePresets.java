@@ -272,6 +272,26 @@ public final class DiscussionStylePresets {
             ]
             ```""";
 
+    /**
+     * The ballot prompt (I14). The JSON contract line is what
+     * {@code VoteTallyEngine}'s three-tier parse reads; the "vote independently"
+     * line is honesty, not the mechanism — independence is enforced structurally
+     * (PARALLEL + NONE scope + the pre-fan-out snapshot), so a model ignoring the
+     * instruction still cannot see any ballot cast this phase.
+     */
+    public static final String TEMPLATE_VOTE = """
+            The group must decide:
+            "{question}"
+
+            The options are:
+            {#for option in options}
+            - {option}
+            {/for}
+
+            As {displayName}, vote independently — you cannot see anyone else's ballot.
+            Respond with ONLY this JSON, no other text:
+            {ballotContract}""";
+
     // Template lookup by phase type
     private static final Map<PhaseType, String> DEFAULT_TEMPLATES = Map.ofEntries(
             Map.entry(PhaseType.OPINION, TEMPLATE_OPINION_INDEPENDENT),
@@ -284,7 +304,8 @@ public final class DiscussionStylePresets {
             Map.entry(PhaseType.SYNTHESIS, TEMPLATE_SYNTHESIS),
             Map.entry(PhaseType.PLAN, TEMPLATE_PLAN),
             Map.entry(PhaseType.EXECUTE, TEMPLATE_EXECUTE),
-            Map.entry(PhaseType.VERIFY, TEMPLATE_VERIFY));
+            Map.entry(PhaseType.VERIFY, TEMPLATE_VERIFY),
+            Map.entry(PhaseType.VOTE, TEMPLATE_VOTE));
 
     /**
      * Returns the default template for a given phase type.

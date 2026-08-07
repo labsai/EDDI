@@ -208,7 +208,7 @@ public class AgentGroupConfiguration {
      */
     public record DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
             boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
-            boolean allowAbstention) {
+            boolean allowAbstention, VoteConfig voteConfig) {
 
         /**
          * Convenience constructor with defaults: participants=ALL,
@@ -248,6 +248,102 @@ public class AgentGroupConfiguration {
                 boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence) {
             this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence, false);
         }
+
+        /**
+         * Backward-compatible constructor without {@code voteConfig} (I14) —
+         * {@code null} means a VOTE phase runs with {@link VoteConfig}'s defaults and
+         * every other phase type ignores it entirely.
+         */
+        public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
+                boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
+                boolean allowAbstention) {
+            this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence,
+                    allowAbstention, null);
+        }
+    }
+
+    /**
+     * Ballot rules for a {@link PhaseType#VOTE} phase (I14).
+     * <p>
+     * LLM ballots are <b>correlated</b> — shared priors, sycophancy — so the
+     * durable value of a vote is the auditable process artifact (tally, raw
+     * ballots, losing-side dissents), not the epistemics. Independence is
+     * engineered structurally: save-time validation forces VOTE phases to
+     * {@code PARALLEL} + {@code ContextScope.NONE}, so ballots are cast blind
+     * against the pre-fan-out transcript snapshot — commit-reveal for LLM purposes,
+     * not an instruction the model could ignore.
+     *
+     * @param method
+     *            {@code MAJORITY} — one option per ballot, highest weighted count
+     *            wins; {@code APPROVAL} — a ballot may approve several options.
+     *            Default MAJORITY
+     * @param optionsSource
+     *            where the ballot options come from. {@code EXPLICIT} (the reliable
+     *            path) takes {@code options} verbatim; {@code LAST_SYNTHESIS}
+     *            extracts {@code Option A: …} lines from the latest SYNTHESIS entry
+     *            — instruct the synthesis to emit that shape. Default
+     *            LAST_SYNTHESIS
+     * @param options
+     *            the explicit option texts, required (≥ 2) for EXPLICIT
+     * @param quorum
+     *            the fraction of participants that must cast a valid ballot for the
+     *            vote to decide, in (0, 1]. Abstentions and unparseable replies
+     *            count toward the denominator only — a mostly-silent team has NOT
+     *            reached quorum, and that is signal. Out-of-range values fall back
+     *            to the default 0.5
+     * @param weights
+     *            per-agentId ballot weights, default 1.0 each. Negative weights are
+     *            rejected at save time
+     * @param weightByConfidence
+     *            multiply each ballot by its self-reported 0..1 confidence
+     *            (ReConcile-style). Default off — self-reported confidence is
+     *            exactly as correlated as the ballots themselves; treat the
+     *            weighted tally as process record, not probability
+     * @param tiePolicy
+     *            what resolves a tie or a quorum failure: {@code MODERATOR_DECIDES}
+     *            (one moderator turn choosing among the tied options),
+     *            {@code HUMAN_DECIDES} (reserved for I6 human members — rejected at
+     *            save time until that ships), or {@code NO_DECISION} (default:
+     *            record {@code type=NONE} and carry on)
+     */
+    public record VoteConfig(VoteMethod method, OptionsSource optionsSource, List<String> options, double quorum,
+            Map<String, Double> weights, boolean weightByConfidence, TiePolicy tiePolicy) {
+
+        public static final double DEFAULT_QUORUM = 0.5;
+
+        /** Same normalization choke point as {@link GroupTaskConfig}. */
+        public VoteConfig {
+            method = method == null ? VoteMethod.MAJORITY : method;
+            optionsSource = optionsSource == null ? OptionsSource.LAST_SYNTHESIS : optionsSource;
+            options = options == null ? List.of() : List.copyOf(options);
+            if (quorum <= 0.0 || quorum > 1.0) {
+                quorum = DEFAULT_QUORUM;
+            }
+            weights = weights == null ? Map.of() : Map.copyOf(weights);
+            tiePolicy = tiePolicy == null ? TiePolicy.NO_DECISION : tiePolicy;
+        }
+
+        /**
+         * All defaults: MAJORITY, LAST_SYNTHESIS, quorum 0.5, unweighted, NO_DECISION.
+         */
+        public VoteConfig() {
+            this(VoteMethod.MAJORITY, OptionsSource.LAST_SYNTHESIS, List.of(), DEFAULT_QUORUM, Map.of(), false, TiePolicy.NO_DECISION);
+        }
+    }
+
+    /** How a {@link VoteConfig} counts ballots (I14). */
+    public enum VoteMethod {
+        MAJORITY, APPROVAL
+    }
+
+    /** Where a {@link VoteConfig}'s ballot options come from (I14). */
+    public enum OptionsSource {
+        LAST_SYNTHESIS, EXPLICIT
+    }
+
+    /** What resolves a tied or quorum-failed vote (I14). */
+    public enum TiePolicy {
+        MODERATOR_DECIDES, HUMAN_DECIDES, NO_DECISION
     }
 
     /**
@@ -323,7 +419,15 @@ public class AgentGroupConfiguration {
         /** Task execution by assigned agents. */
         EXECUTE,
         /** Verification of task results. */
-        VERIFY
+        VERIFY,
+        /**
+         * Explicit ballots (I14). Save-time validation forces VOTE phases to
+         * {@code PARALLEL} + {@code ContextScope.NONE} — ballot independence is
+         * enforced structurally (the pre-fan-out snapshot plus the F4 peer-visibility
+         * matrix mean no ballot can see another cast this phase), not advised in a
+         * prompt.
+         */
+        VOTE
     }
 
     public enum TurnOrder {

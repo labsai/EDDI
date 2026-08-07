@@ -160,6 +160,50 @@ Both caps are enforced independently: `maxPerTurn` bounds a runaway single turn,
 discussion cap counts only agent-filed tasks, so a large planned backlog does not
 exhaust it. A rejected call does not consume the per-turn budget.
 
+## Voting
+
+A `VOTE` phase collects **explicit ballots** instead of another round of prose.
+LLM ballots are correlated (shared priors, sycophancy) — the durable value is
+the auditable artifact: the weighted tally, every raw ballot, and the losing
+side's statements recorded as dissents on the `DecisionRecord`.
+
+```json
+{
+  "name": "Ballot", "type": "VOTE",
+  "turnOrder": "PARALLEL", "contextScope": "NONE",
+  "voteConfig": {
+    "method": "MAJORITY",
+    "optionsSource": "EXPLICIT",
+    "options": ["Adopt PostgreSQL", "Stay on MongoDB"],
+    "quorum": 0.5,
+    "weights": { "senior-architect": 2.0 },
+    "weightByConfidence": false,
+    "tiePolicy": "MODERATOR_DECIDES"
+  }
+}
+```
+
+**Independence is enforced structurally, not advised.** Save-time validation
+rejects a VOTE phase that is not `PARALLEL` + `contextScope: NONE`; ballots are
+cast blind against the pre-fan-out snapshot, and `VOTE` entries stay
+peer-hidden until their phase completes (commit-reveal).
+
+- **Ballot contract:** `{"vote": "<exact option text>", "confidence": <0..1>,
+  "statement": "..."}` (`APPROVAL` uses `"votes": [...]`). Three-tier parse:
+  strict JSON → JSON embedded in prose → a reply naming exactly one option's
+  text. Anything else is a non-ballot and **counts against quorum** — as do
+  abstentions; a mostly-silent team has not reached quorum, and that is signal.
+- **Options:** `EXPLICIT` is the reliable path. `LAST_SYNTHESIS` extracts
+  `Option A: …` lines from the newest synthesis — instruct that synthesis to
+  emit them.
+- **Ties and quorum failures** go to `tiePolicy`: `MODERATOR_DECIDES` runs one
+  moderator turn choosing among the unresolved options (method
+  `vote+moderator-tiebreak`); `NO_DECISION` (default) records an honest
+  `type: NONE` and the discussion continues. `HUMAN_DECIDES` is reserved for
+  human group members (I6) and is rejected at save time until then.
+- The result fires the `decision_reached` SSE event (which this feature also
+  wires for debate verdicts) and renders a tally block in Slack.
+
 ## Nested Groups (Group-of-Groups)
 
 Members can be other groups. The sub-group runs its own discussion and its synthesized answer becomes the member's response.

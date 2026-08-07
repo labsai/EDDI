@@ -843,11 +843,26 @@ public class GroupConversationService implements IGroupConversationService {
                         // verdict landing on top of a dissent-only record. Same
                         // last-repeat reasoning as below — a draft judgment is not the
                         // decision.
-                        phaseExecutionEngine.recordDebateVerdict(gc, config, phase, phaseIdx, speakers);
+                        boolean verdictRecorded = phaseExecutionEngine.recordDebateVerdict(gc, config, phase, phaseIdx, speakers);
                         if (config.isRecordDissents()) {
                             phaseExecutionEngine.runDissentRound(gc, config, phase, protocol, phaseIdx, speakers, listener,
                                     turnCounter, maxTurns);
                         }
+                        // I14 fold-in (§4 gap): decision_reached finally has a producer.
+                        // Fired AFTER the dissent round so the event's record carries the
+                        // merged dissents, and only for a real verdict — a prose-only
+                        // synthesis set no record worth announcing.
+                        if (verdictRecorded) {
+                            phaseExecutionEngine.fireDecisionReached(gc, listener);
+                        }
+                    }
+
+                    // I14: a completed VOTE phase tallies into a DecisionRecord (and
+                    // fires decision_reached itself). Last repeat only, same reasoning
+                    // as the verdict above — a re-balloting round's draft tally is not
+                    // the decision.
+                    if (phase.type() == PhaseType.VOTE && lastRepeat) {
+                        phaseExecutionEngine.recordVoteDecision(gc, config, phase, protocol, phaseIdx, repeatEntries, speakers, listener);
                     }
 
                     gc.setLastModified(Instant.now());

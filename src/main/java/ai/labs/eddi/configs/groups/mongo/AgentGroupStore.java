@@ -19,6 +19,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * DB-agnostic store for group configurations. Extends
@@ -41,6 +42,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
     public IResourceStore.IResourceId create(AgentGroupConfiguration groupConfiguration)
             throws IResourceStore.ResourceStoreException {
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
+        validateVotePhases(groupConfiguration);
         normalizeNonPositiveCostCeiling(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         return super.create(groupConfiguration);
@@ -52,6 +54,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
             IResourceStore.ResourceNotFoundException {
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
+        validateVotePhases(groupConfiguration);
         normalizeNonPositiveCostCeiling(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         return super.update(id, version, groupConfiguration);
@@ -101,6 +104,54 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                 .filter(p -> p != null && "MODERATOR".equalsIgnoreCase(p.participants()))
                 .map(DiscussionPhase::name)
                 .toList();
+    }
+
+    /**
+     * I14: VOTE phases are validated as HARD errors — the fields are new, so no
+     * stored config predating this release can trip them (same rationale as the
+     * cascade pricing validation). Ballot independence is the point of the PARALLEL
+     * + NONE requirement: enforced structurally at save time, not advised in a
+     * prompt at run time.
+     */
+    static void validateVotePhases(AgentGroupConfiguration groupConfiguration) {
+        List<DiscussionPhase> phases = groupConfiguration.getPhases();
+        if (phases == null) {
+            return;
+        }
+        for (int i = 0; i < phases.size(); i++) {
+            DiscussionPhase phase = phases.get(i);
+            if (phase == null || phase.type() != AgentGroupConfiguration.PhaseType.VOTE) {
+                continue;
+            }
+            String path = "phases[" + i + "] (VOTE)";
+            if (phase.turnOrder() != AgentGroupConfiguration.TurnOrder.PARALLEL) {
+                throw new IllegalArgumentException(path + " must use turnOrder PARALLEL — ballots are cast blind against the "
+                        + "pre-fan-out snapshot; a sequential vote lets later ballots read earlier ones");
+            }
+            if (phase.contextScope() != null && phase.contextScope() != AgentGroupConfiguration.ContextScope.NONE) {
+                throw new IllegalArgumentException(path + " must use contextScope NONE — ballot independence is enforced "
+                        + "structurally, not advised in the prompt");
+            }
+            if (phase.targetEachPeer()) {
+                throw new IllegalArgumentException(path + " must not use targetEachPeer");
+            }
+            var voteConfig = phase.voteConfig();
+            if (voteConfig == null) {
+                continue;
+            }
+            if (voteConfig.optionsSource() == AgentGroupConfiguration.OptionsSource.EXPLICIT && voteConfig.options().size() < 2) {
+                throw new IllegalArgumentException(path + " with optionsSource EXPLICIT needs at least 2 options");
+            }
+            if (voteConfig.tiePolicy() == AgentGroupConfiguration.TiePolicy.HUMAN_DECIDES) {
+                throw new IllegalArgumentException(path + ".tiePolicy HUMAN_DECIDES needs human group members (I6), which are "
+                        + "not available yet — use MODERATOR_DECIDES or NO_DECISION");
+            }
+            for (Map.Entry<String, Double> weight : voteConfig.weights().entrySet()) {
+                if (weight.getValue() == null || weight.getValue() < 0) {
+                    throw new IllegalArgumentException(path + ".weights['" + weight.getKey() + "'] must be >= 0");
+                }
+            }
+        }
     }
 
     /**

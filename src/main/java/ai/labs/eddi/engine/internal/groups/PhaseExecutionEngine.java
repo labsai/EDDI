@@ -404,6 +404,134 @@ public class PhaseExecutionEngine {
     }
 
     /**
+     * The conversation key the vote tiebreaker's private conversation lives under
+     * (I14). Not the moderator's agent id, for exactly
+     * {@link #JUDGE_CONVERSATION_KEY}'s reason: the tiebreak prompt must not become
+     * the moderator's recent history.
+     */
+    static final String TIEBREAK_CONVERSATION_KEY = "__vote_tiebreak";
+
+    /**
+     * Tallies a completed VOTE phase into the discussion's {@link DecisionRecord}
+     * and fires {@code decision_reached} (I14).
+     * <p>
+     * Quorum failures and ties go to the phase's {@code tiePolicy}:
+     * {@code MODERATOR_DECIDES} runs one moderator turn choosing among the
+     * unresolved options (method {@code vote+moderator-tiebreak});
+     * {@code NO_DECISION} records the honest {@code NONE}. {@code
+     * HUMAN_DECIDES} is save-time rejected until I6 ships human members, so
+     * reaching it here means hand-edited storage — it degrades to NO_DECISION with
+     * a WARN rather than guessing.
+     * <p>
+     * Like every decision producer, failure is prose-only, never a failed
+     * discussion.
+     */
+    public void recordVoteDecision(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase, ProtocolConfig protocol,
+                                   int phaseIdx, List<TranscriptEntry> repeatEntries, List<GroupMember> speakers,
+                                   GroupDiscussionEventListener listener) {
+        var voteConfig = phase.voteConfig() != null ? phase.voteConfig() : new AgentGroupConfiguration.VoteConfig();
+        List<TranscriptEntry> transcriptSnapshot;
+        synchronized (gc.getTranscript()) {
+            transcriptSnapshot = List.copyOf(gc.getTranscript());
+        }
+        List<String> options = VoteTallyEngine.resolveOptions(voteConfig, transcriptSnapshot);
+        if (options.size() < 2) {
+            LOGGER.warnf("Group %s: VOTE phase '%s' resolved %d option(s) — a vote needs at least two; recording NONE",
+                    gc.getId(), phase.name(), options.size());
+            setDecisionCarryingDissents(gc, new DecisionRecord(DecisionType.NONE,
+                    "The vote could not run: only " + options.size() + " option(s) were available.",
+                    null, null, List.of(), VoteTallyEngine.METHOD_VOTE, phase.name(), null));
+            fireDecisionReached(gc, listener);
+            return;
+        }
+
+        List<TranscriptEntry> ballots = repeatEntries.stream().filter(e -> e != null && e.type() == TranscriptEntryType.VOTE).toList();
+        int participants = speakers != null ? speakers.size() : ballots.size();
+        var outcome = VoteTallyEngine.tally(ballots, participants, options, voteConfig, phase.name());
+
+        DecisionRecord decision = outcome.decision();
+        if (!outcome.unresolvedOptions().isEmpty()) {
+            decision = switch (voteConfig.tiePolicy()) {
+                case MODERATOR_DECIDES -> moderatorTiebreak(gc, config, phase, protocol, phaseIdx, outcome, listener);
+                case HUMAN_DECIDES -> {
+                    LOGGER.warnf("Group %s: VOTE phase '%s' has tiePolicy HUMAN_DECIDES, which needs human group members (I6) — "
+                            + "recording NO_DECISION", gc.getId(), phase.name());
+                    yield outcome.decision();
+                }
+                case NO_DECISION -> outcome.decision();
+            };
+        }
+
+        setDecisionCarryingDissents(gc, decision);
+        LOGGER.infof("Group %s: VOTE phase '%s' concluded: %s", gc.getId(), phase.name(),
+                decision.type() == DecisionType.VOTE ? decision.outcome() : "no decision (" + decision.outcome() + ")");
+        fireDecisionReached(gc, listener);
+    }
+
+    /**
+     * One moderator turn choosing among the unresolved options. The reply is
+     * resolved by the same exact-scan rule as a tier-2 ballot; an unreadable reply
+     * keeps the tally's honest NONE.
+     */
+    private DecisionRecord moderatorTiebreak(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
+                                             ProtocolConfig protocol, int phaseIdx, VoteTallyEngine.TallyOutcome outcome,
+                                             GroupDiscussionEventListener listener) {
+        String moderatorAgentId = config.getModeratorAgentId();
+        if (moderatorAgentId == null || moderatorAgentId.isBlank()) {
+            LOGGER.warnf("Group %s: tiePolicy MODERATOR_DECIDES but the group names no moderatorAgentId — keeping NO_DECISION", gc.getId());
+            return outcome.decision();
+        }
+        String reason = outcome.quorumReached() ? "The vote tied between" : "The vote did not reach quorum; decide among";
+        String input = """
+                %s these options:
+                %s
+
+                As the moderator, choose exactly ONE. Reply with ONLY the exact text of the option you choose.
+                """.formatted(reason, outcome.unresolvedOptions().stream().map(o -> "- " + o).collect(Collectors.joining("\n")));
+        try {
+            var moderator = new GroupMember(moderatorAgentId, "Vote Tiebreaker", 0, "MODERATOR");
+            TranscriptEntry reply = memberTurnExecutor.executeAgentTurn(moderator, gc, input, protocol, phaseIdx, phase, null, listener,
+                    null, TIEBREAK_CONVERSATION_KEY);
+            String choice = VoteTallyEngine.resolveChoice(reply != null ? reply.content() : null, outcome.unresolvedOptions());
+            if (choice == null) {
+                LOGGER.warnf("Group %s: the tiebreaker's reply named no single option — keeping NO_DECISION", gc.getId());
+                return outcome.decision();
+            }
+            DecisionRecord base = outcome.decision();
+            return new DecisionRecord(DecisionType.VOTE,
+                    "\"%s\" chosen by the moderator (%s).".formatted(choice,
+                            outcome.quorumReached() ? "tie break" : "quorum failure"),
+                    choice, base.tally(), base.dissents(), VoteTallyEngine.METHOD_TIEBREAK, phase.name(),
+                    reply != null ? reply.content() : null);
+        } catch (Exception e) {
+            LOGGER.warnf("Group %s: vote tiebreak failed (%s) — keeping NO_DECISION", gc.getId(), e.getMessage());
+            return outcome.decision();
+        }
+    }
+
+    /** Immutable-record merge: a new decision keeps dissents already collected. */
+    private static void setDecisionCarryingDissents(GroupConversation gc, DecisionRecord decision) {
+        DecisionRecord existing = gc.getDecision();
+        if (existing != null && existing.dissents() != null && !existing.dissents().isEmpty()
+                && (decision.dissents() == null || decision.dissents().isEmpty())) {
+            decision = new DecisionRecord(decision.type(), decision.outcome(), decision.winner(), decision.tally(),
+                    existing.dissents(), decision.method(), decision.decidedAtPhase(), decision.raw());
+        }
+        gc.setDecision(decision);
+    }
+
+    /**
+     * The {@code decision_reached} producer (the §4 gap, folded in with I14): fired
+     * whenever a {@link DecisionRecord} lands on the discussion. The Slack listener
+     * skips {@code NONE} records itself; SSE forwards everything.
+     */
+    public void fireDecisionReached(GroupConversation gc, GroupDiscussionEventListener listener) {
+        if (listener != null && gc.getDecision() != null) {
+            listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(gc.getDecision()));
+        }
+    }
+
+    /**
      * Merges dissents into the discussion's {@code DecisionRecord}, creating a
      * {@code NONE}-type record when no decision-producing feature ran. Records are
      * immutable, so an existing one is rebuilt rather than mutated.

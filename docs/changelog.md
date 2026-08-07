@@ -5,6 +5,24 @@
 
 ---
 
+## 🗳️ feat(groups): I14 — voting with structural ballot independence (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i14-voting`)
+
+Second Wave 2 queue item. A `VOTE` phase collects explicit ballots; the deliverable is the **auditable process artifact** (weighted tally, raw ballots, losing-side dissents), not epistemics — LLM ballots are correlated and the plan says so out loud.
+
+- **Model:** `PhaseType.VOTE` (the new enum value flushed every exhaustive switch at compile time — `mapPhaseToEntryType` now maps to F4's existing `TranscriptEntryType.VOTE`, so commit-reveal peer-hiding worked before any new code ran); `VoteConfig` (MAJORITY|APPROVAL, EXPLICIT|LAST_SYNTHESIS options, quorum, per-agent weights, `weightByConfidence` — default off with the correlated-self-report caveat in its Javadoc — and `tiePolicy`) as a 12th `DiscussionPhase` component with the usual compat constructor.
+- **Independence is enforced, not advised:** `AgentGroupStore.validateVotePhases` HARD-rejects a VOTE phase that is not PARALLEL + `ContextScope.NONE` (plus: `targetEachPeer`, EXPLICIT with <2 options, negative weights). `HUMAN_DECIDES` is **save-time rejected until I6 ships human members** — the plan sequences I14 before I6, so shipping a silently-degrading enum value would be a lie; the queue's I6 item wires it. Deviation recorded here.
+- **`VoteTallyEngine`:** three-tier ballot parse mirroring `DebateVerdictParser` (strict JSON with `FAIL_ON_TRAILING_TOKENS` → embedded JSON → exactly-one-option text scan; out-of-contract votes are non-ballots, never write-ins), `Option A:` line extraction from the newest synthesis, weighted tally, quorum with abstentions/garbage counting against the denominator, dissents from losing statements.
+- **Wiring:** the discussion loop tallies on the VOTE phase's last repeat; `PhaseExecutionEngine.recordVoteDecision` applies the tie policy — `MODERATOR_DECIDES` runs one moderator turn under `__vote_tiebreak` (the judge's separate-conversation-key rule: a "reply with ONLY the option" prompt must not become the moderator's recent history), resolved by the same exact-scan rule as a ballot.
+- **`decision_reached` finally fires (the §4 gap, folded in as planned):** `fireDecisionReached` runs for vote decisions AND for I3 debate verdicts — after the dissent round, so the event's record carries the merged dissents. Slack renders a bounded tally block for VOTE records (instanceof-guarded — the tally map crossed serialization).
+
+**Tests (121 across the touched classes green; full `engine.internal` suite green; checkstyle clean):** parse tiers incl. ambiguous-two-options and out-of-contract refusals; label voting ("Option B" → positional); LAST_SYNTHESIS extraction (newest synthesis, colon and dash forms); weighted majority; exact tie → unresolved (never a winner by list position); confidence weighting on/off flips a tie; quorum arithmetic pinned to the "2 of 5" message; dissents + raw-ballot audit; tiebreak choice resolution; save-time validation matrix (PARALLEL/NONE/options/weights/HUMAN_DECIDES); service-level E2E: majority vote records the decision and fires `decision_reached` with the winner; tie + MODERATOR_DECIDES resolves via one tiebreak turn with method `vote+moderator-tiebreak`; tie + NO_DECISION records an honest NONE and the discussion does not fail; ballots land as VOTE entries. Slack tally block + malformed-tally no-throw.
+
+**Files:** `AgentGroupConfiguration` (VOTE + VoteConfig/VoteMethod/OptionsSource/TiePolicy), `AgentGroupStore`, `DiscussionStylePresets` (TEMPLATE_VOTE), `GroupContextBuilder` (VOTE branch + entry-type mapping), `VoteTallyEngine` (new), `PhaseExecutionEngine` (recordVoteDecision + fireDecisionReached), `GroupConversationService` (loop wiring), `SlackGroupDiscussionListener` (tally block), `docs/group-conversations.md`, 4 test classes.
+
+---
+
 ## 🔀 merge: bring `origin/main` (PR #627 HITL request pinning) into the branch (2026-08-07)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

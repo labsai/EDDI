@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
@@ -287,6 +288,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         if (decision.winner() != null && !decision.winner().isBlank()) {
             sb.append(String.format("Winner: *%s*\n", decision.winner()));
         }
+        appendVoteTally(sb, decision);
         if (decision.dissents() != null && !decision.dissents().isEmpty()) {
             sb.append(String.format("Dissents: %d\n", decision.dissents().size()));
         }
@@ -294,6 +296,34 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         String threadTs = expandedMode ? null : userThreadTs;
         postSafe(channelId, threadTs, sb.toString().stripTrailing());
     }
+
+    /**
+     * The per-option tally block for VOTE decisions (I14). Bounded and defensive:
+     * the tally map is model-shaped data that crossed serialization, so every read
+     * is instanceof-guarded rather than cast.
+     */
+    private static void appendVoteTally(StringBuilder sb, DecisionRecord decision) {
+        if (decision.type() != DecisionType.VOTE || decision.tally() == null) {
+            return;
+        }
+        Object totals = decision.tally().get("totals");
+        if (totals instanceof Map<?, ?> totalsMap && !totalsMap.isEmpty()) {
+            sb.append("Tally:\n");
+            totalsMap.entrySet().stream().limit(MAX_TALLY_LINES).forEach(entry -> sb.append(String.format("• %s — %s\n",
+                    entry.getKey(), entry.getValue())));
+            if (totalsMap.size() > MAX_TALLY_LINES) {
+                sb.append(String.format("… and %d more option(s)\n", totalsMap.size() - MAX_TALLY_LINES));
+            }
+        }
+        Object valid = decision.tally().get("validBallots");
+        Object participants = decision.tally().get("participants");
+        if (valid instanceof Number && participants instanceof Number) {
+            sb.append(String.format("Ballots: %s of %s\n", valid, participants));
+        }
+    }
+
+    /** Slack messages are skimmed, not scrolled — a ten-option tally is noise. */
+    private static final int MAX_TALLY_LINES = 6;
 
     // ─── HITL (human-in-the-loop) ───
 

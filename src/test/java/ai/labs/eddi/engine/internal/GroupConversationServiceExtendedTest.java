@@ -37,6 +37,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -143,6 +144,97 @@ class GroupConversationServiceExtendedTest {
     // =========================================================
     // startAndDiscussAsync
     // =========================================================
+
+    /**
+     * I14 — a VOTE phase end-to-end: blind parallel ballots, weighted tally, the
+     * DecisionRecord on the discussion, and decision_reached finally firing (the §4
+     * gap this item folds in).
+     */
+    @Nested
+    class VotePhases {
+
+        private AgentGroupConfiguration voteConfig(AgentGroupConfiguration.TiePolicy tiePolicy) {
+            var c = new AgentGroupConfiguration();
+            c.setName("Vote Group");
+            c.setStyle(DiscussionStyle.CUSTOM);
+            c.setModeratorAgentId("mod");
+            c.setMembers(List.of(new GroupMember("a1", "Alice", 1, null), new GroupMember("a2", "Bob", 2, null),
+                    new GroupMember("a3", "Carol", 3, null)));
+            c.setPhases(List.of(new AgentGroupConfiguration.DiscussionPhase("Ballot", PhaseType.VOTE, "ALL",
+                    TurnOrder.PARALLEL, ContextScope.NONE, false, null, 1, false, null, false,
+                    new AgentGroupConfiguration.VoteConfig(AgentGroupConfiguration.VoteMethod.MAJORITY,
+                            AgentGroupConfiguration.OptionsSource.EXPLICIT, List.of("Ship it", "Hold it"), 0.5,
+                            Map.of(), false, tiePolicy))));
+            c.setProtocol(new ProtocolConfig(60, ProtocolConfig.MemberFailurePolicy.SKIP, 2,
+                    ProtocolConfig.MemberUnavailablePolicy.SKIP));
+            return c;
+        }
+
+        @Test
+        void votePhase_majorityWins_recordsDecision_andFiresDecisionReached() throws Exception {
+            setupStore(voteConfig(AgentGroupConfiguration.TiePolicy.NO_DECISION));
+            stubAgent("a1", "{\"vote\": \"Ship it\", \"statement\": \"ready\"}");
+            stubAgent("a2", "{\"vote\": \"Ship it\"}");
+            stubAgent("a3", "{\"vote\": \"Hold it\", \"statement\": \"needs QA\"}");
+            var listener = mock(GroupDiscussionEventListener.class);
+
+            GroupConversation gc = service.discuss(GROUP_ID, "Release?", USER_ID, 0, listener);
+
+            assertNotNull(gc.getDecision());
+            assertEquals(GroupConversation.DecisionType.VOTE, gc.getDecision().type());
+            assertEquals("Ship it", gc.getDecision().winner());
+            assertEquals(1, gc.getDecision().dissents().size(), "the losing statement is the minority report");
+
+            var captor = ArgumentCaptor.forClass(GroupConversationEventSink.DecisionReachedEvent.class);
+            verify(listener).onDecisionReached(captor.capture());
+            assertEquals("Ship it", captor.getValue().decision().winner());
+        }
+
+        @Test
+        void votePhase_tie_moderatorDecides_viaOneTiebreakTurn() throws Exception {
+            var config = voteConfig(AgentGroupConfiguration.TiePolicy.MODERATOR_DECIDES);
+            config.setMembers(List.of(new GroupMember("a1", "Alice", 1, null), new GroupMember("a2", "Bob", 2, null)));
+            setupStore(config);
+            stubAgent("a1", "{\"vote\": \"Ship it\"}");
+            stubAgent("a2", "{\"vote\": \"Hold it\"}");
+            stubAgent("mod", "Hold it");
+
+            GroupConversation gc = service.discuss(GROUP_ID, "Release?", USER_ID, 0);
+
+            assertEquals(GroupConversation.DecisionType.VOTE, gc.getDecision().type());
+            assertEquals("Hold it", gc.getDecision().winner());
+            assertEquals("vote+moderator-tiebreak", gc.getDecision().method());
+        }
+
+        @Test
+        void votePhase_tie_noDecisionPolicy_recordsHonestNone_andContinues() throws Exception {
+            var config = voteConfig(AgentGroupConfiguration.TiePolicy.NO_DECISION);
+            config.setMembers(List.of(new GroupMember("a1", "Alice", 1, null), new GroupMember("a2", "Bob", 2, null)));
+            setupStore(config);
+            stubAgent("a1", "{\"vote\": \"Ship it\"}");
+            stubAgent("a2", "{\"vote\": \"Hold it\"}");
+
+            GroupConversation gc = service.discuss(GROUP_ID, "Release?", USER_ID, 0);
+
+            assertEquals(GroupConversation.DecisionType.NONE, gc.getDecision().type());
+            assertNull(gc.getDecision().winner());
+            assertNotEquals(GroupConversation.GroupConversationState.FAILED, gc.getState(),
+                    "an undecided vote is not a failed discussion");
+        }
+
+        @Test
+        void votePhase_ballotsAreVoteEntries_peerHiddenDuringTheirPhase() throws Exception {
+            setupStore(voteConfig(AgentGroupConfiguration.TiePolicy.NO_DECISION));
+            stubAgent("a1", "{\"vote\": \"Ship it\"}");
+            stubAgent("a2", "{\"vote\": \"Ship it\"}");
+            stubAgent("a3", "{\"vote\": \"Hold it\"}");
+
+            GroupConversation gc = service.discuss(GROUP_ID, "Release?", USER_ID, 0);
+
+            long voteEntries = gc.getTranscript().stream().filter(e -> e.type() == TranscriptEntryType.VOTE).count();
+            assertEquals(3, voteEntries, "each ballot is a VOTE transcript entry (F4 hides them until the phase ends)");
+        }
+    }
 
     @Nested
     class AsyncDiscussion {
