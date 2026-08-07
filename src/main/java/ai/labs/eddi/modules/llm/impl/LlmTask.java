@@ -854,7 +854,10 @@ public class LlmTask implements ILifecycleTask {
     }
 
     private void accumulateCost(IWritableConversationStep currentStep, double delta) {
-        if (delta <= 0.0) {
+        // !(delta > 0.0), not delta <= 0.0: NaN fails every comparison, so the
+        // latter admits it — and one NaN poisons the running total forever,
+        // silently disabling every dollar ceiling that compares against it.
+        if (!Double.isFinite(delta) || !(delta > 0.0)) {
             return;
         }
         double total = delta;

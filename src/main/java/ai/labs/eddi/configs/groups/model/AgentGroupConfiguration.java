@@ -158,6 +158,11 @@ public class AgentGroupConfiguration {
                 maxRecentEntries = DEFAULT_MAX_RECENT_ENTRIES;
             }
             summarizeOverflow = summarizeOverflow == null || summarizeOverflow;
+            // Blank identifiers ARE absent — every reader null-checks, and a
+            // whitespace-only provider reaching the summarization service would
+            // bypass the documented truncation fallback.
+            llmProvider = llmProvider == null || llmProvider.isBlank() ? null : llmProvider;
+            llmModel = llmModel == null || llmModel.isBlank() ? null : llmModel;
             inputPricePer1M = inputPricePer1M == null || inputPricePer1M < 0 ? null : inputPricePer1M;
             outputPricePer1M = outputPricePer1M == null || outputPricePer1M < 0 ? null : outputPricePer1M;
         }

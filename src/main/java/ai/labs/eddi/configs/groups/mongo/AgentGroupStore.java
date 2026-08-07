@@ -14,6 +14,7 @@ import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -118,9 +119,9 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         if (window == null || !window.enabled() || !Boolean.TRUE.equals(window.summarizeOverflow())) {
             return;
         }
-        if (window.llmProvider() == null || window.llmProvider().isBlank() || window.llmModel() == null || window.llmModel().isBlank()) {
+        if (window.llmProvider() == null || window.llmModel() == null) {
             LOGGER.warnf("Group '%s' enables contextWindow summarization but names no llmProvider/llmModel — "
-                    + "overflow will fall back to a plain truncation marker", groupConfiguration.getName());
+                    + "overflow will fall back to a plain truncation marker", LogSanitizer.sanitize(groupConfiguration.getName()));
         }
     }
 

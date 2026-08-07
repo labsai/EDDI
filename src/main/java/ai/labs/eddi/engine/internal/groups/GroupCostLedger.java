@@ -114,7 +114,11 @@ public final class GroupCostLedger {
      * is idempotent while distinct operations sum.
      */
     public static void recordSystemCost(GroupConversation gc, String key, double cost) {
-        if (key == null || cost <= 0.0) {
+        // !(cost > 0.0) rather than cost <= 0.0: NaN fails every comparison, so
+        // the latter would let a NaN through, poison totalCost, and silently
+        // disable the ceiling checks (NaN comparisons are all false). Infinity is
+        // rejected for the same reason — no finite ceiling could ever bind again.
+        if (key == null || !Double.isFinite(cost) || !(cost > 0.0)) {
             return;
         }
         recordAndReSum(gc, key, cost);

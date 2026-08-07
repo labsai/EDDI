@@ -38,6 +38,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
+import ai.labs.eddi.engine.internal.groups.GroupCostLedger;
 import ai.labs.eddi.engine.internal.groups.GroupHitlCoordinator;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.internal.groups.GroupLifecycleOps;
@@ -741,7 +742,13 @@ public class GroupConversationService implements IGroupConversationService {
                     // per member turn — that per-turn re-feeding is the quadratic
                     // cost the window exists to stop. A no-op unless the window is
                     // enabled and the transcript outgrew it since the last extension.
-                    contextBuilder.updateWindowSummary(gc, phase, config.getContextWindow(), summarizationService);
+                    // Ceiling-gated like the convergence judge and the dissent round:
+                    // summarization is optional spend, and a discussion that already
+                    // blew its budget must not pay for one more LLM call the next
+                    // executor's own gate is about to stop anyway.
+                    if (!GroupCostLedger.wouldExceedCeiling(gc, protocol)) {
+                        contextBuilder.updateWindowSummary(gc, phase, config.getContextWindow(), summarizationService);
+                    }
 
                     // I2: mark where this repeat's entries begin. TranscriptEntry
                     // carries phaseIndex but no repeat index, so with repeats > 1 the

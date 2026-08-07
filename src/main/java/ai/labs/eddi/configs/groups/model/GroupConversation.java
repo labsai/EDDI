@@ -83,14 +83,18 @@ public class GroupConversation {
     // turns a successful discussion into a FAILED one.
     private Map<String, String> memberDisplayNames = new ConcurrentHashMap<>();
     /**
-     * Per-member dollar-cost attribution (Wave 0, F5): agentId → that member's cost
-     * so far. For an individual agent, its own private conversation's cumulative
-     * tracked cost; for a {@code MemberType.GROUP} member, the child discussion's
-     * own {@link #totalCost} rolled up whole. See {@code GroupCostLedger}'s Javadoc
-     * for the known gap this reflects (V1: a non-cascade member turn's own
-     * model-completion cost is not tracked anywhere yet — I1 closes that).
-     * Thread-safe: PARALLEL phases accumulate from multiple member turns
-     * concurrently.
+     * Per-conversation dollar-cost attribution (Wave 0, F5): attribution key → that
+     * conversation's cumulative tracked cost. The invariant is <b>one key = one
+     * conversation</b> (recording is by replacement, which is only idempotent under
+     * that reading), so keys are NOT uniformly agent ids: an ordinary member's key
+     * is its agentId, a separate-conversation turn uses its conversation key (I2's
+     * {@code __convergence_judge}, I4's {@code __dissent__*}), and a nested GROUP
+     * member's children are keyed {@code agentId:childConversationId} — each turn
+     * of a GROUP member is a fresh child discussion, and a per-agent key would
+     * replace child N−1's whole spend with child N's. Consumers wanting a member's
+     * total must sum matching keys; {@link #totalCost} is always the sum of
+     * everything. Thread-safe: PARALLEL phases accumulate from multiple member
+     * turns concurrently.
      */
     private Map<String, Double> memberCosts = new ConcurrentHashMap<>();
     /**

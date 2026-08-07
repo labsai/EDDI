@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import ai.labs.eddi.modules.llm.impl.TokenPricing;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -335,12 +336,23 @@ public class GroupContextBuilder {
             return List.of();
         }
 
+        // Sequential phases hand in the LIVE synchronized transcript, which tool
+        // threads (e.g. a recruit's FACILITATION entry) can append to mid-render.
+        // Copy under the wrapper's own monitor — Collections.synchronizedList's
+        // add() locks the wrapper object, which is exactly what this locks — so
+        // the indexed walk below runs over one consistent view. Copying a
+        // snapshot the parallel path already made is a cheap re-wrap.
+        List<TranscriptEntry> entries;
+        synchronized (transcript) {
+            entries = List.copyOf(transcript);
+        }
+
         // Raw transcript indices ride along because the rolling summary's
         // summaryUpToIndex is a raw-transcript boundary, not a filtered-list one.
         List<Integer> rawIndices = new ArrayList<>();
         List<TranscriptEntry> filtered = new ArrayList<>();
-        for (int i = 0; i < transcript.size(); i++) {
-            TranscriptEntry e = transcript.get(i);
+        for (int i = 0; i < entries.size(); i++) {
+            TranscriptEntry e = entries.get(i);
             boolean included = e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
                     && e.type() != TranscriptEntryType.QUESTION && isVisibleToPeers(e, currentPhaseIdx) && switch (scope) {
                         case FULL -> true;
@@ -472,14 +484,18 @@ public class GroupContextBuilder {
         synchronized (gc.getTranscript()) {
             transcript = List.copyOf(gc.getTranscript());
         }
-        int coverThrough = transcript.size() - window.maxRecentEntries();
+        // The boundary counts VISIBLE (summarizable) entries back from the tail,
+        // not raw entries: bookkeeping rows (SKIPPED, CONVERGENCE, …) in the tail
+        // would otherwise shrink the verbatim window below maxRecentEntries while
+        // newer real contributions get summarized away.
+        int coverThrough = summaryBoundary(transcript, window.maxRecentEntries());
         int alreadyCovered = anonymous ? gc.getAnonymousSummaryUpToIndex() : gc.getSummaryUpToIndex();
         if (coverThrough <= alreadyCovered) {
             return;
         }
         if (summarizationService == null || window.llmProvider() == null || window.llmModel() == null) {
             LOGGER.warnf("Group %s: contextWindow.summarizeOverflow is on but no summarizer %s — falling back to plain truncation",
-                    gc.getId(), summarizationService == null ? "service is available" : "llmProvider/llmModel is configured");
+                    LogSanitizer.sanitize(gc.getId()), summarizationService == null ? "service is available" : "llmProvider/llmModel is configured");
             return;
         }
 
@@ -496,7 +512,8 @@ public class GroupContextBuilder {
             var result = summarizationService.summarizeWithUsage(content, WINDOW_SUMMARY_INSTRUCTIONS,
                     window.llmProvider(), window.llmModel());
             if (result.summary().isBlank()) {
-                LOGGER.warnf("Group %s: window summarization returned empty — keeping previous state, will retry next boundary", gc.getId());
+                LOGGER.warnf("Group %s: window summarization returned empty — keeping previous state, will retry next boundary",
+                        LogSanitizer.sanitize(gc.getId()));
                 return;
             }
             if (anonymous) {
@@ -513,22 +530,52 @@ public class GroupContextBuilder {
                     Map.of("inputTokens", result.inputTokens(), "outputTokens", result.outputTokens()));
             GroupCostLedger.recordSystemCost(gc, "system:summarizer:" + (anonymous ? "anon" : "full") + ":" + coverThrough, cost);
         } catch (Exception e) {
-            LOGGER.warnf("Group %s: window summarization failed (%s) — falling back to plain truncation for this window", gc.getId(),
-                    e.getMessage());
+            LOGGER.warnf("Group %s: window summarization failed (%s) — falling back to plain truncation for this window",
+                    LogSanitizer.sanitize(gc.getId()), e.getMessage());
         }
     }
 
     /**
-     * Renders transcript entries as summarizer input. Applies the same content
-     * exclusions the peer-visibility matrix applies to rendered context —
-     * bookkeeping a member never sees must not leak into a summary a member reads.
+     * The raw index the summary should cover through (exclusive): the position of
+     * the {@code maxRecentEntries}-th <em>summarizable</em> entry counted from the
+     * tail. {@code 0} when the transcript holds fewer than the cap — nothing to
+     * summarize yet.
+     */
+    static int summaryBoundary(List<TranscriptEntry> transcript, int maxRecentEntries) {
+        int visibleSeen = 0;
+        for (int i = transcript.size() - 1; i >= 0; i--) {
+            if (isSummarizable(transcript.get(i))) {
+                visibleSeen++;
+                if (visibleSeen == maxRecentEntries) {
+                    return i;
+                }
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * The shared content predicate for windowing: what counts toward the verbatim
+     * tail and what may enter a summary. The same exclusions the peer-visibility
+     * matrix applies to rendered context — bookkeeping a member never sees must not
+     * leak into a summary a member reads. (VOTE/BID need no phase check here:
+     * summaries are extended at phase boundaries, where every ballot on the
+     * transcript belongs to a completed phase.)
+     */
+    private static boolean isSummarizable(TranscriptEntry e) {
+        return e != null && e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
+                && e.type() != TranscriptEntryType.QUESTION && e.type() != TranscriptEntryType.ABSTAINED
+                && e.type() != TranscriptEntryType.CONVERGENCE && e.type() != TranscriptEntryType.FACILITATION;
+    }
+
+    /**
+     * Renders transcript entries as summarizer input, {@link #isSummarizable}
+     * entries only.
      */
     private static String renderForSummarizer(List<TranscriptEntry> entries, boolean anonymous) {
         var sb = new StringBuilder();
         for (TranscriptEntry e : entries) {
-            if (e.content() == null || e.type() == TranscriptEntryType.ERROR || e.type() == TranscriptEntryType.SKIPPED
-                    || e.type() == TranscriptEntryType.QUESTION || e.type() == TranscriptEntryType.ABSTAINED
-                    || e.type() == TranscriptEntryType.CONVERGENCE || e.type() == TranscriptEntryType.FACILITATION) {
+            if (!isSummarizable(e)) {
                 continue;
             }
             String label = anonymous ? "Anonymous" : e.speakerDisplayName();

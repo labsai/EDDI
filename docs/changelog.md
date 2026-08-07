@@ -5,6 +5,24 @@
 
 ---
 
+## 🔍 fix(review): PR #636 review findings — NaN cost guard, ceiling-gated summarizer, visible-entry boundary (2026-08-08)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`, PR [#636](https://github.com/labsai/EDDI/pull/636))
+
+Every reviewer finding on #636 triaged; the real ones fixed, each with a pinning test:
+
+- **NaN poisons the cost ledger (CodeRabbit, real).** Both `GroupCostLedger.recordSystemCost` and `LlmTask.accumulateCost` guarded with `delta <= 0.0` — NaN fails *every* comparison, so it slipped through, made `totalCost` NaN, and every ceiling comparison against NaN is false: the ceiling silently never fires again. Now `!Double.isFinite(x) || !(x > 0.0)`. Tests: NaN/∞/non-positive rejected in both accumulators.
+- **Summarizer spend must be ceiling-gated (Copilot, real).** The I9 boundary call now runs behind `GroupCostLedger.wouldExceedCeiling`, exactly like the convergence judge and the dissent round. The pinning test needed care — the first attempt was vacuous because the per-turn gate fired before any boundary could (mutation survived); rebuilt so the first phase completes under the gate while blowing the ceiling cumulatively. **Mutation-checked: removing the guard fails exactly this test.**
+- **Summary boundary counts raw entries, not visible ones (Copilot, real).** Bookkeeping rows (SKIPPED/CONVERGENCE/…) in the tail shrank the verbatim window below `maxRecentEntries` while newer real contributions got summarized away. New `summaryBoundary` walks back over `isSummarizable` entries (one shared predicate with `renderForSummarizer`). Test: bookkeeping interleaved in the tail keeps the 3 newest *visible* entries verbatim.
+- **Blank summarizer identifiers (CodeRabbit, real-minor).** Whitespace-only `llmProvider`/`llmModel` bypassed the null checks and reached `SummarizationService`. Normalized to null in `ContextWindowConfig`'s compact constructor (the one choke point); the store warn simplifies to null checks. Test: blank identifiers → truncation fallback, `verifyNoInteractions(summarizer)`.
+- **CodeQL log injection ×4 (real).** `gc.getId()` and the group name are caller-influenced; the three windowing WARNs and the save-time warn now go through `LogSanitizer.sanitize`.
+- **Live-transcript iteration (CodeRabbit, partly right).** The `updateWindowSummary` copy already held the correct monitor (`Collections.synchronizedList`'s mutex IS the wrapper object — the PhaseExecutionEngine comment documents this), but the windowed `filterByScope`'s indexed walk over the LIVE list could interleave with tool-thread appends (recruitment's FACILITATION entries). It now copies under the wrapper monitor first.
+- **`memberCosts` key shape (CodeRabbit, documentation).** The "agentId → cost" Javadoc was stale *before* the nested-cost fix — I2's `__convergence_judge` and I4's `__dissent__*` conversation keys already live in that map. Rewritten to the actual invariant: one key = one conversation, `totalCost` = sum of everything. Copying a member total onto `memberCosts[agentId]` (the suggested fix) would double-count in the re-sum.
+
+144 tests across the touched classes green; checkstyle clean.
+
+---
+
 ## 🪟 feat(groups): N2/I9 — transcript windowing for rendered member context (2026-08-07)
 
 **Repo:** EDDI (`fix/group-pre-feature-defects`)

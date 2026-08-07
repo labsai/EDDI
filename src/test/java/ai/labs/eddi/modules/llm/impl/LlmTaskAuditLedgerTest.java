@@ -313,6 +313,16 @@ class LlmTaskAuditLedgerTest {
     }
 
     @Test
+    @DisplayName("a NaN cost signal is rejected — one NaN would poison the running total and disable every ceiling")
+    void nanCostIsNeverAccumulated() throws Exception {
+        agentReturns("done", new ArrayList<>(), Map.of("toolCostUsd", Double.NaN));
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(task("taskA"))));
+
+        assertNull(stored.get(MemoryKeys.AUDIT_COST), "NaN fails every comparison, so a <=0 guard admits it");
+    }
+
+    @Test
     @DisplayName("a plain priced model call accumulates its token cost — the common case is no longer $0")
     void plainPricedCallAccumulatesTokenCost() throws Exception {
         when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any())).thenReturn(null);

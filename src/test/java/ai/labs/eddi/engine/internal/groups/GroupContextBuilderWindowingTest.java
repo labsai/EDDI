@@ -67,6 +67,14 @@ class GroupContextBuilderWindowingTest {
         return new TranscriptEntry("id-" + name, name, content, 0, "P", TranscriptEntryType.OPINION, Instant.now(), null, null);
     }
 
+    /**
+     * A process bookkeeping row — carries content but must never be windowed or
+     * summarized.
+     */
+    private TranscriptEntry bookkeeping(TranscriptEntryType type) {
+        return new TranscriptEntry(null, "System", "bookkeeping", 0, "P", type, Instant.now(), null, null);
+    }
+
     /** enabled, cap 3, summarize on, summarizer model configured, unpriced. */
     private ContextWindowConfig window() {
         return new ContextWindowConfig(true, 3, true, "openai", "gpt-4o-mini", null, null);
@@ -190,6 +198,44 @@ class GroupContextBuilderWindowingTest {
         assertFalse(secondContent.contains("aaa-1"), "already-summarized entries must not be re-fed — that is the incremental contract");
         assertEquals("SUMMARY-2", gc.getTranscriptSummary());
         assertEquals(4, gc.getSummaryUpToIndex());
+    }
+
+    /**
+     * Review finding (Copilot, PR #636): the boundary must count VISIBLE entries
+     * back from the tail, not raw entries — bookkeeping rows in the tail would
+     * otherwise shrink the verbatim window below the cap while newer real
+     * contributions get summarized away.
+     */
+    @Test
+    @DisplayName("the summary boundary counts visible entries — bookkeeping in the tail does not eat the verbatim window")
+    void boundaryCountsVisibleEntries_notRawOnes() {
+        var gc = gcWith(
+                entry("A", "aaa-1"), entry("B", "bbb-2"),
+                bookkeeping(TranscriptEntryType.SKIPPED), entry("C", "ccc-3"),
+                bookkeeping(TranscriptEntryType.CONVERGENCE), entry("D", "ddd-4"), entry("E", "eee-5"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(new SummarizationResult("S", 10, 5));
+
+        builder.updateWindowSummary(gc, opinionPhase(ContextScope.FULL), window(), summarizationService);
+
+        var content = ArgumentCaptor.forClass(String.class);
+        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString());
+        // Cap 3 → the verbatim tail must be the 3 newest VISIBLE entries
+        // (ccc-3, ddd-4, eee-5); only aaa-1 and bbb-2 may be summarized.
+        assertTrue(content.getValue().contains("aaa-1") && content.getValue().contains("bbb-2"), content.getValue());
+        assertFalse(content.getValue().contains("ccc-3"),
+                "counting raw entries would summarize ccc-3 because bookkeeping rows sit in the tail: " + content.getValue());
+    }
+
+    @Test
+    @DisplayName("a whitespace-only provider/model is absent — truncation fallback, never a summarizer call")
+    void blankSummarizerIdentifiers_meanAbsent() {
+        var gc = gcWith(entry("A", "c1"), entry("B", "c2"), entry("C", "c3"), entry("D", "c4"), entry("E", "c5"));
+        var blank = new ContextWindowConfig(true, 3, true, "  ", "\t", null, null);
+
+        builder.updateWindowSummary(gc, opinionPhase(ContextScope.FULL), blank, summarizationService);
+
+        verifyNoInteractions(summarizationService);
     }
 
     @Test
