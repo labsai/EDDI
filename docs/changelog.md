@@ -5,6 +5,27 @@
 
 ---
 
+## 🛡️ fix(ci): unblock the OpenSSF Branch-Protection check on release branches (2026-08-05)
+
+**Repo:** EDDI (`fix/scorecard-branch-protection`)
+
+Scorecard reported `Branch-Protection: 0` with 22 warnings, one per `release/5.0.1`–`release/5.6.0` branch. Root cause is not a regression in our settings: the check builds its branch list from `release.target_commitish` over the **30 most recent releases** (`clients/githubrepo/releases.go` calls `ListReleases` with an empty `ListOptions`, so one page, no pagination). Our 30 newest releases are `6.2.0` down to `5.0.1` — the eight 6.x releases target `main`, the twenty-two 5.x ones still target the `release/x.y.z` branch they were cut from. The final score is a normalised sum across *every* branch in that set with no release-branch exemption, so `main` scoring well was averaged against 22 zeros.
+
+**The branches were kept, not deleted.** Deleting them would have scored better in one step (only `main` left in the set), and 21 of 22 tips are identical to their tag so nothing would have been lost — except `release/5.6.0`, which carries `cf82cc06 "fixed release build"` one commit past the `5.6.0` tag and covered by no tag at all. More importantly the old GitHub releases point at these branches, so they stay. Protection was applied instead, via repository settings (not in this repo):
+
+- a **classic wildcard rule** on `release/*` — deletion and force-push blocked, PRs required with 2 approvals, code-owner review, status checks `Build & Test` + `CodeQL Analysis`
+- a **ruleset** `Frozen release branches` on `refs/heads/release/*` with `deletion` + `non_fast_forward` and **zero bypass actors**, which is what makes `branchProtectionAppliesToAdmins` resolve true (`EnforceAdmins = asPtr(len(BypassActors.Nodes) == 0)`)
+
+**Classic protection was chosen over expressing everything as a ruleset, deliberately.** Rulesets surface the admin-only fields (`RequiresStrictStatusChecks`, `DismissesStaleReviews`, `RequireLastPushApproval`), which would then have to be *true* on every branch to score — dragging `main` into up-to-date-before-merge and stale-review dismissal. Classic protection exposes only `refUpdateRule`, giving the release branches the same probe-availability profile as `main`. That uniformity also matters because `computeFinalScore` uses `scores[0].maxes` — an arbitrary entry of a Go map — as the max template for all branches, so branches with mismatched availability produce a score that varies run to run.
+
+**Why the action bump is the actual code change here.** Applying the above made the check report `-1`: `error during GetBranch(release/5.6.0): Resource not accessible by integration`. The pinned `scorecard-action@v2.4.3` ships scorecard **v5.3.0**, whose `branchesHandler.setup()` tolerates the permission error for the *default* branch but whose `query()` — used for every non-default branch — has no tolerance at all, so classic protection on a non-default branch is fatal under the read-only `GITHUB_TOKEN`. v5.5.0 added the same `isPermissionsError` guard to `query()`, tolerating it whenever the repo has at least one ruleset. `scorecard-action@v2.4.4` ships v5.5.0, so the pin moves to `2d1146689b8cda280b9bc96326124645441f03bc`.
+
+**Deliberately left off:** "require branches to be up to date", "dismiss stale reviews" and "include administrators" on the release rule. Those map to admin-only GraphQL fields that our read-only token cannot see, so they are scored `NotAvailable` and excluded from the max — enabling them buys zero points and only adds friction.
+
+**Expected result: 8/10**, with `main`'s merge workflow completely unchanged (still 1 approval, no code-owner gate, no rebase treadmill). The remaining 2 points require `main` itself to move to 2 approvals + code-owner review; that is a two-person dependency rather than a two-approval one while `.github/CODEOWNERS` lists only `@ginccc` and `@rolandpickl`, and widening it was explicitly deferred. The check re-runs on its own — `scorecard.yml` triggers on `branch_protection_rule`.
+
+---
+
 ## 🔒 fix(docker): move to the republished UBI base and retire the microdnf stopgap (2026-08-04)
 
 **Repo:** EDDI (`fix/base-image-cve-2026-47063`)
