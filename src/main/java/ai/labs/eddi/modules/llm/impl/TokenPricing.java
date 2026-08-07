@@ -16,8 +16,12 @@ import java.util.Map;
  * There is deliberately no built-in provider price table: prices are an
  * agent-designer concern and belong in configuration, where they can track
  * provider changes without a code release.
+ * <p>
+ * Public because the group transcript summarizer (I9,
+ * {@code GroupContextBuilder}) prices its own summarization calls with the same
+ * formula.
  */
-final class TokenPricing {
+public final class TokenPricing {
 
     private TokenPricing() {
     }
@@ -31,7 +35,7 @@ final class TokenPricing {
      *            the {@code tokenUsage} metadata map carrying
      *            {@code inputTokens}/{@code outputTokens} as numbers
      */
-    static double cost(Double inputPricePer1M, Double outputPricePer1M, Map<?, ?> tokenUsage) {
+    public static double cost(Double inputPricePer1M, Double outputPricePer1M, Map<?, ?> tokenUsage) {
         if (tokenUsage == null || (inputPricePer1M == null && outputPricePer1M == null)) {
             return 0.0;
         }

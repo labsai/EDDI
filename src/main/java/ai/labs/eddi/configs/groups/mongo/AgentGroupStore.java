@@ -43,6 +43,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
+        warnOnSummarizerlessWindow(groupConfiguration);
         return super.create(groupConfiguration);
     }
 
@@ -54,6 +55,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
+        warnOnSummarizerlessWindow(groupConfiguration);
         return super.update(id, version, groupConfiguration);
     }
 
@@ -101,6 +103,25 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                 .filter(p -> p != null && "MODERATOR".equalsIgnoreCase(p.participants()))
                 .map(DiscussionPhase::name)
                 .toList();
+    }
+
+    /**
+     * I9: a window that asks for summarization but names no summarizer model will
+     * silently degrade to the plain truncation marker at discussion time. Worth
+     * telling the author at save time, when they can still add
+     * {@code llmProvider}/{@code llmModel}. A warning, not a rejection — the
+     * truncation fallback is well-defined behaviour, same warn-not-reject shape as
+     * {@link #warnOnModeratorlessPhases}.
+     */
+    private void warnOnSummarizerlessWindow(AgentGroupConfiguration groupConfiguration) {
+        var window = groupConfiguration.getContextWindow();
+        if (window == null || !window.enabled() || !Boolean.TRUE.equals(window.summarizeOverflow())) {
+            return;
+        }
+        if (window.llmProvider() == null || window.llmProvider().isBlank() || window.llmModel() == null || window.llmModel().isBlank()) {
+            LOGGER.warnf("Group '%s' enables contextWindow summarization but names no llmProvider/llmModel — "
+                    + "overflow will fall back to a plain truncation marker", groupConfiguration.getName());
+        }
     }
 
     /**

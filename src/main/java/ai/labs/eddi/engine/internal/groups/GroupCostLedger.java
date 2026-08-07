@@ -107,6 +107,20 @@ public final class GroupCostLedger {
     }
 
     /**
+     * Attribution for spend the discussion's own machinery incurs — today the I9
+     * transcript summarizer. {@code key} must be unique per priced operation (e.g.
+     * {@code "system:summarizer:full:42"}, suffixed with the boundary it covered
+     * through): the map records by replacement, so a re-run of the same operation
+     * is idempotent while distinct operations sum.
+     */
+    public static void recordSystemCost(GroupConversation gc, String key, double cost) {
+        if (key == null || cost <= 0.0) {
+            return;
+        }
+        recordAndReSum(gc, key, cost);
+    }
+
+    /**
      * The pre-turn/pre-wave ceiling check (I1). If
      * {@code protocol.maxCostPerDiscussion()} is set and {@code gc.getTotalCost()}
      * has passed it, records a {@code SKIPPED} transcript entry naming the ceiling

@@ -145,6 +145,63 @@ public class GroupConversation {
     public void setRoundStartTranscriptIndex(int roundStartTranscriptIndex) {
         this.roundStartTranscriptIndex = roundStartTranscriptIndex;
     }
+
+    /**
+     * Rolling summary of transcript entries {@code [0, summaryUpToIndex)} for
+     * FULL-scope windowed rendering (I9), extended incrementally at phase
+     * boundaries by {@code GroupContextBuilder.updateWindowSummary}. A derived view
+     * only — the transcript itself is never modified. {@code null} until windowing
+     * first summarizes; legacy documents deserialize to exactly that state and
+     * simply start summarizing at the next boundary, so this is additive and needs
+     * no {@code CURRENT_SCHEMA_VERSION} bump.
+     */
+    private String transcriptSummary;
+    /** Exclusive raw-transcript index {@link #transcriptSummary} covers through. */
+    private int summaryUpToIndex;
+    /**
+     * The ANONYMOUS-scope twin of {@link #transcriptSummary}, built from
+     * "Anonymous"-labelled input so an ANONYMOUS phase's summary can never leak
+     * attribution (no de-anonymization). Kept separately rather than reusing the
+     * FULL summary, which contains real speaker names.
+     */
+    private String anonymousTranscriptSummary;
+    /**
+     * Exclusive raw-transcript index {@link #anonymousTranscriptSummary} covers
+     * through.
+     */
+    private int anonymousSummaryUpToIndex;
+
+    public String getTranscriptSummary() {
+        return transcriptSummary;
+    }
+
+    public void setTranscriptSummary(String transcriptSummary) {
+        this.transcriptSummary = transcriptSummary;
+    }
+
+    public int getSummaryUpToIndex() {
+        return summaryUpToIndex;
+    }
+
+    public void setSummaryUpToIndex(int summaryUpToIndex) {
+        this.summaryUpToIndex = summaryUpToIndex;
+    }
+
+    public String getAnonymousTranscriptSummary() {
+        return anonymousTranscriptSummary;
+    }
+
+    public void setAnonymousTranscriptSummary(String anonymousTranscriptSummary) {
+        this.anonymousTranscriptSummary = anonymousTranscriptSummary;
+    }
+
+    public int getAnonymousSummaryUpToIndex() {
+        return anonymousSummaryUpToIndex;
+    }
+
+    public void setAnonymousSummaryUpToIndex(int anonymousSummaryUpToIndex) {
+        this.anonymousSummaryUpToIndex = anonymousSummaryUpToIndex;
+    }
     private SharedTaskList taskList;
     /** Agents dynamically added during the discussion (recruited or created). */
     private List<AgentGroupConfiguration.GroupMember> dynamicMembers = new CopyOnWriteArrayList<>();

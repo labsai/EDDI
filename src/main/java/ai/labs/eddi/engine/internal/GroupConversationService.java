@@ -51,6 +51,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
+import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -207,6 +208,15 @@ public class GroupConversationService implements IGroupConversationService {
      */
     @Inject
     LiveDiscussionRegistry liveDiscussionRegistry;
+
+    /**
+     * Shared LLM summarization for I9 transcript windowing. Same field-injection
+     * pattern and null-safety as {@link #attachmentStore} — {@code null} in the
+     * direct-construction unit tests, where an enabled window falls back to the
+     * plain truncation marker instead of summarizing.
+     */
+    @Inject
+    SummarizationService summarizationService;
 
     // In-node fast-fail guard for concurrent post-discussion operations
     // (follow-up, continue, close) on the same conversation: a second
@@ -725,6 +735,13 @@ public class GroupConversationService implements IGroupConversationService {
                             startSpeakerIdx = resumePoint.speakerIdx();
                         }
                     }
+
+                    // I9: extend the rolling window summary this repeat's FULL/
+                    // ANONYMOUS-scope turns will render with. At the boundary, never
+                    // per member turn — that per-turn re-feeding is the quadratic
+                    // cost the window exists to stop. A no-op unless the window is
+                    // enabled and the transcript outgrew it since the last extension.
+                    contextBuilder.updateWindowSummary(gc, phase, config.getContextWindow(), summarizationService);
 
                     // I2: mark where this repeat's entries begin. TranscriptEntry
                     // carries phaseIndex but no repeat index, so with repeats > 1 the

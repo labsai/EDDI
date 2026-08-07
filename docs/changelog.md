@@ -5,6 +5,24 @@
 
 ---
 
+## 🪟 feat(groups): N2/I9 — transcript windowing for rendered member context (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+Third and last pre-feature item from `planning/group-collaboration-NEXT.md` §2 — a live cost bug, not a new collaboration mode: FULL-scope phases re-fed the entire transcript to every member every turn (~quadratic prompt cost), and every queued Wave 2/3 item makes transcripts longer. Landed in `GroupContextBuilder` per the plan (`### I9`, plan line ~337).
+
+- **Config:** `AgentGroupConfiguration.ContextWindowConfig` (`contextWindow`) — `enabled=false`, `maxRecentEntries=30`, `summarizeOverflow=true`, plus `llmProvider`/`llmModel` for the summarizer and optional `inputPricePer1M`/`outputPricePer1M` (I1 attribution, reusing N1's shared `TokenPricing`). Boolean-not-boolean for `summarizeOverflow` so an omitted JSON key means true; compact-constructor normalization in the `GroupTaskConfig` style. Save-time warn in `AgentGroupStore` when summarization is on but no model is named.
+- **Rendering:** windowed `filterByScope` overload — when the FULL/ANONYMOUS scope-filtered context exceeds the cap, older entries collapse into one leading "System" pseudo-entry: the rolling summary when it covers the omitted range, else the `[n earlier entries omitted]` truncation marker (the `summarizeOverflow=false` path and the failure fallback). The verbatim/summary split is the summary's **raw-transcript boundary**, so there is never a gap or duplication; between boundaries the tail may grow a few entries past the cap and the next boundary re-tightens. The stored transcript is never modified; signing verifies raw entries as before.
+- **Summaries:** extended **incrementally at phase boundaries only** (`updateWindowSummary`, called from the discussion loop before each repeat — never per member turn), previous summary + new slice, mirroring `ConversationSummarizer`'s self-correcting algorithm via the shared `SummarizationService` (unification rule). Failure or empty answer leaves stored state untouched: WARN, truncation fallback, next boundary catches up with a larger batch. Summarizer spend lands on the discussion ledger via `GroupCostLedger.recordSystemCost` keyed `system:summarizer:{variant}:{boundary}` (idempotent per extension, distinct extensions sum).
+- **One deliberate deviation from the plan text:** the plan named a single `transcriptSummary`/`summaryUpToIndex` pair *and* required ANONYMOUS summarizer input to use "Anonymous" labels. One shared summary cannot satisfy both — a FULL-built summary carries real names and would de-anonymize an ANONYMOUS phase through the back door. `GroupConversation` therefore carries a second, lazily-built pair (`anonymousTranscriptSummary`/`anonymousSummaryUpToIndex`); a group that never uses ANONYMOUS never pays for it. Fields are additive with correct defaults — no `CURRENT_SCHEMA_VERSION` bump (a legacy document simply starts summarizing at its next boundary).
+- **Wiring:** `PhaseExecutionEngine`'s three `buildPhaseInput` call sites pass `config.getContextWindow()` + gc; `SummarizationService` reaches the facade by the established field-injection pattern (null in direct-construction unit tests → truncation fallback). The I2 convergence judge's input is untouched (already bounded to two rounds); SYNTHESIS deliberately keeps the full picture.
+
+**Tests** (`GroupContextBuilderWindowingTest`, 13): boundary at exactly the cap (must exceed, not meet); truncation marker; summary + boundary-split tail (no gap/duplication); ANONYMOUS uses the anonymous summary and labels (the named FULL summary must not surface); incremental extension (second call sees previous summary + only the new slice); failure/empty-answer state untouched + rendering falls back; priced summarization reaches `totalCost`; no summarizer call outside its remit (wrong phase type/scope, below cap, summarization off); config normalization. **Mutation-checked:** re-feeding the whole prefix instead of the new slice fails exactly the incremental test. `PhaseExecutionEngineTest`'s input stub updated to the new 9-arg overload (same reasoning as its own comment: a shorter stub silently nulls every input). Full `engine.internal` suite: 1438 green; checkstyle clean.
+
+**Files:** `AgentGroupConfiguration.java`, `GroupConversation.java`, `GroupContextBuilder.java`, `PhaseExecutionEngine.java`, `GroupConversationService.java`, `GroupCostLedger.java`, `AgentGroupStore.java`, `TokenPricing.java` (now public), `docs/group-conversations.md`, `planning/group-collaboration-NEXT.md` (all three §2 items marked done), tests.
+
+---
+
 ## 🪜 fix(schema): N3 — legacy documents now enter the migration ladder at the bottom (2026-08-07)
 
 **Repo:** EDDI (`fix/group-pre-feature-defects`)

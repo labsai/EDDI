@@ -92,6 +92,78 @@ public class AgentGroupConfiguration {
     }
 
     /**
+     * Transcript windowing for rendered member context (I9). {@code null} means
+     * windowing is off — every FULL/ANONYMOUS-scope turn renders the whole
+     * scope-filtered transcript, exactly as before the feature existed.
+     */
+    private ContextWindowConfig contextWindow;
+
+    public ContextWindowConfig getContextWindow() {
+        return contextWindow;
+    }
+
+    public void setContextWindow(ContextWindowConfig contextWindow) {
+        this.contextWindow = contextWindow;
+    }
+
+    /**
+     * Bounds what a FULL/ANONYMOUS-scope member turn renders from the transcript
+     * (I9). Without it, every such turn re-feeds the entire transcript to every
+     * member — ~quadratic cost as the discussion grows. When the scope-filtered
+     * context exceeds {@link #maxRecentEntries}, the rendered context becomes
+     * {@code [summary of the older entries] + [the recent entries verbatim]} — a
+     * derived view only; the stored transcript is never modified and signing
+     * verification still operates on the raw entries.
+     *
+     * @param enabled
+     *            master switch, default off — a config that does not opt in renders
+     *            exactly as before
+     * @param maxRecentEntries
+     *            how many of the newest scope-filtered entries stay verbatim.
+     *            Non-positive falls back to {@link #DEFAULT_MAX_RECENT_ENTRIES} (an
+     *            accidental 0 must not blank the whole context)
+     * @param summarizeOverflow
+     *            {@code true} (default) compresses the older entries into a rolling
+     *            summary via the shared summarization service; {@code false}
+     *            replaces them with a plain "[n earlier entries omitted]" marker
+     *            and never calls an LLM
+     * @param llmProvider
+     *            provider for the summarization calls (e.g. "openai"). Required for
+     *            summarization — without it (or {@code llmModel}) the overflow
+     *            falls back to the truncation marker with a warning
+     * @param llmModel
+     *            model name for the summarization calls
+     * @param inputPricePer1M
+     *            optional USD price per 1M input tokens for the summarizer's own
+     *            calls, so their cost counts toward the discussion's I1 ledger.
+     *            Null or negative = unpriced ($0), same semantics as the LLM task
+     *            pricing fields
+     * @param outputPricePer1M
+     *            optional USD price per 1M output tokens, same semantics
+     */
+    public record ContextWindowConfig(boolean enabled, int maxRecentEntries, Boolean summarizeOverflow,
+            String llmProvider, String llmModel,
+            Double inputPricePer1M, Double outputPricePer1M) {
+
+        public static final int DEFAULT_MAX_RECENT_ENTRIES = 30;
+
+        /**
+         * Normalizes at the one choke point every reader passes through — same shape as
+         * {@link GroupTaskConfig}. {@code summarizeOverflow} is a Boolean rather than a
+         * boolean so an omitted JSON key defaults to {@code true} instead of silently
+         * disabling summarization.
+         */
+        public ContextWindowConfig {
+            if (maxRecentEntries <= 0) {
+                maxRecentEntries = DEFAULT_MAX_RECENT_ENTRIES;
+            }
+            summarizeOverflow = summarizeOverflow == null || summarizeOverflow;
+            inputPricePer1M = inputPricePer1M == null || inputPricePer1M < 0 ? null : inputPricePer1M;
+            outputPricePer1M = outputPricePer1M == null || outputPricePer1M < 0 ? null : outputPricePer1M;
+        }
+    }
+
+    /**
      * Governs agent-filed tasks (I5). The task list is otherwise written only by
      * the PLAN phase and by config, so work an agent <em>discovers</em> while
      * executing — a missing migration, an untested edge case — dies in prose. The

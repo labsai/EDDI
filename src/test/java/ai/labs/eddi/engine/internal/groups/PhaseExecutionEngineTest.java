@@ -53,11 +53,12 @@ class PhaseExecutionEngineTest {
     private PhaseExecutionEngine engine() {
         memberTurnExecutor = mock(MemberTurnExecutor.class);
         contextBuilder = mock(GroupContextBuilder.class);
-        // The 7-ARG overload — the only one PhaseExecutionEngine calls. Stubbing the
-        // 6-arg one left every turn running with a null input, so a regression that
-        // dropped the phase rendering entirely and passed the raw question through
-        // would not have failed a single test here.
-        when(contextBuilder.buildPhaseInput(any(), any(), any(), any(), anyInt(), any(), any()))
+        // The 9-ARG overload (I9 added window + gc) — the only one
+        // PhaseExecutionEngine calls. Stubbing a shorter one left every turn running
+        // with a null input, so a regression that dropped the phase rendering
+        // entirely and passed the raw question through would not have failed a
+        // single test here.
+        when(contextBuilder.buildPhaseInput(any(), any(), any(), any(), anyInt(), any(), any(), any(), any()))
                 .thenReturn("rendered-input");
         return new PhaseExecutionEngine(memberTurnExecutor, contextBuilder,
                 Executors.newVirtualThreadPerTaskExecutor(), new CallerIdentityContext(null, null));
