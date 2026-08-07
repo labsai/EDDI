@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Loader2, Sparkles, ShieldCheck, Lock } from "lucide-react";
+import { AlertTriangle, Loader2, Sparkles, ShieldCheck, ShieldAlert, ShieldQuestion, Lock, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,12 +10,16 @@ import { MODEL_SUGGESTIONS, isBaseUrlRequired } from "@/lib/model-suggestions";
 import { useVaultHealth } from "@/hooks/use-secrets";
 import { useAuth } from "@/hooks/use-auth";
 import {
-  OPERATOR_SAFETY_PREAMBLE,
-  OPERATOR_PROMPT_BODY,
+  safetyPreambleForScope,
+  defaultOperatorPromptBody,
 } from "@/lib/operator/system-prompt";
-import { READ_ENDPOINTS } from "@/lib/operator/tool-scopes";
+import {
+  endpointsForScope,
+  isWriteScopeAvailable,
+  type OperatorScope,
+} from "@/lib/operator/tool-scopes";
 import { extractVaultKeyName, toVaultRef } from "@/lib/operator/vault-ref";
-import type { OperatorConfig, OperatorAuthMode } from "@/lib/api/operator";
+import type { OperatorConfig, OperatorAuthMode, GateVerificationResult } from "@/lib/api/operator";
 import type { ActivationStage } from "@/hooks/use-operator";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +27,12 @@ interface OperatorActivationProps {
   initial: OperatorConfig;
   stage: ActivationStage;
   error: string | null;
+  /**
+   * The CURRENT operator's verified gate status — `initial.agentId`'s gate, not
+   * the one this form is about to provision. `undefined`/`null` for a
+   * never-activated operator, where there is nothing yet to have verified.
+   */
+  gate?: GateVerificationResult | null;
   onActivate: (config: OperatorConfig, apiKey: string, baseUrl?: string) => void;
   onCancel?: () => void;
 }
@@ -33,6 +43,7 @@ export function OperatorActivation({
   initial,
   stage,
   error,
+  gate,
   onActivate,
   onCancel,
 }: OperatorActivationProps) {
@@ -51,7 +62,6 @@ export function OperatorActivation({
   );
   const [baseUrl, setBaseUrl] = useState("");
   const [environment, setEnvironment] = useState(initial.environment);
-  const [promptBody, setPromptBody] = useState(initial.promptBody || OPERATOR_PROMPT_BODY);
   const [authMode, setAuthMode] = useState<OperatorAuthMode>(initial.authMode);
 
   const providerConfig = getProviderConfig(provider);
@@ -61,6 +71,97 @@ export function OperatorActivation({
   const vaultDown = vaultHealth != null && vaultHealth.available === false;
   const oidcEnabled = method === "keycloak";
   const busy = stage !== "idle" && stage !== "done";
+
+  /**
+   * Whether `read_write` can be offered at all — the same seam
+   * `isWriteScopeAvailable` guards everywhere else, evaluated here against
+   * what this form can actually know before submitting.
+   *
+   * `backendAcceptsHitlConfig` and `gateVerifiedOnEveryVersion` collapse to the
+   * SAME fact here: `gate.verified` (from re-reading every version of the
+   * CURRENT operator's document) cannot be true unless the backend both
+   * accepted `hitlConfig` and round-tripped it soundly, since that is exactly
+   * what verifying it checked. For a never-activated operator there is no
+   * `gate` yet — nothing has been provisioned to verify — so this is false
+   * until a first, read-only activation has proven the pipeline once.
+   *
+   * `approvalSurfaceMounted` is hardcoded true: this codebase's operator chat
+   * unconditionally renders `ApprovalBanner` whenever a conversation pauses,
+   * for every active operator — there is no configuration under which it
+   * would not be mounted.
+   */
+  const writeScopeFacts = {
+    backendAcceptsHitlConfig: gate?.verified ?? false,
+    gateVerifiedOnEveryVersion: gate?.verified ?? false,
+    authMode,
+    approvalSurfaceMounted: true,
+  };
+  const writeScopeAvailable = isWriteScopeAvailable(writeScopeFacts);
+
+  // `scope` remembers the admin's last EXPLICIT choice; `effectiveScope` is
+  // what everything below actually uses. They diverge exactly when the admin
+  // picked read_write and then something they also control (authMode) made it
+  // unavailable again — e.g. flipping back to "none" mid-form. Without this
+  // split the radio could stay visually "checked" on read_write while
+  // grantedEndpoints/safetyPreamble/handleActivate had silently reverted to
+  // read_only, or worse, handleActivate could submit a combination
+  // isWriteScopeAvailable itself would refuse.
+  const [scope, setScope] = useState<OperatorScope>(
+    initial.scope === "read_write" ? "read_write" : "read_only",
+  );
+  const effectiveScope: OperatorScope = scope === "read_write" && writeScopeAvailable ? "read_write" : "read_only";
+
+  const grantedEndpoints = useMemo(() => endpointsForScope(effectiveScope), [effectiveScope]);
+  const safetyPreamble = useMemo(() => safetyPreambleForScope(effectiveScope), [effectiveScope]);
+
+  const [promptBody, setPromptBody] = useState(
+    initial.promptBody || defaultOperatorPromptBody(effectiveScope),
+  );
+
+  /**
+   * Swaps the editable body to the new scope's default when the admin flips
+   * scope — but ONLY while it still exactly equals the CURRENT scope's own
+   * default. An admin who has customized the text gets to keep their
+   * customization; silently overwriting it because they toggled a radio
+   * button would be the kind of surprise this screen exists to avoid. An
+   * untouched body always equals its own scope's default and never the other
+   * scope's (the two are distinct strings — read_write's is read_only's plus
+   * one more section — and nothing else in this component writes `promptBody`
+   * outside the textarea's own `onChange`), so this single comparison is
+   * sufficient; it does not need to check both defaults.
+   */
+  function handleScopeChange(next: OperatorScope) {
+    if (promptBody === defaultOperatorPromptBody(effectiveScope)) {
+      setPromptBody(defaultOperatorPromptBody(next));
+    }
+    setScope(next);
+  }
+
+  /**
+   * The same swap, for when `effectiveScope` moves WITHOUT the admin touching the
+   * scope radio.
+   *
+   * `handleScopeChange` only fires on an explicit pick, but `effectiveScope` also
+   * changes on its own when `writeScopeAvailable` flips — most realistically when
+   * the admin selects read_write and then changes `authMode` away from
+   * caller-identity further up the form. Scope silently reverts to read_only while
+   * the body still describes write capability, and `handleActivate` submits that
+   * pair: an agent granted read-only endpoints but told it can change things.
+   *
+   * Compared against the PREVIOUS effective scope's default, because by the time
+   * this runs the current one has already changed — testing against the new
+   * default would never match and the body would never re-sync. A customized body
+   * equals neither default and is left alone, same contract as above.
+   */
+  const previousEffectiveScope = useRef(effectiveScope);
+  useEffect(() => {
+    const previous = previousEffectiveScope.current;
+    if (previous === effectiveScope) return;
+    previousEffectiveScope.current = effectiveScope;
+    setPromptBody((current) =>
+      current === defaultOperatorPromptBody(previous) ? defaultOperatorPromptBody(effectiveScope) : current,
+    );
+  }, [effectiveScope]);
 
   /**
    * With OIDC on, `none` produces tool calls with no Authorization header, which
@@ -95,7 +196,7 @@ export function OperatorActivation({
         promptBody,
         authMode,
         credentialKey: extractVaultKeyName(apiKey),
-        scope: "read_only",
+        scope: effectiveScope,
       },
       apiKey,
       baseUrl || undefined,
@@ -112,10 +213,17 @@ export function OperatorActivation({
         <p className="text-sm text-muted-foreground">
           {t("operator.activation.subtitle", "Choose the model that will run the operator, review its instructions, and deploy.")}
         </p>
-        <Badge variant="success" className="gap-1">
-          <Lock className="h-3 w-3" />
-          {t("operator.readOnlyChip", "Read-only")}
-        </Badge>
+        {effectiveScope === "read_write" ? (
+          <Badge variant="warning" className="gap-1" data-testid="operator-scope-chip">
+            <Unlock className="h-3 w-3" />
+            {t("operator.readWriteChip", "Read & write")}
+          </Badge>
+        ) : (
+          <Badge variant="success" className="gap-1" data-testid="operator-scope-chip">
+            <Lock className="h-3 w-3" />
+            {t("operator.readOnlyChip", "Read-only")}
+          </Badge>
+        )}
       </header>
 
       {step === "model" ? (
@@ -241,12 +349,19 @@ export function OperatorActivation({
               />
             </dl>
 
+            <ScopeField
+              effectiveScope={effectiveScope}
+              writeScopeAvailable={writeScopeAvailable}
+              hasExistingOperator={Boolean(initial.agentId)}
+              onChange={handleScopeChange}
+            />
+
             <Field
               label={t("operator.activation.safetyPreamble", "Safety rules (not editable)")}
               hint={t("operator.activation.safetyPreambleHint", "Always prepended. It tells the operator to treat everything its tools return as untrusted data.")}
             >
               <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-xs whitespace-pre-wrap text-muted-foreground">
-                {OPERATOR_SAFETY_PREAMBLE}
+                {safetyPreamble}
               </pre>
             </Field>
 
@@ -265,9 +380,13 @@ export function OperatorActivation({
               />
             </Field>
 
-            <Field label={t("operator.activation.tools", { toolCount: READ_ENDPOINTS.length })}>
+            <Field
+              label={t("operator.activation.tools", "Tools it will be given ({{toolCount}})", {
+                toolCount: grantedEndpoints.length,
+              })}
+            >
               <ul className="max-h-32 space-y-1 overflow-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-xs text-muted-foreground">
-                {READ_ENDPOINTS.map((e) => (
+                {grantedEndpoints.map((e) => (
                   <li key={e}>{e}</li>
                 ))}
               </ul>
@@ -313,6 +432,132 @@ export function OperatorActivation({
         </Card>
       )}
     </div>
+  );
+}
+
+/* ─── Scope ─── */
+
+interface ScopeFieldProps {
+  /**
+   * What is actually granted right now — never the admin's raw last click.
+   * The parent derives this from its own `scope` state plus
+   * `writeScopeAvailable`, so it already reflects a precondition lost after
+   * the fact (e.g. auth mode flipped away from caller-identity). Both radios'
+   * `checked` state and the write-warning notice below key off this alone —
+   * keying either off the raw selection instead would let the UI show a
+   * choice as active that will not actually be what gets submitted.
+   */
+  effectiveScope: OperatorScope;
+  writeScopeAvailable: boolean;
+  /** Whether this is a reconfigure of an already-verified operator, vs a
+   *  first-time activation with nothing yet to have verified. */
+  hasExistingOperator: boolean;
+  onChange: (scope: OperatorScope) => void;
+}
+
+/**
+ * Selects between read-only and read-write.
+ *
+ * Read-write is only ever offered once `writeScopeAvailable` holds — see
+ * `isWriteScopeAvailable`'s own doc comment: this is the one control in the
+ * whole app that turns it on, so the seam has to be enforced exactly here.
+ * The control is still SHOWN, disabled, when unavailable — an admin who never
+ * sees the option has no way to learn that reconfiguring later could offer
+ * it once a gate is verified.
+ */
+function ScopeField({ effectiveScope, writeScopeAvailable, hasExistingOperator, onChange }: ScopeFieldProps) {
+  const { t } = useTranslation();
+
+  const unavailableReason = writeScopeAvailable
+    ? null
+    : hasExistingOperator
+      ? t(
+          "operator.activation.scope.unavailableNotVerified",
+          "Not available yet — this operator's approval gate has not been verified as sound. Check connection on the status panel, or choose \"Your identity\" below, then reconfigure.",
+        )
+      : t(
+          "operator.activation.scope.unavailableFirstActivation",
+          "Not available on first activation. Activate read-only first to prove the approval gate is sound, then reconfigure to grant write access.",
+        );
+
+  return (
+    <Field
+      label={t("operator.activation.scope.label", "Capability")}
+      hint={t("operator.activation.scope.hint", "What the operator is allowed to do. Every write still pauses for your approval — see the safety rules below.")}
+      asGroup
+      groupRole="radiogroup"
+    >
+      <div className="space-y-2">
+        <label
+          className={cn(
+            "flex cursor-pointer gap-3 rounded-md border p-3 text-sm",
+            effectiveScope === "read_only" ? "border-primary bg-primary/5" : "border-border",
+          )}
+        >
+          <input
+            type="radio"
+            name="operator-scope"
+            value="read_only"
+            checked={effectiveScope === "read_only"}
+            onChange={() => onChange("read_only")}
+            className="mt-1"
+            data-testid="operator-scope-read_only"
+          />
+          <span>
+            <span className="font-medium">{t("operator.activation.scope.readOnly.label", "Read-only")}</span>
+            <span className="block text-xs text-muted-foreground">
+              {t("operator.activation.scope.readOnly.description", "Can inspect and explain this deployment. Cannot change anything.")}
+            </span>
+          </span>
+        </label>
+
+        <label
+          className={cn(
+            "flex gap-3 rounded-md border p-3 text-sm",
+            !writeScopeAvailable
+              ? "cursor-not-allowed opacity-60"
+              : effectiveScope === "read_write"
+                ? "cursor-pointer border-primary bg-primary/5"
+                : "cursor-pointer border-border",
+          )}
+        >
+          <input
+            type="radio"
+            name="operator-scope"
+            value="read_write"
+            checked={effectiveScope === "read_write"}
+            disabled={!writeScopeAvailable}
+            onChange={() => onChange("read_write")}
+            className="mt-1"
+            data-testid="operator-scope-read_write"
+          />
+          <span>
+            <span className="font-medium">{t("operator.activation.scope.readWrite.label", "Read & write")}</span>
+            <span className="block text-xs text-muted-foreground">
+              {t(
+                "operator.activation.scope.readWrite.description",
+                "Also lets it create and modify agents and agent groups, deploy, undeploy, disable a runaway schedule, and edit an agent's descriptor — each one paused for your approval first.",
+              )}
+            </span>
+          </span>
+        </label>
+      </div>
+
+      {unavailableReason && (
+        <Notice tone="info" icon={ShieldQuestion} testId="operator-scope-unavailable">
+          {unavailableReason}
+        </Notice>
+      )}
+
+      {effectiveScope === "read_write" && (
+        <Notice tone="warning" icon={ShieldAlert} testId="operator-scope-write-warning">
+          {t(
+            "operator.activation.scope.writeWarning",
+            "Activating will run a write canary: a real, harmless test write that must pause for approval before this deployment finishes. If it does not pause, activation is refused and the operator is removed rather than left deployed with an unverified write gate.",
+          )}
+        </Notice>
+      )}
+    </Field>
   );
 }
 

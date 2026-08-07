@@ -2790,6 +2790,8 @@
   },
   "hitl": {
     "loadingApprovalDetails": "Loading approval details…",
+    "pendingCount": "{{count}} awaiting approval",
+    "approvalDetailsError": "Couldn't load what this request would do, so it can't be approved from here. Rejecting is still safe.",
     "awaitingHuman": "Awaiting Human",
     "awaitingApproval": "Awaiting Approval",
     "approve": "Approve",
@@ -2834,6 +2836,9 @@
     "outcomeUnknown": "A previous approval was interrupted mid-execution — its effect is unknown; verify externally before retrying.",
     "outcomeUnknownShort": "outcome unknown",
     "toolApprovalHint": "Approve applies your per-call choices (calls you didn't change are approved). Reject rejects the whole batch.",
+    "toolApprovalHintExplicit": "Every call needs its own Approve or Reject before you can approve the batch. Reject rejects the whole batch.",
+    "explicitReviewMissing": "Review every call above before approving.",
+    "redactionCaveat": "Arguments shown below are redacted — a secret value appears as \"<REDACTED>\", not omitted.",
     "gateReason": "Matched pattern",
     "argsTruncated": "arguments truncated",
     "amendArguments": "Amend arguments (optional)",
@@ -2861,7 +2866,10 @@
     "confirmCancelGroupTitle": "Cancel discussion?",
     "confirmCancelGroupDescription": "Cancel this discussion? Any in-progress work is aborted.",
     "confirmCancelGroupButton": "Cancel discussion",
-    "confirmDismiss": "Go back"
+    "confirmDismiss": "Go back",
+    "approvalBlockedHeading": "This cannot be approved here",
+    "confirmRejectToolTitle": "Reject tool execution?",
+    "confirmRejectToolDescription": "Nothing will run. The conversation continues and the agent answers without {{toolNames}}."
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",
@@ -3087,6 +3095,7 @@
     "title": "Platform Operator",
     "subtitle": "Ask about this EDDI deployment — it looks things up for you.",
     "readOnlyChip": "Read-only",
+    "readWriteChip": "Read & write",
     "configError": "Couldn't load the operator configuration",
     "empty": {
       "title": "The Platform Operator is off",
@@ -3114,6 +3123,21 @@
       "authMode": "How the operator authenticates",
       "authModeHint": "The operator calls your EDDI admin API. This decides what credentials those calls carry.",
       "authNoneBlocked": "This deployment has authentication enabled, so unauthenticated tool calls would be rejected. The operator would deploy successfully and then fail every lookup. Choose \"Your identity\" instead.",
+      "scope": {
+        "label": "Capability",
+        "hint": "What the operator is allowed to do. Every write still pauses for your approval — see the safety rules below.",
+        "readOnly": {
+          "label": "Read-only",
+          "description": "Can inspect and explain this deployment. Cannot change anything."
+        },
+        "readWrite": {
+          "label": "Read & write",
+          "description": "Also lets it create and modify agents and agent groups, deploy, undeploy, disable a runaway schedule, and edit an agent's descriptor — each one paused for your approval first."
+        },
+        "unavailableNotVerified": "Not available yet — this operator's approval gate has not been verified as sound. Check connection on the status panel, or choose \"Your identity\" below, then reconfigure.",
+        "unavailableFirstActivation": "Not available on first activation. Activate read-only first to prove the approval gate is sound, then reconfigure to grant write access.",
+        "writeWarning": "Activating will run a write canary: a real, harmless test write that must pause for approval before this deployment finishes. If it does not pause, activation is refused and the operator is removed rather than left deployed with an unverified write gate."
+      },
       "safetyPreamble": "Safety rules (not editable)",
       "safetyPreambleHint": "Always prepended. It tells the operator to treat everything its tools return as untrusted data.",
       "promptBody": "Operator instructions",
@@ -3140,8 +3164,10 @@
       "provisioning": "Creating the operator agent…",
       "resolving-version": "Resolving the agent version…",
       "saving": "Saving configuration…",
+      "verifying-gate": "Verifying the approval gate…",
       "done": "Done",
-      "canary": "Checking the operator can reach your platform…"
+      "canary": "Checking the operator can reach your platform…",
+      "write-canary": "Running a real test write, which must pause for your approval…"
     },
     "status": {
       "title": "Operator",
@@ -3162,15 +3188,58 @@
       "deactivateConfirmBody": "The operator is undeployed and stops responding. Its configuration is kept, so you can turn it back on later.",
       "resetConfirmTitle": "Delete the Platform Operator?",
       "resetConfirmBody": "The operator agent and all the resources created for it are permanently deleted, along with its saved configuration. This cannot be undone.",
-      "connectionCheck": "Check connection"
+      "connectionCheck": "Check connection",
+      "gateChecking": "Verifying gate…",
+      "gateUnknown": "Gate not checked",
+      "gateVerified": "Gate verified",
+      "gateNotVerified": "Gate not verified",
+      "gateUnverifiedHelp": "The approval gate could not be verified on this agent's document."
     },
     "chat": {
       "empty": "Ask about your deployment. The operator looks things up and shows you every call it makes.",
       "placeholder": "Ask about agents, conversations, deployments, logs…",
+      "pausedPlaceholder": "Awaiting a decision above before the operator can continue…",
       "send": "Send",
       "stop": "Stop",
       "newConversation": "Start a new conversation",
-      "transcript": "Operator conversation"
+      "transcript": "Operator conversation",
+      "pauseCompactFallback": "The operator needs your approval before continuing.",
+      "pauseCompactReview": "Review to approve →"
+    },
+    "drawer": {
+      "title": "Platform Operator",
+      "notActivated": "Turn on the Platform Operator to chat with your deployment from anywhere.",
+      "titleAwaiting": "Platform Operator — a decision is waiting on you",
+      "activate": "Set up the Platform Operator"
+    },
+    "approval": {
+      "reconstructedEndpoint": "{{method}} {{path}} (reconstructed)",
+      "verified": "verified",
+      "verifiedTitle": "Resolved from the actual API call config; re-checked immediately before execution — if the request changes before then, execution is refused.",
+      "previewOnly": "preview",
+      "previewOnlyTitle": "This call runs additional setup steps before executing, so this is a best-effort preview — the actual request may differ and is not re-checked before execution.",
+      "query": "Query",
+      "headers": "Headers",
+      "bodyTruncated": "Body shown truncated for display — approval still covers the full request.",
+      "diffHeading": "Changes against the stored version {{version}}",
+      "diffLoading": "Loading the stored version to compare against…",
+      "diffFailed": "Couldn't load the stored version to compare against — the full proposed document is below.",
+      "diffForbidden": "Comparing against the stored version needs editor access — the full proposed document is below.",
+      "diffRedactionNote": "Credential values are redacted in the proposed version, so they appear as changes here even when unchanged.",
+      "showFullRequest": "Show the full proposed document",
+      "hideFullRequest": "Hide the full proposed document",
+      "expandBody": "Expand",
+      "escalation": {
+        "heading": "This request grants further capability",
+        "dynamicAgentCreation": "This group may create new agents while it runs. Those agents are not themselves approval-gated.",
+        "dynamicAgentRecruitment": "This group may pull other existing agents into its discussions.",
+        "autoApproveOnTimeout": "Approvals for this resource are granted automatically when they time out, with nobody watching.",
+        "agentCreatedWithoutGate": "This agent is being created with no approval gate. Every write it later makes will execute unsupervised.",
+        "agentCreatedWithBroadEndpoints": "This agent is being created with write access to its API — not limited to reads.",
+        "agentCreatedWithExternalTools": "This agent is being created with every tool an external MCP server offers. That server decides what those are, and can change them later.",
+        "unchecked": "The body was too long to scan for capability grants — read it in full before approving."
+      },
+      "blockedSelfTarget": "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page."
     },
     "starters": {
       "whatsDeployed": "What's deployed right now?",
@@ -3180,6 +3249,7 @@
     },
     "toast": {
       "activated": "Platform Operator activated",
+      "activatedReadWrite": "Platform Operator activated — write access verified",
       "deactivated": "Platform Operator deactivated",
       "reset": "Platform Operator deleted",
       "activatedButUnreachable": "Operator deployed, but it could not read your platform"

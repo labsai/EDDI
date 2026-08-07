@@ -4,6 +4,7 @@ import { Outlet } from "react-router-dom";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 import { ChatDrawer } from "@/components/chat/chat-drawer";
+import { OperatorDrawer } from "@/components/operator/operator-drawer";
 import { WelcomeModal } from "@/components/onboarding/welcome-modal";
 import { GuidedTour } from "@/components/onboarding/guided-tour";
 import { TourOfferBar } from "@/components/onboarding/tour-offer-bar";
@@ -95,6 +96,7 @@ export function AppLayout() {
         </main>
       </div>
       <ChatDrawer />
+      <OperatorDrawer />
       <WelcomeModal />
       <GuidedTour />
       <TourOfferBar />

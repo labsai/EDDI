@@ -11,14 +11,20 @@ import {
   undeployAgent,
   deployAgent,
   getDeploymentStatus,
+  getAgent,
+  type Agent,
 } from "./agents";
 import { startConversation, sendMessageStreaming, endConversation } from "./chat";
 import {
   buildEndpointFilter,
+  buildToolApprovals,
   parseEndpoint,
   type OperatorScope,
 } from "@/lib/operator/tool-scopes";
-import { buildOperatorSystemPrompt } from "@/lib/operator/system-prompt";
+import {
+  buildOperatorSystemPrompt,
+  defaultOperatorPromptBody,
+} from "@/lib/operator/system-prompt";
 
 /* ─── Config model ─── */
 
@@ -73,7 +79,10 @@ export interface OperatorConfig {
  */
 export const OPERATOR_VARIABLE_KEY = "platform.operator";
 
-export function defaultOperatorConfig(promptBody: string): OperatorConfig {
+export function defaultOperatorConfig(promptBody?: string): OperatorConfig {
+  // Derived from the scope set here rather than restated by callers, so the
+  // seeded body can never describe a capability this config does not grant.
+  const scope: OperatorScope = "read_only";
   return {
     enabled: false,
     agentId: null,
@@ -82,9 +91,9 @@ export function defaultOperatorConfig(promptBody: string): OperatorConfig {
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     credentialKey: null,
-    scope: "read_only",
+    scope,
     authMode: "none",
-    promptBody,
+    promptBody: promptBody ?? defaultOperatorPromptBody(scope),
   };
 }
 
@@ -228,7 +237,9 @@ export async function provisionOperator(
 
   return createApiAgent({
     agentName,
-    systemPrompt: buildOperatorSystemPrompt(config.promptBody),
+    // Same scope as the endpoint filter below, so the preamble describes the
+    // boundary the agent is actually behind.
+    systemPrompt: buildOperatorSystemPrompt(config.promptBody, config.scope),
     openApiSpec: JSON.stringify(spec.raw),
     provider: config.provider,
     model: config.model,
@@ -241,6 +252,14 @@ export async function provisionOperator(
     endpoints: buildEndpointFilter(config.scope),
     deploy: true,
     environment: config.environment,
+    // Sent unconditionally — including for read_only. See buildToolApprovals:
+    // installing the real gate now, on v1, is what verifyGateInstalled proves
+    // and what read_write reuses unchanged later. hitlConfig.timeoutPolicy is
+    // left unset deliberately: the per-tool toolApprovals.timeoutPolicy already
+    // pins WAIT_INDEFINITELY, and Task 10 on the backend demotes an *inherited*
+    // AUTO_APPROVE to WAIT_INDEFINITELY for tool pauses anyway — setting it here
+    // too would only be redundant, not safer.
+    hitlConfig: { toolApprovals: buildToolApprovals() },
   });
 }
 
@@ -301,6 +320,182 @@ export function parseVersionFromLocation(location: string): number | null {
   if (!match) return null;
   const value = Number(match[1]);
   return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/* ─── Gate verification ─── */
+
+/** Write patterns `buildToolApprovals` gates. An `exempt` entry equal to any of
+ *  these — or broad enough to subsume one — would exempt a write outright. */
+const GATED_WRITE_PATTERNS = ["http.post:*", "http.put:*", "http.patch:*", "http.delete:*"] as const;
+
+/** `exempt` patterns broad enough to swallow a gated write pattern above. */
+const OVERBROAD_EXEMPT_PATTERNS = ["*", "http.*", "http.*:*", ...GATED_WRITE_PATTERNS] as const;
+
+/**
+ * The method-qualified prefixes above, with the trailing `*` stripped —
+ * `["http.post:", "http.put:", "http.patch:", "http.delete:"]`.
+ *
+ * The blanket gate patterns already match every call of that method, so any
+ * pattern starting with one of these prefixes — narrow
+ * (`http.post:/agentstore/agents`) or equally broad (`http.post:*`) — addresses
+ * a strict subset of what the blanket pattern gates. No glob-intersection logic
+ * is needed: prefix membership alone is sufficient to prove overlap.
+ */
+const GATED_WRITE_PREFIXES = GATED_WRITE_PATTERNS.map((pattern) => pattern.slice(0, -1));
+
+/**
+ * Exempt prefixes that can match a write call.
+ *
+ * `http.*:` is included because the method segment is itself a wildcard, and
+ * `ToolApprovalPatterns.compile` turns `*` into `.*` — so an exempt of
+ * `http.*:/agentstore/agents` matches the address `http.post:/agentstore/agents`
+ * exactly as readily as the GET its author had in mind.
+ *
+ * Known limit: a pattern addressing a tool by its bare dispatch name (an exempt
+ * of `deployAgent`) also exempts a write, and cannot be recognised from the
+ * config alone — `ToolApprovalGate.addressesOf` matches bare names too, but the
+ * name-to-method mapping lives in the fetched spec, not here. The method-
+ * qualified forms below are what `buildToolApprovals` writes and what a hand
+ * edit realistically reaches for.
+ */
+const WRITE_EXEMPT_PREFIXES = [...GATED_WRITE_PREFIXES, "http.*:"] as const;
+
+export interface GateVerificationResult {
+  verified: boolean;
+  /** Human-readable cause of the first failure found; undefined when verified. */
+  reason?: string;
+  /** Agent versions actually inspected, 1..currentVersion. */
+  checkedVersions: number[];
+}
+
+/**
+ * Judges a single fetched agent document against what `buildToolApprovals`
+ * installs. Exported for direct unit testing without a network round trip.
+ */
+export function gateLooksInstalled(agent: Agent): { ok: boolean; reason?: string } {
+  const hitl = agent.hitlConfig;
+  if (!hitl) return { ok: false, reason: "hitlConfig is absent" };
+  if (hitl.timeoutPolicy === "AUTO_APPROVE") {
+    return { ok: false, reason: "hitlConfig.timeoutPolicy is AUTO_APPROVE" };
+  }
+  const toolApprovals = hitl.toolApprovals;
+  if (!toolApprovals) return { ok: false, reason: "hitlConfig.toolApprovals is absent" };
+  if (!toolApprovals.requireApproval || toolApprovals.requireApproval.length === 0) {
+    return { ok: false, reason: "toolApprovals.requireApproval is empty — the gate is inactive" };
+  }
+  // Non-empty is not the same as effective. `requireApproval: ["http.get:*"]`
+  // is a populated list that gates only reads, so every write runs unapproved
+  // while the config reads as gated at a glance — a decoy the length check
+  // alone accepts. At least one pattern must actually address a write.
+  //
+  // Known limit, the mirror of the one WRITE_EXEMPT_PREFIXES documents: a gate
+  // written against bare dispatch names (`requireApproval: ["deployAgent"]`)
+  // genuinely gates that write but cannot be recognised as such without the
+  // spec's name-to-method mapping, so it reports as ungated. That direction is
+  // the safe one — it withholds write scope, or raises a warning on a created
+  // agent, rather than certifying a gate nobody verified. `buildToolApprovals`
+  // writes the method-qualified form.
+  const gatesAWrite = toolApprovals.requireApproval.some(
+    (pattern) =>
+      pattern === "*" ||
+      pattern.startsWith("http.*") ||
+      GATED_WRITE_PREFIXES.some((prefix) => pattern.startsWith(prefix)),
+  );
+  if (!gatesAWrite) {
+    return {
+      ok: false,
+      reason: "toolApprovals.requireApproval gates no write method — reads only, so every write runs unapproved",
+    };
+  }
+  if (toolApprovals.timeoutPolicy === "AUTO_APPROVE") {
+    return { ok: false, reason: "toolApprovals.timeoutPolicy is AUTO_APPROVE" };
+  }
+  // `exempt` is the more dangerous of the two lists: ToolApprovalGate.classify
+  // tests it FIRST and short-circuits to `allowed`, so a matching entry means
+  // the call never pauses at all — strictly worse than an AUTO_APPROVE rule,
+  // which at least records a pause. It therefore gets the same prefix test the
+  // rules check below uses, not just an exact-match list: an exempt of
+  // `http.post:/agentstore/agents` is narrower than `http.post:*` and every bit
+  // as effective at un-gating that write.
+  const exempt = toolApprovals.exempt ?? [];
+  const overbroadExempt = exempt.find(
+    (pattern) =>
+      (OVERBROAD_EXEMPT_PATTERNS as readonly string[]).includes(pattern) ||
+      WRITE_EXEMPT_PREFIXES.some((prefix) => pattern.startsWith(prefix)),
+  );
+  if (overbroadExempt) {
+    return { ok: false, reason: `exempt pattern '${overbroadExempt}' would exempt a gated write` };
+  }
+  // A per-tool rule takes precedence over the toolApprovals-level scalar for any
+  // call it matches (the backend's ToolApprovalRules.governing — most specific
+  // statement wins), so a safe-looking top-level WAIT_INDEFINITELY does not
+  // guarantee the effective policy for a write endpoint actually IS
+  // WAIT_INDEFINITELY. Checking only the scalar above would let a rule such as
+  // { match: "http.post:/agentstore/agents", timeoutPolicy: "AUTO_APPROVE" }
+  // pass verification while that one endpoint auto-executes unreviewed.
+  const autoApproveWriteRule = (toolApprovals.rules ?? []).find(
+    (rule) =>
+      rule.timeoutPolicy === "AUTO_APPROVE" &&
+      GATED_WRITE_PREFIXES.some((prefix) => rule.match.startsWith(prefix)),
+  );
+  if (autoApproveWriteRule) {
+    return {
+      ok: false,
+      reason: `rule '${autoApproveWriteRule.match}' sets timeoutPolicy AUTO_APPROVE on a gated write`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Reads EVERY version of the agent document back and refuses unless the gate
+ * is verifiably installed and sane on each one.
+ *
+ * Checking only the currently-deployed version is not enough: version skew is
+ * real (a newer Manager against an older backend can have `hitlConfig` silently
+ * dropped from the request it sent, or an older, ungated version can still be
+ * reachable by a future redeploy), and the only defence is reading the actual
+ * stored documents back rather than trusting what was requested or what is
+ * currently live.
+ *
+ * `agentId` alone, not a config snapshot — the caller must not be able to
+ * short-circuit this with cached state.
+ */
+export async function verifyGateInstalled(agentId: string): Promise<GateVerificationResult> {
+  let currentVersion: number;
+  try {
+    currentVersion = (await api.get<number>(`/agentstore/agents/${agentId}/currentversion`)) ?? 0;
+  } catch (error) {
+    return {
+      verified: false,
+      reason: `could not resolve the current version: ${error instanceof Error ? error.message : String(error)}`,
+      checkedVersions: [],
+    };
+  }
+  if (currentVersion < 1) {
+    return { verified: false, reason: "no version of this agent could be resolved", checkedVersions: [] };
+  }
+
+  const versions = Array.from({ length: currentVersion }, (_, i) => i + 1);
+  const checkedVersions: number[] = [];
+  for (const version of versions) {
+    let agent: Agent;
+    try {
+      agent = await getAgent(agentId, version);
+    } catch (error) {
+      return {
+        verified: false,
+        reason: `version ${version} could not be read back: ${error instanceof Error ? error.message : String(error)}`,
+        checkedVersions,
+      };
+    }
+    checkedVersions.push(version);
+    const judged = gateLooksInstalled(agent);
+    if (!judged.ok) {
+      return { verified: false, reason: `version ${version}: ${judged.reason}`, checkedVersions };
+    }
+  }
+  return { verified: true, checkedVersions };
 }
 
 /* ─── Canary ─── */
@@ -488,4 +683,35 @@ export async function resetOperator(config: OperatorConfig): Promise<void> {
     });
   }
   await clearOperatorConfig();
+}
+
+/* ─── Metrics relay ─── */
+
+/**
+ * Report a client-run canary outcome onto this deployment's `/q/metrics`.
+ *
+ * Purely a relay — see `docs/hitl.md` (EDDI backend repo) "Operator canary/gate
+ * metrics" for why this has to exist at all: the canary runs entirely in this
+ * browser tab, and the backend has no server-side event to hang a meter on.
+ *
+ * Best-effort BY DESIGN: a caller must never let a failed report change the
+ * canary's own result. Losing the metric for one run is a worse UX than
+ * treating a Grafana dashboard as more important than the security probe it
+ * is merely reporting on.
+ */
+export async function reportOperatorCanaryResult(outcome: string, durationMs?: number): Promise<void> {
+  try {
+    await api.post("/administration/operator/canary-result", { outcome, durationMs });
+  } catch {
+    // See doc comment.
+  }
+}
+
+/** Report a client-run gate-verification outcome. Same best-effort contract as {@link reportOperatorCanaryResult}. */
+export async function reportOperatorGateStatus(verified: boolean): Promise<void> {
+  try {
+    await api.post("/administration/operator/gate-status", { verified });
+  } catch {
+    // Best-effort — see reportOperatorCanaryResult.
+  }
 }

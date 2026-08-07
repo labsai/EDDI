@@ -1,5 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Sparkles,
@@ -22,12 +23,18 @@ import {
   useDeactivateOperator,
   useResetOperator,
   useOperatorCanary,
+  useVerifyOperatorGate,
   seedConfig,
   type ActivationStage,
 } from "@/hooks/use-operator";
 import { useOperatorChat } from "@/hooks/use-operator-chat";
+import { useApprovalStatus } from "@/hooks/use-hitl";
 import { getErrorMessage } from "@/lib/api-client";
-import type { OperatorConfig } from "@/lib/api/operator";
+import { fetchOpenApiSpec, type OperatorConfig } from "@/lib/api/operator";
+import { buildOperationIdIndex, reconstructEndpoint } from "@/lib/operator/reconstruct-endpoint";
+import { findSelfTargetedCalls } from "@/lib/operator/self-guard";
+import { RequestPreview } from "@/components/operator/request-preview";
+import type { PendingToolCallView } from "@/lib/api/hitl";
 
 export function OperatorPage() {
   const { t } = useTranslation();
@@ -58,8 +65,105 @@ export function OperatorPage() {
   const reset = useResetOperator();
   const canary = useOperatorCanary();
 
+  const queryClient = useQueryClient();
   const status = useOperatorStatus(config);
+  const gate = useVerifyOperatorGate(config);
   const chat = useOperatorChat(config);
+
+  // Structured RULE/TOOL_CALL pause detail — the streamed `done` snapshot only
+  // carries the generic bookmark fields, not per-call tool names/arguments.
+  const approvalStatus = useApprovalStatus(chat.conversationId ?? undefined, chat.isPaused);
+
+  // Fetched once a pause needs it, cached for the tab: reconstructing "METHOD
+  // /path" for display is the same lookup on every pause, and the spec does
+  // not change between them.
+  const specQuery = useQuery({
+    queryKey: ["operator", "openapi-spec-for-reconstruction"],
+    queryFn: fetchOpenApiSpec,
+    enabled: chat.isPaused,
+    staleTime: Infinity,
+  });
+  const operationIdIndex = useMemo(
+    () => (specQuery.data ? buildOperationIdIndex(specQuery.data) : {}),
+    [specQuery.data],
+  );
+  /**
+   * Writes the operator aimed at its OWN agent document — refused, not merely
+   * flagged. See `self-guard.ts`: repointing its own agent is the hinge of the
+   * chain that ends with the operator running an LLM task whose `toolApprovals`
+   * has replaced the gate, redeployed via the deploy verb it legitimately
+   * holds. Every other write on this surface is reviewable; this is the one
+   * that removes the reviewing.
+   */
+  const blockedCalls = useMemo(() => {
+    const details = chat.isPaused ? approvalStatus.data?.pauseDetails : undefined;
+    // Narrowed on the discriminator rather than a `"calls" in` probe: a RULE
+    // pause has no per-call requests to target anything with.
+    const pending = details?.type === "TOOL_CALL" ? details.calls : undefined;
+    return findSelfTargetedCalls(pending, config?.agentId).map((hit) => ({
+      callId: hit.callId,
+      reason: t(
+        "operator.approval.blockedSelfTarget",
+        "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page.",
+        { agentId: hit.agentId },
+      ),
+    }));
+  }, [chat.isPaused, approvalStatus.data, config?.agentId, t]);
+  /**
+   * Resolve the pause, then DROP the cached approval-status.
+   *
+   * `useApprovalStatus` is keyed on the conversation id alone, and a turn may
+   * pause up to `maxPausesPerTurn` times (backend default 3). Without this, the
+   * second pause of a conversation would render the FIRST pause's cached
+   * `pauseDetails` — showing an approver a different set of tool calls than the
+   * one actually awaiting their decision. Removing rather than invalidating so
+   * the next pause starts at `undefined`, which drives `pauseDetailsPending`
+   * and keeps Approve disabled until the real details arrive.
+   *
+   * (`useResumeConversation` does this invalidation itself, but this surface
+   * calls `resumeConversation` directly — it also has to poll for the resumed
+   * turn's outcome, which that mutation does not do.)
+   */
+  const handleDecide = useCallback<typeof chat.resolveApproval>(
+    async (verdict, note, toolDecisions) => {
+      const conversationId = chat.conversationId;
+      try {
+        await chat.resolveApproval(verdict, note, toolDecisions);
+      } finally {
+        if (conversationId) {
+          queryClient.removeQueries({ queryKey: ["approval-status", conversationId] });
+        }
+      }
+    },
+    // `chat` is recreated each render; only these two members are used.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [chat.resolveApproval, chat.conversationId, queryClient],
+  );
+
+  const renderCallExtra = useCallback(
+    (call: PendingToolCallView) => {
+      // The backend's own resolved-request preview is ground truth — prefer it
+      // over guessing an endpoint client-side from the tool name's operationId.
+      // The client-side reconstruction remains only for a call the backend could
+      // not preview (a non-http tool source, or a pre-fix persisted pause).
+      if (call.requestPreview) {
+        return (
+          <RequestPreview preview={call.requestPreview} pinned={call.requestPinned} callId={call.callId} />
+        );
+      }
+      const endpoint = reconstructEndpoint(call.toolName, operationIdIndex);
+      if (!endpoint) return null;
+      return (
+        <p className="mb-1.5 font-mono text-[11px] text-muted-foreground" data-testid={`tool-endpoint-${call.callId}`}>
+          {t("operator.approval.reconstructedEndpoint", "{{method}} {{path}} (reconstructed)", {
+            method: endpoint.method,
+            path: endpoint.path,
+          })}
+        </p>
+      );
+    },
+    [operationIdIndex, t],
+  );
 
   const handleActivate = useCallback(
     (next: OperatorConfig, apiKey: string, baseUrl?: string) => {
@@ -80,7 +184,14 @@ export function OperatorPage() {
             chat.reset();
             if (outcome.canary.ok) {
               setCanaryWarning(null);
-              toast.success(t("operator.toast.activated", "Platform Operator activated"));
+              // A reachable onSuccess means the write canary either did not run
+              // (read_only) or passed — a non-"pass" result throws, landing in
+              // onError below with the agent already rolled back.
+              toast.success(
+                outcome.writeCanary
+                  ? t("operator.toast.activatedReadWrite", "Platform Operator activated — write access verified")
+                  : t("operator.toast.activated", "Platform Operator activated"),
+              );
             } else {
               setCanaryWarning(outcome.canary.error ?? t("operator.canary.genericFailure", "The connection check did not succeed."));
               toast.warning(t("operator.toast.activatedButUnreachable", "Operator deployed, but it could not read your platform"));
@@ -188,6 +299,7 @@ export function OperatorPage() {
           initial={seedConfig(config)}
           stage={stage}
           error={activationError}
+          gate={gate.data}
           onActivate={handleActivate}
           onCancel={() => {
             setShowActivation(false);
@@ -307,11 +419,31 @@ export function OperatorPage() {
           onSend={chat.send}
           onStop={chat.stop}
           onReset={chat.reset}
+          isPaused={chat.isPaused}
+          // approval-status first: the chat hook derives its own pauseReason from
+          // getSimpleConversationLog, which does not carry one — so on the 409 and
+          // re-pause paths it is always null. This endpoint is the one that has it,
+          // along with the timeout fields the countdown needs.
+          pauseReason={approvalStatus.data?.pauseReason ?? chat.pauseReason}
+          pausedAt={approvalStatus.data?.pausedAt}
+          timeoutPolicy={approvalStatus.data?.timeoutPolicy}
+          approvalTimeout={approvalStatus.data?.approvalTimeout}
+          pauseDetails={chat.isPaused ? approvalStatus.data?.pauseDetails : undefined}
+          pauseDetailsPending={chat.isPaused && approvalStatus.isLoading}
+          pauseDetailsError={chat.isPaused && approvalStatus.isError}
+          onRetryPauseDetails={() => void approvalStatus.refetch()}
+          isResolvingPause={chat.isResolvingPause}
+          resolveError={chat.resolveError}
+          onDecide={handleDecide}
+          blockedCalls={blockedCalls}
+          renderCallExtra={renderCallExtra}
         />
         <OperatorStatusPanel
           config={config!}
           status={status.data}
           statusLoading={status.isLoading}
+          gate={gate.data}
+          gateLoading={gate.isLoading}
           onReconfigure={() => setShowActivation(true)}
           onDeactivate={handleDeactivate}
           onReset={handleReset}

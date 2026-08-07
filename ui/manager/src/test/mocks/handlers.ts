@@ -4796,6 +4796,14 @@ export const backupSyncHandlers = [
     return new HttpResponse(null, { status: 200 });
   }),
 
+  // Operator canary/gate metrics relay — best-effort by contract (see
+  // reportOperatorCanaryResult/reportOperatorGateStatus), but tests that
+  // don't care about it still trigger it as a side effect of gate
+  // verification and the write canary. Without a default, every one of them
+  // logs an MSW "unhandled request" warning that drowns out real ones.
+  http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
+  http.post("*/administration/operator/gate-status", () => new HttpResponse(null, { status: 204 })),
+
   http.get("*/agents/:conversationId/approval-status", () => {
     return HttpResponse.json({
       conversationId: "conv-awaiting-1",

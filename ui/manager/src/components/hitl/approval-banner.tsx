@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   CheckCircle2,
@@ -45,11 +45,25 @@ interface ApprovalBannerProps {
   pauseDetails?: PauseDetails | null;
   /** Whether the mutation is in-flight. */
   isSubmitting?: boolean;
-  /** True while the structured pause details are still loading (or failed to
-   *  load) for a paused conversation. Blocks Approve so the reviewer can't
-   *  blind approve-all before knowing whether this is a RULE or TOOL_CALL pause;
-   *  Reject/Cancel stay available (both are safe with details unknown). */
+  /** True while the structured pause details are still loading for a paused
+   *  conversation. Blocks Approve so the reviewer can't blind approve-all
+   *  before knowing whether this is a RULE or TOOL_CALL pause; Reject/Cancel
+   *  stay available (both are safe with details unknown). */
   pauseDetailsPending?: boolean;
+  /**
+   * True when loading those details FAILED, as distinct from still loading.
+   *
+   * Both block Approve, and must — but they are not the same thing to a human.
+   * Folding a failure into `pauseDetailsPending` (as every caller here used to)
+   * left a pulsing "Loading approval details…" on screen forever with Approve
+   * permanently disabled, no error, and no way to retry: a dead end on the one
+   * surface the whole feature exists for. Callers pass their query's own error
+   * flag, and `onRetryPauseDetails` to offer a way out.
+   */
+  pauseDetailsError?: boolean;
+  /** Retries the pause-details read. Renders a Retry action when provided
+   *  alongside `pauseDetailsError`. */
+  onRetryPauseDetails?: () => void;
   /** Called when the user submits a decision. `toolDecisions` is populated only
    *  for a TOOL_CALL pause (per-call verdicts / amended arguments). */
   onDecide: (
@@ -60,6 +74,35 @@ interface ApprovalBannerProps {
   ) => void;
   /** Called when the user cancels. */
   onCancel?: () => void;
+  /**
+   * On a TOOL_CALL pause, disables top-level Approve until every gated call has
+   * an explicit per-call verdict — an untouched call otherwise inherits the
+   * top-level verdict silently (see the hint text below the call list). Regular
+   * conversation and group review intentionally keep that default; this exists
+   * for a surface where a swept-in call executes an unreviewed write against the
+   * platform itself (the Platform Operator), so "I clicked Approve" must mean
+   * "I looked at every call", not "I looked at the batch".
+   */
+  requireExplicitPerCall?: boolean;
+  /**
+   * Call ids that must NOT be approvable, with the reason shown to the
+   * approver. Unlike every other signal on this banner these are a refusal, not
+   * a warning: Approve is disabled outright while any is present.
+   *
+   * Used by the operator surfaces for a write the operator aimed at its own
+   * agent document — see `self-guard.ts` for why that specific write ends with
+   * an operator that no longer needs approval for anything. Reject stays
+   * available, so the pause is never a dead end.
+   */
+  blockedCalls?: readonly { callId: string; reason: string }[];
+  /**
+   * Rendered per call, above the redacted arguments — e.g. the reconstructed
+   * "METHOD /path" a generated tool actually calls, which `PendingToolCallView`
+   * does not carry (only the operationId-derived tool name does). Kept as a
+   * render prop rather than a new required field so this stays optional for
+   * every other caller.
+   */
+  renderCallExtra?: (call: PendingToolCallView) => ReactNode;
 }
 
 /** Whether a date string parses to a real instant. */
@@ -123,8 +166,13 @@ export function ApprovalBanner({
   pauseDetails,
   isSubmitting,
   pauseDetailsPending,
+  pauseDetailsError,
+  onRetryPauseDetails,
   onDecide,
   onCancel,
+  requireExplicitPerCall = false,
+  blockedCalls,
+  renderCallExtra,
 }: ApprovalBannerProps) {
   const { t } = useTranslation();
   const [note, setNote] = useState("");
@@ -153,6 +201,21 @@ export function ApprovalBanner({
 
   const toolPause = pauseDetails?.type === "TOOL_CALL" ? pauseDetails : null;
   const isToolCall = !!toolPause;
+
+  // Every gated call must carry an explicit verdict before Approve is offered.
+  // Checked against callStates directly (not toolDecisions, which is built only
+  // at submit time) so the button reflects the CURRENT review state live.
+  const explicitReviewMissing =
+    requireExplicitPerCall &&
+    isToolCall &&
+    toolPause!.calls.some((call) => callStates[call.callId]?.verdict === undefined);
+
+  // A refusal, not a nudge. Any blocked call disables Approve for the whole
+  // batch rather than only for itself: the per-call verdicts are submitted
+  // together, and letting the rest through would still run the batch that
+  // contains the write we are refusing to authorise.
+  const blocked = blockedCalls ?? [];
+  const approvalBlocked = blocked.length > 0;
 
   const setCall = (callId: string, patch: Partial<CallState>) => {
     setCallStates((prev) => ({ ...prev, [callId]: { ...prev[callId], ...patch } }));
@@ -269,12 +332,30 @@ export function ApprovalBanner({
               variant: "warning" as const,
             };
       case "REJECTED":
-        return {
-          title: t("hitl.confirmRejectTitle", "Reject request?"),
-          description: t("hitl.confirmRejectDescription", "Reject this request? The conversation will not proceed."),
-          confirmLabel: t("hitl.reject", "Reject"),
-          variant: "destructive" as const,
-        };
+        // Two different outcomes, and conflating them pushed the wrong way. A
+        // TOOL_CALL rejection does NOT end the conversation: the backend
+        // (Conversation.java — `verdict == REJECTED && !toolPause`) short-circuits
+        // only RULE pauses; a rejected tool call becomes a synthetic rejection
+        // result and the model answers without it. Telling an approver their
+        // conversation dies is pressure toward Approve — precisely the
+        // rubber-stamping this whole flow exists to avoid.
+        return isToolCall
+          ? {
+              title: t("hitl.confirmRejectToolTitle", "Reject tool execution?"),
+              description: t(
+                "hitl.confirmRejectToolDescription",
+                "Nothing will run. The conversation continues and the agent answers without {{toolNames}}.",
+                { toolNames: gatedToolNames.join(", ") },
+              ),
+              confirmLabel: t("hitl.reject", "Reject"),
+              variant: "destructive" as const,
+            }
+          : {
+              title: t("hitl.confirmRejectTitle", "Reject request?"),
+              description: t("hitl.confirmRejectDescription", "Reject this request? The conversation will not proceed."),
+              confirmLabel: t("hitl.reject", "Reject"),
+              variant: "destructive" as const,
+            };
       case "CANCEL":
         return surface === "group"
           ? {
@@ -373,12 +454,26 @@ export function ApprovalBanner({
           <p className="text-xs font-medium text-muted-foreground">
             {t("hitl.toolCallsAwaiting", "Tool calls awaiting approval")}
           </p>
+          {/* The backend never sends raw arguments to a client — only the
+              redacted, size-capped form. A secret inside the payload reads as
+              the literal text "<REDACTED>" here — the marker must match
+              `RequestRedactor.REDACTED` / `SecretRedactionFilter` exactly,
+              because this sentence is telling an approver what string to look
+              for. It said "[REDACTED]" until a review caught it, which sent
+              them hunting for something that never appears; an
+              approver who doesn't know that can mistake it for "nothing
+              sensitive was in this call" rather than "something was, and it was
+              hidden from you". */}
+          <p className="text-[11px] text-muted-foreground" data-testid="redaction-caveat">
+            {t("hitl.redactionCaveat", "Arguments shown below are redacted — a secret value appears as \"<REDACTED>\", not omitted.")}
+          </p>
           {toolPause.calls.map((call) => (
             <ToolCallRow
               key={call.callId}
               call={call}
               state={callStates[call.callId] ?? {}}
               outcomeUnknown={outcomeUnknown.has(call.callId)}
+              extra={renderCallExtra?.(call)}
               onToggle={(verdict) =>
                 setCall(call.callId, {
                   verdict: callStates[call.callId]?.verdict === verdict ? undefined : verdict,
@@ -400,8 +495,36 @@ export function ApprovalBanner({
             </p>
           )}
           <p className="text-[11px] text-muted-foreground">
-            {t("hitl.toolApprovalHint", "Approve applies your per-call choices (calls you didn't change are approved). Reject rejects the whole batch.")}
+            {requireExplicitPerCall
+              ? t("hitl.toolApprovalHintExplicit", "Every call needs its own Approve or Reject before you can approve the batch. Reject rejects the whole batch.")
+              : t("hitl.toolApprovalHint", "Approve applies your per-call choices (calls you didn't change are approved). Reject rejects the whole batch.")}
           </p>
+          {explicitReviewMissing && (
+            <p className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400" data-testid="explicit-review-missing">
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("hitl.explicitReviewMissing", "Review every call above before approving.")}
+            </p>
+          )}
+          {approvalBlocked && (
+            // role="alert" rather than a styled paragraph: Approve has just been
+            // taken away, and an approver who does not know why will assume the
+            // UI is broken and go looking for another way to do it.
+            <div
+              role="alert"
+              className="rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive"
+              data-testid="approval-blocked"
+            >
+              <p className="flex items-center gap-1 font-medium">
+                <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("hitl.approvalBlockedHeading", "This cannot be approved here")}
+              </p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                {blocked.map((entry) => (
+                  <li key={entry.callId}>{entry.reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
@@ -510,18 +633,58 @@ export function ApprovalBanner({
         </p>
       )}
 
-      {pauseDetailsPending && (
+      {pauseDetailsPending && !pauseDetailsError && (
         <p className="mb-2 flex items-center gap-1 text-xs text-muted-foreground" data-testid="approval-details-pending">
           <Clock className="h-3 w-3 animate-pulse" aria-hidden="true" />
           {t("hitl.loadingApprovalDetails", "Loading approval details…")}
         </p>
       )}
 
+      {pauseDetailsError && (
+        <div
+          className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
+          role="alert"
+          data-testid="approval-details-error"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="flex-1">
+            {t(
+              "hitl.approvalDetailsError",
+              "Couldn't load what this request would do, so it can't be approved from here. Rejecting is still safe.",
+            )}
+          </span>
+          {onRetryPauseDetails && (
+            <button
+              type="button"
+              onClick={onRetryPauseDetails}
+              className="rounded border border-destructive/40 px-2 py-1 font-medium transition-colors hover:bg-destructive/20"
+              data-testid="approval-details-retry"
+            >
+              {t("common.retry", "Retry")}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Action buttons */}
       <div className="flex items-center gap-2">
         <button
           type="button"
-          disabled={isSubmitting || pauseDetailsPending}
+          // `pauseDetailsError` belongs here as much as `pauseDetailsPending`:
+          // when the read FAILED, `pauseDetails` is null, so `blockedCalls` is
+          // empty and `explicitReviewMissing` is false — every other guard in
+          // this list silently evaluates to "nothing to object to" precisely
+          // because we know nothing. Omitting it (as this did when the error
+          // state was introduced) left the screen rendering "it can't be
+          // approved from here" above a live Approve that resumed the whole
+          // batch with no per-call decisions, executing calls nobody saw.
+          disabled={
+            isSubmitting ||
+            pauseDetailsPending ||
+            pauseDetailsError ||
+            explicitReviewMissing ||
+            approvalBlocked
+          }
           onClick={() => setConfirmAction("APPROVED")}
           className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
           data-testid="approve-button"
@@ -578,6 +741,7 @@ function ToolCallRow({
   call,
   state,
   outcomeUnknown,
+  extra,
   onToggle,
   onToggleAmend,
   onAmendChange,
@@ -585,6 +749,9 @@ function ToolCallRow({
   call: PendingToolCallView;
   state: CallState;
   outcomeUnknown: boolean;
+  /** Optional caller-supplied content rendered above the arguments block —
+   *  see `ApprovalBannerProps.renderCallExtra`. */
+  extra?: ReactNode;
   onToggle: (verdict: HitlVerdict) => void;
   onToggleAmend: () => void;
   onAmendChange: (amend: string) => void;
@@ -656,6 +823,7 @@ function ToolCallRow({
           </button>
         </div>
       </div>
+      {extra}
       {call.arguments && (
         <pre
           className="max-h-40 overflow-auto rounded bg-muted/60 p-2 text-[11px] leading-relaxed text-foreground"

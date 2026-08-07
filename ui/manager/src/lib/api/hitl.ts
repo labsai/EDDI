@@ -100,6 +100,31 @@ export interface GroupApprovalRequest {
 
 // ── approval-status / pauseDetails types ──────────────────────────
 
+/**
+ * The redacted HTTP request a gated call actually resolves to — backend-verified
+ * at gate time (`IApiCallExecutor#resolve`) and, when `PendingToolCallView.requestPinned`
+ * is true, re-derived and compared immediately before execution so what runs is
+ * what was shown here. Credentials are already redacted; nothing on this object
+ * is ever sensitive.
+ *
+ * Absent (`PendingToolCallView.requestPreview` is null/undefined) for every
+ * non-http tool source, and for an http call whose config could not be resolved
+ * without side effects — a client must read absence as "nothing to preview",
+ * never as "this call is less real".
+ */
+export interface ResolvedRequestPreview {
+  method: string;
+  uri: string;
+  queryParams: Record<string, string>;
+  /** Shown even though mostly uninteresting: the fingerprint covers them too,
+   *  so "approve what you are shown" has to include the whole of what is checked. */
+  headers: Record<string, string>;
+  body?: string | null;
+  /** True when `body` was cut for display — never affects the fingerprint,
+   *  which is computed over the full body before any capping. */
+  bodyTruncated: boolean;
+}
+
 /** One gated tool call in a TOOL_CALL pause. `arguments` is ALWAYS the redacted,
  *  size-capped value — the raw arguments are never sent to a client. */
 export interface PendingToolCallView {
@@ -113,6 +138,17 @@ export interface PendingToolCallView {
   argsTruncated: boolean;
   /** The requireApproval pattern that gated this call, e.g. "mcp:*". */
   gateReason?: string | null;
+  /**
+   * True when `requestPreview` is backed by a fingerprint that will be
+   * re-checked immediately before execution — false for every non-http tool
+   * AND for an http call previewed only best-effort (one with pre-request
+   * property instructions, whose actual request can still change before it
+   * runs). Independent of whether `requestPreview` itself is present: a
+   * best-effort preview can exist while this is false.
+   */
+  requestPinned: boolean;
+  /** The redacted resolved request, when determinable ahead of execution. */
+  requestPreview?: ResolvedRequestPreview | null;
 }
 
 /** pauseDetails for a gated-tool-call pause. */
@@ -182,6 +218,27 @@ export interface ToolApprovalsConfig {
   pendingMessage?: string | null;
   /** Behavior inside group turns — REJECT only in v1 (INBOX reserved). */
   inGroupTurns?: HitlInGroupTurns | null;
+  /**
+   * Per-tool friction, most-specific-pattern-first. Mirrors the backend
+   * `ToolApprovalsConfig.rules` (EDDI PR "per-endpoint approval friction").
+   * A rule tunes HOW a gated call is reviewed — it never decides WHETHER one is
+   * gated; that stays in `requireApproval`/`exempt` above.
+   */
+  rules?: ApprovalRule[] | null;
+}
+
+/**
+ * One per-tool override in `ToolApprovalsConfig.rules`. Every field but `match`
+ * falls back individually to the enclosing `ToolApprovalsConfig` scalar.
+ */
+export interface ApprovalRule {
+  /** Pattern selecting the calls this rule applies to. Same language as
+   *  `requireApproval` — bare name, "source:name", or "source.method:path". */
+  match: string;
+  timeoutPolicy?: HitlTimeoutPolicy | null;
+  approvalTimeout?: string | null;
+  pauseReason?: string | null;
+  pendingMessage?: string | null;
 }
 
 /** Agent-level HITL configuration. */

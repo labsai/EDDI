@@ -1,0 +1,268 @@
+import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import { useLocation, Link } from "react-router-dom";
+import { Sparkles, X, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { OperatorChat } from "@/components/operator/operator-chat";
+import { useOperatorConfig } from "@/hooks/use-operator";
+import { useOperatorChat } from "@/hooks/use-operator-chat";
+import { useOperatorDrawerStore } from "@/hooks/use-operator-drawer";
+import { useCurrentScreenContext, toContextPayload } from "@/hooks/use-current-screen-context";
+import { useApprovalStatus, usePendingApprovals } from "@/hooks/use-hitl";
+import { useAuth } from "@/hooks/use-auth";
+import { cn } from "@/lib/utils";
+
+export interface OperatorDrawerProps {
+  /**
+   * Raises the launcher clear of the Workforce mobile shell's own bottom
+   * furniture: `WorkforceBottomTabs` (`fixed bottom-0 h-16`, plus a
+   * safe-area inset) AND `workforce-dashboard`'s `MobileFab`
+   * (`fixed bottom-24 z-40 sm:hidden`, so 96–152px up).
+   *
+   * That second one is why this is not merely cosmetic. At the old `bottom-20`
+   * the two launchers overlapped by 40 vertical points over most of their
+   * width, and `MobileFab` is z-40 against this component's z-30 — so it won
+   * the hit test and tapping the operator launcher navigated to
+   * `/workforce/new` instead. `bottom-40` (160px) clears MobileFab's top edge.
+   */
+  clearsBottomTabBar?: boolean;
+}
+
+/**
+ * Floating launcher for the Platform Operator, mounted once in `AppLayout`
+ * and once in each of `WorkforceLayout`'s three viewport branches — a
+ * self-positioned `fixed` panel sidesteps the fact that those four layouts
+ * share no common chrome slot the way `ChatDrawer` shares `AppLayout`'s.
+ *
+ * Reuses `useOperatorChat` and `useOperatorConfig` directly — the SAME
+ * react-query cache and the SAME shared conversation store the full
+ * `/manage/operator` page reads, not a second copy of either. A gated write
+ * started here and a gated write approved there are the same pause.
+ */
+export function OperatorDrawer({ clearsBottomTabBar = false }: OperatorDrawerProps) {
+  const { t } = useTranslation();
+  const location = useLocation();
+  const isOpen = useOperatorDrawerStore((s) => s.isOpen);
+  const close = useOperatorDrawerStore((s) => s.close);
+  const toggle = useOperatorDrawerStore((s) => s.toggle);
+
+  // The operator config lives in the global variable store, which the backend
+  // restricts to eddi-admin/eddi-editor. Unlike every other caller of this
+  // hook — all of them admin screens someone navigated to deliberately — this
+  // component is mounted on EVERY page of both shells, so an ungated read here
+  // is a 403 on every navigation for every other role (`eddi-approver` above
+  // all, whose whole job is the approvals inbox). Both roles are checked
+  // because the backend allows either; `useHasRole` returns true for all roles
+  // when auth is off, so a no-auth deployment is unaffected.
+  // One `useAuth()` rather than two `useHasRole()` calls behind `||`: the
+  // short-circuit makes the second a conditional hook call, which
+  // react-hooks/rules-of-hooks rejects (and `npm run lint` is a CI step). It
+  // survives at runtime today only because useHasRole bottoms out in
+  // useContext, which claims no hook slot — one useMemo added inside it and
+  // this crashes every page of both shells.
+  const { method: authMethod, roles } = useAuth();
+  const canReadOperatorConfig =
+    authMethod === "none" || roles.includes("eddi-admin") || roles.includes("eddi-editor");
+  const { data: config, isLoading: configLoading, isError: configError } = useOperatorConfig(canReadOperatorConfig);
+  const chat = useOperatorChat(config);
+  // Mirrors operator.tsx's own preference for approval-status's pauseReason
+  // over the chat hook's derived one: the hook's is null on some pause paths
+  // (a 409 arriving with no reason of its own), and approval-status is the
+  // endpoint that actually carries it.
+  const approvalStatus = useApprovalStatus(chat.conversationId ?? undefined, chat.isPaused);
+  const screenContext = useCurrentScreenContext();
+
+  useEffect(() => {
+    // A shared store keeps `error` alive for the whole tab session now, not
+    // just one mount — an hour-old failure from a different surface should
+    // not be the first thing shown on open.
+    if (isOpen) chat.clearError();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  /**
+   * Escape closes, focus moves in on open and back to the launcher on close.
+   *
+   * The panel is rendered BEFORE the launcher in the DOM (the flex column puts
+   * it visually above), so without moving focus deliberately a keyboard user
+   * who activates the launcher tabs *past* the drawer into the rest of the
+   * page and has to shift-tab backwards to reach what they just opened. Not a
+   * focus trap: this panel is non-modal by design — the page behind it stays
+   * usable — so trapping would be wrong. `WorkforceLayout`'s nav drawer IS
+   * modal and does trap; the difference is deliberate.
+   */
+  const panelRef = useRef<HTMLDivElement>(null);
+  const fabRef = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      // Only restore focus on a real open→close transition, never on mount,
+      // or every page load would steal focus to the launcher.
+      if (wasOpen.current) fabRef.current?.focus();
+      wasOpen.current = false;
+      return;
+    }
+    wasOpen.current = true;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    // rAF so the panel has been laid out before we look for something to focus.
+    const raf = requestAnimationFrame(() => {
+      const target = panelRef.current?.querySelector<HTMLElement>(
+        'input, button, [href], select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      target?.focus();
+    });
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      cancelAnimationFrame(raf);
+    };
+  }, [isOpen, close]);
+
+  /**
+   * Whether a decision is waiting on someone, from SERVER state rather than
+   * this tab's chat store.
+   *
+   * `isPaused` is only ever set by a turn this tab streamed, so after a reload
+   * — or when the pause was raised in another tab, or by a scheduled run — the
+   * launcher would look idle while the operator sat blocked. The pending list
+   * is the same query the sidebar badge and the approvals inbox read, so this
+   * costs no extra request, and it is readable by every role that can act on
+   * an approval.
+   */
+  const { data: pendingApprovals } = usePendingApprovals();
+  const operatorHasPendingApproval =
+    chat.isPaused ||
+    (pendingApprovals ?? []).some(
+      (item) =>
+        (chat.conversationId && item.conversationId === chat.conversationId) ||
+        (config?.agentId && item.agentId === config.agentId),
+    );
+
+  // Redundant with the page you're already on, and structurally the one
+  // guard that keeps two OperatorChat instances from ever being interactive
+  // at the same time in this tab.
+  if (location.pathname.startsWith("/manage/operator")) return null;
+
+  // No launcher at all rather than an "activate it" call-to-action nobody
+  // without these roles could act on. `configError` covers the same ground
+  // empirically: if the read failed anyway (roles mapped differently than this
+  // check assumes), we cannot know whether the operator is even on, and
+  // offering to set up a second one is the worst possible guess.
+  if (!canReadOperatorConfig || configError) return null;
+
+  const isActive = Boolean(config?.enabled && config?.agentId);
+
+  return (
+    <div
+      className={cn(
+        // z-30, not z-40: both shells render their mobile/tablet nav backdrop
+        // at z-40 and this component AFTER them, so at equal z-index the later
+        // DOM node wins and the launcher painted over an open nav overlay —
+        // clickable, and in Workforce's tablet branch that overlay is
+        // `aria-modal="true"`, so it opened a second panel on top of a modal.
+        "fixed end-6 z-30 flex flex-col items-end gap-3",
+        // Not `bottom-6`: that corner is already occupied on the Manager side
+        // by sonner's toast viewport (bottom-right, z-999999999 — it covered
+        // the launcher outright while any toast was up) and by `ChatDrawer`'s
+        // composer, whose Send button this `fixed` element painted over by
+        // roughly half. 96px clears both.
+        clearsBottomTabBar ? "bottom-40" : "bottom-24",
+      )}
+    >
+      {isOpen && (
+        <div
+          ref={panelRef}
+          id="operator-drawer-panel"
+          className="flex h-[32rem] w-96 max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl"
+          role="complementary"
+          aria-label={t("operator.drawer.title", "Platform Operator")}
+          data-testid="operator-drawer-panel"
+        >
+          <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+            <Sparkles className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            <p className="flex-1 truncate text-sm font-semibold text-foreground">
+              {t("operator.drawer.title", "Platform Operator")}
+            </p>
+            <button
+              onClick={close}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title={t("common.close", "Close")}
+              aria-label={t("common.close", "Close")}
+              data-testid="operator-drawer-close"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {configLoading ? (
+              <div className="flex flex-1 items-center justify-center">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : isActive ? (
+              <OperatorChat
+                messages={chat.messages}
+                events={chat.events}
+                tracesByMessageId={chat.tracesByMessageId}
+                isStreaming={chat.isStreaming}
+                error={chat.error}
+                onSend={(input) => chat.send(input, toContextPayload(screenContext))}
+                onStop={chat.stop}
+                onReset={chat.reset}
+                isPaused={chat.isPaused}
+                pauseReason={approvalStatus.data?.pauseReason ?? chat.pauseReason}
+                isResolvingPause={chat.isResolvingPause}
+                resolveError={chat.resolveError}
+                pauseSurface="compact"
+              />
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+                <Sparkles className="h-8 w-8 text-muted-foreground/40" />
+                <p className="text-sm text-muted-foreground">
+                  {t(
+                    "operator.drawer.notActivated",
+                    "Turn on the Platform Operator to chat with your deployment from anywhere.",
+                  )}
+                </p>
+                <Button asChild size="sm">
+                  <Link to="/manage/operator" data-testid="operator-drawer-activate-link">
+                    {t("operator.drawer.activate", "Set up the Platform Operator")}
+                  </Link>
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <button
+        ref={fabRef}
+        onClick={toggle}
+        className="relative flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105"
+        title={t("operator.drawer.title", "Platform Operator")}
+        aria-label={
+          operatorHasPendingApproval
+            ? t("operator.drawer.titleAwaiting", "Platform Operator — a decision is waiting on you")
+            : t("operator.drawer.title", "Platform Operator")
+        }
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? "operator-drawer-panel" : undefined}
+        data-testid="operator-drawer-fab"
+      >
+        {/* The pause is silent otherwise: the conversation simply stops and
+            waits, with nothing anywhere saying so. */}
+        {operatorHasPendingApproval && !isOpen && (
+          <span
+            className="absolute -top-0.5 -end-0.5 h-3.5 w-3.5 rounded-full border-2 border-background bg-amber-500"
+            data-testid="operator-drawer-pending-dot"
+            aria-hidden="true"
+          />
+        )}
+        {isOpen ? <X className="h-5 w-5" aria-hidden="true" /> : <Sparkles className="h-5 w-5" aria-hidden="true" />}
+      </button>
+    </div>
+  );
+}

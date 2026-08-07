@@ -2765,6 +2765,8 @@
   },
   "hitl": {
     "loadingApprovalDetails": "Chargement des détails d’approbation…",
+    "pendingCount": "{{count}} en attente d'approbation",
+    "approvalDetailsError": "Impossible de charger ce que ferait cette requête, elle ne peut donc pas être approuvée ici. La rejeter reste sans risque.",
     "awaitingHuman": "En attente humaine",
     "awaitingApproval": "En attente d'approbation",
     "approve": "Approuver",
@@ -2809,6 +2811,9 @@
     "outcomeUnknown": "Une approbation précédente a été interrompue en cours d'exécution — son effet est inconnu ; vérifiez-le en externe avant de réessayer.",
     "outcomeUnknownShort": "résultat inconnu",
     "toolApprovalHint": "Approuver applique vos choix par appel (les appels que vous n'avez pas modifiés sont approuvés). Rejeter rejette l'ensemble du lot.",
+    "toolApprovalHintExplicit": "Chaque appel doit être approuvé ou rejeté individuellement avant de pouvoir approuver le lot. Rejeter rejette l'ensemble du lot.",
+    "explicitReviewMissing": "Examinez chaque appel ci-dessus avant d'approuver.",
+    "redactionCaveat": "Les arguments affichés ci-dessous sont expurgés — une valeur secrète apparaît comme « <REDACTED> », pas omise.",
     "gateReason": "Motif correspondant",
     "argsTruncated": "arguments tronqués",
     "amendArguments": "Modifier les arguments (facultatif)",
@@ -2836,7 +2841,10 @@
     "confirmCancelGroupTitle": "Annuler la discussion ?",
     "confirmCancelGroupDescription": "Annuler cette discussion ? Tout travail en cours sera interrompu.",
     "confirmCancelGroupButton": "Annuler la discussion",
-    "confirmDismiss": "Retour"
+    "confirmDismiss": "Retour",
+    "approvalBlockedHeading": "Ceci ne peut pas être approuvé ici",
+    "confirmRejectToolTitle": "Rejeter l'exécution de l'outil ?",
+    "confirmRejectToolDescription": "Rien ne sera exécuté. La conversation se poursuit et l'agent répond sans {{toolNames}}."
   },
   "chatDrawer": {
     "deploying": "Déploiement de l'agent…",
@@ -3066,6 +3074,7 @@
     "title": "Opérateur de plateforme",
     "subtitle": "Posez vos questions sur ce déploiement EDDI — il fait les recherches pour vous.",
     "readOnlyChip": "Lecture seule",
+    "readWriteChip": "Lecture et écriture",
     "configError": "Impossible de charger la configuration de l'opérateur",
     "empty": {
       "title": "L'opérateur de plateforme est désactivé",
@@ -3092,7 +3101,22 @@
       "environment": "Environnement",
       "authMode": "Authentification de l'opérateur",
       "authModeHint": "L'opérateur appelle votre API d'administration EDDI. Ce réglage détermine les identifiants portés par ces appels.",
-      "authNoneBlocked": "L'authentification est activée sur ce déploiement : les appels d'outils non authentifiés seraient rejetés. L'opérateur se déploierait correctement puis échouerait à chaque recherche. Choisissez plutôt « Votre identité ».",
+      "authNoneBlocked": "L'authentification est activée sur ce déploiement : les appels d'outils non authentifiés seraient rejetés. L'opérateur se déploierait correctement puis échouerait à chaque recherche. Choisissez plutôt « Votre identité ».",      "scope": {
+        "label": "Capacité",
+        "hint": "Ce que l'opérateur est autorisé à faire. Chaque écriture reste en attente de votre approbation — voir les règles de sécurité ci-dessous.",
+        "readOnly": {
+          "label": "Lecture seule",
+          "description": "Peut inspecter et expliquer ce déploiement. Ne peut rien modifier."
+        },
+        "readWrite": {
+          "label": "Lecture et écriture",
+          "description": "Peut aussi créer et modifier des agents et des groupes d'agents, déployer, annuler le déploiement, désactiver une planification incontrôlée et modifier le descripteur d'un agent — chacune de ces actions étant d'abord soumise à votre approbation."
+        },
+        "unavailableNotVerified": "Pas encore disponible — la passerelle d'approbation de cet opérateur n'a pas été vérifiée comme fiable. Vérifiez la connexion depuis le panneau d'état, ou choisissez « Votre identité » ci-dessous, puis reconfigurez.",
+        "unavailableFirstActivation": "Non disponible lors de la première activation. Activez d'abord en lecture seule pour prouver que la passerelle d'approbation est fiable, puis reconfigurez pour accorder l'accès en écriture.",
+        "writeWarning": "L'activation exécutera un test canari d'écriture : une écriture de test réelle et inoffensive qui doit rester en attente d'approbation avant la fin de ce déploiement. Si elle ne se met pas en pause, l'activation est refusée et l'opérateur est supprimé plutôt que laissé déployé avec une passerelle d'écriture non vérifiée."
+      },
+
       "safetyPreamble": "Règles de sécurité (non modifiables)",
       "safetyPreambleHint": "Toujours ajoutées en tête. Elles indiquent à l'opérateur de traiter tout ce que renvoient ses outils comme des données non fiables.",
       "promptBody": "Instructions de l'opérateur",
@@ -3119,8 +3143,10 @@
       "provisioning": "Création de l'agent opérateur…",
       "resolving-version": "Résolution de la version de l'agent…",
       "saving": "Enregistrement de la configuration…",
+      "verifying-gate": "Vérification de la barrière d'approbation…",
       "done": "Terminé",
-      "canary": "Vérification que l'opérateur atteint votre plateforme…"
+      "canary": "Vérification que l'opérateur atteint votre plateforme…",
+      "write-canary": "Exécution d'une écriture de test réelle, qui doit attendre votre approbation…"
     },
     "status": {
       "title": "Opérateur",
@@ -3141,15 +3167,58 @@
       "deactivateConfirmBody": "L'opérateur est retiré du déploiement et cesse de répondre. Sa configuration est conservée, vous pourrez le réactiver plus tard.",
       "resetConfirmTitle": "Supprimer l'opérateur de plateforme ?",
       "resetConfirmBody": "L'agent opérateur et toutes les ressources créées pour lui sont définitivement supprimés, ainsi que sa configuration enregistrée. Cette action est irréversible.",
-      "connectionCheck": "Vérifier la connexion"
+      "connectionCheck": "Vérifier la connexion",
+      "gateChecking": "Vérification de la barrière…",
+      "gateUnknown": "Barrière non contrôlée",
+      "gateVerified": "Barrière vérifiée",
+      "gateNotVerified": "Barrière non vérifiée",
+      "gateUnverifiedHelp": "La barrière d'approbation n'a pas pu être vérifiée sur le document de cet agent."
     },
     "chat": {
       "empty": "Interrogez votre déploiement. L'opérateur fait les recherches et vous montre chaque appel qu'il effectue.",
       "placeholder": "Agents, conversations, déploiements, journaux…",
+      "pausedPlaceholder": "En attente d'une décision ci-dessus avant que l'opérateur ne puisse continuer…",
       "send": "Envoyer",
       "stop": "Arrêter",
       "newConversation": "Démarrer une nouvelle conversation",
-      "transcript": "Conversation avec l'opérateur"
+      "transcript": "Conversation avec l'opérateur",
+      "pauseCompactFallback": "L'opérateur a besoin de votre approbation pour continuer.",
+      "pauseCompactReview": "Examiner pour approuver →"
+    },
+    "drawer": {
+      "title": "Opérateur de plateforme",
+      "notActivated": "Activez-le pour discuter avec votre déploiement depuis n'importe où.",
+      "titleAwaiting": "Opérateur de plateforme — une décision vous attend",
+      "activate": "Configurer l'opérateur de plateforme"
+    },
+    "approval": {
+      "reconstructedEndpoint": "{{method}} {{path}} (reconstruit)",
+      "verified": "vérifié",
+      "verifiedTitle": "Résolu à partir de la configuration réelle de l'appel API ; revérifié juste avant l'exécution — si la requête change avant cela, l'exécution est refusée.",
+      "previewOnly": "aperçu",
+      "previewOnlyTitle": "Cet appel exécute des étapes de préparation supplémentaires avant de s'exécuter ; il s'agit donc d'un aperçu au mieux — la requête réelle peut différer et n'est pas revérifiée avant l'exécution.",
+      "query": "Requête",
+      "headers": "En-têtes",
+      "bodyTruncated": "Le corps est affiché tronqué pour l'affichage — l'approbation couvre toujours la requête complète.",
+      "diffHeading": "Modifications par rapport à la version enregistrée {{version}}",
+      "diffLoading": "Chargement de la version enregistrée pour comparaison…",
+      "diffFailed": "Impossible de charger la version enregistrée pour comparaison — le document proposé complet figure ci-dessous.",
+      "diffForbidden": "La comparaison avec la version enregistrée nécessite un accès éditeur — le document proposé complet figure ci-dessous.",
+      "diffRedactionNote": "Les identifiants sont masqués dans la version proposée : ils apparaissent donc ici comme des modifications même s'ils sont inchangés.",
+      "showFullRequest": "Afficher le document proposé complet",
+      "hideFullRequest": "Masquer le document proposé complet",
+      "expandBody": "Développer",
+      "escalation": {
+        "heading": "Cette requête accorde des capacités supplémentaires",
+        "dynamicAgentCreation": "Ce groupe peut créer de nouveaux agents pendant son exécution. Ces agents ne sont pas eux-mêmes soumis à approbation.",
+        "dynamicAgentRecruitment": "Ce groupe peut intégrer d'autres agents existants à ses discussions.",
+        "autoApproveOnTimeout": "Les approbations de cette ressource sont accordées automatiquement en cas d'expiration du délai, sans surveillance.",
+        "agentCreatedWithoutGate": "Cet agent est créé sans passerelle d'approbation. Chaque écriture qu'il effectuera par la suite s'exécutera sans supervision.",
+        "agentCreatedWithBroadEndpoints": "Cet agent est créé avec un accès en écriture à son API — non limité aux lectures.",
+        "agentCreatedWithExternalTools": "Cet agent est créé avec l'ensemble des outils qu'un serveur MCP externe propose. C'est ce serveur qui décide lesquels, et il peut les modifier par la suite.",
+        "unchecked": "Le corps était trop long pour être analysé à la recherche d'octrois de capacités — lisez-le en entier avant d'approuver."
+      },
+      "blockedSelfTarget": "Un agent ne peut pas modifier sa propre définition, et cette requête vise l'agent de l'opérateur lui-même ({{agentId}}). Tant qu'elle est présente, l'ensemble du lot ne peut pas être approuvé — rejetez-la et effectuez cette modification depuis la page de cet agent."
     },
     "starters": {
       "whatsDeployed": "Qu'est-ce qui est déployé actuellement ?",
@@ -3159,6 +3228,8 @@
     },
     "toast": {
       "activated": "Opérateur de plateforme activé",
+
+      "activatedReadWrite": "Opérateur de plateforme activé — accès en écriture vérifié",
       "deactivated": "Opérateur de plateforme désactivé",
       "reset": "Opérateur de plateforme supprimé",
       "activatedButUnreachable": "Opérateur déployé, mais il n'a pas pu lire votre plateforme"

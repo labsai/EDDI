@@ -40,6 +40,19 @@ export interface CreateApiAgentRequest {
   enableSentimentAnalysis?: boolean;
   deploy?: boolean;
   environment?: string;
+  /**
+   * The HITL approval gate to install on the created agent, on v1 of its
+   * document. Without this the created agent's `hitlConfig` is `null` and the
+   * tool-approval gate is inert — every generated write tool runs unreviewed.
+   * See `AgentSetupService.createApiAgent` (backend PR "provision the HITL gate
+   * through setup-api").
+   */
+  hitlConfig?: import("./hitl").AgentHitlConfig;
+  /**
+   * Comma-separated MCP server URLs whose tools are added alongside the ones
+   * generated from `openApiSpec`, so one agent can hold both.
+   */
+  mcpServerUrls?: string;
 }
 
 // ---------- Response type ----------

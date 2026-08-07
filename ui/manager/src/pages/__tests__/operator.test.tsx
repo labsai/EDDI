@@ -6,6 +6,7 @@ import { server } from "@/test/mocks/server";
 import { OperatorPage } from "../operator";
 import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY } from "@/lib/api/operator";
 import type { OperatorConfig } from "@/lib/api/operator";
+import { useOperatorChatStore } from "@/hooks/use-operator-chat";
 
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({
@@ -58,6 +59,12 @@ describe("OperatorPage", () => {
   beforeEach(() => {
     // jsdom has no scrollIntoView; the chat auto-scroll effect calls it.
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    // This page mounts the real useOperatorChat, backed by a module-level
+    // store — without this, a pause or conversationId left by one test's
+    // render leaks into the next and fires unmocked requests against handlers
+    // server.resetHandlers() already removed (MSW is configured to hard-error
+    // on those, per src/test/setup.ts).
+    useOperatorChatStore.getState().reset();
     server.resetHandlers();
     server.use(
       http.get("*/secretstore/secrets/health", () =>
@@ -182,6 +189,142 @@ describe("OperatorPage", () => {
       renderWithProviders(<OperatorPage />);
       await userEvent.click(await screen.findByRole("button", { name: /reconfigure/i }));
       expect(await screen.findByTestId("operator-provider")).toBeInTheDocument();
+    });
+  });
+
+  describe("when a turn pauses on a gated tool call", () => {
+    /** Wires the 409-pause path (`send` rejected because the conversation is
+     *  already AWAITING_HUMAN) since it needs no SSE mocking, plus the
+     *  approval-status read that supplies `pauseDetails` — the same two reads
+     *  `useOperatorChat`/`useApprovalStatus` perform for a real streamed pause. */
+    function servePause(calls: unknown[]) {
+      server.use(
+        http.post("*/agents/op-1/start", () => HttpResponse.json({ location: "/agents/conv-1" })),
+        http.post("*/agents/conv-1/stream", () => new HttpResponse(null, { status: 409 })),
+        // Deliberately WITHOUT hitlPauseReason/hitlTimeoutPolicy/hitlApprovalTimeout:
+        // SimpleConversationMemorySnapshot carries only hitlPausedAt and
+        // hitlPauseType. A mock that invented the others hid a real bug — the UI
+        // read the reason and timeouts off this response and got undefined in
+        // production while the tests passed.
+        http.get("*/conversationstore/conversations/simple/conv-1", () =>
+          HttpResponse.json({
+            conversationState: "AWAITING_HUMAN",
+            hitlPausedAt: "2026-08-03T10:00:00Z",
+            conversationOutputs: [],
+          }),
+        ),
+        http.get("*/agents/conv-1/approval-status", () =>
+          HttpResponse.json({
+            conversationId: "conv-1",
+            state: "AWAITING_HUMAN",
+            pausedAt: "2026-08-03T10:00:00Z",
+            pauseReason: "Tool approval required",
+            timeoutPolicy: "AUTO_REJECT",
+            approvalTimeout: "PT15M",
+            pauseDetails: {
+              type: "TOOL_CALL",
+              calls,
+              executedUngatedCalls: [],
+              outcomeUnknown: [],
+            },
+          }),
+        ),
+      );
+    }
+
+    it("renders the backend's resolved-request preview instead of guessing from the tool name", async () => {
+      serveConfig(activeConfig());
+      serveDeploymentStatus("READY");
+      servePause([
+        {
+          callId: "call-1",
+          toolName: "createAgent",
+          source: "http",
+          arguments: '{"name":"foo"}',
+          argsTruncated: false,
+          gateReason: "http.post:*",
+          requestPinned: true,
+          requestPreview: {
+            method: "POST",
+            uri: "https://eddi.example.com/agentstore/agents",
+            queryParams: {},
+            headers: { "Content-Type": "application/json" },
+            body: '{"name":"foo"}',
+            bodyTruncated: false,
+          },
+        },
+      ]);
+
+      renderWithProviders(<OperatorPage />);
+      await userEvent.type(await screen.findByTestId("operator-input"), "create an agent{enter}");
+
+      expect(await screen.findByTestId("request-preview-call-1")).toBeInTheDocument();
+      expect(screen.getByText(/POST https:\/\/eddi\.example\.com\/agentstore\/agents/)).toBeInTheDocument();
+      // The honest server-verified preview replaces the client-side guess —
+      // both must never render for the same call.
+      expect(screen.queryByTestId("tool-endpoint-call-1")).not.toBeInTheDocument();
+    });
+
+    it("shows the pause reason and timeout, which only approval-status carries", async () => {
+      // The conversation endpoint this surface also reads returns neither. Sourcing
+      // them from there yielded undefined: a blank reason and a countdown that
+      // never rendered — invisible until a mock stopped inventing the fields.
+      serveConfig(activeConfig());
+      serveDeploymentStatus("READY");
+      servePause([
+        {
+          callId: "call-1",
+          toolName: "createAgent",
+          source: "http",
+          arguments: "{}",
+          argsTruncated: false,
+          gateReason: "http.post:*",
+          requestPinned: false,
+          requestPreview: null,
+        },
+      ]);
+
+      renderWithProviders(<OperatorPage />);
+      await userEvent.type(await screen.findByTestId("operator-input"), "create an agent{enter}");
+
+      const banner = await screen.findByTestId("approval-banner");
+      expect(banner).toHaveTextContent(/Tool approval required/);
+      // The timeout-policy chip renders only when a policy other than
+      // WAIT_INDEFINITELY actually arrived — unlike the countdown itself, this
+      // does not depend on the wall clock.
+      expect(banner).toHaveTextContent(/auto.?reject/i);
+    });
+
+    it("falls back to the client-side reconstruction when a call carries no preview", async () => {
+      serveConfig(activeConfig());
+      serveDeploymentStatus("READY");
+      server.use(
+        http.get("*/openapi", () =>
+          HttpResponse.json({
+            openapi: "3.1.0",
+            paths: { "/agentstore/agents": { post: { operationId: "createAgent" } } },
+          }),
+        ),
+      );
+      servePause([
+        {
+          callId: "call-1",
+          toolName: "createAgent",
+          source: "http",
+          arguments: '{"name":"foo"}',
+          argsTruncated: false,
+          gateReason: "http.post:*",
+          requestPinned: false,
+          requestPreview: null,
+        },
+      ]);
+
+      renderWithProviders(<OperatorPage />);
+      await userEvent.type(await screen.findByTestId("operator-input"), "create an agent{enter}");
+
+      expect(await screen.findByTestId("tool-endpoint-call-1")).toBeInTheDocument();
+      expect(screen.getByText(/POST \/agentstore\/agents \(reconstructed\)/)).toBeInTheDocument();
+      expect(screen.queryByTestId("request-preview-call-1")).not.toBeInTheDocument();
     });
   });
 

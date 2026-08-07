@@ -78,6 +78,7 @@ describe("HITL API", () => {
               toolName: "delete_database",
               source: "builtin",
               argsTruncated: false,
+              requestPinned: false,
             },
           ],
           executedUngatedCalls: [],

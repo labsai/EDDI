@@ -10,18 +10,24 @@ import {
   RefreshCw,
   Trash2,
   PlugZap,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldQuestion,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import type { OperatorConfig } from "@/lib/api/operator";
+import type { OperatorConfig, GateVerificationResult } from "@/lib/api/operator";
 import type { DeploymentStatus } from "@/lib/api/agents";
 
 interface OperatorStatusPanelProps {
   config: OperatorConfig;
   status: DeploymentStatus | null | undefined;
   statusLoading: boolean;
+  /** Result of re-reading the approval gate off the live agent document. */
+  gate: GateVerificationResult | null | undefined;
+  gateLoading: boolean;
   onReconfigure: () => void;
   onDeactivate: () => void;
   onReset: () => void;
@@ -35,6 +41,8 @@ export function OperatorStatusPanel({
   config,
   status,
   statusLoading,
+  gate,
+  gateLoading,
   onReconfigure,
   onDeactivate,
   onReset,
@@ -59,10 +67,23 @@ export function OperatorStatusPanel({
             <Cpu className="h-3 w-3" />
             {config.model}
           </Badge>
-          <Badge variant="success" className="gap-1">
-            <Lock className="h-3 w-3" />
-            {t("operator.readOnlyChip", "Read-only")}
-          </Badge>
+          {/* Derived from the CONFIGURED scope, never hardcoded: this panel is
+              where an admin answers "what can this thing do right now?", and a
+              green padlock on a write-capable operator is the one wrong answer
+              that matters. Mirrors the same two-branch chip in the activation
+              form so the two surfaces cannot disagree. */}
+          {config.scope === "read_write" ? (
+            <Badge variant="warning" className="gap-1" data-testid="operator-status-scope-chip">
+              <ShieldAlert className="h-3 w-3" />
+              {t("operator.readWriteChip", "Read & write")}
+            </Badge>
+          ) : (
+            <Badge variant="success" className="gap-1" data-testid="operator-status-scope-chip">
+              <Lock className="h-3 w-3" />
+              {t("operator.readOnlyChip", "Read-only")}
+            </Badge>
+          )}
+          <GateBadge gate={gate} loading={gateLoading} />
         </div>
 
         <div className="space-y-1 text-sm">
@@ -86,6 +107,22 @@ export function OperatorStatusPanel({
           >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{t("operator.status.errorHelp", "The operator agent failed to deploy. Reconfigure it to try again, or check the platform logs for the underlying error.")}</span>
+          </div>
+        )}
+
+        {/* Nothing depends on this today — read_only never offers a write tool
+            regardless — but it is checked and shown on every load so the fact is
+            never assumed the one time it starts to matter (read_write scope). */}
+        {gate && !gate.verified && (
+          <div
+            className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+            data-testid="operator-gate-unverified"
+          >
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              {t("operator.status.gateUnverifiedHelp", "The approval gate could not be verified on this agent's document.")}
+              {gate.reason ? ` (${gate.reason})` : ""}
+            </span>
           </div>
         )}
 
@@ -163,6 +200,52 @@ export function OperatorStatusPanel({
         }}
       />
     </Card>
+  );
+}
+
+/**
+ * Shows whether the tool-approval gate is currently verified on the live agent
+ * document. Independent of the deployment-status badge above: a `READY`
+ * deployment says nothing about whether `hitlConfig` survived version skew or
+ * was flipped off deployment-wide — this badge is the one thing that does.
+ */
+function GateBadge({
+  gate,
+  loading,
+}: {
+  gate: GateVerificationResult | null | undefined;
+  loading: boolean;
+}) {
+  const { t } = useTranslation();
+  if (loading && !gate) {
+    return (
+      <Badge variant="secondary" className="gap-1" data-testid="operator-gate-checking">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        {t("operator.status.gateChecking", "Verifying gate…")}
+      </Badge>
+    );
+  }
+  if (!gate) {
+    return (
+      <Badge variant="outline" className="gap-1" data-testid="operator-gate-unknown">
+        <ShieldQuestion className="h-3 w-3" />
+        {t("operator.status.gateUnknown", "Gate not checked")}
+      </Badge>
+    );
+  }
+  if (gate.verified) {
+    return (
+      <Badge variant="success" className="gap-1" data-testid="operator-gate-verified">
+        <ShieldCheck className="h-3 w-3" />
+        {t("operator.status.gateVerified", "Gate verified")}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="destructive" className="gap-1" data-testid="operator-gate-badge-unverified">
+      <ShieldAlert className="h-3 w-3" />
+      {t("operator.status.gateNotVerified", "Gate not verified")}
+    </Badge>
   );
 }
 
