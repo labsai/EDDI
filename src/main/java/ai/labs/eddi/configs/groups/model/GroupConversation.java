@@ -33,6 +33,19 @@ public class GroupConversation {
      */
     public static final int CURRENT_SCHEMA_VERSION = 3;
     /**
+     * The version a stored document claims when its JSON carries no
+     * {@code schemaVersion} key — i.e. it was written before F6 existed, which is
+     * every pre-F6 production document. Jackson runs the no-arg constructor and
+     * leaves the field initialiser standing either way, so the initialiser cannot
+     * distinguish "absent" from "current": it MUST be this legacy floor, and the
+     * single creation point ({@code GroupConversationService}) stamps
+     * {@link #CURRENT_SCHEMA_VERSION} explicitly. Initialising the field to CURRENT
+     * instead made key-less documents claim the current version and
+     * {@code prepareForResume}'s ladder run zero iterations on exactly the
+     * documents it exists for.
+     */
+    public static final int LEGACY_SCHEMA_VERSION = 1;
+    /**
      * The shape this specific document was last written in. Checked before a
      * resume: newer than {@link #CURRENT_SCHEMA_VERSION} refuses (this deployment
      * predates the document), older runs registered migrations forward. A pause can
@@ -41,7 +54,7 @@ public class GroupConversation {
      * per-resume config-drift check (bookmarked phase vs. current config) that
      * guards a different axis. See {@code GroupConversationSchemaMigrations}.
      */
-    private int schemaVersion = CURRENT_SCHEMA_VERSION;
+    private int schemaVersion = LEGACY_SCHEMA_VERSION;
     private String id;
     private String groupId;
     private String userId;

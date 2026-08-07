@@ -5,6 +5,25 @@
 
 ---
 
+## 🪜 fix(schema): N3 — legacy documents now enter the migration ladder at the bottom (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+Second pre-feature defect from `planning/group-collaboration-NEXT.md` §2, filed by the round-5 review of #626. `GroupConversation.schemaVersion` was initialised to `CURRENT_SCHEMA_VERSION` (3). Every pre-F6 production document has no `schemaVersion` key, Jackson leaves the initialiser standing, so those documents loaded **claiming schema 3 while being version-1-shaped** — and `prepareForResume`'s ladder ran `for (v = 3; v < 3; ...)`: zero iterations on exactly the documents it exists for. Fixed now, while it is free: no released build has ever written a versioned document, so nothing in production carries a wrong claim to migrate away from.
+
+- **Test first, watched it fail:** `documentWithoutVersionKey_claimsLegacyVersionNotCurrent` deserialises `{}` and asserts version 1 — failed with `expected: <1> but was: <3>` before the fix, exactly the round-5 finding. This is the case none of the four previous review rounds' tests covered (they all *set* a version).
+- **The fix is a split, not a re-initialisation:** new `LEGACY_SCHEMA_VERSION = 1` is the field initialiser (the version a key-less document claims — it never moves), and the single creation point (`GroupConversationService.createGroupConversation`) stamps `CURRENT_SCHEMA_VERSION` explicitly. The initialiser alone cannot distinguish "absent" from "current" — Jackson runs the no-arg constructor either way — so the stamp must live at creation.
+- **`ConversationMemorySnapshot` got the identical split** even though its `CURRENT` is still 1 (correct only by coincidence — first bump to 2 would have silently re-created the group side's bug). Its stamp lives in `ConversationMemoryUtilities.getMemorySnapshot`, the one place snapshots are built from live memory. A pinning test asserts `LEGACY_SCHEMA_VERSION` stays 1 when `CURRENT` bumps.
+- **(b) Stale Javadoc fixed:** `GroupConversationSchemaMigrations.MIGRATIONS` claimed `CURRENT_SCHEMA_VERSION` is 1 and "there is nothing yet to migrate from" — it is 3, and the identity-default path has already been exercised twice. Rewritten (plus the single-conversation mirror and the stale test-class Javadoc).
+
+**Mutation-checked:** removing the creation stamp fails exactly `discuss_stampsCurrentSchemaVersionOnTheCreatedDocument` (a fresh document would persist claiming legacy). Deserialisation side proven by the red→green cycle above. 133 tests across the six touched classes green.
+
+⚠️ **Surefire note for the next session:** `-Dtest=ClassName` prints `Tests run: 0` for the parent of `@Nested` tests while the nested groups report under their `@DisplayName` — read the run TOTAL, not the class line, before concluding nothing ran.
+
+**Files:** `GroupConversation.java`, `GroupConversationService.java`, `ConversationMemorySnapshot.java`, `ConversationMemoryUtilities.java`, both `*SchemaMigrations.java`, tests.
+
+---
+
 ## 🧮 fix(groups): nested-group cost is summed per child discussion, not overwritten (2026-08-07)
 
 **Repo:** EDDI (`fix/group-pre-feature-defects`)

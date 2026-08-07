@@ -1690,6 +1690,9 @@ public class GroupConversationService implements IGroupConversationService {
             throws IResourceStore.ResourceStoreException {
 
         GroupConversation gc = new GroupConversation();
+        // The field initialiser is the LEGACY sentinel so key-less stored documents
+        // read as legacy — a genuinely new document must claim current explicitly.
+        gc.setSchemaVersion(GroupConversation.CURRENT_SCHEMA_VERSION);
         gc.setGroupId(groupId);
         gc.setUserId(userId);
         gc.setState(GroupConversationState.IN_PROGRESS);

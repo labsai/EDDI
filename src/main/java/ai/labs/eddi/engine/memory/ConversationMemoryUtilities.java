@@ -64,6 +64,10 @@ public class ConversationMemoryUtilities {
 
     private static ConversationMemorySnapshot getMemorySnapshot(IConversationMemory conversationMemory) {
         var snapshot = new ConversationMemorySnapshot();
+        // The field initialiser is the LEGACY sentinel so key-less stored documents
+        // read as legacy — a snapshot built from live memory is current by
+        // definition and must say so explicitly.
+        snapshot.setSchemaVersion(ConversationMemorySnapshot.CURRENT_SCHEMA_VERSION);
 
         if (conversationMemory.getUserId() != null) {
             snapshot.setUserId(conversationMemory.getUserId());

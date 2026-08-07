@@ -27,12 +27,25 @@ public class ConversationMemorySnapshot {
      */
     public static final int CURRENT_SCHEMA_VERSION = 1;
     /**
+     * The version a stored document claims when its JSON carries no
+     * {@code schemaVersion} key. Mirrors
+     * {@code GroupConversation#LEGACY_SCHEMA_VERSION} and exists for the same
+     * reason: Jackson leaves the field initialiser standing for key-less documents,
+     * so the initialiser must be the legacy floor and the creation path
+     * ({@code ConversationMemoryUtilities}) stamps {@link #CURRENT_SCHEMA_VERSION}
+     * explicitly. While {@code CURRENT} is also {@code 1} this is indistinguishable
+     * from initialising to CURRENT — but only by coincidence, and the first bump to
+     * {@code 2} would silently re-create the group side's zero-iteration migration
+     * bug without this split.
+     */
+    public static final int LEGACY_SCHEMA_VERSION = 1;
+    /**
      * The shape this specific document was last written in. Checked before a
      * resume: newer than {@link #CURRENT_SCHEMA_VERSION} refuses (this deployment
      * predates the document), older runs registered migrations forward. See
      * {@code ConversationSchemaMigrations}.
      */
-    private int schemaVersion = CURRENT_SCHEMA_VERSION;
+    private int schemaVersion = LEGACY_SCHEMA_VERSION;
     private String conversationId;
     private String agentId;
     private Integer agentVersion;
