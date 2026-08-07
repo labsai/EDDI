@@ -875,6 +875,12 @@ public class RestGroupConversation implements IRestGroupConversation {
                 // debate verdict before a later synthesis phase).
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_DECISION_REACHED, toJson(event));
             }
+
+            @Override
+            public void onRetroRecorded(GroupConversationEventSink.RetroRecordedEvent event) {
+                // Not terminal — a retro can precede further phases.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_RETRO_RECORDED, toJson(event));
+            }
         };
     }
 

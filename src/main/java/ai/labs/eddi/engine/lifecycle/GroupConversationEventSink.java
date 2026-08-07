@@ -61,6 +61,12 @@ public final class GroupConversationEventSink {
      * Always preceded by an {@link #EVENT_CONVERGENCE_CHECKED} for the same repeat.
      */
     public static final String EVENT_CONVERGENCE_REACHED = "convergence_reached";
+    /**
+     * A RETRO phase harvested lessons into team-owned group memory (I8). Fires even
+     * with zero lessons stored — "the retro ran and found nothing durable" is
+     * itself signal for an observer.
+     */
+    public static final String EVENT_RETRO_RECORDED = "retro_recorded";
 
     // --- Event payloads ---
 
@@ -158,5 +164,9 @@ public final class GroupConversationEventSink {
      *            run — the concrete saving
      */
     public record ConvergenceReachedEvent(int phaseIndex, String phaseName, int repeat, int repeatsSkipped, String reason) {
+    }
+
+    /** A RETRO phase stored lessons into team-owned group memory (I8). */
+    public record RetroRecordedEvent(String groupId, String phaseName, int lessonsStored) {
     }
 }

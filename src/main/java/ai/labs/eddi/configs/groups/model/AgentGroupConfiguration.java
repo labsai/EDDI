@@ -92,6 +92,54 @@ public class AgentGroupConfiguration {
     }
 
     /**
+     * Bounds for RETRO lessons (I8). {@code null} runs a RETRO phase with the
+     * defaults — the caps are non-negotiable either way (bounded growth for an LLM
+     * write surface).
+     */
+    private RetroConfig retroConfig;
+
+    public RetroConfig getRetroConfig() {
+        return retroConfig;
+    }
+
+    public void setRetroConfig(RetroConfig retroConfig) {
+        this.retroConfig = retroConfig;
+    }
+
+    /**
+     * Bounds for the RETRO lesson pipeline (I8).
+     *
+     * @param maxLessonsPerRun
+     *            how many lessons one retro turn may store (default 3) — the
+     *            template quotes this cap to the model, and the parser truncates
+     *            past it regardless
+     * @param maxStoredLessons
+     *            FIFO ceiling on the team's stored lessons (default 50): storing
+     *            the 51st evicts the oldest. Bounded growth is non-negotiable —
+     *            non-positive values fall back to the defaults
+     */
+    public record RetroConfig(int maxLessonsPerRun, int maxStoredLessons) {
+
+        public static final int DEFAULT_MAX_PER_RUN = 3;
+        public static final int DEFAULT_MAX_STORED = 50;
+
+        /** Same normalization choke point as {@link GroupTaskConfig}. */
+        public RetroConfig {
+            if (maxLessonsPerRun <= 0) {
+                maxLessonsPerRun = DEFAULT_MAX_PER_RUN;
+            }
+            if (maxStoredLessons <= 0) {
+                maxStoredLessons = DEFAULT_MAX_STORED;
+            }
+        }
+
+        /** Both caps at their defaults. */
+        public RetroConfig() {
+            this(DEFAULT_MAX_PER_RUN, DEFAULT_MAX_STORED);
+        }
+    }
+
+    /**
      * Governs agent-filed tasks (I5). The task list is otherwise written only by
      * the PLAN phase and by config, so work an agent <em>discovers</em> while
      * executing — a missing migration, an untested edge case — dies in prose. The
@@ -323,7 +371,15 @@ public class AgentGroupConfiguration {
         /** Task execution by assigned agents. */
         EXECUTE,
         /** Verification of task results. */
-        VERIFY
+        VERIFY,
+        /**
+         * Post-discussion retrospective (I8): what worked, what failed, what to do
+         * differently. Parsed lessons land in team-owned group memory (synthetic owner
+         * {@code "group:"+groupId}) so they surface as {@code {properties.*}} in every
+         * member's later discussions — institutional knowledge that compounds
+         * run-over-run.
+         */
+        RETRO
     }
 
     public enum TurnOrder {

@@ -210,6 +210,8 @@ public interface IGroupConversationService {
         }
         default void onConvergenceReached(GroupConversationEventSink.ConvergenceReachedEvent event) {
         }
+        default void onRetroRecorded(GroupConversationEventSink.RetroRecordedEvent event) {
+        }
     }
 
     // --- Exceptions ---

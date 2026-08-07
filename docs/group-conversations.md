@@ -160,6 +160,31 @@ Both caps are enforced independently: `maxPerTurn` bounds a runaway single turn,
 discussion cap counts only agent-filed tasks, so a large planned backlog does not
 exhaust it. A rejected call does not consume the per-turn budget.
 
+## Retro → group memory
+
+A `RETRO` phase stops discussions from evaporating: the group reviews how it
+worked and distills lessons that persist as **team-owned group memory**, then
+surface as `{properties.*}` in every member's later discussions — institutional
+knowledge that compounds run-over-run.
+
+```json
+{ "name": "Retro", "type": "RETRO", "participants": "MODERATOR" },
+"retroConfig": { "maxLessonsPerRun": 3, "maxStoredLessons": 50 }
+```
+
+- The built-in template asks for `{"lessons": [{"lesson": "...", "context":
+  "..."}]}`; parsing is three-tier (strict JSON → embedded JSON → nothing) and
+  the per-run cap is enforced at parse time whatever the model produced.
+- Lessons are stored under the synthetic owner `group:<groupId>` with `group`
+  visibility — they belong to the team, not to whichever human ran the
+  discussion, and survive that human's GDPR erasure without carrying their
+  identity. The idempotency key `retro:<hash(lesson)>` makes re-running the
+  same retro a no-op.
+- **Bounded growth is non-negotiable:** the stored set FIFOs at
+  `maxStoredLessons` — storing past the cap evicts the oldest.
+- Member conversations already load group-visible entries at init, so recall
+  needs no new namespace. The `retro_recorded` SSE event reports each harvest.
+
 ## Nested Groups (Group-of-Groups)
 
 Members can be other groups. The sub-group runs its own discussion and its synthesized answer becomes the member's response.

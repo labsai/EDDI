@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
@@ -184,6 +185,27 @@ public class GroupContextBuilder {
             }
             case VERIFY -> {
                 // Completed tasks populated by executeTaskPhase
+            }
+            case RETRO -> {
+                // I8: the retro reviews the whole discussion — same full-picture
+                // filter as SYNTHESIS (a retrospective on a windowed excerpt would
+                // draw lessons from an excerpt).
+                List<Map<String, Object>> fullTranscript = transcript.stream()
+                        .filter(e -> e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
+                                && e.type() != TranscriptEntryType.QUESTION)
+                        .map(e -> {
+                            Map<String, Object> t = new LinkedHashMap<>();
+                            t.put("speaker", e.speakerDisplayName());
+                            t.put("content", e.content());
+                            t.put("phaseName", e.phaseName() != null ? e.phaseName() : "");
+                            return t;
+                        }).collect(Collectors.toList());
+                data.put("transcript", fullTranscript);
+                // The template QUOTES the default cap; RetroEngine ENFORCES the
+                // configured one at parse time regardless of what the model was
+                // told. Quoting the default keeps this builder free of the group
+                // config (which it deliberately does not receive).
+                data.put("maxLessonsPerRun", AgentGroupConfiguration.RetroConfig.DEFAULT_MAX_PER_RUN);
             }
             default -> {
                 // All PhaseType values handled above; default required by checkstyle
@@ -370,6 +392,8 @@ public class GroupContextBuilder {
             case PLAN -> TranscriptEntryType.PLAN;
             case EXECUTE -> TranscriptEntryType.TASK_RESULT;
             case VERIFY -> TranscriptEntryType.VERIFICATION;
+            // I8: retro contributions are public RETRO entries (F4 default).
+            case RETRO -> TranscriptEntryType.RETRO;
         };
     }
 

@@ -37,8 +37,10 @@ import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
 import ai.labs.eddi.engine.internal.groups.GroupHitlCoordinator;
+import ai.labs.eddi.engine.internal.groups.RetroEngine;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.internal.groups.GroupLifecycleOps;
 import ai.labs.eddi.engine.internal.groups.GroupSigningGuard;
@@ -207,6 +209,14 @@ public class GroupConversationService implements IGroupConversationService {
      */
     @Inject
     LiveDiscussionRegistry liveDiscussionRegistry;
+
+    /**
+     * I8's lesson store. Same field-injection pattern and null-safety as
+     * {@link #attachmentStore} — {@code null} in direct-construction unit tests,
+     * where a RETRO phase runs but persists nothing (warned, never failed).
+     */
+    @Inject
+    IUserMemoryStore userMemoryStore;
 
     // In-node fast-fail guard for concurrent post-discussion operations
     // (follow-up, continue, close) on the same conversation: a second
@@ -848,6 +858,14 @@ public class GroupConversationService implements IGroupConversationService {
                             phaseExecutionEngine.runDissentRound(gc, config, phase, protocol, phaseIdx, speakers, listener,
                                     turnCounter, maxTurns);
                         }
+                    }
+
+                    // I8: a completed RETRO phase harvests its lessons into
+                    // team-owned group memory. Last repeat only — a draft retro is
+                    // not the retrospective — and BEFORE the persist below, so a
+                    // crash cannot lose lessons a stored document claims were taken.
+                    if (phase.type() == PhaseType.RETRO && lastRepeat) {
+                        RetroEngine.harvest(gc, config.getRetroConfig(), repeatEntries, userMemoryStore, phase.name(), listener);
                     }
 
                     gc.setLastModified(Instant.now());

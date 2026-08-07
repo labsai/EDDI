@@ -5,6 +5,24 @@
 
 ---
 
+## 🧠 feat(groups): I8 — retro phases harvest team-owned group memory (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i8-retro-memory`)
+
+Third Wave 2 queue item, and the substrate I13 (Standing Teams) builds on. Discussions stop evaporating: a `RETRO` phase's lessons persist and surface as `{properties.*}` in every member's later discussions.
+
+- **`PhaseType.RETRO`** + built-in template (full-transcript review, JSON lessons contract) + `RetroConfig {maxLessonsPerRun=3, maxStoredLessons=50}`. The template *quotes* the default per-run cap; `RetroEngine` *enforces* the configured one at parse time regardless — the context builder deliberately does not receive the group config.
+- **Storage exactly as the plan resolved (V2):** `IUserMemoryStore.upsert` under the synthetic team owner `"group:"+groupId` with `group` visibility. New `TEAM_OWNER_PREFIX` contract constant; lessons belong to the team, not the human who ran the discussion, and survive that human's GDPR erasure without carrying their identity.
+- **The additive synthetic-team-owner recall branch, on BOTH backends:** Mongo's `buildVisibilityFilter` and Postgres's `buildVisibilityQuery` (+ its bind order) now OR in a narrow team scope — owner ids DERIVED from the supplied group ids (never caller-supplied), `group` visibility, group-id overlap. The user's own scope is untouched, per the plan's "do not widen the existing user-scoped group branch". Both made package-private static so the filter/SQL shapes are directly assertable — and both are pinned side by side so the backends cannot drift.
+- **Idempotency + bounded growth:** key `retro:<sha256(lesson)[0..16]>` with a FIXED `sourceAgentId` ("retro") — the upsert identity for group entries is `(userId, key, sourceAgentId)`, so a real speaker id would have made the same lesson from two speakers two rows. FIFO eviction past `maxStoredLessons` via the newest-first recall (everything past the cap is the oldest); `RetroEngine` is the ONLY reaper — `UserMemoryTool`'s eviction only ever touches the calling agent's `self` entries.
+- **Wiring:** discussion-loop harvest on the RETRO phase's last repeat, before the persist (a crash must not lose lessons a stored document claims were taken); `IUserMemoryStore` reaches the facade by the established null-safe field-injection pattern. New `retro_recorded` event (constant + record + listener default + SSE forward) — fires even at zero lessons stored, which is itself signal.
+
+**Tests (11 new, all green; `engine.internal` + `configs.properties` suites 1572 green; checkstyle clean):** parse tiers (strict/fenced/prose-refused); per-run cap enforced past what the model was told; idempotent team-owned upsert against a REAL in-memory store with the production upsert identity (a mocked idempotency claim would prove nothing); FIFO evicts the oldest and never the newest; `retro_recorded` carries the stored count; null store and failing store never fail the discussion; Mongo filter shape (no-groups → user scope only; with-groups → derived `group:` owners paired with group visibility; no foreign human id reachable); Postgres SQL shape incl. the `??|` escape arithmetic pinning the bind order.
+
+**Files:** `AgentGroupConfiguration` (RETRO + RetroConfig), `DiscussionStylePresets` (TEMPLATE_RETRO), `GroupContextBuilder` (RETRO branch + entry mapping), `RetroEngine` (new), `GroupConversationService` (wiring + store injection), `IUserMemoryStore` (TEAM_OWNER_PREFIX + contract Javadoc), `MongoUserMemoryStore`, `PostgresUserMemoryStore`, `GroupConversationEventSink`/listener/SSE, `docs/group-conversations.md`, 3 test classes.
+
+---
+
 ## 🔀 merge: bring `origin/main` (PR #627 HITL request pinning) into the branch (2026-08-07)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
