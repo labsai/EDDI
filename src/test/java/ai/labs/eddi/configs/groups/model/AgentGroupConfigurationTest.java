@@ -136,7 +136,7 @@ class AgentGroupConfigurationTest {
 
     @Test
     void phaseType_allValues() {
-        assertEquals(11, PhaseType.values().length);
+        assertEquals(12, PhaseType.values().length);
         assertNotNull(PhaseType.valueOf("OPINION"));
         assertNotNull(PhaseType.valueOf("CRITIQUE"));
         assertNotNull(PhaseType.valueOf("REVISION"));
@@ -148,6 +148,7 @@ class AgentGroupConfigurationTest {
         assertNotNull(PhaseType.valueOf("PLAN"));
         assertNotNull(PhaseType.valueOf("EXECUTE"));
         assertNotNull(PhaseType.valueOf("VERIFY"));
+        assertNotNull(PhaseType.valueOf("VOTE"));
     }
 
     @Test
