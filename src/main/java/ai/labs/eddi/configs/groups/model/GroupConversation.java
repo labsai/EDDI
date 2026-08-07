@@ -14,10 +14,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Transcript record for a group conversation. Persisted with a single-version
@@ -224,6 +226,62 @@ public class GroupConversation {
      */
     @JsonIgnore
     private transient AgentGroupConfiguration.ProtocolConfig.CostPolicy costCeilingOutcome;
+
+    /**
+     * One accepted artifact write (I17), queued by the artifact tools on the LIVE
+     * instance and drained by {@code MemberTurnExecutor} after the turn to fire the
+     * {@code artifact_updated} event. This indirection exists because tools have no
+     * listener reference — {@code ToolAssemblyContext} carries none — while the
+     * turn executor does. Transient and concurrent: PARALLEL phases run members
+     * (and so their tools) concurrently.
+     */
+    public record ArtifactChange(String artifactId, String name, String type, long version, String editorAgentId,
+            String status, boolean created) {
+    }
+
+    @JsonIgnore
+    private final transient Queue<ArtifactChange> pendingArtifactChanges = new ConcurrentLinkedQueue<>();
+
+    /** Queues an accepted artifact write for the turn executor to announce. */
+    @JsonIgnore
+    public void queueArtifactChange(ArtifactChange change) {
+        if (change != null) {
+            pendingArtifactChanges.add(change);
+        }
+    }
+
+    /** Drains queued artifact writes — each drained exactly once. */
+    @JsonIgnore
+    public List<ArtifactChange> drainArtifactChanges() {
+        List<ArtifactChange> drained = new ArrayList<>();
+        ArtifactChange change;
+        while ((change = pendingArtifactChanges.poll()) != null) {
+            drained.add(change);
+        }
+        return drained;
+    }
+
+    /**
+     * The discussion's shared artifacts (I17), populated at READ time by
+     * {@code GroupConversationService.readGroupConversation} from the artifact
+     * store — never persisted with this document (artifacts have their own
+     * collection; see {@link SharedArtifact}). Serialized when populated so REST's
+     * status payload and MCP's {@code read_group_conversation} both carry it;
+     * {@code READ_ONLY} because a stored copy must never be trusted back. Mirrors
+     * the {@code availableActions} idiom.
+     */
+    @JsonIgnore
+    private transient List<SharedArtifact> artifacts;
+
+    @JsonProperty(value = "artifacts", access = JsonProperty.Access.READ_ONLY)
+    public List<SharedArtifact> getArtifacts() {
+        return artifacts;
+    }
+
+    @JsonIgnore
+    public void setArtifacts(List<SharedArtifact> artifacts) {
+        this.artifacts = artifacts;
+    }
 
     /**
      * A parent discussion's remaining cost budget at the moment it dispatched this

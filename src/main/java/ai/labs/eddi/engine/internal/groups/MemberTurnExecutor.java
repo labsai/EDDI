@@ -152,6 +152,36 @@ public class MemberTurnExecutor {
                                             DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener,
                                             GroupConversationService.MemberTurnCancellation cancellation, String conversationKey)
             throws GroupDiscussionException {
+        try {
+            return doExecuteAgentTurn(member, gc, input, protocol, phaseIdx, phase, targetAgentId, listener, cancellation, conversationKey);
+        } finally {
+            // I17: announce artifact writes this turn made. In a finally because an
+            // accepted write already happened whatever the turn's own outcome —
+            // a timeout or cancellation after the write must not swallow the event.
+            // Drained even with a null listener so the queue never grows unbounded.
+            announceArtifactChanges(gc, listener);
+        }
+    }
+
+    /**
+     * I17: fires {@code artifact_updated} for every write queued during the turn.
+     */
+    private static void announceArtifactChanges(GroupConversation gc, GroupDiscussionEventListener listener) {
+        List<GroupConversation.ArtifactChange> changes = gc.drainArtifactChanges();
+        if (listener == null || changes.isEmpty()) {
+            return;
+        }
+        for (GroupConversation.ArtifactChange change : changes) {
+            listener.onArtifactUpdated(new GroupConversationEventSink.ArtifactUpdatedEvent(
+                    change.artifactId(), change.name(), change.type(), change.version(),
+                    change.editorAgentId(), change.status(), change.created()));
+        }
+    }
+
+    private TranscriptEntry doExecuteAgentTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
+                                               DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener,
+                                               GroupConversationService.MemberTurnCancellation cancellation, String conversationKey)
+            throws GroupDiscussionException {
 
         if (cancellation != null && cancellation.isCancelled()) {
             throw new GroupConversationService.MemberTurnCancelledException();

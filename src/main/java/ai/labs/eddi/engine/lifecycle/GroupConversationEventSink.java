@@ -61,6 +61,13 @@ public final class GroupConversationEventSink {
      * Always preceded by an {@link #EVENT_CONVERGENCE_CHECKED} for the same repeat.
      */
     public static final String EVENT_CONVERGENCE_REACHED = "convergence_reached";
+    /**
+     * A member created or updated a shared artifact (I17). Fired by the turn
+     * executor after the turn that made the write — tools have no listener
+     * reference, so accepted writes ride the live discussion's artifact-change
+     * queue until the executor drains it.
+     */
+    public static final String EVENT_ARTIFACT_UPDATED = "artifact_updated";
 
     // --- Event payloads ---
 
@@ -158,5 +165,18 @@ public final class GroupConversationEventSink {
      *            run — the concrete saving
      */
     public record ConvergenceReachedEvent(int phaseIndex, String phaseName, int repeat, int repeatsSkipped, String reason) {
+    }
+
+    /**
+     * A member created or updated a shared artifact (I17). Carries metadata only,
+     * never the content — an SSE observer reads the artifact through the REST
+     * payload, and content can be a quarter megabyte.
+     *
+     * @param created
+     *            {@code true} for a fresh artifact (v1), {@code false} for an
+     *            accepted update
+     */
+    public record ArtifactUpdatedEvent(String artifactId, String name, String type, long version, String editorAgentId,
+            String status, boolean created) {
     }
 }

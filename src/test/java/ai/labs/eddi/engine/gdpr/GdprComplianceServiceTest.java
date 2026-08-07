@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -61,6 +62,8 @@ class GdprComplianceServiceTest {
     private IConversationCheckpointStore checkpointStore;
     private GroupConversationStore groupConversationStore;
     private Instance<GroupConversationStore> groupConversationStoreInstance;
+    private ISharedArtifactStore sharedArtifactStore;
+    private Instance<ISharedArtifactStore> sharedArtifactStoreInstance;
     private IScheduleStore scheduleStore;
     private CacheFactory cacheFactory;
 
@@ -80,6 +83,10 @@ class GdprComplianceServiceTest {
         groupConversationStoreInstance = mock(Instance.class);
         when(groupConversationStoreInstance.isResolvable()).thenReturn(true);
         when(groupConversationStoreInstance.get()).thenReturn(groupConversationStore);
+        sharedArtifactStore = mock(ISharedArtifactStore.class);
+        sharedArtifactStoreInstance = mock(Instance.class);
+        when(sharedArtifactStoreInstance.isResolvable()).thenReturn(true);
+        when(sharedArtifactStoreInstance.get()).thenReturn(sharedArtifactStore);
         scheduleStore = mock(IScheduleStore.class);
         // A real cache factory, not a mock: the cache-invalidation test needs the
         // same Caffeine instance the REST store reads through.
@@ -98,7 +105,7 @@ class GdprComplianceServiceTest {
                 userConversationStore, databaseLogs, auditStore,
                 auditLedgerService, attachments, hitlToolJournalStore,
                 conversationDescriptorStore, checkpointStore,
-                groupConversationStoreInstance, scheduleStore, cacheFactory);
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, cacheFactory);
     }
 
     @Test
@@ -863,6 +870,7 @@ class GdprComplianceServiceTest {
         when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
         when(checkpointStore.deleteByConversationId("conv-1")).thenThrow(new RuntimeException("checkpoint store down"));
         when(groupConversationStore.deleteAllForUser(USER_ID)).thenThrow(new RuntimeException("group store down"));
+        when(sharedArtifactStore.deleteAllForUser(USER_ID)).thenThrow(new RuntimeException("artifact store down"));
         when(scheduleStore.deleteSchedulesByUserId(USER_ID)).thenThrow(new RuntimeException("schedule store down"));
         when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(1L);
         when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
@@ -873,5 +881,39 @@ class GdprComplianceServiceTest {
 
         assertEquals(1, result.conversationsDeleted());
         verify(scheduleStore).deleteSchedulesByUserId(USER_ID);
+    }
+
+    /**
+     * I17: shared artifacts carry ownerUserId, so the cascade sweeps them
+     * user-keyed — independent of whether their parent discussions still exist.
+     */
+    @Test
+    void deleteUserData_deletesSharedArtifacts() throws Exception {
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of());
+        when(sharedArtifactStore.deleteAllForUser(USER_ID)).thenReturn(3L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(0L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        service.deleteUserData(USER_ID);
+
+        verify(sharedArtifactStore).deleteAllForUser(USER_ID);
+    }
+
+    @Test
+    void deleteUserData_skipsSharedArtifacts_whenStoreNotResolvable() throws Exception {
+        when(sharedArtifactStoreInstance.isResolvable()).thenReturn(false);
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(0L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        assertDoesNotThrow(() -> service.deleteUserData(USER_ID));
+
+        verify(sharedArtifactStore, never()).deleteAllForUser(any());
     }
 }

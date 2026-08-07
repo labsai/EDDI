@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.mongo;
 
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
+import ai.labs.eddi.configs.groups.ArtifactValidators;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
@@ -41,6 +42,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
     public IResourceStore.IResourceId create(AgentGroupConfiguration groupConfiguration)
             throws IResourceStore.ResourceStoreException {
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
+        ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         return super.create(groupConfiguration);
@@ -52,6 +54,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
             IResourceStore.ResourceNotFoundException {
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
+        ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         return super.update(id, version, groupConfiguration);

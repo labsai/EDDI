@@ -49,6 +49,7 @@ import dev.langchain4j.service.tool.ToolExecutor;
 import jakarta.enterprise.context.ApplicationScoped;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
@@ -266,6 +267,13 @@ class AgentOrchestrator implements IAgentOrchestrator {
 
     @Inject
     volatile IAgentGroupStore agentGroupStore;
+
+    /**
+     * I17's store, field-injected for the same reason as the two above.
+     * {@code ArtifactToolsProvider} treats null as "no artifact tools".
+     */
+    @Inject
+    volatile ISharedArtifactStore sharedArtifactStore;
 
     /**
      * Test seam for supplying the attachment services to a directly-constructed
@@ -644,6 +652,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         var contextual = contextualToolsProvider();
         merger.addAll(List.of(builtinToolsProvider, contextual, dynamicAgentToolsProvider(),
                 new GroupTaskToolsProvider(liveDiscussionRegistry, agentGroupStore),
+                new ArtifactToolsProvider(liveDiscussionRegistry, agentGroupStore, sharedArtifactStore),
                 new AttachmentToolsProvider(contextual)), ctx);
 
         // LAZY registers every built-in's executor but shows the model only

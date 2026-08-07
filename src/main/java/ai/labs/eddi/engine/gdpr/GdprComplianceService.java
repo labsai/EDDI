@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
@@ -62,6 +63,7 @@ public class GdprComplianceService {
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationCheckpointStore checkpointStore;
     private final Instance<GroupConversationStore> groupConversationStoreInstance;
+    private final Instance<ISharedArtifactStore> sharedArtifactStoreInstance;
     private final IScheduleStore scheduleStore;
     private final ICache<String, UserConversation> userConversationCache;
 
@@ -77,6 +79,7 @@ public class GdprComplianceService {
             IConversationDescriptorStore conversationDescriptorStore,
             IConversationCheckpointStore checkpointStore,
             Instance<GroupConversationStore> groupConversationStoreInstance,
+            Instance<ISharedArtifactStore> sharedArtifactStoreInstance,
             IScheduleStore scheduleStore,
             ICacheFactory cacheFactory) {
         this.userMemoryStore = userMemoryStore;
@@ -90,6 +93,7 @@ public class GdprComplianceService {
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.checkpointStore = checkpointStore;
         this.groupConversationStoreInstance = groupConversationStoreInstance;
+        this.sharedArtifactStoreInstance = sharedArtifactStoreInstance;
         this.scheduleStore = scheduleStore;
         this.userConversationCache = cacheFactory.getCache(USER_CONVERSATION_CACHE_NAME);
     }
@@ -306,6 +310,23 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
+        // 5c2. Delete shared artifacts (I17). Artifacts carry ownerUserId (the
+        // owning discussion's user) precisely so this sweep works even when the
+        // parent discussion document is already gone.
+        long sharedArtifactsDeleted = 0;
+        try {
+            if (sharedArtifactStoreInstance.isResolvable()) {
+                sharedArtifactsDeleted = sharedArtifactStoreInstance.get().deleteAllForUser(userId);
+                if (sharedArtifactsDeleted > 0) {
+                    LOGGER.infof("[GDPR] Deleted %d shared artifacts [%s]",
+                            sharedArtifactsDeleted, pseudonym);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to delete shared artifacts [%s]",
+                    pseudonym);
+        }
+
         // 5d. Delete schedules owned by the user. Left behind, they keep firing new
         // conversations under the erased identity — recreating the data forever.
         long schedulesDeleted = 0;
@@ -346,9 +367,9 @@ public class GdprComplianceService {
 
         LOGGER.infof("[GDPR] Erasure cascade complete [%s]: "
                 + "memories=%d, conversations=%d, checkpoints=%d, mappings=%d, "
-                + "groupConversations=%d, schedules=%d, logs=%d, audit=%d",
+                + "groupConversations=%d, sharedArtifacts=%d, schedules=%d, logs=%d, audit=%d",
                 pseudonym, memoriesDeleted, conversationsDeleted, checkpointsDeleted,
-                mappingsDeleted, groupConversationsDeleted, schedulesDeleted,
+                mappingsDeleted, groupConversationsDeleted, sharedArtifactsDeleted, schedulesDeleted,
                 logsPseudonymized, auditPseudonymized);
 
         // Write compliance event to immutable audit ledger
@@ -360,6 +381,7 @@ public class GdprComplianceService {
         auditDetails.put("conversationsDeleted", conversationsDeleted);
         auditDetails.put("mappingsDeleted", mappingsDeleted);
         auditDetails.put("groupConversationsDeleted", groupConversationsDeleted);
+        auditDetails.put("sharedArtifactsDeleted", sharedArtifactsDeleted);
         auditDetails.put("schedulesDeleted", schedulesDeleted);
         auditDetails.put("logsPseudonymized", logsPseudonymized);
         auditDetails.put("auditPseudonymized", auditPseudonymized);

@@ -875,6 +875,12 @@ public class RestGroupConversation implements IRestGroupConversation {
                 // debate verdict before a later synthesis phase).
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_DECISION_REACHED, toJson(event));
             }
+
+            @Override
+            public void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
+                // Not terminal — artifacts are edited throughout the discussion.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_ARTIFACT_UPDATED, toJson(event));
+            }
         };
     }
 

@@ -8,11 +8,13 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LifecyclePolicy;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
@@ -53,12 +55,16 @@ class GroupLifecycleOpsTest {
     private IAgentStore agentStore;
     private IGroupConversationStore conversationStore;
 
+    private ISharedArtifactStore sharedArtifactStore;
+
     private GroupLifecycleOps ops() {
         agentFactory = mock(IAgentFactory.class);
         agentStore = mock(IAgentStore.class);
         conversationStore = mock(IGroupConversationStore.class);
+        sharedArtifactStore = mock(ISharedArtifactStore.class);
         return new GroupLifecycleOps(conversationStore, mock(IAgentGroupStore.class),
                 mock(IConversationService.class), agentFactory, agentStore, mock(IDeploymentStore.class),
+                sharedArtifactStore,
                 ConcurrentHashMap.newKeySet(), new ConcurrentHashMap<String, DiscussionControlToken>(),
                 Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.followup"),
@@ -148,6 +154,55 @@ class GroupLifecycleOpsTest {
         doThrow(new RuntimeException("undeploy failed")).when(agentFactory).undeployAgent(any(), eq(AGENT_A), isNull());
 
         assertDoesNotThrow(() -> ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.EPHEMERAL)));
+    }
+
+    // =================================================================
+    // I17 — artifact cascade on lifecycle ends
+    // =================================================================
+
+    @Test
+    void deleteGroupConversation_cascadesToArtifacts_beforeTheDocumentGoes() throws Exception {
+        var ops = ops();
+        var gc = gc();
+        gc.setState(GroupConversationState.COMPLETED);
+        doReturn(gc).when(conversationStore).read("gc-1");
+
+        ops.deleteGroupConversation("gc-1");
+
+        var order = inOrder(sharedArtifactStore, conversationStore);
+        order.verify(sharedArtifactStore).deleteByGroupConversationId("gc-1");
+        order.verify(conversationStore).delete("gc-1");
+    }
+
+    @Test
+    void deleteGroupConversation_artifactCascadeFails_discussionIsStillDeleted() throws Exception {
+        var ops = ops();
+        var gc = gc();
+        gc.setState(GroupConversationState.COMPLETED);
+        doReturn(gc).when(conversationStore).read("gc-1");
+        doThrow(new IResourceStore.ResourceStoreException("artifact store down"))
+                .when(sharedArtifactStore).deleteByGroupConversationId("gc-1");
+
+        assertDoesNotThrow(() -> ops.deleteGroupConversation("gc-1"),
+                "a broken artifact store must not make discussions undeletable");
+        verify(conversationStore).delete("gc-1");
+    }
+
+    @Test
+    void closeGroupConversation_cascadesToArtifacts() throws Exception {
+        var ops = ops();
+        var gc = gc();
+        gc.setState(GroupConversationState.COMPLETED);
+        var closed = gc();
+        closed.setState(GroupConversationState.CLOSED);
+        // close re-reads after the CAS — the two-read stub is load-bearing.
+        when(conversationStore.read("gc-1")).thenReturn(gc, closed);
+        when(conversationStore.compareAndSetState("gc-1", GroupConversationState.COMPLETED, GroupConversationState.CLOSED))
+                .thenReturn(true);
+
+        ops.closeGroupConversation("gc-1");
+
+        verify(sharedArtifactStore).deleteByGroupConversationId("gc-1");
     }
 
     // =================================================================

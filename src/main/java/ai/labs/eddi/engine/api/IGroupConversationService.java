@@ -210,6 +210,8 @@ public interface IGroupConversationService {
         }
         default void onConvergenceReached(GroupConversationEventSink.ConvergenceReachedEvent event) {
         }
+        default void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
+        }
     }
 
     // --- Exceptions ---

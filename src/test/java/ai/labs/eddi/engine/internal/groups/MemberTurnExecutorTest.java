@@ -17,8 +17,10 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
+import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -28,6 +30,7 @@ import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -73,6 +76,46 @@ class MemberTurnExecutorTest {
 
     private ProtocolConfig protocol(MemberFailurePolicy failurePolicy) {
         return new ProtocolConfig(60, failurePolicy, 2, MemberUnavailablePolicy.SKIP);
+    }
+
+    /**
+     * I17: artifact tools have no listener reference, so accepted writes ride the
+     * live discussion's change queue until the turn executor drains it. Announced
+     * even for a turn that itself went sideways (here: agent not deployed →
+     * SKIPPED) — the write already happened.
+     */
+    @Test
+    void executeAgentTurn_announcesQueuedArtifactChanges_andDrainsExactlyOnce() throws Exception {
+        var executor = executor();
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 1, AGENT_A, "DRAFT", true));
+        var listener = Mockito.mock(GroupDiscussionEventListener.class);
+
+        executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, listener);
+
+        var captor = ArgumentCaptor.forClass(GroupConversationEventSink.ArtifactUpdatedEvent.class);
+        verify(listener).onArtifactUpdated(captor.capture());
+        assertEquals("doc", captor.getValue().name());
+        assertTrue(captor.getValue().created());
+
+        // A second turn must not re-announce the same change.
+        executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, listener);
+        verify(listener, times(1)).onArtifactUpdated(any());
+    }
+
+    @Test
+    void executeAgentTurn_nullListener_stillDrainsTheQueue() throws Exception {
+        var executor = executor();
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 1, AGENT_A, "DRAFT", true));
+
+        executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null);
+
+        assertTrue(gc.drainArtifactChanges().isEmpty(), "the queue must never grow unbounded on the no-listener path");
     }
 
     @Test

@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
@@ -207,6 +208,14 @@ public class GroupConversationService implements IGroupConversationService {
      */
     @Inject
     LiveDiscussionRegistry liveDiscussionRegistry;
+
+    /**
+     * I17's artifact store. Same field-injection pattern and null-safety as
+     * {@link #attachmentStore} — {@code null} in direct-construction unit tests,
+     * where reads simply carry no artifacts and lifecycle cascades no-op.
+     */
+    @Inject
+    ISharedArtifactStore sharedArtifactStore;
 
     // In-node fast-fail guard for concurrent post-discussion operations
     // (follow-up, continue, close) on the same conversation: a second
@@ -1188,7 +1197,29 @@ public class GroupConversationService implements IGroupConversationService {
     @Override
     public GroupConversation readGroupConversation(String groupConversationId)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
-        return lifecycleOps().readGroupConversation(groupConversationId);
+        GroupConversation gc = lifecycleOps().readGroupConversation(groupConversationId);
+        populateArtifacts(gc);
+        return gc;
+    }
+
+    /**
+     * I17: attaches the discussion's shared artifacts as a read-time derived field,
+     * here in the service so REST's status payload and MCP's
+     * {@code read_group_conversation} both carry them. Best-effort — a status read
+     * must not fail because the artifact store hiccuped.
+     */
+    private void populateArtifacts(GroupConversation gc) {
+        if (sharedArtifactStore == null || gc == null || gc.getId() == null) {
+            return;
+        }
+        try {
+            var artifacts = sharedArtifactStore.listByGroupConversationId(gc.getId());
+            if (!artifacts.isEmpty()) {
+                gc.setArtifacts(artifacts);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Could not attach shared artifacts to group conversation %s: %s", gc.getId(), e.getMessage());
+        }
     }
 
     @Override
@@ -1242,7 +1273,7 @@ public class GroupConversationService implements IGroupConversationService {
 
     private GroupLifecycleOps lifecycleOps() {
         return new GroupLifecycleOps(conversationStore, groupStore, conversationService, agentFactory, agentStore,
-                deploymentStore, operationsInProgress, activeTokens, this,
+                deploymentStore, sharedArtifactStore, operationsInProgress, activeTokens, this,
                 counterGroupFollowUp, counterGroupContinue, counterGroupClose, counterGroupFailure);
     }
 

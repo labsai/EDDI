@@ -5,6 +5,27 @@
 
 ---
 
+## 📄 feat(groups): I17 — shared artifacts (blackboard-lite) (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i17-shared-artifacts`)
+
+First Wave 2 queue item from `planning/group-collaboration-NEXT.md` §3. Agents can now **co-edit typed documents** instead of only talking: four member tools — `createArtifact`, `readArtifact`, `proposeArtifactUpdate`, `listArtifacts` — gated by a new `artifactConfig` on the group config.
+
+**Design decisions, per the plan (and the plan's own rejections honored):**
+
+- **Own collection, never embedded.** `SharedArtifact` + `ISharedArtifactStore`/`SharedArtifactStore` follow `GroupConversationStore`'s single-version runtime-document pattern. The discussion loop's whole-document stale-snapshot persists cannot clobber artifact writes, which is also why — unlike I5's task tools — the artifact tools write **through the store directly**. The live registry is still consulted: membership at assembly (`getForMember`, the caller-supplied-id IDOR guard), liveness at write time, and accepted writes ride a new transient change queue on the live `GroupConversation`.
+- **Deterministic CAS-and-retry, explicitly not an LLM fusion arbiter.** The version CAS needed a storage primitive that doesn't exist for numbers: `storeIfFieldEquals(String)` text-compares, which "works" on Postgres (`data->>` renders JSON numbers as text) and **silently never matches on Mongo** (typed BSON equality). New `storeIfFieldEquals(…, long)` overload on `IResourceStorage` + both backends, same no-silent-degrade contract (the default throws). Stale writers get the plan's sentence: *"artifact changed since you read it (now vN); re-read and merge your change."*
+- **Declarative validators only.** `JSON_SCHEMA` (new dependency `com.networknt:json-schema-validator` — the victools libraries only *generate* schemas), `REGEX`, `MAX_LENGTH`. Specs hard-fail the config save (`ArtifactValidators.requireValidSpecs` from `AgentGroupStore`, `HitlConfigValidation`'s contract); write-time failures are rejection sentences and the gate fails closed on a broken spec. Content ≤ 256 KB.
+- **Events without a listener reference:** tools can't fire SSE/Slack events (`ToolAssemblyContext` carries no listener — the structural gap that left I5's planned `task_added_by_agent` unfired). Accepted writes queue an `ArtifactChange` on the live instance; `MemberTurnExecutor` drains the queue in a `finally` after every turn and fires the new `artifact_updated` event (sink constant + record + SSE forward + Slack line + OpenAPI description lists). Drained even with a null listener so the queue cannot grow unbounded.
+- **Lifecycle:** artifacts are attached to the discussion status payload at read time in the service (so REST *and* MCP `read_group_conversation` carry them — `availableActions` idiom, `READ_ONLY`, never trusted back from storage); close/delete cascade removes them (`GroupLifecycleOps`, warn-and-continue so a broken artifact store can't make discussions undeletable); GDPR erasure sweeps them **user-keyed** via a stamped `ownerUserId` (page/exact-recheck/fail-loud contract copied from the group store) as a new `GdprComplianceService` cascade step.
+- **Caps:** `maxArtifactsPerDiscussion` (default 5) counted inside a `synchronized (liveInstance)` block — creation is check-then-act and PARALLEL phases genuinely race; updates need no lock, the CAS decides.
+
+**Tests (148 across 8 classes, all green):** tools against a real in-memory CAS store (stale-version retry sentence with the CURRENT version, concurrent same-version writers → exactly one winner, FINAL freeze, foreign-discussion ids don't resolve, validator chain, refusals leave no side effect); provider gate matrix (every uncertainty → contribute nothing, membership not existence, `enableBuiltInTools` still applies); store CAS through the numeric overload with `verify(never()).store(…)`; anchored+escaped filters with Java exact-recheck; erasure paging/fail-loud; lifecycle cascade ordering (`inOrder` artifact-delete before document-delete) + cascade-failure-still-deletes; GDPR step + not-resolvable skip + failure-continues; turn-executor drain (exactly once, null-listener drain); Slack lines incl. degenerate-payload skip. **Mutation notes:** degrading the store CAS to an unconditional store does not even compile (the gone-document catch becomes unreachable) — the CAS call is structurally load-bearing; the Mockito-verified negatives (`never().store`, `specs().isEmpty()`) pin the rest.
+
+**Files:** `SharedArtifact`, `ISharedArtifactStore`, `SharedArtifactStore`, `ArtifactValidators`, `ArtifactTools`, `ArtifactToolsProvider` (+ `AgentOrchestrator` phase-1 wiring), `AgentGroupConfiguration` (`ArtifactConfig`/`ArtifactValidator`/`ValidatorKind`), `GroupConversation` (change queue + read-time `artifacts`), `IResourceStorage` + Mongo/Postgres (numeric CAS), `GroupConversationEventSink`/listener/SSE/Slack, `GroupLifecycleOps`, `GroupConversationService`, `GdprComplianceService`, `AgentGroupStore`, `pom.xml`, `docs/group-conversations.md`, 8 test classes.
+
+---
+
 ## 🔀 merge: bring `origin/main` (PR #627 HITL request pinning) into the branch (2026-08-07)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

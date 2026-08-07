@@ -295,6 +295,28 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         postSafe(channelId, threadTs, sb.toString().stripTrailing());
     }
 
+    @Override
+    public void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
+        // Degenerate payload → skip rather than posting noise, same as
+        // onDecisionReached's NONE guard.
+        if (event == null || event.name() == null) {
+            return;
+        }
+        String emoji = event.created() ? "📄" : "✏️";
+        String verb = event.created() ? "created" : "updated";
+        var sb = new StringBuilder();
+        sb.append(String.format("%s *Artifact \"%s\"* %s (v%d)", emoji, event.name(), verb, event.version()));
+        if (event.editorAgentId() != null && !event.editorAgentId().isBlank()) {
+            sb.append(String.format(" by %s", event.editorAgentId()));
+        }
+        if ("FINAL".equals(event.status())) {
+            sb.append(" — FINAL");
+        }
+
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, sb.toString().stripTrailing());
+    }
+
     // ─── HITL (human-in-the-loop) ───
 
     @Override
