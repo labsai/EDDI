@@ -117,6 +117,50 @@ class AgentOrchestratorToolGovernanceTest {
             assertTrue(specs.isEmpty());
             assertFalse(executors.containsKey("orphan"));
         }
+
+        @Test
+        @DisplayName("an http tool that LOSES a name collision does not keep its request resolver")
+        void droppedHttpToolLosesItsResolver() {
+            // Otherwise the builtin that won the name would be pinned against the
+            // dropped http tool's request: the approver is shown a preview of a
+            // request that will never run, and the pre-execution re-check compares
+            // against that same fabricated request and passes.
+            List<ToolSpecification> specs = new ArrayList<>(List.of(ToolSpecification.builder().name("calculator").build()));
+            Map<String, ToolExecutor> executors = new HashMap<>(Map.of("calculator", executor("builtin")));
+            Map<String, String> sources = new HashMap<>(Map.of("calculator", "builtin"));
+
+            AgentOrchestrator.mergeExternalTools(List.of(ToolSpecification.builder().name("calculator").build()),
+                    Map.of("calculator", executor("http")), "http", specs, executors, sources);
+            Map<String, AgentOrchestrator.ToolRequestResolver> resolvers = new HashMap<>();
+            resolvers.put("calculator", req -> {
+                throw new AssertionError("the dropped http tool's resolver must never be consulted");
+            });
+
+            AgentOrchestrator.pruneResolversToSurvivingHttpTools(resolvers, sources);
+
+            assertFalse(resolvers.containsKey("calculator"), "the losing http tool's resolver must be pruned");
+        }
+
+        @Test
+        @DisplayName("an http tool that WINS its name keeps its resolver — pruning is not a blanket wipe")
+        void survivingHttpToolKeepsItsResolver() {
+            List<ToolSpecification> specs = new ArrayList<>();
+            Map<String, ToolExecutor> executors = new HashMap<>();
+            Map<String, String> sources = new HashMap<>();
+
+            AgentOrchestrator.mergeExternalTools(List.of(ToolSpecification.builder().name("deployAgent").build()),
+                    Map.of("deployAgent", executor("http")), "http", specs, executors, sources);
+            // A later mcp tool of the same name is the one dropped here.
+            AgentOrchestrator.mergeExternalTools(List.of(ToolSpecification.builder().name("deployAgent").build()),
+                    Map.of("deployAgent", executor("mcp")), "mcp", specs, executors, sources);
+
+            Map<String, AgentOrchestrator.ToolRequestResolver> resolvers = new HashMap<>();
+            resolvers.put("deployAgent", req -> null);
+
+            AgentOrchestrator.pruneResolversToSurvivingHttpTools(resolvers, sources);
+
+            assertTrue(resolvers.containsKey("deployAgent"), "the http tool owns the name, so pinning must stay available");
+        }
     }
 
     @Nested

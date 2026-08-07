@@ -158,7 +158,10 @@ public class CreateSubAgentTool {
                     null, // enableSentimentAnalysis
                     null, // mcpServerUrls
                     true, // deploy
-                    null // environment
+                    null, // environment
+                    null // hitlConfig — dynamic sub-agents are not gated; see the
+                         // dynamicAgents.allowCreation escalation flag on the group
+                         // that provisioned this one
             );
 
             SetupResult result = agentSetupService.setupAgent(request);

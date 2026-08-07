@@ -181,6 +181,38 @@ class ConversationServiceHitlCoverage2Test {
         }
 
         @Test
+        @DisplayName("null decision → IllegalArgumentException before even the 404 check")
+        void nullDecision_illegalArgument() throws Exception {
+            assertThrows(IllegalArgumentException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, null, null));
+
+            // Every caller of resumeConversation already guarantees a real verdict
+            // (RestAgentEngine, Slack, MCP, timeout auto-resolution) — this guards the
+            // ONE shared choke point they all funnel through, so a future caller that
+            // forgets fails loudly here rather than reaching AgentOrchestrator with a
+            // verdict that is neither APPROVED nor REJECTED. Checked first: not even
+            // the conversation-existence lookup runs on a malformed request.
+            verify(conversationMemoryStore, never()).getConversationState(any());
+            verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("decision with no top-level verdict → IllegalArgumentException before even the 404 check")
+        void nullVerdict_illegalArgument() throws Exception {
+            HitlDecision decision = new HitlDecision();
+            // verdict left unset (null) — e.g. a hand-built or future caller that
+            // forgot to set it, or a per-call-only decision with no top-level default.
+            decision.setToolDecisions(Map.of("call_abc", toolDecision(HitlVerdict.APPROVED)));
+
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
+            assertTrue(e.getMessage().contains("verdict"), "message should name the missing field: " + e.getMessage());
+
+            verify(conversationMemoryStore, never()).getConversationState(any());
+            verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), any());
+        }
+
+        @Test
         @DisplayName("toolDecisions present but pre-CAS snapshot null → validation skipped, CAS still runs")
         void toolDecisionsButNullPreCasSnapshot_skipsValidation() throws Exception {
             doReturn(ConversationState.AWAITING_HUMAN).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);

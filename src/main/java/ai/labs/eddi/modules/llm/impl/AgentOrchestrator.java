@@ -43,6 +43,7 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
@@ -555,9 +556,18 @@ class AgentOrchestrator {
 
         for (PendingToolCallBatch.PendingToolCall c : batch.getCalls()) {
             ToolCallDecision cd = perCall.get(c.getCallId());
-            HitlDecision.HitlVerdict verdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : topVerdict;
+            HitlDecision.HitlVerdict resolvedVerdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : topVerdict;
+            // Every current caller of resumeConversation validates a non-null verdict
+            // before this point, so resolvedVerdict should never actually be null —
+            // but the check that guarantees it lives in each caller, not here. Fail
+            // closed rather than trust that invariant silently: the REJECTED check
+            // below is the only thing standing between an unresolved verdict and
+            // executing a gated call, and "not REJECTED" is a dangerous way to spell
+            // "approved".
+            HitlDecision.HitlVerdict verdict = resolvedVerdict != null ? resolvedVerdict : HitlDecision.HitlVerdict.REJECTED;
             String note = cd != null ? cd.getNote() : decision.getNote();
             String amended = cd != null ? cd.getAmendedArguments() : null;
+            recordWriteApprovalDecision(verdict, decision.getDecidedBy());
 
             if (verdict == HitlDecision.HitlVerdict.REJECTED) {
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), rejectionEnvelope(c.getToolName(), note)));
@@ -574,6 +584,19 @@ class AgentOrchestrator {
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
                         "{\"status\":\"NOT_EXECUTED\",\"reason\":\"arguments exceeded the persistable size cap\"}"));
                 trace.add(Map.of("type", "hitl_not_executed", "tool", c.getToolName(), "callId", c.getCallId()));
+                continue;
+            }
+
+            // Approval binds to a REQUEST, not to a tool name: re-resolve now and
+            // refuse if what is about to be sent is not what was approved. Checked
+            // before the journal claim so a refusal consumes nothing and stays
+            // replayable.
+            String changed = requestChangedSinceApproval(c, amended, setup.toolRequestResolvers());
+            if (changed != null) {
+                auditRequestChanged(memory, c, changed);
+                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
+                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"the request changed after it was approved\"}"));
+                trace.add(Map.of("type", "hitl_request_changed", "tool", c.getToolName(), "callId", c.getCallId(), "detail", changed));
                 continue;
             }
 
@@ -655,6 +678,14 @@ class AgentOrchestrator {
 
     /** Journal-stored result cap (bytes) — matches the journal store's own cap. */
     private static final int JOURNAL_RESULT_MAX_BYTES = 32_768;
+
+    /**
+     * Cap for tool arguments echoed into a log line. Deliberately small: a log is
+     * for identifying WHICH call failed to parse, not for reproducing its payload,
+     * and an unbounded model-supplied string is a log-flooding vector on top of the
+     * redaction concern.
+     */
+    private static final int ARGS_LOG_MAX_BYTES = 512;
 
     /**
      * Restores the active-spec surface on resume. For EAGER, every registered spec.
@@ -821,6 +852,66 @@ class AgentOrchestrator {
     }
 
     /**
+     * Whether the request this approved call would now send differs from the one
+     * that was approved — the check that makes an approval bind to a request.
+     *
+     * @return null when the call may proceed, otherwise a short reason for the
+     *         audit trail and trace
+     */
+    String requestChangedSinceApproval(PendingToolCallBatch.PendingToolCall c, String amendedArguments,
+                                       Map<String, ToolRequestResolver> resolvers) {
+
+        if (!c.isRequestPinned()) {
+            // Never pinned, so there is nothing to compare: every non-http tool, and
+            // any call that could not be resolved ahead of execution. Enforcing here
+            // would reject calls on a comparison that was never sound.
+            return null;
+        }
+        if (amendedArguments != null) {
+            // The approver rewrote the arguments themselves. The pinned fingerprint
+            // describes the request they replaced, so comparing against it would
+            // refuse every amendment. An amendment is already a deliberate, audited
+            // act by the same human whose approval the pin exists to honour.
+            return null;
+        }
+
+        var resolver = resolvers.get(c.getToolName());
+        if (resolver == null) {
+            // Pinned at gate time and unresolvable now: the tool is gone from the
+            // workflow, or the agent was reconfigured across the pause. We cannot
+            // show that what runs is what was approved, so it does not run.
+            return "the tool is no longer available to re-check the approved request";
+        }
+        try {
+            ResolvedRequest current = resolver.resolve(rebuiltRequest(c));
+            if (current.fingerprint() == null) {
+                return "the request could no longer be resolved for comparison";
+            }
+            if (!current.fingerprint().equals(c.getRequestFingerprint())) {
+                return "the resolved request no longer matches the approved fingerprint";
+            }
+            return null;
+        } catch (Exception e) {
+            // Fail closed: a pinned call whose request cannot be re-derived is
+            // exactly the case this check exists for. Type only, no throwable —
+            // see errorType.
+            LOGGER.warnf("Could not re-resolve the request for approved tool '%s' (%s); refusing to execute it.", sanitize(c.getToolName()),
+                    errorType(e));
+            return "the request could not be re-resolved before execution";
+        }
+    }
+
+    /**
+     * Records that an approved call was refused because its request no longer
+     * matched. Deliberately logs no argument, body or header — only the tool, the
+     * call id and the fixed reason.
+     */
+    void auditRequestChanged(IConversationMemory memory, PendingToolCallBatch.PendingToolCall c, String reason) {
+        LOGGER.warnf("hitl.tool.request_changed: approved tool '%s' (callId '%s') for conversation '%s' was NOT executed — %s.",
+                sanitize(c.getToolName()), sanitize(c.getCallId()), sanitize(memory.getConversationId()), sanitize(reason));
+    }
+
+    /**
      * Records an at-most-once outcome-unknown event. No lightweight
      * {@code hitl.tool.*} audit collector is reachable from this task (the
      * {@link ai.labs.eddi.engine.audit.model.AuditEntry} record is built by the
@@ -859,7 +950,8 @@ class AgentOrchestrator {
      */
     record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
             Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
-            Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints) {
+            Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints,
+            Map<String, ToolRequestResolver> toolRequestResolvers) {
     }
 
     /**
@@ -928,12 +1020,18 @@ class AgentOrchestrator {
         // Copy built-in specs before merging external ones — LAZY activation needs it.
         List<ToolSpecification> builtInSpecs = new ArrayList<>(toolSpecs);
 
+        Map<String, ToolRequestResolver> toolRequestResolvers = new HashMap<>();
+
         // Merge httpcall tools discovered from workflow (if any)
         if (httpCallTools != null) {
             mergeExternalTools(httpCallTools.toolSpecs(), httpCallTools.executors(), "http", toolSpecs, toolExecutors, toolSources);
             // Endpoint provenance travels beside the source so an approval pattern can
             // address what a tool calls, not just what it is named.
             toolEndpoints.putAll(httpCallTools.endpoints());
+            // Only httpcall tools resolve to an HTTP request, so only they can be
+            // pinned. Pruned below once every source has merged — a name whose http
+            // tool LOST a collision must not keep its resolver.
+            toolRequestResolvers.putAll(httpCallTools.resolvers());
         }
 
         // Merge mcpcalls tools discovered from workflow (if any)
@@ -946,7 +1044,28 @@ class AgentOrchestrator {
             mergeExternalTools(a2aTools.toolSpecs(), a2aTools.executors(), "a2a", toolSpecs, toolExecutors, toolSources);
         }
 
-        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames), Map.copyOf(toolEndpoints));
+        pruneResolversToSurvivingHttpTools(toolRequestResolvers, toolSources);
+
+        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, Map.copyOf(toolCanonicalNames), Map.copyOf(toolEndpoints),
+                Map.copyOf(toolRequestResolvers));
+    }
+
+    /**
+     * Drop every request resolver whose name is not owned by a surviving http tool.
+     * <p>
+     * {@link #mergeExternalTools} resolves a name collision by DROPPING the
+     * incoming tool and leaving the incumbent in place, but the dropped tool's
+     * resolver was registered before that verdict was known. Left in, a builtin (or
+     * mcp/a2a) tool that won a collision would be pinned against the losing http
+     * tool's request: the approver would be shown a preview of a request that is
+     * not the one about to run, and the pre-execution re-check would compare
+     * against it too — a fabricated request passing as a verified one.
+     * <p>
+     * Run after every source has merged, so {@code toolSources} already records the
+     * final owner of each name.
+     */
+    static void pruneResolversToSurvivingHttpTools(Map<String, ToolRequestResolver> resolvers, Map<String, String> toolSources) {
+        resolvers.keySet().removeIf(name -> !"http".equals(toolSources.get(name)));
     }
 
     /**
@@ -1291,7 +1410,8 @@ class AgentOrchestrator {
                             // 3) snapshot + persist the pending batch, then abort the loop
                             PendingToolCallBatch batch = buildPendingBatch(currentMessages, gateResult, task, memory,
                                     i, activatedToolNames(isLazy, activeSpecs), trace, pausesSoFar + 1, llmTaskIndex,
-                                    toolSources, effectiveToolApprovals, transcriptMaxBytes, ruleByCallId, governingRule);
+                                    toolSources, effectiveToolApprovals, transcriptMaxBytes, ruleByCallId, governingRule,
+                                    setup.toolRequestResolvers());
                             memory.setHitlPendingToolCalls(batch);
                             incrementToolPauseCount(memory, pausesSoFar);
                             throw new ToolApprovalRequiredException(
@@ -1742,6 +1862,22 @@ class AgentOrchestrator {
 
     // ─── Tool-approval gate helpers ───
 
+    /**
+     * The only part of a failure from the request-resolution path that is safe to
+     * log: its type.
+     * <p>
+     * Not the throwable and not its message. These failures come out of template
+     * rendering and request building, so the message routinely quotes the material
+     * being rendered — Jackson in particular appends a snippet of the offending
+     * source ({@code at [Source: (String)"{\"apiKey\":\"sk-…"]}), which puts the
+     * credential straight back into the log line that carefully redacted it. The
+     * type alone is what an operator triages on; the payload is already available,
+     * redacted, in the same message.
+     */
+    private static String errorType(Throwable e) {
+        return e == null ? "unknown" : e.getClass().getSimpleName();
+    }
+
     /** Maps a built-in tool instance to its gate source tag. */
     private static String sourceForBuiltInTool(Object tool) {
         Class<?> c = tool.getClass();
@@ -1784,6 +1920,38 @@ class AgentOrchestrator {
             return DEFAULT_MAX_PAUSES_PER_TURN;
         }
         return Math.max(1, Math.min(10, cfg.getMaxPausesPerTurn()));
+    }
+
+    /**
+     * {@code eddi.operator.write.approval} — one per gated call the moment its
+     * verdict is resolved, regardless of what happens to it afterwards (truncated
+     * args, a changed-request refusal, and a successful execution are all still an
+     * instance of a human's — or the timeout policy's — decision).
+     * <p>
+     * "write" describes the mechanism, not the source: any call reaching this loop
+     * was gated by {@code toolApprovals.requireApproval}, whether it dispatches
+     * over http, mcp, or a2a. Restricting the tag to http-sourced calls would
+     * silently exclude a gated MCP tool that writes to an external system, which is
+     * exactly the rubber-stamping risk this counter exists to surface.
+     * <p>
+     * {@code decidedBy} distinguishes a real decision from one the timeout policy
+     * made ({@link HitlTimeoutHandler}, {@code decidedBy = "system:timeout"}) —
+     * folding those into {@code approved}/{@code rejected} would count an operator
+     * walking away from their desk as an approval, which is the opposite of what
+     * "approvals ≫ rejections is a rubber-stamping signal" is trying to detect.
+     * <p>
+     * Tagged only with the decision outcome — never a tool name, argument, or
+     * conversation id.
+     */
+    void recordWriteApprovalDecision(HitlDecision.HitlVerdict verdict, String decidedBy) {
+        try {
+            String decisionTag = "system:timeout".equals(decidedBy)
+                    ? "timeout"
+                    : verdict == HitlDecision.HitlVerdict.APPROVED ? "approved" : "rejected";
+            Metrics.globalRegistry.counter("eddi.operator.write.approval", "decision", decisionTag).increment();
+        } catch (Exception e) {
+            LOGGER.debugf("write.approval metric emit failed: %s", e.getMessage());
+        }
     }
 
     /**
@@ -1869,7 +2037,7 @@ class AgentOrchestrator {
                                            Map<String, String> toolSources, ToolApprovalsConfig effectiveToolApprovals,
                                            int transcriptMaxBytes) {
         return buildPendingBatch(currentMessages, gateResult, task, memory, iterationIndex, activatedToolNames, trace,
-                pauseCountThisTurn, llmTaskIndex, toolSources, effectiveToolApprovals, transcriptMaxBytes, Map.of(), null);
+                pauseCountThisTurn, llmTaskIndex, toolSources, effectiveToolApprovals, transcriptMaxBytes, Map.of(), null, Map.of());
     }
 
     /**
@@ -1889,6 +2057,11 @@ class AgentOrchestrator {
      *            the single rule governing this pause (strictest of the above), or
      *            null; persisted so the post-pause resolvers read the same answer
      *            this gate computed
+     * @param resolvers
+     *            per httpcall tool name, how to resolve what it would send —
+     *            {@code ToolSetup#toolRequestResolvers}. Absent entries (every
+     *            non-http tool) leave the call unpinned, which is the pre-pinning
+     *            behaviour.
      */
     PendingToolCallBatch buildPendingBatch(List<ChatMessage> currentMessages, ToolApprovalGate.GateResult gateResult,
                                            LlmConfiguration.Task task, IConversationMemory memory, int iterationIndex,
@@ -1897,7 +2070,8 @@ class AgentOrchestrator {
                                            Map<String, String> toolSources, ToolApprovalsConfig effectiveToolApprovals,
                                            int transcriptMaxBytes,
                                            Map<String, ToolApprovalsConfig.ApprovalRule> ruleByCallId,
-                                           ToolApprovalsConfig.ApprovalRule governingRule) {
+                                           ToolApprovalsConfig.ApprovalRule governingRule,
+                                           Map<String, ToolRequestResolver> resolvers) {
         PendingToolCallBatch batch = new PendingToolCallBatch();
         batch.setPauseEpoch(UUID.randomUUID().toString());
         batch.setLlmTaskId(task.getId());
@@ -1952,6 +2126,7 @@ class AgentOrchestrator {
             // on a batch should be able to tell which call brought it.
             var callRule = req.id() != null ? ruleByCallId.get(req.id()) : null;
             call.setMatchedRule(callRule != null ? callRule.getMatch() : null);
+            pinResolvedRequest(call, req, resolvers);
             calls.add(call);
         }
         batch.setCalls(calls);
@@ -1966,6 +2141,65 @@ class AgentOrchestrator {
         batch.setFingerprint(fingerprint(gateResult.gated()));
 
         return batch;
+    }
+
+    /**
+     * Resolve what this gated call would send, and pin it to the pause.
+     *
+     * <p>
+     * Records both the redacted preview (so the approver sees the actual request
+     * rather than a tool name) and its fingerprint (so the request can be
+     * re-checked immediately before execution).
+     *
+     * <p>
+     * <b>Never fails the pause.</b> A tool with no resolver — every non-http source
+     * — and a resolve that throws both leave the call simply unpinned, which is
+     * exactly the behaviour that existed before pinning: approval on name and
+     * arguments. Letting a template error here abort the batch would turn a display
+     * feature into a way to kill a turn, and the honest failure mode for "we could
+     * not determine the request" is to say so, not to guess.
+     */
+    private void pinResolvedRequest(PendingToolCallBatch.PendingToolCall call, ToolExecutionRequest req,
+                                    Map<String, ToolRequestResolver> resolvers) {
+
+        var resolver = resolvers.get(req.name());
+        if (resolver == null) {
+            return;
+        }
+        try {
+            ResolvedRequest resolved = resolver.resolve(req);
+            call.setRequestFingerprint(resolved.fingerprint());
+            call.setRequestPreview(toPreview(resolved));
+        } catch (Exception e) {
+            // sanitize: the tool name is model-chosen, so it can carry newlines or
+            // control characters and forge log records — same treatment as every
+            // other name-bearing log statement in this class. The throwable is
+            // omitted for the reason given on errorType: this failure comes out of
+            // request building, whose message quotes the request being built.
+            LOGGER.warnf("Could not resolve the request for gated tool '%s' (%s); it will be approved unpinned.", sanitize(req.name()),
+                    errorType(e));
+        }
+    }
+
+    /** The persisted, display-shaped view of a resolved request. */
+    private static PendingToolCallBatch.ResolvedRequestPreview toPreview(ResolvedRequest resolved) {
+        var preview = new PendingToolCallBatch.ResolvedRequestPreview();
+        preview.setMethod(resolved.method());
+        preview.setUri(resolved.uri());
+        preview.setQueryParams(resolved.queryParams());
+        preview.setHeaders(resolved.headers());
+
+        String body = resolved.body();
+        if (body != null && body.getBytes(StandardCharsets.UTF_8).length > PendingToolCallBatch.PREVIEW_BODY_MAX_BYTES) {
+            // Capped for display only — the fingerprint above was computed over the
+            // whole body, so truncating here cannot weaken the pre-execution check.
+            preview.setBody(capUtf8(body, PendingToolCallBatch.PREVIEW_BODY_MAX_BYTES));
+            preview.setBodyTruncated(true);
+        } else {
+            preview.setBody(body);
+            preview.setBodyTruncated(false);
+        }
+        return preview;
     }
 
     /** Caps a string to at most maxBytes UTF-8 bytes without splitting a char. */
@@ -2568,7 +2802,20 @@ class AgentOrchestrator {
      *            method and path are what the agent designer actually wrote in the
      *            endpoint allow-list.
      */
-    record HttpCallToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors, Map<String, String> endpoints) {
+    record HttpCallToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors, Map<String, String> endpoints,
+            Map<String, ToolRequestResolver> resolvers) {
+    }
+
+    /**
+     * Resolves what an httpcall tool would send, without sending it.
+     * <p>
+     * Only httpcall tools have one. A builtin, MCP or A2A tool is not an HTTP
+     * request this side of the boundary, so there is nothing to pin — those calls
+     * pause and are approved on their name and arguments alone, exactly as before.
+     */
+    @FunctionalInterface
+    interface ToolRequestResolver {
+        ResolvedRequest resolve(ToolExecutionRequest toolRequest) throws LifecycleException;
     }
 
     /**
@@ -2619,6 +2866,48 @@ class AgentOrchestrator {
     }
 
     /**
+     * Template data for one httpcall tool invocation: conversation memory plus the
+     * model's arguments merged over it.
+     * <p>
+     * Shared by the executor and the resolver on purpose. The gate-time fingerprint
+     * only means anything if it was computed from the same inputs execution will
+     * use — two copies of this merge would eventually disagree, and the guard would
+     * then reject correct calls (or, worse, pass altered ones).
+     */
+    private Map<String, Object> templateDataFor(IConversationMemory memory, ToolExecutionRequest toolRequest) {
+        Map<String, Object> templateData = memoryItemConverter.convert(memory);
+        if (toolRequest.arguments() != null && !toolRequest.arguments().isBlank()) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
+                safeTemplateMerge(templateData, args);
+            } catch (IOException e) {
+                // Redacted and capped, never raw: these are model-supplied arguments
+                // that routinely carry credentials — the pause record keeps only a
+                // SecretRedactionFilter'd copy for exactly this reason, and a log
+                // line is no safer a place for the plaintext than that record was.
+                //
+                // The throwable is deliberately NOT passed: a Jackson parse error
+                // quotes the offending source in its own message, which would undo
+                // the redaction on the line right next to it. See errorType.
+                // Order is load-bearing. Redact FIRST, on the full string: capping
+                // first would cut a credential mid-token, and the fragment left
+                // behind no longer matches the shape rules — a partial secret in
+                // the log instead of a marker. Sanitize LAST: these arguments are
+                // model-chosen and therefore prompt-injectable, and
+                // SecretRedactionFilter only substitutes secret-shaped VALUES — it
+                // leaves \r and \n untouched, so a model could forge whole log
+                // records in the HITL audit stream. The tool name beside it was
+                // already sanitized for exactly this reason; the argument string
+                // is the more attacker-controllable of the two.
+                LOGGER.warnf("Failed to parse arguments for tool '%s' (%s): %s", sanitize(toolRequest.name()), errorType(e),
+                        sanitize(capUtf8(SecretRedactionFilter.redact(toolRequest.arguments()), ARGS_LOG_MAX_BYTES)));
+            }
+        }
+        return templateData;
+    }
+
+    /**
      * Discovers httpcall configurations from the workflow and creates
      * ToolSpecification + ToolExecutor for each ApiCall.
      * <p>
@@ -2626,10 +2915,12 @@ class AgentOrchestrator {
      * WorkflowConfiguration → filter httpcall steps → load ApiCallsConfiguration →
      * create tools from each ApiCall.
      */
+
     HttpCallToolsResult discoverHttpCallTools(IConversationMemory memory) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> executors = new HashMap<>();
         Map<String, String> endpoints = new HashMap<>();
+        Map<String, ToolRequestResolver> resolvers = new HashMap<>();
 
         try {
             LOGGER.infof("Discovering httpcall tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
@@ -2668,19 +2959,15 @@ class AgentOrchestrator {
                                 apiRequest.getMethod().toLowerCase(Locale.ROOT) + ":" + normalizeEndpointPath(apiRequest.getPath()));
                     }
 
+                    // Resolving and executing MUST build their template data the same
+                    // way: the fingerprint pinned at gate time is only meaningful if
+                    // it describes the request execution will actually construct.
+                    resolvers.put(apiCall.getName(),
+                            toolRequest -> apiCallExecutor.resolve(apiCall, memory, templateDataFor(memory, toolRequest), targetServerUrl));
+
                     executors.put(apiCall.getName(), (toolRequest, memoryId) -> {
                         try {
-                            Map<String, Object> templateData = memoryItemConverter.convert(memory);
-
-                            if (toolRequest.arguments() != null && !toolRequest.arguments().isBlank()) {
-                                try {
-                                    @SuppressWarnings("unchecked")
-                                    Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
-                                    safeTemplateMerge(templateData, args);
-                                } catch (IOException e) {
-                                    LOGGER.warn("Failed to parse tool arguments: " + toolRequest.arguments(), e);
-                                }
-                            }
+                            Map<String, Object> templateData = templateDataFor(memory, toolRequest);
 
                             Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl);
 
@@ -2702,7 +2989,7 @@ class AgentOrchestrator {
             LOGGER.warn("Failed to discover httpcall tools from workflow", e);
         }
 
-        return new HttpCallToolsResult(toolSpecs, executors, endpoints);
+        return new HttpCallToolsResult(toolSpecs, executors, endpoints, resolvers);
     }
 
     // --- McpCalls auto-discovery from workflow ---

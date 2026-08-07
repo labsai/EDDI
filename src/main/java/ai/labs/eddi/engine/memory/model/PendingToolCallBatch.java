@@ -26,6 +26,15 @@ public class PendingToolCallBatch {
     public static final int ARGS_REDACTED_MAX_BYTES = 32_768;
     public static final int AMENDED_ARGS_MAX_BYTES = 32_768;
     public static final int TRACE_ENTRY_MAX_BYTES = 65_536;
+    /**
+     * Cap for the request body kept in the approval preview.
+     * <p>
+     * Display-only, and deliberately smaller than {@link #ARGS_RAW_MAX_BYTES}: an
+     * approver cannot meaningfully read more than this, and the pause is persisted
+     * as part of the conversation document. Truncation here never affects the
+     * fingerprint, which is computed over the full body before any capping.
+     */
+    public static final int PREVIEW_BODY_MAX_BYTES = 8_192;
 
     /** A single gated tool call awaiting a human verdict. */
     public static class PendingToolCall {
@@ -37,6 +46,40 @@ public class PendingToolCallBatch {
         private String argumentsRedacted; // SecretRedactionFilter'd, capped — the ONLY field approver surfaces read
         private String gateReason; // the matched pattern, e.g. "mcp:*"
         private String matchedRule; // toolApprovals.rules[].match that tuned this call, or null
+
+        /**
+         * SHA-256 of the HTTP request this call resolved to at gate time, re-derived
+         * and compared immediately before execution.
+         * <p>
+         * Headers participate in their <em>redacted</em> form and the query and body as
+         * <em>resolved</em> — see {@code ResolvedRequest} for why the two differ (a
+         * caller token legitimately varies between requester and approver; a query
+         * value or body does not, and collapsing two credentials to one marker before
+         * hashing would let a swapped one pass this check). Never exposed through any
+         * client-facing projection: it is a digest, not encryption, and for a
+         * predictable body it would support offline guessing.
+         * <p>
+         * Distinct from the batch-level {@code fingerprint} above, which hashes tool
+         * names and arguments to detect a wedged no-progress loop. This one answers a
+         * different question — <em>is the request about to run the one that was
+         * approved</em> — and is what makes approval bind to a request rather than to a
+         * tool name.
+         * <p>
+         * Null for anything not resolvable ahead of execution: every non-http tool, and
+         * an http call whose pre-request property instructions would have to run first
+         * (see {@code IApiCallExecutor#resolve}). Null means unenforced, not failed — a
+         * call is never rejected on a comparison that was never sound.
+         */
+        private String requestFingerprint;
+
+        /**
+         * The redacted request, for display to the approver — {@code METHOD uri}, query
+         * and body, credentials already removed.
+         * <p>
+         * This is the honest replacement for reconstructing an endpoint client-side
+         * from an {@code operationId}, which is a guess from a spec that can drift.
+         */
+        private ResolvedRequestPreview requestPreview;
 
         public String getCallId() {
             return callId;
@@ -100,6 +143,103 @@ public class PendingToolCallBatch {
 
         public void setMatchedRule(String matchedRule) {
             this.matchedRule = matchedRule;
+        }
+
+        public String getRequestFingerprint() {
+            return requestFingerprint;
+        }
+
+        public void setRequestFingerprint(String requestFingerprint) {
+            this.requestFingerprint = requestFingerprint;
+        }
+
+        public ResolvedRequestPreview getRequestPreview() {
+            return requestPreview;
+        }
+
+        public void setRequestPreview(ResolvedRequestPreview requestPreview) {
+            this.requestPreview = requestPreview;
+        }
+
+        /** Whether this call was pinned to a request at gate time. */
+        public boolean isRequestPinned() {
+            return requestFingerprint != null && !requestFingerprint.isBlank();
+        }
+    }
+
+    /**
+     * The redacted HTTP request a gated call resolved to, as persisted on the pause
+     * and shown to the approver.
+     * <p>
+     * A plain POJO rather than the {@code ResolvedRequest} record it is built from:
+     * this is written to the conversation document and read back by Jackson, and
+     * the persisted shape must not be coupled to a type in the apicalls module.
+     * Credentials are already redacted before anything reaches here — nothing on
+     * this object is ever sensitive.
+     */
+    public static class ResolvedRequestPreview {
+        private String method;
+        private String uri;
+        private Map<String, String> queryParams;
+        /**
+         * Redacted headers.
+         * <p>
+         * Shown even though they are mostly uninteresting, because the fingerprint
+         * covers them: a header the approver never saw could otherwise be the thing
+         * that later fails the pre-execution check, and "approve what you are shown"
+         * has to mean the whole of what is checked.
+         */
+        private Map<String, String> headers;
+        private String body;
+        /** True when the body was cut to {@link #PREVIEW_BODY_MAX_BYTES}. */
+        private boolean bodyTruncated;
+
+        public String getMethod() {
+            return method;
+        }
+
+        public void setMethod(String method) {
+            this.method = method;
+        }
+
+        public String getUri() {
+            return uri;
+        }
+
+        public void setUri(String uri) {
+            this.uri = uri;
+        }
+
+        public Map<String, String> getQueryParams() {
+            return queryParams;
+        }
+
+        public void setQueryParams(Map<String, String> queryParams) {
+            this.queryParams = queryParams;
+        }
+
+        public Map<String, String> getHeaders() {
+            return headers;
+        }
+
+        public void setHeaders(Map<String, String> headers) {
+            this.headers = headers;
+        }
+
+        public String getBody() {
+            return body;
+        }
+
+        public void setBody(String body) {
+            this.body = body;
+        }
+
+        public boolean isBodyTruncated() {
+            return bodyTruncated;
+        }
+
+        public void setBodyTruncated(boolean bodyTruncated) {
+            this.bodyTruncated = bodyTruncated;
         }
     }
 

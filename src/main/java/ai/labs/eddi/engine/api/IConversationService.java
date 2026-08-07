@@ -308,6 +308,16 @@ public interface IConversationService {
      *            the human approval/rejection decision
      * @param responseHandler
      *            optional callback — may be null for fire-and-forget
+     * @throws IllegalArgumentException
+     *             {@code decision} is null, carries no top-level {@code verdict},
+     *             or its {@code toolDecisions} fail validation — maps to HTTP 400;
+     *             checked before the AWAITING_HUMAN-&gt;IN_PROGRESS CAS, so the
+     *             pause is never consumed by a malformed request. Every current
+     *             caller (REST, Slack, MCP, timeout auto-resolution) already
+     *             guarantees a non-null verdict before calling this method; this is
+     *             the one place that guarantee is enforced rather than assumed, so
+     *             a future caller that forgets fails loudly here instead of
+     *             silently reaching the tool-execution gate with nothing to check.
      * @throws IllegalStateException
      *             wrong-state conflict (not AWAITING_HUMAN, or agent not deployed)
      *             — maps to HTTP 409; the pause is preserved/restored

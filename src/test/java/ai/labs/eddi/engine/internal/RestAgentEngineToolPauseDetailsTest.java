@@ -108,6 +108,17 @@ class RestAgentEngineToolPauseDetailsTest {
         return (Map<String, Object>) response.getEntity();
     }
 
+    private PendingToolCallBatch.ResolvedRequestPreview preview(String method, String uri, String body) {
+        var preview = new PendingToolCallBatch.ResolvedRequestPreview();
+        preview.setMethod(method);
+        preview.setUri(uri);
+        preview.setQueryParams(Map.of("version", "1"));
+        preview.setHeaders(Map.of("Authorization", "<REDACTED>"));
+        preview.setBody(body);
+        preview.setBodyTruncated(false);
+        return preview;
+    }
+
     @Nested
     @DisplayName("pauseDetails — TOOL_CALL")
     class ToolCallPauseDetails {
@@ -151,6 +162,128 @@ class RestAgentEngineToolPauseDetailsTest {
             assertEquals("mcp:*", call.get("gateReason"));
 
             assertEquals(List.of("getCurrentDateTime"), pauseDetails.get("executedUngatedCalls"));
+        }
+
+        @Test
+        @DisplayName("a pinned http call exposes its resolved-request preview, so an approver sees the real request")
+        void pinnedCallExposesRequestPreview() throws Exception {
+            var snapshot = snapshotInState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPauseType("TOOL_CALL");
+
+            var call = toolCall("call-1", "deployAgent", "http", RAW_SECRET, "{}", false, "http.post:*");
+            call.setRequestFingerprint("deadbeef");
+            call.setRequestPreview(preview("POST", "https://eddi.example/administration/production/deploy/a1", "{}"));
+
+            var batch = new PendingToolCallBatch();
+            batch.setPauseEpoch("epoch-1");
+            batch.setCalls(List.of(call));
+            snapshot.setHitlPendingToolCalls(batch);
+            doReturn(Optional.empty()).when(hitlToolJournalStore).find(anyString(), anyString(), anyString());
+
+            Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, "summary");
+
+            var pauseDetails = (Map<String, Object>) summaryOf(response).get("pauseDetails");
+            var callView = ((List<Map<String, Object>>) pauseDetails.get("calls")).get(0);
+
+            assertEquals(true, callView.get("requestPinned"));
+            var previewView = (Map<String, Object>) callView.get("requestPreview");
+            assertNotNull(previewView, "a pinned call must expose its preview");
+            assertEquals("POST", previewView.get("method"));
+            assertEquals("https://eddi.example/administration/production/deploy/a1", previewView.get("uri"));
+            assertEquals(Map.of("version", "1"), previewView.get("queryParams"));
+            assertEquals(Map.of("Authorization", "<REDACTED>"), previewView.get("headers"));
+            assertEquals("{}", previewView.get("body"));
+            assertEquals(false, previewView.get("bodyTruncated"));
+        }
+
+        @Test
+        @DisplayName("an unpinned call (every non-http tool) has no preview, honestly, rather than a fabricated one")
+        void unpinnedCallHasNoPreview() throws Exception {
+            var snapshot = snapshotInState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPauseType("TOOL_CALL");
+
+            var call = toolCall("call-1", "sendEmail", "mcp", RAW_SECRET, "{\"to\":\"[REDACTED]\"}", false, "mcp:*");
+            // requestFingerprint / requestPreview left unset, exactly as the gate
+            // leaves them for a non-http tool.
+
+            var batch = new PendingToolCallBatch();
+            batch.setPauseEpoch("epoch-1");
+            batch.setCalls(List.of(call));
+            snapshot.setHitlPendingToolCalls(batch);
+            doReturn(Optional.empty()).when(hitlToolJournalStore).find(anyString(), anyString(), anyString());
+
+            Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, "summary");
+
+            var pauseDetails = (Map<String, Object>) summaryOf(response).get("pauseDetails");
+            var callView = ((List<Map<String, Object>>) pauseDetails.get("calls")).get(0);
+
+            assertEquals(false, callView.get("requestPinned"));
+            assertNull(callView.get("requestPreview"));
+        }
+
+        @Test
+        @DisplayName("the fingerprint itself never appears in the response — it is an internal comparison value, not approver-facing")
+        void fingerprintNeverAppearsInResponse() throws Exception {
+            var snapshot = snapshotInState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPauseType("TOOL_CALL");
+
+            var call = toolCall("call-1", "deployAgent", "http", RAW_SECRET, "{}", false, "http.post:*");
+            String secretFingerprint = "fingerprint-must-not-leak-abc123";
+            call.setRequestFingerprint(secretFingerprint);
+            call.setRequestPreview(preview("POST", "https://eddi.example/deploy/a1", "{}"));
+
+            var batch = new PendingToolCallBatch();
+            batch.setPauseEpoch("epoch-1");
+            batch.setCalls(List.of(call));
+            snapshot.setHitlPendingToolCalls(batch);
+            doReturn(Optional.empty()).when(hitlToolJournalStore).find(anyString(), anyString(), anyString());
+
+            Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, "summary");
+
+            assertFalse(summaryOf(response).toString().contains(secretFingerprint),
+                    "the raw fingerprint value must never appear in the approval-status response");
+        }
+
+        @Test
+        @DisplayName("detail=full strips the fingerprint too — it digests the RAW body the preview redacts")
+        void fingerprintNeverAppearsInTheFullSnapshot() throws Exception {
+            // The gap the summary test above did NOT cover: detail=full returns the
+            // whole snapshot object, and the getter carries no @JsonIgnore (it cannot
+            // — the persistence mapper shares the same configuration, so ignoring it
+            // would drop the field from the stored document and disable pinning).
+            // Without a read-time strip, an approver received a SHA-256 over a
+            // canonical string containing the raw body and raw query values — i.e.
+            // exactly the credential material RequestRedactor removed from the
+            // preview sitting beside it.
+            var snapshot = snapshotInState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPauseType("TOOL_CALL");
+
+            var call = toolCall("call-1", "deployAgent", "http", RAW_SECRET, "{}", false, "http.post:*");
+            String secretFingerprint = "fingerprint-must-not-leak-abc123";
+            call.setRequestFingerprint(secretFingerprint);
+            call.setRequestPreview(preview("POST", "https://eddi.example/deploy/a1", "{}"));
+
+            var batch = new PendingToolCallBatch();
+            batch.setPauseEpoch("epoch-1");
+            batch.setCalls(List.of(call));
+            snapshot.setHitlPendingToolCalls(batch);
+
+            Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, "full");
+
+            var returned = (ConversationMemorySnapshot) response.getEntity();
+            var returnedCall = returned.getHitlPendingToolCalls().getCalls().getFirst();
+            assertNotEquals(secretFingerprint, returnedCall.getRequestFingerprint(),
+                    "detail=full must not carry the real request fingerprint");
+            // The approver still gets everything they need to decide — stripping the
+            // digest must not cost them the preview it was derived from.
+            assertNotNull(returnedCall.getRequestPreview(), "the redacted request preview must survive the strip");
+            // And must not cost them the PINNED signal either. isRequestPinned() is
+            // derived from the fingerprint field, so clearing it outright silently
+            // reported every pinned call as unpinned — telling the approver the
+            // request is not re-checked before execution when it is, and
+            // contradicting what detail=summary says about the same conversation.
+            assertTrue(returnedCall.isRequestPinned(),
+                    "stripping the digest must not flip the documented requestPinned contract field");
         }
 
         @Test

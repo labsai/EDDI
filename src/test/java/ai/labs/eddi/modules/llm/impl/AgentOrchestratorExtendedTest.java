@@ -639,7 +639,7 @@ class AgentOrchestratorExtendedTest {
         void testRecordFields() {
             var spec = ToolSpecification.builder().name("test").description("test").build();
             var result = new AgentOrchestrator.HttpCallToolsResult(
-                    List.of(spec), Map.of(), Map.of());
+                    List.of(spec), Map.of(), Map.of(), Map.of());
 
             assertEquals(1, result.toolSpecs().size());
             assertEquals("test", result.toolSpecs().get(0).name());
