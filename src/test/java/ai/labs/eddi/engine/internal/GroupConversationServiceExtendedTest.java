@@ -375,6 +375,67 @@ class GroupConversationServiceExtendedTest {
             assertNull(gc.getRuntimePhases());
         }
 
+        /**
+         * Final-review finding: a facilitator END_PHASE used to take a plain
+         * {@code break} AFTER the decision block, so a VOTE phase it ended never
+         * tallied its cast ballots. END_PHASE now folds into the phase outcome BEFORE
+         * the block — the tally, verdict and dissent machinery all see a real phase
+         * end.
+         */
+        @Test
+        void endPhase_onAVotePhase_stillTalliesTheCastBallots() throws Exception {
+            var config = facilitatorConfig(FacilitatorCheckpoint.EACH_REPEAT, 10, 1,
+                    FacilitatorMove.CONTINUE, FacilitatorMove.END_PHASE);
+            config.setPhases(List.of(new AgentGroupConfiguration.DiscussionPhase("Ballot", PhaseType.VOTE, "ALL",
+                    TurnOrder.PARALLEL, ContextScope.NONE, false, null, 2, false, null, false,
+                    new AgentGroupConfiguration.VoteConfig(AgentGroupConfiguration.VoteMethod.MAJORITY,
+                            AgentGroupConfiguration.OptionsSource.EXPLICIT, List.of("Ship it", "Hold it"), 0.5,
+                            Map.of(), false, AgentGroupConfiguration.TiePolicy.NO_DECISION))));
+            setupStore(config);
+            stubAgent("a1", "{\"vote\": \"Ship it\"}");
+            stubAgent("a2", "{\"vote\": \"Ship it\"}");
+            stubAgent("fac", "{\"move\": \"END_PHASE\", \"reason\": \"one ballot round is enough\"}");
+
+            GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, gc.getState());
+            assertEquals(2, gc.getTranscript().stream().filter(e -> e.type() == TranscriptEntryType.VOTE).count(),
+                    "END_PHASE stopped the second ballot round");
+            assertNotNull(gc.getDecision(), "the cast ballots MUST still be tallied — an untallied election is lost work");
+            assertEquals(GroupConversation.DecisionType.VOTE, gc.getDecision().type());
+            assertEquals("Ship it", gc.getDecision().winner());
+        }
+
+        /**
+         * Final-review finding: EXTEND_PHASE at a phase's final repeat used to run
+         * AFTER the decision block had already fired for that repeat, so the next
+         * (extended) final repeat re-ran it — duplicate dissent rounds and a re-fired
+         * decision event. The consult now precedes the block, so an extension DEFERS it
+         * to the true final repeat.
+         */
+        @Test
+        void extendPhase_onTheFinalSynthesisRepeat_runsTheDissentRoundExactlyOnce() throws Exception {
+            var config = facilitatorConfig(FacilitatorCheckpoint.EACH_REPEAT, 10, 1,
+                    FacilitatorMove.CONTINUE, FacilitatorMove.EXTEND_PHASE);
+            config.setPhases(List.of(new AgentGroupConfiguration.DiscussionPhase("Wrap", PhaseType.SYNTHESIS,
+                    "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false)));
+            config.setModeratorAgentId("mod");
+            config.setRecordDissents(true);
+            setupStore(config);
+            stubAgent("a1", "I still disagree about the rollout risk.");
+            stubAgent("a2", "I still disagree about the budget.");
+            stubAgent("mod", "The synthesis.");
+            stubAgent("fac", "{\"move\": \"EXTEND_PHASE\", \"reason\": \"one more pass\"}");
+
+            GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, gc.getState());
+            assertEquals(3, gc.getTranscript().stream().filter(e -> e.type() == TranscriptEntryType.SYNTHESIS).count(),
+                    "1 configured + 2 extended synthesis repeats");
+            assertEquals(2, gc.getTranscript().stream().filter(e -> e.type() == TranscriptEntryType.DISSENT).count(),
+                    "ONE dissent round (two dissenters), on the true final repeat only — not one per extension");
+        }
+
         @Test
         void effectivePhases_prefersTheRuntimeList_overTheConfig() {
             var config = facilitatorConfig(FacilitatorCheckpoint.EACH_PHASE, 10, 1, FacilitatorMove.CONTINUE);
