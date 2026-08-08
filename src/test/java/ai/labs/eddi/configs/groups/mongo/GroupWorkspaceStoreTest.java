@@ -120,6 +120,21 @@ class GroupWorkspaceStoreTest {
         verify(storage, never()).storeIfFieldEquals(any(), anyString(), anyString());
     }
 
+    @Test
+    @DisplayName("a corrupt (non-numeric) revision surfaces as the declared store exception, not a raw NumberFormatException")
+    void casRevision_corruptRevision_throwsDeclaredException() {
+        var workspace = new GroupWorkspace();
+        workspace.setId("ws-1");
+        workspace.setGroupId(GROUP_ID);
+        workspace.setRevision("not-a-number");
+
+        var thrown = org.junit.jupiter.api.Assertions.assertThrows(
+                IResourceStore.ResourceStoreException.class, () -> store.casRevision(workspace));
+
+        assertTrue(thrown.getMessage().contains("not-a-number"), thrown.getMessage());
+        assertEquals("not-a-number", workspace.getRevision(), "the corrupt value is left for diagnosis, never bumped");
+    }
+
     // =================================================================
     // readOrCreate duplicate convergence
     // =================================================================
@@ -135,7 +150,7 @@ class GroupWorkspaceStoreTest {
         var survivor = new GroupWorkspace();
         survivor.setGroupId(GROUP_ID);
         var survivorResource = resource(survivor, "aaa");
-        when(storage.findResources(any(), eq("lastModified"), eq(0), eq(2)))
+        when(storage.findResources(any(), eq("lastModified"), eq(0), eq(50)))
                 .thenReturn(List.of())
                 .thenReturn(List.of(idBbb, idAaa))
                 .thenReturn(List.of(idAaa));
@@ -156,7 +171,7 @@ class GroupWorkspaceStoreTest {
         var survivor = new GroupWorkspace();
         survivor.setGroupId(GROUP_ID);
         var survivorResource = resource(survivor, "aaa");
-        when(storage.findResources(any(), eq("lastModified"), eq(0), eq(2)))
+        when(storage.findResources(any(), eq("lastModified"), eq(0), eq(50)))
                 .thenReturn(List.of(idBbb, idAaa));
         when(storage.read("aaa", 1)).thenReturn(survivorResource);
 

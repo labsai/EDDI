@@ -115,8 +115,12 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
     private List<IResourceStore.IResourceId> findWorkspaceIds(String groupId) {
         var filter = new IResourceFilter.QueryFilters(
                 List.of(new IResourceFilter.QueryFilter("groupId", "^" + groupId + "$")));
+        // High enough that EVERY realistic racer set fits in one query — with a
+        // small limit, three-plus concurrent creators could each see a different
+        // subset and compute different survivors, and the documents would never
+        // converge (review finding).
         List<IResourceStore.IResourceId> ids = storage.findResources(
-                new IResourceFilter.QueryFilters[]{filter}, "lastModified", 0, 2);
+                new IResourceFilter.QueryFilters[]{filter}, "lastModified", 0, 50);
         return ids != null ? ids : List.of();
     }
 
@@ -152,7 +156,23 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
     @Override
     public boolean casRevision(GroupWorkspace workspace) throws IResourceStore.ResourceStoreException {
         String expected = workspace.getRevision();
-        workspace.setRevision(expected == null ? "1" : String.valueOf(Long.parseLong(expected) + 1));
+        String bumped;
+        if (expected == null) {
+            bumped = "1";
+        } else {
+            try {
+                bumped = String.valueOf(Long.parseLong(expected) + 1);
+            } catch (NumberFormatException e) {
+                // A corrupt revision must surface through the method's declared
+                // error model, not as an uncaught runtime exception the REST
+                // layer's generic handler turns into a bare 500 (CodeQL).
+                throw new IResourceStore.ResourceStoreException(
+                        "Workspace revision for group " + workspace.getGroupId() + " is not numeric: '"
+                                + expected + "'",
+                        e);
+            }
+        }
+        workspace.setRevision(bumped);
         workspace.setLastModified(Instant.now());
         if (expected == null) {
             // Pre-revision document: no field to compare against. One plain write

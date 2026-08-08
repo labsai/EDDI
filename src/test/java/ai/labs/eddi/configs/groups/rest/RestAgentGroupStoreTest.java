@@ -163,10 +163,13 @@ class RestAgentGroupStoreTest {
             restStore.deleteGroup("group-1", 1, true);
 
             // Review finding: enabled ScheduleConfigurations outlived the deleted
-            // workspace and fired "No workspace exists" forever.
-            verify(scheduleStore).deleteSchedule("sched-1");
-            verify(scheduleStore).deleteSchedule("sched-2");
-            verify(workspaceStore).deleteByGroupId("group-1");
+            // workspace and fired "No workspace exists" forever. InOrder pins the
+            // crash-recoverable ORDER, not just the calls — deleting the workspace
+            // first would leave unreachable schedules on a crash in between.
+            var inOrder = inOrder(scheduleStore, workspaceStore);
+            inOrder.verify(scheduleStore).deleteSchedule("sched-1");
+            inOrder.verify(scheduleStore).deleteSchedule("sched-2");
+            inOrder.verify(workspaceStore).deleteByGroupId("group-1");
         }
 
         @Test

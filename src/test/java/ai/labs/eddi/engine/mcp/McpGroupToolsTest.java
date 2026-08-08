@@ -734,6 +734,7 @@ class McpGroupToolsTest {
 
         assertTrue(result.contains("complete or delete"), "the cap error says what to do about it: " + result);
         verify(workspaceStore, never()).update(any());
+        verify(workspaceStore, never()).casRevision(any());
     }
 
     @Test
@@ -770,6 +771,7 @@ class McpGroupToolsTest {
         String longDescription = "d".repeat(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH + 1);
         assertTrue(tools.add_team_task("g1", "Ok", longDescription, null).contains("error"));
         verify(workspaceStore, never()).update(any());
+        verify(workspaceStore, never()).casRevision(any());
     }
 
     @Test
@@ -783,6 +785,7 @@ class McpGroupToolsTest {
         assertTrue(result.contains("subject"), "the error names the conflict: " + result);
         assertEquals(1, workspace.getBacklog().size());
         verify(workspaceStore, never()).update(any());
+        verify(workspaceStore, never()).casRevision(any());
     }
 
     @Test

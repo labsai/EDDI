@@ -14,6 +14,21 @@ Two accepted CodeRabbit findings, one rebutted:
 1. **RetroConfig ceilings (major)** — the compact ctor accepted any positive int, so `Integer.MAX_VALUE` unbounded the per-run write count and the retained-lesson set. Hard ceilings: `CEILING_MAX_PER_RUN` 20, `CEILING_MAX_STORED` 500 (clamped, not rejected — same normalization style as the rest of the record).
 2. **FIFO vs reharvest (major)** — eviction used the `most_recent` recall order (sorted by `updatedAt`); reharvesting an existing lesson refreshes `updatedAt`, so an old-but-reharvested lesson could shield itself while a later-CREATED lesson got evicted. Eviction now sorts by `createdAt` (which the store `setOnInsert`s — the stable insertion stamp), nulls oldest-first. Regression test reharvests an old lesson before exceeding the cap and asserts the oldest-created is the one evicted.
 3. **Rebutted: RETRO entries lost on mid-repeat HITL resume** — on this branch nothing ever creates a speaker-level `ResumePoint` (producers are I6 human turns and I12 escalations, on other branches), so a RETRO phase cannot resume mid-repeat here. On the integration branch, where producers exist, the I6 `pausedRepeatSliceBase` fix restores the true repeat base at top-of-repeat before `repeatEntries` is sliced — the RETRO harvest reads that same slice, so pre-pause lessons are preserved (pinned by the HumanPauseRepeatSlice tests).
+## 🔎 fix(groups): I13 review round 3 — revision parse guard, convergence limit, test pins (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams`)
+
+Six findings from the CodeRabbit/CodeQL round on the round-2 push, all accepted:
+
+1. **NumberFormatException in casRevision (CodeQL, both #644 and #645)** — `Long.parseLong` on a persisted value; a corrupt revision surfaced as an uncaught runtime exception (bare 500 at REST). Guarded: non-numeric revision throws the method's declared `ResourceStoreException` with the value named; the instance keeps the corrupt value for diagnosis.
+2. **Convergence limit (major)** — `findWorkspaceIds` fetched at most 2 ids; with 3+ concurrent creators, different racers could see different subsets and compute different survivors, never converging. Limit raised to 50 so every realistic racer set fits one query.
+3. **Javadoc detachment (minor)** — `casRevision` was inserted between `casRunningDiscussion`'s Javadoc and its declaration, silently detaching it. Reordered; the claim Javadoc is re-attached.
+4. **Legacy null-revision window (minor)** — documented on `IGroupWorkspaceStore.casRevision`: one unconditional stamp per pre-revision document, CAS'd forever after.
+5. **Deletion-order pin (minor)** — the schedule-retirement test now uses `InOrder`, protecting the crash-recoverable order (schedules before workspace), not just the calls.
+6. **Write-path pins (minor)** — the backlog rejection tests assert `never().casRevision(any())` (the actual write path) alongside the legacy `update` pin; the lost-settle test uses `verifyNoMoreInteractions` so the failed conditional release is provably the ONLY store interaction.
+
+---
+
 ## 🔎 fix(groups): I13 review round 2 — workspace concurrency + schedule lifecycle (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i13-standing-teams`)
