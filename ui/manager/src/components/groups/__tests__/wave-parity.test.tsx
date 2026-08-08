@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { AgentResponseCard } from "@/components/groups/agent-response-card";
@@ -293,6 +293,68 @@ describe("DiscussionInput — group attachments", () => {
     });
 
     expect(screen.getByTestId("start-discussion-btn")).not.toBeDisabled();
+  });
+
+  /**
+   * `stageFiles` reads the staged set before its first `await`. Against
+   * `attachments` state — only visible to the next render — two selections made
+   * before the first finished reading both computed their dedupe set and byte
+   * budget from the same stale array and then merged, past both caps. Runs are
+   * serialized and share a synchronously-updated ref instead.
+   */
+  it("does not let two rapid selections both slip the same file through", async () => {
+    renderWithProviders(<DiscussionInput onSubmit={vi.fn()} />);
+    const input = screen.getByTestId("discussion-file-input") as HTMLInputElement;
+    const file = new File(["payload"], "race.txt", { type: "text/plain" });
+
+    // jsdom has no DataTransfer, so stand in a FileList-shaped object. Two change
+    // events fire back to back with no await between them, which is what a user
+    // double-picking faster than the read completes produces.
+    const fileList = {
+      0: file,
+      length: 1,
+      item: (i: number) => (i === 0 ? file : null),
+    } as unknown as FileList;
+    Object.defineProperty(input, "files", { value: fileList, configurable: true });
+
+    fireEvent.change(input);
+    fireEvent.change(input);
+
+    expect(await screen.findByText("race.txt")).toBeInTheDocument();
+    // One chip, not two — the second run saw the first run's result.
+    await waitFor(() => expect(screen.getAllByText("race.txt")).toHaveLength(1));
+  });
+
+  /**
+   * A file that does not fit the remaining budget used to `break`, dropping every
+   * later file too — including smaller ones that would have fitted.
+   */
+  it("skips a file that does not fit but keeps a later one that does", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<DiscussionInput onSubmit={vi.fn()} />);
+
+    // Sizes are STUBBED rather than allocated: three real multi-MiB buffers would
+    // be slow to base64 in jsdom, and — more importantly — a file big enough to
+    // break the 32 MiB aggregate on its own also breaks the 20 MiB per-file cap,
+    // so it would never reach the branch under test. Each of these is legal on
+    // its own; only the running total is not.
+    const sized = (name: string, bytes: number) => {
+      const f = new File(["x"], name, { type: "application/octet-stream" });
+      Object.defineProperty(f, "size", { value: bytes, configurable: true });
+      return f;
+    };
+    const mib = 1024 * 1024;
+    await user.upload(screen.getByTestId("discussion-file-input"), [
+      sized("first-18mb.bin", 18 * mib),
+      sized("wont-fit-18mb.bin", 18 * mib), // 36 MiB total — over the 32 MiB cap
+      sized("still-fits.bin", 64),
+    ]);
+
+    expect(await screen.findByText("first-18mb.bin")).toBeInTheDocument();
+    // The one that did not fit is skipped…
+    expect(screen.queryByText("wont-fit-18mb.bin")).not.toBeInTheDocument();
+    // …and the smaller one after it is still staged, which `break` would have lost.
+    expect(screen.getByText("still-fits.bin")).toBeInTheDocument();
   });
 
   it("drops an attachment when its chip is dismissed", async () => {

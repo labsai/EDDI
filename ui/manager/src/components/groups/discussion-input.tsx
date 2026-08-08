@@ -79,9 +79,20 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
   const [question, setQuestion] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [isStaging, setIsStaging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dialogTextareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /**
+   * What is staged, tracked synchronously. `attachments` state is only visible to
+   * the NEXT render, so two selections made before the first finishes reading
+   * would both compute their dedupe set and byte budget from the same stale
+   * array and then merge — exceeding both caps. This ref is updated the moment
+   * files are accepted, so a serialized second run sees the first run's work.
+   */
+  const stagedRef = useRef<PendingAttachment[]>([]);
+  /** Tail of the staging queue — see `addFiles`. */
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
   // Attachments are shared with member agents only when a discussion STARTS, so
   // a continuation that carries them is a 400. Hide the affordance rather than
   // letting the user assemble a request the backend will refuse.
@@ -106,8 +117,16 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
   // `handleSubmit` then silently declines to send — the backend rejects
   // attachments on a continuation outright.
   useEffect(() => {
-    if (!canAttach) setAttachments([]);
+    if (!canAttach) {
+      stagedRef.current = [];
+      setAttachments([]);
+    }
   }, [canAttach]);
+
+  // Removals and a post-submit reset go through state, so mirror it back.
+  useEffect(() => {
+    stagedRef.current = attachments;
+  }, [attachments]);
 
   // Focus the dialog textarea when dialog opens
   useEffect(() => {
@@ -118,7 +137,13 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
     }
   }, [dialogOpen]);
 
-  const addFiles = useCallback(
+  /**
+   * Stage one selection: dedupe, apply both caps, base64-encode, append.
+   *
+   * Reads and writes `stagedRef` rather than the `attachments` state so that
+   * runs serialized behind each other observe one another's results.
+   */
+  const stageFiles = useCallback(
     // Takes an ARRAY, not the live FileList. The caller resets `input.value` to
     // re-arm the change event, and that clears `input.files` — so the list has to
     // be materialized synchronously by the caller rather than read across an
@@ -129,14 +154,15 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
         t("groups.attachmentLimit", "At most {{max}} attachments per discussion", {
           max: MAX_GROUP_ATTACHMENTS,
         });
-      const room = MAX_GROUP_ATTACHMENTS - attachments.length;
+      const staged = stagedRef.current;
+      const room = MAX_GROUP_ATTACHMENTS - staged.length;
       if (room <= 0) {
         toast.error(tooMany());
         return;
       }
       // Drop duplicates BEFORE the count and size budgets. Charging a file that
       // is then discarded as a duplicate would reject a later legitimate one.
-      const seen = new Set(attachments.map((a) => a.id));
+      const seen = new Set(staged.map((a) => a.id));
       const fresh = files.filter((f) => {
         const id = attachmentId(f);
         if (seen.has(id)) return false;
@@ -149,7 +175,9 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
       const accepted: PendingAttachment[] = [];
       // The per-file cap alone is not enough: this endpoint takes the bytes
       // inline, so fifty legal files still become one enormous base64 body.
-      let stagedBytes = attachments.reduce((sum, a) => sum + a.sizeBytes, 0);
+      let stagedBytes = staged.reduce((sum, a) => sum + a.sizeBytes, 0);
+      // One message per selection, however many files miss out.
+      let reportedBudget = false;
       for (const file of picked) {
         if (file.size > MAX_ATTACHMENT_BYTES) {
           toast.error(
@@ -158,12 +186,15 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
           continue;
         }
         if (stagedBytes + file.size > MAX_GROUP_ATTACHMENTS_TOTAL_BYTES) {
-          // `break`, not `continue`: once the budget is gone, every remaining
-          // file would produce the same toast.
-          toast.error(
-            t("groups.attachmentTotalTooLarge", "Attachments exceed the total size limit"),
-          );
-          break;
+          // Skip THIS file and keep going: a later, smaller one may still fit
+          // inside the remaining budget, and dropping it too would be arbitrary.
+          if (!reportedBudget) {
+            toast.error(
+              t("groups.attachmentTotalTooLarge", "Attachments exceed the total size limit"),
+            );
+            reportedBudget = true;
+          }
+          continue;
         }
         try {
           accepted.push({
@@ -180,12 +211,32 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
           toast.error(t("groups.attachmentReadFailed", "Could not read {{name}}", { name: file.name }));
         }
       }
-      if (accepted.length) setAttachments((prev) => [...prev, ...accepted]);
+      if (accepted.length) {
+        // Ref first and synchronously, so a queued run already sees these.
+        stagedRef.current = [...stagedRef.current, ...accepted];
+        setAttachments(stagedRef.current);
+      }
     },
-    // `attachments`, not `attachments.length`: the dedupe and running-total checks
-    // read the entries themselves, and a remove-then-add pair leaves the length
-    // equal while the ids and sizes differ.
-    [attachments, t],
+    [t],
+  );
+
+  /**
+   * Serialized entry point. Each selection is chained onto the previous one, so
+   * two rapid picks cannot both reserve the same remaining count and byte budget
+   * and then merge past the caps.
+   */
+  const addFiles = useCallback(
+    (files: File[]) => {
+      setIsStaging(true);
+      const run: Promise<void> = queueRef.current.then(() => stageFiles(files)).finally(() => {
+        // Only the tail of the chain clears the flag — an earlier run finishing
+        // must not re-enable the control while a later one is still reading.
+        if (queueRef.current === run) setIsStaging(false);
+      });
+      queueRef.current = run;
+      return run;
+    },
+    [stageFiles],
   );
 
   const charCount = question.length;
@@ -273,13 +324,20 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
               variant="outline"
               size="icon"
               className="shrink-0"
-              disabled={disabled || isLoading}
+              // Also blocked while reading: the staging queue makes concurrent
+              // selections safe, but leaving the button live invites a second
+              // pick whose result appears seconds later with no explanation.
+              disabled={disabled || isLoading || isStaging}
               onClick={() => fileInputRef.current?.click()}
               aria-label={t("groups.attachFiles", "Attach files")}
               title={t("groups.attachFiles", "Attach files")}
               data-testid="discussion-attach-btn"
             >
-              <Paperclip className="h-4 w-4" />
+              {isStaging ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Paperclip className="h-4 w-4" />
+              )}
             </Button>
           </>
         )}
