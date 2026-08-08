@@ -116,6 +116,8 @@ export function GroupPhaseEditor({
         const repeats = phase.repeats ?? 1;
         const canConverge = convergenceApplies(phase);
         const convergence = phase.convergence;
+        // Comparing more repeats than the phase has would never converge.
+        const maxMinRepeats = Math.max(repeats, CONVERGENCE_MIN_REPEATS_FLOOR);
         return (
           <div key={`${phase.name}-${idx}`} className="rounded-md border border-border bg-background/60 p-2">
             <div className="mb-1.5 flex items-center gap-1.5">
@@ -185,45 +187,74 @@ export function GroupPhaseEditor({
             {canConverge && convergence?.enabled && (
               <div className="mt-2 grid grid-cols-3 gap-2">
                 <div>
-                  <p className="mb-0.5 text-[10px] text-muted-foreground">
+                  <label
+                    htmlFor={`phase-convergence-min-${idx}`}
+                    className="mb-0.5 block text-[10px] text-muted-foreground"
+                  >
                     {t("groups.convergenceMinRepeats", "Min repeats")}
-                  </p>
+                  </label>
                   <input
+                    id={`phase-convergence-min-${idx}`}
                     type="number"
                     min={CONVERGENCE_MIN_REPEATS_FLOOR}
-                    max={Math.max(repeats, CONVERGENCE_MIN_REPEATS_FLOOR)}
+                    max={maxMinRepeats}
+                    step={1}
                     value={convergence.minRepeats}
                     onChange={(e) => {
-                      const v = Number(e.target.value);
-                      if (!isNaN(v)) patchConvergence(idx, { minRepeats: v });
+                      // `min`/`max`/`step` bound the spinner, not the value —
+                      // a paste survives all three. `normalizeConvergence`
+                      // applies only the floor, so a minRepeats above the
+                      // phase's own repeat count would save a config whose
+                      // judge can never run, silently disabling the feature
+                      // that was just switched on.
+                      const v = e.currentTarget.valueAsNumber;
+                      if (!Number.isFinite(v)) return;
+                      patchConvergence(idx, {
+                        minRepeats: Math.min(
+                          maxMinRepeats,
+                          Math.max(CONVERGENCE_MIN_REPEATS_FLOOR, Math.trunc(v)),
+                        ),
+                      });
                     }}
                     className={inputCls}
                     data-testid={`phase-convergence-min-${idx}`}
                   />
                 </div>
                 <div>
-                  <p className="mb-0.5 text-[10px] text-muted-foreground">
+                  <label
+                    htmlFor={`phase-convergence-threshold-${idx}`}
+                    className="mb-0.5 block text-[10px] text-muted-foreground"
+                  >
                     {t("groups.convergenceThreshold", "Threshold")}
-                  </p>
+                  </label>
                   <input
+                    id={`phase-convergence-threshold-${idx}`}
                     type="number"
                     min={0.1}
                     max={1}
                     step={0.05}
                     value={convergence.threshold}
                     onChange={(e) => {
-                      const v = Number(e.target.value);
-                      if (!isNaN(v)) patchConvergence(idx, { threshold: v });
+                      // Out-of-range values are left to normalizeConvergence,
+                      // which mirrors the backend and falls back to the default
+                      // for anything outside (0,1] — clamping here instead would
+                      // silently turn a typo into a plausible-looking threshold.
+                      const v = e.currentTarget.valueAsNumber;
+                      if (Number.isFinite(v)) patchConvergence(idx, { threshold: v });
                     }}
                     className={inputCls}
                     data-testid={`phase-convergence-threshold-${idx}`}
                   />
                 </div>
                 <div>
-                  <p className="mb-0.5 text-[10px] text-muted-foreground">
+                  <label
+                    htmlFor={`phase-convergence-judge-${idx}`}
+                    className="mb-0.5 block text-[10px] text-muted-foreground"
+                  >
                     {t("groups.convergenceJudge", "Judge")}
-                  </p>
+                  </label>
                   <select
+                    id={`phase-convergence-judge-${idx}`}
                     value={convergence.judge}
                     onChange={(e) => patchConvergence(idx, { judge: e.target.value as ConvergenceJudge })}
                     className={inputCls}

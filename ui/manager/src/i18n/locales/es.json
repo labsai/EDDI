@@ -2385,7 +2385,6 @@
     "convergenceReached": "Convergido",
     "convergenceChecked": "Comprobación de convergencia",
     "convergenceScore": "acuerdo {{score}}",
-    "convergenceSkipped": "· {{skipped}} ronda(s) adicional(es) omitida(s)",
     "decisionWinner": "Ganador: {{winner}}",
     "decisionTie": "Empate",
     "decisionDecidedAt": "Decidido en {{phase}}",
@@ -2403,7 +2402,10 @@
       "AWARD": "Adjudicación",
       "NONE": "Sin decisión estructurada"
     },
-    "abstainedBody": "No aportó nada nuevo en esta ronda."
+    "abstainedBody": "No aportó nada nuevo en esta ronda.",
+    "convergenceSkipped_one": "· {{count}} ronda adicional omitida",
+    "convergenceSkipped_many": "· {{count}} rondas adicionales omitidas",
+    "convergenceSkipped_other": "· {{count}} rondas adicionales omitidas"
   },
   "taskBoard": {
     "title": "Tablero de tareas",

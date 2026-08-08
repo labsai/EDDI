@@ -13,7 +13,7 @@ import { parseTranscriptContent, safeFormatDate } from "./group-utils";
 import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, SharedTaskList, TaskDefinition } from "@/lib/api/groups";
 import type { HitlVerdict } from "@/lib/api/hitl";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
-import { cn } from "@/lib/utils";
+import { cn, formatUsd } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { STYLE_INFO } from "@/lib/api/groups";
@@ -407,7 +407,7 @@ export function DiscussionTranscript({
                   title={formatMemberCostBreakdown(conversation?.memberCosts, conversation?.memberDisplayNames)}
                   data-testid="discussion-cost"
                 >
-                  ${costTotal.toFixed(costTotal < 0.01 ? 4 : 2)}
+                  {formatUsd(costTotal)}
                 </Badge>
               )}
               {/* Allow HTML toggle — opt-in for trusted content */}
@@ -679,7 +679,7 @@ function formatMemberCostBreakdown(
   const rows = Object.entries(memberCosts)
     .filter(([, cost]) => typeof cost === "number" && cost > 0)
     .sort(([, a], [, b]) => b - a)
-    .map(([agentId, cost]) => `${memberDisplayNames?.[agentId] ?? agentId}: $${cost.toFixed(4)}`);
+    .map(([agentId, cost]) => `${memberDisplayNames?.[agentId] ?? agentId}: ${formatUsd(cost)}`);
   return rows.length ? rows.join("\n") : undefined;
 }
 

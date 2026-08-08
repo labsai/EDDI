@@ -2379,7 +2379,6 @@
     "convergenceReached": "수렴됨",
     "convergenceChecked": "수렴 검사",
     "convergenceScore": "일치도 {{score}}",
-    "convergenceSkipped": "· 이후 {{skipped}}개 라운드 건너뜀",
     "decisionWinner": "승자: {{winner}}",
     "decisionTie": "무승부",
     "decisionDecidedAt": "{{phase}}에서 결정",
@@ -2397,7 +2396,9 @@
       "AWARD": "낙찰",
       "NONE": "구조화된 결정 없음"
     },
-    "abstainedBody": "이번 라운드에는 새로운 내용을 더하지 않았습니다."
+    "abstainedBody": "이번 라운드에는 새로운 내용을 더하지 않았습니다.",
+    "convergenceSkipped_other": "· 이후 {{count}}개 라운드 건너뜀",
+    "convergenceSkipped_one": "· 이후 {{count}}개 라운드 건너뜀"
   },
   "taskBoard": {
     "title": "작업 보드",

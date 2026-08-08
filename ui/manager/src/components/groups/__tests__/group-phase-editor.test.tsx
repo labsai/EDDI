@@ -88,6 +88,45 @@ describe("GroupPhaseEditor", () => {
     expect(savedConfig().phases![0]!.convergence!.minRepeats).toBe(2);
   });
 
+  /**
+   * `min`/`max`/`step` bound the spinner, not the value — a paste survives all
+   * three, and `normalizeConvergence` only applies the floor. A minRepeats above
+   * the phase's own repeat count saves a config whose judge can never run.
+   */
+  it("clamps minRepeats to the phase's repeat count", () => {
+    renderWithProviders(
+      <GroupPhaseEditor config={makeConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByTestId("phase-convergence-enable-0"));
+    // The phase declares repeats: 4.
+    fireEvent.change(screen.getByTestId("phase-convergence-min-0"), { target: { value: "99" } });
+    fireEvent.click(screen.getByTestId("group-phase-save"));
+
+    expect(savedConfig().phases![0]!.convergence!.minRepeats).toBe(4);
+  });
+
+  it("stores a whole number of repeats", () => {
+    renderWithProviders(
+      <GroupPhaseEditor config={makeConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByTestId("phase-convergence-enable-0"));
+    fireEvent.change(screen.getByTestId("phase-convergence-min-0"), { target: { value: "3.7" } });
+    fireEvent.click(screen.getByTestId("group-phase-save"));
+
+    expect(savedConfig().phases![0]!.convergence!.minRepeats).toBe(3);
+  });
+
+  it("labels every convergence control for a screen reader", () => {
+    renderWithProviders(
+      <GroupPhaseEditor config={makeConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByTestId("phase-convergence-enable-0"));
+
+    expect(screen.getByLabelText("Min repeats")).toBeInTheDocument();
+    expect(screen.getByLabelText("Threshold")).toBeInTheDocument();
+    expect(screen.getByLabelText("Judge")).toBeInTheDocument();
+  });
+
   it("stores null rather than a disabled convergence block", () => {
     const config = makeConfig({
       phases: [

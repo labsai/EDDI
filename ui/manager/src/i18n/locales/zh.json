@@ -2379,7 +2379,6 @@
     "convergenceReached": "已收敛",
     "convergenceChecked": "收敛检查",
     "convergenceScore": "一致度 {{score}}",
-    "convergenceSkipped": "· 已跳过 {{skipped}} 个后续轮次",
     "decisionWinner": "胜方：{{winner}}",
     "decisionTie": "平局",
     "decisionDecidedAt": "在 {{phase}} 阶段裁定",
@@ -2397,7 +2396,9 @@
       "AWARD": "授予",
       "NONE": "无结构化决定"
     },
-    "abstainedBody": "本轮未补充新内容。"
+    "abstainedBody": "本轮未补充新内容。",
+    "convergenceSkipped_other": "· 已跳过 {{count}} 个后续轮次",
+    "convergenceSkipped_one": "· 已跳过 {{count}} 个后续轮次"
   },
   "taskBoard": {
     "title": "任务看板",

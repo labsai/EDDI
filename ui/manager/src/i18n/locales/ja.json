@@ -2379,7 +2379,6 @@
     "convergenceReached": "収束",
     "convergenceChecked": "収束チェック",
     "convergenceScore": "一致度 {{score}}",
-    "convergenceSkipped": "· 以降の {{skipped}} ラウンドをスキップ",
     "decisionWinner": "勝者: {{winner}}",
     "decisionTie": "引き分け",
     "decisionDecidedAt": "{{phase}} で決定",
@@ -2397,7 +2396,9 @@
       "AWARD": "割当",
       "NONE": "構造化された決定なし"
     },
-    "abstainedBody": "このラウンドでは新たな発言を控えました。"
+    "abstainedBody": "このラウンドでは新たな発言を控えました。",
+    "convergenceSkipped_other": "· 以降の {{count}} ラウンドをスキップ",
+    "convergenceSkipped_one": "· 以降の {{count}} ラウンドをスキップ"
   },
   "taskBoard": {
     "title": "タスクボード",

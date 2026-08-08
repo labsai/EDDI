@@ -2423,7 +2423,6 @@
     "convergenceReached": "Converged",
     "convergenceChecked": "Convergence check",
     "convergenceScore": "agreement {{score}}",
-    "convergenceSkipped": "· {{skipped}} further round(s) skipped",
     "decisionWinner": "Winner: {{winner}}",
     "decisionTie": "Tie",
     "decisionDecidedAt": "Decided in {{phase}}",
@@ -2441,7 +2440,9 @@
       "AWARD": "Award",
       "NONE": "No structured decision"
     },
-    "abstainedBody": "Declined to add anything new this round."
+    "abstainedBody": "Declined to add anything new this round.",
+    "convergenceSkipped_one": "· {{count}} further round skipped",
+    "convergenceSkipped_other": "· {{count}} further rounds skipped"
   },
   "taskBoard": {
     "title": "Task Board",

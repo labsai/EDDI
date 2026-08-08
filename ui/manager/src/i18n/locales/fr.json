@@ -2385,7 +2385,6 @@
     "convergenceReached": "Convergé",
     "convergenceChecked": "Contrôle de convergence",
     "convergenceScore": "accord {{score}}",
-    "convergenceSkipped": "· {{skipped}} tour(s) supplémentaire(s) ignoré(s)",
     "decisionWinner": "Vainqueur : {{winner}}",
     "decisionTie": "Égalité",
     "decisionDecidedAt": "Décidé lors de {{phase}}",
@@ -2403,7 +2402,10 @@
       "AWARD": "Attribution",
       "NONE": "Aucune décision structurée"
     },
-    "abstainedBody": "N'a rien ajouté de nouveau ce tour-ci."
+    "abstainedBody": "N'a rien ajouté de nouveau ce tour-ci.",
+    "convergenceSkipped_one": "· {{count}} tour supplémentaire ignoré",
+    "convergenceSkipped_many": "· {{count}} tours supplémentaires ignorés",
+    "convergenceSkipped_other": "· {{count}} tours supplémentaires ignorés"
   },
   "taskBoard": {
     "title": "Tableau des tâches",

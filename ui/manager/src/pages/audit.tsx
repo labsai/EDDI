@@ -1,3 +1,4 @@
+import { formatUsd } from "@/lib/utils";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
@@ -64,8 +65,7 @@ function formatDuration(ms: number): string {
 
 function formatCost(cost: number): string {
   if (cost === 0) return "";
-  if (cost < 0.01) return `$${cost.toFixed(4)}`;
-  return `$${cost.toFixed(2)}`;
+  return formatUsd(cost);
 }
 
 function groupByStep(entries: AuditEntry[]): Map<number, AuditEntry[]> {

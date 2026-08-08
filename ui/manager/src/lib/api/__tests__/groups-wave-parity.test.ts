@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   ENTRY_TYPE_INFO,
   MAX_GROUP_ATTACHMENTS,
@@ -30,6 +30,12 @@ const api = (await import("../../api-client")).api as any;
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+// A stubbed global outlives the test that installed it if an assertion throws
+// first, and every later test in the worker then talks to that fetch.
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 /**
@@ -186,7 +192,6 @@ describe("group discussion attachments", () => {
     expect(body.attachments).toEqual([
       { fileName: "b.png", mimeType: "image/png", data: "Zm9v" },
     ]);
-    vi.unstubAllGlobals();
   });
 
   it("exposes the backend's per-request ceiling", () => {

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, HandMetal, Pencil, MessagesSquare, GitMerge } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { cn, hashColor, getInitials } from "@/lib/utils";
+import { cn, hashColor, getInitials, formatUsd } from "@/lib/utils";
 import type { AgentGroupConfiguration, DiscussionStyle, DiscussionPhase } from "@/lib/api/groups";
 import { STYLE_INFO, normalizeLifecyclePolicy } from "@/lib/api/groups";
 import {
@@ -592,11 +592,6 @@ function InfoRow({ label, value }: { label: string; value: string }) {
       <span className="font-medium text-foreground">{value}</span>
     </div>
   );
-}
-
-/** A cost ceiling, at cent precision — it is a dollar amount, not a score. */
-function formatUsd(value: number): string {
-  return `$${value.toFixed(2)}`;
 }
 
 /** Format allowedModels Record<string, string[]> into a compact display string */

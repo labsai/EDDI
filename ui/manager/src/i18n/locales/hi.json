@@ -2356,7 +2356,7 @@
     "moderatorlessWarning": "ऐसे मॉडरेटर तक सीमित जो इस समूह में नहीं है: {{phases}}। बोलने के क्रम में पहला सदस्य स्थान लेगा।",
     "delegationDepth": "अधिकतम गहराई",
     "delegationTimeout": "प्रतिनिधि समय-सीमा",
-    "secondsShort": "{{seconds}}से",
+    "secondsShort": "{{seconds}} सेकंड",
     "delegationTargets": "अनुमति-सूची",
     "phaseBehaviour": "चरण व्यवहार",
     "phaseBehaviourNone": "न परहेज़ न अभिसरण कॉन्फ़िगर है — सदस्यों को छोड़ने देने या सहमति पर दोहराव वाला चरण रोकने के लिए संपादित करें।",
@@ -2379,7 +2379,6 @@
     "convergenceReached": "अभिसरित",
     "convergenceChecked": "अभिसरण जाँच",
     "convergenceScore": "सहमति {{score}}",
-    "convergenceSkipped": "· आगे के {{skipped}} दौर छोड़े गए",
     "decisionWinner": "विजेता: {{winner}}",
     "decisionTie": "बराबरी",
     "decisionDecidedAt": "{{phase}} में तय हुआ",
@@ -2397,7 +2396,9 @@
       "AWARD": "आवंटन",
       "NONE": "कोई संरचित निर्णय नहीं"
     },
-    "abstainedBody": "इस दौर में कुछ नया नहीं जोड़ा।"
+    "abstainedBody": "इस दौर में कुछ नया नहीं जोड़ा।",
+    "convergenceSkipped_one": "· आगे का {{count}} दौर छोड़ा गया",
+    "convergenceSkipped_other": "· आगे के {{count}} दौर छोड़े गए"
   },
   "taskBoard": {
     "title": "कार्य बोर्ड",

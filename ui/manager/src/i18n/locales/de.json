@@ -2379,7 +2379,6 @@
     "convergenceReached": "Konvergiert",
     "convergenceChecked": "Konvergenzprüfung",
     "convergenceScore": "Übereinstimmung {{score}}",
-    "convergenceSkipped": "· {{skipped}} weitere Runde(n) übersprungen",
     "decisionWinner": "Sieger: {{winner}}",
     "decisionTie": "Unentschieden",
     "decisionDecidedAt": "Entschieden in {{phase}}",
@@ -2397,7 +2396,9 @@
       "AWARD": "Zuschlag",
       "NONE": "Keine strukturierte Entscheidung"
     },
-    "abstainedBody": "Hat in dieser Runde nichts Neues beigetragen."
+    "abstainedBody": "Hat in dieser Runde nichts Neues beigetragen.",
+    "convergenceSkipped_one": "· {{count}} weitere Runde übersprungen",
+    "convergenceSkipped_other": "· {{count}} weitere Runden übersprungen"
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",

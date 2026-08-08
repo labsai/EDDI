@@ -2379,7 +2379,6 @@
     "convergenceReached": "บรรจบแล้ว",
     "convergenceChecked": "ตรวจการบรรจบ",
     "convergenceScore": "ความเห็นพ้อง {{score}}",
-    "convergenceSkipped": "· ข้ามอีก {{skipped}} รอบ",
     "decisionWinner": "ผู้ชนะ: {{winner}}",
     "decisionTie": "เสมอ",
     "decisionDecidedAt": "ตัดสินใน {{phase}}",
@@ -2397,7 +2396,9 @@
       "AWARD": "การมอบหมาย",
       "NONE": "ไม่มีการตัดสินแบบมีโครงสร้าง"
     },
-    "abstainedBody": "ไม่ได้เพิ่มเนื้อหาใหม่ในรอบนี้"
+    "abstainedBody": "ไม่ได้เพิ่มเนื้อหาใหม่ในรอบนี้",
+    "convergenceSkipped_other": "· ข้ามอีก {{count}} รอบ",
+    "convergenceSkipped_one": "· ข้ามอีก {{count}} รอบ"
   },
   "taskBoard": {
     "title": "บอร์ดงาน",

@@ -2403,7 +2403,6 @@
     "convergenceReached": "تقارب",
     "convergenceChecked": "فحص التقارب",
     "convergenceScore": "توافق {{score}}",
-    "convergenceSkipped": "· تم تخطي {{skipped}} جولة إضافية",
     "decisionWinner": "الفائز: {{winner}}",
     "decisionTie": "تعادل",
     "decisionDecidedAt": "تقرّر في {{phase}}",
@@ -2421,7 +2420,13 @@
       "AWARD": "إسناد",
       "NONE": "لا قرار منظّم"
     },
-    "abstainedBody": "لم يضف جديدًا في هذه الجولة."
+    "abstainedBody": "لم يضف جديدًا في هذه الجولة.",
+    "convergenceSkipped_zero": "· لم تُتخطَّ أي جولة إضافية",
+    "convergenceSkipped_one": "· تم تخطي جولة إضافية واحدة",
+    "convergenceSkipped_two": "· تم تخطي جولتين إضافيتين",
+    "convergenceSkipped_few": "· تم تخطي {{count}} جولات إضافية",
+    "convergenceSkipped_many": "· تم تخطي {{count}} جولة إضافية",
+    "convergenceSkipped_other": "· تم تخطي {{count}} جولة إضافية"
   },
   "taskBoard": {
     "title": "لوحة المهام",

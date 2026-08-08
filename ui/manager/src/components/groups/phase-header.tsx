@@ -120,8 +120,13 @@ export function PhaseHeader({
             )}
             {convergence.repeatsSkipped != null && convergence.repeatsSkipped > 0 && (
               <span className="ms-1.5">
-                {t("groups.convergenceSkipped", "· {{skipped}} further round(s) skipped", {
-                  skipped: convergence.repeatsSkipped,
+                {/* `count`, so i18next picks the plural form the locale needs.
+                    A literal "round(s)" cannot be translated at all into the
+                    six categories Arabic distinguishes. */}
+                {t("groups.convergenceSkipped", {
+                  defaultValue: "· {{count}} further round skipped",
+                  defaultValue_other: "· {{count}} further rounds skipped",
+                  count: convergence.repeatsSkipped,
                 })}
               </span>
             )}
