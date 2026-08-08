@@ -5,6 +5,15 @@
 
 ---
 
+## 🔎 fix(groups): I6 final-review finding — mid-repeat pause loses the repeat slice (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i6-human-members`)
+
+Confirmed CRITICAL from the final multi-agent review pass (2 independent verifiers traced it): a human turn pauses MID-repeat, after other speakers already appended this repeat's entries — but the resumed leg recomputed `transcriptSizeBeforeRepeat` from the current transcript size, so the repeat slice covered only post-pause entries. Every consumer of that slice silently lost the pre-pause contributions: the convergence check on this branch, and (on the integration tree) VOTE tallies missing every agent ballot cast before the human's — a wrong election, reported as legitimate.
+
+**Fix:** new persisted `pausedRepeatSliceBase` on `GroupConversation` (−1 = unset; legacy documents keep the old recompute), written when the human-turn pause commits (the catch site has the true base in scope) and consumed exactly once with the same read-and-clear discipline as the speaker bookmark. Tests: the pause persists the base pointing at the top of the repeat (fails without the write), and a resumed leg consumes it exactly once (fails without the consume).
+
+
 ## 🔎 fix(groups): I6 PR #640 review round 1 (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i6-human-members`)

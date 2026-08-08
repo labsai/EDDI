@@ -750,7 +750,15 @@ public class GroupConversationService implements IGroupConversationService {
                     // I2: mark where this repeat's entries begin. TranscriptEntry
                     // carries phaseIndex but no repeat index, so with repeats > 1 the
                     // only way to say "what this repeat produced" is by position.
+                    // I6: a human-turn pause landed MID-repeat — the persisted base
+                    // (taken when the pause committed) wins over a recompute that
+                    // would only see post-pause entries. Read-and-clear with the same
+                    // one-shot discipline as the speaker bookmark above.
                     int transcriptSizeBeforeRepeat = gc.getTranscript().size();
+                    if (gc.getPausedRepeatSliceBase() >= 0) {
+                        transcriptSizeBeforeRepeat = Math.min(gc.getPausedRepeatSliceBase(), transcriptSizeBeforeRepeat);
+                        gc.setPausedRepeatSliceBase(-1);
+                    }
 
                     // --- Task-oriented phase routing ---
                     // I6: the dispatch is wrapped so a HUMAN member's turn — surfaced
@@ -777,6 +785,12 @@ public class GroupConversationService implements IGroupConversationService {
                                     maxTurns, startSpeakerIdx);
                         }
                     } catch (PhaseExecutionEngine.HumanTurnRequired humanTurn) {
+                        // I6 slice-base fix: the pause lands MID-repeat, after other
+                        // speakers appended this repeat's entries. Persist where the
+                        // repeat began so the resumed leg's convergence slice (and
+                        // every later consumer of repeatEntries) still covers the
+                        // pre-pause contributions instead of only what follows.
+                        gc.setPausedRepeatSliceBase(transcriptSizeBeforeRepeat);
                         hitlCoordinator.commitHumanTurnPause(gc, phaseIdx, phase, repeat, humanTurn,
                                 turnCounter.get() + 1, contextBuilder.mapPhaseToEntryType(phase.type()).name(),
                                 listener, config);
