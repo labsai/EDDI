@@ -5,6 +5,18 @@
 
 ---
 
+## 🔎 fix(groups): I12 final-review findings — checkpoint runs before the decision block (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i12-facilitator`)
+
+Two confirmed MAJORs from the final multi-agent review pass, one root cause: the EACH_REPEAT facilitator checkpoint sat AFTER the last-repeat decision block.
+
+- **END_PHASE skipped the decisions:** it fired only mid-phase (where `lastRepeat` is false) and took a plain `break` past the block — a VOTE phase it ended never tallied its cast ballots; verdicts, dissent rounds and retro harvests were skipped the same way.
+- **EXTEND_PHASE at a final repeat re-ran them:** the block had already fired for that repeat, and the extension made the next repeat "final" again — duplicate dissent rounds, `decision_reached` twice, the tally overwritten.
+
+**Fix:** the consult now runs after convergence but BEFORE `lastRepeat` is computed, with effects split by kind — END_PHASE folds into the phase outcome (the block sees a real phase end and records everything), EXTEND_PHASE applies immediately (deferring the block to the true final repeat), and INSERT_VOTE/ESCALATE are stashed and applied after the block, so an escalation on a final repeat cannot skip that repeat's decisions on its way out. Two new mutation-check E2Es: END_PHASE on a VOTE phase still tallies (fails against the old `break`), and always-EXTEND on a dissent-recording SYNTHESIS runs exactly one dissent round (fails against the old ordering).
+
+
 ## 🔎 fix(groups): I12 PR #643 review round 1 (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i12-facilitator`)

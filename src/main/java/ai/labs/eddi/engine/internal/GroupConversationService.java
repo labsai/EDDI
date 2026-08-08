@@ -868,6 +868,60 @@ public class GroupConversationService implements IGroupConversationService {
                                 repeatEntries, previousRepeatEntries, listener, turnCounter, maxTurns);
                     }
 
+                    // I12: EACH_REPEAT facilitator checkpoint — the CONSULT runs here,
+                    // after convergence but BEFORE the last-repeat decision block, and
+                    // its effects are split by kind (final-review finding, both halves):
+                    // • END_PHASE folds into `outcome` so the block below sees a real
+                    // phase end and still tallies ballots / records the verdict /
+                    // runs the dissent round — the plain `break` it used to take
+                    // skipped all of that, leaving cast VOTE ballots untallied.
+                    // • EXTEND_PHASE applies now, before `lastRepeat` is computed, so
+                    // extending a final repeat DEFERS the decision block instead of
+                    // re-running one that already fired (duplicate dissent rounds,
+                    // decision_reached twice, tally overwritten).
+                    // • INSERT_VOTE and ESCALATE are stashed and applied after the
+                    // block — an escalation at a final repeat must not skip the
+                    // repeat's own decisions on its way out.
+                    FacilitatorEngine.FacilitatorAction deferredFacilitatorAction = null;
+                    boolean facilitatorMidPhaseResume = false;
+                    if (config.getFacilitator() != null && config.getFacilitator().enabled()
+                            && config.getFacilitator().checkAfter() == AgentGroupConfiguration.FacilitatorCheckpoint.EACH_REPEAT
+                            && !costCeilingSynthesizeNow) {
+                        boolean moreRepeats = repeat < Math.max(phase.repeats(), 1) - 1;
+                        boolean midPhaseResume = moreRepeats && outcome.isContinue();
+                        boolean escalationTarget = midPhaseResume || phaseIdx + 1 < phaseList.size();
+                        var facilitatorCtx = new FacilitatorEngine.CheckpointContext(
+                                phaseIdx, repeat, true, moreRepeats, !outcome.isContinue(), escalationTarget);
+                        var facilitatorAction = facilitatorEngine.checkpoint(gc, config, phase, facilitatorCtx,
+                                protocol, question, listener, turnCounter, maxTurns);
+                        switch (facilitatorAction.kind()) {
+                            case END_PHASE -> {
+                                LOGGER.infof("Facilitator ended phase '%s' of group %s after repeat %d",
+                                        LogSanitizer.sanitize(phase.name()), LogSanitizer.sanitize(gc.getGroupId()), repeat);
+                                outcome = PhaseOutcome.endRepeats("Facilitator ended the phase");
+                            }
+                            case EXTEND_PHASE -> {
+                                // The extension lives in the RUNTIME phase list (a new
+                                // record with repeats+1), not a loose counter — so the
+                                // loop bound, the resume clamp and the drift check all
+                                // read the same extended value after a pause.
+                                phase = new DiscussionPhase(phase.name(), phase.type(), phase.participants(),
+                                        phase.turnOrder(), phase.contextScope(), phase.targetEachPeer(),
+                                        phase.inputTemplate(), Math.max(phase.repeats(), 1) + 1, phase.requiresApproval(),
+                                        phase.convergence(), phase.allowAbstention(), phase.voteConfig());
+                                phaseList.set(phaseIdx, phase);
+                                persistRuntimePhases(gc, phaseList);
+                            }
+                            case INSERT_VOTE, ESCALATE -> {
+                                deferredFacilitatorAction = facilitatorAction;
+                                facilitatorMidPhaseResume = midPhaseResume;
+                            }
+                            case NONE -> {
+                                // no-op; any rejection entry rides the next persist
+                            }
+                        }
+                    }
+
                     // I4: the minority report. Placed AFTER the convergence slice above
                     // and BEFORE the persist below — after, so the DISSENT entries do
                     // not land inside repeatEntries where the convergence judge would
@@ -925,59 +979,26 @@ public class GroupConversationService implements IGroupConversationService {
                         listener.onPhaseComplete(new GroupConversationEventSink.PhaseCompleteEvent(phaseIdx, phase.name()));
                     }
 
-                    // I12: EACH_REPEAT facilitator checkpoint — after the repeat's own
-                    // bookkeeping (convergence, dissent, vote, persist) so the briefing
-                    // describes a settled repeat, and BEFORE the outcome break so the
-                    // engine can validate moves against how the repeat ended (a
-                    // facilitator never overrules a convergence exit; the context flags
-                    // make that structural rather than advisory).
-                    if (config.getFacilitator() != null && config.getFacilitator().enabled()
-                            && config.getFacilitator().checkAfter() == AgentGroupConfiguration.FacilitatorCheckpoint.EACH_REPEAT
-                            && !costCeilingSynthesizeNow) {
-                        boolean moreRepeats = repeat < Math.max(phase.repeats(), 1) - 1;
-                        boolean midPhaseResume = moreRepeats && outcome.isContinue();
-                        boolean escalationTarget = midPhaseResume || phaseIdx + 1 < phaseList.size();
-                        var facilitatorCtx = new FacilitatorEngine.CheckpointContext(
-                                phaseIdx, repeat, true, moreRepeats, !outcome.isContinue(), escalationTarget);
-                        var facilitatorAction = facilitatorEngine.checkpoint(gc, config, phase, facilitatorCtx,
-                                protocol, question, listener, turnCounter, maxTurns);
-                        switch (facilitatorAction.kind()) {
-                            case END_PHASE -> {
-                                gc.setLastModified(Instant.now());
-                                conversationStore.update(gc);
-                            }
-                            case EXTEND_PHASE -> {
-                                // The extension lives in the RUNTIME phase list (a new
-                                // record with repeats+1), not a loose counter — so the
-                                // loop bound, the resume clamp and the drift check all
-                                // read the same extended value after a pause.
-                                phase = new DiscussionPhase(phase.name(), phase.type(), phase.participants(),
-                                        phase.turnOrder(), phase.contextScope(), phase.targetEachPeer(),
-                                        phase.inputTemplate(), Math.max(phase.repeats(), 1) + 1, phase.requiresApproval(),
-                                        phase.convergence(), phase.allowAbstention(), phase.voteConfig());
-                                phaseList.set(phaseIdx, phase);
-                                persistRuntimePhases(gc, phaseList);
-                            }
+                    // I12: apply the checkpoint's stashed structural effects now that
+                    // the repeat's own decisions are recorded and persisted.
+                    if (deferredFacilitatorAction != null) {
+                        switch (deferredFacilitatorAction.kind()) {
                             case INSERT_VOTE -> {
-                                phaseList.add(phaseIdx + 1, facilitatorAction.insertPhase());
+                                phaseList.add(phaseIdx + 1, deferredFacilitatorAction.insertPhase());
                                 persistRuntimePhases(gc, phaseList);
                             }
                             case ESCALATE -> {
-                                int resumePhaseIdx = midPhaseResume ? phaseIdx : phaseIdx + 1;
-                                int resumeRepeatIdx = midPhaseResume ? repeat + 1 : 0;
+                                int resumePhaseIdx = facilitatorMidPhaseResume ? phaseIdx : phaseIdx + 1;
+                                int resumeRepeatIdx = facilitatorMidPhaseResume ? repeat + 1 : 0;
                                 hitlCoordinator.commitFacilitatorEscalationPause(gc, resumePhaseIdx, resumeRepeatIdx,
-                                        phaseList, facilitatorAction.escalation(), turnCounter.get() + 1, listener, config);
+                                        phaseList, deferredFacilitatorAction.escalation(), turnCounter.get() + 1, listener, config);
                                 convertPauseToCancelIfSignalled(gc, listener);
                                 return gc;
                             }
-                            case NONE -> {
-                                // no-op; any rejection entry rides the next persist
+                            default -> {
+                                // END_PHASE/EXTEND_PHASE were applied before the
+                                // decision block; NONE never lands here.
                             }
-                        }
-                        if (facilitatorAction.kind() == FacilitatorEngine.FacilitatorAction.Kind.END_PHASE) {
-                            LOGGER.infof("Facilitator ended phase '%s' of group %s after repeat %d",
-                                    LogSanitizer.sanitize(phase.name()), LogSanitizer.sanitize(gc.getGroupId()), repeat);
-                            break;
                         }
                     }
 
