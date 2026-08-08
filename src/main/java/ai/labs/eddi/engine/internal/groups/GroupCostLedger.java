@@ -22,17 +22,13 @@ import java.util.Locale;
  * {@code memberCosts}/{@code totalCost} (Wave 0, F5), and enforces
  * {@code ProtocolConfig#maxCostPerDiscussion} against it (I1).
  * <p>
- * <b>Known gap (V1, confirmed):</b> {@link MemoryKeys#AUDIT_COST} — the value
- * this class reads — is written by {@code LlmTask.accumulateCost} from
- * {@code cascadeCostUsd + toolCostUsd} only. There is no dollar price table for
- * a non-cascade model completion anywhere in this codebase today
- * ({@code LlmTask}'s own Javadoc says so directly), so a member's own turn
- * contributes {@code $0} here unless the group's LLM config uses the
- * multi-model cascade (priced) or the turn called a priced tool. This is a
- * real, known undercount for the common case, not a bug in this class — I1 is
- * where model-call cost recording gets added, reusing whatever price source it
- * settles on. Until then, {@code totalCost} is a lower bound, not the true
- * total.
+ * <b>Coverage note:</b> {@link MemoryKeys#AUDIT_COST} — the value this class
+ * reads — sums the member conversation's LLM token spend (cascade step pricing,
+ * or the task-level {@code inputPricePer1M}/{@code outputPricePer1M} for plain
+ * calls) and its tracked tool cost. Pricing is config-driven with no built-in
+ * provider price table, so a member whose LLM config carries no prices still
+ * contributes {@code $0} of token cost here — for such members
+ * {@code totalCost} remains a lower bound.
  * <p>
  * Both {@code memberCosts} and the recomputed {@code totalCost} are set, never
  * incremented by a delta — each call replaces the member's entry with its
@@ -91,12 +87,41 @@ public final class GroupCostLedger {
      * this group's attribution, whole — the child's own {@code totalCost} already
      * reflects everything its own members accumulated (recursively, via this same
      * method for individual members).
+     * <p>
+     * Keyed per <em>child discussion</em>, not per member: {@code memberCosts}
+     * records by replacement, which is only idempotent when one key means one
+     * conversation's cumulative cost. Every turn of a GROUP member spawns a fresh
+     * child discussion whose {@code totalCost} starts at 0, so keying by agentId
+     * alone replaced child N−1's whole spend with child N's and only the last child
+     * survived the sum. The suffix restores the map's invariant; a child without an
+     * id (not yet persisted) falls back to the plain agentId.
      */
     public static void accumulateNestedGroupCost(GroupConversation gc, GroupMember member, GroupConversation subConversation) {
         if (subConversation == null) {
             return;
         }
-        recordAndReSum(gc, member.agentId(), subConversation.getTotalCost());
+        String attributionKey = subConversation.getId() != null
+                ? member.agentId() + ":" + subConversation.getId()
+                : member.agentId();
+        recordAndReSum(gc, attributionKey, subConversation.getTotalCost());
+    }
+
+    /**
+     * Attribution for spend the discussion's own machinery incurs — today the I9
+     * transcript summarizer. {@code key} must be unique per priced operation (e.g.
+     * {@code "system:summarizer:full:42"}, suffixed with the boundary it covered
+     * through): the map records by replacement, so a re-run of the same operation
+     * is idempotent while distinct operations sum.
+     */
+    public static void recordSystemCost(GroupConversation gc, String key, double cost) {
+        // !(cost > 0.0) rather than cost <= 0.0: NaN fails every comparison, so
+        // the latter would let a NaN through, poison totalCost, and silently
+        // disable the ceiling checks (NaN comparisons are all false). Infinity is
+        // rejected for the same reason — no finite ceiling could ever bind again.
+        if (key == null || !Double.isFinite(cost) || !(cost > 0.0)) {
+            return;
+        }
+        recordAndReSum(gc, key, cost);
     }
 
     /**

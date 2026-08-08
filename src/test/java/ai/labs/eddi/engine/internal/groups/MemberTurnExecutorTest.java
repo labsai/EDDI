@@ -391,7 +391,9 @@ class MemberTurnExecutorTest {
                 null, null);
 
         assertEquals("Nested answer", entry.content());
-        assertEquals(0.42, gc.getMemberCosts().get("sub-group-1"));
+        // Attribution is keyed per child discussion (agentId:childId) so a member's
+        // later children add to — rather than replace — its earlier ones.
+        assertEquals(0.42, gc.getMemberCosts().get("sub-group-1:sub-gc-1"));
         assertEquals(0.42, gc.getTotalCost());
     }
 

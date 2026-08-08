@@ -127,6 +127,22 @@ class ConversationMemoryUtilitiesTest {
             assertEquals(5, restored.getAgentVersion());
             assertEquals("user-42", restored.getUserId());
         }
+
+        /**
+         * F6/N3: the snapshot field initialiser is the LEGACY sentinel so key-less
+         * stored documents read as legacy — a snapshot built from live memory is
+         * current-shaped by definition and must be stamped so explicitly here.
+         */
+        @Test
+        @DisplayName("a snapshot built from live memory is stamped with the current schema version")
+        void stampsCurrentSchemaVersion() {
+            var memory = new ConversationMemory("conv-id", "agent-1", 5, "user-42");
+
+            var snapshot = ConversationMemoryUtilities.convertConversationMemory(memory);
+
+            assertEquals(ConversationMemorySnapshot.CURRENT_SCHEMA_VERSION, snapshot.getSchemaVersion(),
+                    "a freshly built snapshot must claim current — the initialiser deliberately claims legacy");
+        }
     }
 
     // ─── convertSimpleConversationMemory ─────────────────────────

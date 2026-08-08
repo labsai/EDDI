@@ -51,6 +51,36 @@ class CascadeConfigValidatorTest {
     }
 
     @Test
+    @DisplayName("task-level pricing: a negative price is a hard error, even with no cascade at all")
+    void negativeTaskLevelPrice_throws() {
+        var task = new LlmConfiguration.Task();
+        task.setId("t1");
+        task.setType("openai");
+        task.setInputPricePer1M(-1.0);
+        var ex = assertThrows(WorkflowConfigurationException.class,
+                () -> CascadeConfigValidator.validate(new LlmConfiguration(List.of(task))));
+        assertTrue(ex.getMessage().contains("inputPricePer1M"));
+
+        var task2 = new LlmConfiguration.Task();
+        task2.setId("t1");
+        task2.setType("openai");
+        task2.setOutputPricePer1M(-0.5);
+        assertThrows(WorkflowConfigurationException.class,
+                () -> CascadeConfigValidator.validate(new LlmConfiguration(List.of(task2))));
+    }
+
+    @Test
+    @DisplayName("task-level pricing: valid or absent prices load fine without a cascade")
+    void taskLevelPrice_ok() {
+        var task = new LlmConfiguration.Task();
+        task.setId("t1");
+        task.setType("openai");
+        task.setInputPricePer1M(1.25);
+        task.setOutputPricePer1M(0.0);
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(new LlmConfiguration(List.of(task))));
+    }
+
+    @Test
     @DisplayName("disabled cascade — never validated")
     void disabledCascade_ok() {
         var c = new ModelCascadeConfig();

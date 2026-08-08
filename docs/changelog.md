@@ -256,6 +256,92 @@ First Wave 2 queue item from `planning/group-collaboration-NEXT.md` §3. Agents 
 **Tests (148 across 8 classes, all green):** tools against a real in-memory CAS store (stale-version retry sentence with the CURRENT version, concurrent same-version writers → exactly one winner, FINAL freeze, foreign-discussion ids don't resolve, validator chain, refusals leave no side effect); provider gate matrix (every uncertainty → contribute nothing, membership not existence, `enableBuiltInTools` still applies); store CAS through the numeric overload with `verify(never()).store(…)`; anchored+escaped filters with Java exact-recheck; erasure paging/fail-loud; lifecycle cascade ordering (`inOrder` artifact-delete before document-delete) + cascade-failure-still-deletes; GDPR step + not-resolvable skip + failure-continues; turn-executor drain (exactly once, null-listener drain); Slack lines incl. degenerate-payload skip. **Mutation notes:** degrading the store CAS to an unconditional store does not even compile (the gone-document catch becomes unreachable) — the CAS call is structurally load-bearing; the Mockito-verified negatives (`never().store`, `specs().isEmpty()`) pin the rest.
 
 **Files:** `SharedArtifact`, `ISharedArtifactStore`, `SharedArtifactStore`, `ArtifactValidators`, `ArtifactTools`, `ArtifactToolsProvider` (+ `AgentOrchestrator` phase-1 wiring), `AgentGroupConfiguration` (`ArtifactConfig`/`ArtifactValidator`/`ValidatorKind`), `GroupConversation` (change queue + read-time `artifacts`), `IResourceStorage` + Mongo/Postgres (numeric CAS), `GroupConversationEventSink`/listener/SSE/Slack, `GroupLifecycleOps`, `GroupConversationService`, `GdprComplianceService`, `AgentGroupStore`, `pom.xml`, `docs/group-conversations.md`, 8 test classes.
+## 🔍 fix(review): PR #636 review findings — NaN cost guard, ceiling-gated summarizer, visible-entry boundary (2026-08-08)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`, PR [#636](https://github.com/labsai/EDDI/pull/636))
+
+Every reviewer finding on #636 triaged; the real ones fixed, each with a pinning test:
+
+- **NaN poisons the cost ledger (CodeRabbit, real).** Both `GroupCostLedger.recordSystemCost` and `LlmTask.accumulateCost` guarded with `delta <= 0.0` — NaN fails *every* comparison, so it slipped through, made `totalCost` NaN, and every ceiling comparison against NaN is false: the ceiling silently never fires again. Now `!Double.isFinite(x) || !(x > 0.0)`. Tests: NaN/∞/non-positive rejected in both accumulators.
+- **Summarizer spend must be ceiling-gated (Copilot, real).** The I9 boundary call now runs behind `GroupCostLedger.wouldExceedCeiling`, exactly like the convergence judge and the dissent round. The pinning test needed care — the first attempt was vacuous because the per-turn gate fired before any boundary could (mutation survived); rebuilt so the first phase completes under the gate while blowing the ceiling cumulatively. **Mutation-checked: removing the guard fails exactly this test.**
+- **Summary boundary counts raw entries, not visible ones (Copilot, real).** Bookkeeping rows (SKIPPED/CONVERGENCE/…) in the tail shrank the verbatim window below `maxRecentEntries` while newer real contributions got summarized away. New `summaryBoundary` walks back over `isSummarizable` entries (one shared predicate with `renderForSummarizer`). Test: bookkeeping interleaved in the tail keeps the 3 newest *visible* entries verbatim.
+- **Blank summarizer identifiers (CodeRabbit, real-minor).** Whitespace-only `llmProvider`/`llmModel` bypassed the null checks and reached `SummarizationService`. Normalized to null in `ContextWindowConfig`'s compact constructor (the one choke point); the store warn simplifies to null checks. Test: blank identifiers → truncation fallback, `verifyNoInteractions(summarizer)`.
+- **CodeQL log injection ×4 (real).** `gc.getId()` and the group name are caller-influenced; the three windowing WARNs and the save-time warn now go through `LogSanitizer.sanitize`.
+- **Live-transcript iteration (CodeRabbit, partly right).** The `updateWindowSummary` copy already held the correct monitor (`Collections.synchronizedList`'s mutex IS the wrapper object — the PhaseExecutionEngine comment documents this), but the windowed `filterByScope`'s indexed walk over the LIVE list could interleave with tool-thread appends (recruitment's FACILITATION entries). It now copies under the wrapper monitor first.
+- **`memberCosts` key shape (CodeRabbit, documentation).** The "agentId → cost" Javadoc was stale *before* the nested-cost fix — I2's `__convergence_judge` and I4's `__dissent__*` conversation keys already live in that map. Rewritten to the actual invariant: one key = one conversation, `totalCost` = sum of everything. Copying a member total onto `memberCosts[agentId]` (the suggested fix) would double-count in the re-sum.
+
+144 tests across the touched classes green; checkstyle clean.
+
+---
+
+## 🪟 feat(groups): N2/I9 — transcript windowing for rendered member context (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+Third and last pre-feature item from `planning/group-collaboration-NEXT.md` §2 — a live cost bug, not a new collaboration mode: FULL-scope phases re-fed the entire transcript to every member every turn (~quadratic prompt cost), and every queued Wave 2/3 item makes transcripts longer. Landed in `GroupContextBuilder` per the plan (`### I9`, plan line ~337).
+
+- **Config:** `AgentGroupConfiguration.ContextWindowConfig` (`contextWindow`) — `enabled=false`, `maxRecentEntries=30`, `summarizeOverflow=true`, plus `llmProvider`/`llmModel` for the summarizer and optional `inputPricePer1M`/`outputPricePer1M` (I1 attribution, reusing N1's shared `TokenPricing`). Boolean-not-boolean for `summarizeOverflow` so an omitted JSON key means true; compact-constructor normalization in the `GroupTaskConfig` style. Save-time warn in `AgentGroupStore` when summarization is on but no model is named.
+- **Rendering:** windowed `filterByScope` overload — when the FULL/ANONYMOUS scope-filtered context exceeds the cap, older entries collapse into one leading "System" pseudo-entry: the rolling summary when it covers the omitted range, else the `[n earlier entries omitted]` truncation marker (the `summarizeOverflow=false` path and the failure fallback). The verbatim/summary split is the summary's **raw-transcript boundary**, so there is never a gap or duplication; between boundaries the tail may grow a few entries past the cap and the next boundary re-tightens. The stored transcript is never modified; signing verifies raw entries as before.
+- **Summaries:** extended **incrementally at phase boundaries only** (`updateWindowSummary`, called from the discussion loop before each repeat — never per member turn), previous summary + new slice, mirroring `ConversationSummarizer`'s self-correcting algorithm via the shared `SummarizationService` (unification rule). Failure or empty answer leaves stored state untouched: WARN, truncation fallback, next boundary catches up with a larger batch. Summarizer spend lands on the discussion ledger via `GroupCostLedger.recordSystemCost` keyed `system:summarizer:{variant}:{boundary}` (idempotent per extension, distinct extensions sum).
+- **One deliberate deviation from the plan text:** the plan named a single `transcriptSummary`/`summaryUpToIndex` pair *and* required ANONYMOUS summarizer input to use "Anonymous" labels. One shared summary cannot satisfy both — a FULL-built summary carries real names and would de-anonymize an ANONYMOUS phase through the back door. `GroupConversation` therefore carries a second, lazily-built pair (`anonymousTranscriptSummary`/`anonymousSummaryUpToIndex`); a group that never uses ANONYMOUS never pays for it. Fields are additive with correct defaults — no `CURRENT_SCHEMA_VERSION` bump (a legacy document simply starts summarizing at its next boundary).
+- **Wiring:** `PhaseExecutionEngine`'s three `buildPhaseInput` call sites pass `config.getContextWindow()` + gc; `SummarizationService` reaches the facade by the established field-injection pattern (null in direct-construction unit tests → truncation fallback). The I2 convergence judge's input is untouched (already bounded to two rounds); SYNTHESIS deliberately keeps the full picture.
+
+**Tests** (`GroupContextBuilderWindowingTest`, 13): boundary at exactly the cap (must exceed, not meet); truncation marker; summary + boundary-split tail (no gap/duplication); ANONYMOUS uses the anonymous summary and labels (the named FULL summary must not surface); incremental extension (second call sees previous summary + only the new slice); failure/empty-answer state untouched + rendering falls back; priced summarization reaches `totalCost`; no summarizer call outside its remit (wrong phase type/scope, below cap, summarization off); config normalization. **Mutation-checked:** re-feeding the whole prefix instead of the new slice fails exactly the incremental test. `PhaseExecutionEngineTest`'s input stub updated to the new 9-arg overload (same reasoning as its own comment: a shorter stub silently nulls every input). Full `engine.internal` suite: 1438 green; checkstyle clean.
+
+**Files:** `AgentGroupConfiguration.java`, `GroupConversation.java`, `GroupContextBuilder.java`, `PhaseExecutionEngine.java`, `GroupConversationService.java`, `GroupCostLedger.java`, `AgentGroupStore.java`, `TokenPricing.java` (now public), `docs/group-conversations.md`, `planning/group-collaboration-NEXT.md` (all three §2 items marked done), tests.
+
+---
+
+## 🪜 fix(schema): N3 — legacy documents now enter the migration ladder at the bottom (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+Second pre-feature defect from `planning/group-collaboration-NEXT.md` §2, filed by the round-5 review of #626. `GroupConversation.schemaVersion` was initialised to `CURRENT_SCHEMA_VERSION` (3). Every pre-F6 production document has no `schemaVersion` key, Jackson leaves the initialiser standing, so those documents loaded **claiming schema 3 while being version-1-shaped** — and `prepareForResume`'s ladder ran `for (v = 3; v < 3; ...)`: zero iterations on exactly the documents it exists for. Fixed now, while it is free: no released build has ever written a versioned document, so nothing in production carries a wrong claim to migrate away from.
+
+- **Test first, watched it fail:** `documentWithoutVersionKey_claimsLegacyVersionNotCurrent` deserialises `{}` and asserts version 1 — failed with `expected: <1> but was: <3>` before the fix, exactly the round-5 finding. This is the case none of the four previous review rounds' tests covered (they all *set* a version).
+- **The fix is a split, not a re-initialisation:** new `LEGACY_SCHEMA_VERSION = 1` is the field initialiser (the version a key-less document claims — it never moves), and the single creation point (`GroupConversationService.createGroupConversation`) stamps `CURRENT_SCHEMA_VERSION` explicitly. The initialiser alone cannot distinguish "absent" from "current" — Jackson runs the no-arg constructor either way — so the stamp must live at creation.
+- **`ConversationMemorySnapshot` got the identical split** even though its `CURRENT` is still 1 (correct only by coincidence — first bump to 2 would have silently re-created the group side's bug). Its stamp lives in `ConversationMemoryUtilities.getMemorySnapshot`, the one place snapshots are built from live memory. A pinning test asserts `LEGACY_SCHEMA_VERSION` stays 1 when `CURRENT` bumps.
+- **(b) Stale Javadoc fixed:** `GroupConversationSchemaMigrations.MIGRATIONS` claimed `CURRENT_SCHEMA_VERSION` is 1 and "there is nothing yet to migrate from" — it is 3, and the identity-default path has already been exercised twice. Rewritten (plus the single-conversation mirror and the stale test-class Javadoc).
+
+**Mutation-checked:** removing the creation stamp fails exactly `discuss_stampsCurrentSchemaVersionOnTheCreatedDocument` (a fresh document would persist claiming legacy). Deserialisation side proven by the red→green cycle above. 133 tests across the six touched classes green.
+
+⚠️ **Surefire note for the next session:** `-Dtest=ClassName` prints `Tests run: 0` for the parent of `@Nested` tests while the nested groups report under their `@DisplayName` — read the run TOTAL, not the class line, before concluding nothing ran.
+
+**Files:** `GroupConversation.java`, `GroupConversationService.java`, `ConversationMemorySnapshot.java`, `ConversationMemoryUtilities.java`, both `*SchemaMigrations.java`, tests.
+
+---
+
+## 🧮 fix(groups): nested-group cost is summed per child discussion, not overwritten (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+The N1 fold-in flagged in `planning/group-collaboration-NEXT.md` §4. `GroupCostLedger.accumulateNestedGroupCost` keyed `memberCosts` by the GROUP member's `agentId`, but every turn of a GROUP member spawns a **fresh child discussion** whose `totalCost` starts at 0 — and the map records by replacement (idempotency invariant: one key = one conversation's cumulative cost). So child N's total replaced child N−1's, only the last child's spend survived the re-sum, and the parent's ceiling checks ran against an undercount.
+
+Fix keeps the replacement invariant instead of breaking it with deltas: the attribution key is now `agentId:childConversationId` — one key per child conversation, replacement stays idempotent, multiple children of the same member sum. A child without an id falls back to the plain agentId (old behaviour). No production reader indexes `memberCosts` by agentId — the map is serialized whole.
+
+`MemberTurnExecutorTest.executeGroupMemberTurn_rollsUpChildDiscussionCost` pinned the old single-key shape and was updated to the new contract. New `GroupCostLedgerTest` case: two children ($1.00, $0.50) of one member total $1.50, not $0.50. **Mutation-checked:** reverting to the agentId key fails exactly that new test.
+
+**Files:** `GroupCostLedger.java`, `GroupCostLedgerTest.java`, `MemberTurnExecutorTest.java`.
+
+---
+
+## 💰 fix(llm): N1 — price ordinary model calls so the ledger's common case is no longer $0 (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+First of the three pre-feature defects from `planning/group-collaboration-NEXT.md` §2. `AUDIT_COST` was written from `cascadeCostUsd + toolCostUsd` only, so a plain model call — no cascade, no priced tool — contributed **$0.00**: I1's `maxCostPerDiscussion` ceiling could never trip for an ordinary group, and `memberCosts`/`totalCost` were served over REST as if authoritative.
+
+- **`LlmConfiguration.Task` gains `inputPricePer1M`/`outputPricePer1M`** — same names and nullable semantics as the cascade fields (null = unpriced, contributes $0), so nothing changes for anyone not setting prices. Config-driven per Golden Rule 1: no hardcoded provider price table — it would be wrong within weeks.
+- **The pricing arithmetic now lives once, in `TokenPricing.cost()`.** `CascadingModelExecutor.computeCost` (step→cascade price resolution) and `LlmTask.accumulateAuditEvidence` (task-level prices for plain calls) both delegate — the formula cannot drift between paths (§4.7 unification rule).
+- **Precedence is explicit, not accidental:** `accumulateAuditEvidence` discriminates on the presence of the `cascadeCostUsd` metadata key, which the cascade branch always writes. A cascade run is priced by its steps alone; task-level prices apply only to non-cascade calls — cascade steps may target entirely different models, so inheriting the task price would price the wrong model. (This matches the precedence concern pre-filed in `docs/superpowers/specs/2026-07-21-manager-coverage-backend-design.md`.) Pinned by a test with deliberately absurd task prices on a cascade turn.
+- **Validation:** negative task-level prices fail deployment (`CascadeConfigValidator`, same new-field hard-error rationale as cascade pricing; the validator now also runs its task-level block for cascade-less tasks).
+- **`GroupCostLedger`'s "Known gap (V1)" Javadoc** rewritten — the gap is closed; `totalCost` remains a lower bound only for members whose configs carry no prices.
+
+**Tests** (`LlmTaskAuditLedgerTest`, `CascadeConfigValidatorTest`): plain priced legacy call accumulates the expected dollars; priced agent-mode turn sums token + tool cost; unpriced call still writes no cost key; cascade with absurd task prices set is priced by the cascade alone; negative task price throws at deploy. **Mutation-checked:** reverting the pricing line to `0.0` fails exactly the two new priced-plain-call tests and nothing else.
+
+The group-side chain (AUDIT_COST → `GroupCostLedger` → ceiling policies ABORT/SYNTHESIZE_NOW) was already pinned end-to-end by `GroupConversationServiceCostCeilingTest` with stubbed member cost; what could not exist before this fix — a plain call producing nonzero AUDIT_COST — is now the pinned link.
+
+**Files:** `LlmConfiguration.java`, `TokenPricing.java` (new), `CascadingModelExecutor.java`, `LlmTask.java`, `CascadeConfigValidator.java`, `GroupCostLedger.java`, `docs/langchain.md`, tests.
 
 ---
 

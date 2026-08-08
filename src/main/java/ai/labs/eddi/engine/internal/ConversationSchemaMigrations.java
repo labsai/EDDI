@@ -33,8 +33,11 @@ public final class ConversationSchemaMigrations {
 
     /**
      * Migration functions, keyed by the version they upgrade <em>from</em>. Empty
-     * today for the same reason as the group side's registry: version {@code 1} is
-     * the first that has ever existed. See
+     * today: on this surface version {@code 1} really is the only version that has
+     * ever existed. When bumping
+     * {@link ConversationMemorySnapshot#CURRENT_SCHEMA_VERSION} for the first time,
+     * note that key-less stored documents claim
+     * {@link ConversationMemorySnapshot#LEGACY_SCHEMA_VERSION} — see
      * {@code GroupConversationSchemaMigrations#MIGRATIONS}'s Javadoc.
      */
     private static final Map<Integer, UnaryOperator<ConversationMemorySnapshot>> MIGRATIONS = Map.of();

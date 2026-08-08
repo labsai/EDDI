@@ -157,6 +157,43 @@ a second writer racing it would corrupt the state machine that decides what runs
 next. Filing is the only agent-side write.
 
 
+## Transcript windowing
+
+A `FULL`- or `ANONYMOUS`-scope discussion phase re-feeds the transcript to every
+member every turn, so a long discussion grows roughly quadratically in prompt
+tokens. `contextWindow` bounds what each turn *renders* — the stored transcript
+is never modified, and signing verification still runs on the raw entries:
+
+```json
+"contextWindow": {
+  "enabled": true,
+  "maxRecentEntries": 30,
+  "summarizeOverflow": true,
+  "llmProvider": "openai",
+  "llmModel": "gpt-4o-mini",
+  "inputPricePer1M": 0.15,
+  "outputPricePer1M": 0.60
+}
+```
+
+When the scope-filtered context exceeds `maxRecentEntries`, the older entries
+collapse into a single leading block: a rolling **summary** (extended
+incrementally at phase boundaries via the shared summarization service — never
+per member turn), or, with `summarizeOverflow: false`, a plain
+`[n earlier entries omitted]` marker that costs no LLM call. A summarization
+failure never blocks the discussion — the turn renders with the truncation
+marker and the next boundary catches up.
+
+- Applies to `FULL` and `ANONYMOUS` scopes only. The `ANONYMOUS` variant keeps
+  its own summary, built from the same `"Anonymous"` labels the scope filter
+  produces — the summary can never de-anonymize a peer.
+- `llmProvider`/`llmModel` name the summarizer; without them, overflow falls
+  back to the truncation marker (a save-time warning says so).
+- The optional prices attribute the summarizer's own spend to the discussion's
+  cost ledger, where `maxCostPerDiscussion` sees it.
+- The convergence judge's input is not windowed — it is already bounded to the
+  last two rounds.
+
 Both caps are enforced independently: `maxPerTurn` bounds a runaway single turn,
 `maxAgentAddedTasksPerDiscussion` bounds slow drift across a long discussion. The
 discussion cap counts only agent-filed tasks, so a large planned backlog does not

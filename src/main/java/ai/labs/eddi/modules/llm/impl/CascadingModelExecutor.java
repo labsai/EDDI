@@ -717,19 +717,7 @@ class CascadingModelExecutor {
     static double computeCost(CascadeStep step, ModelCascadeConfig cascade, Map<String, Object> tokenUsage) {
         Double inPrice = step.getInputPricePer1M() != null ? step.getInputPricePer1M() : cascade.getInputPricePer1M();
         Double outPrice = step.getOutputPricePer1M() != null ? step.getOutputPricePer1M() : cascade.getOutputPricePer1M();
-        if (tokenUsage == null || (inPrice == null && outPrice == null)) {
-            return 0.0;
-        }
-        long inputTokens = asLong(tokenUsage.get("inputTokens"));
-        long outputTokens = asLong(tokenUsage.get("outputTokens"));
-        double cost = 0.0;
-        if (inPrice != null) {
-            cost += inputTokens / 1_000_000.0 * inPrice;
-        }
-        if (outPrice != null) {
-            cost += outputTokens / 1_000_000.0 * outPrice;
-        }
-        return cost;
+        return TokenPricing.cost(inPrice, outPrice, tokenUsage);
     }
 
     private static long asLong(Object value) {

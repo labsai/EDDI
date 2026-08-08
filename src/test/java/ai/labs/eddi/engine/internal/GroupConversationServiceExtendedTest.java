@@ -566,6 +566,29 @@ class GroupConversationServiceExtendedTest {
             verify(listener).onGroupError(any(GroupConversationEventSink.GroupErrorEvent.class));
         }
 
+        /**
+         * F6/N3: the field initialiser is the LEGACY sentinel (so key-less stored
+         * documents read as legacy), which means a freshly created document only claims
+         * the current schema because the creation path stamps it. Drop the stamp and
+         * every NEW document would persist claiming legacy shape.
+         */
+        @Test
+        void discuss_stampsCurrentSchemaVersionOnTheCreatedDocument() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("a1", "Alice", 1, null));
+            cfg.setModeratorAgentId("mod");
+            setupStore(cfg);
+            stubAgent("a1", "Opinion");
+            stubAgent("mod", "Synthesis");
+
+            service.discuss(GROUP_ID, QUESTION, USER_ID, 0, null);
+
+            var created = ArgumentCaptor.forClass(GroupConversation.class);
+            verify(conversationStore).create(created.capture());
+            assertEquals(GroupConversation.CURRENT_SCHEMA_VERSION, created.getValue().getSchemaVersion(),
+                    "a new document must be stamped current at creation — the initialiser deliberately is not");
+        }
+
         @Test
         void discuss_withNullListener_doesNotThrow() throws Exception {
             var cfg = config(DiscussionStyle.ROUND_TABLE, 1,

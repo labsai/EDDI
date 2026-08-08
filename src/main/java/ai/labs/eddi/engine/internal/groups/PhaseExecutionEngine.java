@@ -728,7 +728,7 @@ public class PhaseExecutionEngine {
                         new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
             }
             String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null,
-                    GroupConversationService.rosterWithRecruits(config, gc));
+                    GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc);
             // I11: the negotiation table lives on gc, which buildPhaseInput does
             // not see — appended here (no-op for non-negotiation phases).
             input = NegotiationEngine.appendStateIfRelevant(input, gc, phase);
@@ -848,7 +848,7 @@ public class PhaseExecutionEngine {
                 .map(speaker -> CompletableFuture.supplyAsync(callerIdentityContext.withIdentitySupplying(phaseCaller, () -> {
                     try {
                         String input = contextBuilder.buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null,
-                                GroupConversationService.rosterWithRecruits(config, gc));
+                                GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc);
                         // I11: see the sequential loop — appended, not templated.
                         input = NegotiationEngine.appendStateIfRelevant(input, gc, phase);
                         return memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
@@ -1007,7 +1007,7 @@ public class PhaseExecutionEngine {
                             new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
                 }
                 String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target,
-                        GroupConversationService.rosterWithRecruits(config, gc));
+                        GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc);
                 TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId(),
                         listener);
                 gc.getTranscript().add(entry);

@@ -53,6 +53,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
+        warnOnSummarizerlessWindow(groupConfiguration);
         return super.create(groupConfiguration);
     }
 
@@ -68,6 +69,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
+        warnOnSummarizerlessWindow(groupConfiguration);
         return super.update(id, version, groupConfiguration);
     }
 
@@ -333,6 +335,25 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         if (facilitator.maxMovesPerDiscussion() > 100) {
             throw new IllegalArgumentException("facilitator.maxMovesPerDiscussion must be at most 100 — the facilitator "
                     + "is a bounded intervention mechanism, not an orchestrator");
+        }
+    }
+
+    /**
+     * I9: a window that asks for summarization but names no summarizer model will
+     * silently degrade to the plain truncation marker at discussion time. Worth
+     * telling the author at save time, when they can still add
+     * {@code llmProvider}/{@code llmModel}. A warning, not a rejection — the
+     * truncation fallback is well-defined behaviour, same warn-not-reject shape as
+     * {@link #warnOnModeratorlessPhases}.
+     */
+    private void warnOnSummarizerlessWindow(AgentGroupConfiguration groupConfiguration) {
+        var window = groupConfiguration.getContextWindow();
+        if (window == null || !window.enabled() || !Boolean.TRUE.equals(window.summarizeOverflow())) {
+            return;
+        }
+        if (window.llmProvider() == null || window.llmModel() == null) {
+            LOGGER.warnf("Group '%s' enables contextWindow summarization but names no llmProvider/llmModel — "
+                    + "overflow will fall back to a plain truncation marker", LogSanitizer.sanitize(groupConfiguration.getName()));
         }
     }
 

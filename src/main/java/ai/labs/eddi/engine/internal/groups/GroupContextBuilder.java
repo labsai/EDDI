@@ -6,18 +6,24 @@ package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextWindowConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.VoteConfig;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import ai.labs.eddi.modules.llm.impl.TokenPricing;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -53,6 +59,11 @@ public class GroupContextBuilder {
         return buildPhaseInput(phase, speaker, question, transcript, phaseIdx, target, null);
     }
 
+    public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
+                                  GroupMember target, List<GroupMember> allMembers) {
+        return buildPhaseInput(phase, speaker, question, transcript, phaseIdx, target, allMembers, null, null);
+    }
+
     /**
      * @param allMembers
      *            the full group roster, used only by {@code ARGUE}/{@code
@@ -62,9 +73,16 @@ public class GroupContextBuilder {
      *            the not-me filter, which is only correct for a 2-member debate —
      *            existing callers that never reach those two phase types are
      *            unaffected either way.
+     * @param window
+     *            I9 transcript windowing, applied to the FULL/ANONYMOUS
+     *            scope-filtered context only. {@code null} disables windowing
+     *            (every pre-I9 caller).
+     * @param gc
+     *            the discussion carrying the rolling window summaries; only read
+     *            when {@code window} is enabled
      */
     public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
-                                  GroupMember target, List<GroupMember> allMembers) {
+                                  GroupMember target, List<GroupMember> allMembers, ContextWindowConfig window, GroupConversation gc) {
 
         String template = phase.inputTemplate() != null
                 ? phase.inputTemplate()
@@ -81,7 +99,7 @@ public class GroupContextBuilder {
         // Phase-type specific variables
         switch (phase.type()) {
             case OPINION -> {
-                List<Map<String, Object>> prev = filterByScope(transcript, phase.contextScope(), phaseIdx, speaker);
+                List<Map<String, Object>> prev = filterByScope(transcript, phase.contextScope(), phaseIdx, speaker, window, gc);
                 data.put("previousResponses", prev);
             }
             case CRITIQUE -> {
@@ -338,29 +356,275 @@ public class GroupContextBuilder {
     }
 
     public List<Map<String, Object>> filterByScope(List<TranscriptEntry> transcript, ContextScope scope, int currentPhaseIdx, GroupMember speaker) {
+        return filterByScope(transcript, scope, currentPhaseIdx, speaker, null, null);
+    }
+
+    /**
+     * As {@link #filterByScope(List, ContextScope, int, GroupMember)}, windowed
+     * (I9): when {@code window} is enabled, the scope is {@code FULL} or
+     * {@code ANONYMOUS}, and the filtered context exceeds {@code maxRecentEntries},
+     * the older entries collapse into a single leading pseudo-entry — the rolling
+     * summary {@code gc} carries when one covers the omitted range, otherwise a
+     * plain "[n earlier entries omitted]" marker (the truncation fallback for
+     * {@code summarizeOverflow=false} and for summarizer failure). The recent
+     * entries render verbatim; the stored transcript is never modified.
+     */
+    public List<Map<String, Object>> filterByScope(List<TranscriptEntry> transcript, ContextScope scope, int currentPhaseIdx, GroupMember speaker,
+                                                   ContextWindowConfig window, GroupConversation gc) {
         if (scope == null || scope == ContextScope.NONE) {
             return List.of();
         }
 
-        return transcript.stream().filter(e -> e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
-                && e.type() != TranscriptEntryType.QUESTION).filter(e -> isVisibleToPeers(e, currentPhaseIdx)).filter(e -> switch (scope) {
-                    case FULL -> true;
-                    case LAST_PHASE -> e.phaseIndex() >= currentPhaseIdx - 1;
-                    case ANONYMOUS -> true; // Content included, attribution stripped
-                    case OWN_FEEDBACK -> speaker.agentId().equals(e.targetAgentId());
-                    case NONE -> false;
-                    case TASK_ONLY, TASK_WITH_DEPS -> false; // Handled by task-specific logic
-                }).map(e -> {
-                    Map<String, Object> entry = new LinkedHashMap<>();
-                    if (scope == ContextScope.ANONYMOUS) {
-                        entry.put("speaker", "Anonymous");
-                    } else {
-                        entry.put("speaker", e.speakerDisplayName());
-                    }
-                    entry.put("content", e.content());
-                    entry.put("phaseName", e.phaseName() != null ? e.phaseName() : "");
-                    return entry;
-                }).collect(Collectors.toList());
+        // Sequential phases hand in the LIVE synchronized transcript, which tool
+        // threads (e.g. a recruit's FACILITATION entry) can append to mid-render.
+        // Copy under the wrapper's own monitor — Collections.synchronizedList's
+        // add() locks the wrapper object, which is exactly what this locks — so
+        // the indexed walk below runs over one consistent view. Copying a
+        // snapshot the parallel path already made is a cheap re-wrap.
+        List<TranscriptEntry> entries;
+        synchronized (transcript) {
+            entries = List.copyOf(transcript);
+        }
+
+        // Raw transcript indices ride along because the rolling summary's
+        // summaryUpToIndex is a raw-transcript boundary, not a filtered-list one.
+        List<Integer> rawIndices = new ArrayList<>();
+        List<TranscriptEntry> filtered = new ArrayList<>();
+        for (int i = 0; i < entries.size(); i++) {
+            TranscriptEntry e = entries.get(i);
+            boolean included = e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
+                    && e.type() != TranscriptEntryType.QUESTION && isVisibleToPeers(e, currentPhaseIdx) && switch (scope) {
+                        case FULL -> true;
+                        case LAST_PHASE -> e.phaseIndex() >= currentPhaseIdx - 1;
+                        case ANONYMOUS -> true; // Content included, attribution stripped
+                        case OWN_FEEDBACK -> speaker.agentId().equals(e.targetAgentId());
+                        case NONE -> false;
+                        case TASK_ONLY, TASK_WITH_DEPS -> false; // Handled by task-specific logic
+                    };
+            if (included) {
+                rawIndices.add(i);
+                filtered.add(e);
+            }
+        }
+
+        boolean windowed = window != null && window.enabled() && gc != null
+                && (scope == ContextScope.FULL || scope == ContextScope.ANONYMOUS)
+                && filtered.size() > window.maxRecentEntries();
+        if (!windowed) {
+            return renderEntries(filtered, scope);
+        }
+
+        String summary = scope == ContextScope.ANONYMOUS ? gc.getAnonymousTranscriptSummary() : gc.getTranscriptSummary();
+        int summaryUpTo = scope == ContextScope.ANONYMOUS ? gc.getAnonymousSummaryUpToIndex() : gc.getSummaryUpToIndex();
+
+        if (summary != null && !summary.isBlank() && summaryUpTo > 0) {
+            // Verbatim tail = everything the summary does not cover. Split on the raw
+            // boundary rather than "last maxRecentEntries" so there is never a gap
+            // (entries neither summarized nor shown) and never duplication (entries
+            // both summarized and shown). Between phase boundaries the tail can grow
+            // a few entries past the cap; the next boundary's summary extension
+            // re-tightens it.
+            List<TranscriptEntry> verbatim = new ArrayList<>();
+            int omitted = 0;
+            for (int i = 0; i < filtered.size(); i++) {
+                if (rawIndices.get(i) >= summaryUpTo) {
+                    verbatim.add(filtered.get(i));
+                } else {
+                    omitted++;
+                }
+            }
+            if (omitted == 0) {
+                return renderEntries(filtered, scope);
+            }
+            List<Map<String, Object>> result = new ArrayList<>();
+            result.add(syntheticEntry("Summary of the earlier discussion:\n" + summary));
+            result.addAll(renderEntries(verbatim, scope));
+            return result;
+        }
+
+        // Truncation fallback — summarizeOverflow=false, no summarizer configured,
+        // or every summarization attempt so far failed.
+        int omitted = filtered.size() - window.maxRecentEntries();
+        List<Map<String, Object>> result = new ArrayList<>();
+        result.add(syntheticEntry("[%d earlier entries omitted]".formatted(omitted)));
+        result.addAll(renderEntries(filtered.subList(omitted, filtered.size()), scope));
+        return result;
+    }
+
+    private static List<Map<String, Object>> renderEntries(List<TranscriptEntry> entries, ContextScope scope) {
+        return entries.stream().map(e -> {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            if (scope == ContextScope.ANONYMOUS) {
+                entry.put("speaker", "Anonymous");
+            } else {
+                entry.put("speaker", e.speakerDisplayName());
+            }
+            entry.put("content", e.content());
+            entry.put("phaseName", e.phaseName() != null ? e.phaseName() : "");
+            return entry;
+        }).collect(Collectors.toList());
+    }
+
+    /**
+     * The windowing pseudo-entry. "System" as the speaker, never a member name —
+     * under ANONYMOUS scope it must not read as an attribution.
+     */
+    private static Map<String, Object> syntheticEntry(String content) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("speaker", "System");
+        entry.put("content", content);
+        entry.put("phaseName", "(earlier discussion)");
+        return entry;
+    }
+
+    /**
+     * Summarization instructions for the I9 window summary. Tag-style constraint
+     * header rather than instruction prose, per the plan's research-adopted
+     * template note.
+     */
+    static final String WINDOW_SUMMARY_INSTRUCTIONS = """
+            Summarize the group discussion entries below for a participant who must continue the discussion.
+            Preserve: each speaker's position and key arguments, decisions reached, open disagreements, and task outcomes.
+            [format: bullet points] [limit: 500 tokens]""";
+
+    /**
+     * Extends the discussion's rolling window summary (I9), called from the
+     * discussion loop at phase boundaries only — never per member turn, which is
+     * exactly the quadratic re-feeding this feature exists to stop.
+     * <p>
+     * A no-op unless the upcoming phase is an OPINION phase with FULL or ANONYMOUS
+     * scope (the only context {@link #filterByScope} windows), the window is
+     * enabled with {@code summarizeOverflow=true}, and the transcript has outgrown
+     * {@code maxRecentEntries} beyond what the summary already covers. The
+     * extension is incremental: the summarizer is handed the previous summary plus
+     * only the new slice, mirroring {@code ConversationSummarizer}'s algorithm —
+     * and like it, a failed call leaves the stored state untouched (WARN, never
+     * blocks the discussion), so rendering falls back to the truncation marker and
+     * the next boundary catches up with a larger batch.
+     * <p>
+     * The ANONYMOUS variant is summarized from "Anonymous"-labelled input — the
+     * same labels the scope filter itself produces — so the stored anonymous
+     * summary can never de-anonymize a peer. Summarizer spend is attributed to the
+     * discussion's cost ledger (I1) when the window config carries prices.
+     */
+    public void updateWindowSummary(GroupConversation gc, DiscussionPhase phase, ContextWindowConfig window,
+                                    SummarizationService summarizationService) {
+        if (window == null || !window.enabled() || !Boolean.TRUE.equals(window.summarizeOverflow())
+                || gc == null || phase == null || phase.type() != PhaseType.OPINION) {
+            return;
+        }
+        ContextScope scope = phase.contextScope();
+        if (scope != ContextScope.FULL && scope != ContextScope.ANONYMOUS) {
+            return;
+        }
+        boolean anonymous = scope == ContextScope.ANONYMOUS;
+
+        List<TranscriptEntry> transcript;
+        synchronized (gc.getTranscript()) {
+            transcript = List.copyOf(gc.getTranscript());
+        }
+        // The boundary counts VISIBLE (summarizable) entries back from the tail,
+        // not raw entries: bookkeeping rows (SKIPPED, CONVERGENCE, …) in the tail
+        // would otherwise shrink the verbatim window below maxRecentEntries while
+        // newer real contributions get summarized away.
+        int coverThrough = summaryBoundary(transcript, window.maxRecentEntries());
+        int alreadyCovered = anonymous ? gc.getAnonymousSummaryUpToIndex() : gc.getSummaryUpToIndex();
+        if (coverThrough <= alreadyCovered) {
+            return;
+        }
+        if (summarizationService == null || window.llmProvider() == null || window.llmModel() == null) {
+            LOGGER.warnf("Group %s: contextWindow.summarizeOverflow is on but no summarizer %s — falling back to plain truncation",
+                    LogSanitizer.sanitize(gc.getId()), summarizationService == null ? "service is available" : "llmProvider/llmModel is configured");
+            return;
+        }
+
+        String newSlice = renderForSummarizer(transcript.subList(alreadyCovered, coverThrough), anonymous);
+        if (newSlice.isBlank()) {
+            return;
+        }
+        String previousSummary = anonymous ? gc.getAnonymousTranscriptSummary() : gc.getTranscriptSummary();
+        String content = previousSummary != null && !previousSummary.isBlank()
+                ? "## Summary of entries 1-" + alreadyCovered + ":\n" + previousSummary + "\n\n## New entries:\n" + newSlice
+                : newSlice;
+
+        try {
+            var result = summarizationService.summarizeWithUsage(content, WINDOW_SUMMARY_INSTRUCTIONS,
+                    window.llmProvider(), window.llmModel());
+            if (result.summary().isBlank()) {
+                LOGGER.warnf("Group %s: window summarization returned empty — keeping previous state, will retry next boundary",
+                        LogSanitizer.sanitize(gc.getId()));
+                return;
+            }
+            if (anonymous) {
+                gc.setAnonymousTranscriptSummary(result.summary());
+                gc.setAnonymousSummaryUpToIndex(coverThrough);
+            } else {
+                gc.setTranscriptSummary(result.summary());
+                gc.setSummaryUpToIndex(coverThrough);
+            }
+            // I1: the summarizer's own spend is discussion spend. Keyed per variant
+            // and boundary so a re-run of the same extension replaces (idempotent)
+            // while distinct extensions sum.
+            double cost = TokenPricing.cost(window.inputPricePer1M(), window.outputPricePer1M(),
+                    Map.of("inputTokens", result.inputTokens(), "outputTokens", result.outputTokens()));
+            GroupCostLedger.recordSystemCost(gc, "system:summarizer:" + (anonymous ? "anon" : "full") + ":" + coverThrough, cost);
+        } catch (Exception e) {
+            LOGGER.warnf("Group %s: window summarization failed (%s) — falling back to plain truncation for this window",
+                    LogSanitizer.sanitize(gc.getId()), e.getMessage());
+        }
+    }
+
+    /**
+     * The raw index the summary should cover through (exclusive): the position of
+     * the {@code maxRecentEntries}-th <em>summarizable</em> entry counted from the
+     * tail. {@code 0} when the transcript holds fewer than the cap — nothing to
+     * summarize yet.
+     */
+    static int summaryBoundary(List<TranscriptEntry> transcript, int maxRecentEntries) {
+        int visibleSeen = 0;
+        for (int i = transcript.size() - 1; i >= 0; i--) {
+            if (isSummarizable(transcript.get(i))) {
+                visibleSeen++;
+                if (visibleSeen == maxRecentEntries) {
+                    return i;
+                }
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * The shared content predicate for windowing: what counts toward the verbatim
+     * tail and what may enter a summary. The same exclusions the peer-visibility
+     * matrix applies to rendered context — bookkeeping a member never sees must not
+     * leak into a summary a member reads. (VOTE/BID need no phase check here:
+     * summaries are extended at phase boundaries, where every ballot on the
+     * transcript belongs to a completed phase.)
+     */
+    private static boolean isSummarizable(TranscriptEntry e) {
+        return e != null && e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
+                && e.type() != TranscriptEntryType.QUESTION && e.type() != TranscriptEntryType.ABSTAINED
+                && e.type() != TranscriptEntryType.CONVERGENCE && e.type() != TranscriptEntryType.FACILITATION;
+    }
+
+    /**
+     * Renders transcript entries as summarizer input, {@link #isSummarizable}
+     * entries only.
+     */
+    private static String renderForSummarizer(List<TranscriptEntry> entries, boolean anonymous) {
+        var sb = new StringBuilder();
+        for (TranscriptEntry e : entries) {
+            if (!isSummarizable(e)) {
+                continue;
+            }
+            String label = anonymous ? "Anonymous" : e.speakerDisplayName();
+            sb.append("- ").append(label);
+            if (e.phaseName() != null) {
+                sb.append(" (").append(e.phaseName()).append(')');
+            }
+            sb.append(": ").append(e.content()).append('\n');
+        }
+        return sb.toString();
     }
 
     /**

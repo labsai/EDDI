@@ -44,6 +44,19 @@ public class GroupConversation {
      */
     public static final int CURRENT_SCHEMA_VERSION = 4;
     /**
+     * The version a stored document claims when its JSON carries no
+     * {@code schemaVersion} key — i.e. it was written before F6 existed, which is
+     * every pre-F6 production document. Jackson runs the no-arg constructor and
+     * leaves the field initialiser standing either way, so the initialiser cannot
+     * distinguish "absent" from "current": it MUST be this legacy floor, and the
+     * single creation point ({@code GroupConversationService}) stamps
+     * {@link #CURRENT_SCHEMA_VERSION} explicitly. Initialising the field to CURRENT
+     * instead made key-less documents claim the current version and
+     * {@code prepareForResume}'s ladder run zero iterations on exactly the
+     * documents it exists for.
+     */
+    public static final int LEGACY_SCHEMA_VERSION = 1;
+    /**
      * The shape this specific document was last written in. Checked before a
      * resume: newer than {@link #CURRENT_SCHEMA_VERSION} refuses (this deployment
      * predates the document), older runs registered migrations forward. A pause can
@@ -52,7 +65,7 @@ public class GroupConversation {
      * per-resume config-drift check (bookmarked phase vs. current config) that
      * guards a different axis. See {@code GroupConversationSchemaMigrations}.
      */
-    private int schemaVersion = CURRENT_SCHEMA_VERSION;
+    private int schemaVersion = LEGACY_SCHEMA_VERSION;
     private String id;
     private String groupId;
     private String userId;
@@ -81,14 +94,18 @@ public class GroupConversation {
     // turns a successful discussion into a FAILED one.
     private Map<String, String> memberDisplayNames = new ConcurrentHashMap<>();
     /**
-     * Per-member dollar-cost attribution (Wave 0, F5): agentId → that member's cost
-     * so far. For an individual agent, its own private conversation's cumulative
-     * tracked cost; for a {@code MemberType.GROUP} member, the child discussion's
-     * own {@link #totalCost} rolled up whole. See {@code GroupCostLedger}'s Javadoc
-     * for the known gap this reflects (V1: a non-cascade member turn's own
-     * model-completion cost is not tracked anywhere yet — I1 closes that).
-     * Thread-safe: PARALLEL phases accumulate from multiple member turns
-     * concurrently.
+     * Per-conversation dollar-cost attribution (Wave 0, F5): attribution key → that
+     * conversation's cumulative tracked cost. The invariant is <b>one key = one
+     * conversation</b> (recording is by replacement, which is only idempotent under
+     * that reading), so keys are NOT uniformly agent ids: an ordinary member's key
+     * is its agentId, a separate-conversation turn uses its conversation key (I2's
+     * {@code __convergence_judge}, I4's {@code __dissent__*}), and a nested GROUP
+     * member's children are keyed {@code agentId:childConversationId} — each turn
+     * of a GROUP member is a fresh child discussion, and a per-agent key would
+     * replace child N−1's whole spend with child N's. Consumers wanting a member's
+     * total must sum matching keys; {@link #totalCost} is always the sum of
+     * everything. Thread-safe: PARALLEL phases accumulate from multiple member
+     * turns concurrently.
      */
     private Map<String, Double> memberCosts = new ConcurrentHashMap<>();
     /**
@@ -227,6 +244,62 @@ public class GroupConversation {
                 : new ConcurrentHashMap<>();
     }
 
+    /**
+     * Rolling summary of transcript entries {@code [0, summaryUpToIndex)} for
+     * FULL-scope windowed rendering (I9), extended incrementally at phase
+     * boundaries by {@code GroupContextBuilder.updateWindowSummary}. A derived view
+     * only — the transcript itself is never modified. {@code null} until windowing
+     * first summarizes; legacy documents deserialize to exactly that state and
+     * simply start summarizing at the next boundary, so this is additive and needs
+     * no {@code CURRENT_SCHEMA_VERSION} bump.
+     */
+    private String transcriptSummary;
+    /** Exclusive raw-transcript index {@link #transcriptSummary} covers through. */
+    private int summaryUpToIndex;
+    /**
+     * The ANONYMOUS-scope twin of {@link #transcriptSummary}, built from
+     * "Anonymous"-labelled input so an ANONYMOUS phase's summary can never leak
+     * attribution (no de-anonymization). Kept separately rather than reusing the
+     * FULL summary, which contains real speaker names.
+     */
+    private String anonymousTranscriptSummary;
+    /**
+     * Exclusive raw-transcript index {@link #anonymousTranscriptSummary} covers
+     * through.
+     */
+    private int anonymousSummaryUpToIndex;
+
+    public String getTranscriptSummary() {
+        return transcriptSummary;
+    }
+
+    public void setTranscriptSummary(String transcriptSummary) {
+        this.transcriptSummary = transcriptSummary;
+    }
+
+    public int getSummaryUpToIndex() {
+        return summaryUpToIndex;
+    }
+
+    public void setSummaryUpToIndex(int summaryUpToIndex) {
+        this.summaryUpToIndex = summaryUpToIndex;
+    }
+
+    public String getAnonymousTranscriptSummary() {
+        return anonymousTranscriptSummary;
+    }
+
+    public void setAnonymousTranscriptSummary(String anonymousTranscriptSummary) {
+        this.anonymousTranscriptSummary = anonymousTranscriptSummary;
+    }
+
+    public int getAnonymousSummaryUpToIndex() {
+        return anonymousSummaryUpToIndex;
+    }
+
+    public void setAnonymousSummaryUpToIndex(int anonymousSummaryUpToIndex) {
+        this.anonymousSummaryUpToIndex = anonymousSummaryUpToIndex;
+    }
     private SharedTaskList taskList;
     /** Agents dynamically added during the discussion (recruited or created). */
     private List<AgentGroupConfiguration.GroupMember> dynamicMembers = new CopyOnWriteArrayList<>();

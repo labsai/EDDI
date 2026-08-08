@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -24,6 +25,23 @@ class ConversationSchemaMigrationsTest {
         snapshot.setConversationId("conv-1");
         snapshot.setSchemaVersion(schemaVersion);
         return snapshot;
+    }
+
+    /**
+     * Pins the legacy sentinel under deserialization. Today {@code LEGACY} and
+     * {@code CURRENT} are both {@code 1}, so this cannot fail for the group side's
+     * reason yet — it exists so the first bump of {@code CURRENT} to {@code 2}
+     * fails THIS test if someone re-couples the field initialiser to
+     * {@code CURRENT}, instead of silently re-creating the zero-iteration migration
+     * bug the group side shipped.
+     */
+    @Test
+    void documentWithoutVersionKey_claimsLegacyVersion() throws Exception {
+        var legacy = new ObjectMapper().readValue("{}", ConversationMemorySnapshot.class);
+
+        assertEquals(ConversationMemorySnapshot.LEGACY_SCHEMA_VERSION, legacy.getSchemaVersion());
+        assertEquals(1, ConversationMemorySnapshot.LEGACY_SCHEMA_VERSION,
+                "the legacy floor is the first version that ever existed — it never moves, even when CURRENT bumps");
     }
 
     @Test
