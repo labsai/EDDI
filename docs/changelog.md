@@ -140,6 +140,28 @@ First Wave 3 queue item. EDDI had win/lose decision forms and no **trade** form;
 - Enum additions are compat-safe; `describe_discussion_styles` (REST) gained the entry via an exhaustive switch the compiler flagged.
 
 **Tests (12 new in `NegotiationEngineTest` + preset shape + 2 enum pins; `engine.internal` + `configs.groups` suites 1694 green; checkstyle clean):** parse tiers incl. the JSON-plus-reasoning form; concession-must-name-return; implicit self-signature with the authoring entry index; supersession; unknown/superseded acceptance + unparseable turn inertness; ledger accumulation with round + refProposal attribution; unanimous acceptance with signed indices asserted exactly; partial acceptance ≠ agreement; arbitration records once and never overwrites; ledger rendering into the turn (and its no-op paths); and the plan's **scripted 3-round bargain converging in round 3** — propose → counter+concede → sign — as living documentation of the protocol.
+## 🔎 fix(groups): I18 PR #642 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i18-bidding`)
+
+All 6 CodeQL log-injection findings in `TaskForceEngine`'s bid round accepted and fixed: `LogSanitizer` applied to every caller-influenced value in the bid-round logs (groupId, task subject, bidder/winner agentId, exception messages) — 7 sites sanitized, the 6 flagged plus the bid-turn-failure log the scan will otherwise flag next round. Bid suites (51) green.
+
+---
+
+## 🏷️ feat(groups): I18 — bid-based task assignment, CNP-lite (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i18-bidding`)
+
+Second Wave 3 queue item (adopted from the research review, scoped down — the turn-auction extension stays REJECTED: an extra call per member per turn to decide who talks doubles cost to save cost). The planner cannot know members' actual fit or load; the Contract Net Protocol's announce-bid-award loop maps onto the existing wave scheduler.
+
+- **`assignmentMode = ROLE (default) | BID`** on `TaskDefinition` (per task) and `GroupTaskConfig` (group default), both with compat constructors — every pre-I18 config resolves to ROLE through `TaskBidEngine.effectiveMode`'s task → group → ROLE chain.
+- **PLAN leaves BID-mode tasks unassigned** (both the pre-configured and LLM-planned paths) — assigning there would preempt the auction with the planner's guess.
+- **The wave's bid round** (`TaskForceEngine.runBidRoundIfNeeded`, before each wave's grouping so awards join the same wave): eligible members (non-moderator AGENTs) each get one **blind, parallel** bid turn — the prompt carries the announced batch and NOTHING else (no transcript, no peer bids; blindness is what makes the self-assessed confidences comparable, and the honesty rule is stated to the model: an inflated confidence wins you work you will fail at, on the record). Replies land as `BID` transcript entries — F4's blind-bid visibility (peer-hidden while the phase runs) has its first producer.
+- **Deterministic award, never a stalled wave**: highest confidence per task; ties break by speaking order then agent id (identical on every pod); a task nobody bid on falls back to ROLE/round-robin; the auction skips itself with a LOG (a silent cap reads as coverage) when <2 bidders, <2 unassigned tasks, or the turn budget cannot cover one bid turn per member. Bid turns count toward the turn budget and their cost flows through the normal member-turn attribution.
+- **The award is per-task metadata** (`SharedTaskList.awardedBids[taskId] = AwardedBid{agentId, confidence, estimatedComplexity, rationale}`), deliberately NOT a global DecisionRecord — an award is a scheduling fact about one task, not the discussion's conclusion.
+- Parse discipline mirrors `VoteTallyEngine`: three tiers, FAIL_ON_TRAILING_TOKENS, unknown subjects dropped (an out-of-contract bid is never guessed onto a task), confidence clamped to [0,1], first-bid-per-task within one reply.
+
+**Tests (13 new: 8 `TaskBidEngineTest` + 5 `TaskForceEngineTest`; `engine.internal` + `configs.groups` suites 1694 green; checkstyle clean):** parse tiers + clamping + unknown-subject drop; award to highest confidence; tie-break determinism (speaking order, then agent id); no-bids absence; effective-mode chain; worthwhile-auction caps; blind prompt content; engine-level award with recorded bid + turn accounting + BID entries; **blindness asserted on the captured prompts** (no peer rationale/confidence leaks); no-bids ROLE fallback never stalls; skip-conditions make zero LLM calls; ROLE-mode tasks never auctioned.
 
 ---
 

@@ -8,8 +8,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Runtime task list for task-oriented group conversations. Embedded in
@@ -606,5 +608,42 @@ public class SharedTaskList {
 
     public synchronized void setTasks(List<TaskItem> tasks) {
         this.tasks = tasks != null ? new ArrayList<>(tasks) : new ArrayList<>();
+    }
+
+    // ==================== I18 — bid awards (CNP-lite) ====================
+
+    /**
+     * The winning bid a BID-mode task was awarded on (I18) — per-task metadata,
+     * deliberately not a global {@code DecisionRecord}: an award is a scheduling
+     * fact about one task, not the discussion's conclusion.
+     *
+     * @param agentId
+     *            the winner
+     * @param confidence
+     *            the winning self-assessed confidence (0..1, clamped at parse)
+     * @param estimatedComplexity
+     *            the bidder's XS/S/M/L estimate, verbatim
+     * @param rationale
+     *            why the bidder claimed the task — quoted by dashboards
+     */
+    public record AwardedBid(String agentId, double confidence, String estimatedComplexity, String rationale) {
+    }
+
+    /** taskId → the bid it was awarded on. Only BID-mode tasks ever appear here. */
+    private Map<String, AwardedBid> awardedBids = new ConcurrentHashMap<>();
+
+    public Map<String, AwardedBid> getAwardedBids() {
+        return awardedBids;
+    }
+
+    public void setAwardedBids(Map<String, AwardedBid> awardedBids) {
+        this.awardedBids = awardedBids != null ? new ConcurrentHashMap<>(awardedBids) : new ConcurrentHashMap<>();
+    }
+
+    /** Records the award a task's assignment came from (I18). */
+    public synchronized void recordAwardedBid(String taskId, AwardedBid bid) {
+        if (taskId != null && bid != null) {
+            awardedBids.put(taskId, bid);
+        }
     }
 }

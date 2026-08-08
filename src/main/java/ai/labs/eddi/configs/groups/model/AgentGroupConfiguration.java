@@ -133,7 +133,8 @@ public class AgentGroupConfiguration {
      *            files twenty tasks in one breath, where a discussion-long drift
      *            files one per turn for forty turns
      */
-    public record GroupTaskConfig(boolean allowAgentTaskCreation, int maxAgentAddedTasksPerDiscussion, int maxPerTurn) {
+    public record GroupTaskConfig(boolean allowAgentTaskCreation, int maxAgentAddedTasksPerDiscussion, int maxPerTurn,
+            AssignmentMode assignmentMode) {
 
         public static final int DEFAULT_MAX_PER_DISCUSSION = 20;
         public static final int DEFAULT_MAX_PER_TURN = 3;
@@ -151,6 +152,14 @@ public class AgentGroupConfiguration {
             if (maxPerTurn <= 0) {
                 maxPerTurn = DEFAULT_MAX_PER_TURN;
             }
+            if (assignmentMode == null) {
+                assignmentMode = AssignmentMode.ROLE;
+            }
+        }
+
+        /** Backward-compatible constructor without {@code assignmentMode} (I18). */
+        public GroupTaskConfig(boolean allowAgentTaskCreation, int maxAgentAddedTasksPerDiscussion, int maxPerTurn) {
+            this(allowAgentTaskCreation, maxAgentAddedTasksPerDiscussion, maxPerTurn, AssignmentMode.ROLE);
         }
 
         /** Disabled, with both caps at their defaults. */
@@ -900,10 +909,16 @@ public class AgentGroupConfiguration {
             String description,
             String assignToRole,
             List<String> dependsOn,
-            int priority) {
+            int priority,
+            AssignmentMode assignmentMode) {
 
         public TaskDefinition(String subject, String description) {
             this(subject, description, "ALL", List.of(), 0);
+        }
+
+        /** Backward-compatible constructor without {@code assignmentMode} (I18). */
+        public TaskDefinition(String subject, String description, String assignToRole, List<String> dependsOn, int priority) {
+            this(subject, description, assignToRole, dependsOn, priority, null);
         }
 
         public TaskDefinition {
@@ -916,6 +931,22 @@ public class AgentGroupConfiguration {
                 assignToRole = "ALL";
             }
         }
+    }
+
+    /**
+     * How a task finds its agent (I18, CNP-lite). {@code null} on a task falls back
+     * to {@code taskListConfig.assignmentMode()}, and to {@link #ROLE} when that
+     * too is unset — every config that predates I18 behaves exactly as before.
+     */
+    public enum AssignmentMode {
+        /** The planner/config assigns by role or round-robin — today's behavior. */
+        ROLE,
+        /**
+         * Contract-Net-lite: eligible members submit blind parallel bids and the
+         * highest confidence wins (deterministic tie-break by speaking order; no bids
+         * falls back to ROLE — a wave never stalls on an auction).
+         */
+        BID
     }
 
     // --- Dynamic Agent Configuration ---
