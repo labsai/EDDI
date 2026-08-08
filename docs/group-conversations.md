@@ -155,6 +155,12 @@ tools.
 a second writer racing it would corrupt the state machine that decides what runs
 next. Filing is the only agent-side write.
 
+
+Both caps are enforced independently: `maxPerTurn` bounds a runaway single turn,
+`maxAgentAddedTasksPerDiscussion` bounds slow drift across a long discussion. The
+discussion cap counts only agent-filed tasks, so a large planned backlog does not
+exhaust it. A rejected call does not consume the per-turn budget.
+
 ### Bid-based assignment (I18, CNP-lite)
 
 The planner cannot know members' actual fit or load. Setting
@@ -186,11 +192,6 @@ turns and **awards** each to the highest self-assessed confidence:
   or when the remaining turn budget cannot cover one bid turn per member.
 - Bid turns are real member turns: they count toward the turn budget and their
   cost lands in the discussion's cost attribution.
-
-Both caps are enforced independently: `maxPerTurn` bounds a runaway single turn,
-`maxAgentAddedTasksPerDiscussion` bounds slow drift across a long discussion. The
-discussion cap counts only agent-filed tasks, so a large planned backlog does not
-exhaust it. A rejected call does not consume the per-turn budget.
 
 ## Nested Groups (Group-of-Groups)
 
