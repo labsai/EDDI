@@ -89,6 +89,59 @@ public class PhaseExecutionEngine {
         this.callerIdentityContext = callerIdentityContext;
     }
 
+    /**
+     * Control-flow signal (I6): the phase reached a HUMAN member's turn and the
+     * discussion must pause for their input. Thrown by the sequential loop and the
+     * parallel human tail, caught ONLY by {@code executeDiscussion}'s phase
+     * dispatch, which commits the {@code AWAITING_HUMAN_INPUT} pause and returns. A
+     * RuntimeException on purpose — it must fly through method signatures that
+     * declare {@code GroupDiscussionException} WITHOUT being caught by the generic
+     * failure handling (the same reasoning as
+     * {@code GroupConversationService.MemberTurnCancelledException}).
+     *
+     * @param member
+     *            the HUMAN member whose turn is up
+     * @param speakerIdx
+     *            the member's index — into the phase's resolved speaker list for
+     *            sequential turns, into the phase's human-only sublist for parallel
+     *            ones ({@code parallel} distinguishes the two)
+     * @param renderedPrompt
+     *            the phase input rendered for this member, exactly as an agent
+     *            would have received it
+     * @param parallel
+     *            whether this turn belongs to a PARALLEL phase's human tail
+     */
+    public static final class HumanTurnRequired extends RuntimeException {
+        private final transient GroupMember member;
+        private final int speakerIdx;
+        private final String renderedPrompt;
+        private final boolean parallel;
+
+        public HumanTurnRequired(GroupMember member, int speakerIdx, String renderedPrompt, boolean parallel) {
+            super("Human member turn required: " + member.agentId(), null, false, false);
+            this.member = member;
+            this.speakerIdx = speakerIdx;
+            this.renderedPrompt = renderedPrompt;
+            this.parallel = parallel;
+        }
+
+        public GroupMember member() {
+            return member;
+        }
+
+        public int speakerIdx() {
+            return speakerIdx;
+        }
+
+        public String renderedPrompt() {
+            return renderedPrompt;
+        }
+
+        public boolean parallel() {
+            return parallel;
+        }
+    }
+
     public void executeSequentialPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
                                        ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
                                        AtomicInteger turnCounter, int maxTurns)
@@ -496,7 +549,8 @@ public class PhaseExecutionEngine {
                                        AtomicInteger turnCounter, int maxTurns, int startSpeakerIdx)
             throws GroupDiscussionException {
         int from = Math.min(Math.max(startSpeakerIdx, 0), speakers.size());
-        for (GroupMember speaker : speakers.subList(from, speakers.size())) {
+        for (int idx = from; idx < speakers.size(); idx++) {
+            GroupMember speaker = speakers.get(idx);
             if (turnCounter.get() >= maxTurns) {
                 break;
             }
@@ -504,6 +558,16 @@ public class PhaseExecutionEngine {
             // overshoot the ceiling, which is accepted (see GroupCostLedger's Javadoc).
             if (GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)) {
                 break;
+            }
+            // I6: a human's turn pauses the discussion. AFTER the budget checks —
+            // an exhausted budget means no more turns, the human's included — and
+            // BEFORE the turn count (the pause commit accounts for the turn, so a
+            // restored pause does not double-count it). The prompt is rendered
+            // HERE, against exactly the transcript an agent speaker would see.
+            if (speaker.memberType() == AgentGroupConfiguration.MemberType.HUMAN) {
+                String humanInput = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null,
+                        GroupConversationService.rosterWithRecruits(config, gc));
+                throw new HumanTurnRequired(speaker, idx, humanInput, false);
             }
             turnCounter.incrementAndGet();
             if (listener != null) {
@@ -525,6 +589,48 @@ public class PhaseExecutionEngine {
                                      ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
                                      AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
+        executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns, null);
+    }
+
+    /**
+     * @param humanResumeIdx
+     *            {@code null} for every fresh run. Non-null only when resuming an
+     *            I6 {@code HUMAN_TURN_PARALLEL} pause: the agent fan-out already
+     *            ran before the pause, so the resumed leg skips straight to the
+     *            phase's human tail, starting at this index into the human-only
+     *            sublist (see {@code GroupConversation.ResumePoint}).
+     */
+    public void executeParallelPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
+                                     ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
+                                     AtomicInteger turnCounter, int maxTurns, Integer humanResumeIdx)
+            throws GroupDiscussionException {
+
+        // I6: humans never join the fan-out — an LLM answers in seconds, a human
+        // in minutes-to-days, and a paused future would pin the whole batch.
+        // Agents run first (concurrently), then humans are prompted sequentially,
+        // each pausing the discussion in turn.
+        List<GroupMember> humans = speakers.stream()
+                .filter(s -> s.memberType() == AgentGroupConfiguration.MemberType.HUMAN).toList();
+        List<GroupMember> agentSpeakers = humans.isEmpty()
+                ? speakers
+                : speakers.stream().filter(s -> s.memberType() != AgentGroupConfiguration.MemberType.HUMAN).toList();
+
+        if (humanResumeIdx != null) {
+            // Resumed leg: the fan-out already ran before the pause. The remaining
+            // humans' prompts must stay blind to their peers — the fresh leg uses
+            // the pre-fan-out snapshot for that, which no longer exists here, so
+            // the resumed bound is "no entries of this phase at all" (deliberately
+            // a touch stronger for repeats > 1 than the fresh-leg bound; a blind
+            // round that stays blind is the honest failure direction).
+            List<TranscriptEntry> blindTranscript;
+            synchronized (gc.getTranscript()) {
+                blindTranscript = gc.getTranscript().stream()
+                        .filter(e -> e == null || e.phaseIndex() != phaseIdx).toList();
+            }
+            promptHumanTail(gc, config, humans, phase, protocol, question, phaseIdx, turnCounter, maxTurns,
+                    humanResumeIdx, blindTranscript);
+            return;
+        }
 
         // I1: whole-batch check — a PARALLEL phase fans every speaker out at once,
         // so there is no per-speaker checkpoint to gate individually; this is the
@@ -535,13 +641,13 @@ public class PhaseExecutionEngine {
         }
 
         // Cap batch size to remaining turn budget
-        int remainingTurns = maxTurns > 0 ? Math.max(0, maxTurns - turnCounter.get()) : speakers.size();
+        int remainingTurns = maxTurns > 0 ? Math.max(0, maxTurns - turnCounter.get()) : agentSpeakers.size();
         if (remainingTurns == 0) {
             return;
         }
         List<GroupMember> batchSpeakers = maxTurns > 0
-                ? speakers.subList(0, Math.min(speakers.size(), remainingTurns))
-                : speakers;
+                ? agentSpeakers.subList(0, Math.min(agentSpeakers.size(), remainingTurns))
+                : agentSpeakers;
 
         // SAFETY: Snapshot the transcript so parallel tasks each see a consistent view.
         // Iterating a Collections.synchronizedList requires holding its monitor.
@@ -678,6 +784,34 @@ public class PhaseExecutionEngine {
         }
         // Count all completed turns for this batch (parallel turns are atomic batches)
         turnCounter.addAndGet(batchSpeakers.size());
+
+        // I6: the human tail, prompted against the PRE-fan-out snapshot so a
+        // "parallel" (independent) round stays independent — a human answering
+        // after the agents must not read their answers first.
+        promptHumanTail(gc, config, humans, phase, protocol, question, phaseIdx, turnCounter, maxTurns, 0, snapshotTranscript);
+    }
+
+    /**
+     * Prompts a PARALLEL phase's HUMAN members one at a time, from
+     * {@code startIdx}. Throws {@link HumanTurnRequired} for the first human whose
+     * turn is still owed — one pause per human, sequentially. Budget checks mirror
+     * the sequential loop: an exhausted budget owes no more turns, human or not.
+     */
+    private void promptHumanTail(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> humans, DiscussionPhase phase,
+                                 ProtocolConfig protocol, String question, int phaseIdx, AtomicInteger turnCounter, int maxTurns,
+                                 int startIdx, List<TranscriptEntry> promptTranscript) {
+        for (int i = Math.max(0, startIdx); i < humans.size(); i++) {
+            if (maxTurns > 0 && turnCounter.get() >= maxTurns) {
+                return;
+            }
+            if (GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)) {
+                return;
+            }
+            GroupMember human = humans.get(i);
+            String input = contextBuilder.buildPhaseInput(phase, human, question, promptTranscript, phaseIdx, null,
+                    GroupConversationService.rosterWithRecruits(config, gc));
+            throw new HumanTurnRequired(human, i, input, true);
+        }
     }
 
     /**

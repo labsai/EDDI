@@ -295,6 +295,36 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         postSafe(channelId, threadTs, sb.toString().stripTrailing());
     }
 
+    /**
+     * I6: a HUMAN member's turn is up. Slack is notification-only in v1 — the
+     * member responds through the EDDI UI/API (free-text reply capture from Slack
+     * is a planned follow-up); this message tells them they are up and where.
+     */
+    @Override
+    public void onHumanInputRequested(GroupConversationEventSink.HumanInputRequestedEvent event) {
+        if (event == null || event.memberId() == null) {
+            return;
+        }
+        String name = event.displayName() != null && !event.displayName().isBlank()
+                ? event.displayName()
+                : event.memberId();
+        String msg = String.format("🙋 *%s* — you're up in *%s*. Respond in EDDI (conversation `%s`).",
+                escapeMrkdwnHuman(name), escapeMrkdwnHuman(event.phaseName()),
+                groupConversationId != null ? groupConversationId : "unknown");
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, msg);
+    }
+
+    /**
+     * Escapes Slack's three mrkdwn control characters — a member display name
+     * containing {@code <!channel>} must render as text, not broadcast.
+     */
+    private static String escapeMrkdwnHuman(String value) {
+        return value == null
+                ? ""
+                : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
     // ─── HITL (human-in-the-loop) ───
 
     @Override

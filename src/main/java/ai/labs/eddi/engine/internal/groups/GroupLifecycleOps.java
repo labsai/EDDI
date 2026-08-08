@@ -36,6 +36,7 @@ import io.micrometer.core.instrument.Counter;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -492,7 +493,15 @@ public class GroupLifecycleOps {
         // The groupId filter is applied in the QUERY (not post-limit), so a busy
         // deployment cannot push this group's items past the limit window.
         int clamped = Math.max(1, Math.min(limit, 1000));
-        return conversationStore.findByState(GroupConversationState.AWAITING_APPROVAL, groupId, clamped).stream()
+        var pending = new ArrayList<>(
+                conversationStore.findByState(GroupConversationState.AWAITING_APPROVAL, groupId, clamped));
+        // I6: pending human turns join the SAME inbox — pauseType "HUMAN_TURN"
+        // (plus pendingMemberId) is the kind discriminator; no third inbox.
+        if (pending.size() < clamped) {
+            pending.addAll(conversationStore.findByState(GroupConversationState.AWAITING_HUMAN_INPUT, groupId,
+                    clamped - pending.size()));
+        }
+        return pending.stream()
                 .map(gc -> {
                     var summary = new PendingApprovalSummary(
                             gc.getId(), null, gc.getUserId(), gc.getPausedAt(),
@@ -500,6 +509,12 @@ public class GroupLifecycleOps {
                             gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy().name() : null);
                     summary.setGroupId(gc.getGroupId());
                     summary.setApprovalTimeout(gc.getHitlApprovalTimeout());
+                    if (gc.getHitlPauseType() != null) {
+                        summary.setPauseType(gc.getHitlPauseType().name());
+                    }
+                    if (gc.getPendingHumanInput() != null) {
+                        summary.setPendingMemberId(gc.getPendingHumanInput().memberId());
+                    }
                     return summary;
                 })
                 .toList();

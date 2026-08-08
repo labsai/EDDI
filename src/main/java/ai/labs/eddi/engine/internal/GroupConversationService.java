@@ -718,11 +718,20 @@ public class GroupConversationService implements IGroupConversationService {
                     // what guarantees this matches on the very first (phaseIdx, repeat)
                     // this leg visits, before executeDiscussion is ever called.
                     int startSpeakerIdx = 0;
+                    Integer parallelHumanResumeIdx = null;
                     GroupConversation.ResumePoint resumePoint = gc.getResumePoint();
                     if (resumePoint != null) {
                         gc.setResumePoint(null);
                         if (resumePoint.phaseIdx() == phaseIdx && resumePoint.repeatIdx() == repeat) {
-                            startSpeakerIdx = resumePoint.speakerIdx();
+                            // I6: a parallel human bookmark indexes the phase's
+                            // human-only sublist and means the agent fan-out already
+                            // ran — routed to executeParallelPhase below instead of
+                            // the sequential offset.
+                            if (GroupConversation.RESUME_KIND_HUMAN_TURN_PARALLEL.equals(resumePoint.pauseKind())) {
+                                parallelHumanResumeIdx = resumePoint.speakerIdx();
+                            } else {
+                                startSpeakerIdx = resumePoint.speakerIdx();
+                            }
                         }
                     }
 
@@ -732,20 +741,35 @@ public class GroupConversationService implements IGroupConversationService {
                     int transcriptSizeBeforeRepeat = gc.getTranscript().size();
 
                     // --- Task-oriented phase routing ---
-                    if (phase.type() == PhaseType.PLAN || phase.type() == PhaseType.EXECUTE || phase.type() == PhaseType.VERIFY) {
-                        executeTaskPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
-                    } else if (phase.targetEachPeer()) {
-                        phaseExecutionEngine.executePeerTargetedPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener,
-                                turnCounter,
-                                maxTurns);
-                    } else if (phase.turnOrder() == TurnOrder.PARALLEL) {
-                        // F2: PARALLEL never honors a speaker offset — see
-                        // GroupConversation.ResumePoint's Javadoc for why a parallel
-                        // resume always re-runs its whole fan-out instead.
-                        executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
-                    } else {
-                        phaseExecutionEngine.executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter,
-                                maxTurns, startSpeakerIdx);
+                    // I6: the dispatch is wrapped so a HUMAN member's turn — surfaced
+                    // by the executors as a HumanTurnRequired signal — commits an
+                    // AWAITING_HUMAN_INPUT pause and ends this leg, exactly like the
+                    // commitPause call sites below end theirs.
+                    try {
+                        if (phase.type() == PhaseType.PLAN || phase.type() == PhaseType.EXECUTE || phase.type() == PhaseType.VERIFY) {
+                            executeTaskPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+                        } else if (phase.targetEachPeer()) {
+                            phaseExecutionEngine.executePeerTargetedPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener,
+                                    turnCounter,
+                                    maxTurns);
+                        } else if (phase.turnOrder() == TurnOrder.PARALLEL) {
+                            // F2: PARALLEL never honors a speaker offset — with I6's
+                            // one carve-out: a HUMAN_TURN_PARALLEL bookmark resumes
+                            // the phase's human tail instead of re-running the
+                            // fan-out; see GroupConversation.ResumePoint's Javadoc.
+                            executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns,
+                                    parallelHumanResumeIdx);
+                        } else {
+                            phaseExecutionEngine.executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener,
+                                    turnCounter,
+                                    maxTurns, startSpeakerIdx);
+                        }
+                    } catch (PhaseExecutionEngine.HumanTurnRequired humanTurn) {
+                        hitlCoordinator.commitHumanTurnPause(gc, phaseIdx, phase, repeat, humanTurn,
+                                turnCounter.get() + 1, contextBuilder.mapPhaseToEntryType(phase.type()).name(),
+                                listener, config);
+                        convertPauseToCancelIfSignalled(gc, listener);
+                        return gc;
                     }
 
                     // I1: a phase executor hit the cost ceiling and stopped scheduling
@@ -996,8 +1020,9 @@ public class GroupConversationService implements IGroupConversationService {
                 }
             }
 
-            // Don't overwrite AWAITING_APPROVAL with COMPLETED
-            if (gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
+            // Don't overwrite AWAITING_APPROVAL (or a human-turn pause) with COMPLETED
+            if (gc.getState() == GroupConversationState.AWAITING_APPROVAL
+                    || gc.getState() == GroupConversationState.AWAITING_HUMAN_INPUT) {
                 return gc;
             }
             // #27/#45: complete with a CAS on the running state this leg believes it
@@ -1366,6 +1391,17 @@ public class GroupConversationService implements IGroupConversationService {
                         + "synthesizer. Configure moderatorAgentId to choose deliberately.", phase.name(), synthesizer.agentId());
                 return List.of(synthesizer);
             }
+            // I6: preserve the roster's identity for the moderator instead of
+            // synthesizing a fresh AGENT-typed member — the 4-arg ctor silently
+            // demoted a HUMAN moderator to an agent, sending their synthesis turn
+            // to a (nonexistent) LLM agent instead of pausing for their input.
+            GroupMember rosterModerator = allMembers != null
+                    ? allMembers.stream().filter(m -> moderatorAgentId.equals(m.agentId())).findFirst().orElse(null)
+                    : null;
+            if (rosterModerator != null) {
+                return List.of(new GroupMember(rosterModerator.agentId(), rosterModerator.displayName(), 0, "MODERATOR",
+                        rosterModerator.memberType()));
+            }
             return List.of(new GroupMember(moderatorAgentId, "Moderator", 0, "MODERATOR"));
         }
 
@@ -1610,6 +1646,17 @@ public class GroupConversationService implements IGroupConversationService {
         phaseExecutionEngine.executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
     }
 
+    /**
+     * I6 overload: {@code humanResumeIdx} resumes a parallel phase's human tail.
+     */
+    private void executeParallelPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
+                                      ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
+                                      java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns, Integer humanResumeIdx)
+            throws GroupDiscussionException {
+        phaseExecutionEngine.executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns,
+                humanResumeIdx);
+    }
+
     // =================================================================
     // Agent turn execution
     // =================================================================
@@ -1783,6 +1830,19 @@ public class GroupConversationService implements IGroupConversationService {
             IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
         rejectIfShuttingDown();
         return hitlCoordinator.resumeDiscussion(groupConversationId, request, listener);
+    }
+
+    @Override
+    public GroupConversation submitHumanInput(String groupConversationId, String memberId, String content, String submittedBy)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException,
+            IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+        rejectIfShuttingDown();
+        return hitlCoordinator.submitHumanInput(groupConversationId, memberId, content, submittedBy, null);
+    }
+
+    @Override
+    public void skipHumanTurnOnTimeout(String groupConversationId) {
+        hitlCoordinator.skipHumanTurnOnTimeout(groupConversationId);
     }
 
     private void restoreGroupPause(GroupConversation gc, int phaseIndex, String phaseName,

@@ -18,7 +18,10 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * DB-agnostic store for group configurations. Extends
@@ -41,6 +44,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
     public IResourceStore.IResourceId create(AgentGroupConfiguration groupConfiguration)
             throws IResourceStore.ResourceStoreException {
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
+        validateHumanMembers(groupConfiguration);
         normalizeNonPositiveCostCeiling(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         return super.create(groupConfiguration);
@@ -52,9 +56,133 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
             IResourceStore.ResourceNotFoundException {
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
+        validateHumanMembers(groupConfiguration);
         normalizeNonPositiveCostCeiling(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         return super.update(id, version, groupConfiguration);
+    }
+
+    /**
+     * I6 save-time matrix for HUMAN members. Hard rejections
+     * ({@link IllegalArgumentException}, {@code HitlConfigValidation}'s contract)
+     * are safe here in a way {@link #warnOnModeratorlessPhases} could not be: no
+     * pre-existing document can contain {@code MemberType.HUMAN}, so there is no
+     * legacy config a rejection could strand.
+     * <ul>
+     * <li>a HUMAN member must carry a {@code displayName} — a paused discussion
+     * must be able to say WHO it is waiting on;</li>
+     * <li>groups with HUMAN members must not run task-force phases
+     * (PLAN/EXECUTE/VERIFY assign work on agent-latency math and pause inside wave
+     * workers) nor {@code targetEachPeer} phases (a human on both axes of an
+     * N×(N-1) round would owe up to 2(N-1) pauses per repeat, and the flat speaker
+     * bookmark has no (speaker,target) coordinate) — preset-expanded like
+     * {@link #moderatorlessPhaseNames}, or the check is inert for preset-style
+     * groups;</li>
+     * <li>a group containing HUMAN members may not be USED as a nested GROUP member
+     * (one level deep here; {@code MemberTurnExecutor} carries the runtime backstop
+     * for configs edited afterwards);</li>
+     * <li>{@code humanMemberConfig.turnTimeout} must parse as an ISO-8601
+     * duration;</li>
+     * <li>a HUMAN moderator is allowed but warned about — every synthesis then
+     * waits on a person.</li>
+     * </ul>
+     */
+    void validateHumanMembers(AgentGroupConfiguration config) throws IResourceStore.ResourceStoreException {
+        List<String> problems = humanMemberProblems(config);
+        if (!problems.isEmpty()) {
+            throw new IllegalArgumentException(String.join("; ", problems));
+        }
+        // Nested check needs the store — kept out of the pure helper.
+        for (var member : config.getMembers()) {
+            if (member != null && member.memberType() == AgentGroupConfiguration.MemberType.GROUP) {
+                AgentGroupConfiguration child = readChildConfig(member.agentId());
+                if (child != null && hasHumanMembers(child)) {
+                    throw new IllegalArgumentException(
+                            "members['" + member.agentId() + "'] is a nested group that contains HUMAN members — "
+                                    + "human turns cannot pause a nested discussion (I6 v1); remove the human from the "
+                                    + "child group or flatten the hierarchy");
+                }
+            }
+        }
+        String moderator = config.getModeratorAgentId();
+        if (moderator != null && config.getMembers().stream()
+                .anyMatch(m -> m != null && m.memberType() == AgentGroupConfiguration.MemberType.HUMAN
+                        && moderator.equals(m.agentId()))) {
+            LOGGER.warnf("Group '%s' names HUMAN member '%s' as moderator — every synthesis phase will pause and wait "
+                    + "for their input", config.getName(), moderator);
+        }
+    }
+
+    /**
+     * The pure, assertable part of the I6 matrix (same split as
+     * {@link #moderatorlessPhaseNames}): every problem with this config's HUMAN
+     * members that needs no store access. Empty list = valid.
+     */
+    static List<String> humanMemberProblems(AgentGroupConfiguration config) {
+        List<AgentGroupConfiguration.GroupMember> humans = config.getMembers() == null
+                ? List.of()
+                : config.getMembers().stream()
+                        .filter(m -> m != null && m.memberType() == AgentGroupConfiguration.MemberType.HUMAN)
+                        .toList();
+        List<String> problems = new ArrayList<>();
+        for (var human : humans) {
+            if (human.displayName() == null || human.displayName().isBlank()) {
+                problems.add("HUMAN member '" + human.agentId() + "' needs a displayName");
+            }
+            if (human.agentId() == null || human.agentId().isBlank()) {
+                problems.add("a HUMAN member needs an agentId carrying the human's principal id");
+            }
+        }
+        if (!humans.isEmpty()) {
+            // Preset-expanded, or the check is inert for preset-style groups.
+            List<DiscussionPhase> phases = config.getPhases();
+            if (phases == null || phases.isEmpty()) {
+                DiscussionStyle style = config.getStyle() != null ? config.getStyle() : DiscussionStyle.ROUND_TABLE;
+                phases = DiscussionStylePresets.expand(style, config.getMaxRounds());
+            }
+            boolean taskPhases = phases.stream().filter(Objects::nonNull).anyMatch(
+                    p -> p.type() == AgentGroupConfiguration.PhaseType.PLAN
+                            || p.type() == AgentGroupConfiguration.PhaseType.EXECUTE
+                            || p.type() == AgentGroupConfiguration.PhaseType.VERIFY);
+            if (taskPhases) {
+                problems.add("HUMAN members cannot join task-force groups (PLAN/EXECUTE/VERIFY phases) — "
+                        + "task waves assign and time work on agent latencies (I6 v1)");
+            }
+            boolean peerPhases = phases.stream().filter(Objects::nonNull).anyMatch(DiscussionPhase::targetEachPeer);
+            if (peerPhases) {
+                problems.add("HUMAN members cannot join groups with targetEachPeer phases — a human would owe one "
+                        + "authored critique per peer AND be a target, multiplying pauses (I6 v1)");
+            }
+        }
+        var humanConfig = config.getHumanMemberConfig();
+        if (humanConfig != null && humanConfig.turnTimeout() != null && !humanConfig.turnTimeout().isBlank()) {
+            try {
+                Duration.parse(humanConfig.turnTimeout());
+            } catch (Exception e) {
+                problems.add("humanMemberConfig.turnTimeout must be an ISO-8601 duration (e.g. PT4H), not '"
+                        + humanConfig.turnTimeout() + "'");
+            }
+        }
+        return problems;
+    }
+
+    /** True if the config lists at least one HUMAN member. */
+    static boolean hasHumanMembers(AgentGroupConfiguration config) {
+        return config.getMembers() != null && config.getMembers().stream()
+                .anyMatch(m -> m != null && m.memberType() == AgentGroupConfiguration.MemberType.HUMAN);
+    }
+
+    /** Latest version of a (possible) child group config, or null if unreadable. */
+    private AgentGroupConfiguration readChildConfig(String groupId) {
+        try {
+            IResourceStore.IResourceId resId = getCurrentResourceId(groupId);
+            return resId != null ? read(groupId, resId.getVersion()) : null;
+        } catch (Exception e) {
+            // Deployment-order tolerance: an unreadable/absent child cannot block
+            // the parent save; the runtime backstop covers it.
+            LOGGER.debugf("Nested-group human check could not read child '%s': %s", groupId, e.getMessage());
+            return null;
+        }
     }
 
     /**

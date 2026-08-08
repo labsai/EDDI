@@ -236,9 +236,10 @@ class AgentGroupConfigurationTest {
 
     @Test
     void memberType_allValues() {
-        assertEquals(2, MemberType.values().length);
+        assertEquals(3, MemberType.values().length);
         assertNotNull(MemberType.valueOf("AGENT"));
         assertNotNull(MemberType.valueOf("GROUP"));
+        assertNotNull(MemberType.valueOf("HUMAN"));
     }
 
     // ==================== LifecyclePolicy ====================

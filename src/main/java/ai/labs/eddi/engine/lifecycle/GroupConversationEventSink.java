@@ -61,6 +61,14 @@ public final class GroupConversationEventSink {
      * Always preceded by an {@link #EVENT_CONVERGENCE_CHECKED} for the same repeat.
      */
     public static final String EVENT_CONVERGENCE_REACHED = "convergence_reached";
+    /**
+     * A HUMAN group member's turn is up (I6): the discussion paused
+     * ({@code AWAITING_HUMAN_INPUT}) until that member submits their response — or
+     * the group's {@code humanMemberConfig} timeout policy resolves the turn.
+     * Distinct from {@link #EVENT_AWAITING_APPROVAL}: this is "you're up", not
+     * "approve/reject".
+     */
+    public static final String EVENT_HUMAN_INPUT_REQUESTED = "human_input_requested";
 
     // --- Event payloads ---
 
@@ -117,6 +125,15 @@ public final class GroupConversationEventSink {
     }
 
     public record HitlResumeEvent(String verdict, String note, String decidedBy) {
+    }
+
+    /**
+     * A HUMAN member's turn is up (I6). Carries identifiers only — the rendered
+     * prompt lives on the conversation's {@code pendingHumanInput}, which the
+     * member's UI reads; an SSE frame is the wrong place for a full transcript
+     * rendering.
+     */
+    public record HumanInputRequestedEvent(String memberId, String displayName, int phaseIndex, String phaseName) {
     }
 
     /**

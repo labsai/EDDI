@@ -139,8 +139,10 @@ public class HitlAccessGuard {
 
     /**
      * Owner-scoped pending-approval inbox for group conversations: admins and
-     * approvers see all; other callers see only their own (post-filtered by owner,
-     * since the group store has no owner-scoped query); anonymous callers see
+     * approvers see all; other callers see their own — or, for I6 human-turn
+     * pauses, entries waiting on THEM as the pending member, since a human member
+     * usually does not own the conversation whose turn they owe. Post-filtered,
+     * since the group store has no owner-scoped query; anonymous callers see
      * nothing (fail-closed). {@code groupId == null} lists across all groups
      * (cross-group inbox).
      */
@@ -154,6 +156,49 @@ public class HitlAccessGuard {
         if (callerId == null || callerId.isBlank()) {
             return List.of();
         }
-        return scoped.filter(summary -> callerId.equals(summary.getUserId())).toList();
+        return scoped.filter(summary -> callerId.equals(summary.getUserId())
+                || callerId.equals(summary.getPendingMemberId())).toList();
+    }
+
+    /**
+     * Authorization for submitting a HUMAN member's turn (I6): the caller must BE
+     * that member (their principal equals the pending turn's member id) or an
+     * admin. Deliberately narrower than the approve surface — an
+     * {@code eddi-approver} may decide approvals they do not own, but SPEAKING as
+     * another human is impersonation, not review; only the admin break-glass
+     * crosses that line. A wrong-group path 404s without leaking existence, same as
+     * {@link #requireGroupConversationHitlAccess}. No-op when authorization is
+     * disabled.
+     *
+     * @throws ForbiddenException
+     *             if the caller may not submit for this member.
+     */
+    public void requireGroupHumanInputAccess(String groupId, String groupConversationId, String memberId) {
+        if (!ownershipValidator.isAuthEnabled()) {
+            return;
+        }
+        GroupConversation gc;
+        try {
+            gc = groupConversationService.readGroupConversation(groupConversationId);
+        } catch (ResourceNotFoundException e) {
+            LOGGER.debugf("Group conversation not found for human-input access check: %s", sanitize(groupConversationId));
+            return; // the actual operation 404s
+        } catch (Exception e) {
+            throw new ForbiddenException("Access denied: unable to verify group conversation");
+        }
+        if (groupId != null && !groupId.equals(gc.getGroupId())) {
+            LOGGER.infof("Group conversation %s does not belong to group %s",
+                    sanitize(groupConversationId), sanitize(groupId));
+            throw new jakarta.ws.rs.NotFoundException("Group conversation not found.");
+        }
+        if (ownershipValidator.isAdmin(identity)) {
+            return;
+        }
+        String callerId = identity != null && identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
+        if (callerId == null || callerId.isBlank() || memberId == null || !callerId.equals(memberId)) {
+            LOGGER.warnf("Human-input submission for member '%s' of %s denied for caller '%s'",
+                    sanitize(memberId), sanitize(groupConversationId), sanitize(callerId));
+            throw new ForbiddenException("Access denied: only the pending member (or an admin) may submit this turn");
+        }
     }
 }

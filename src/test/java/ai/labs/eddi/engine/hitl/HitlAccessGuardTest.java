@@ -227,4 +227,85 @@ class HitlAccessGuardTest {
 
         assertThrows(ForbiddenException.class, () -> guard.requireGroupConversationHitlAccess("g1", "gc1"));
     }
+
+    // =================================================================
+    // I6 — requireGroupHumanInputAccess (speaking ≠ approving)
+    // =================================================================
+
+    private GroupConversation humanPausedGc() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc1");
+        gc.setGroupId("g1");
+        gc.setUserId("owner1");
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
+        return gc;
+    }
+
+    @Test
+    void humanInputAccess_thePendingMemberThemselves_allowed() throws Exception {
+        when(ownershipValidator.isAuthEnabled()).thenReturn(true);
+        humanPausedGc();
+        callerNamed("hannah");
+
+        guard.requireGroupHumanInputAccess("g1", "gc1", "hannah");
+    }
+
+    @Test
+    void humanInputAccess_adminBreakGlass_allowed() throws Exception {
+        when(ownershipValidator.isAuthEnabled()).thenReturn(true);
+        when(ownershipValidator.isAdmin(identity)).thenReturn(true);
+        humanPausedGc();
+        callerNamed("some-admin");
+
+        guard.requireGroupHumanInputAccess("g1", "gc1", "hannah");
+    }
+
+    @Test
+    void humanInputAccess_ownerAndApprover_forbidden_speakingIsNotApproving() throws Exception {
+        when(ownershipValidator.isAuthEnabled()).thenReturn(true);
+        when(ownershipValidator.isApprover(identity)).thenReturn(true);
+        humanPausedGc();
+        // The conversation OWNER, who is also an approver — may decide approvals,
+        // but must never speak AS another human.
+        callerNamed("owner1");
+
+        assertThrows(ForbiddenException.class,
+                () -> guard.requireGroupHumanInputAccess("g1", "gc1", "hannah"));
+    }
+
+    @Test
+    void humanInputAccess_wrongGroupPath_404sWithoutLeaking() throws Exception {
+        when(ownershipValidator.isAuthEnabled()).thenReturn(true);
+        humanPausedGc();
+        callerNamed("hannah");
+
+        assertThrows(jakarta.ws.rs.NotFoundException.class,
+                () -> guard.requireGroupHumanInputAccess("other-group", "gc1", "hannah"));
+    }
+
+    @Test
+    void humanInputAccess_authDisabled_noOp() {
+        when(ownershipValidator.isAuthEnabled()).thenReturn(false);
+
+        guard.requireGroupHumanInputAccess("g1", "gc1", "anyone");
+
+        verify(ownershipValidator, never()).isAdmin(any());
+    }
+
+    @Test
+    void groupInbox_pendingMemberSeesTheirTurn_withoutOwningTheConversation() throws Exception {
+        when(ownershipValidator.isAdmin(identity)).thenReturn(false);
+        when(ownershipValidator.isApprover(identity)).thenReturn(false);
+        callerNamed("hannah");
+        var ownTurn = new PendingApprovalSummary("gc1", null, "owner1", Instant.now(), "waiting", null);
+        ownTurn.setPendingMemberId("hannah");
+        var someoneElses = new PendingApprovalSummary("gc2", null, "owner2", Instant.now(), "waiting", null);
+        someoneElses.setPendingMemberId("bob");
+        when(groupConversationService.listGroupPendingApprovals(null, 50)).thenReturn(List.of(ownTurn, someoneElses));
+
+        List<PendingApprovalSummary> result = guard.listScopedGroupPendingApprovals(null, 50);
+
+        assertEquals(1, result.size());
+        assertEquals("gc1", result.get(0).getConversationId());
+    }
 }
