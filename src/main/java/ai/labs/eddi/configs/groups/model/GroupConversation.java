@@ -42,6 +42,10 @@ public class GroupConversation {
      * documents have neither field and Jackson defaults them correctly (identity
      * hop).
      */
+    // v4 (this release): the release shape — adds I11's negotiationState, I12's
+    // runtimePhases and I6's pausedRepeatSliceBase, all resume-consumed. No
+    // migration entries needed: Jackson defaults each on legacy documents to its
+    // pre-v4 behavior (null / null / -1).
     public static final int CURRENT_SCHEMA_VERSION = 4;
     /**
      * The version a stored document claims when its JSON carries no

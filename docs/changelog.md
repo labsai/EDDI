@@ -5,6 +5,17 @@
 
 ---
 
+## 🔎 fix(groups): I6 review round — schema bump, approver full-view scope, persist-time assertion (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i6-human-members`)
+
+Three accepted CodeRabbit findings on PR #640 (all against the pausedRepeatSliceBase fix commit):
+
+1. **Schema version (major)** — `pausedRepeatSliceBase` is persisted state the resumed leg depends on, but `CURRENT_SCHEMA_VERSION` stayed 3. Bumped to 4 (no migration entry: Jackson defaults legacy documents to -1, the exact pre-v4 behavior). On the integration branch v4 is the release shape shared with I11's `negotiationState` and I12's `runtimePhases`.
+2. **Approver transcript scope (major, security)** — the `detail=full` gate used the shared `paused` predicate, which also covers `AWAITING_HUMAN_INPUT`; an `eddi-approver` could read the full transcript of a discussion merely waiting on a human member's turn. Both surfaces (REST `getGroupApprovalStatus`, MCP `get_group_approval_status`) now gate the approver window on a dedicated `awaitingApproval` predicate; summary fields keep the wider one. Regression tests on both surfaces (approver + human-turn pause → 403/FORBIDDEN).
+3. **Persist-time assertion (minor)** — the mid-repeat pause test asserted only the in-memory instance; a captor would hold the same mutable object, so the test now records `pausedRepeatSliceBase` inside the `update()` stub at persist time and asserts the last persisted value.
+
+---
 ## 🔎 fix(groups): I13 + HITL fixes from the final cross-branch review (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i13-standing-teams`)
