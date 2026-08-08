@@ -31,7 +31,11 @@ public class GroupConversation {
      * Wave adds a field resume-time logic depends on, and register that version's
      * migration in {@code GroupConversationSchemaMigrations}.
      */
-    public static final int CURRENT_SCHEMA_VERSION = 3;
+    // v4 (this release): adds pausedRepeatSliceBase, which the resumed leg's
+    // repeat-slice logic depends on. No migration entry needed — Jackson defaults
+    // the field to -1 (no pending slice base) on legacy documents, which is
+    // exactly the pre-v4 behavior.
+    public static final int CURRENT_SCHEMA_VERSION = 4;
     /**
      * The shape this specific document was last written in. Checked before a
      * resume: newer than {@link #CURRENT_SCHEMA_VERSION} refuses (this deployment

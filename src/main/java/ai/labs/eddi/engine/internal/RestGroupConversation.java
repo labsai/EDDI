@@ -729,6 +729,11 @@ public class RestGroupConversation implements IRestGroupConversation {
             var gc = groupConversationService.readGroupConversation(gcId);
             boolean paused = gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL
                     || gc.getState() == GroupConversation.GroupConversationState.AWAITING_HUMAN_INPUT;
+            // The approver full-view window is the APPROVAL pause only — `paused`
+            // also covers AWAITING_HUMAN_INPUT, where nothing awaits an approver's
+            // decision and the transcript would leak outside their remit (review
+            // finding). Summary fields keep the wider predicate.
+            boolean awaitingApproval = gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL;
             if ("full".equals(detail)) {
                 // Approver-only callers (not owner, not admin) may read the full
                 // conversation (incl. transcript) only while it is actually awaiting
@@ -737,7 +742,7 @@ public class RestGroupConversation implements IRestGroupConversation {
                 // working material is the rendered prompt in the summary.
                 if (!ownershipValidator.isAdmin(identity)
                         && !ownershipValidator.isOwner(identity, gc.getUserId())
-                        && !(paused && ownershipValidator.isApprover(identity))) {
+                        && !(awaitingApproval && ownershipValidator.isApprover(identity))) {
                     return Response.status(Response.Status.FORBIDDEN)
                             .entity("Full approval status is available to approvers only while the group "
                                     + "conversation is awaiting approval — use the summary view")

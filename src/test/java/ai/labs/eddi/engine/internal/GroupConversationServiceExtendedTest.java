@@ -172,6 +172,15 @@ class GroupConversationServiceExtendedTest {
         void midRepeatHumanPause_persistsTheRepeatSliceBase() throws Exception {
             setupStore(humanConfig());
             stubAgent("a1", "Opinion A");
+            // The resumed leg re-reads the DOCUMENT — the in-memory instance below
+            // proves nothing about what a crashed-and-recovered pod would see
+            // (review finding: a captor would hold the same mutable instance, so
+            // the value is recorded AT persist time instead).
+            var basesAtPersistTime = new java.util.ArrayList<Integer>();
+            doAnswer(inv -> {
+                basesAtPersistTime.add(((GroupConversation) inv.getArgument(0)).getPausedRepeatSliceBase());
+                return null;
+            }).when(conversationStore).update(any());
 
             GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
 
@@ -180,6 +189,9 @@ class GroupConversationServiceExtendedTest {
             assertEquals(1, gc.getPausedRepeatSliceBase(),
                     "the repeat began AFTER the question entry — the resumed leg must slice from there, "
                             + "not from the pause point (which would lose a1's contribution)");
+            assertFalse(basesAtPersistTime.isEmpty(), "the pause must persist the conversation");
+            assertEquals(1, basesAtPersistTime.get(basesAtPersistTime.size() - 1),
+                    "the slice base must be IN the persisted pause record, not only in memory");
         }
 
         @Test
