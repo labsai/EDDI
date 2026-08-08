@@ -188,8 +188,26 @@ public class GroupConversation {
         this.facilitatorMoveCount = facilitatorMoveCount;
     }
 
+    /**
+     * Read-only view — mutation goes through {@link #recordFacilitatorExtension}
+     * and {@link #clearFacilitatorExtensions}, so the caps cannot be edited behind
+     * the conversation's back.
+     */
     public Map<String, Integer> getFacilitatorExtensions() {
-        return facilitatorExtensions;
+        return Collections.unmodifiableMap(facilitatorExtensions);
+    }
+
+    /** EXTEND_PHASE count for one phase index (I12). */
+    public int facilitatorExtensionCount(int phaseIdx) {
+        return facilitatorExtensions.getOrDefault(String.valueOf(phaseIdx), 0);
+    }
+
+    public void recordFacilitatorExtension(int phaseIdx) {
+        facilitatorExtensions.merge(String.valueOf(phaseIdx), 1, Integer::sum);
+    }
+
+    public void clearFacilitatorExtensions() {
+        facilitatorExtensions.clear();
     }
 
     public void setFacilitatorExtensions(Map<String, Integer> facilitatorExtensions) {

@@ -372,7 +372,7 @@ public class GroupLifecycleOps {
             // must never run round N+1 against round N's inserted phases or count
             // its extensions against stale phase indices.
             gc.setRuntimePhases(null);
-            gc.getFacilitatorExtensions().clear();
+            gc.clearFacilitatorExtensions();
             gc.setResumeQuestion(question);
             gc.getTranscript().add(new TranscriptEntry(
                     "user", "User", question, 0, "Question",

@@ -21,6 +21,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.VoteConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.VoteMethod;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
@@ -184,11 +185,11 @@ public class FacilitatorEngine {
         // judge set the precedent): a facilitator consult is an optimization and
         // must never be the marginal call that busts either budget.
         if (maxTurns > 0 && turnCounter != null && turnCounter.get() >= maxTurns) {
-            LOGGER.debugf("Facilitator checkpoint for %s skipped — turn budget exhausted", gc.getId());
+            LOGGER.debugf("Facilitator checkpoint for %s skipped — turn budget exhausted", LogSanitizer.sanitize(gc.getId()));
             return FacilitatorAction.none();
         }
         if (GroupCostLedger.wouldExceedCeiling(gc, protocol)) {
-            LOGGER.debugf("Facilitator checkpoint for %s skipped — cost ceiling reached", gc.getId());
+            LOGGER.debugf("Facilitator checkpoint for %s skipped — cost ceiling reached", LogSanitizer.sanitize(gc.getId()));
             return FacilitatorAction.none();
         }
         if (turnCounter != null) {
@@ -283,14 +284,12 @@ public class FacilitatorEngine {
                     "EXTEND_PHASE only applies mid-phase, and never after a convergence exit");
             return FacilitatorAction.none();
         }
-        String key = String.valueOf(ctx.phaseIdx());
-        int extensions = gc.getFacilitatorExtensions().getOrDefault(key, 0);
-        if (extensions >= MAX_EXTENSIONS_PER_PHASE) {
+        if (gc.facilitatorExtensionCount(ctx.phaseIdx()) >= MAX_EXTENSIONS_PER_PHASE) {
             recordRejection(gc, fc, phase, ctx, parsed.move().name(), parsed.reason(),
                     "phase already extended " + MAX_EXTENSIONS_PER_PHASE + " times");
             return FacilitatorAction.none();
         }
-        gc.getFacilitatorExtensions().put(key, extensions + 1);
+        gc.recordFacilitatorExtension(ctx.phaseIdx());
         recordExecution(gc, fc, phase, ctx, parsed, "extended phase '" + phase.name() + "' by one repeat", null);
         return new FacilitatorAction(FacilitatorAction.Kind.EXTEND_PHASE, null, null);
     }
@@ -644,8 +643,12 @@ public class FacilitatorEngine {
             sb.append("- Latest convergence check: ").append(latestConvergence).append('\n');
         }
         var taskList = gc.getTaskList();
-        if (taskList != null && !taskList.getTasks().isEmpty()) {
-            var byStatus = taskList.getTasks().stream()
+        // One snapshot: getTasks() is synchronized per call, but an emptiness
+        // check followed by a second read is a check-then-act across two
+        // monitors' worth of state — stream the single copy instead.
+        var taskSnapshot = taskList != null ? taskList.getTasks() : List.<SharedTaskList.TaskItem>of();
+        if (!taskSnapshot.isEmpty()) {
+            var byStatus = taskSnapshot.stream()
                     .collect(Collectors.groupingBy(t -> t.status().name(), LinkedHashMap::new, Collectors.counting()));
             sb.append("- Tasks: ").append(byStatus.entrySet().stream()
                     .map(e -> e.getKey() + "=" + e.getValue())

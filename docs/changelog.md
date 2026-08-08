@@ -5,6 +5,20 @@
 
 ---
 
+## 🔎 fix(groups): I12 PR #643 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i12-facilitator`)
+
+All 5 findings (CodeQL ×4 incl. 1 high, code-quality ×1) accepted and fixed:
+
+- **TOCTOU (high):** the briefing's task summary called `taskList.getTasks()` twice — an emptiness check then a re-read, each under its own monitor acquisition. One snapshot, streamed once.
+- **`facilitatorExtensions` encapsulated** (the NegotiationState treatment): the getter returns an unmodifiable view; mutation goes through `recordFacilitatorExtension`/`clearFacilitatorExtensions`/`facilitatorExtensionCount` — the extension caps cannot be edited behind the conversation's back. Engine, service, lifecycle-ops and tests rewired.
+- **Log injection ×3:** the two budget-skip debug logs and the END_PHASE info log sanitize their caller-influenced values (conversation id, groupId, phase name).
+
+Suites: facilitator + service + conversation tests (154) green.
+
+---
+
 ## 🎛️ feat(groups): I12 — facilitator with bounded moves (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i12-facilitator` — stacked: I14 branch + merge of I6, because the moves ARE those features)

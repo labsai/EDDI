@@ -976,7 +976,7 @@ public class GroupConversationService implements IGroupConversationService {
                         }
                         if (facilitatorAction.kind() == FacilitatorEngine.FacilitatorAction.Kind.END_PHASE) {
                             LOGGER.infof("Facilitator ended phase '%s' of group %s after repeat %d",
-                                    phase.name(), gc.getGroupId(), repeat);
+                                    LogSanitizer.sanitize(phase.name()), LogSanitizer.sanitize(gc.getGroupId()), repeat);
                             break;
                         }
                     }
@@ -1171,7 +1171,7 @@ public class GroupConversationService implements IGroupConversationService {
             // a continuation round starts from the config's phases again, and stale
             // extension counts would misattribute under next round's indices.
             gc.setRuntimePhases(null);
-            gc.getFacilitatorExtensions().clear();
+            gc.clearFacilitatorExtensions();
             gc.setLastModified(Instant.now());
             try {
                 conversationStore.updateIfState(gc, expectedRunningState);

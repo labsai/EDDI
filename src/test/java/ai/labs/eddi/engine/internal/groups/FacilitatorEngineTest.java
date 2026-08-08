@@ -352,7 +352,8 @@ class FacilitatorEngineTest {
         @Test
         void extendPhase_capsAtTwoPerPhase() {
             stubReply("{\"move\": \"EXTEND_PHASE\"}");
-            gc.getFacilitatorExtensions().put("1", 2);
+            gc.recordFacilitatorExtension(1);
+            gc.recordFacilitatorExtension(1);
 
             assertEquals(FacilitatorAction.Kind.NONE, checkpoint(midPhaseCtx()).kind());
 
