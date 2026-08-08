@@ -236,6 +236,33 @@ class RetroEngineTest {
     }
 
     @Test
+    @DisplayName("a null store still fires retro_recorded with zero — the event contract holds when nothing persists")
+    void harvest_nullStore_firesZeroCountEvent() {
+        var listener = Mockito.mock(GroupDiscussionEventListener.class);
+
+        RetroEngine.harvest(gc, new RetroConfig(),
+                List.of(retroEntry("{\"lessons\":[{\"lesson\":\"x\"}]}")), null, "Retro", listener);
+
+        var captor = ArgumentCaptor.forClass(GroupConversationEventSink.RetroRecordedEvent.class);
+        verify(listener).onRetroRecorded(captor.capture());
+        assertEquals(0, captor.getValue().lessonsStored());
+    }
+
+    @Test
+    @DisplayName("maxLessonsPerRun bounds the whole harvest, not each entry — multi-speaker retros cannot multiply it")
+    void harvest_capIsPerHarvest_notPerEntry() throws Exception {
+        var config = new RetroConfig(2, 50);
+
+        RetroEngine.harvest(gc, config, List.of(
+                retroEntry("{\"lessons\":[{\"lesson\":\"one\"},{\"lesson\":\"two\"}]}"),
+                retroEntry("{\"lessons\":[{\"lesson\":\"three\"},{\"lesson\":\"four\"}]}"),
+                retroEntry("{\"lessons\":[{\"lesson\":\"five\"}]}")), store, "Retro", null);
+
+        assertEquals(2, store.countEntries(IUserMemoryStore.TEAM_OWNER_PREFIX + GROUP_ID),
+                "3 RETRO entries × cap 2 used to store up to 6 — the cap is per harvest");
+    }
+
+    @Test
     @DisplayName("a failing store loses that lesson with a warning — never the discussion")
     void harvest_storeFailure_neverThrows() throws IResourceStore.ResourceStoreException {
         var failing = Mockito.mock(IUserMemoryStore.class);

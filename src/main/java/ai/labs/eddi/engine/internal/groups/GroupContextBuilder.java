@@ -83,6 +83,20 @@ public class GroupContextBuilder {
      */
     public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
                                   GroupMember target, List<GroupMember> allMembers, ContextWindowConfig window, GroupConversation gc) {
+        return buildPhaseInput(phase, speaker, question, transcript, phaseIdx, target, allMembers, window, gc, null);
+    }
+
+    /**
+     * @param retroConfig
+     *            the group's RETRO settings; only the {@code RETRO} case reads it
+     *            (the template quotes {@code maxLessonsPerRun} to the model).
+     *            {@code null} falls back to the default cap — review finding: the
+     *            template always quoted the DEFAULT, so a group configured above it
+     *            could never obtain its configured number of lessons.
+     */
+    public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
+                                  GroupMember target, List<GroupMember> allMembers, ContextWindowConfig window, GroupConversation gc,
+                                  AgentGroupConfiguration.RetroConfig retroConfig) {
 
         String template = phase.inputTemplate() != null
                 ? phase.inputTemplate()
@@ -236,11 +250,12 @@ public class GroupContextBuilder {
                             return t;
                         }).collect(Collectors.toList());
                 data.put("transcript", fullTranscript);
-                // The template QUOTES the default cap; RetroEngine ENFORCES the
-                // configured one at parse time regardless of what the model was
-                // told. Quoting the default keeps this builder free of the group
-                // config (which it deliberately does not receive).
-                data.put("maxLessonsPerRun", AgentGroupConfiguration.RetroConfig.DEFAULT_MAX_PER_RUN);
+                // The template QUOTES the configured cap so the model is asked for
+                // exactly what the group wants; RetroEngine still ENFORCES it at
+                // parse time regardless of what the model returns.
+                data.put("maxLessonsPerRun", retroConfig != null
+                        ? retroConfig.maxLessonsPerRun()
+                        : AgentGroupConfiguration.RetroConfig.DEFAULT_MAX_PER_RUN);
             }
             default -> {
                 // All PhaseType values handled above; default required by checkstyle

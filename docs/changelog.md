@@ -5,6 +5,34 @@
 
 ---
 
+## 🔎 fix(groups): I13 review round 2 — workspace concurrency + schedule lifecycle (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams`)
+
+Five accepted findings from the CodeRabbit/CodeQL round on PR #644:
+
+1. **Atomic backlog adds (major)** — both backlog-add surfaces (REST `addBacklogTask`, MCP `add_team_task`) validated the cap/duplicate rules against their own snapshot and then issued a whole-document `update`, so two concurrent adds could both pass under the cap and the later write dropped the earlier task. New optimistic-concurrency primitive: `GroupWorkspace.revision` (string stamp) + `IGroupWorkspaceStore.casRevision` (revision-conditional store via `storeIfFieldEquals`, bump-in-write, loser restores its stamp). Both surfaces run a 3-attempt read-validate-mutate-CAS loop; exhaustion is an honest 409/error telling the caller to retry. Pre-revision documents get stamped by one plain write, then CAS'd forever after.
+2. **Duplicate workspace documents (major)** — `readOrCreate` read-then-inserted with no unique constraint (the storage abstraction has none), so concurrent creators could each insert a document and split subsequent writes. Now: after inserting, re-query; every racer that does not hold the deterministic survivor (lexicographically smallest id = earliest ObjectId) deletes its own insert and adopts the survivor. `find()` picks the same survivor when duplicates linger, so readers and racers always agree.
+3. **Orphaned schedule on failed cadence write (major)** — `addCadence` created the `ScheduleConfiguration` before the workspace write; a failed write left an enabled schedule no cadence names, firing "cadence no longer exists" forever with no delete path. The failed write now compensates by deleting the schedule.
+4. **Group deletion left cadence schedules behind (major)** — permanent group deletion removed only the workspace; enabled schedules kept firing "No workspace exists". `RestAgentGroupStore` now retires every cadence's schedule BEFORE deleting the workspace (crash between the two leaves the recoverable order).
+5. **Log sanitization (minor + CodeQL 478/480)** — the run-claim disappearance warning sanitizes `groupId`; the same treatment in the new casRevision path.
+
+Tests: GroupWorkspaceStoreTest (new, 5: CAS bump/restore/legacy-stamp, duplicate convergence in readOrCreate and find), RestGroupWorkspaceTest 14 (+2: lost-CAS retry/exhaustion, schedule cleanup on failed write), McpGroupToolsTest 53 (+1 retry/exhaustion), RestAgentGroupStoreTest (+1 schedule retirement). All green.
+
+---
+
+## 🔎 fix(groups): I8 review round 2 — retro cap semantics + event contract (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i8-retro-memory`)
+
+Four accepted findings from the CodeRabbit round on the stacked PR (#644, which carries this branch):
+
+1. **Template quoted the wrong cap (major)** — the RETRO prompt always rendered `DEFAULT_MAX_PER_RUN` (3), so a group configured above it could never obtain its configured number of lessons. `buildPhaseInput` gained a `RetroConfig` parameter (config-less overloads keep the default); all three agent-turn call sites in `PhaseExecutionEngine` pass `config.getRetroConfig()`. RetroEngine's parse-time enforcement is unchanged and remains the server-side limit.
+2. **Per-entry cap multiplied (major)** — `harvest` applied `maxLessonsPerRun` to each RETRO transcript entry, so a multi-speaker or multi-repeat retro could store `cap × entries`. Now a per-harvest `remaining` allowance shared across entries.
+3. **Missing zero-count event (minor)** — the null-memory-store branch returned before `retro_recorded`; it now fires the event with `lessonsStored = 0`, honoring the contract that a RETRO phase always emits it.
+4. **Fixture didn't cross users (minor)** — `personalEntriesNeverCrossUsers` built its "other user's" entry with the shared helper that stamps USER; it now genuinely belongs to `user-2`.
+
+Tests: RetroEngineTest 8 (+2: per-harvest cap, null-store zero event), GroupContextBuilderTest 41 (+1: configured cap quoted, default fallback), PhaseExecutionEngineTest stub widened to the new arity. All green.
 ## 🔎 fix(groups): I6 review round — schema bump, approver full-view scope, persist-time assertion (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i6-human-members`)

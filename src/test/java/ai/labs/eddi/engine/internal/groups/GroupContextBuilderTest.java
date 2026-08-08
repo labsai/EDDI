@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.RetroConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
@@ -14,6 +15,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -74,6 +76,26 @@ class GroupContextBuilderTest {
 
         assertEquals("rendered", result);
         verify(templatingEngine).processTemplate(any(), any(), eq(ITemplatingEngine.TemplateMode.TEXT));
+    }
+
+    @Test
+    @DisplayName("the RETRO template quotes the CONFIGURED lesson cap — a group set above the default gets what it asked for")
+    void buildPhaseInput_retro_quotesConfiguredCap() throws Exception {
+        when(templatingEngine.processTemplate(any(), any(), eq(ITemplatingEngine.TemplateMode.TEXT))).thenReturn("rendered");
+
+        builder.buildPhaseInput(phase(PhaseType.RETRO, ContextScope.FULL), member(), "Q?", List.of(), 1, null, null,
+                null, null, new RetroConfig(7, 50));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> dataCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(templatingEngine).processTemplate(any(), dataCaptor.capture(), eq(ITemplatingEngine.TemplateMode.TEXT));
+        assertEquals(7, dataCaptor.getValue().get("maxLessonsPerRun"));
+
+        // The config-less overloads still quote the default.
+        clearInvocations(templatingEngine);
+        builder.buildPhaseInput(phase(PhaseType.RETRO, ContextScope.FULL), member(), "Q?", List.of(), 1, null);
+        verify(templatingEngine).processTemplate(any(), dataCaptor.capture(), eq(ITemplatingEngine.TemplateMode.TEXT));
+        assertEquals(RetroConfig.DEFAULT_MAX_PER_RUN, dataCaptor.getValue().get("maxLessonsPerRun"));
     }
 
     // =================================================================

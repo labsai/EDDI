@@ -28,9 +28,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -72,6 +74,7 @@ class RestGroupWorkspaceTest {
         workspace.setGroupId(GROUP_ID);
         lenient().when(workspaceStore.readOrCreate(GROUP_ID)).thenReturn(workspace);
         lenient().when(workspaceStore.find(GROUP_ID)).thenReturn(workspace);
+        lenient().when(workspaceStore.casRevision(workspace)).thenReturn(true);
         return workspace;
     }
 
@@ -105,7 +108,8 @@ class RestGroupWorkspaceTest {
         TaskItem task = workspace.getBacklog().getTasks().get(0);
         assertEquals("Ship it", task.subject());
         assertEquals(3, task.priority());
-        verify(workspaceStore).update(workspace);
+        verify(workspaceStore).casRevision(workspace);
+        verify(workspaceStore, never()).update(any());
     }
 
     @Test
@@ -156,6 +160,42 @@ class RestGroupWorkspaceTest {
         assertTrue(String.valueOf(response.getEntity()).contains("subject"), String.valueOf(response.getEntity()));
         assertEquals(1, workspace.getBacklog().size());
         verify(workspaceStore, never()).update(any());
+    }
+
+    @Test
+    @DisplayName("a lost revision race re-reads and retries; exhaustion is an honest 409")
+    void addBacklogTask_lostCas_retriesThenGivesUp() throws Exception {
+        // Each read returns a FRESH document — in production a re-read reflects
+        // the concurrent writer's state, never this caller's failed mutation.
+        when(workspaceStore.readOrCreate(GROUP_ID)).thenAnswer(inv -> {
+            var w = new GroupWorkspace();
+            w.setId("ws-1");
+            w.setGroupId(GROUP_ID);
+            return w;
+        });
+        when(workspaceStore.casRevision(any())).thenReturn(false, true);
+
+        assertEquals(201, rest.addBacklogTask(GROUP_ID, new BacklogTaskRequest("Ship it", "", 0)).getStatus());
+        verify(workspaceStore, times(2).description("one re-read per attempt")).readOrCreate(GROUP_ID);
+
+        when(workspaceStore.casRevision(any())).thenReturn(false);
+        var response = rest.addBacklogTask(GROUP_ID, new BacklogTaskRequest("Another", "", 0));
+        assertEquals(409, response.getStatus());
+        assertTrue(String.valueOf(response.getEntity()).contains("concurrently"),
+                "exhausted retries tell the caller to retry: " + response.getEntity());
+    }
+
+    @Test
+    @DisplayName("a failed workspace write deletes the just-created schedule — no orphan fires forever")
+    void addCadence_workspaceWriteFails_deletesSchedule() throws Exception {
+        var workspace = workspace();
+        when(scheduleStore.createSchedule(any())).thenReturn("sched-9");
+        doThrow(new IResourceStore.ResourceStoreException("store down")).when(workspaceStore).update(workspace);
+
+        var response = rest.addCadence(GROUP_ID, new CadenceRequest("0 9 * * 1", null, null, 0, null));
+
+        assertEquals(500, response.getStatus());
+        verify(scheduleStore).deleteSchedule("sched-9");
     }
 
     @Test

@@ -57,12 +57,12 @@ class PhaseExecutionEngineTest {
     private PhaseExecutionEngine engine() {
         memberTurnExecutor = mock(MemberTurnExecutor.class);
         contextBuilder = mock(GroupContextBuilder.class);
-        // The 9-ARG overload (I9 added window + gc) — the only one
-        // PhaseExecutionEngine calls. Stubbing a shorter one left every turn running
-        // with a null input, so a regression that dropped the phase rendering
-        // entirely and passed the raw question through would not have failed a
-        // single test here.
-        when(contextBuilder.buildPhaseInput(any(), any(), any(), any(), anyInt(), any(), any(), any(), any()))
+        // The 10-ARG overload (I9 added window + gc, I8's review round added
+        // retroConfig) — the only one PhaseExecutionEngine calls. Stubbing a
+        // shorter one left every turn running with a null input, so a regression
+        // that dropped the phase rendering entirely and passed the raw question
+        // through would not have failed a single test here.
+        when(contextBuilder.buildPhaseInput(any(), any(), any(), any(), anyInt(), any(), any(), any(), any(), any()))
                 .thenReturn("rendered-input");
         return new PhaseExecutionEngine(memberTurnExecutor, contextBuilder,
                 Executors.newVirtualThreadPerTaskExecutor(), new CallerIdentityContext(null, null));
@@ -237,7 +237,7 @@ class PhaseExecutionEngineTest {
         // Blindness: the human's prompt renders from the PRE-fan-out snapshot.
         var transcriptCaptor = org.mockito.ArgumentCaptor.forClass(List.class);
         verify(contextBuilder).buildPhaseInput(any(), argThat(m -> "h".equals(m.agentId())), any(),
-                transcriptCaptor.capture(), anyInt(), any(), any(), any(), any());
+                transcriptCaptor.capture(), anyInt(), any(), any(), any(), any(), any());
         assertTrue(transcriptCaptor.getValue().isEmpty(),
                 "a 'parallel' (independent) round must stay independent — the human must not read the batch's answers");
     }
@@ -272,7 +272,7 @@ class PhaseExecutionEngineTest {
         verifyNoInteractions(memberTurnExecutor);
         var transcriptCaptor = org.mockito.ArgumentCaptor.forClass(List.class);
         verify(contextBuilder).buildPhaseInput(any(), argThat(m -> "h2".equals(m.agentId())), any(),
-                transcriptCaptor.capture(), anyInt(), any(), any(), any(), any());
+                transcriptCaptor.capture(), anyInt(), any(), any(), any(), any(), any());
         assertTrue(transcriptCaptor.getValue().isEmpty(),
                 "the resumed human prompt excludes this phase's entries entirely — the blindness bound survives the pause");
     }

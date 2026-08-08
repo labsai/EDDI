@@ -116,23 +116,37 @@ public final class RetroEngine {
         if (userMemoryStore == null) {
             LOGGER.warnf("Group %s: RETRO phase '%s' ran but no user memory store is available — lessons are not persisted",
                     LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phaseName));
+            // The event contract holds even when nothing can be stored: a RETRO
+            // phase always emits retro_recorded (review finding — this path
+            // returned silently, leaving SSE consumers waiting).
+            if (listener != null) {
+                listener.onRetroRecorded(new GroupConversationEventSink.RetroRecordedEvent(gc.getGroupId(), phaseName, 0));
+            }
             return;
         }
         RetroConfig config = retroConfig != null ? retroConfig : new RetroConfig();
         String teamOwner = IUserMemoryStore.TEAM_OWNER_PREFIX + gc.getGroupId();
 
+        // maxLessonsPerRun bounds the whole HARVEST, not each transcript entry —
+        // a multi-participant or multi-repeat RETRO phase produces several RETRO
+        // entries, and a per-entry cap multiplied by entry count (review finding).
+        int remaining = config.maxLessonsPerRun();
         int stored = 0;
         for (TranscriptEntry entry : repeatEntries) {
+            if (remaining <= 0) {
+                break;
+            }
             if (entry == null || entry.type() != TranscriptEntryType.RETRO) {
                 continue;
             }
-            for (Lesson lesson : parseLessons(entry.content(), config.maxLessonsPerRun())) {
+            for (Lesson lesson : parseLessons(entry.content(), remaining)) {
                 try {
                     String value = lesson.context() != null ? lesson.lesson() + " (applies: " + lesson.context() + ")" : lesson.lesson();
                     userMemoryStore.upsert(new UserMemoryEntry(null, teamOwner, KEY_PREFIX + lessonHash(lesson.lesson()), value,
                             "context", Visibility.group, RETRO_SOURCE, List.of(gc.getGroupId()), gc.getId(), false, 0,
                             Instant.now(), Instant.now()));
                     stored++;
+                    remaining--;
                 } catch (Exception e) {
                     LOGGER.warnf("Group %s: failed to store a retro lesson: %s",
                             LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
