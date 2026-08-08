@@ -5,6 +5,25 @@
 
 ---
 
+## 🔎 fix(groups): I13 + HITL fixes from the final cross-branch review (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams`)
+
+Fixes from the 23-agent final review (5 dimensions, every non-minor finding adversarially double-verified; 9 confirmed across all branches — the four below are the ones on this branch's surface):
+
+1. **Settle race (major/concurrency)** — `TeamCadenceService.settle()` released the claim with an **unconditional** `update()`, so a writeback racing a concurrent reconcile (schedule fire on another pod, or the REST read-repair) could clobber a *newer* claim, orphaning that discussion's outcomes. Now conditional: `settle(workspace, gc, settledDiscussionId)` releases via `casRunningDiscussion(workspace, settledDiscussionId)`; both writebacks capture the id before clearing and return the verdict; a lost race drops the caller's mutations (`writeback_lostSettleRace_dropsMutations` pins it). Reconcile propagates the verdict so a losing caller treats the workspace as busy.
+2. **Cost ceiling lost on HITL resume (major/cost-bounds)** — `GroupConversation.inheritedCostCeiling` was `@JsonIgnore transient`, so a cadence run that paused for approval resumed with **no ceiling**. Now a persisted field (documented as a review finding in the Javadoc).
+3. **Backlog write caps bypassed (major/security)** — REST `addBacklogTask` and MCP `add_team_task` skipped the caps the agent tool surface enforces: subject ≤ `MAX_AGENT_TASK_SUBJECT_LENGTH` (200), description ≤ `MAX_AGENT_TASK_DESCRIPTION_LENGTH` (4000), and duplicate subjects (case-insensitive) now 409/error — writeback matches outcomes **by subject**, so duplicates made outcome attribution ambiguous. Plus two bound minors: cadence count capped at 20/workspace, `inputTemplate` ≤ 4000 chars.
+4. **Unbounded failure-feedback growth (major/cost-bounds)** — the COMPLETED writeback appended each failed run's **entire agent output** to the persisted task description every run. New `appendFeedbackBounded`: 500-char per-run slice, total trimmed from the front (oldest first) to the shared 4000-char description cap.
+
+Also on this branch's surface: the **claim-CAS exception path** now cancels the just-started discussion before rethrowing (previously it leaked an unclaimed discussion running to completion with outcomes no writeback collects), the template-failure log sanitizes the exception message, and `GroupHitlCoordinator`'s executor-saturated resume rollback uses remove-and-recheck (`removeTokenAndConvertIfSignalled`) like every sibling rollback path — a cancel signalled between token registration and the rollback was silently dropped, leaving a "cancelled" discussion stuck AWAITING_APPROVAL (regression test added, mutation-verified: reverting the fix fails it).
+
+**Rebutted (deliberate, not fixed):** MCP `list_team_backlog` requiring `eddi-viewer` while REST listing requires editor — consistent with the read_group/list_groups viewer convention across all MCP group read tools.
+
+**Tests:** TeamCadenceServiceTest 17 (+3), RestGroupWorkspaceTest 12 (+3), McpGroupToolsTest 52 (+2), GroupHitlCoordinatorTest 16 (+1). All green.
+
+---
+
 ## 🔎 fix(groups): I13 PR #644 review round 1 (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i13-standing-teams`)

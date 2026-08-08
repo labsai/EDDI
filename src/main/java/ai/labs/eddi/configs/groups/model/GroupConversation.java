@@ -227,14 +227,18 @@ public class GroupConversation {
 
     /**
      * A parent discussion's remaining cost budget at the moment it dispatched this
-     * nested one (I1), or {@code null} for a top-level discussion (and for a parent
-     * that has no ceiling of its own). The discussion runs under
-     * {@code min(own configured ceiling, this)} — see
-     * {@code GroupConversationService.effectiveCostCeiling}. Transient: it is a
-     * property of one dispatch, not of the stored discussion.
+     * nested one (I1), or a cadence run's {@code maxCostPerRun} (I13), or
+     * {@code null} for an unconstrained top-level discussion. The discussion runs
+     * under {@code min(own configured ceiling, this)} — see
+     * {@code GroupConversationService.effectiveCostCeiling}.
+     * <p>
+     * PERSISTED (final-review finding): this was transient, so every HITL
+     * pause/resume re-read the document and silently DROPPED the ceiling — a
+     * cadence discussion whose group config had no ceiling of its own resumed with
+     * unlimited spend after one human approval. The ceiling is a property of the
+     * RUN, and the run survives pauses.
      */
-    @JsonIgnore
-    private transient Double inheritedCostCeiling;
+    private Double inheritedCostCeiling;
 
     /**
      * A single entry in the discussion transcript. Each entry records one agent's

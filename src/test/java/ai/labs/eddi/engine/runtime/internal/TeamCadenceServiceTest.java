@@ -276,7 +276,7 @@ class TeamCadenceServiceTest {
         discussionTasks.verifyTask(failedB.id(), false, "missing the API section");
         gc.setTaskList(discussionTasks);
 
-        service.writebackCompleted(workspace, gc);
+        assertTrue(service.writebackCompleted(workspace, gc), "this caller's settle won the race");
 
         TaskItem backlogA = workspace.getBacklog().findById(taskA.id());
         assertEquals(TaskStatus.VERIFIED, backlogA.status());
@@ -297,7 +297,25 @@ class TeamCadenceServiceTest {
 
         assertEquals(GroupWorkspace.NO_RUNNING_DISCUSSION, workspace.getRunningDiscussionId());
         assertTrue(workspace.getPulledTaskIds().isEmpty());
-        verify(workspaceStore).update(workspace);
+        verify(workspaceStore).casRunningDiscussion(workspace, GC_ID);
+        verify(workspaceStore, never()).update(any());
+    }
+
+    @Test
+    @DisplayName("a writeback that loses the settle race drops its mutations instead of clobbering the live claim")
+    void writeback_lostSettleRace_dropsMutations() throws Exception {
+        var taskA = new TaskItem("A", "", 0);
+        var workspace = pulledWorkspace(taskA, new TaskItem("B", "", 0));
+        when(workspaceStore.casRunningDiscussion(any(), anyString())).thenReturn(false);
+        var gc = new GroupConversation();
+        gc.setId(GC_ID);
+        gc.setState(GroupConversationState.COMPLETED);
+        gc.setTaskList(new SharedTaskList());
+
+        assertFalse(service.writebackCompleted(workspace, gc),
+                "a concurrent reconciler settled first — this caller's writeback must report defeat");
+        verify(workspaceStore).casRunningDiscussion(workspace, GC_ID);
+        verify(workspaceStore, never()).update(any());
     }
 
     @Test
@@ -311,7 +329,7 @@ class TeamCadenceServiceTest {
         gc.setState(GroupConversationState.CANCELLED);
         gc.setTotalCost(0.5);
 
-        service.writebackFailure(workspace, gc);
+        assertTrue(service.writebackFailure(workspace, gc));
 
         assertEquals(TaskStatus.PENDING, workspace.getBacklog().findById(taskA.id()).status());
         assertEquals(TaskStatus.PENDING, workspace.getBacklog().findById(taskB.id()).status());
@@ -348,6 +366,40 @@ class TeamCadenceServiceTest {
     // =================================================================
     // Model + contract pins
     // =================================================================
+
+    @Test
+    @DisplayName("a store failure during the claim CAS cancels the just-started discussion before failing")
+    void fire_claimThrows_cancelsStartedDiscussion() throws Exception {
+        workspace(cadence(5, null), new TaskItem("T", "", 0));
+        when(workspaceStore.casRunningDiscussion(any(), anyString())).thenThrow(new RuntimeException("store down"));
+        startedGc();
+
+        var result = service.processScheduledFire(metadata());
+
+        assertFalse(result.isSuccess());
+        verify(groupConversationService).cancelDiscussion(eq(GC_ID), any());
+    }
+
+    @Test
+    @DisplayName("per-run feedback is capped and the accumulated description trimmed from the front")
+    void appendFeedbackBounded_capsSliceAndTotal() {
+        String bounded = TeamCadenceService.appendFeedbackBounded("desc", "run-1",
+                "x".repeat(TeamCadenceService.MAX_FEEDBACK_CHARS + 100));
+        assertTrue(bounded.length() < TeamCadenceService.MAX_FEEDBACK_CHARS + 100,
+                "one run's feedback never rides in whole: " + bounded.length());
+        assertTrue(bounded.startsWith("desc\n[Cadence run run-1] "), bounded.substring(0, 30));
+        assertTrue(bounded.endsWith("…"), "the slice is visibly truncated");
+
+        String longDescription = "y".repeat(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH);
+        String trimmed = TeamCadenceService.appendFeedbackBounded(longDescription, "run-2", "newest feedback");
+        assertEquals(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH, trimmed.length(),
+                "the persisted description never outgrows the shared task cap");
+        assertTrue(trimmed.startsWith("…"), "oldest feedback is what gets dropped");
+        assertTrue(trimmed.endsWith("newest feedback"), "the newest feedback always survives");
+
+        assertEquals("d\n[Cadence run r] short",
+                TeamCadenceService.appendFeedbackBounded("d", "r", "short"), "short feedback is untouched");
+    }
 
     @Test
     void cadence_compactConstructor_defaultsTasksPerRun() {

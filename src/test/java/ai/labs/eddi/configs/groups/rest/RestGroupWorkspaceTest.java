@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.groups.IRestGroupWorkspace.BacklogTaskRequest;
 import ai.labs.eddi.configs.groups.IRestGroupWorkspace.CadenceRequest;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.Cadence;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
@@ -130,6 +131,34 @@ class RestGroupWorkspaceTest {
     }
 
     @Test
+    @DisplayName("REST enforces the same subject/description bounds as the agent tool surface")
+    void addBacklogTask_oversizedFields_400() throws Exception {
+        workspace();
+
+        String longSubject = "s".repeat(SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH + 1);
+        assertEquals(400, rest.addBacklogTask(GROUP_ID, new BacklogTaskRequest(longSubject, "", 0)).getStatus());
+
+        String longDescription = "d".repeat(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH + 1);
+        assertEquals(400, rest.addBacklogTask(GROUP_ID, new BacklogTaskRequest("Ok", longDescription, 0)).getStatus());
+
+        verify(workspaceStore, never()).update(any());
+    }
+
+    @Test
+    @DisplayName("duplicate subjects are rejected — writeback matches outcomes by subject")
+    void addBacklogTask_duplicateSubject_409() throws Exception {
+        var workspace = workspace();
+        workspace.getBacklog().addTask(new TaskItem("Ship it", "", 0));
+
+        var response = rest.addBacklogTask(GROUP_ID, new BacklogTaskRequest("ship IT", "", 0));
+
+        assertEquals(409, response.getStatus());
+        assertTrue(String.valueOf(response.getEntity()).contains("subject"), String.valueOf(response.getEntity()));
+        assertEquals(1, workspace.getBacklog().size());
+        verify(workspaceStore, never()).update(any());
+    }
+
+    @Test
     @DisplayName("adding a cadence creates the schedule carrying the fire-dispatch metadata")
     void addCadence_createsScheduleWithMetadata() throws Exception {
         var workspace = workspace();
@@ -164,6 +193,23 @@ class RestGroupWorkspaceTest {
         var response = rest.addCadence(GROUP_ID, new CadenceRequest("not a cron", null, null, 0, null));
 
         assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    @DisplayName("a workspace is a team's schedule, not a cron farm — the cadence count is capped")
+    void addCadence_countCap_409_andTemplateBound_400() throws Exception {
+        var workspace = workspace();
+        for (int i = 0; i < RestGroupWorkspace.MAX_CADENCES_PER_WORKSPACE; i++) {
+            workspace.addCadence(new Cadence("c-" + i, "sched-" + i, null, 5, null, "pm"));
+        }
+        assertEquals(409, rest.addCadence(GROUP_ID, new CadenceRequest("0 9 * * 1", null, null, 0, null)).getStatus());
+
+        var fresh = workspace();
+        String hugeTemplate = "t".repeat(RestGroupWorkspace.MAX_INPUT_TEMPLATE_LENGTH + 1);
+        assertEquals(400,
+                rest.addCadence(GROUP_ID, new CadenceRequest("0 9 * * 1", null, hugeTemplate, 0, null)).getStatus());
+        assertTrue(fresh.getCadences().isEmpty());
         verify(scheduleStore, never()).createSchedule(any());
     }
 
