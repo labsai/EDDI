@@ -1019,13 +1019,13 @@ public class TaskForceEngine {
         if (!TaskBidEngine.auctionWorthwhile(bidders.size(), unassigned.size())) {
             LOGGER.infof("Group %s: skipping bid round (%d bidder(s), %d unassigned task(s) — the auction cannot beat "
                     + "its own overhead); falling back to ROLE assignment",
-                    gc.getGroupId(), bidders.size(), unassigned.size());
+                    LogSanitizer.sanitize(gc.getGroupId()), bidders.size(), unassigned.size());
             fallbackRoleAssign(gc, config, unassigned);
             return;
         }
         if (maxTurns > 0 && turnCounter.get() + bidders.size() > maxTurns) {
             LOGGER.infof("Group %s: skipping bid round — %d bid turn(s) would exceed the remaining turn budget; "
-                    + "falling back to ROLE assignment", gc.getGroupId(), bidders.size());
+                    + "falling back to ROLE assignment", LogSanitizer.sanitize(gc.getGroupId()), bidders.size());
             fallbackRoleAssign(gc, config, unassigned);
             return;
         }
@@ -1049,7 +1049,8 @@ public class TaskForceEngine {
                         }
                         return TaskBidEngine.parseBids(reply != null ? reply.content() : null, member, announcedSubjects);
                     } catch (Exception e) {
-                        LOGGER.warnf("Bid turn failed for '%s': %s — casting no bids", member.agentId(), e.getMessage());
+                        LOGGER.warnf("Bid turn failed for '%s': %s — casting no bids",
+                                LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(e.getMessage()));
                         return List.<TaskBidEngine.Bid>of();
                     }
                 }), executorService)).toList();
@@ -1063,13 +1064,15 @@ public class TaskForceEngine {
                 allBids.addAll(future.get(remainingNanos, TimeUnit.NANOSECONDS));
             } catch (TimeoutException e) {
                 cancellation.cancel();
-                LOGGER.warnf("Group %s: bid round timed out — late bidders cast no bids", gc.getGroupId());
+                LOGGER.warnf("Group %s: bid round timed out — late bidders cast no bids",
+                        LogSanitizer.sanitize(gc.getGroupId()));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 cancellation.cancel();
                 break;
             } catch (ExecutionException e) {
-                LOGGER.warnf("Group %s: bid future failed: %s", gc.getGroupId(), e.getMessage());
+                LOGGER.warnf("Group %s: bid future failed: %s",
+                        LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(e.getMessage()));
             }
         }
 
@@ -1083,7 +1086,8 @@ public class TaskForceEngine {
                             member != null ? member.displayName() : winner.agentId());
                     taskList.recordAwardedBid(task.id(), winner);
                     LOGGER.infof("Group %s: task '%s' awarded to '%s' (confidence %.2f)",
-                            gc.getGroupId(), task.subject(), winner.agentId(), winner.confidence());
+                            LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(task.subject()),
+                            LogSanitizer.sanitize(winner.agentId()), winner.confidence());
                 }
             }
         }
@@ -1122,7 +1126,8 @@ public class TaskForceEngine {
                     GroupMember member = findMember(config.getMembers(), agentId);
                     taskList.assignTask(task.id(), agentId, member != null ? member.displayName() : agentId);
                 } else {
-                    LOGGER.warnf("Group %s: no fallback assignee for task '%s'", gc.getGroupId(), task.subject());
+                    LOGGER.warnf("Group %s: no fallback assignee for task '%s'",
+                            LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(task.subject()));
                 }
             }
         }

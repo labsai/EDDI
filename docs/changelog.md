@@ -5,6 +5,14 @@
 
 ---
 
+## 🔎 fix(groups): I18 PR #642 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i18-bidding`)
+
+All 6 CodeQL log-injection findings in `TaskForceEngine`'s bid round accepted and fixed: `LogSanitizer` applied to every caller-influenced value in the bid-round logs (groupId, task subject, bidder/winner agentId, exception messages) — 7 sites sanitized, the 6 flagged plus the bid-turn-failure log the scan will otherwise flag next round. Bid suites (51) green.
+
+---
+
 ## 🏷️ feat(groups): I18 — bid-based task assignment, CNP-lite (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i18-bidding`)
