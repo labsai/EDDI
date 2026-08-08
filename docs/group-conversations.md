@@ -22,7 +22,6 @@ Group Conversations enable multiple agents to discuss a question. Each agent par
 ## Quick Start (MCP)
 
 ```
-
 # 1. Discover available styles
 describe_discussion_styles
 
@@ -42,7 +41,6 @@ discuss_with_group(groupId="<id>", question="Should we use microservices?")
 ## Quick Start (REST)
 
 ```bash
-
 # Create group config
 curl -X POST /groupstore/groups \
   -H "Content-Type: application/json" \
@@ -523,7 +521,6 @@ roles fail loudly, naming the template's real roles.
 Members can be other groups. The sub-group runs its own discussion and its synthesized answer becomes the member's response.
 
 ```
-
 # Create sub-groups
 create_group(name="Team A", memberAgentIds="a1,a2", style="PEER_REVIEW")  → g1
 create_group(name="Team B", memberAgentIds="a3,a4", style="DEBATE")       → g2
@@ -608,10 +605,13 @@ block.
 
 **`allowAbstention` (I4)** appends an instruction telling members they may reply
 with the single token `PASS` when they have nothing to add. A passing member
-produces no transcript entry and does not count toward the round, which is what
-makes a late DELPHI round cheap instead of forcing three agents to restate
-agreement in prose. Task phases never advertise the token — the detector and the
-prompt read the same switch, so they cannot disagree.
+produces an `ABSTAINED` entry carrying no content: peers, the synthesizer and
+the convergence judge never see it, so a late DELPHI round costs one short call
+instead of three agents restating agreement in prose. The entry is still
+*counted* — a round in which every scheduled participant abstained ends the
+phase through the unanimous-abstention exit. Task phases never advertise the
+token — the detector and the prompt read the same switch, so they cannot
+disagree.
 
 ### Dissent (I4)
 
@@ -717,7 +717,7 @@ Use `dependsOn` to create sequential execution chains. Each entry references a t
 | `IN_PROGRESS` | Currently being executed by an agent |
 | `COMPLETED` | Agent produced output |
 | `VERIFIED` | Moderator verified the result |
-| `BLOCKED` | A dependency failed — this task can never run |
+| `BLOCKED` | Reserved for dependency/resource blocking — recognized as non-terminal, but the engine does not set it yet |
 | `AWAITING_APPROVAL` | Result submitted, waiting on a human (TASK-granularity HITL) |
 | `FAILED` | Agent or verification failed |
 
@@ -920,7 +920,7 @@ speaker and phase pairs.
 |---|---|
 | `group_start` | The discussion begins (carries group id and question) |
 | `phase_start` / `phase_complete` | A phase opens / closes |
-| `round_start` | A repeat of a repeating phase begins |
+| `round_start` | A continuation round (round 2+) of the whole discussion begins — see `POST .../continue`. Phase repeats fire `phase_start` instead |
 | `speaker_start` / `speaker_complete` | A member's turn opens / closes (complete carries the content) |
 | `token` | Incremental token from a streaming member turn |
 | `synthesis_start` / `synthesis_complete` | The synthesis phase opens / closes |
@@ -1009,7 +1009,6 @@ After a discussion, users can reply in any agent's thread to ask follow-up quest
 ## Configuration
 
 ```properties
-
 # application.properties
 eddi.groups.max-depth=3    # Max recursion depth for nested groups
 ```

@@ -19,7 +19,7 @@ source, not against the plan.
   `GET /groupstore/groups/descriptors`.
 - Corrected the `HUMAN_DECIDES` note: I6 shipped humans as group *members*, but the tie-break
   is still save-time rejected because it needs its own resume machinery.
-- Completed the REST table (+21 rows: streaming, follow-up/continue/close/cancel, approve,
+- Completed the REST table (+20 rows: streaming, follow-up/continue/close/cancel, approve,
   human-input, approval-status, pending-approvals, all 3 template routes, all 5 workspace
   routes) and the MCP table (+10 tools).
 - Completed the reference tables: `PhaseType` gained `VOTE`/`PROPOSAL`/`BARGAIN`/`RETRO`;
@@ -32,12 +32,12 @@ source, not against the plan.
 - Documented the new RETRO hard ceilings (20/run, 500 stored) and creation-ordered FIFO.
 - Structure: moved the orphaned `taskListConfig` cap paragraph back out of the windowing
   section, re-parented bid-based assignment under TASK_FORCE (it is task-force machinery, not
-  negotiation), and fixed 8 headings that were glued to the preceding paragraph.
+  negotiation), and unglued 4 headings from the preceding paragraph.
 
-**`README.md`**: 6 → 7 built-in styles; ten new capability bullets (voting, artifacts, human
-members, facilitator, negotiation, bidding, team memory, standing teams, templates); a HITL
+**`README.md`**: 6 → 7 built-in styles; nine new capability bullets (voting, artifacts, human
+members, facilitator, negotiation, bidding, team memory, standing teams, templates) plus a HITL
 bullet for humans-as-members; MCP tool count 60+ → 80+ (actual 82); test badge 11,000+ →
-14,000+ (actual 14,233); an OpenAI-Compatible API docs row.
+14,000+ (14,205 test annotations across `src/test`); an OpenAI-Compatible API docs row.
 
 **`AGENTS.md`**: Phase 10 row 6 → 7 styles; new Completed rows 10c (Group Deliberation) and
 10d (Group Work Products); test count 12,000+ → 14,000+; the HITL-remaining row now
@@ -45,7 +45,7 @@ distinguishes the still-reserved `inGroupTurns: INBOX` from the shipped human-me
 gained the *opt-in by absence* convention, which governs every group capability and lived only
 in Javadoc.
 
-**`docs/README.md`**: version 6.0.0 → 6.2.0; MCP 48+ → 80+; group styles list; HITL and
+**`docs/README.md`**: the hardcoded version line became the dynamic release badge (it had been stuck on 6.0.0, two releases behind); MCP 48+ → 80+; group styles list; HITL and
 OpenAI-Compatible entries. **`docs/SUMMARY.md`**: added the missing `hitl.md` and
 `open-webui-integration.md` (both shipped flagships absent from the index), plus the monitoring
 guide, code-review standards, build reproducibility and changelog. **`docs/rag.md`**: added the
