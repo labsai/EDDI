@@ -164,6 +164,18 @@ public class MemberTurnExecutor {
             return executeGroupMemberTurn(member, gc, input, protocol, phaseIdx, phase, entryType, targetAgentId);
         }
 
+        // --- HUMAN member (I6): defense in depth, never the main path ---
+        // The phase loops intercept HUMAN speakers BEFORE this method and pause
+        // the discussion. Reaching here means an automated sub-round (convergence
+        // judge, dissent round, vote tiebreak, task-force wave, nested group)
+        // asked a human for an automated turn — those contexts cannot pause, so
+        // the turn is skipped, mirroring handleMemberPause's SKIP precedent.
+        if (member.memberType() == AgentGroupConfiguration.MemberType.HUMAN) {
+            return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(),
+                    TranscriptEntryType.SKIPPED, Instant.now(),
+                    "Human member does not take automated turns in this context — skipped", targetAgentId);
+        }
+
         // Check agent availability
         try {
             var agent = agentFactory.getLatestReadyAgent(DEFAULT_ENV, member.agentId());
@@ -644,9 +656,14 @@ public class MemberTurnExecutor {
             // supported in v1; cancel the stranded sub-pause (releases its timeout
             // schedule and removes it from pending-approval listings) and return a
             // SKIPPED entry with explanation.
-            if (subConversation.getState() == GroupConversationState.AWAITING_APPROVAL) {
-                LOGGER.warnf("Sub-group '%s' is awaiting approval — nested HITL not supported in v1; cancelling sub-pause",
-                        subGroupId);
+            // I6: AWAITING_HUMAN_INPUT is the same stranded-nested-pause problem —
+            // save-time validation rejects HUMAN members in nested groups, but the
+            // child config can gain a human AFTER the parent saved; this is the
+            // runtime backstop.
+            if (subConversation.getState() == GroupConversationState.AWAITING_APPROVAL
+                    || subConversation.getState() == GroupConversationState.AWAITING_HUMAN_INPUT) {
+                LOGGER.warnf("Sub-group '%s' paused (%s) — nested pauses are not supported in v1; cancelling sub-pause",
+                        subGroupId, subConversation.getState());
                 try {
                     groupConversationService.cancelDiscussion(subConversation.getId(), ControlSignal.CANCEL_GRACEFUL);
                 } catch (Exception cancelEx) {
@@ -656,7 +673,10 @@ public class MemberTurnExecutor {
                 }
                 return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(),
                         TranscriptEntryType.SKIPPED, Instant.now(),
-                        "Sub-group awaiting approval — nested HITL not supported in v1", targetAgentId);
+                        subConversation.getState() == GroupConversationState.AWAITING_HUMAN_INPUT
+                                ? "Sub-group waiting on a human member — nested human turns are not supported in v1"
+                                : "Sub-group awaiting approval — nested HITL not supported in v1",
+                        targetAgentId);
             }
 
             // Extract the synthesized answer, or concatenate all responses

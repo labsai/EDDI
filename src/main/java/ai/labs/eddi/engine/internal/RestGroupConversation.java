@@ -461,6 +461,51 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
     }
 
+    @Override
+    public Response submitHumanInput(String groupId, String gcId, HumanInputRequest request) {
+        if (request == null || request.memberId() == null || request.memberId().isBlank()
+                || request.content() == null || request.content().isBlank()) {
+            return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
+                    .entity("Request body must include a non-blank 'memberId' and 'content'").build();
+        }
+        // I6: NOT the approve guard — speaking as a member is impersonation unless
+        // the caller IS that member (or an admin); an eddi-approver may decide
+        // approvals but not talk for people.
+        hitlAccessGuard.requireGroupHumanInputAccess(groupId, gcId, request.memberId());
+        String submittedBy = identity != null && identity.getPrincipal() != null
+                ? identity.getPrincipal().getName()
+                : "anonymous";
+        try {
+            var gc = groupConversationService.submitHumanInput(gcId, request.memberId(), request.content(), submittedBy);
+            return Response.ok(gc).build();
+        } catch (IResourceStore.ResourceModifiedException e) {
+            // Double-submit or a concurrent cancel won the CAS.
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("The group conversation was modified concurrently — reload and retry.").build();
+        } catch (IResourceStore.ResourceNotFoundException
+                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+            LOGGER.infof("Human input for group conversation %s → not found: %s", sanitize(gcId), e.getMessage());
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group conversation not found.").build();
+        } catch (IGroupConversationService.GroupDiscussionException e) {
+            LOGGER.infof("Human input for group conversation %s rejected (wrong state): %s", sanitize(gcId), e.getMessage());
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("Group conversation is not awaiting human input — the turn may have been resolved, "
+                            + "timed out, or cancelled.")
+                    .build();
+        } catch (IllegalArgumentException e) {
+            LOGGER.infof("Human input for group conversation %s rejected (invalid request): %s", sanitize(gcId), e.getMessage());
+            return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
+                    .entity("Invalid submission: the memberId does not match the pending turn, or the content is "
+                            + "blank or too long.")
+                    .build();
+        } catch (Exception e) {
+            LOGGER.error("Failed to submit human input for group conversation " + sanitize(gcId), e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).type(TEXT_PLAIN)
+                    .entity("Failed to submit human input.").build();
+        }
+    }
+
     /**
      * A continuation round cannot share NEW files: attachments are granted and
      * injected to a member only on its first-ever turn, and on a continuation every
@@ -676,16 +721,23 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public Response getGroupApprovalStatus(String groupId, String gcId, String detail) {
-        validateGroupConversationOwnership(groupId, gcId, true);
+        // I6: the READ guard, not the strict HITL guard — the pending HUMAN
+        // member must be able to see the status of the turn they owe (their
+        // rendered prompt lives in the summary below).
+        hitlAccessGuard.requireGroupConversationReadAccess(groupId, gcId);
         try {
             var gc = groupConversationService.readGroupConversation(gcId);
-            boolean paused = gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL;
+            boolean paused = gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL
+                    || gc.getState() == GroupConversation.GroupConversationState.AWAITING_HUMAN_INPUT;
             if ("full".equals(detail)) {
                 // Approver-only callers (not owner, not admin) may read the full
                 // conversation (incl. transcript) only while it is actually awaiting
-                // approval — mirrors the regular surface's read-scope gate.
-                if (!paused && !ownershipValidator.isAdmin(identity)
-                        && !ownershipValidator.isOwner(identity, gc.getUserId())) {
+                // approval — mirrors the regular surface's read-scope gate. The
+                // pending human member does NOT get the full view either: their
+                // working material is the rendered prompt in the summary.
+                if (!ownershipValidator.isAdmin(identity)
+                        && !ownershipValidator.isOwner(identity, gc.getUserId())
+                        && !(paused && ownershipValidator.isApprover(identity))) {
                     return Response.status(Response.Status.FORBIDDEN)
                             .entity("Full approval status is available to approvers only while the group "
                                     + "conversation is awaiting approval — use the summary view")
@@ -711,6 +763,13 @@ public class RestGroupConversation implements IRestGroupConversation {
             summary.put("pauseReason", paused && gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");
             summary.put("timeoutPolicy", paused && gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy().name() : "");
             summary.put("awaitingApprovalTaskIds", awaitingTaskIds);
+            // I6: a human-turn pause carries WHO is up and WHAT they were asked —
+            // the summary is that member's working view, no transcript needed.
+            if (gc.getPendingHumanInput() != null) {
+                summary.put("pendingMemberId", gc.getPendingHumanInput().memberId());
+                summary.put("pendingMemberDisplayName", gc.getPendingHumanInput().displayName());
+                summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
+            }
             return Response.ok(summary).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
@@ -836,6 +895,14 @@ public class RestGroupConversation implements IRestGroupConversation {
             @Override
             public void onHitlPause(GroupConversationEventSink.HitlPauseEvent event) {
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_AWAITING_APPROVAL, toJson(event));
+                closeQuietly(eventSink);
+            }
+
+            @Override
+            public void onHumanInputRequested(GroupConversationEventSink.HumanInputRequestedEvent event) {
+                // I6: terminal for THIS stream, like an approval pause — the leg
+                // ends; a submission opens its own resumed stream if it wants one.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_HUMAN_INPUT_REQUESTED, toJson(event));
                 closeQuietly(eventSink);
             }
 

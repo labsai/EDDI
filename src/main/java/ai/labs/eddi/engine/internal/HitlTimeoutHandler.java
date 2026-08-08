@@ -44,6 +44,12 @@ public class HitlTimeoutHandler {
             LOGGER.error("HITL timeout metadata missing 'policy' key");
             return;
         }
+        // I6: human-turn timeouts carry OnHumanTimeout policies (SKIP_TURN/ABORT),
+        // not HitlTimeoutPolicy values — branch on the surface BEFORE the parse.
+        if (HitlSchedules.SURFACE_GROUP_HUMAN.equals(surface)) {
+            handleHumanTurnTimeout(metadata, policyStr);
+            return;
+        }
         HitlTimeoutPolicy policy;
         try {
             policy = HitlTimeoutPolicy.valueOf(policyStr);
@@ -77,6 +83,30 @@ public class HitlTimeoutHandler {
             }
             case WAIT_INDEFINITELY -> {
                 /* never scheduled */ }
+        }
+    }
+
+    /**
+     * I6: an expired human turn resolves per the group's {@code humanMemberConfig}
+     * — SKIP_TURN records a SKIPPED entry and moves on; ABORT cancels the
+     * discussion (the same graceful cancel the approval ABORT policy uses).
+     */
+    private void handleHumanTurnTimeout(Map<String, Object> metadata, String policyStr) {
+        String gcId = (String) metadata.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY);
+        try {
+            if ("ABORT".equals(policyStr)) {
+                boolean cancelled = groupConversationService.cancelDiscussion(gcId,
+                        ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+                LOGGER.infof("Human-turn timeout ABORT for group conversation %s%s", gcId,
+                        cancelled ? "" : " skipped — already terminal");
+                return;
+            }
+            if (!"SKIP_TURN".equals(policyStr)) {
+                LOGGER.errorf("Unknown human-turn timeout policy '%s' for %s — treating as SKIP_TURN", policyStr, gcId);
+            }
+            groupConversationService.skipHumanTurnOnTimeout(gcId);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "Failed to resolve timed-out human turn for group conversation %s", gcId);
         }
     }
 

@@ -8,6 +8,10 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.HumanMemberConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.OnHumanTimeout;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.OptionsSource;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TiePolicy;
@@ -169,10 +173,107 @@ class AgentGroupStoreTest {
         }
     }
 
+    // =================================================================
+    // I6 — HUMAN member save-time matrix
+    // =================================================================
+
+    private GroupMember human(String id, String name) {
+        return new GroupMember(id, name, 1, null, MemberType.HUMAN);
+    }
+
+    private AgentGroupConfiguration humanConfig(DiscussionStyle style, List<DiscussionPhase> phases, GroupMember... members) {
+        var c = config(style, phases, null);
+        c.setMembers(List.of(members));
+        return c;
+    }
+
+    @Test
+    void humanMember_withoutDisplayName_isRejected() {
+        var problems = AgentGroupStore.humanMemberProblems(humanConfig(DiscussionStyle.CUSTOM,
+                List.of(phase("Open", "ALL")), human("h-1", "  ")));
+
+        assertEquals(1, problems.size());
+        assertTrue(problems.get(0).contains("displayName"), problems.toString());
+    }
+
+    @Test
+    void humanMember_inTaskForceGroup_isRejected_presetExpanded() {
+        // TASK_FORCE stores NO phases — the preset expansion is what makes this
+        // check reach PLAN/EXECUTE/VERIFY at all.
+        var problems = AgentGroupStore.humanMemberProblems(humanConfig(DiscussionStyle.TASK_FORCE,
+                null, human("h-1", "Hannah")));
+
+        assertFalse(problems.isEmpty());
+        assertTrue(problems.stream().anyMatch(p -> p.contains("task-force")), problems.toString());
+    }
+
+    @Test
+    void humanMember_inTargetEachPeerPhase_isRejected() {
+        var peerPhase = new DiscussionPhase("Critique", PhaseType.CRITIQUE, "ALL", TurnOrder.SEQUENTIAL,
+                ContextScope.FULL, true, null, 1, false);
+        var problems = AgentGroupStore.humanMemberProblems(humanConfig(DiscussionStyle.CUSTOM,
+                List.of(peerPhase), human("h-1", "Hannah")));
+
+        assertFalse(problems.isEmpty());
+        assertTrue(problems.stream().anyMatch(p -> p.contains("targetEachPeer")), problems.toString());
+    }
+
+    @Test
+    void humanMember_inPlainSequentialGroup_isAccepted() {
+        var config = humanConfig(DiscussionStyle.CUSTOM, List.of(phase("Open", "ALL")),
+                human("h-1", "Hannah"), new GroupMember("a-1", "Agent", 2, null));
+        config.setHumanMemberConfig(new HumanMemberConfig("PT4H", OnHumanTimeout.SKIP_TURN));
+
+        assertTrue(AgentGroupStore.humanMemberProblems(config).isEmpty());
+    }
+
+    @Test
+    void humanTimeout_notIso8601_isRejected() {
+        var config = humanConfig(DiscussionStyle.CUSTOM, List.of(phase("Open", "ALL")), human("h-1", "Hannah"));
+        config.setHumanMemberConfig(new HumanMemberConfig("4 hours", null));
+
+        var problems = AgentGroupStore.humanMemberProblems(config);
+
+        assertEquals(1, problems.size());
+        assertTrue(problems.get(0).contains("ISO-8601"), problems.toString());
+    }
+
+    @Test
+    void humanTimeout_zeroOrNegative_isRejected() {
+        // Duration.parse accepts both; armed, they would fire effectively
+        // immediately and silently skip every human turn.
+        for (String bad : new String[]{"PT0S", "PT-4H"}) {
+            var config = humanConfig(DiscussionStyle.CUSTOM, List.of(phase("Open", "ALL")), human("h-1", "Hannah"));
+            config.setHumanMemberConfig(new HumanMemberConfig(bad, null));
+
+            var problems = AgentGroupStore.humanMemberProblems(config);
+
+            assertEquals(1, problems.size(), bad);
+            assertTrue(problems.get(0).contains("positive"), problems.toString());
+        }
+    }
+
     @Test
     void nonVotePhases_areNeverTouchedByVoteValidation() {
         assertDoesNotThrow(() -> AgentGroupStore.validateVotePhases(config(DiscussionStyle.CUSTOM,
                 List.of(phase("Open", "ALL")), null)));
         assertDoesNotThrow(() -> AgentGroupStore.validateVotePhases(config(DiscussionStyle.DEBATE, null, null)));
+    }
+
+    @Test
+    void humanValidation_nullMembersList_neverNPEs() {
+        var config = config(DiscussionStyle.CUSTOM, List.of(phase("Open", "ALL")), "mod");
+        config.setMembers(null);
+
+        assertTrue(AgentGroupStore.humanMemberProblems(config).isEmpty());
+        assertFalse(AgentGroupStore.hasHumanMembers(config));
+    }
+
+    @Test
+    void agentOnlyGroups_produceNoHumanProblems() {
+        assertTrue(AgentGroupStore.humanMemberProblems(config(DiscussionStyle.TASK_FORCE, null, null)).isEmpty(),
+                "the whole matrix only applies when a HUMAN member exists");
+        assertFalse(AgentGroupStore.hasHumanMembers(config(DiscussionStyle.CUSTOM, null, null)));
+        assertTrue(AgentGroupStore.hasHumanMembers(humanConfig(DiscussionStyle.CUSTOM, null, human("h", "H"))));
     }
 }

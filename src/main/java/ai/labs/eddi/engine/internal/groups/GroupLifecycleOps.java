@@ -36,6 +36,8 @@ import io.micrometer.core.instrument.Counter;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -138,7 +140,8 @@ public class GroupLifecycleOps {
             // schedule fires against a deleted conversation, ephemeral dynamic
             // agents stay deployed forever, and the signing guard's verification
             // cursor leaks.
-            if (gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
+            if (gc.getState() == GroupConversationState.AWAITING_APPROVAL
+                    || gc.getState() == GroupConversationState.AWAITING_HUMAN_INPUT) {
                 groupConversationService.deleteGroupHitlTimeoutSchedule(groupConversationId);
                 groupConversationService.cleanupAfterTerminalState(gc);
             }
@@ -492,7 +495,19 @@ public class GroupLifecycleOps {
         // The groupId filter is applied in the QUERY (not post-limit), so a busy
         // deployment cannot push this group's items past the limit window.
         int clamped = Math.max(1, Math.min(limit, 1000));
-        return conversationStore.findByState(GroupConversationState.AWAITING_APPROVAL, groupId, clamped).stream()
+        // I6: pending human turns join the SAME inbox — pauseType "HUMAN_TURN"
+        // (plus pendingMemberId) is the kind discriminator; no third inbox. Both
+        // states are queried with the FULL limit and merged oldest-pause-first,
+        // then capped — filling the window with approvals before ever querying
+        // human turns would starve exactly the entries a member's own inbox
+        // filter needs to see.
+        var pending = new ArrayList<>(
+                conversationStore.findByState(GroupConversationState.AWAITING_APPROVAL, groupId, clamped));
+        pending.addAll(conversationStore.findByState(GroupConversationState.AWAITING_HUMAN_INPUT, groupId, clamped));
+        pending.sort(Comparator.comparing(GroupConversation::getPausedAt,
+                Comparator.nullsLast(Comparator.naturalOrder())));
+        return pending.stream()
+                .limit(clamped)
                 .map(gc -> {
                     var summary = new PendingApprovalSummary(
                             gc.getId(), null, gc.getUserId(), gc.getPausedAt(),
@@ -500,6 +515,12 @@ public class GroupLifecycleOps {
                             gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy().name() : null);
                     summary.setGroupId(gc.getGroupId());
                     summary.setApprovalTimeout(gc.getHitlApprovalTimeout());
+                    if (gc.getHitlPauseType() != null) {
+                        summary.setPauseType(gc.getHitlPauseType().name());
+                    }
+                    if (gc.getPendingHumanInput() != null) {
+                        summary.setPendingMemberId(gc.getPendingHumanInput().memberId());
+                    }
                     return summary;
                 })
                 .toList();

@@ -272,4 +272,27 @@ class MemberTurnExecutorTest {
         assertEquals(0.42, gc.getMemberCosts().get("sub-group-1"));
         assertEquals(0.42, gc.getTotalCost());
     }
+
+    /**
+     * I6 defense in depth: the phase loops intercept HUMAN speakers BEFORE this
+     * method and pause the discussion — any caller reaching it with a human
+     * (convergence judge, dissent round, task-force wave, nested group) is an
+     * automated context that cannot pause, and gets a SKIPPED entry instead of an
+     * attempted LLM call against a person.
+     */
+    @Test
+    void executeAgentTurn_humanMember_skippedInAutomatedContexts() throws Exception {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        var human = new GroupMember("h-1", "Hannah", 1, null, MemberType.HUMAN);
+
+        var entry = executor().executeAgentTurn(human, gc, "input", protocol(MemberFailurePolicy.SKIP), 0,
+                phase(PhaseType.OPINION), null, null);
+
+        assertEquals(TranscriptEntryType.SKIPPED, entry.type());
+        assertEquals("h-1", entry.speakerAgentId());
+        assertEquals("Hannah", entry.speakerDisplayName());
+        assertTrue(entry.errorReason().contains("Human member"), entry.errorReason());
+    }
 }

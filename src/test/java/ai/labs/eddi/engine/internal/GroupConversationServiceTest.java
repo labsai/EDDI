@@ -303,6 +303,26 @@ class GroupConversationServiceTest {
         }
 
         @Test
+        void moderator_whoIsAHumanMember_keepsHumanTypeAndName() throws Exception {
+            var phase = new DiscussionPhase("Synth", PhaseType.SYNTHESIS, "MODERATOR",
+                    AgentGroupConfiguration.TurnOrder.SEQUENTIAL, AgentGroupConfiguration.ContextScope.FULL,
+                    false, null, 1);
+            var members = List.of(
+                    new GroupMember("a1", "Alice", 1, "MEMBER"),
+                    new GroupMember("h-1", "Hannah", 2, null, AgentGroupConfiguration.MemberType.HUMAN));
+
+            List<GroupMember> result = invoke(phase, members, "h-1");
+
+            assertEquals(1, result.size());
+            assertEquals("h-1", result.get(0).agentId());
+            // I6: the 4-arg ctor synthesized a fresh AGENT-typed moderator, silently
+            // demoting a HUMAN — their synthesis turn then went to a (nonexistent)
+            // LLM agent instead of pausing for their input.
+            assertEquals(AgentGroupConfiguration.MemberType.HUMAN, result.get(0).memberType());
+            assertEquals("Hannah", result.get(0).displayName());
+        }
+
+        @Test
         void moderator_withNullModerator_picksOneDeterministicSynthesizer() throws Exception {
             var phase = new DiscussionPhase("Synth", PhaseType.SYNTHESIS, "MODERATOR",
                     AgentGroupConfiguration.TurnOrder.SEQUENTIAL, AgentGroupConfiguration.ContextScope.FULL,

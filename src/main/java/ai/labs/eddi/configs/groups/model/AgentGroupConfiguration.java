@@ -92,6 +92,21 @@ public class AgentGroupConfiguration {
     }
 
     /**
+     * How HUMAN members' turns are timed out (I6). {@code null} means wait
+     * indefinitely — the same thing a default-constructed {@link HumanMemberConfig}
+     * means.
+     */
+    private HumanMemberConfig humanMemberConfig;
+
+    public HumanMemberConfig getHumanMemberConfig() {
+        return humanMemberConfig;
+    }
+
+    public void setHumanMemberConfig(HumanMemberConfig humanMemberConfig) {
+        this.humanMemberConfig = humanMemberConfig;
+    }
+
+    /**
      * Governs agent-filed tasks (I5). The task list is otherwise written only by
      * the PLAN phase and by config, so work an agent <em>discovers</em> while
      * executing — a missing migration, an untested edge case — dies in prose. The
@@ -145,11 +160,17 @@ public class AgentGroupConfiguration {
     }
 
     /**
-     * A member of the group. Members can be individual agents or nested groups.
+     * A member of the group. Members can be individual agents, nested groups, or
+     * humans (I6).
      * <p>
      * For {@code MemberType.GROUP} members, the {@code agentId} field contains the
      * group configuration ID instead. The sub-group runs its own discussion and its
      * synthesized answer becomes this member's response.
+     * <p>
+     * For {@code MemberType.HUMAN} members, {@code agentId} carries the human's
+     * principal id (the identity that may submit their turns) and
+     * {@code displayName} is required at save time — a paused discussion must be
+     * able to say WHO it is waiting on.
      * <p>
      * The optional {@code role} field controls which phases the member participates
      * in (e.g. "DEVIL_ADVOCATE", "PRO", "CON"). If null, the member is a default
@@ -164,13 +185,56 @@ public class AgentGroupConfiguration {
     }
 
     /**
-     * Whether a group member is an individual agent or a nested sub-group.
+     * Whether a group member is an individual agent, a nested sub-group, or a human
+     * (I6).
      */
     public enum MemberType {
         /** An individual EDDI agent. */
         AGENT,
         /** A nested group — runs its own discussion, returns synthesized answer. */
-        GROUP
+        GROUP,
+        /**
+         * A human — their turn pauses the discussion ({@code
+         * AWAITING_HUMAN_INPUT}) until they submit a response or the group's
+         * {@code humanMemberConfig} timeout policy resolves the turn (I6).
+         */
+        HUMAN
+    }
+
+    /**
+     * How the discussion treats HUMAN members' turns (I6). One config for the whole
+     * group: humans on the same team wait under the same rules.
+     *
+     * @param turnTimeout
+     *            ISO-8601 duration a human turn may stay unanswered before
+     *            {@code onTimeout} fires; {@code null} or blank = wait indefinitely
+     * @param onTimeout
+     *            what an expired turn does — defaults to
+     *            {@link OnHumanTimeout#SKIP_TURN}
+     */
+    public record HumanMemberConfig(String turnTimeout, OnHumanTimeout onTimeout) {
+
+        /** Normalization choke point, same shape as {@link GroupTaskConfig}. */
+        public HumanMemberConfig {
+            if (onTimeout == null) {
+                onTimeout = OnHumanTimeout.SKIP_TURN;
+            }
+        }
+
+        /** Wait indefinitely; a timeout would skip the turn if one were set. */
+        public HumanMemberConfig() {
+            this(null, OnHumanTimeout.SKIP_TURN);
+        }
+    }
+
+    /** What an expired human turn does (I6). */
+    public enum OnHumanTimeout {
+        /**
+         * Record a SKIPPED entry ("no response from <name> within <d>") and move on.
+         */
+        SKIP_TURN,
+        /** Cancel the discussion. */
+        ABORT
     }
 
     // --- Discussion Style ---

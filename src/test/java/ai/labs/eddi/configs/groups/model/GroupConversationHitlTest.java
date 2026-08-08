@@ -49,9 +49,10 @@ class GroupConversationHitlTest {
         void valuesContainAllExpected() {
             var values = GroupConversationState.values();
             // CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED, CANCELLED,
-            // AWAITING_APPROVAL, CLOSED (CLOSED added by the group follow-up feature)
-            assertEquals(8, values.length);
+            // AWAITING_APPROVAL, AWAITING_HUMAN_INPUT (I6), CLOSED
+            assertEquals(9, values.length);
             assertEquals(GroupConversationState.CLOSED, GroupConversationState.valueOf("CLOSED"));
+            assertEquals(GroupConversationState.AWAITING_HUMAN_INPUT, GroupConversationState.valueOf("AWAITING_HUMAN_INPUT"));
         }
     }
 
@@ -74,9 +75,10 @@ class GroupConversationHitlTest {
         }
 
         @Test
-        @DisplayName("values() has exactly 2 members")
+        @DisplayName("values() has exactly 3 members")
         void valuesCount() {
-            assertEquals(2, HitlPauseType.values().length);
+            assertEquals(3, HitlPauseType.values().length);
+            assertNotNull(HitlPauseType.valueOf("HUMAN_TURN"));
         }
     }
 

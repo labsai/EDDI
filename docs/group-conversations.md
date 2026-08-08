@@ -204,6 +204,49 @@ peer-hidden until their phase completes (commit-reveal).
 - The result fires the `decision_reached` SSE event (which this feature also
   wires for debate verdicts) and renders a tally block in Slack.
 
+## Humans as group members (I6)
+
+Real deployments are hybrid teams: a `memberType: "HUMAN"` member sits in the
+roster like any agent, but their turn **pauses the discussion**
+(`AWAITING_HUMAN_INPUT`) until they answer.
+
+```json
+{
+  "members": [
+    { "agentId": "agent-1", "displayName": "Analyst", "speakingOrder": 1 },
+    { "agentId": "gregor@example.com", "displayName": "Gregor", "speakingOrder": 2, "memberType": "HUMAN" }
+  ],
+  "humanMemberConfig": { "turnTimeout": "PT4H", "onTimeout": "SKIP_TURN" }
+}
+```
+
+- The human's `agentId` is their **principal id** — the identity that may submit
+  their turns; `displayName` is required at save time.
+- Their prompt is rendered exactly like an agent's and persisted on the
+  conversation (`pendingHumanInput.renderedPrompt`); the `human_input_requested`
+  SSE event (and a Slack notice) says who is up.
+- Submission: `POST /groups/{groupId}/conversations/{id}/human-input`
+  `{memberId, content}` or MCP `submit_group_human_input`. **Only the member's
+  own principal (or an admin) may submit** — an `eddi-approver` may decide
+  approvals, but speaking as another human is impersonation, not review. The
+  answer is recorded as the phase's natural entry type (a human OPINION is an
+  OPINION) and the discussion resumes from the next speaker.
+- This is deliberately NOT the approval surface: approve/reject endpoints never
+  accept free text, and the pending-approvals inbox marks these entries
+  `pauseType: "HUMAN_TURN"` with the member's id, so a human sees their own
+  pending turns without owning the conversation.
+- **Timeouts** (`humanMemberConfig`): `turnTimeout` (ISO-8601; unset = wait
+  indefinitely) with `onTimeout: SKIP_TURN` (a SKIPPED entry — "no response from
+  <name> within <window>" — and the discussion moves on) or `ABORT` (graceful
+  cancel). Timeout schedules survive restarts via the HITL crash-recovery sweep.
+- **PARALLEL phases**: agents fan out first; humans are then prompted one at a
+  time against the *pre-fan-out* snapshot, so an independent round stays
+  independent — a human answering after the agents cannot read their answers.
+- **v1 bounds (save-time rejected)**: no HUMAN members in task-force groups
+  (PLAN/EXECUTE/VERIFY) or `targetEachPeer` phases, and a group containing
+  humans cannot be nested as a GROUP member. A human **moderator** is allowed —
+  every synthesis then waits on that person (the save warns about it).
+
 ## Nested Groups (Group-of-Groups)
 
 Members can be other groups. The sub-group runs its own discussion and its synthesized answer becomes the member's response.

@@ -32,6 +32,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.Counter;
 import org.jboss.logging.Logger;
 
@@ -288,7 +289,9 @@ public class GroupHitlCoordinator {
      */
     public void removeTokenAndConvertIfSignalled(GroupConversation gc, GroupDiscussionEventListener listener) {
         var removed = activeTokens.remove(gc.getId());
-        if (removed != null && removed.isCancelled() && gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
+        if (removed != null && removed.isCancelled()
+                && (gc.getState() == GroupConversationState.AWAITING_APPROVAL
+                        || gc.getState() == GroupConversationState.AWAITING_HUMAN_INPUT)) {
             convertPauseToCancelIfSignalled(gc, listener, removed);
         }
     }
@@ -298,24 +301,32 @@ public class GroupHitlCoordinator {
         if (token == null || !token.isCancelled()) {
             return;
         }
+        // I6: the conversion serves BOTH pause kinds — CAS on whichever paused
+        // state this leg just committed (approval or human turn).
+        final GroupConversationState pausedState = gc.getState() == GroupConversationState.AWAITING_HUMAN_INPUT
+                ? GroupConversationState.AWAITING_HUMAN_INPUT
+                : GroupConversationState.AWAITING_APPROVAL;
         // Only the persist itself may revert the in-memory state. Past the commit
-        // below, CANCELLED is durable, and reverting memory to AWAITING_APPROVAL
+        // below, CANCELLED is durable, and reverting memory to the paused state
         // would make executeDiscussion's finally block read the wrong state: it
-        // skips signingGuard.forgetConversation for AWAITING_APPROVAL (leaking the
+        // skips signingGuard.forgetConversation for paused states (leaking the
         // verification cursor) and only runs cleanupEphemeralAgents for
         // FAILED/CANCELLED — so dynamically created agents would stay deployed.
         // The realistic post-commit thrower is the listener: an SSE sink on a closed
         // stream. It used to sit inside this try.
+        final GroupConversation.PendingHumanInput savedPending = gc.getPendingHumanInput();
         try {
             gc.setState(GroupConversationState.CANCELLED);
             gc.setPausedAt(null);
+            gc.setPendingHumanInput(null);
             gc.setLastModified(Instant.now());
-            conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+            conversationStore.updateIfState(gc, pausedState);
         } catch (IResourceStore.ResourceModifiedException e) {
             // Someone else moved the state concurrently (approve/timeout) — restore
             // the in-memory state so the executeDiscussion finally block does not
             // release paused-state resources for a conversation still paused in DB.
-            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setState(pausedState);
+            gc.setPendingHumanInput(savedPending);
             LOGGER.infof("Pause→cancel conversion for GC %s lost a state race — leaving persisted state", gc.getId());
             return;
         } catch (IGroupConversationStore.GroupConversationGoneException e) {
@@ -323,7 +334,8 @@ public class GroupHitlCoordinator {
             LOGGER.infof("Pause→cancel conversion for GC %s skipped — conversation was deleted", gc.getId());
             return;
         } catch (Exception e) {
-            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setState(pausedState);
+            gc.setPendingHumanInput(savedPending);
             LOGGER.warnf("Failed to convert just-committed pause of GC %s to CANCELLED: %s",
                     gc.getId(), e.getMessage());
             return;
@@ -441,9 +453,11 @@ public class GroupHitlCoordinator {
             LOGGER.infof("Cancel skipped: GC %s already in terminal state %s", conversationId, state);
             return false;
         }
-        boolean wasPaused = state == GroupConversationState.AWAITING_APPROVAL;
+        boolean wasPaused = state == GroupConversationState.AWAITING_APPROVAL
+                || state == GroupConversationState.AWAITING_HUMAN_INPUT;
         gc.setState(GroupConversationState.CANCELLED);
         gc.setPausedAt(null); // keep isPaused() consistent with the terminal state
+        gc.setPendingHumanInput(null); // I6: a cancelled turn is no longer owed
         gc.setLastModified(Instant.now());
         try {
             conversationStore.updateIfState(gc, state);
@@ -762,7 +776,16 @@ public class GroupHitlCoordinator {
                 // the pause instead, mirroring the phase-name drift branch above.
                 // Independent of savedPhaseName: a resumePoint's own phaseIdx is the
                 // authority for which phase's roster to check.
-                if (savedResumePoint != null) {
+                // I6 scoping: this guard's ">= size means drift" arithmetic is the
+                // APPROVAL bookmark's contract (the bookmarked speaker itself
+                // re-runs, so its index must exist). Human-turn bookmarks cannot
+                // reach this method — their state is AWAITING_HUMAN_INPUT, which
+                // the CAS above rejects — and their advanced (speakerIdx+1)
+                // semantics would false-positive here at the last-speaker
+                // boundary; the executors clamp their indices safely instead.
+                if (savedResumePoint != null
+                        && !GroupConversation.RESUME_KIND_HUMAN_TURN.equals(savedResumePoint.pauseKind())
+                        && !GroupConversation.RESUME_KIND_HUMAN_TURN_PARALLEL.equals(savedResumePoint.pauseKind())) {
                     List<GroupMember> currentSpeakers = savedResumePoint.phaseIdx() < phases.size()
                             // I7: the same roster the phase loop will use, recruits
                             // included — resolving against the config alone would
@@ -901,6 +924,344 @@ public class GroupHitlCoordinator {
             LOGGER.warnf("Group resume of %s failed — pause restored (AWAITING_APPROVAL)", gc.getId());
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to restore group pause after failed resume: %s", gc.getId());
+        }
+    }
+
+    // =================================================================
+    // I6 — human member turns: pause commit, submission, timeout
+    // =================================================================
+
+    /**
+     * Upper bound on one human submission — transcripts are documents, not blobs.
+     */
+    static final int MAX_HUMAN_INPUT_LENGTH = 100_000;
+
+    /**
+     * Commits an {@code AWAITING_HUMAN_INPUT} pause for a HUMAN member's turn (I6).
+     * The commitPause sibling, deliberately NOT folded into it: the states, the
+     * pause payloads, the timeout policies and the resolution surfaces all differ —
+     * sharing a method body would couple what the design keeps apart.
+     *
+     * @param turnCountIncludingThisTurn
+     *            the leg's turn count PLUS ONE for the human turn being paused on —
+     *            the turn is spent when it resolves (submission or SKIP_TURN), and
+     *            the resumed leg's counter is seeded from this bookmark, so
+     *            counting it here is what keeps a human turn from being free
+     * @param entryTypeName
+     *            {@link TranscriptEntryType} name the eventual submission is
+     *            recorded as — the phase's natural type, captured now so a config
+     *            edit while paused cannot re-type the entry
+     */
+    public void commitHumanTurnPause(GroupConversation gc, int phaseIdx, DiscussionPhase phase, int repeatIdx,
+                                     PhaseExecutionEngine.HumanTurnRequired turn, int turnCountIncludingThisTurn,
+                                     String entryTypeName, GroupDiscussionEventListener listener,
+                                     AgentGroupConfiguration config)
+            throws IResourceStore.ResourceStoreException {
+        GroupMember member = turn.member();
+        var humanConfig = config != null && config.getHumanMemberConfig() != null
+                ? config.getHumanMemberConfig()
+                : new AgentGroupConfiguration.HumanMemberConfig();
+
+        gc.setResumePoint(new GroupConversation.ResumePoint(phaseIdx, repeatIdx, turn.speakerIdx(),
+                turn.parallel()
+                        ? GroupConversation.RESUME_KIND_HUMAN_TURN_PARALLEL
+                        : GroupConversation.RESUME_KIND_HUMAN_TURN));
+        gc.setPendingHumanInput(new GroupConversation.PendingHumanInput(
+                member.agentId(), member.displayName(), phaseIdx, repeatIdx, turn.speakerIdx(),
+                entryTypeName, turn.renderedPrompt(), humanConfig.onTimeout().name(), Instant.now()));
+        gc.setState(GroupConversationState.AWAITING_HUMAN_INPUT);
+        gc.setPausedAt(Instant.now());
+        gc.setPausedAtPhaseIndex(phaseIdx);
+        gc.setPausedPhaseName(phase.name());
+        gc.setPausedTurnCount(turnCountIncludingThisTurn);
+        gc.setHitlPauseType(HitlPauseType.HUMAN_TURN);
+        gc.setHitlPauseReason("Waiting for input from " + member.displayName() + " — phase: " + phase.name());
+        // The ISO-8601 duration rides the shared bookmark field (REST visibility +
+        // crash-recovery re-arm); the SKIP_TURN/ABORT policy rides the pending
+        // record — it is not a HitlTimeoutPolicy and must not pretend to be one.
+        gc.setHitlApprovalTimeout(humanConfig.turnTimeout());
+        gc.setHitlTimeoutPolicy(null);
+        conversationStore.update(gc);
+
+        scheduleHumanTurnTimeout(gc);
+        counterGroupHitlPause.increment();
+
+        if (listener != null) {
+            listener.onHumanInputRequested(new GroupConversationEventSink.HumanInputRequestedEvent(
+                    member.agentId(), member.displayName(), phaseIdx, phase.name()));
+        }
+        LOGGER.infof("Group discussion %s paused for human input from member '%s' at phase %d",
+                LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(member.agentId()), phaseIdx);
+    }
+
+    /**
+     * One-shot timeout schedule for a human turn. Same schedule NAME as the
+     * approval timeout (one armed timeout per conversation, ever), but surface
+     * {@code group-human} and a SKIP_TURN/ABORT policy string — the fire handler
+     * branches on the surface before it ever parses a {@code HitlTimeoutPolicy}.
+     */
+    public void scheduleHumanTurnTimeout(GroupConversation gc) {
+        try {
+            var pending = gc.getPendingHumanInput();
+            String timeoutStr = gc.getHitlApprovalTimeout();
+            if (pending == null || timeoutStr == null || timeoutStr.isBlank()) {
+                return; // wait indefinitely
+            }
+            Duration timeout = Duration.parse(timeoutStr);
+            Instant pausedAt = gc.getPausedAt();
+            Instant now = Instant.now();
+            Instant fireAt = pausedAt != null ? pausedAt.plus(timeout) : now.plus(timeout);
+            if (fireAt.isBefore(now)) {
+                fireAt = now.plus(GROUP_HITL_REARM_GRACE);
+            }
+
+            var schedule = new ScheduleConfiguration();
+            schedule.setName(HitlSchedules.groupTimeoutScheduleName(gc.getId()));
+            schedule.setEnabled(true);
+            schedule.setOneTimeAt(fireAt.toString());
+            schedule.setNextFire(fireAt);
+            schedule.setCreatedAt(Instant.now());
+            schedule.setMetadata(Map.of(
+                    HitlSchedules.METADATA_TYPE_KEY, HitlSchedules.METADATA_TYPE_TIMEOUT,
+                    HitlSchedules.METADATA_POLICY_KEY, pending.onTimeout(),
+                    HitlSchedules.METADATA_SURFACE_KEY, HitlSchedules.SURFACE_GROUP_HUMAN,
+                    HitlSchedules.METADATA_CONVERSATION_ID_KEY, gc.getId()));
+            scheduleStore.createSchedule(schedule);
+            LOGGER.infof("Scheduled human-turn timeout for %s at %s (policy: %s)",
+                    LogSanitizer.sanitize(gc.getId()), fireAt, LogSanitizer.sanitize(pending.onTimeout()));
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to schedule human-turn timeout for %s: %s",
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
+        }
+    }
+
+    /**
+     * Records a HUMAN member's submitted response and resumes the discussion (I6).
+     * Validation and the config-drift check run BEFORE any mutation, so a stale
+     * bookmark refuses the submission instead of needing a rollback; the one
+     * failure after the CAS (executor saturation) rolls the append back and
+     * restores the pause.
+     */
+    public GroupConversation submitHumanInput(String groupConversationId, String memberId, String content,
+                                              String submittedBy, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException,
+            IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+        var gc = GroupConversationSchemaMigrations.prepareForResume(conversationStore.read(groupConversationId));
+        if (gc.getState() != GroupConversationState.AWAITING_HUMAN_INPUT) {
+            throw new GroupDiscussionException("Group conversation is not awaiting human input");
+        }
+        var pending = gc.getPendingHumanInput();
+        if (pending == null) {
+            throw new GroupDiscussionException(
+                    "Group conversation is awaiting human input but records no pending turn — cancel the discussion");
+        }
+        if (memberId == null || !memberId.equals(pending.memberId())) {
+            throw new IllegalArgumentException(
+                    "This conversation is waiting on member '" + pending.memberId() + "'");
+        }
+        if (content == null || content.isBlank()) {
+            throw new IllegalArgumentException("Content must not be blank");
+        }
+        if (content.length() > MAX_HUMAN_INPUT_LENGTH) {
+            throw new IllegalArgumentException(
+                    "Content exceeds the maximum length of " + MAX_HUMAN_INPUT_LENGTH + " characters");
+        }
+        return resolveHumanTurn(gc, pending, content, null, submittedBy, listener);
+    }
+
+    /**
+     * SKIP_TURN timeout resolution: the turn resolves to a SKIPPED entry ("no
+     * response within the configured window") and the discussion moves on — the
+     * same resume path a submission takes, with a different entry.
+     */
+    public void skipHumanTurnOnTimeout(String groupConversationId) {
+        try {
+            var gc = GroupConversationSchemaMigrations.prepareForResume(conversationStore.read(groupConversationId));
+            if (gc.getState() != GroupConversationState.AWAITING_HUMAN_INPUT || gc.getPendingHumanInput() == null) {
+                LOGGER.infof("Human-turn timeout for %s skipped — no longer awaiting human input", groupConversationId);
+                return;
+            }
+            var pending = gc.getPendingHumanInput();
+            String reason = "No response from " + pending.displayName()
+                    + (gc.getHitlApprovalTimeout() != null ? " within " + gc.getHitlApprovalTimeout() : "");
+            resolveHumanTurn(gc, pending, null, reason, "system:timeout", null);
+            LOGGER.infof("Human turn for %s timed out (SKIP_TURN) — member '%s' skipped",
+                    groupConversationId, pending.memberId());
+        } catch (Exception e) {
+            LOGGER.errorf(e, "Failed to skip timed-out human turn for %s", groupConversationId);
+        }
+    }
+
+    /**
+     * The shared resolution path: append the turn's entry (the submission, or a
+     * SKIPPED record), advance the bookmark past the answered speaker, CAS out of
+     * AWAITING_HUMAN_INPUT, and re-enter the discussion on a background thread.
+     */
+    private GroupConversation resolveHumanTurn(GroupConversation gc, GroupConversation.PendingHumanInput pending,
+                                               String content, String skipReason, String resolvedBy,
+                                               GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException,
+            IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+        String groupConversationId = gc.getId();
+
+        // Config + drift check BEFORE any mutation.
+        IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(gc.getGroupId());
+        if (currentGroupId == null) {
+            throw new IResourceStore.ResourceNotFoundException("Group not found.");
+        }
+        AgentGroupConfiguration groupConfig = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
+        List<DiscussionPhase> phases = groupConversationService.resolvePhases(groupConfig);
+        GroupConversation.ResumePoint bookmark = gc.getResumePoint();
+        if (bookmark == null || bookmark.phaseIdx() != pending.phaseIdx()) {
+            throw new GroupDiscussionException(
+                    "The paused turn's bookmark is missing or inconsistent — cancel the discussion");
+        }
+        if (pending.phaseIdx() >= phases.size()
+                || (gc.getPausedPhaseName() != null
+                        && !gc.getPausedPhaseName().equals(phases.get(pending.phaseIdx()).name()))) {
+            throw new GroupDiscussionException(
+                    "Group config changed while paused — the bookmarked phase no longer matches; fix the config or cancel");
+        }
+
+        TranscriptEntry entry;
+        if (skipReason != null) {
+            entry = new TranscriptEntry(pending.memberId(), pending.displayName(), null, pending.phaseIdx(),
+                    phases.get(pending.phaseIdx()).name(), TranscriptEntryType.SKIPPED, Instant.now(), skipReason, null);
+        } else {
+            TranscriptEntryType entryType;
+            try {
+                entryType = TranscriptEntryType.valueOf(pending.entryType());
+            } catch (Exception e) {
+                // hand-edited or legacy — a mis-typed entry beats a refused turn
+                LOGGER.warnf("Pending human turn for %s carries unknown entry type '%s' — recording as OPINION",
+                        groupConversationId, pending.entryType());
+                entryType = TranscriptEntryType.OPINION;
+            }
+            entry = new TranscriptEntry(pending.memberId(), pending.displayName(), content, pending.phaseIdx(),
+                    phases.get(pending.phaseIdx()).name(), entryType, Instant.now(), null, null);
+        }
+
+        // Saved for the one rollback path below (executor saturation).
+        final Instant savedPausedAt = gc.getPausedAt();
+        final String savedPausedPhaseName = gc.getPausedPhaseName();
+        final int savedPausedPhaseIdx = gc.getPausedAtPhaseIndex();
+        final String savedApprovalTimeout = gc.getHitlApprovalTimeout();
+        final String savedPauseReason = gc.getHitlPauseReason();
+
+        gc.getTranscript().add(entry);
+        // Advance past the answered speaker; RESUME_KIND is preserved so a
+        // parallel tail resumes as a parallel tail.
+        gc.setResumePoint(new GroupConversation.ResumePoint(pending.phaseIdx(), pending.repeatIdx(),
+                pending.speakerIdx() + 1, bookmark.pauseKind()));
+        gc.setPendingHumanInput(null);
+        gc.setPausedAt(null);
+        gc.setPausedAtPhaseIndex(-1);
+        gc.setPausedPhaseName(null);
+        gc.setHitlPauseType(null);
+        gc.setHitlPauseReason(null);
+        gc.setHitlTimeoutPolicy(null);
+        gc.setHitlApprovalTimeout(null);
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        gc.setLastModified(Instant.now());
+        // Double-submit / concurrent-cancel race → ResourceModifiedException → 409.
+        conversationStore.updateIfState(gc, GroupConversationState.AWAITING_HUMAN_INPUT);
+
+        // Same post-CAS order as resumeDiscussion: token first (a racing cancel
+        // must find a signalable token), then the schedule. The metric, the audit
+        // entry and the resume event are deliberately deferred until the resume is
+        // actually ENQUEUED below — a submit failure rolls the pause back, and a
+        // rolled-back attempt must not pollute the resume metric or the EU-AI-Act
+        // audit trail (the same rule resumeDiscussion follows).
+        activeTokens.put(gc.getId(), new DiscussionControlToken());
+        deleteGroupHitlTimeoutSchedule(groupConversationId);
+
+        final int startFromPhase = pending.phaseIdx();
+        var question = gc.getResumeQuestion() != null ? gc.getResumeQuestion() : gc.getOriginalQuestion();
+        Runnable resumeWork = () -> {
+            try {
+                groupConversationService.executeDiscussion(gc, groupConfig, phases, question, listener, startFromPhase);
+            } catch (Exception e) {
+                // executeDiscussion persisted the terminal state itself.
+                LOGGER.errorf(e, "Resumed group discussion %s failed after human turn resolution", groupConversationId);
+            }
+        };
+        try {
+            executorService.submit(callerIdentityContext.withIdentity(callerIdentityContext.captureOrCurrent(), resumeWork));
+        } catch (RuntimeException e) {
+            // No thread will run the resume — roll the append back and restore the
+            // pause, so the member's turn is not silently swallowed.
+            LOGGER.errorf(e, "Could not schedule resumed discussion %s after human turn — restoring the pause",
+                    groupConversationId);
+            synchronized (gc.getTranscript()) {
+                gc.getTranscript().remove(entry);
+            }
+            gc.setResumePoint(bookmark);
+            gc.setPendingHumanInput(pending);
+            gc.setState(GroupConversationState.AWAITING_HUMAN_INPUT);
+            gc.setPausedAt(savedPausedAt);
+            gc.setPausedAtPhaseIndex(savedPausedPhaseIdx);
+            gc.setPausedPhaseName(savedPausedPhaseName);
+            gc.setHitlPauseType(HitlPauseType.HUMAN_TURN);
+            gc.setHitlPauseReason(savedPauseReason);
+            gc.setHitlApprovalTimeout(savedApprovalTimeout);
+            gc.setLastModified(Instant.now());
+            try {
+                conversationStore.updateIfState(gc, GroupConversationState.IN_PROGRESS);
+                scheduleHumanTurnTimeout(gc);
+            } catch (Exception restoreEx) {
+                LOGGER.errorf(restoreEx, "Failed to restore human pause for %s", groupConversationId);
+            }
+            // Remove-and-recheck, not a plain remove: a cancel signalled between
+            // the token registration above and this rollback would otherwise be
+            // dropped with the discarded token, leaving a "cancelled" discussion
+            // restored to AWAITING_HUMAN_INPUT with an armed timer.
+            removeTokenAndConvertIfSignalled(gc, listener);
+            throw new GroupDiscussionException("Could not schedule the resumed discussion — try again", e);
+        }
+
+        // The resume is committed and enqueued — now count it, audit it, and tell
+        // SSE subscribers the discussion is live again.
+        counterGroupHitlResume.increment();
+        auditHumanTurnResolution(gc, pending, resolvedBy, skipReason != null);
+        if (listener != null) {
+            listener.onHitlResume(new GroupConversationEventSink.HitlResumeEvent(
+                    skipReason != null ? "HUMAN_TURN_SKIPPED" : "HUMAN_INPUT", null, resolvedBy));
+        }
+
+        // A freshly-read copy, not the live instance: resumeWork mutates gc on a
+        // background thread (transcript appends, cost maps) while the caller
+        // serializes the return value — handing back the live object is a
+        // serialization-time race.
+        try {
+            return conversationStore.read(groupConversationId);
+        } catch (Exception e) {
+            LOGGER.debugf("Post-resume re-read of %s failed (%s) — returning the pre-resume snapshot state",
+                    groupConversationId, e.getMessage());
+            return gc;
+        }
+    }
+
+    /** Audit entry for a human turn's resolution (submission or timeout skip). */
+    private void auditHumanTurnResolution(GroupConversation gc, GroupConversation.PendingHumanInput pending,
+                                          String resolvedBy, boolean skipped) {
+        if (auditLedgerService == null || !auditLedgerService.isEnabled()) {
+            return;
+        }
+        try {
+            var detail = new LinkedHashMap<String, Object>();
+            detail.put("verdict", skipped ? "HUMAN_TURN_SKIPPED" : "HUMAN_INPUT_SUBMITTED");
+            detail.put("memberId", pending.memberId());
+            detail.put("decidedBy", resolvedBy != null ? resolvedBy : "unknown");
+            detail.put("automated", resolvedBy != null && resolvedBy.startsWith("system:"));
+            detail.put("surface", "group");
+            auditLedgerService.submit(new AuditEntry(
+                    UUID.randomUUID().toString(), gc.getId(), gc.getGroupId(), null, gc.getUserId(),
+                    null, -1, "hitl.approval", "hitl", -1, 0L,
+                    Map.of(), detail, null, null, List.of(), 0.0,
+                    Instant.now(), null, null));
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to submit human-turn audit entry for group conversation %s: %s",
+                    gc.getId(), e.getMessage());
         }
     }
 

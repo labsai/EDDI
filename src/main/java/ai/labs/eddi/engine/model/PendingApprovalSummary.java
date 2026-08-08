@@ -22,10 +22,21 @@ public class PendingApprovalSummary {
     private String timeoutPolicy;
     /** ISO-8601 duration of the configured approval timeout (may be null). */
     private String approvalTimeout;
-    /** null/"RULE" = behavior-rule pause, "TOOL_CALL" = gated tool pause. */
+    /**
+     * null/"RULE" = behavior-rule pause, "TOOL_CALL" = gated tool pause; group
+     * pauses carry "PHASE"/"TASK", and "HUMAN_TURN" (I6) marks a pending human
+     * member turn — the inbox's kind discriminator, per the plan's "no third inbox"
+     * rule.
+     */
     private String pauseType;
     /** Names only (no arguments) of the gated tool calls — badges inbox lists. */
     private List<String> toolNames;
+    /**
+     * The HUMAN member a "HUMAN_TURN" pause is waiting on (I6) — lets that member's
+     * own inbox surface the turn even though they do not own the conversation.
+     * {@code null} for every other pause kind.
+     */
+    private String pendingMemberId;
 
     public PendingApprovalSummary() {
     }
@@ -101,5 +112,11 @@ public class PendingApprovalSummary {
     }
     public void setToolNames(List<String> toolNames) {
         this.toolNames = toolNames;
+    }
+    public String getPendingMemberId() {
+        return pendingMemberId;
+    }
+    public void setPendingMemberId(String pendingMemberId) {
+        this.pendingMemberId = pendingMemberId;
     }
 }

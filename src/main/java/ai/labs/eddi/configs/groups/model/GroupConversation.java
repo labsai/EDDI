@@ -169,13 +169,18 @@ public class GroupConversation {
     private String hitlPauseReason;
     /**
      * Where inside a SEQUENTIAL phase's speaker list a pause landed (Wave 0, F2).
-     * {@code null} for every pause today — {@code PHASE} and {@code TASK} pauses
-     * (the only kinds that exist) both land at a phase/task boundary, never
-     * mid-speaker-list. Exists for I6 (human as a group member), which pauses
-     * between one speaker and the next within a running SEQUENTIAL phase; see
-     * {@link ResumePoint}'s own Javadoc for why PARALLEL phases never set this.
+     * {@code null} for {@code PHASE} and {@code TASK} pauses, which land at a
+     * phase/task boundary, never mid-speaker-list. I6's HUMAN_TURN pauses are the
+     * producer: they pause ON a specific speaker within a running phase; see
+     * {@link ResumePoint}'s own Javadoc (and its {@code HUMAN_TURN_PARALLEL}
+     * carve-out) for the resume semantics.
      */
     private ResumePoint resumePoint;
+    /**
+     * The human member's turn an {@code AWAITING_HUMAN_INPUT} pause is waiting on
+     * (I6). Non-null exactly while the state is AWAITING_HUMAN_INPUT.
+     */
+    private PendingHumanInput pendingHumanInput;
     /** Timeout policy copied from config at pause time (Phase 6d). */
     private HitlTimeoutPolicy hitlTimeoutPolicy;
     /**
@@ -390,11 +395,63 @@ public class GroupConversation {
      *            pause landed on; on resume, speakers before this index are skipped
      *            rather than re-run
      * @param pauseKind
-     *            free-text tag for observability (REST/MCP status payloads) — not
-     *            consulted by any resume logic, which keys off this record's mere
-     *            presence rather than what kind of mid-phase pause it names
+     *            which kind of mid-phase pause this bookmark records. For most
+     *            kinds it is a pure observability tag (resume logic keys off this
+     *            record's mere presence), with ONE exception:
+     *            {@link #RESUME_KIND_HUMAN_TURN_PARALLEL} tells the resumed leg
+     *            that {@code speakerIdx} indexes the phase's HUMAN-only sublist and
+     *            that the agent fan-out already ran — the parallel executor then
+     *            skips straight to the remaining human turns instead of re-running
+     *            the fan-out (the sole carve-out from the "PARALLEL never honors a
+     *            bookmark" rule above; see I6)
      */
     public record ResumePoint(int phaseIdx, int repeatIdx, int speakerIdx, String pauseKind) {
+    }
+
+    /** {@link ResumePoint#pauseKind()} of a sequential HUMAN member turn (I6). */
+    public static final String RESUME_KIND_HUMAN_TURN = "HUMAN_TURN";
+
+    /**
+     * {@link ResumePoint#pauseKind()} of a HUMAN turn in a PARALLEL phase (I6):
+     * {@code speakerIdx} indexes the phase's human-only sublist, and the resumed
+     * leg must NOT re-run the agent fan-out.
+     */
+    public static final String RESUME_KIND_HUMAN_TURN_PARALLEL = "HUMAN_TURN_PARALLEL";
+
+    /**
+     * The one turn a paused {@code AWAITING_HUMAN_INPUT} discussion is waiting on
+     * (I6). Persisted with the document so the prompt survives a restart and the
+     * approval/inbox surfaces can display exactly what the member was asked.
+     *
+     * @param memberId
+     *            the HUMAN member's {@code agentId} — the human principal id;
+     *            submissions must come from this principal (or an admin)
+     * @param displayName
+     *            the member's display name, for transcript attribution and UI
+     * @param phaseIdx
+     *            phase the turn belongs to (matches the {@link ResumePoint})
+     * @param repeatIdx
+     *            repeat of that phase
+     * @param speakerIdx
+     *            the member's index — into the phase's resolved speaker list for
+     *            sequential turns, into the human-only sublist for parallel ones
+     * @param entryType
+     *            {@link TranscriptEntryType} name the submitted content is recorded
+     *            as — captured at pause time so a config edit while paused cannot
+     *            re-type the entry (a human OPINION is an OPINION)
+     * @param renderedPrompt
+     *            the phase input rendered for this member exactly as an agent would
+     *            have received it — what the UI shows the human
+     * @param onTimeout
+     *            the group's {@code humanMemberConfig.onTimeout} policy name at
+     *            pause time (SKIP_TURN or ABORT) — bookmarked so crash recovery
+     *            re-arms the same policy the pause promised, config edits
+     *            notwithstanding
+     * @param requestedAt
+     *            when the turn was requested
+     */
+    public record PendingHumanInput(String memberId, String displayName, int phaseIdx, int repeatIdx, int speakerIdx,
+            String entryType, String renderedPrompt, String onTimeout, Instant requestedAt) {
     }
 
     /**
@@ -481,6 +538,14 @@ public class GroupConversation {
         /** Paused for human approval — HITL foundation (Phase 9b). */
         AWAITING_APPROVAL,
         /**
+         * Paused because a HUMAN group member's turn is up (I6). Deliberately NOT
+         * {@link #AWAITING_APPROVAL}: approval endpoints must never accept free text,
+         * and an inbox must be able to tell "approve/reject this" from "you're up".
+         * Resolved only by {@code submitHumanInput} (or its timeout policy) — never by
+         * the approve/resume surface.
+         */
+        AWAITING_HUMAN_INPUT,
+        /**
          * Terminal — member conversations ended, ephemeral agents cleaned up, no
          * further follow-ups.
          */
@@ -488,7 +553,12 @@ public class GroupConversation {
     }
 
     public enum HitlPauseType {
-        PHASE, TASK
+        PHASE, TASK,
+        /**
+         * A HUMAN group member's turn (I6) — see
+         * {@link GroupConversationState#AWAITING_HUMAN_INPUT}.
+         */
+        HUMAN_TURN
     }
 
     // --- Getters/Setters ---
@@ -752,6 +822,9 @@ public class GroupConversation {
             // FAILED and CANCELLED are terminal but closeable — close ends member
             // conversations and reclaims ephemeral agents.
             case FAILED, CANCELLED -> List.of("close");
+            // I6: the one state a human member acts on — the UI switches to an
+            // input prompt instead of approve/reject buttons.
+            case AWAITING_HUMAN_INPUT -> List.of("submitHumanInput");
             case IN_PROGRESS, SYNTHESIZING, CREATED, AWAITING_APPROVAL -> List.of();
             case CLOSED -> List.of();
         };
@@ -825,6 +898,14 @@ public class GroupConversation {
 
     public void setResumePoint(ResumePoint resumePoint) {
         this.resumePoint = resumePoint;
+    }
+
+    public PendingHumanInput getPendingHumanInput() {
+        return pendingHumanInput;
+    }
+
+    public void setPendingHumanInput(PendingHumanInput pendingHumanInput) {
+        this.pendingHumanInput = pendingHumanInput;
     }
 
     public AgentGroupConfiguration.ProtocolConfig.CostPolicy getCostCeilingOutcome() {
