@@ -78,7 +78,7 @@ class TeamCadenceServiceTest {
         workspace.setId("ws-1");
         workspace.setGroupId(GROUP_ID);
         if (cadence != null) {
-            workspace.getCadences().add(cadence);
+            workspace.addCadence(cadence);
         }
         for (TaskItem task : backlogTasks) {
             workspace.getBacklog().addTask(task);

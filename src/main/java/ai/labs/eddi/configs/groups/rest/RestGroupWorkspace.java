@@ -23,7 +23,6 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.time.ZoneId;
-import java.util.ArrayList;
 import java.util.Map;
 import java.util.UUID;
 
@@ -160,7 +159,7 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
 
             var cadence = new Cadence(cadenceId, scheduleId, request.inputTemplate(),
                     request.maxBacklogTasksPerRun(), request.maxCostPerRun(), principal);
-            workspace.getCadences().add(cadence);
+            workspace.addCadence(cadence);
             workspaceStore.update(workspace);
             LOG.infof("Cadence %s created for group %s (schedule %s, cron '%s')", cadenceId, sanitize(groupId),
                     scheduleId, sanitize(request.cronExpression()));
@@ -197,12 +196,10 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
             try {
                 scheduleStore.deleteSchedule(cadence.scheduleRef());
             } catch (Exception e) {
-                LOG.warnf("Could not delete schedule %s for cadence %s: %s", cadence.scheduleRef(), cadenceId,
-                        e.getMessage());
+                LOG.warnf("Could not delete schedule %s for cadence %s: %s", cadence.scheduleRef(),
+                        sanitize(cadenceId), sanitize(e.getMessage()));
             }
-            var remaining = new ArrayList<>(workspace.getCadences());
-            remaining.removeIf(c -> cadenceId.equals(c.cadenceId()));
-            workspace.setCadences(remaining);
+            workspace.removeCadence(cadenceId);
             workspaceStore.update(workspace);
             return Response.noContent().build();
         } catch (IResourceStore.ResourceNotFoundException e) {

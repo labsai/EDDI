@@ -170,7 +170,7 @@ class RestGroupWorkspaceTest {
     @Test
     void deleteCadence_removesScheduleAndCadence() throws Exception {
         var workspace = workspace();
-        workspace.getCadences().add(new Cadence("c-1", "sched-9", null, 5, null, "pm"));
+        workspace.addCadence(new Cadence("c-1", "sched-9", null, 5, null, "pm"));
 
         var response = rest.deleteCadence(GROUP_ID, "c-1");
 

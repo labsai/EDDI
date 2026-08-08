@@ -5,6 +5,14 @@
 
 ---
 
+## 🔎 fix(groups): I13 PR #644 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams`)
+
+All 3 findings (CodeQL ×2, code-quality ×1) accepted and fixed: the workspace-deletion and cadence-deletion logs sanitize their caller-influenced values; `GroupWorkspace.getCadences` returns an unmodifiable view with mutation through new `addCadence`/`removeCadence` (the NegotiationState treatment) — REST layer and tests rewired. Suites (73) green.
+
+---
+
 ## 🏭 feat(groups): I13 — standing teams (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i13-standing-teams` — stacked on the I8 branch: retro lessons flow through I8 unchanged)
