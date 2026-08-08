@@ -1,6 +1,6 @@
 # EDDI Architecture
 
-**Version: 6.2.0**
+[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases)
 
 This document provides a comprehensive overview of EDDI's architecture, design principles, and internal workflow.
 

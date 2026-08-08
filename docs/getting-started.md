@@ -1,6 +1,6 @@
 # Getting started
 
-**Version: 6.2.0**
+[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases)
 
 Welcome to **EDDI**!
 

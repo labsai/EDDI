@@ -52,6 +52,16 @@ guide, code-review standards, build reproducibility and changelog. **`docs/rag.m
 `gemini` embedding provider and `chroma` vector store rows — the code supports 8 and 6, the
 tables listed 7 and 5.
 
+**Version labels no longer hand-maintained.** Twelve docs carried a hardcoded `**Version:
+6.2.0**` header (and `docs/README.md` a `**Latest version: 6.2.0**` line) that had to be
+touched on every release — and had already drifted: `docs/README.md` still said 6.0.0, two
+releases behind. All of them now use the same dynamic shields.io badge the root README uses
+for its release, which reads the latest GitHub release tag and can never go stale:
+`[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases)`.
+Deliberately **not** converted: `**Version: ≥6.0.0**` in `security.md` and the
+`Available since v6.0.0` status lines in `a2a-protocol.md`/`audit-ledger.md` — those are
+historical minimum-version facts, not "the current release", and pinning them is correct.
+
 **`planning/group-collaboration-NEXT.md`**: the queue is empty — every §3 item marked done with
 its PR number, the three implementation-time constraints recorded as deviations, and the two
 §4 gaps that this work closed (`decision_reached` never firing, the doc drift itself) struck
