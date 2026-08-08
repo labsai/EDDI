@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.model;
 
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -237,8 +238,24 @@ public class GroupWorkspace {
         this.metrics = metrics != null ? metrics : new WorkspaceMetrics();
     }
 
+    /**
+     * Read-only view — mutation goes through {@link #addCadence} and
+     * {@link #removeCadence}, so the schedule references cannot be edited behind
+     * the workspace's back.
+     */
     public List<Cadence> getCadences() {
-        return cadences;
+        return Collections.unmodifiableList(cadences);
+    }
+
+    public void addCadence(Cadence cadence) {
+        if (cadence != null) {
+            cadences.add(cadence);
+        }
+    }
+
+    /** @return {@code true} if a cadence with that id existed and was removed */
+    public boolean removeCadence(String cadenceId) {
+        return cadences.removeIf(c -> c.cadenceId().equals(cadenceId));
     }
 
     public void setCadences(List<Cadence> cadences) {

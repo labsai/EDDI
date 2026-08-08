@@ -11,6 +11,7 @@ import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -105,7 +106,7 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
         GroupWorkspace workspace = find(groupId);
         if (workspace != null && workspace.getId() != null) {
             storage.removeAllPermanently(workspace.getId());
-            LOGGER.infof("Deleted workspace for group %s", groupId);
+            LOGGER.infof("Deleted workspace for group %s", LogSanitizer.sanitize(groupId));
         }
     }
 

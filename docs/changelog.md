@@ -177,6 +177,14 @@ Second Wave 3 queue item (adopted from the research review, scoped down — the 
 - Parse discipline mirrors `VoteTallyEngine`: three tiers, FAIL_ON_TRAILING_TOKENS, unknown subjects dropped (an out-of-contract bid is never guessed onto a task), confidence clamped to [0,1], first-bid-per-task within one reply.
 
 **Tests (13 new: 8 `TaskBidEngineTest` + 5 `TaskForceEngineTest`; `engine.internal` + `configs.groups` suites 1694 green; checkstyle clean):** parse tiers + clamping + unknown-subject drop; award to highest confidence; tie-break determinism (speaking order, then agent id); no-bids absence; effective-mode chain; worthwhile-auction caps; blind prompt content; engine-level award with recorded bid + turn accounting + BID entries; **blindness asserted on the captured prompts** (no peer rationale/confidence leaks); no-bids ROLE fallback never stalls; skip-conditions make zero LLM calls; ROLE-mode tasks never auctioned.
+## 🔎 fix(groups): I13 PR #644 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams`)
+
+All 3 findings (CodeQL ×2, code-quality ×1) accepted and fixed: the workspace-deletion and cadence-deletion logs sanitize their caller-influenced values; `GroupWorkspace.getCadences` returns an unmodifiable view with mutation through new `addCadence`/`removeCadence` (the NegotiationState treatment) — REST layer and tests rewired. Suites (73) green.
+
+---
+
 ## 🏭 feat(groups): I13 — standing teams (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i13-standing-teams` — stacked on the I8 branch: retro lessons flow through I8 unchanged)
