@@ -47,13 +47,14 @@ class AgentGroupConfigurationTest {
 
     @Test
     void style_allValues() {
-        assertEquals(7, DiscussionStyle.values().length);
+        assertEquals(8, DiscussionStyle.values().length);
         assertNotNull(DiscussionStyle.valueOf("ROUND_TABLE"));
         assertNotNull(DiscussionStyle.valueOf("PEER_REVIEW"));
         assertNotNull(DiscussionStyle.valueOf("DEVIL_ADVOCATE"));
         assertNotNull(DiscussionStyle.valueOf("DELPHI"));
         assertNotNull(DiscussionStyle.valueOf("DEBATE"));
         assertNotNull(DiscussionStyle.valueOf("TASK_FORCE"));
+        assertNotNull(DiscussionStyle.valueOf("NEGOTIATION"));
         assertNotNull(DiscussionStyle.valueOf("CUSTOM"));
     }
 
@@ -136,7 +137,9 @@ class AgentGroupConfigurationTest {
 
     @Test
     void phaseType_allValues() {
-        assertEquals(12, PhaseType.values().length);
+        assertEquals(14, PhaseType.values().length);
+        assertNotNull(PhaseType.valueOf("PROPOSAL"));
+        assertNotNull(PhaseType.valueOf("BARGAIN"));
         assertNotNull(PhaseType.valueOf("OPINION"));
         assertNotNull(PhaseType.valueOf("CRITIQUE"));
         assertNotNull(PhaseType.valueOf("REVISION"));

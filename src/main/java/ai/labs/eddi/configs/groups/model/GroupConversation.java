@@ -31,11 +31,14 @@ public class GroupConversation {
      * Wave adds a field resume-time logic depends on, and register that version's
      * migration in {@code GroupConversationSchemaMigrations}.
      * <p>
-     * Version 4 (I12): {@link #runtimePhases} — a facilitator-diverged phase list a
-     * resume MUST honor. An older deployment resuming a v4 document would silently
-     * run the config's phases instead, mis-indexing every bookmark into a list the
-     * pause was not taken against — exactly the class of corruption the
-     * newer-than-current refusal exists to prevent.
+     * Version 4 — the 2026-08 group-features release shape, carrying BOTH
+     * resume-critical additions that ship together: {@code runtimePhases} (I12 — a
+     * facilitator-diverged phase list a resume must honor; an older pod would
+     * mis-index every bookmark into the config's list) and {@code negotiationState}
+     * (I11 — an older pod re-saving a paused document would drop the proposals,
+     * signed acceptances and concession ledger). No migration entry for either: v3
+     * documents have neither field and Jackson defaults them correctly (identity
+     * hop).
      */
     public static final int CURRENT_SCHEMA_VERSION = 4;
     /**
@@ -110,6 +113,12 @@ public class GroupConversation {
      * one of those features ran.
      */
     private DecisionRecord decision;
+    /**
+     * The negotiation's proposals + concession ledger (I11). {@code null} until the
+     * first PROPOSAL/BARGAIN phase produces state; persisted with the document so a
+     * pause/resume keeps the table as it stood.
+     */
+    private NegotiationState negotiation;
     private int depth;
     /** Current discussion round (1-based). Incremented by continueDiscussion(). */
     private int round = 1;
@@ -539,6 +548,98 @@ public class GroupConversation {
     }
 
     /**
+     * The negotiation's working state (I11): open/superseded proposals and the
+     * concession ledger. Persisted with the document — the ledger is the record,
+     * quoted back into every bargaining turn (accountability is the anti-sycophancy
+     * mechanism) and into the outcome.
+     * <p>
+     * Lists are copy-on-write for the same reason the roster lists are: Jackson
+     * walks them unguarded on every persist while a turn may append.
+     */
+    public static class NegotiationState {
+
+        private List<Proposal> proposals = new CopyOnWriteArrayList<>();
+        private List<Concession> concessions = new CopyOnWriteArrayList<>();
+
+        /**
+         * Read-only view — all mutation goes through {@link #addProposal},
+         * {@link #replaceProposal} and {@link #addConcession}, so the table cannot be
+         * edited behind the state's back.
+         */
+        public List<Proposal> getProposals() {
+            return Collections.unmodifiableList(proposals);
+        }
+
+        public void setProposals(List<Proposal> proposals) {
+            this.proposals = proposals != null ? new CopyOnWriteArrayList<>(proposals) : new CopyOnWriteArrayList<>();
+        }
+
+        /** Read-only view — see {@link #getProposals}. */
+        public List<Concession> getConcessions() {
+            return Collections.unmodifiableList(concessions);
+        }
+
+        public void setConcessions(List<Concession> concessions) {
+            this.concessions = concessions != null ? new CopyOnWriteArrayList<>(concessions) : new CopyOnWriteArrayList<>();
+        }
+
+        public void addProposal(Proposal proposal) {
+            proposals.add(proposal);
+        }
+
+        /** In-place status/signature transition; a no-op if {@code oldOne} is gone. */
+        public void replaceProposal(Proposal oldOne, Proposal newOne) {
+            int idx = proposals.indexOf(oldOne);
+            if (idx >= 0) {
+                proposals.set(idx, newOne);
+            }
+        }
+
+        public void addConcession(Concession concession) {
+            concessions.add(concession);
+        }
+    }
+
+    /**
+     * One proposal on the negotiation table (I11).
+     *
+     * @param id
+     *            stable id ("p1", "p2", …) — what a BARGAIN turn's {@code accept}
+     *            names
+     * @param byAgentId
+     *            the proposer (implicitly the first acceptor of their own terms)
+     * @param round
+     *            the phase repeat the proposal was made in
+     * @param terms
+     *            the proposal's terms — a String in v1, deliberately untyped
+     * @param status
+     *            OPEN, SUPERSEDED (the proposer made a newer proposal) or REJECTED
+     * @param acceptedBy
+     *            agent ids that accepted these terms
+     * @param acceptanceEntryIndices
+     *            agentId → absolute transcript index of that agent's accepting
+     *            entry. The signed transcript entries ARE the co-signatures — no
+     *            new crypto; these indices are what the AGREEMENT decision quotes
+     *            in {@code tally.signedAcceptances}
+     */
+    public record Proposal(String id, String byAgentId, int round, String terms, String status,
+            List<String> acceptedBy, Map<String, Integer> acceptanceEntryIndices) {
+    }
+
+    /** Proposal status: still on the table. */
+    public static final String PROPOSAL_OPEN = "OPEN";
+    /** Proposal status: replaced by the proposer's own newer proposal. */
+    public static final String PROPOSAL_SUPERSEDED = "SUPERSEDED";
+
+    /**
+     * One ledger line (I11): what an agent gave up, and what they received in
+     * return — every concession must name its counterpart; that structure is what
+     * stops sycophantic instant-agreement.
+     */
+    public record Concession(String byAgentId, int round, String gaveUp, String inReturnFor, String refProposalId) {
+    }
+
+    /**
      * What kind of conclusion a {@link DecisionRecord} represents (Wave 0, F3).
      */
     public enum DecisionType {
@@ -769,6 +870,23 @@ public class GroupConversation {
 
     public void setDecision(DecisionRecord decision) {
         this.decision = decision;
+    }
+
+    public NegotiationState getNegotiation() {
+        return negotiation;
+    }
+
+    public void setNegotiation(NegotiationState negotiation) {
+        this.negotiation = negotiation;
+    }
+
+    /** The negotiation state, created on first use (I11). */
+    @JsonIgnore
+    public NegotiationState negotiationState() {
+        if (negotiation == null) {
+            negotiation = new NegotiationState();
+        }
+        return negotiation;
     }
 
     public int getDepth() {

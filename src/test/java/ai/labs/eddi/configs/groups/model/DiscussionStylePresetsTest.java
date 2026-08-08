@@ -267,6 +267,48 @@ class DiscussionStylePresetsTest {
         assertEquals(PhaseType.SYNTHESIS, phases.get(3).type());
     }
 
+    // --- NEGOTIATION (I11) ---
+
+    @Test
+    void negotiation_produces5Phases_withTheProtocolShape() {
+        List<DiscussionPhase> phases = DiscussionStylePresets.expand(DiscussionStyle.NEGOTIATION, 3);
+
+        assertEquals(5, phases.size());
+
+        // ① Positions & Interests — PARALLEL and context-free: parties state
+        // genuine interests before anchoring on each other.
+        var positions = phases.get(0);
+        assertEquals(PhaseType.OPINION, positions.type());
+        assertEquals(TurnOrder.PARALLEL, positions.turnOrder());
+        assertEquals(ContextScope.NONE, positions.contextScope());
+
+        // ② Opening Proposals
+        var proposals = phases.get(1);
+        assertEquals(PhaseType.PROPOSAL, proposals.type());
+        assertEquals("ALL", proposals.participants());
+
+        // ③ Bargaining — repeats = maxRounds; the loop exits early on agreement.
+        var bargaining = phases.get(2);
+        assertEquals(PhaseType.BARGAIN, bargaining.type());
+        assertEquals(3, bargaining.repeats());
+        assertEquals(TurnOrder.SEQUENTIAL, bargaining.turnOrder());
+
+        // ④ Arbitration — MODERATOR, skipped entirely when agreement was reached,
+        // with its own template (the default SYNTHESIS asks for a balanced
+        // summary; an arbitrator DECIDES).
+        var arbitration = phases.get(3);
+        assertEquals(PhaseType.SYNTHESIS, arbitration.type());
+        assertEquals("MODERATOR", arbitration.participants());
+        assertEquals(AgentGroupConfiguration.PhaseSkipCondition.AGREEMENT_REACHED, arbitration.skipIf());
+        assertEquals(DiscussionStylePresets.TEMPLATE_ARBITRATION, arbitration.inputTemplate());
+
+        // ⑤ Synthesis
+        var synthesis = phases.get(4);
+        assertEquals(PhaseType.SYNTHESIS, synthesis.type());
+        assertEquals("MODERATOR", synthesis.participants());
+        assertNull(synthesis.skipIf(), "only the arbitration is conditional");
+    }
+
     @Test
     void taskForce_turnOrders() {
         List<DiscussionPhase> phases = DiscussionStylePresets.expand(DiscussionStyle.TASK_FORCE, 1);

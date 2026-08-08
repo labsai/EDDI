@@ -369,6 +369,12 @@ public class AgentGroupConfiguration {
         DEBATE,
         /** Collaborative task accomplishment: plan → execute → verify → synthesis. */
         TASK_FORCE,
+        /**
+         * Trade, not win/lose (I11): positions & interests → opening proposals →
+         * bargaining with a concession ledger → arbitration (skipped once an agreement
+         * is reached) → synthesis.
+         */
+        NEGOTIATION,
         /** User defines phases manually. */
         CUSTOM
     }
@@ -385,7 +391,7 @@ public class AgentGroupConfiguration {
      */
     public record DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
             boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
-            boolean allowAbstention, VoteConfig voteConfig) {
+            boolean allowAbstention, VoteConfig voteConfig, PhaseSkipCondition skipIf) {
 
         /**
          * Convenience constructor with defaults: participants=ALL,
@@ -427,15 +433,38 @@ public class AgentGroupConfiguration {
         }
 
         /**
-         * Backward-compatible constructor without {@code voteConfig} (I14) —
-         * {@code null} means a VOTE phase runs with {@link VoteConfig}'s defaults and
-         * every other phase type ignores it entirely.
+         * Backward-compatible constructor without {@code voteConfig} (I14) or
+         * {@code skipIf} (I11) — {@code null}s mean a VOTE phase runs with
+         * {@link VoteConfig}'s defaults and the phase always runs, the behavior of
+         * every phase that predates those items.
          */
         public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
                 boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
                 boolean allowAbstention) {
             this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence,
-                    allowAbstention, null);
+                    allowAbstention, null, null);
+        }
+
+        /**
+         * I14-shaped constructor without {@code skipIf} — what every vote-phase call
+         * site written before the I11 merge uses.
+         */
+        public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
+                boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
+                boolean allowAbstention, VoteConfig voteConfig) {
+            this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence,
+                    allowAbstention, voteConfig, null);
+        }
+
+        /**
+         * I11-shaped constructor without {@code voteConfig} — what every
+         * negotiation-phase call site written before the I14 merge uses.
+         */
+        public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
+                boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
+                boolean allowAbstention, PhaseSkipCondition skipIf) {
+            this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence,
+                    allowAbstention, null, skipIf);
         }
     }
 
@@ -604,7 +633,31 @@ public class AgentGroupConfiguration {
          * matrix mean no ballot can see another cast this phase), not advised in a
          * prompt.
          */
-        VOTE
+        VOTE,
+        /**
+         * An opening offer in a negotiation (I11) — the whole turn is the proposal's
+         * terms.
+         */
+        PROPOSAL,
+        /**
+         * A bargaining turn (I11): accept an open proposal, counter with a new one,
+         * and/or record concessions — a typed JSON contract, parsed by
+         * {@code NegotiationEngine}.
+         */
+        BARGAIN
+    }
+
+    /**
+     * The one phase-skip condition (I11) — deliberately a single enum, not an
+     * expression language: deterministic governance means a phase is skipped for a
+     * reason the engine can PROVE, not one an expression evaluates to.
+     */
+    public enum PhaseSkipCondition {
+        /**
+         * Skip when the discussion already carries an AGREEMENT decision — the
+         * arbitration phase of a negotiation is only needed when bargaining failed.
+         */
+        AGREEMENT_REACHED
     }
 
     public enum TurnOrder {

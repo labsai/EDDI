@@ -16,6 +16,7 @@ Group Conversations enable multiple agents to discuss a question. Each agent par
 | `DELPHI` | Anonymous rounds → convergence → Synthesis | Forecasting, reducing groupthink |
 | `DEBATE` | Pro → Con → Rebuttals → Judge | Trade-off analysis, comparisons |
 | `TASK_FORCE` | Plan → Execute → Verify → Synthesis | Structured task decomposition, parallel execution |
+| `NEGOTIATION` | Positions → Proposals → Bargaining → (Arbitration) → Synthesis | Surfacing trade-offs, drafting compromises |
 | `CUSTOM` | Define your own phases | Any workflow |
 
 ## Quick Start (MCP)
@@ -301,6 +302,36 @@ resume path — approval, human turn, timeout skip — executes and drift-checks
 against that list, so a pause taken inside an inserted phase resumes
 correctly. The divergence is one-off: completion (and every new round) starts
 from the config again.
+## Negotiation (I11)
+
+EDDI's other decision forms are win/lose; `NEGOTIATION` is the **trade** form —
+a process for surfacing trade-offs whose output is a drafted compromise with an
+explicit **concession ledger** for human sign-off.
+
+The preset: ① *Positions & Interests* (parallel, context-free — interests
+enable integrative trades) ② *Opening Proposals* ③ *Bargaining* (repeats =
+`maxRounds`, exits early on agreement) ④ *Arbitration* (moderator; **skipped
+entirely** when an agreement was reached — `skipIf: "AGREEMENT_REACHED"`, the
+single deterministic skip condition) ⑤ *Synthesis*.
+
+- A **BARGAIN** turn is a typed move: `{"accept": "<proposalId>"|null,
+  "proposal": {"terms": "..."}|null, "concessions": [{"gaveUp": "...",
+  "inReturnFor": "..."}]}` plus free-text reasoning. Three-tier parse; an
+  unreadable turn is prose with no state effect.
+- The typed structure is the anti-sycophancy mechanism: an acceptance must name
+  a specific proposal id, a concession that names nothing in return is **not
+  recorded**, and the open proposals + ledger are quoted into every turn — the
+  record the outcome will cite.
+- A new proposal supersedes the mover's own open one (one live offer per
+  agent); the proposer signs their own terms implicitly.
+- **Agreement** = every non-moderator participant signed the same open
+  proposal. The bargaining phase ends its repeats early and the conversation
+  carries `decision: {type: "AGREEMENT", method: "negotiation"}` whose
+  `tally.signedAcceptances` maps each signatory to the transcript index of
+  their signed acceptance entry — the (already signed) entries are the
+  co-signatures; no new crypto.
+- No agreement → the arbitration runs and its conclusion becomes
+  `decision: {type: "VERDICT", method: "arbitration"}`.
 
 ## Nested Groups (Group-of-Groups)
 

@@ -26,6 +26,7 @@ import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
@@ -44,6 +45,7 @@ import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.internal.groups.GroupLifecycleOps;
 import ai.labs.eddi.engine.internal.groups.GroupSigningGuard;
 import ai.labs.eddi.engine.internal.groups.MemberTurnExecutor;
+import ai.labs.eddi.engine.internal.groups.NegotiationEngine;
 import ai.labs.eddi.engine.internal.groups.PhaseExecutionEngine;
 import ai.labs.eddi.engine.internal.groups.PhaseOutcome;
 import ai.labs.eddi.engine.internal.groups.TaskForceEngine;
@@ -688,6 +690,17 @@ public class GroupConversationService implements IGroupConversationService {
                     continue;
                 }
 
+                // I11: the one skip condition — a phase marked skipIf=AGREEMENT_REACHED
+                // (the negotiation's arbitration) is only needed when bargaining
+                // failed; a reached agreement makes it provably redundant. Checked
+                // deterministically against the typed decision, never inferred.
+                if (phase.skipIf() == AgentGroupConfiguration.PhaseSkipCondition.AGREEMENT_REACHED
+                        && gc.getDecision() != null && gc.getDecision().type() == DecisionType.AGREEMENT) {
+                    LOGGER.infof("Group %s: skipping phase '%s' — agreement already reached",
+                            LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(phase.name()));
+                    continue;
+                }
+
                 // I2: the previous repeat's contributions, the baseline the
                 // convergence judge compares against. Scoped to this phase — a
                 // comparison across two different phases would be meaningless.
@@ -868,6 +881,23 @@ public class GroupConversationService implements IGroupConversationService {
                                 repeatEntries, previousRepeatEntries, listener, turnCounter, maxTurns);
                     }
 
+                    // I11: fold this repeat's PROPOSAL/BARGAIN turns into the
+                    // negotiation state, then test for unanimous acceptance — which
+                    // ends the phase's repeats early through the same outcome
+                    // plumbing convergence uses. Applied BEFORE the persist below so
+                    // the table and the turns that produced it share one write.
+                    if (phase.type() == PhaseType.PROPOSAL || phase.type() == PhaseType.BARGAIN) {
+                        NegotiationEngine.applyRepeat(gc, repeatEntries, transcriptSizeBeforeRepeat, repeat);
+                        if (phase.type() == PhaseType.BARGAIN
+                                && NegotiationEngine.checkAndRecordAgreement(gc, speakers, config.getModeratorAgentId(), phase.name())) {
+                            outcome = PhaseOutcome.endRepeats("Unanimous acceptance — agreement reached");
+                            if (listener != null) {
+                                listener.onDecisionReached(
+                                        new GroupConversationEventSink.DecisionReachedEvent(gc.getDecision()));
+                            }
+                        }
+                    }
+
                     // I4: the minority report. Placed AFTER the convergence slice above
                     // and BEFORE the persist below — after, so the DISSENT entries do
                     // not land inside repeatEntries where the convergence judge would
@@ -896,6 +926,17 @@ public class GroupConversationService implements IGroupConversationService {
                         // last-repeat reasoning as below — a draft judgment is not the
                         // decision.
                         boolean verdictRecorded = phaseExecutionEngine.recordDebateVerdict(gc, config, phase, phaseIdx, speakers);
+                        // I11: an arbitration phase (skipIf=AGREEMENT_REACHED) that
+                        // RAN means bargaining failed — its conclusion is the
+                        // discussion's VERDICT. Never overwrites an existing decision;
+                        // `arbitrated` is true only when THIS call set one, so the
+                        // event below cannot re-announce an earlier phase's decision.
+                        boolean arbitrated = false;
+                        if (phase.skipIf() == AgentGroupConfiguration.PhaseSkipCondition.AGREEMENT_REACHED) {
+                            boolean hadDecision = gc.getDecision() != null;
+                            NegotiationEngine.recordArbitration(gc, repeatEntries, phase.name());
+                            arbitrated = !hadDecision && gc.getDecision() != null;
+                        }
                         if (config.isRecordDissents()) {
                             phaseExecutionEngine.runDissentRound(gc, config, phase, protocol, phaseIdx, speakers, listener,
                                     turnCounter, maxTurns);
@@ -903,8 +944,9 @@ public class GroupConversationService implements IGroupConversationService {
                         // I14 fold-in (§4 gap): decision_reached finally has a producer.
                         // Fired AFTER the dissent round so the event's record carries the
                         // merged dissents, and only for a real verdict — a prose-only
-                        // synthesis set no record worth announcing.
-                        if (verdictRecorded) {
+                        // synthesis set no record worth announcing. Covers I11's
+                        // arbitration verdicts through the same late firing.
+                        if (verdictRecorded || arbitrated) {
                             phaseExecutionEngine.fireDecisionReached(gc, listener);
                         }
                     }

@@ -194,6 +194,14 @@ public class GroupContextBuilder {
                 data.put("options", VoteTallyEngine.resolveOptions(voteConfig, transcript));
                 data.put("ballotContract", VoteTallyEngine.ballotContract(voteConfig.method()));
             }
+            case PROPOSAL, BARGAIN -> {
+                // I11: same peer context an OPINION turn gets — the negotiation
+                // TABLE (open proposals + concession ledger) is appended after
+                // rendering by NegotiationEngine.appendStateIfRelevant, because it
+                // lives on the GroupConversation, which this method does not see.
+                List<Map<String, Object>> prev = filterByScope(transcript, phase.contextScope(), phaseIdx, speaker);
+                data.put("previousResponses", prev);
+            }
             default -> {
                 // All PhaseType values handled above; default required by checkstyle
             }
@@ -382,6 +390,8 @@ public class GroupContextBuilder {
             // I14: ballots are VOTE entries — peer-hidden while their phase runs
             // (F4's commit-reveal), public once it completes.
             case VOTE -> TranscriptEntryType.VOTE;
+            case PROPOSAL -> TranscriptEntryType.PROPOSAL;
+            case BARGAIN -> TranscriptEntryType.BARGAIN;
         };
     }
 
