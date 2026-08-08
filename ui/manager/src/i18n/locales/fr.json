@@ -2405,7 +2405,9 @@
     "abstainedBody": "N'a rien ajouté de nouveau ce tour-ci.",
     "convergenceSkipped_one": "· {{count}} tour supplémentaire ignoré",
     "convergenceSkipped_many": "· {{count}} tours supplémentaires ignorés",
-    "convergenceSkipped_other": "· {{count}} tours supplémentaires ignorés"
+    "convergenceSkipped_other": "· {{count}} tours supplémentaires ignorés",
+    "convergenceSkipped": "· {{skipped}} tour(s) supplémentaire(s) ignoré(s)",
+    "attachmentTotalTooLarge": "Les pièces jointes dépassent la taille totale autorisée"
   },
   "taskBoard": {
     "title": "Tableau des tâches",

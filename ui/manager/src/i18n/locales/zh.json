@@ -2398,7 +2398,9 @@
     },
     "abstainedBody": "本轮未补充新内容。",
     "convergenceSkipped_other": "· 已跳过 {{count}} 个后续轮次",
-    "convergenceSkipped_one": "· 已跳过 {{count}} 个后续轮次"
+    "convergenceSkipped_one": "· 已跳过 {{count}} 个后续轮次",
+    "convergenceSkipped": "· 已跳过 {{skipped}} 个后续轮次",
+    "attachmentTotalTooLarge": "附件超出总大小限制"
   },
   "taskBoard": {
     "title": "任务看板",

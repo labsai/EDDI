@@ -2405,7 +2405,9 @@
     "abstainedBody": "No aportó nada nuevo en esta ronda.",
     "convergenceSkipped_one": "· {{count}} ronda adicional omitida",
     "convergenceSkipped_many": "· {{count}} rondas adicionales omitidas",
-    "convergenceSkipped_other": "· {{count}} rondas adicionales omitidas"
+    "convergenceSkipped_other": "· {{count}} rondas adicionales omitidas",
+    "convergenceSkipped": "· {{skipped}} ronda(s) adicional(es) omitida(s)",
+    "attachmentTotalTooLarge": "Los adjuntos superan el límite de tamaño total"
   },
   "taskBoard": {
     "title": "Tablero de tareas",

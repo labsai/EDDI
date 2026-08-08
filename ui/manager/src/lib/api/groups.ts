@@ -655,6 +655,22 @@ export interface GroupAttachmentRef {
 /** Backend `IRestGroupConversation.MAX_ATTACHMENTS_PER_REQUEST`. */
 export const MAX_GROUP_ATTACHMENTS = 50;
 
+/**
+ * Client-side ceiling on the COMBINED size of one request's attachments.
+ *
+ * The backend bounds each file and the file count, but not the total — and the
+ * two interact badly here, because this endpoint takes the bytes inline rather
+ * than by reference. Fifty files at the per-file limit is ~1 GiB held in memory
+ * as base64 (which inflates by a third) and then serialized into a single JSON
+ * body: the tab dies long before the server gets a chance to reject it.
+ *
+ * Necessarily larger than {@link MAX_ATTACHMENT_BYTES}, or a single legal file
+ * could not be attached. 32 MiB (~43 MiB encoded) leaves room for one maximal
+ * file plus several ordinary ones, and stays under the body limit a default
+ * reverse proxy imposes.
+ */
+export const MAX_GROUP_ATTACHMENTS_TOTAL_BYTES = 32 * 1024 * 1024;
+
 /** Backend `IRestGroupConversation.MAX_QUESTION_CHARS`. */
 export const MAX_GROUP_QUESTION_CHARS = 50_000;
 

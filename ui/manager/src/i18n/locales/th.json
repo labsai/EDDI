@@ -2398,7 +2398,9 @@
     },
     "abstainedBody": "ไม่ได้เพิ่มเนื้อหาใหม่ในรอบนี้",
     "convergenceSkipped_other": "· ข้ามอีก {{count}} รอบ",
-    "convergenceSkipped_one": "· ข้ามอีก {{count}} รอบ"
+    "convergenceSkipped_one": "· ข้ามอีก {{count}} รอบ",
+    "convergenceSkipped": "· ข้ามอีก {{skipped}} รอบ",
+    "attachmentTotalTooLarge": "ไฟล์แนบเกินขีดจำกัดขนาดรวม"
   },
   "taskBoard": {
     "title": "บอร์ดงาน",

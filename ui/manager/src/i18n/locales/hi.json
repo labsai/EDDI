@@ -2398,7 +2398,9 @@
     },
     "abstainedBody": "इस दौर में कुछ नया नहीं जोड़ा।",
     "convergenceSkipped_one": "· आगे का {{count}} दौर छोड़ा गया",
-    "convergenceSkipped_other": "· आगे के {{count}} दौर छोड़े गए"
+    "convergenceSkipped_other": "· आगे के {{count}} दौर छोड़े गए",
+    "convergenceSkipped": "· आगे के {{skipped}} दौर छोड़े गए",
+    "attachmentTotalTooLarge": "संलग्नक कुल आकार सीमा से अधिक हैं"
   },
   "taskBoard": {
     "title": "कार्य बोर्ड",

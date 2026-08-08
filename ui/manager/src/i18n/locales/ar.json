@@ -2426,7 +2426,9 @@
     "convergenceSkipped_two": "· تم تخطي جولتين إضافيتين",
     "convergenceSkipped_few": "· تم تخطي {{count}} جولات إضافية",
     "convergenceSkipped_many": "· تم تخطي {{count}} جولة إضافية",
-    "convergenceSkipped_other": "· تم تخطي {{count}} جولة إضافية"
+    "convergenceSkipped_other": "· تم تخطي {{count}} جولة إضافية",
+    "convergenceSkipped": "· تم تخطي {{skipped}} جولة إضافية",
+    "attachmentTotalTooLarge": "تتجاوز المرفقات الحد الأقصى للحجم الإجمالي"
   },
   "taskBoard": {
     "title": "لوحة المهام",

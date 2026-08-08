@@ -2398,7 +2398,9 @@
     },
     "abstainedBody": "このラウンドでは新たな発言を控えました。",
     "convergenceSkipped_other": "· 以降の {{count}} ラウンドをスキップ",
-    "convergenceSkipped_one": "· 以降の {{count}} ラウンドをスキップ"
+    "convergenceSkipped_one": "· 以降の {{count}} ラウンドをスキップ",
+    "convergenceSkipped": "· 以降の {{skipped}} ラウンドをスキップ",
+    "attachmentTotalTooLarge": "添付ファイルの合計サイズが上限を超えています"
   },
   "taskBoard": {
     "title": "タスクボード",

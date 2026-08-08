@@ -2405,7 +2405,9 @@
     "abstainedBody": "Não acrescentou nada de novo nesta ronda.",
     "convergenceSkipped_one": "· {{count}} ronda adicional ignorada",
     "convergenceSkipped_many": "· {{count}} rondas adicionais ignoradas",
-    "convergenceSkipped_other": "· {{count}} rondas adicionais ignoradas"
+    "convergenceSkipped_other": "· {{count}} rondas adicionais ignoradas",
+    "convergenceSkipped": "· {{skipped}} ronda(s) adicional(is) ignorada(s)",
+    "attachmentTotalTooLarge": "Os anexos excedem o limite de tamanho total"
   },
   "taskBoard": {
     "title": "Quadro de tarefas",

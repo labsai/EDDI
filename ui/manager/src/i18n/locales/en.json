@@ -2442,7 +2442,9 @@
     },
     "abstainedBody": "Declined to add anything new this round.",
     "convergenceSkipped_one": "· {{count}} further round skipped",
-    "convergenceSkipped_other": "· {{count}} further rounds skipped"
+    "convergenceSkipped_other": "· {{count}} further rounds skipped",
+    "convergenceSkipped": "· {{skipped}} further round(s) skipped",
+    "attachmentTotalTooLarge": "Attachments exceed the total size limit"
   },
   "taskBoard": {
     "title": "Task Board",

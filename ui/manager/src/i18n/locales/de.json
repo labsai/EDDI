@@ -2398,7 +2398,9 @@
     },
     "abstainedBody": "Hat in dieser Runde nichts Neues beigetragen.",
     "convergenceSkipped_one": "· {{count}} weitere Runde übersprungen",
-    "convergenceSkipped_other": "· {{count}} weitere Runden übersprungen"
+    "convergenceSkipped_other": "· {{count}} weitere Runden übersprungen",
+    "convergenceSkipped": "· {{skipped}} weitere Runde(n) übersprungen",
+    "attachmentTotalTooLarge": "Anhänge überschreiten die Gesamtgrößenbeschränkung"
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -3315,7 +3317,7 @@
     },
     "toast": {
       "activated": "Plattform-Operator aktiviert",
-      "activatedReadWrite": "Platform Operator aktiviert — Schreibzugriff verifiziert",
+      "activatedReadWrite": "Plattform-Operator aktiviert — Schreibzugriff verifiziert",
       "deactivated": "Plattform-Operator deaktiviert",
       "reset": "Plattform-Operator gelöscht",
       "activatedButUnreachable": "Operator deployt, konnte Ihre Plattform aber nicht lesen"

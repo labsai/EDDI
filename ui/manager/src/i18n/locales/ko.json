@@ -2398,7 +2398,9 @@
     },
     "abstainedBody": "이번 라운드에는 새로운 내용을 더하지 않았습니다.",
     "convergenceSkipped_other": "· 이후 {{count}}개 라운드 건너뜀",
-    "convergenceSkipped_one": "· 이후 {{count}}개 라운드 건너뜀"
+    "convergenceSkipped_one": "· 이후 {{count}}개 라운드 건너뜀",
+    "convergenceSkipped": "· 이후 {{skipped}}개 라운드 건너뜀",
+    "attachmentTotalTooLarge": "첨부 파일이 총 용량 제한을 초과합니다"
   },
   "taskBoard": {
     "title": "작업 보드",

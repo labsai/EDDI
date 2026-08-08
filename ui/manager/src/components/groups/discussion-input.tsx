@@ -5,7 +5,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { MAX_ATTACHMENT_BYTES } from "@/lib/api/attachments";
-import { MAX_GROUP_ATTACHMENTS, type GroupAttachmentRef } from "@/lib/api/groups";
+import {
+  MAX_GROUP_ATTACHMENTS,
+  MAX_GROUP_ATTACHMENTS_TOTAL_BYTES,
+  type GroupAttachmentRef,
+} from "@/lib/api/groups";
 
 interface DiscussionInputProps {
   /**
@@ -117,12 +121,23 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
         );
       }
       const accepted: PendingAttachment[] = [];
+      // The per-file cap alone is not enough: this endpoint takes the bytes
+      // inline, so fifty legal files still become one enormous base64 body.
+      let stagedBytes = attachments.reduce((sum, a) => sum + a.sizeBytes, 0);
       for (const file of picked) {
         if (file.size > MAX_ATTACHMENT_BYTES) {
           toast.error(
             t("groups.attachmentTooLarge", "{{name}} is too large to attach", { name: file.name }),
           );
           continue;
+        }
+        if (stagedBytes + file.size > MAX_GROUP_ATTACHMENTS_TOTAL_BYTES) {
+          // `break`, not `continue`: once the budget is gone, every remaining
+          // file would produce the same toast.
+          toast.error(
+            t("groups.attachmentTotalTooLarge", "Attachments exceed the total size limit"),
+          );
+          break;
         }
         try {
           accepted.push({
@@ -134,6 +149,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
             data: await readAsBase64(file),
             sizeBytes: file.size,
           });
+          stagedBytes += file.size;
         } catch {
           toast.error(t("groups.attachmentReadFailed", "Could not read {{name}}", { name: file.name }));
         }
@@ -145,7 +161,10 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
         ]);
       }
     },
-    [attachments.length, t],
+    // `attachments`, not `attachments.length`: the running-total check reads the
+    // entries themselves now, and a remove-then-add pair leaves the length equal
+    // while the sizes differ.
+    [attachments, t],
   );
 
   function handleSubmit(e?: React.FormEvent) {
