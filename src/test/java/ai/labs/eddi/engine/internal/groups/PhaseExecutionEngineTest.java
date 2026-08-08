@@ -12,7 +12,11 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.OptionsSource;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TiePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.VoteConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.VoteMethod;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
@@ -529,5 +533,64 @@ class PhaseExecutionEngineTest {
                 new AtomicInteger(0), 10);
 
         assertFalse(outcome.isContinue(), "every scheduled turn abstained — the phase must stop");
+    }
+
+    // =================================================================
+    // I14 review round 1 — the moderator tiebreak is budget-gated
+    // =================================================================
+
+    private DiscussionPhase votePhase() {
+        var voteConfig = new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT,
+                List.of("Adopt PostgreSQL", "Stay on MongoDB"), 0.5, java.util.Map.of(), false, TiePolicy.MODERATOR_DECIDES);
+        return new DiscussionPhase("Ballot", PhaseType.VOTE, "ALL", TurnOrder.PARALLEL, ContextScope.NONE,
+                false, null, 1, false, null, false, voteConfig);
+    }
+
+    private TranscriptEntry voteEntry(String agentId, String json) {
+        return new TranscriptEntry(agentId, agentId, json, 0, "Ballot", TranscriptEntryType.VOTE, Instant.now(), null, null);
+    }
+
+    @Test
+    void voteTiebreak_turnBudgetExhausted_keepsNoDecision_andSpendsNothing() throws Exception {
+        var engine = engine();
+        var config = new AgentGroupConfiguration();
+        config.setModeratorAgentId("mod");
+        var ballots = List.of(
+                voteEntry("a", "{\"vote\": \"Adopt PostgreSQL\"}"),
+                voteEntry("b", "{\"vote\": \"Stay on MongoDB\"}"));
+        var turnCounter = new AtomicInteger(5);
+
+        engine.recordVoteDecision(gc(), config, votePhase(), protocol(), 0, ballots,
+                List.of(member("a"), member("b")), null, turnCounter, 5);
+
+        verify(memberTurnExecutor, never()).executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any(), any());
+        assertEquals(5, turnCounter.get(), "a blocked tiebreak must not consume a turn");
+    }
+
+    @Test
+    void voteTiebreak_withinBudget_countsItsTurn_andCarriesTheLosersDissent() throws Exception {
+        var engine = engine();
+        var config = new AgentGroupConfiguration();
+        config.setModeratorAgentId("mod");
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any(), any()))
+                .thenReturn(voteEntry("mod", "Adopt PostgreSQL"));
+        var ballots = List.of(
+                voteEntry("a", "{\"vote\": \"Adopt PostgreSQL\", \"statement\": \"pgvector\"}"),
+                voteEntry("b", "{\"vote\": \"Stay on MongoDB\", \"statement\": \"migration risk is real\"}"));
+        var gc = gc();
+        var turnCounter = new AtomicInteger(0);
+
+        engine.recordVoteDecision(gc, config, votePhase(), protocol(), 0, ballots,
+                List.of(member("a"), member("b")), null, turnCounter, 10);
+
+        assertEquals(1, turnCounter.get(), "the tiebreak is a real LLM turn and must be counted");
+        DecisionRecord decision = gc.getDecision();
+        assertEquals(DecisionType.VOTE, decision.type());
+        assertEquals("Adopt PostgreSQL", decision.winner());
+        assertEquals(VoteTallyEngine.METHOD_TIEBREAK, decision.method());
+        // The review defect: reusing the unresolved record's empty dissent list
+        // dropped the minority report for exactly the closest votes.
+        assertEquals(1, decision.dissents().size(), "the losing side's statement must survive the tiebreak");
+        assertEquals("migration risk is real", decision.dissents().get(0).position());
     }
 }

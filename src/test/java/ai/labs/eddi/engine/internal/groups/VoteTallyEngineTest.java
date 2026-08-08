@@ -224,6 +224,42 @@ class VoteTallyEngineTest {
         assertEquals(2.0, ((Map<?, ?>) outcome.decision().tally().get("totals")).get("Adopt PostgreSQL"));
     }
 
+    @Test
+    @DisplayName("mathematically equal totals that differ in the last floating-point bit are STILL a tie")
+    void tally_floatingPointEqualTotals_isATie() {
+        // 0.1 + 0.2 != 0.3 in doubles. An exact == compare would crown one side
+        // of a genuinely tied vote on representation noise.
+        var config = new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, OPTIONS, 0.5,
+                Map.of("a1", 0.1, "a2", 0.2, "a3", 0.3), false, TiePolicy.NO_DECISION);
+        var entries = List.of(
+                ballot("a1", "{\"vote\": \"Adopt PostgreSQL\"}"),
+                ballot("a2", "{\"vote\": \"Adopt PostgreSQL\"}"),
+                ballot("a3", "{\"vote\": \"Stay on MongoDB\"}"));
+
+        var outcome = VoteTallyEngine.tally(entries, 3, OPTIONS, config, "Vote");
+
+        assertEquals(DecisionType.NONE, outcome.decision().type(), "0.1+0.2 vs 0.3 is a tie, not a winner");
+        assertEquals(2, outcome.unresolvedOptions().size());
+    }
+
+    @Test
+    @DisplayName("the outcome carries the parsed ballots, so a tie policy's choice still yields dissents")
+    void tally_outcomeCarriesBallots_forTiePolicyDissents() {
+        var entries = List.of(
+                ballot("a1", "{\"vote\": \"Adopt PostgreSQL\", \"statement\": \"pgvector\"}"),
+                ballot("a2", "{\"vote\": \"Stay on MongoDB\", \"statement\": \"migration risk is real\"}"));
+
+        var outcome = VoteTallyEngine.tally(entries, 2, OPTIONS, config(), "Vote");
+
+        assertEquals(DecisionType.NONE, outcome.decision().type(), "an exact tie");
+        assertTrue(outcome.decision().dissents().isEmpty(), "no winner yet, so the record itself has no dissents");
+        assertEquals(2, outcome.ballots().size());
+        // What the moderator tiebreak computes after choosing: the loser's report.
+        var dissents = VoteTallyEngine.losingDissents(outcome.ballots(), "Adopt PostgreSQL");
+        assertEquals(1, dissents.size());
+        assertEquals("migration risk is real", dissents.get(0).position());
+    }
+
     // =================================================================
     // tiebreak choice resolution
     // =================================================================

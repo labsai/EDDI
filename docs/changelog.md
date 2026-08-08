@@ -5,6 +5,24 @@
 
 ---
 
+## 🔎 fix(groups): I14 PR #638 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i14-voting`)
+
+All 14 review comments (CodeQL ×6, code-quality ×1, CodeRabbit ×6, + enum-count CI failure) triaged; every one accepted and fixed:
+
+- **CI failure**: `AgentGroupConfigurationTest.phaseType_allValues` pins the enum size at 11; VOTE is the 12th. Fixed here (and the same pin fixed for RETRO on the I8 branch — the local targeted regressions missed this class; noted for future enum-touching branches).
+- **The moderator tiebreak is now budget-gated** (the one real architecture defect): it is an LLM turn, and it ran unguarded after `maxTurns` was exhausted or the cost ceiling fired — the only extra call in `PhaseExecutionEngine` without the gate `checkConvergence` and `runDissentRound` both carry. `recordVoteDecision` now takes `(turnCounter, maxTurns)`, blocks the tiebreak on either budget (keeping the honest NO_DECISION), and counts the turn it does spend.
+- **Losing-side dissents survive a tie-policy resolution**: the unresolved tally's record necessarily has no dissents, and `moderatorTiebreak` reused it — so the minority report vanished for exactly the closest votes. `TallyOutcome` now carries the parsed ballots; the tiebreak computes `losingDissents(ballots, chosenOption)` against ITS choice.
+- **Weighted-total ties compare with an epsilon** (1e-9), not `==`: totals are sums of non-representable doubles, so 0.1+0.2 vs 0.3 — a genuine tie — silently crowned one side on the last bit.
+- **Ballot weights must be finite**: NaN passes every `<` comparison and poisons the totals; infinity decides every vote alone. Save-time rejection alongside the existing `>= 0`.
+- **Slack tally lines are width-bounded** (`buildPreview`, 120 chars): a LAST_SYNTHESIS option can be a paragraph, and six of those pushed the whole decision message past Slack's limit — `postSafe` then swallowed the loss, winner and all.
+- **CodeQL log injection ×6** in `PhaseExecutionEngine` sanitized (`LogSanitizer` on conversation/phase/outcome/exception values); the flagged useless null check in `moderatorTiebreak` removed (control flow guarantees non-null there).
+
+**Tests:** +6 (floating-point tie; outcome-carries-ballots + dissent-vs-choice; NaN/∞ weight rejection ×2 scenarios; tiebreak blocked at budget spends nothing; tiebreak within budget counts its turn AND carries the loser's dissent — the last one fails against the pre-fix code on both the counter and the dissent assertions). `engine.internal` + `configs.groups` suites: 1711 green; checkstyle clean.
+
+---
+
 ## 🗳️ feat(groups): I14 — voting with structural ballot independence (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i14-voting`)

@@ -147,8 +147,10 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                         + "not available yet — use MODERATOR_DECIDES or NO_DECISION");
             }
             for (Map.Entry<String, Double> weight : voteConfig.weights().entrySet()) {
-                if (weight.getValue() == null || weight.getValue() < 0) {
-                    throw new IllegalArgumentException(path + ".weights['" + weight.getKey() + "'] must be >= 0");
+                // isFinite: NaN passes every < comparison and would poison the
+                // weighted totals; infinity would decide every vote alone.
+                if (weight.getValue() == null || !Double.isFinite(weight.getValue()) || weight.getValue() < 0) {
+                    throw new IllegalArgumentException(path + ".weights['" + weight.getKey() + "'] must be finite and >= 0");
                 }
             }
         }

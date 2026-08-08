@@ -310,7 +310,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         if (totals instanceof Map<?, ?> totalsMap && !totalsMap.isEmpty()) {
             sb.append("Tally:\n");
             totalsMap.entrySet().stream().limit(MAX_TALLY_LINES).forEach(entry -> sb.append(String.format("• %s — %s\n",
-                    entry.getKey(), entry.getValue())));
+                    buildPreview(String.valueOf(entry.getKey()), MAX_TALLY_OPTION_CHARS), entry.getValue())));
             if (totalsMap.size() > MAX_TALLY_LINES) {
                 sb.append(String.format("… and %d more option(s)\n", totalsMap.size() - MAX_TALLY_LINES));
             }
@@ -324,6 +324,14 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
     /** Slack messages are skimmed, not scrolled — a ten-option tally is noise. */
     private static final int MAX_TALLY_LINES = 6;
+
+    /**
+     * Same reasoning per line: a LAST_SYNTHESIS-derived option is whatever text
+     * followed "Option X:", which can be a paragraph — six of those could push the
+     * whole decision message past Slack's per-message limit, and postSafe would
+     * swallow the loss.
+     */
+    private static final int MAX_TALLY_OPTION_CHARS = 120;
 
     // ─── HITL (human-in-the-loop) ───
 

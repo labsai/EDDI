@@ -157,6 +157,19 @@ class AgentGroupStoreTest {
     }
 
     @Test
+    void votePhase_nonFiniteWeight_isRejected() {
+        // NaN passes every < comparison; infinity would decide every vote alone.
+        for (double bad : new double[]{Double.NaN, Double.POSITIVE_INFINITY}) {
+            var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateVotePhases(voteGroup(
+                    votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
+                            new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5,
+                                    Map.of("a1", bad), false, TiePolicy.NO_DECISION)))),
+                    "weight " + bad + " must be rejected");
+            assertTrue(ex.getMessage().contains("finite"), ex.getMessage());
+        }
+    }
+
+    @Test
     void nonVotePhases_areNeverTouchedByVoteValidation() {
         assertDoesNotThrow(() -> AgentGroupStore.validateVotePhases(config(DiscussionStyle.CUSTOM,
                 List.of(phase("Open", "ALL")), null)));

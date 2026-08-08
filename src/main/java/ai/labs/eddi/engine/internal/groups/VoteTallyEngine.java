@@ -51,6 +51,9 @@ public final class VoteTallyEngine {
     /** The mechanism tag when a moderator broke the tie (or quorum failure). */
     public static final String METHOD_TIEBREAK = "vote+moderator-tiebreak";
 
+    /** Two weighted totals within this of each other are the same total (a tie). */
+    private static final double TALLY_EPSILON = 1e-9;
+
     /** {@code Option A: text} / {@code Option 2 - text} lines in a synthesis. */
     private static final Pattern OPTION_LINE = Pattern.compile("^\\s*Option\\s+([A-Za-z0-9]+)\\s*[:\\-]\\s*(.+?)\\s*$",
             Pattern.MULTILINE);
@@ -79,8 +82,15 @@ public final class VoteTallyEngine {
      *            every option on a quorum failure
      * @param quorumReached
      *            whether enough valid ballots arrived
+     * @param ballots
+     *            every parsed ballot. Carried so a tie policy that DOES pick a
+     *            winner can compute the losing side's dissents against its choice —
+     *            the unresolved decision's own dissent list is necessarily empty,
+     *            and reusing it silently dropped the minority report for exactly
+     *            the closest votes
      */
-    public record TallyOutcome(DecisionRecord decision, List<String> unresolvedOptions, boolean quorumReached) {
+    public record TallyOutcome(DecisionRecord decision, List<String> unresolvedOptions, boolean quorumReached,
+            List<Ballot> ballots) {
     }
 
     /**
@@ -236,19 +246,22 @@ public final class VoteTallyEngine {
                     "Quorum not reached: %d of %d participants cast a valid ballot (needed %.0f%%)."
                             .formatted(ballots.size(), participantCount, config.quorum() * 100),
                     null, tallyMap, List.of(), METHOD_VOTE, phaseName, null);
-            return new TallyOutcome(decision, List.copyOf(options), false);
+            return new TallyOutcome(decision, List.copyOf(options), false, List.copyOf(ballots));
         }
 
         double max = totals.values().stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+        // Tolerance, not ==: weighted and confidence-weighted totals are sums of
+        // non-representable doubles, so two mathematically equal totals can differ
+        // in the last bit — and a real tie would then silently crown one side.
         List<String> leaders = totals.entrySet().stream()
-                .filter(e -> e.getValue() == max && max > 0.0)
+                .filter(e -> Math.abs(e.getValue() - max) < TALLY_EPSILON && max > 0.0)
                 .map(Map.Entry::getKey).toList();
 
         if (leaders.size() != 1) {
             var decision = new DecisionRecord(DecisionType.NONE,
                     leaders.isEmpty() ? "No option received any weighted vote." : "Tie between: " + String.join(" / ", leaders) + ".",
                     null, tallyMap, List.of(), METHOD_VOTE, phaseName, null);
-            return new TallyOutcome(decision, leaders.isEmpty() ? List.copyOf(options) : leaders, true);
+            return new TallyOutcome(decision, leaders.isEmpty() ? List.copyOf(options) : leaders, true, List.copyOf(ballots));
         }
 
         String winner = leaders.get(0);
@@ -256,14 +269,15 @@ public final class VoteTallyEngine {
                 "\"%s\" wins with %.2f of %.2f weighted votes.".formatted(winner, totals.get(winner),
                         totals.values().stream().mapToDouble(Double::doubleValue).sum()),
                 winner, tallyMap, losingDissents(ballots, winner), METHOD_VOTE, phaseName, null);
-        return new TallyOutcome(decision, List.of(), true);
+        return new TallyOutcome(decision, List.of(), true, List.copyOf(ballots));
     }
 
     /**
      * The minority report: losing-side ballots that carried a statement become the
-     * decision's dissents.
+     * decision's dissents. Package-visible so {@code PhaseExecutionEngine}'s
+     * moderator tiebreak can compute dissents against ITS chosen option.
      */
-    private static List<Dissent> losingDissents(List<Ballot> ballots, String winner) {
+    static List<Dissent> losingDissents(List<Ballot> ballots, String winner) {
         List<Dissent> dissents = new ArrayList<>();
         for (Ballot ballot : ballots) {
             if (!ballot.votes().contains(winner) && ballot.statement() != null && !ballot.statement().isBlank()) {

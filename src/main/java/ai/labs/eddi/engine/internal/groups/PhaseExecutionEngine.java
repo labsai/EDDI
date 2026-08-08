@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.internal.GroupConversationService.MemberTurnCancelled
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -428,7 +429,7 @@ public class PhaseExecutionEngine {
      */
     public void recordVoteDecision(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase, ProtocolConfig protocol,
                                    int phaseIdx, List<TranscriptEntry> repeatEntries, List<GroupMember> speakers,
-                                   GroupDiscussionEventListener listener) {
+                                   GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns) {
         var voteConfig = phase.voteConfig() != null ? phase.voteConfig() : new AgentGroupConfiguration.VoteConfig();
         List<TranscriptEntry> transcriptSnapshot;
         synchronized (gc.getTranscript()) {
@@ -437,7 +438,7 @@ public class PhaseExecutionEngine {
         List<String> options = VoteTallyEngine.resolveOptions(voteConfig, transcriptSnapshot);
         if (options.size() < 2) {
             LOGGER.warnf("Group %s: VOTE phase '%s' resolved %d option(s) — a vote needs at least two; recording NONE",
-                    gc.getId(), phase.name(), options.size());
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phase.name()), options.size());
             setDecisionCarryingDissents(gc, new DecisionRecord(DecisionType.NONE,
                     "The vote could not run: only " + options.size() + " option(s) were available.",
                     null, null, List.of(), VoteTallyEngine.METHOD_VOTE, phase.name(), null));
@@ -452,10 +453,25 @@ public class PhaseExecutionEngine {
         DecisionRecord decision = outcome.decision();
         if (!outcome.unresolvedOptions().isEmpty()) {
             decision = switch (voteConfig.tiePolicy()) {
-                case MODERATOR_DECIDES -> moderatorTiebreak(gc, config, phase, protocol, phaseIdx, outcome, listener);
+                case MODERATOR_DECIDES -> {
+                    // The tiebreak is a real LLM call — same two budgets as the
+                    // convergence judge and the dissent round. Without this gate a
+                    // tied vote issued one uncounted turn even after the discussion
+                    // exhausted maxTurns or blew its cost ceiling.
+                    if ((maxTurns > 0 && turnCounter != null && turnCounter.get() >= maxTurns)
+                            || GroupCostLedger.wouldExceedCeiling(gc, protocol)) {
+                        LOGGER.warnf("Group %s: VOTE phase '%s' tied but the turn/cost budget is exhausted — keeping NO_DECISION",
+                                LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phase.name()));
+                        yield outcome.decision();
+                    }
+                    if (turnCounter != null) {
+                        turnCounter.incrementAndGet();
+                    }
+                    yield moderatorTiebreak(gc, config, phase, protocol, phaseIdx, outcome, listener);
+                }
                 case HUMAN_DECIDES -> {
                     LOGGER.warnf("Group %s: VOTE phase '%s' has tiePolicy HUMAN_DECIDES, which needs human group members (I6) — "
-                            + "recording NO_DECISION", gc.getId(), phase.name());
+                            + "recording NO_DECISION", LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phase.name()));
                     yield outcome.decision();
                 }
                 case NO_DECISION -> outcome.decision();
@@ -463,8 +479,10 @@ public class PhaseExecutionEngine {
         }
 
         setDecisionCarryingDissents(gc, decision);
-        LOGGER.infof("Group %s: VOTE phase '%s' concluded: %s", gc.getId(), phase.name(),
-                decision.type() == DecisionType.VOTE ? decision.outcome() : "no decision (" + decision.outcome() + ")");
+        LOGGER.infof("Group %s: VOTE phase '%s' concluded: %s", LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phase.name()),
+                decision.type() == DecisionType.VOTE
+                        ? LogSanitizer.sanitize(decision.outcome())
+                        : "no decision (" + LogSanitizer.sanitize(decision.outcome()) + ")");
         fireDecisionReached(gc, listener);
     }
 
@@ -478,7 +496,8 @@ public class PhaseExecutionEngine {
                                              GroupDiscussionEventListener listener) {
         String moderatorAgentId = config.getModeratorAgentId();
         if (moderatorAgentId == null || moderatorAgentId.isBlank()) {
-            LOGGER.warnf("Group %s: tiePolicy MODERATOR_DECIDES but the group names no moderatorAgentId — keeping NO_DECISION", gc.getId());
+            LOGGER.warnf("Group %s: tiePolicy MODERATOR_DECIDES but the group names no moderatorAgentId — keeping NO_DECISION",
+                    LogSanitizer.sanitize(gc.getId()));
             return outcome.decision();
         }
         String reason = outcome.quorumReached() ? "The vote tied between" : "The vote did not reach quorum; decide among";
@@ -494,17 +513,22 @@ public class PhaseExecutionEngine {
                     null, TIEBREAK_CONVERSATION_KEY);
             String choice = VoteTallyEngine.resolveChoice(reply != null ? reply.content() : null, outcome.unresolvedOptions());
             if (choice == null) {
-                LOGGER.warnf("Group %s: the tiebreaker's reply named no single option — keeping NO_DECISION", gc.getId());
+                LOGGER.warnf("Group %s: the tiebreaker's reply named no single option — keeping NO_DECISION",
+                        LogSanitizer.sanitize(gc.getId()));
                 return outcome.decision();
             }
             DecisionRecord base = outcome.decision();
+            // Dissents against the CHOSEN option, from the carried ballots — the
+            // unresolved record's own list is necessarily empty, and reusing it
+            // dropped the minority report for exactly the closest votes.
             return new DecisionRecord(DecisionType.VOTE,
                     "\"%s\" chosen by the moderator (%s).".formatted(choice,
                             outcome.quorumReached() ? "tie break" : "quorum failure"),
-                    choice, base.tally(), base.dissents(), VoteTallyEngine.METHOD_TIEBREAK, phase.name(),
-                    reply != null ? reply.content() : null);
+                    choice, base.tally(), VoteTallyEngine.losingDissents(outcome.ballots(), choice),
+                    VoteTallyEngine.METHOD_TIEBREAK, phase.name(), reply.content());
         } catch (Exception e) {
-            LOGGER.warnf("Group %s: vote tiebreak failed (%s) — keeping NO_DECISION", gc.getId(), e.getMessage());
+            LOGGER.warnf("Group %s: vote tiebreak failed (%s) — keeping NO_DECISION",
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
             return outcome.decision();
         }
     }

@@ -862,7 +862,8 @@ public class GroupConversationService implements IGroupConversationService {
                     // as the verdict above — a re-balloting round's draft tally is not
                     // the decision.
                     if (phase.type() == PhaseType.VOTE && lastRepeat) {
-                        phaseExecutionEngine.recordVoteDecision(gc, config, phase, protocol, phaseIdx, repeatEntries, speakers, listener);
+                        phaseExecutionEngine.recordVoteDecision(gc, config, phase, protocol, phaseIdx, repeatEntries, speakers, listener,
+                                turnCounter, maxTurns);
                     }
 
                     gc.setLastModified(Instant.now());
