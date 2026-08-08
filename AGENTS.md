@@ -134,7 +134,7 @@ Follow this order unless the user explicitly requests something different.
 | 5     | NATS JetStream           | Event bus abstraction, async processing, coordinator dashboard                                      |
 | 6     | DB-Agnostic Architecture | PostgreSQL adapter, MongoDB sync driver, Caffeine cache, Lombok removal, langchain4j core migration |
 | 7     | Security & Compliance    | Secrets Vault, Audit Ledger (EU AI Act), tenant quota stub                                          |
-| 8     | MCP Integration          | MCP Server (60+ tools), MCP Client, agent discovery, managed conversations                           |
+| 8     | MCP Integration          | MCP Server (80+ tools), MCP Client, agent discovery, managed conversations                           |
 | 8c    | RAG Foundation           | Config-driven vector store retrieval, pgvector, httpCall RAG                                        |
 | 10    | Group Conversations      | Multi-agent debate orchestration, 7 styles (incl. Task Force, Negotiation), group-of-groups         |
 | 10b   | Dynamic Agents           | Runtime agent creation/recruitment/delegation, DynamicAgentConfig guardrails, lifecycle policies, SharedTaskList |
@@ -326,7 +326,7 @@ Several infrastructure components are already built and should be reused, not du
 - `GroupConversationService.discuss()` creates individual conversations for each member agent
 - Group context (groupId, discussion phase, peer responses) is injected via the conversation's `Context` map
 - `GroupConversationEventSink` streams SSE events for real-time group discussion visibility
-- **Collaboration surfaces are opt-in by absence.** `artifactConfig`, `taskListConfig`, `retroConfig`, `contextWindow`, `facilitator`, and `humanMemberConfig` all default to `null`, and a null config means the corresponding tools are never *assembled* — not merely rejected at call time. An absent tool costs no prompt tokens and cannot be argued with; one that exists and always says no invites retries. Follow this convention for any new group capability.
+- **Collaboration surfaces are opt-in by absence.** `artifactConfig`, `taskListConfig`, `retroConfig`, `contextWindow`, `facilitator`, and `humanMemberConfig` all default to `null`, and a null config means the capability is *absent*, not present-and-refusing. For the two that expose **tools** (`artifactConfig`, `taskListConfig`) that is literal: the tools are never assembled, so they cost no prompt tokens and cannot be argued with — one that exists and always says no invites retries. For the rest it means the behaviour simply does not run: no windowing pass, no facilitator checkpoint, no human-turn pause. Follow this convention for any new group capability.
 
 When a feature needs to know which group an agent belongs to (e.g., persistent memory with `group` visibility), the groupId comes from the `GroupConversation` context — not from `AgentConfiguration`. The group is a runtime concern, not a static configuration.
 

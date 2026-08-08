@@ -6,9 +6,9 @@
 > item you are about to build, using the section pointers below.
 >
 > **Last updated:** 2026-08-08 · **the queue is empty.** Every item in §3 (I17, I14, I8, I6,
-> I11, I18, I12, I13, I10) shipped and merged to `main` on 2026-08-08 via PRs #636–#645. The
-> §2 pre-feature defects shipped 2026-08-07. This file is now a *record*, not a work list —
-> see §3 for what landed and §4 for what deliberately remains.
+> I11, I18, I12, I13, I10) shipped and merged to `main` on 2026-08-08, one PR per item, #637
+> through #645. The §2 pre-feature defects shipped separately as #636. This file is now a
+> *record*, not a work list — see §3 for what landed and §4 for what deliberately remains.
 
 ---
 
@@ -24,7 +24,7 @@ builds on (F1–F6), and shipped six feature items.
 | **Wave 0** — F1 `LiveDiscussionRegistry`, F2 speaker-level `ResumePoint`, F3 `DecisionRecord`, F4 entry types + visibility, F5 cost ledger, F6 schema versioning | ✅ Done |
 | **Wave 1** — I1 cost ceiling, I2 convergence + early exit, I3 structured verdicts, I4 abstention + minority report | ✅ Done |
 | **Wave 2** — I5 agent-filed tasks, I7 recruitment + delegation timeout | ✅ Done |
-| **Pre-feature defects** — N1 plain-call pricing, N2/I9 transcript windowing, N3 schema sentinel (§2) | ✅ Done (2026-08-07, `fix/group-pre-feature-defects`) |
+| **Pre-feature defects** — N1 plain-call pricing, N2/I9 transcript windowing, N3 schema sentinel (§2) | ✅ Done (2026-08-07, `fix/group-pre-feature-defects`, PR #636) |
 | **Wave 2** — I6, I8, I14, I17 | ✅ Done (2026-08-08, PRs #637–#640) |
 | **Wave 3** — I10, I11, I12, I13, I18 | ✅ Done (2026-08-08, PRs #641–#645) |
 | **Excluded — do not start** — I15 cross-team process DAGs, I16 A2A remote members | ❌ Out of scope |

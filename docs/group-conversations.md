@@ -938,6 +938,10 @@ speaker and phase pairs.
 
 ## MCP Tools
 
+Group-related tools live in two classes: the group tools below, plus three
+lifecycle/approval tools provided by the HITL tool set (marked). Both are exposed
+on the same MCP server — the split is internal.
+
 | Tool | Description |
 |---|---|
 | `describe_discussion_styles` | Rich descriptions of all styles |
@@ -954,9 +958,9 @@ speaker and phase pairs.
 | `followup_with_member` | Ask a single member a follow-up on a finished discussion |
 | `continue_group_discussion` | Continue a discussion with a new question |
 | `close_group_conversation` | Close a conversation to further rounds |
-| `submit_group_human_input` | Submit a HUMAN member's turn (I6) |
-| `approve_group_phase` | Approve or reject a HITL pause |
-| `cancel_group_discussion` | Cancel a running discussion |
+| `submit_group_human_input` | Submit a HUMAN member's turn (I6) — HITL tool set |
+| `approve_group_phase` | Approve or reject a HITL pause — HITL tool set |
+| `cancel_group_discussion` | Cancel a running discussion — HITL tool set |
 | `add_team_task` | File a task on a standing team's backlog (I13) |
 | `list_team_backlog` | Read a standing team's backlog |
 | `list_group_templates` | List the preset group templates (I10) |

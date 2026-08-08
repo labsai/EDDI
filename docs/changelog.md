@@ -9,8 +9,9 @@
 
 **Repo:** EDDI (`docs/group-collaboration-refresh`)
 
-The nine group-collaboration items merged to `main` (PRs #636–#645); this brings every
-user-facing doc in line with what actually shipped. Each claim below was verified against the
+The nine group-collaboration items merged to `main` — PRs #637–#645, alongside #636 which
+carried the pre-feature defect fixes — and this brings every user-facing doc in line with what
+actually shipped. Each claim below was verified against the
 source, not against the plan.
 
 **`docs/group-conversations.md`** (the main reference, +230 lines):
