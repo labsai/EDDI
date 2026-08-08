@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { DollarSign } from "lucide-react";
 import { EditorSection } from "../editor-section";
@@ -15,6 +16,10 @@ import { parseNum as num } from "./cascade/cascade-utils";
  */
 export function TaskPricingSection({ task, onChange, readOnly }: TaskSectionProps) {
   const { t } = useTranslation();
+  // useId, not a fixed string: the LLM editor can render several task sections
+  // at once, and duplicate ids would point every label at the first input.
+  const inputPriceId = useId();
+  const outputPriceId = useId();
 
   return (
     <EditorSection label={t("llmEditor.taskPricing", "Plain-Call Pricing")} icon={DollarSign} accent="text-emerald-500">
@@ -27,10 +32,11 @@ export function TaskPricingSection({ task, onChange, readOnly }: TaskSectionProp
         </p>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="mb-0.5 block text-[10px] text-muted-foreground">
+            <label htmlFor={inputPriceId} className="mb-0.5 block text-[10px] text-muted-foreground">
               {t("llmEditor.cascadeInputPrice", "Input $ / 1M tokens")}
             </label>
             <input
+              id={inputPriceId}
               type="number"
               min={0}
               step="0.01"
@@ -43,10 +49,11 @@ export function TaskPricingSection({ task, onChange, readOnly }: TaskSectionProp
             />
           </div>
           <div>
-            <label className="mb-0.5 block text-[10px] text-muted-foreground">
+            <label htmlFor={outputPriceId} className="mb-0.5 block text-[10px] text-muted-foreground">
               {t("llmEditor.cascadeOutputPrice", "Output $ / 1M tokens")}
             </label>
             <input
+              id={outputPriceId}
               type="number"
               min={0}
               step="0.01"

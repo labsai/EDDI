@@ -2227,7 +2227,8 @@
       "ERROR": "त्रुटि",
       "AWAITING_APPROVAL": "अनुमोदन की प्रतीक्षा",
       "CANCELLED": "रद्द",
-      "AWAITING_HUMAN_INPUT": "आपकी बारी की प्रतीक्षा"
+      "AWAITING_HUMAN_INPUT": "आपकी बारी की प्रतीक्षा",
+      "CLOSED": "बंद"
     },
     "preConfiguredTasksCount": "पूर्व-कॉन्फ़िगर किए गए कार्य ({{count}})",
     "entryType": {
@@ -2989,7 +2990,10 @@
     "confirmDismiss": "वापस जाएं",
     "approvalBlockedHeading": "इसे यहाँ से अनुमोदित नहीं किया जा सकता",
     "confirmRejectToolTitle": "टूल निष्पादन अस्वीकार करें?",
-    "confirmRejectToolDescription": "कुछ भी नहीं चलेगा। बातचीत जारी रहेगी और एजेंट {{toolNames}} के बिना उत्तर देगा।"
+    "confirmRejectToolDescription": "कुछ भी नहीं चलेगा। बातचीत जारी रहेगी और एजेंट {{toolNames}} के बिना उत्तर देगा।",
+    "humanTurn": "सदस्य की बारी",
+    "humanTurnReason": "{{member}} के बोलने की प्रतीक्षा",
+    "humanTurnMemberFallback": "एक सदस्य"
   },
   "chatDrawer": {
     "deploying": "एजेंट Deploy हो रहा है…",

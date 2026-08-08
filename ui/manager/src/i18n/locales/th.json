@@ -2227,7 +2227,8 @@
       "ERROR": "ข้อผิดพลาด",
       "AWAITING_APPROVAL": "รอการอนุมัติ",
       "CANCELLED": "ยกเลิก",
-      "AWAITING_HUMAN_INPUT": "รอตาของคุณ"
+      "AWAITING_HUMAN_INPUT": "รอตาของคุณ",
+      "CLOSED": "ปิดแล้ว"
     },
     "preConfiguredTasksCount": "งานที่ตั้งค่าไว้ล่วงหน้า ({{count}})",
     "entryType": {
@@ -2989,7 +2990,10 @@
     "confirmDismiss": "กลับ",
     "approvalBlockedHeading": "ไม่สามารถอนุมัติรายการนี้ได้จากที่นี่",
     "confirmRejectToolTitle": "ปฏิเสธการเรียกใช้เครื่องมือ?",
-    "confirmRejectToolDescription": "จะไม่มีการเรียกใช้ใด ๆ การสนทนาจะดำเนินต่อและเอเจนต์จะตอบโดยไม่ใช้ {{toolNames}}"
+    "confirmRejectToolDescription": "จะไม่มีการเรียกใช้ใด ๆ การสนทนาจะดำเนินต่อและเอเจนต์จะตอบโดยไม่ใช้ {{toolNames}}",
+    "humanTurn": "ตาของสมาชิก",
+    "humanTurnReason": "กำลังรอให้ {{member}} พูด",
+    "humanTurnMemberFallback": "สมาชิกคนหนึ่ง"
   },
   "chatDrawer": {
     "deploying": "กำลังปรับใช้เอเจนต์…",

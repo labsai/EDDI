@@ -2227,7 +2227,8 @@
       "ERROR": "错误",
       "AWAITING_APPROVAL": "等待审批",
       "CANCELLED": "已取消",
-      "AWAITING_HUMAN_INPUT": "等待您的发言"
+      "AWAITING_HUMAN_INPUT": "等待您的发言",
+      "CLOSED": "已关闭"
     },
     "preConfiguredTasksCount": "预配置任务 ({{count}})",
     "entryType": {
@@ -2989,7 +2990,10 @@
     "confirmDismiss": "返回",
     "approvalBlockedHeading": "此项无法在这里批准",
     "confirmRejectToolTitle": "拒绝工具执行？",
-    "confirmRejectToolDescription": "不会运行任何内容。对话将继续，智能体会在不使用 {{toolNames}} 的情况下作答。"
+    "confirmRejectToolDescription": "不会运行任何内容。对话将继续，智能体会在不使用 {{toolNames}} 的情况下作答。",
+    "humanTurn": "成员发言",
+    "humanTurnReason": "正在等待 {{member}} 发言",
+    "humanTurnMemberFallback": "某位成员"
   },
   "chatDrawer": {
     "deploying": "正在部署智能体…",

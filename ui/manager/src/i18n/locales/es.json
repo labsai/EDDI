@@ -2232,7 +2232,8 @@
       "ERROR": "Error",
       "AWAITING_APPROVAL": "Pendiente de aprobación",
       "CANCELLED": "Cancelado",
-      "AWAITING_HUMAN_INPUT": "Esperando su turno"
+      "AWAITING_HUMAN_INPUT": "Esperando su turno",
+      "CLOSED": "Cerrada"
     },
     "preConfiguredTasksCount": "Tareas preconfiguradas ({{count}})",
     "entryType": {
@@ -2996,7 +2997,10 @@
     "confirmDismiss": "Volver",
     "approvalBlockedHeading": "Esto no se puede aprobar aquí",
     "confirmRejectToolTitle": "¿Rechazar la ejecución de la herramienta?",
-    "confirmRejectToolDescription": "No se ejecutará nada. La conversación continúa y el agente responde sin {{toolNames}}."
+    "confirmRejectToolDescription": "No se ejecutará nada. La conversación continúa y el agente responde sin {{toolNames}}.",
+    "humanTurn": "Turno del miembro",
+    "humanTurnReason": "Esperando a que {{member}} hable",
+    "humanTurnMemberFallback": "un miembro"
   },
   "chatDrawer": {
     "deploying": "Desplegando agente…",

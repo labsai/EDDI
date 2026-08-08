@@ -377,13 +377,17 @@ function BoardTranscript({
   // placeholder turning into a real answer scrolls too, not just new entries.
   // Layout effect, not effect: scrolling after paint shows one frame at the old
   // offset before snapping down, which reads as a jump on every streamed turn.
+  // `header` is in the deps because it renders INSIDE the scroll box: an
+  // insight panel appearing mid-discussion changes scrollHeight without
+  // touching any transcript field, so without it a user pinned to the bottom
+  // silently drifts up by the panel's height and misses new turns.
   const lastContent = transcript[transcript.length - 1]?.content ?? null;
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && isNearBottomRef.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [transcript.length, lastContent, synthesizedAnswer, isLive]);
+  }, [transcript.length, lastContent, synthesizedAnswer, isLive, header]);
 
   // Check if transcript already contains a SYNTHESIS entry
   const hasSynthesisEntry = transcript.some((e) => e.type === "SYNTHESIS");

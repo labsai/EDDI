@@ -2274,7 +2274,8 @@
       "ERROR": "Error",
       "AWAITING_APPROVAL": "Awaiting Approval",
       "CANCELLED": "Cancelled",
-      "AWAITING_HUMAN_INPUT": "Awaiting Your Turn"
+      "AWAITING_HUMAN_INPUT": "Awaiting Your Turn",
+      "CLOSED": "Closed"
     },
     "entryType": {
       "QUESTION": "Question",
@@ -3020,7 +3021,10 @@
     "confirmDismiss": "Go back",
     "approvalBlockedHeading": "This cannot be approved here",
     "confirmRejectToolTitle": "Reject tool execution?",
-    "confirmRejectToolDescription": "Nothing will run. The conversation continues and the agent answers without {{toolNames}}."
+    "confirmRejectToolDescription": "Nothing will run. The conversation continues and the agent answers without {{toolNames}}.",
+    "humanTurn": "Member's turn",
+    "humanTurnReason": "Waiting on {{member}} to speak",
+    "humanTurnMemberFallback": "a member"
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",

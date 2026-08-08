@@ -165,16 +165,24 @@ function TemplateInstantiateView({ templateId, onBack }: { templateId: string; o
   }
 
   const { manifest } = detail;
+  // `.trim()` here too, so a whitespace-only principal id cannot satisfy the gate.
   const allAssigned = manifest.requiredRoles.every((r) => !!assignments[r.role]?.trim());
 
   function handleCreate() {
     setSubmitError(null);
+    // Trim every assignment: a HUMAN role's principal id is free text, and a
+    // stray leading/trailing space would be stored verbatim as that member's
+    // identity — the discussion would then wait forever on a principal that
+    // never matches the submitting user.
+    const trimmedAssignments = Object.fromEntries(
+      Object.entries(assignments).map(([role, value]) => [role, value.trim()]),
+    );
     instantiate.mutate(
       {
         templateId,
         request: {
           name: name.trim() || undefined,
-          roleAssignments: assignments,
+          roleAssignments: trimmedAssignments,
         },
       },
       {

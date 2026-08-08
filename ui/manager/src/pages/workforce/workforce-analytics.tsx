@@ -159,7 +159,7 @@ function WorkforceAnalytics() {
     if (filters.outcome) {
       list.push({
         type: "outcome",
-        label: stateLabel(filters.outcome),
+        label: stateLabel(filters.outcome, t),
         value: filters.outcome,
       });
     }
@@ -178,7 +178,9 @@ function WorkforceAnalytics() {
       });
     }
     return list;
-  }, [filters]);
+    // `t` is a dependency now that the outcome chip is localized — without it
+    // the chip keeps its old-language label until some other filter changes.
+  }, [filters, t]);
 
   const hasActiveFilters = activeFilters.length > 0;
 

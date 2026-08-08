@@ -22,6 +22,7 @@ import {
 import {
   WORKSPACE_MAX_TASK_SUBJECT_LENGTH,
   WORKSPACE_MAX_TASK_DESCRIPTION_LENGTH,
+  WORKSPACE_MAX_INPUT_TEMPLATE_LENGTH,
   NO_RUNNING_DISCUSSION,
 } from "@/lib/api/group-workspace";
 
@@ -91,6 +92,16 @@ export function GroupWorkspacePage() {
     if (parsedCost !== undefined && (!Number.isFinite(parsedCost) || parsedCost < 0)) {
       setCadenceError(
         t("groupWorkspace.maxCostInvalid", "Max cost per run must be a number of 0 or more."),
+      );
+      return;
+    }
+    // The backend rejects an oversized template with a 400 whose message names
+    // the cap; saying so before the round trip is the same information sooner.
+    if (inputTemplate.trim().length > WORKSPACE_MAX_INPUT_TEMPLATE_LENGTH) {
+      setCadenceError(
+        t("groupWorkspace.inputTemplateTooLong", "The prompt template is limited to {{max}} characters.", {
+          max: WORKSPACE_MAX_INPUT_TEMPLATE_LENGTH,
+        }),
       );
       return;
     }
@@ -342,6 +353,7 @@ export function GroupWorkspacePage() {
             value={inputTemplate}
             onChange={(e) => setInputTemplate(e.target.value)}
             placeholder={t("groupWorkspace.inputTemplatePlaceholder", "Prompt template for each run (optional — a plain backlog listing is used otherwise)")}
+            maxLength={WORKSPACE_MAX_INPUT_TEMPLATE_LENGTH}
             rows={2}
             className={cn(inputCls, "resize-none")}
             data-testid="workspace-input-template"
@@ -356,7 +368,10 @@ export function GroupWorkspacePage() {
                 type="number"
                 min={1}
                 value={maxPerRun}
-                onChange={(e) => setMaxPerRun(Number(e.target.value) || 1)}
+                onChange={(e) => {
+                  const v = Math.trunc(Number(e.target.value));
+                  setMaxPerRun(Number.isFinite(v) && v > 0 ? v : 1);
+                }}
                 className={inputCls}
                 data-testid="workspace-max-per-run"
               />

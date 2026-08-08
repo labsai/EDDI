@@ -299,6 +299,33 @@ describe("GroupPhaseEditor", () => {
       expect(vc.weightByConfidence).toBe(true);
     });
 
+    // quorum is a FRACTION in (0,1]. The spinner's min/max bound its arrows,
+    // not a typed or pasted value, and a quorum of 5 saves a phase whose vote
+    // can never reach quorum — every ballot silently inconclusive.
+    it.each([
+      ["above the range", "5", 0.5],
+      ["zero", "0", 0.5],
+      ["negative", "-1", 0.5],
+    ])("clamps a quorum %s back to the backend default on save", (_label, typed, expected) => {
+      renderWithProviders(
+        <GroupPhaseEditor config={voteConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+      );
+      fireEvent.change(screen.getByTestId("phase-vote-quorum-0"), { target: { value: typed } });
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      expect(savedConfig().phases![0]!.voteConfig!.quorum).toBeCloseTo(expected);
+    });
+
+    it("keeps a valid in-range quorum exactly as entered", () => {
+      renderWithProviders(
+        <GroupPhaseEditor config={voteConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+      );
+      fireEvent.change(screen.getByTestId("phase-vote-quorum-0"), { target: { value: "0.75" } });
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      expect(savedConfig().phases![0]!.voteConfig!.quorum).toBeCloseTo(0.75);
+    });
+
     it("never offers HUMAN_DECIDES as a selectable tie policy — still save-time rejected by the backend", () => {
       renderWithProviders(
         <GroupPhaseEditor config={voteConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,

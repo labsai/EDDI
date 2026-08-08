@@ -291,11 +291,17 @@ export interface ProtocolConfig {
 }
 
 /**
- * How a TASK_FORCE task is assigned to a member (I18). `ROLE` is today's
- * round-robin/role-matched behavior. `BID` is Contract-Net-lite: eligible members
- * submit blind parallel bids and the highest confidence wins (deterministic
- * tie-break by speaking order, then agent id — never bidders/tasks
- * (`auctionWorthwhile`, ≥2 of each), a wave silently falls back to ROLE.
+ * How a TASK_FORCE task is assigned to a member (I18).
+ *
+ * `ROLE` is the original behaviour: the planner or config assigns by role, or
+ * round-robin. `BID` is Contract-Net-lite — eligible members submit blind,
+ * parallel bids and the highest confidence wins, tie-broken deterministically by
+ * speaking order and then agent id so every pod resolves a tie identically.
+ *
+ * A BID wave silently falls back to ROLE when the auction cannot pay for itself
+ * — fewer than two eligible bidders or fewer than two unassigned tasks
+ * (`TaskBidEngine.auctionWorthwhile`), when the remaining turn budget could not
+ * cover one turn per bidder, or when nobody bid on a given task.
  */
 export type AssignmentMode = "ROLE" | "BID";
 

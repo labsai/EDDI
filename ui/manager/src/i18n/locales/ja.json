@@ -2227,7 +2227,8 @@
       "ERROR": "エラー",
       "AWAITING_APPROVAL": "承認待ち",
       "CANCELLED": "キャンセル済み",
-      "AWAITING_HUMAN_INPUT": "あなたの番を待っています"
+      "AWAITING_HUMAN_INPUT": "あなたの番を待っています",
+      "CLOSED": "クローズ済み"
     },
     "preConfiguredTasksCount": "事前設定タスク ({{count}})",
     "entryType": {
@@ -2989,7 +2990,10 @@
     "confirmDismiss": "戻る",
     "approvalBlockedHeading": "ここでは承認できません",
     "confirmRejectToolTitle": "ツールの実行を拒否しますか？",
-    "confirmRejectToolDescription": "何も実行されません。会話は続行され、エージェントは {{toolNames}} を使わずに回答します。"
+    "confirmRejectToolDescription": "何も実行されません。会話は続行され、エージェントは {{toolNames}} を使わずに回答します。",
+    "humanTurn": "メンバーの番",
+    "humanTurnReason": "{{member}} の発言を待っています",
+    "humanTurnMemberFallback": "あるメンバー"
   },
   "chatDrawer": {
     "deploying": "エージェントをデプロイ中…",

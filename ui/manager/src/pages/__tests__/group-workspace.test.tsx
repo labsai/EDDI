@@ -17,7 +17,7 @@ function renderWorkspacePage() {
 function mockWorkspace(overrides: Record<string, unknown> = {}) {
   return {
     id: "ws-g1", schemaVersion: 1, groupId: "g1",
-    backlog: { tasks: [] },
+    backlog: { tasks: [], awardedBids: {} },
     metrics: { discussions: 3, tasksVerified: 12, totalCost: 4.5, lastRunAt: "2026-08-01T09:00:00Z", perMemberStats: {} },
     cadences: [],
     runningDiscussionId: "",

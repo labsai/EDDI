@@ -55,17 +55,16 @@ function CloseIcon() {
 
 // ─── State i18n Key Mapping ──────────────────────────────────────
 
+/**
+ * Keyed off the shared `groups.state.*` namespace rather than a per-surface
+ * switch. The switch this replaced ended in `default: "…created"`, so every
+ * state it did not enumerate — CLOSED, and now AWAITING_HUMAN_INPUT — was
+ * labelled "Created": a session waiting on a member to speak claimed it had not
+ * started. A key derived from the state cannot silently mislabel a new one; at
+ * worst it falls back to the English default passed alongside it.
+ */
 function getStateI18nKey(state: GroupConversationState): string {
-  switch (state) {
-    case "COMPLETED": return "Workforce.board.completed";
-    case "IN_PROGRESS": return "Workforce.board.inProgress";
-    case "SYNTHESIZING": return "Workforce.board.synthesizing";
-    case "CREATED": return "Workforce.board.created";
-    case "FAILED": return "Workforce.board.failed";
-    case "CANCELLED": return "Workforce.board.cancelled";
-    case "AWAITING_APPROVAL": return "Workforce.board.awaitingApproval";
-    default: return "Workforce.board.created";
-  }
+  return `groups.state.${state}`;
 }
 
 // ─── Component ───────────────────────────────────────────────────

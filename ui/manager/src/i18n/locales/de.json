@@ -2227,7 +2227,8 @@
       "ERROR": "Fehler",
       "AWAITING_APPROVAL": "Wartet auf Genehmigung",
       "CANCELLED": "Abgebrochen",
-      "AWAITING_HUMAN_INPUT": "Warte auf Ihren Zug"
+      "AWAITING_HUMAN_INPUT": "Warte auf Ihren Zug",
+      "CLOSED": "Geschlossen"
     },
     "preConfiguredTasksCount": "Vorkonfigurierte Aufgaben ({{count}})",
     "entryType": {
@@ -2989,7 +2990,10 @@
     "confirmDismiss": "Zurück",
     "approvalBlockedHeading": "Dies kann hier nicht genehmigt werden",
     "confirmRejectToolTitle": "Tool-Ausführung ablehnen?",
-    "confirmRejectToolDescription": "Es wird nichts ausgeführt. Die Konversation wird fortgesetzt und der Agent antwortet ohne {{toolNames}}."
+    "confirmRejectToolDescription": "Es wird nichts ausgeführt. Die Konversation wird fortgesetzt und der Agent antwortet ohne {{toolNames}}.",
+    "humanTurn": "Zug des Mitglieds",
+    "humanTurnReason": "Wartet darauf, dass {{member}} spricht",
+    "humanTurnMemberFallback": "ein Mitglied"
   },
   "chatDrawer": {
     "deploying": "Agent wird bereitgestellt…",

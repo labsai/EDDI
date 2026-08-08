@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Wrench,
   ChevronDown,
+  UserCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -87,6 +88,8 @@ function ApprovalQueueRow({
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const isToolCall = !item.groupId && item.pauseType === "TOOL_CALL";
+  /** I6: a member's turn, not a decision anyone takes from this queue. */
+  const isHumanTurn = item.pauseType === "HUMAN_TURN";
   // Fetched only while expanded: pauseDetails (the per-call redacted arguments
   // and request preview) is not on the list summary, deliberately — a payload
   // that size has no place in an endpoint that lists every pending approval at
@@ -161,9 +164,28 @@ function ApprovalQueueRow({
               <Wrench className="h-3 w-3" /> {t("hitl.tool", "Tool")}
             </span>
           )}
+          {/* A HUMAN member's turn (I6) rides the SAME pending-approvals
+              endpoints as real approvals — there is no separate "my turns"
+              feed — so it lands in this queue discriminated only by pauseType.
+              Without a badge it reads as one more thing to approve or reject,
+              which is the one thing it is not: nobody is deciding here, a
+              member simply owes the discussion their contribution. */}
+          {isHumanTurn && (
+            <span
+              className="me-1.5 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary"
+              data-testid={`human-turn-badge-${item.conversationId}`}
+            >
+              <UserCheck className="h-3 w-3" />{" "}
+              {t("hitl.humanTurn", "Member's turn")}
+            </span>
+          )}
           {item.pauseType === "TOOL_CALL" && item.toolNames && item.toolNames.length > 0
             ? item.toolNames.join(", ")
-            : item.pauseReason || "—"}
+            : isHumanTurn
+              ? t("hitl.humanTurnReason", "Waiting on {{member}} to speak", {
+                  member: item.pendingMemberId || t("hitl.humanTurnMemberFallback", "a member"),
+                })
+              : item.pauseReason || "—"}
         </td>
         <td className="px-4 py-3 text-muted-foreground text-xs">
           {item.pausedAt
@@ -201,7 +223,7 @@ function ApprovalQueueRow({
                 </button>
               </>
             )}
-            {!item.groupId && item.pauseType !== "TOOL_CALL" && (
+            {!item.groupId && item.pauseType !== "TOOL_CALL" && !isHumanTurn && (
               <>
                 <button
                   onClick={() => onRequestConfirm(item, "APPROVED")}

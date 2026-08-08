@@ -29,11 +29,29 @@ function defaultVoteConfig(existing?: VoteConfig | null): VoteConfig {
     method: existing?.method ?? "MAJORITY",
     optionsSource: existing?.optionsSource ?? "LAST_SYNTHESIS",
     options: existing?.options ?? [],
-    quorum: existing?.quorum && existing.quorum > 0 ? existing.quorum : DEFAULT_VOTE_QUORUM,
+    quorum: normalizeQuorum(existing?.quorum),
     weights: existing?.weights ?? {},
     weightByConfidence: existing?.weightByConfidence ?? false,
     tiePolicy: existing?.tiePolicy ?? "NO_DECISION",
   };
+}
+
+/**
+ * `quorum` is a FRACTION in (0,1] — the share of eligible voters a ballot needs
+ * to count. The spinner's min/max bound the arrows, not the value: a pasted or
+ * typed `5` is a perfectly ordinary number, and storing it would save a phase
+ * whose quorum can never be met, silently making every vote inconclusive.
+ * Anything outside the range falls back to the backend's own default, the same
+ * way `normalizeConvergence` treats an out-of-range threshold.
+ */
+function normalizeQuorum(quorum: number | undefined | null): number {
+  if (typeof quorum !== "number" || !Number.isFinite(quorum)) return DEFAULT_VOTE_QUORUM;
+  return quorum > 0 && quorum <= 1 ? quorum : DEFAULT_VOTE_QUORUM;
+}
+
+/** Applied on save so a value typed past the spinner bounds cannot be persisted. */
+function normalizeVoteConfig(voteConfig: VoteConfig): VoteConfig {
+  return { ...voteConfig, quorum: normalizeQuorum(voteConfig.quorum) };
 }
 
 /**
@@ -108,6 +126,10 @@ export function GroupPhaseEditor({
     const cleaned: DiscussionPhase[] = phases.map((p) => ({
       ...p,
       convergence: p.convergence?.enabled ? normalizeConvergence(p.convergence) : null,
+      // Normalize on the way out, not on every keystroke: clamping mid-typing
+      // fights the user (typing "0.75" passes through "0.7"), while an
+      // out-of-range value must never reach the document.
+      voteConfig: p.voteConfig ? normalizeVoteConfig(p.voteConfig) : p.voteConfig,
     }));
     const next: AgentGroupConfiguration = { ...config, phases: cleaned };
     update.mutate(

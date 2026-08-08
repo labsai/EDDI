@@ -633,6 +633,75 @@ describe("GroupWizardPage", () => {
       expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
     });
 
+    // `agentId` means a different thing per member type — a deployed agent, a
+    // nested group config, or a human's principal id. Carrying it across a
+    // switch would submit an agent id as somebody's login.
+    it("clears a selected agent when switching that member to Human", async () => {
+      const user = userEvent.setup();
+      await reachMembersStepWithTwo(user);
+      await user.type(screen.getByTestId("member-name-0"), "Director");
+
+      // Genuinely assign a real agent first — the reset is only meaningful if
+      // there IS an agentId to carry over.
+      const card = screen.getByTestId("member-card-0");
+      await user.click(within(card).getByText("Use Existing"));
+      const picker = within(card).getByRole("combobox");
+      const option = within(picker).getAllByRole("option").find((o) => (o as HTMLOptionElement).value);
+      await user.selectOptions(picker, (option as HTMLOptionElement).value);
+      expect((picker as HTMLSelectElement).value).not.toBe("");
+      // With an agent assigned, the members step is satisfied.
+      expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
+
+      // Switching to HUMAN must surface an EMPTY principal-id field, never one
+      // pre-filled with the agent id — and Next must go back to blocked,
+      // because that agent id is not a valid human principal.
+      await user.click(screen.getByTestId("member-type-human-0"));
+      expect(screen.getByTestId("human-principal-id-0")).toHaveValue("");
+      expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+    });
+
+    // Switching HUMAN back to AGENT leaves no visible trace of the stale id —
+    // the card just shows the create-agent form again. Its only observable
+    // effect is the SUBMITTED payload, where a principal id masquerading as an
+    // agentId would create a group pointing at an agent that does not exist.
+    it("never submits a former principal id as a member's agentId", async () => {
+      let submitted: { members?: { agentId?: string; memberType?: string }[] } | null = null;
+      server.use(
+        http.post("*/administration/agents/setup", () =>
+          HttpResponse.json({
+            agentId: "auto-agent-1", agentName: "Auto Agent", provider: "anthropic",
+            model: "claude-sonnet-4-6", deployed: true, deploymentStatus: "deployed",
+          }),
+        ),
+        http.post("*/groupstore/groups", async ({ request }) => {
+          submitted = (await request.json()) as typeof submitted;
+          return new HttpResponse(null, {
+            status: 201,
+            headers: { Location: "/groupstore/groups/new-grp?version=1" },
+          });
+        }),
+      );
+
+      const user = userEvent.setup();
+      await reachMembersStepWithTwo(user);
+      await user.type(screen.getByTestId("member-name-0"), "Director");
+
+      await user.click(screen.getByTestId("member-type-human-0"));
+      await user.type(screen.getByTestId("human-principal-id-0"), "director@acme.com");
+
+      // Change of mind: this seat should be an agent after all.
+      await user.click(within(screen.getByTestId("member-card-0")).getByText("Agent"));
+      expect(screen.queryByTestId("human-turn-settings")).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId("group-wizard-next"));
+      await user.click(screen.getByTestId("group-wizard-create"));
+
+      await waitFor(() => expect(submitted).not.toBeNull());
+      const member = submitted!.members![0]!;
+      expect(member.memberType).toBe("AGENT");
+      expect(member.agentId).not.toBe("director@acme.com");
+    });
+
     it("shows the human turn settings panel only once a member is Human, and validates the duration", async () => {
       const user = userEvent.setup();
       await reachMembersStepWithTwo(user);

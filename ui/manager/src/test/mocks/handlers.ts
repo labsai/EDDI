@@ -2185,7 +2185,9 @@ export const handlers = [
   http.get("*/groupstore/groups/:groupId/workspace", ({ params }) => {
     return HttpResponse.json({
       id: `ws-${params.groupId}`, schemaVersion: 1, groupId: params.groupId,
-      backlog: { tasks: [] },
+      // awardedBids is a Record<taskId, AwardedBid>, not an array — an empty
+      // object is the real empty shape.
+      backlog: { tasks: [], awardedBids: {} },
       metrics: { discussions: 0, tasksVerified: 0, totalCost: 0, lastRunAt: null, perMemberStats: {} },
       cadences: [],
       runningDiscussionId: "",

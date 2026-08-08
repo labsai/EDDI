@@ -193,7 +193,7 @@ function AnalyticsFilterBar({
     { value: null, label: t("analyticsPage.allOutcomes", "All outcomes") },
     ...ALL_OUTCOMES.map((s) => ({
       value: s,
-      label: OUTCOME_LABELS[s],
+      label: t(`groups.state.${s}`, OUTCOME_LABELS[s]),
       count: (outcomeCounts ?? {})[s] ?? 0,
     })),
   ];

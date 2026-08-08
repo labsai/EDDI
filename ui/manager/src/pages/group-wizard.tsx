@@ -1281,6 +1281,19 @@ function MemberCard({
 }) {
   const providerConfig = LLM_PROVIDERS.find((p) => p.id === member.provider);
 
+  /**
+   * Switching a member's type must clear its identity. `agentId` means a
+   * DIFFERENT thing per type — a deployed agent, a nested group's config id, or
+   * a human's principal id — so carrying it across a switch would submit, say,
+   * an agent id as somebody's login. `created`/`creating` belong to the
+   * agent-creation flow; leaving `created` true additionally suppressed the
+   * whole card body, hiding the principal-id input a HUMAN member needs.
+   */
+  const selectMemberType = (memberType: NonNullable<MemberSlot["memberType"]>) => {
+    if (member.memberType === memberType) return;
+    onUpdate({ memberType, agentId: "", created: false, creating: false, mode: "new" });
+  };
+
   return (
     <div
       className={cn(
@@ -1329,10 +1342,10 @@ function MemberCard({
           />
         </div>
 
-        {/* Type toggle: Agent / Group */}
+        {/* Type toggle: Agent / Group / Human */}
         <div className="flex items-center rounded-md border border-border bg-background overflow-hidden shrink-0">
           <button
-            onClick={() => onUpdate({ memberType: "AGENT" })}
+            onClick={() => selectMemberType("AGENT")}
             className={cn(
               "px-2.5 py-1 text-[10px] font-medium transition-colors",
               member.memberType === "AGENT"
@@ -1343,7 +1356,7 @@ function MemberCard({
             Agent
           </button>
           <button
-            onClick={() => onUpdate({ memberType: "GROUP" })}
+            onClick={() => selectMemberType("GROUP")}
             className={cn(
               "px-2.5 py-1 text-[10px] font-medium transition-colors",
               member.memberType === "GROUP"
@@ -1355,7 +1368,7 @@ function MemberCard({
             Group
           </button>
           <button
-            onClick={() => onUpdate({ memberType: "HUMAN" })}
+            onClick={() => selectMemberType("HUMAN")}
             className={cn(
               "px-2.5 py-1 text-[10px] font-medium transition-colors",
               member.memberType === "HUMAN"

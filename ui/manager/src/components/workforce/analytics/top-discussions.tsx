@@ -87,7 +87,7 @@ function TopDiscussions({ discussions, emptyMessage }: TopDiscussionsProps) {
                   BADGE_CLASSES[d.state] ?? "bg-muted text-muted-foreground",
                 )}
               >
-                {STATE_LABELS[d.state] ?? d.state}
+                {t(`groups.state.${d.state}`, STATE_LABELS[d.state] ?? d.state)}
               </span>
             </Link>
           ))}

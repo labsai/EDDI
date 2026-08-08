@@ -115,7 +115,7 @@ function OutcomeRing({ data, total, selected, onSelect }: OutcomeRingProps) {
                   )}
                 />
                 <span className="text-xs text-muted-foreground">
-                  {STATE_LABELS[item.state] ?? item.state} ({item.count})
+                  {t(`groups.state.${item.state}`, STATE_LABELS[item.state] ?? item.state)} ({item.count})
                 </span>
               </button>
             );
