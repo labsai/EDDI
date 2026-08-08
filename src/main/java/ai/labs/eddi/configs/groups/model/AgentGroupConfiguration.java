@@ -11,6 +11,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Size;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -92,6 +93,157 @@ public class AgentGroupConfiguration {
     }
 
     /**
+     * How HUMAN members' turns are timed out (I6). {@code null} means wait
+     * indefinitely — the same thing a default-constructed {@link HumanMemberConfig}
+     * means.
+     */
+    private HumanMemberConfig humanMemberConfig;
+
+    public HumanMemberConfig getHumanMemberConfig() {
+        return humanMemberConfig;
+    }
+
+    public void setHumanMemberConfig(HumanMemberConfig humanMemberConfig) {
+        this.humanMemberConfig = humanMemberConfig;
+    }
+
+    /**
+     * Bounds for RETRO lessons (I8). {@code null} runs a RETRO phase with the
+     * defaults — the caps are non-negotiable either way (bounded growth for an LLM
+     * write surface).
+     */
+    private RetroConfig retroConfig;
+
+    public RetroConfig getRetroConfig() {
+        return retroConfig;
+    }
+
+    public void setRetroConfig(RetroConfig retroConfig) {
+        this.retroConfig = retroConfig;
+    }
+
+    /**
+     * Bounds for the RETRO lesson pipeline (I8).
+     *
+     * @param maxLessonsPerRun
+     *            how many lessons one retro turn may store (default 3) — the
+     *            template quotes this cap to the model, and the parser truncates
+     *            past it regardless
+     * @param maxStoredLessons
+     *            FIFO ceiling on the team's stored lessons (default 50): storing
+     *            the 51st evicts the oldest. Bounded growth is non-negotiable —
+     *            non-positive values fall back to the defaults
+     */
+    public record RetroConfig(int maxLessonsPerRun, int maxStoredLessons) {
+
+        public static final int DEFAULT_MAX_PER_RUN = 3;
+        public static final int DEFAULT_MAX_STORED = 50;
+        /**
+         * Hard ceilings (review finding): the compact constructor accepted any positive
+         * int, so a config carrying {@code Integer.MAX_VALUE} made the per-run write
+         * count and the retained-lesson count effectively unbounded — exactly the
+         * bounded-growth guarantee this record exists to enforce on an LLM-driven write
+         * surface.
+         */
+        public static final int CEILING_MAX_PER_RUN = 20;
+        public static final int CEILING_MAX_STORED = 500;
+
+        /** Same normalization choke point as {@link GroupTaskConfig}. */
+        public RetroConfig {
+            if (maxLessonsPerRun <= 0) {
+                maxLessonsPerRun = DEFAULT_MAX_PER_RUN;
+            }
+            if (maxStoredLessons <= 0) {
+                maxStoredLessons = DEFAULT_MAX_STORED;
+            }
+            maxLessonsPerRun = Math.min(maxLessonsPerRun, CEILING_MAX_PER_RUN);
+            maxStoredLessons = Math.min(maxStoredLessons, CEILING_MAX_STORED);
+        }
+
+        /** Both caps at their defaults. */
+        public RetroConfig() {
+            this(DEFAULT_MAX_PER_RUN, DEFAULT_MAX_STORED);
+        }
+    }
+
+    /**
+     * Transcript windowing for rendered member context (I9). {@code null} means
+     * windowing is off — every FULL/ANONYMOUS-scope turn renders the whole
+     * scope-filtered transcript, exactly as before the feature existed.
+     */
+    private ContextWindowConfig contextWindow;
+
+    public ContextWindowConfig getContextWindow() {
+        return contextWindow;
+    }
+
+    public void setContextWindow(ContextWindowConfig contextWindow) {
+        this.contextWindow = contextWindow;
+    }
+
+    /**
+     * Bounds what a FULL/ANONYMOUS-scope member turn renders from the transcript
+     * (I9). Without it, every such turn re-feeds the entire transcript to every
+     * member — ~quadratic cost as the discussion grows. When the scope-filtered
+     * context exceeds {@link #maxRecentEntries}, the rendered context becomes
+     * {@code [summary of the older entries] + [the recent entries verbatim]} — a
+     * derived view only; the stored transcript is never modified and signing
+     * verification still operates on the raw entries.
+     *
+     * @param enabled
+     *            master switch, default off — a config that does not opt in renders
+     *            exactly as before
+     * @param maxRecentEntries
+     *            how many of the newest scope-filtered entries stay verbatim.
+     *            Non-positive falls back to {@link #DEFAULT_MAX_RECENT_ENTRIES} (an
+     *            accidental 0 must not blank the whole context)
+     * @param summarizeOverflow
+     *            {@code true} (default) compresses the older entries into a rolling
+     *            summary via the shared summarization service; {@code false}
+     *            replaces them with a plain "[n earlier entries omitted]" marker
+     *            and never calls an LLM
+     * @param llmProvider
+     *            provider for the summarization calls (e.g. "openai"). Required for
+     *            summarization — without it (or {@code llmModel}) the overflow
+     *            falls back to the truncation marker with a warning
+     * @param llmModel
+     *            model name for the summarization calls
+     * @param inputPricePer1M
+     *            optional USD price per 1M input tokens for the summarizer's own
+     *            calls, so their cost counts toward the discussion's I1 ledger.
+     *            Null or negative = unpriced ($0), same semantics as the LLM task
+     *            pricing fields
+     * @param outputPricePer1M
+     *            optional USD price per 1M output tokens, same semantics
+     */
+    public record ContextWindowConfig(boolean enabled, int maxRecentEntries, Boolean summarizeOverflow,
+            String llmProvider, String llmModel,
+            Double inputPricePer1M, Double outputPricePer1M) {
+
+        public static final int DEFAULT_MAX_RECENT_ENTRIES = 30;
+
+        /**
+         * Normalizes at the one choke point every reader passes through — same shape as
+         * {@link GroupTaskConfig}. {@code summarizeOverflow} is a Boolean rather than a
+         * boolean so an omitted JSON key defaults to {@code true} instead of silently
+         * disabling summarization.
+         */
+        public ContextWindowConfig {
+            if (maxRecentEntries <= 0) {
+                maxRecentEntries = DEFAULT_MAX_RECENT_ENTRIES;
+            }
+            summarizeOverflow = summarizeOverflow == null || summarizeOverflow;
+            // Blank identifiers ARE absent — every reader null-checks, and a
+            // whitespace-only provider reaching the summarization service would
+            // bypass the documented truncation fallback.
+            llmProvider = llmProvider == null || llmProvider.isBlank() ? null : llmProvider;
+            llmModel = llmModel == null || llmModel.isBlank() ? null : llmModel;
+            inputPricePer1M = inputPricePer1M == null || inputPricePer1M < 0 ? null : inputPricePer1M;
+            outputPricePer1M = outputPricePer1M == null || outputPricePer1M < 0 ? null : outputPricePer1M;
+        }
+    }
+
+    /**
      * Governs agent-filed tasks (I5). The task list is otherwise written only by
      * the PLAN phase and by config, so work an agent <em>discovers</em> while
      * executing — a missing migration, an untested edge case — dies in prose. The
@@ -118,7 +270,8 @@ public class AgentGroupConfiguration {
      *            files twenty tasks in one breath, where a discussion-long drift
      *            files one per turn for forty turns
      */
-    public record GroupTaskConfig(boolean allowAgentTaskCreation, int maxAgentAddedTasksPerDiscussion, int maxPerTurn) {
+    public record GroupTaskConfig(boolean allowAgentTaskCreation, int maxAgentAddedTasksPerDiscussion, int maxPerTurn,
+            AssignmentMode assignmentMode) {
 
         public static final int DEFAULT_MAX_PER_DISCUSSION = 20;
         public static final int DEFAULT_MAX_PER_TURN = 3;
@@ -136,6 +289,14 @@ public class AgentGroupConfiguration {
             if (maxPerTurn <= 0) {
                 maxPerTurn = DEFAULT_MAX_PER_TURN;
             }
+            if (assignmentMode == null) {
+                assignmentMode = AssignmentMode.ROLE;
+            }
+        }
+
+        /** Backward-compatible constructor without {@code assignmentMode} (I18). */
+        public GroupTaskConfig(boolean allowAgentTaskCreation, int maxAgentAddedTasksPerDiscussion, int maxPerTurn) {
+            this(allowAgentTaskCreation, maxAgentAddedTasksPerDiscussion, maxPerTurn, AssignmentMode.ROLE);
         }
 
         /** Disabled, with both caps at their defaults. */
@@ -145,11 +306,85 @@ public class AgentGroupConfiguration {
     }
 
     /**
+     * A member of the group. Members can be individual agents, nested groups, or
+     * humans (I6). Whether members may create and co-edit shared artifacts
+     * mid-discussion (I17). {@code null} means the artifact tools are absent
+     * entirely.
+     */
+    private ArtifactConfig artifactConfig;
+
+    public ArtifactConfig getArtifactConfig() {
+        return artifactConfig;
+    }
+
+    public void setArtifactConfig(ArtifactConfig artifactConfig) {
+        this.artifactConfig = artifactConfig;
+    }
+
+    /**
+     * Governs shared artifacts (I17, blackboard-lite): typed documents members
+     * co-edit through tools instead of re-parsing each other's prose. Same
+     * opt-in-by-absence discipline as {@link GroupTaskConfig}: off means the tools
+     * are never assembled, and there is no permissive standalone default.
+     *
+     * @param allowArtifactTools
+     *            master switch, default off
+     * @param maxArtifactsPerDiscussion
+     *            ceiling on artifacts per discussion (default 5). Non-positive
+     *            falls back to the default — 0 must never mean unlimited for an LLM
+     *            write surface
+     * @param validators
+     *            declarative validation chain every accepted write must pass —
+     *            {@link ValidatorKind#JSON_SCHEMA}, {@link ValidatorKind#REGEX} or
+     *            {@link ValidatorKind#MAX_LENGTH} with a {@code spec}. Declarative
+     *            <em>only</em>, never arbitrary code. Failed validation rejects the
+     *            write with the validator's message; nothing is stored
+     */
+    public record ArtifactConfig(boolean allowArtifactTools, int maxArtifactsPerDiscussion, List<ArtifactValidator> validators) {
+
+        public static final int DEFAULT_MAX_ARTIFACTS = 5;
+
+        /** Same normalization choke point as {@link GroupTaskConfig}. */
+        public ArtifactConfig {
+            if (maxArtifactsPerDiscussion <= 0) {
+                maxArtifactsPerDiscussion = DEFAULT_MAX_ARTIFACTS;
+            }
+            // Not List.copyOf: it NPEs on a null ELEMENT ("validators": [null]),
+            // preempting ArtifactValidators.requireValidSpecs' actionable message.
+            validators = validators == null ? List.of() : Collections.unmodifiableList(new ArrayList<>(validators));
+        }
+
+        /** Disabled, cap at its default, no validators. */
+        public ArtifactConfig() {
+            this(false, DEFAULT_MAX_ARTIFACTS, List.of());
+        }
+    }
+
+    /**
+     * One declarative artifact validator (I17): {@code kind} selects the check,
+     * {@code spec} parameterizes it — a JSON schema document, a regex the content
+     * must match, or a maximum character count. Specs are validated at save time so
+     * a typo fails the config save, not a member's turn.
+     */
+    public record ArtifactValidator(ValidatorKind kind, String spec) {
+    }
+
+    /** The closed set of declarative artifact validators (I17). */
+    public enum ValidatorKind {
+        JSON_SCHEMA, REGEX, MAX_LENGTH
+    }
+
+    /**
      * A member of the group. Members can be individual agents or nested groups.
      * <p>
      * For {@code MemberType.GROUP} members, the {@code agentId} field contains the
      * group configuration ID instead. The sub-group runs its own discussion and its
      * synthesized answer becomes this member's response.
+     * <p>
+     * For {@code MemberType.HUMAN} members, {@code agentId} carries the human's
+     * principal id (the identity that may submit their turns) and
+     * {@code displayName} is required at save time — a paused discussion must be
+     * able to say WHO it is waiting on.
      * <p>
      * The optional {@code role} field controls which phases the member participates
      * in (e.g. "DEVIL_ADVOCATE", "PRO", "CON"). If null, the member is a default
@@ -164,13 +399,169 @@ public class AgentGroupConfiguration {
     }
 
     /**
-     * Whether a group member is an individual agent or a nested sub-group.
+     * Whether a group member is an individual agent, a nested sub-group, or a human
+     * (I6).
      */
     public enum MemberType {
         /** An individual EDDI agent. */
         AGENT,
         /** A nested group — runs its own discussion, returns synthesized answer. */
-        GROUP
+        GROUP,
+        /**
+         * A human — their turn pauses the discussion ({@code
+         * AWAITING_HUMAN_INPUT}) until they submit a response or the group's
+         * {@code humanMemberConfig} timeout policy resolves the turn (I6).
+         */
+        HUMAN
+    }
+
+    /**
+     * How the discussion treats HUMAN members' turns (I6). One config for the whole
+     * group: humans on the same team wait under the same rules.
+     *
+     * @param turnTimeout
+     *            ISO-8601 duration a human turn may stay unanswered before
+     *            {@code onTimeout} fires; {@code null} or blank = wait indefinitely
+     * @param onTimeout
+     *            what an expired turn does — defaults to
+     *            {@link OnHumanTimeout#SKIP_TURN}
+     */
+    public record HumanMemberConfig(String turnTimeout, OnHumanTimeout onTimeout) {
+
+        /** Normalization choke point, same shape as {@link GroupTaskConfig}. */
+        public HumanMemberConfig {
+            if (onTimeout == null) {
+                onTimeout = OnHumanTimeout.SKIP_TURN;
+            }
+        }
+
+        /** Wait indefinitely; a timeout would skip the turn if one were set. */
+        public HumanMemberConfig() {
+            this(null, OnHumanTimeout.SKIP_TURN);
+        }
+    }
+
+    /** What an expired human turn does (I6). */
+    public enum OnHumanTimeout {
+        /**
+         * Record a SKIPPED entry ("no response from <name> within <d>") and move on.
+         */
+        SKIP_TURN,
+        /** Cancel the discussion. */
+        ABORT
+    }
+
+    /**
+     * A facilitator agent's checkpoint configuration (I12). {@code null} means no
+     * facilitator — the same thing a default-constructed instance means.
+     */
+    private FacilitatorConfig facilitator;
+
+    public FacilitatorConfig getFacilitator() {
+        return facilitator;
+    }
+
+    public void setFacilitator(FacilitatorConfig facilitator) {
+        this.facilitator = facilitator;
+    }
+
+    /**
+     * Bounded adaptive orchestration (I12): a facilitator agent is briefed at
+     * configured checkpoints and chooses one move from a config-enumerated list. A
+     * full LLM orchestrator conflicts with deterministic governance — the
+     * facilitator never free-forms; it selects, and every selection is validated,
+     * capped and audit-logged. Anything unparseable, disallowed or invalid degrades
+     * to {@link FacilitatorMove#CONTINUE}.
+     *
+     * @param enabled
+     *            master switch; {@code false} (default) means no checkpoint ever
+     *            runs and the discussion costs nothing extra
+     * @param agentId
+     *            the agent that plays facilitator — required when enabled. It runs
+     *            under its own conversation key, never a member's
+     * @param allowedMoves
+     *            the moves the facilitator may execute; defaults to
+     *            {@code [CONTINUE]}, which makes an enabled-but-unconfigured
+     *            facilitator a pure observer. {@code END_PHASE} and
+     *            {@code EXTEND_PHASE} act mid-phase and are save-time rejected
+     *            unless {@code checkAfter} is {@code EACH_REPEAT}
+     * @param checkAfter
+     *            checkpoint cadence — after each completed phase (default) or after
+     *            each completed repeat within a phase
+     * @param maxMovesPerDiscussion
+     *            ceiling on <em>executed non-CONTINUE</em> moves across the whole
+     *            discussion (default 10). Rejected attempts do not consume it —
+     *            they are recorded, not budgeted
+     * @param escalateTo
+     *            principal id that {@link FacilitatorMove#ESCALATE_HUMAN} pauses
+     *            for — required at save time when that move is allowed
+     */
+    public record FacilitatorConfig(boolean enabled, String agentId, List<FacilitatorMove> allowedMoves,
+            FacilitatorCheckpoint checkAfter, int maxMovesPerDiscussion, String escalateTo) {
+
+        public static final int DEFAULT_MAX_MOVES = 10;
+
+        /** Normalization choke point, same shape as {@link GroupTaskConfig}. */
+        public FacilitatorConfig {
+            allowedMoves = allowedMoves == null || allowedMoves.isEmpty()
+                    ? List.of(FacilitatorMove.CONTINUE)
+                    : List.copyOf(allowedMoves);
+            if (checkAfter == null) {
+                checkAfter = FacilitatorCheckpoint.EACH_PHASE;
+            }
+            if (maxMovesPerDiscussion <= 0) {
+                maxMovesPerDiscussion = DEFAULT_MAX_MOVES;
+            }
+        }
+
+        /** Disabled, observer-only move list, phase-boundary cadence. */
+        public FacilitatorConfig() {
+            this(false, null, List.of(FacilitatorMove.CONTINUE), FacilitatorCheckpoint.EACH_PHASE, DEFAULT_MAX_MOVES, null);
+        }
+    }
+
+    /**
+     * The moves a facilitator may choose from (I12). The move list IS the feature
+     * surface — each non-CONTINUE move drives machinery another item already built
+     * (I2's phase-exit plumbing, I14's vote phases, I7's recruitment, I6's pending
+     * human input).
+     */
+    public enum FacilitatorMove {
+        /** No intervention — the ambient default and every failure's fallback. */
+        CONTINUE,
+        /** Skip the current phase's remaining repeats. Mid-phase only. */
+        END_PHASE,
+        /**
+         * Add one repeat to the current phase (at most 2 extensions per phase, still
+         * bounded by {@code maxTurns}). Mid-phase only.
+         */
+        EXTEND_PHASE,
+        /**
+         * Insert a one-off VOTE phase right after the current one, with the options the
+         * facilitator names in {@code args.options}.
+         */
+        CALL_VOTE,
+        /**
+         * Recruit an existing deployed agent into the roster — the same validation path
+         * as I7's {@code recruitAgent} tool.
+         */
+        RECRUIT,
+        /**
+         * Pause the discussion for input from the configured {@code escalateTo}
+         * principal, carrying the facilitator's question (I6 pending-input machinery).
+         */
+        ESCALATE_HUMAN
+    }
+
+    /** When the facilitator is briefed (I12). */
+    public enum FacilitatorCheckpoint {
+        /** After each completed phase — the default. */
+        EACH_PHASE,
+        /**
+         * After each completed repeat within a phase. Required for
+         * {@code END_PHASE}/{@code EXTEND_PHASE}, which act mid-phase.
+         */
+        EACH_REPEAT
     }
 
     // --- Discussion Style ---
@@ -192,6 +583,12 @@ public class AgentGroupConfiguration {
         DEBATE,
         /** Collaborative task accomplishment: plan → execute → verify → synthesis. */
         TASK_FORCE,
+        /**
+         * Trade, not win/lose (I11): positions & interests → opening proposals →
+         * bargaining with a concession ledger → arbitration (skipped once an agreement
+         * is reached) → synthesis.
+         */
+        NEGOTIATION,
         /** User defines phases manually. */
         CUSTOM
     }
@@ -208,7 +605,7 @@ public class AgentGroupConfiguration {
      */
     public record DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
             boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
-            boolean allowAbstention) {
+            boolean allowAbstention, VoteConfig voteConfig, PhaseSkipCondition skipIf) {
 
         /**
          * Convenience constructor with defaults: participants=ALL,
@@ -248,6 +645,125 @@ public class AgentGroupConfiguration {
                 boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence) {
             this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence, false);
         }
+
+        /**
+         * Backward-compatible constructor without {@code voteConfig} (I14) or
+         * {@code skipIf} (I11) — {@code null}s mean a VOTE phase runs with
+         * {@link VoteConfig}'s defaults and the phase always runs, the behavior of
+         * every phase that predates those items.
+         */
+        public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
+                boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
+                boolean allowAbstention) {
+            this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence,
+                    allowAbstention, null, null);
+        }
+
+        /**
+         * I14-shaped constructor without {@code skipIf} — what every vote-phase call
+         * site written before the I11 merge uses.
+         */
+        public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
+                boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
+                boolean allowAbstention, VoteConfig voteConfig) {
+            this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence,
+                    allowAbstention, voteConfig, null);
+        }
+
+        /**
+         * I11-shaped constructor without {@code voteConfig} — what every
+         * negotiation-phase call site written before the I14 merge uses.
+         */
+        public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
+                boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
+                boolean allowAbstention, PhaseSkipCondition skipIf) {
+            this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence,
+                    allowAbstention, null, skipIf);
+        }
+    }
+
+    /**
+     * Ballot rules for a {@link PhaseType#VOTE} phase (I14).
+     * <p>
+     * LLM ballots are <b>correlated</b> — shared priors, sycophancy — so the
+     * durable value of a vote is the auditable process artifact (tally, raw
+     * ballots, losing-side dissents), not the epistemics. Independence is
+     * engineered structurally: save-time validation forces VOTE phases to
+     * {@code PARALLEL} + {@code ContextScope.NONE}, so ballots are cast blind
+     * against the pre-fan-out transcript snapshot — commit-reveal for LLM purposes,
+     * not an instruction the model could ignore.
+     *
+     * @param method
+     *            {@code MAJORITY} — one option per ballot, highest weighted count
+     *            wins; {@code APPROVAL} — a ballot may approve several options.
+     *            Default MAJORITY
+     * @param optionsSource
+     *            where the ballot options come from. {@code EXPLICIT} (the reliable
+     *            path) takes {@code options} verbatim; {@code LAST_SYNTHESIS}
+     *            extracts {@code Option A: …} lines from the latest SYNTHESIS entry
+     *            — instruct the synthesis to emit that shape. Default
+     *            LAST_SYNTHESIS
+     * @param options
+     *            the explicit option texts, required (≥ 2) for EXPLICIT
+     * @param quorum
+     *            the fraction of participants that must cast a valid ballot for the
+     *            vote to decide, in (0, 1]. Abstentions and unparseable replies
+     *            count toward the denominator only — a mostly-silent team has NOT
+     *            reached quorum, and that is signal. Out-of-range values fall back
+     *            to the default 0.5
+     * @param weights
+     *            per-agentId ballot weights, default 1.0 each. Negative weights are
+     *            rejected at save time
+     * @param weightByConfidence
+     *            multiply each ballot by its self-reported 0..1 confidence
+     *            (ReConcile-style). Default off — self-reported confidence is
+     *            exactly as correlated as the ballots themselves; treat the
+     *            weighted tally as process record, not probability
+     * @param tiePolicy
+     *            what resolves a tie or a quorum failure: {@code MODERATOR_DECIDES}
+     *            (one moderator turn choosing among the tied options),
+     *            {@code HUMAN_DECIDES} (reserved for I6 human members — rejected at
+     *            save time until that ships), or {@code NO_DECISION} (default:
+     *            record {@code type=NONE} and carry on)
+     */
+    public record VoteConfig(VoteMethod method, OptionsSource optionsSource, List<String> options, double quorum,
+            Map<String, Double> weights, boolean weightByConfidence, TiePolicy tiePolicy) {
+
+        public static final double DEFAULT_QUORUM = 0.5;
+
+        /** Same normalization choke point as {@link GroupTaskConfig}. */
+        public VoteConfig {
+            method = method == null ? VoteMethod.MAJORITY : method;
+            optionsSource = optionsSource == null ? OptionsSource.LAST_SYNTHESIS : optionsSource;
+            options = options == null ? List.of() : List.copyOf(options);
+            if (quorum <= 0.0 || quorum > 1.0) {
+                quorum = DEFAULT_QUORUM;
+            }
+            weights = weights == null ? Map.of() : Map.copyOf(weights);
+            tiePolicy = tiePolicy == null ? TiePolicy.NO_DECISION : tiePolicy;
+        }
+
+        /**
+         * All defaults: MAJORITY, LAST_SYNTHESIS, quorum 0.5, unweighted, NO_DECISION.
+         */
+        public VoteConfig() {
+            this(VoteMethod.MAJORITY, OptionsSource.LAST_SYNTHESIS, List.of(), DEFAULT_QUORUM, Map.of(), false, TiePolicy.NO_DECISION);
+        }
+    }
+
+    /** How a {@link VoteConfig} counts ballots (I14). */
+    public enum VoteMethod {
+        MAJORITY, APPROVAL
+    }
+
+    /** Where a {@link VoteConfig}'s ballot options come from (I14). */
+    public enum OptionsSource {
+        LAST_SYNTHESIS, EXPLICIT
+    }
+
+    /** What resolves a tied or quorum-failed vote (I14). */
+    public enum TiePolicy {
+        MODERATOR_DECIDES, HUMAN_DECIDES, NO_DECISION
     }
 
     /**
@@ -323,7 +839,47 @@ public class AgentGroupConfiguration {
         /** Task execution by assigned agents. */
         EXECUTE,
         /** Verification of task results. */
-        VERIFY
+        VERIFY,
+        /**
+         * Explicit ballots (I14). Save-time validation forces VOTE phases to
+         * {@code PARALLEL} + {@code ContextScope.NONE} — ballot independence is
+         * enforced structurally (the pre-fan-out snapshot plus the F4 peer-visibility
+         * matrix mean no ballot can see another cast this phase), not advised in a
+         * prompt.
+         */
+        VOTE,
+        /**
+         * An opening offer in a negotiation (I11) — the whole turn is the proposal's
+         * terms.
+         */
+        PROPOSAL,
+        /**
+         * A bargaining turn (I11): accept an open proposal, counter with a new one,
+         * and/or record concessions — a typed JSON contract, parsed by
+         * {@code NegotiationEngine}.
+         */
+        BARGAIN,
+        /**
+         * Post-discussion retrospective (I8): what worked, what failed, what to do
+         * differently. Parsed lessons land in team-owned group memory (synthetic owner
+         * {@code "group:"+groupId}) so they surface as {@code {properties.*}} in every
+         * member's later discussions — institutional knowledge that compounds
+         * run-over-run.
+         */
+        RETRO
+    }
+
+    /**
+     * The one phase-skip condition (I11) — deliberately a single enum, not an
+     * expression language: deterministic governance means a phase is skipped for a
+     * reason the engine can PROVE, not one an expression evaluates to.
+     */
+    public enum PhaseSkipCondition {
+        /**
+         * Skip when the discussion already carries an AGREEMENT decision — the
+         * arbitration phase of a negotiation is only needed when bargaining failed.
+         */
+        AGREEMENT_REACHED
     }
 
     public enum TurnOrder {
@@ -566,10 +1122,16 @@ public class AgentGroupConfiguration {
             String description,
             String assignToRole,
             List<String> dependsOn,
-            int priority) {
+            int priority,
+            AssignmentMode assignmentMode) {
 
         public TaskDefinition(String subject, String description) {
             this(subject, description, "ALL", List.of(), 0);
+        }
+
+        /** Backward-compatible constructor without {@code assignmentMode} (I18). */
+        public TaskDefinition(String subject, String description, String assignToRole, List<String> dependsOn, int priority) {
+            this(subject, description, assignToRole, dependsOn, priority, null);
         }
 
         public TaskDefinition {
@@ -582,6 +1144,22 @@ public class AgentGroupConfiguration {
                 assignToRole = "ALL";
             }
         }
+    }
+
+    /**
+     * How a task finds its agent (I18, CNP-lite). {@code null} on a task falls back
+     * to {@code taskListConfig.assignmentMode()}, and to {@link #ROLE} when that
+     * too is unset — every config that predates I18 behaves exactly as before.
+     */
+    public enum AssignmentMode {
+        /** The planner/config assigns by role or round-robin — today's behavior. */
+        ROLE,
+        /**
+         * Contract-Net-lite: eligible members submit blind parallel bids and the
+         * highest confidence wins (deterministic tie-break by speaking order; no bids
+         * falls back to ROLE — a wave never stalls on an auction).
+         */
+        BID
     }
 
     // --- Dynamic Agent Configuration ---

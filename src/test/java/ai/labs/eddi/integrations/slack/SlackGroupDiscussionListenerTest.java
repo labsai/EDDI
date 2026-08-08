@@ -493,4 +493,69 @@ class SlackGroupDiscussionListenerTest {
 
         verify(slackApi, times(1)).postMessage(any(), any(), any(), any());
     }
+
+    // ─── Vote tally block (I14) ───
+
+    @Test
+    void onDecisionReached_voteWithTally_postsTheTallyBlock() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        var tally = Map.<String, Object>of(
+                "totals", Map.of("Ship it", 2.0, "Hold it", 1.0),
+                "validBallots", 3, "participants", 3);
+        var decision = new DecisionRecord(DecisionType.VOTE, "\"Ship it\" wins.", "Ship it", tally, List.of(),
+                "vote", "Ballot", null);
+
+        listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(decision));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Tally:"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Ship it — 2.0"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Ballots: 3 of 3"));
+    }
+
+    @Test
+    void onDecisionReached_voteWithMalformedTally_stillPostsWithoutThrowing() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        var decision = new DecisionRecord(DecisionType.VOTE, "outcome", "X",
+                Map.of("totals", "not-a-map"), List.of(), "vote", "Ballot", null);
+
+        assertDoesNotThrow(() -> listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(decision)));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Winner: *X*"));
+    }
+
+    // ─── Artifact updated (I17) ───
+
+    @Test
+    void onArtifactUpdated_created_postsNameVersionAndEditor() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        listener.onArtifactUpdated(new GroupConversationEventSink.ArtifactUpdatedEvent(
+                "art-1", "design-doc", "MARKDOWN", 1, "agent-a", "DRAFT", true));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("design-doc"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("created"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("v1"));
+    }
+
+    @Test
+    void onArtifactUpdated_finalUpdate_marksFinal_inCompactThread() {
+        listener.onGroupStart(groupStart("SINGLE", 1));
+
+        listener.onArtifactUpdated(new GroupConversationEventSink.ArtifactUpdatedEvent(
+                "art-1", "design-doc", "MARKDOWN", 4, "agent-b", "FINAL", false));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("FINAL"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("updated"));
+    }
+
+    @Test
+    void onArtifactUpdated_degeneratePayload_doesNotThrowOrPost() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        assertDoesNotThrow(() -> listener.onArtifactUpdated(null));
+        assertDoesNotThrow(() -> listener.onArtifactUpdated(new GroupConversationEventSink.ArtifactUpdatedEvent(
+                null, null, null, 0, null, null, false)));
+
+        verify(slackApi, times(1)).postMessage(any(), any(), any(), any());
+    }
 }

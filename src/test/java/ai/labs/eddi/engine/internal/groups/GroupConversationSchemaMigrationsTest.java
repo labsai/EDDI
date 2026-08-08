@@ -6,16 +6,17 @@ package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link GroupConversationSchemaMigrations} (Wave 0, F6). Per the
- * plan's own testing instruction, fixture documents are constructed at
- * artificial version numbers — there is no real "older version" today, since
- * {@link GroupConversation#CURRENT_SCHEMA_VERSION} ({@code 1}) is the first
- * version that has ever existed.
+ * Tests for {@link GroupConversationSchemaMigrations} (Wave 0, F6). Fixture
+ * documents are constructed at explicit version numbers; the key-less fixtures
+ * go through Jackson because the field-initialiser semantics under
+ * deserialization are exactly what is under test — every pre-F6 production
+ * document has no {@code schemaVersion} key.
  *
  * @author tests
  */
@@ -26,6 +27,33 @@ class GroupConversationSchemaMigrationsTest {
         gc.setId("gc-1");
         gc.setSchemaVersion(schemaVersion);
         return gc;
+    }
+
+    /**
+     * The case that is every document in production: written before F6 existed, so
+     * the stored JSON has no {@code schemaVersion} key at all. Jackson runs the
+     * no-arg constructor and leaves the field initialiser standing — so the
+     * initialiser IS the version such a document claims. It must be the legacy
+     * floor ({@code 1}), not {@code CURRENT_SCHEMA_VERSION}: a key-less document
+     * claiming current makes {@code prepareForResume}'s ladder run zero iterations
+     * on exactly the documents it exists for.
+     */
+    @Test
+    void documentWithoutVersionKey_claimsLegacyVersionNotCurrent() throws Exception {
+        var legacy = new ObjectMapper().readValue("{}", GroupConversation.class);
+
+        assertEquals(1, legacy.getSchemaVersion(),
+                "a stored document with no schemaVersion key predates F6 and must claim the legacy floor, "
+                        + "so the migration ladder walks every hop instead of zero");
+    }
+
+    @Test
+    void documentWithoutVersionKey_isMigratedForwardOnResume() throws Exception {
+        var legacy = new ObjectMapper().readValue("{}", GroupConversation.class);
+
+        var result = GroupConversationSchemaMigrations.prepareForResume(legacy);
+
+        assertEquals(GroupConversation.CURRENT_SCHEMA_VERSION, result.getSchemaVersion());
     }
 
     @Test

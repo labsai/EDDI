@@ -34,6 +34,7 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -224,6 +225,38 @@ class GroupConversationServiceCostCeilingTest {
                 .filter(e -> e.type() != TranscriptEntryType.SKIPPED)
                 .map(e -> e.phaseName()).distinct().toList();
         assertFalse(phasesRun.contains("Summary"), "ABORT must not run synthesis — it fails outright");
+    }
+
+    /**
+     * Review finding (Copilot, PR #636): summarization is optional spend and must
+     * be ceiling-gated like the convergence judge and the dissent round. The
+     * scenario is built so the FIRST phase completes without tripping the per-turn
+     * gate (member A passes at $0, member B at $2 under the $3 ceiling) while its
+     * cumulative spend ends at $6 — so the SECOND Opinion phase's boundary is
+     * reached with the ceiling already blown and two summarizable entries on the
+     * transcript (cap 1 → a summarizer call is otherwise guaranteed).
+     * Mutation-checked: removing the guard fails this test.
+     */
+    @Test
+    @DisplayName("a blown ceiling also gates the I9 window summarizer — optional spend stops with the budget")
+    void blownCeiling_skipsWindowSummarization() throws Exception {
+        var phases = List.of(
+                phase("Opinion 1", PhaseType.OPINION),
+                phase("Opinion 2", PhaseType.OPINION),
+                phase("Summary", PhaseType.SYNTHESIS));
+        var config = buildConfig(phases, protocol(3.0, CostPolicy.SYNTHESIZE_NOW));
+        config.setMembers(List.of(new GroupMember(AGENT_A, "Agent A", 1, null), new GroupMember("agent-b", "Agent B", 2, null)));
+        config.setContextWindow(new AgentGroupConfiguration.ContextWindowConfig(true, 1, true, "openai", "gpt-4o-mini", null, null));
+        doReturn(mockResourceId()).when(groupStore).getCurrentResourceId(GROUP_ID);
+        doReturn(config).when(groupStore).read(GROUP_ID, 1);
+        doReturn("gc-window").when(conversationStore).create(any());
+        stubAgentSayCosting(2.0);
+        var summarizer = mock(SummarizationService.class);
+        service.summarizationService = summarizer;
+
+        service.discuss(GROUP_ID, "Q?", USER_ID, 0);
+
+        verifyNoInteractions(summarizer);
     }
 
     @Test

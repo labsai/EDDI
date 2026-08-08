@@ -5,7 +5,7 @@
 > holds the **design** for each item and does not repeat status — go there only for the one
 > item you are about to build, using the section pointers below.
 >
-> **Last updated:** 2026-08-04 · after PR [#626](https://github.com/labsai/EDDI/pull/626) (`refactor/group-service-split`)
+> **Last updated:** 2026-08-07 · after the `fix/group-pre-feature-defects` branch (N1 + N2/I9 + N3, §2 below — all three done)
 
 ---
 
@@ -21,7 +21,8 @@ builds on (F1–F6), and shipped six feature items.
 | **Wave 0** — F1 `LiveDiscussionRegistry`, F2 speaker-level `ResumePoint`, F3 `DecisionRecord`, F4 entry types + visibility, F5 cost ledger, F6 schema versioning | ✅ Done |
 | **Wave 1** — I1 cost ceiling, I2 convergence + early exit, I3 structured verdicts, I4 abstention + minority report | ✅ Done |
 | **Wave 2** — I5 agent-filed tasks, I7 recruitment + delegation timeout | ✅ Done |
-| **Wave 2** — I6, I8, I9, I14, I17 | ⬜ Queued (see §3) |
+| **Pre-feature defects** — N1 plain-call pricing, N2/I9 transcript windowing, N3 schema sentinel (§2) | ✅ Done (2026-08-07, `fix/group-pre-feature-defects`) |
+| **Wave 2** — I6, I8, I14, I17 | ⬜ Queued (see §3) |
 | **Wave 3** — I10, I11, I12, I13, I18 | ⬜ Queued (see §3) |
 | **Excluded — do not start** — I15 cross-team process DAGs, I16 A2A remote members | ❌ Out of scope |
 
@@ -32,7 +33,12 @@ tool surfaces → a `ToolSourceProvider`.
 
 ---
 
-## 2. Do these three first
+## 2. Do these three first — ✅ ALL DONE (2026-08-07, branch `fix/group-pre-feature-defects`)
+
+> N1, N2 and N3 below all shipped on that branch, each mutation-checked; the §4
+> nested-group cost gap was folded into N1 as planned. The section is kept for
+> the reasoning record — do not redo any of it. Details in `docs/changelog.md`
+> (entries of 2026-08-07). **Next up: §3's queue, starting with I17 / I14 / I8.**
 
 These are not new features. They are **defects in what already shipped**, and later items depend
 on them. Do them as one small PR before starting any Wave 2 feature.
@@ -171,9 +177,8 @@ Recorded so they are not rediscovered. Fix opportunistically, or fold into a rel
 - **`decision_reached` never fires.** I3 writes `DecisionRecord`, but no producer calls the sink
   event, so verdicts reach REST/MCP and never SSE or Slack.
   `SlackGroupDiscussionListener.onDecisionReached` is dead code today. *(Natural fold-in: I14.)*
-- **Nested-group cost is overwritten, not accumulated.** `accumulateNestedGroupCost` keys by
-  `agentId`, and each nested turn is a fresh child discussion starting at 0, so only the last
-  child's spend survives. *(Natural fold-in: N1.)*
+- ~~**Nested-group cost is overwritten, not accumulated.**~~ ✅ Fixed with N1 (2026-08-07):
+  attribution is keyed per child discussion (`agentId:childId`), so children sum.
 - **`allowAbstention` on a SYNTHESIS phase** yields a `COMPLETED` discussion with no answer.
 - **Parallel-phase late entries are lost.** After the batch deadline a member finishing
   milliseconds late has its real entry replaced by `SKIPPED`. **Both obvious fixes were tried

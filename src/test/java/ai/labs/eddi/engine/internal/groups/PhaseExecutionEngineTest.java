@@ -12,7 +12,11 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.OptionsSource;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TiePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.VoteConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.VoteMethod;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
@@ -53,11 +57,12 @@ class PhaseExecutionEngineTest {
     private PhaseExecutionEngine engine() {
         memberTurnExecutor = mock(MemberTurnExecutor.class);
         contextBuilder = mock(GroupContextBuilder.class);
-        // The 7-ARG overload — the only one PhaseExecutionEngine calls. Stubbing the
-        // 6-arg one left every turn running with a null input, so a regression that
-        // dropped the phase rendering entirely and passed the raw question through
-        // would not have failed a single test here.
-        when(contextBuilder.buildPhaseInput(any(), any(), any(), any(), anyInt(), any(), any()))
+        // The 10-ARG overload (I9 added window + gc, I8's review round added
+        // retroConfig) — the only one PhaseExecutionEngine calls. Stubbing a
+        // shorter one left every turn running with a null input, so a regression
+        // that dropped the phase rendering entirely and passed the raw question
+        // through would not have failed a single test here.
+        when(contextBuilder.buildPhaseInput(any(), any(), any(), any(), anyInt(), any(), any(), any(), any(), any()))
                 .thenReturn("rendered-input");
         return new PhaseExecutionEngine(memberTurnExecutor, contextBuilder,
                 Executors.newVirtualThreadPerTaskExecutor(), new CallerIdentityContext(null, null));
@@ -163,6 +168,113 @@ class PhaseExecutionEngineTest {
         assertTrue(gc.getTranscript().isEmpty());
         assertEquals(0, turnCounter.get());
         verifyNoInteractions(memberTurnExecutor);
+    }
+
+    // =================================================================
+    // I6 — human member turns
+    // =================================================================
+
+    private GroupMember human(String id) {
+        return new GroupMember(id, "Human " + id, 5, null, AgentGroupConfiguration.MemberType.HUMAN);
+    }
+
+    @Test
+    void sequentialPhase_humanSpeaker_pausesWithRenderedPromptAndAbsoluteIndex() throws Exception {
+        var engine = engine();
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any()))
+                .thenAnswer(inv -> opinionEntry(((GroupMember) inv.getArgument(0)).agentId()));
+        var speakers = List.of(member("a"), human("h"), member("c"));
+        var gc = gc();
+        var turnCounter = new AtomicInteger(0);
+
+        var pause = assertThrows(PhaseExecutionEngine.HumanTurnRequired.class,
+                () -> engine.executeSequentialPhase(gc, new AgentGroupConfiguration(), speakers, phase(TurnOrder.SEQUENTIAL),
+                        protocol(), "Q?", 0, null, turnCounter, 10));
+
+        assertEquals("h", pause.member().agentId());
+        assertEquals(1, pause.speakerIdx(), "the index into the phase's resolved speaker list — the resume bookmark");
+        assertEquals("rendered-input", pause.renderedPrompt(), "the human sees exactly what an agent speaker would");
+        assertFalse(pause.parallel());
+        assertEquals(1, gc.getTranscript().size(), "the agent BEFORE the human spoke");
+        assertEquals(1, turnCounter.get(), "the human's own turn is accounted by the pause commit, not the loop");
+        // The speaker after the human never ran — the pause ends the leg.
+        verify(memberTurnExecutor, times(1)).executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any());
+    }
+
+    @Test
+    void sequentialPhase_turnBudgetExhaustedBeforeHuman_noPause() throws Exception {
+        var engine = engine();
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any()))
+                .thenAnswer(inv -> opinionEntry(((GroupMember) inv.getArgument(0)).agentId()));
+        var turnCounter = new AtomicInteger(0);
+
+        // Budget of 1: the agent takes it; the human's turn is no longer owed —
+        // an exhausted budget must not park the discussion on a human.
+        engine.executeSequentialPhase(gc(), new AgentGroupConfiguration(), List.of(member("a"), human("h")),
+                phase(TurnOrder.SEQUENTIAL), protocol(), "Q?", 0, null, turnCounter, 1);
+
+        assertEquals(1, turnCounter.get());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void parallelPhase_humansPromptedAfterFanOut_blindToTheBatch() throws Exception {
+        var engine = engine();
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any()))
+                .thenAnswer(inv -> opinionEntry(((GroupMember) inv.getArgument(0)).agentId()));
+        var speakers = List.of(member("a"), human("h"), member("b"));
+        var gc = gc();
+        var turnCounter = new AtomicInteger(0);
+
+        var pause = assertThrows(PhaseExecutionEngine.HumanTurnRequired.class,
+                () -> engine.executeParallelPhase(gc, new AgentGroupConfiguration(), speakers, phase(TurnOrder.PARALLEL),
+                        protocol(), "Q?", 0, null, turnCounter, 10));
+
+        assertTrue(pause.parallel());
+        assertEquals(0, pause.speakerIdx(), "the index into the phase's HUMAN-ONLY sublist");
+        assertEquals(2, gc.getTranscript().size(), "both agents fanned out and completed first");
+        assertEquals(2, turnCounter.get(), "agent turns are counted; the human's comes with the pause commit");
+        // Blindness: the human's prompt renders from the PRE-fan-out snapshot.
+        var transcriptCaptor = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(contextBuilder).buildPhaseInput(any(), argThat(m -> "h".equals(m.agentId())), any(),
+                transcriptCaptor.capture(), anyInt(), any(), any(), any(), any(), any());
+        assertTrue(transcriptCaptor.getValue().isEmpty(),
+                "a 'parallel' (independent) round must stay independent — the human must not read the batch's answers");
+    }
+
+    @Test
+    void parallelPhase_resumeHumanTail_allAnswered_completesWithoutReRunningFanOut() throws Exception {
+        var engine = engine();
+        var gc = gc();
+        gc.getTranscript().add(opinionEntry("a")); // the fan-out's pre-pause output
+
+        engine.executeParallelPhase(gc, new AgentGroupConfiguration(), List.of(member("a"), human("h")),
+                phase(TurnOrder.PARALLEL), protocol(), "Q?", 0, null, new AtomicInteger(2), 10, 1);
+
+        verifyNoInteractions(memberTurnExecutor);
+        assertEquals(1, gc.getTranscript().size(), "no re-run, no duplicate agent entries");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void parallelPhase_resumeHumanTail_nextHumanPauses_blindToThePhase() throws Exception {
+        var engine = engine();
+        var gc = gc();
+        gc.getTranscript().add(opinionEntry("a")); // phaseIndex 0 — this phase's entry
+
+        var pause = assertThrows(PhaseExecutionEngine.HumanTurnRequired.class,
+                () -> engine.executeParallelPhase(gc, new AgentGroupConfiguration(),
+                        List.of(member("a"), human("h1"), human("h2")),
+                        phase(TurnOrder.PARALLEL), protocol(), "Q?", 0, null, new AtomicInteger(2), 10, 1));
+
+        assertEquals("h2", pause.member().agentId());
+        assertEquals(1, pause.speakerIdx());
+        verifyNoInteractions(memberTurnExecutor);
+        var transcriptCaptor = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(contextBuilder).buildPhaseInput(any(), argThat(m -> "h2".equals(m.agentId())), any(),
+                transcriptCaptor.capture(), anyInt(), any(), any(), any(), any(), any());
+        assertTrue(transcriptCaptor.getValue().isEmpty(),
+                "the resumed human prompt excludes this phase's entries entirely — the blindness bound survives the pause");
     }
 
     // =================================================================
@@ -529,5 +641,64 @@ class PhaseExecutionEngineTest {
                 new AtomicInteger(0), 10);
 
         assertFalse(outcome.isContinue(), "every scheduled turn abstained — the phase must stop");
+    }
+
+    // =================================================================
+    // I14 review round 1 — the moderator tiebreak is budget-gated
+    // =================================================================
+
+    private DiscussionPhase votePhase() {
+        var voteConfig = new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT,
+                List.of("Adopt PostgreSQL", "Stay on MongoDB"), 0.5, java.util.Map.of(), false, TiePolicy.MODERATOR_DECIDES);
+        return new DiscussionPhase("Ballot", PhaseType.VOTE, "ALL", TurnOrder.PARALLEL, ContextScope.NONE,
+                false, null, 1, false, null, false, voteConfig);
+    }
+
+    private TranscriptEntry voteEntry(String agentId, String json) {
+        return new TranscriptEntry(agentId, agentId, json, 0, "Ballot", TranscriptEntryType.VOTE, Instant.now(), null, null);
+    }
+
+    @Test
+    void voteTiebreak_turnBudgetExhausted_keepsNoDecision_andSpendsNothing() throws Exception {
+        var engine = engine();
+        var config = new AgentGroupConfiguration();
+        config.setModeratorAgentId("mod");
+        var ballots = List.of(
+                voteEntry("a", "{\"vote\": \"Adopt PostgreSQL\"}"),
+                voteEntry("b", "{\"vote\": \"Stay on MongoDB\"}"));
+        var turnCounter = new AtomicInteger(5);
+
+        engine.recordVoteDecision(gc(), config, votePhase(), protocol(), 0, ballots,
+                List.of(member("a"), member("b")), null, turnCounter, 5);
+
+        verify(memberTurnExecutor, never()).executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any(), any());
+        assertEquals(5, turnCounter.get(), "a blocked tiebreak must not consume a turn");
+    }
+
+    @Test
+    void voteTiebreak_withinBudget_countsItsTurn_andCarriesTheLosersDissent() throws Exception {
+        var engine = engine();
+        var config = new AgentGroupConfiguration();
+        config.setModeratorAgentId("mod");
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any(), any()))
+                .thenReturn(voteEntry("mod", "Adopt PostgreSQL"));
+        var ballots = List.of(
+                voteEntry("a", "{\"vote\": \"Adopt PostgreSQL\", \"statement\": \"pgvector\"}"),
+                voteEntry("b", "{\"vote\": \"Stay on MongoDB\", \"statement\": \"migration risk is real\"}"));
+        var gc = gc();
+        var turnCounter = new AtomicInteger(0);
+
+        engine.recordVoteDecision(gc, config, votePhase(), protocol(), 0, ballots,
+                List.of(member("a"), member("b")), null, turnCounter, 10);
+
+        assertEquals(1, turnCounter.get(), "the tiebreak is a real LLM turn and must be counted");
+        DecisionRecord decision = gc.getDecision();
+        assertEquals(DecisionType.VOTE, decision.type());
+        assertEquals("Adopt PostgreSQL", decision.winner());
+        assertEquals(VoteTallyEngine.METHOD_TIEBREAK, decision.method());
+        // The review defect: reusing the unresolved record's empty dissent list
+        // dropped the minority report for exactly the closest votes.
+        assertEquals(1, decision.dissents().size(), "the losing side's statement must survive the tiebreak");
+        assertEquals("migration risk is real", decision.dissents().get(0).position());
     }
 }

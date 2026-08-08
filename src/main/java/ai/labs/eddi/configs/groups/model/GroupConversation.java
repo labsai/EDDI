@@ -14,10 +14,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Transcript record for a group conversation. Persisted with a single-version
@@ -30,8 +32,34 @@ public class GroupConversation {
      * Current document shape this code understands (Wave 0, F6). Bump whenever a
      * Wave adds a field resume-time logic depends on, and register that version's
      * migration in {@code GroupConversationSchemaMigrations}.
+     * <p>
+     * Version 4 — the 2026-08 group-features release shape, carrying BOTH
+     * resume-critical additions that ship together: {@code runtimePhases} (I12 — a
+     * facilitator-diverged phase list a resume must honor; an older pod would
+     * mis-index every bookmark into the config's list) and {@code negotiationState}
+     * (I11 — an older pod re-saving a paused document would drop the proposals,
+     * signed acceptances and concession ledger). No migration entry for either: v3
+     * documents have neither field and Jackson defaults them correctly (identity
+     * hop).
      */
-    public static final int CURRENT_SCHEMA_VERSION = 3;
+    // v4 (this release): the release shape — adds I11's negotiationState, I12's
+    // runtimePhases and I6's pausedRepeatSliceBase, all resume-consumed. No
+    // migration entries needed: Jackson defaults each on legacy documents to its
+    // pre-v4 behavior (null / null / -1).
+    public static final int CURRENT_SCHEMA_VERSION = 4;
+    /**
+     * The version a stored document claims when its JSON carries no
+     * {@code schemaVersion} key — i.e. it was written before F6 existed, which is
+     * every pre-F6 production document. Jackson runs the no-arg constructor and
+     * leaves the field initialiser standing either way, so the initialiser cannot
+     * distinguish "absent" from "current": it MUST be this legacy floor, and the
+     * single creation point ({@code GroupConversationService}) stamps
+     * {@link #CURRENT_SCHEMA_VERSION} explicitly. Initialising the field to CURRENT
+     * instead made key-less documents claim the current version and
+     * {@code prepareForResume}'s ladder run zero iterations on exactly the
+     * documents it exists for.
+     */
+    public static final int LEGACY_SCHEMA_VERSION = 1;
     /**
      * The shape this specific document was last written in. Checked before a
      * resume: newer than {@link #CURRENT_SCHEMA_VERSION} refuses (this deployment
@@ -41,7 +69,7 @@ public class GroupConversation {
      * per-resume config-drift check (bookmarked phase vs. current config) that
      * guards a different axis. See {@code GroupConversationSchemaMigrations}.
      */
-    private int schemaVersion = CURRENT_SCHEMA_VERSION;
+    private int schemaVersion = LEGACY_SCHEMA_VERSION;
     private String id;
     private String groupId;
     private String userId;
@@ -70,14 +98,18 @@ public class GroupConversation {
     // turns a successful discussion into a FAILED one.
     private Map<String, String> memberDisplayNames = new ConcurrentHashMap<>();
     /**
-     * Per-member dollar-cost attribution (Wave 0, F5): agentId → that member's cost
-     * so far. For an individual agent, its own private conversation's cumulative
-     * tracked cost; for a {@code MemberType.GROUP} member, the child discussion's
-     * own {@link #totalCost} rolled up whole. See {@code GroupCostLedger}'s Javadoc
-     * for the known gap this reflects (V1: a non-cascade member turn's own
-     * model-completion cost is not tracked anywhere yet — I1 closes that).
-     * Thread-safe: PARALLEL phases accumulate from multiple member turns
-     * concurrently.
+     * Per-conversation dollar-cost attribution (Wave 0, F5): attribution key → that
+     * conversation's cumulative tracked cost. The invariant is <b>one key = one
+     * conversation</b> (recording is by replacement, which is only idempotent under
+     * that reading), so keys are NOT uniformly agent ids: an ordinary member's key
+     * is its agentId, a separate-conversation turn uses its conversation key (I2's
+     * {@code __convergence_judge}, I4's {@code __dissent__*}), and a nested GROUP
+     * member's children are keyed {@code agentId:childConversationId} — each turn
+     * of a GROUP member is a fresh child discussion, and a per-agent key would
+     * replace child N−1's whole spend with child N's. Consumers wanting a member's
+     * total must sum matching keys; {@link #totalCost} is always the sum of
+     * everything. Thread-safe: PARALLEL phases accumulate from multiple member
+     * turns concurrently.
      */
     private Map<String, Double> memberCosts = new ConcurrentHashMap<>();
     /**
@@ -104,6 +136,12 @@ public class GroupConversation {
      * one of those features ran.
      */
     private DecisionRecord decision;
+    /**
+     * The negotiation's proposals + concession ledger (I11). {@code null} until the
+     * first PROPOSAL/BARGAIN phase produces state; persisted with the document so a
+     * pause/resume keeps the table as it stood.
+     */
+    private NegotiationState negotiation;
     private int depth;
     /** Current discussion round (1-based). Incremented by continueDiscussion(). */
     private int round = 1;
@@ -131,6 +169,140 @@ public class GroupConversation {
 
     public void setRoundStartTranscriptIndex(int roundStartTranscriptIndex) {
         this.roundStartTranscriptIndex = roundStartTranscriptIndex;
+    }
+
+    /**
+     * The phase list the CURRENT round actually runs (I12), persisted only once a
+     * facilitator move diverges it from the config's phases — a CALL_VOTE insertion
+     * or an EXTEND_PHASE repeat bump. {@code null} means the config is
+     * authoritative, which is every discussion without a facilitator intervention.
+     * <p>
+     * Load-bearing across a pause: every resume path (approval, human turn, crash
+     * recovery) must execute and drift-check against THIS list when it is set —
+     * resolving the config's phases instead would mis-index the bookmark into a
+     * list the pause was not taken against. Schema version 4 guards exactly that
+     * (see {@link #CURRENT_SCHEMA_VERSION}). Cleared when a round completes: a
+     * facilitator's insertions are one-off by design, so a continuation round
+     * starts from the config again.
+     */
+    private List<AgentGroupConfiguration.DiscussionPhase> runtimePhases;
+
+    /**
+     * Executed non-CONTINUE facilitator moves so far (I12) — the counter
+     * {@code FacilitatorConfig.maxMovesPerDiscussion} caps. Persisted so a
+     * pause/resume cannot refill the budget. Rejected attempts never increment it.
+     */
+    private int facilitatorMoveCount;
+
+    /**
+     * EXTEND_PHASE count per phase index (I12), capped at 2 per phase. Keyed by the
+     * phase's index rendered as a string (document maps key by string). Safe under
+     * CALL_VOTE insertions: insertions land at {@code currentPhase + 1}, so an
+     * index that already carries a count (current or earlier) never shifts, and
+     * later phases have no counts yet. Cleared with {@link #runtimePhases} when the
+     * round completes.
+     */
+    private Map<String, Integer> facilitatorExtensions = new ConcurrentHashMap<>();
+
+    public List<AgentGroupConfiguration.DiscussionPhase> getRuntimePhases() {
+        return runtimePhases;
+    }
+
+    public void setRuntimePhases(List<AgentGroupConfiguration.DiscussionPhase> runtimePhases) {
+        this.runtimePhases = runtimePhases;
+    }
+
+    public int getFacilitatorMoveCount() {
+        return facilitatorMoveCount;
+    }
+
+    public void setFacilitatorMoveCount(int facilitatorMoveCount) {
+        this.facilitatorMoveCount = facilitatorMoveCount;
+    }
+
+    /**
+     * Read-only view — mutation goes through {@link #recordFacilitatorExtension}
+     * and {@link #clearFacilitatorExtensions}, so the caps cannot be edited behind
+     * the conversation's back.
+     */
+    public Map<String, Integer> getFacilitatorExtensions() {
+        return Collections.unmodifiableMap(facilitatorExtensions);
+    }
+
+    /** EXTEND_PHASE count for one phase index (I12). */
+    public int facilitatorExtensionCount(int phaseIdx) {
+        return facilitatorExtensions.getOrDefault(String.valueOf(phaseIdx), 0);
+    }
+
+    public void recordFacilitatorExtension(int phaseIdx) {
+        facilitatorExtensions.merge(String.valueOf(phaseIdx), 1, Integer::sum);
+    }
+
+    public void clearFacilitatorExtensions() {
+        facilitatorExtensions.clear();
+    }
+
+    public void setFacilitatorExtensions(Map<String, Integer> facilitatorExtensions) {
+        this.facilitatorExtensions = facilitatorExtensions != null
+                ? new ConcurrentHashMap<>(facilitatorExtensions)
+                : new ConcurrentHashMap<>();
+    }
+
+    /**
+     * Rolling summary of transcript entries {@code [0, summaryUpToIndex)} for
+     * FULL-scope windowed rendering (I9), extended incrementally at phase
+     * boundaries by {@code GroupContextBuilder.updateWindowSummary}. A derived view
+     * only — the transcript itself is never modified. {@code null} until windowing
+     * first summarizes; legacy documents deserialize to exactly that state and
+     * simply start summarizing at the next boundary, so this is additive and needs
+     * no {@code CURRENT_SCHEMA_VERSION} bump.
+     */
+    private String transcriptSummary;
+    /** Exclusive raw-transcript index {@link #transcriptSummary} covers through. */
+    private int summaryUpToIndex;
+    /**
+     * The ANONYMOUS-scope twin of {@link #transcriptSummary}, built from
+     * "Anonymous"-labelled input so an ANONYMOUS phase's summary can never leak
+     * attribution (no de-anonymization). Kept separately rather than reusing the
+     * FULL summary, which contains real speaker names.
+     */
+    private String anonymousTranscriptSummary;
+    /**
+     * Exclusive raw-transcript index {@link #anonymousTranscriptSummary} covers
+     * through.
+     */
+    private int anonymousSummaryUpToIndex;
+
+    public String getTranscriptSummary() {
+        return transcriptSummary;
+    }
+
+    public void setTranscriptSummary(String transcriptSummary) {
+        this.transcriptSummary = transcriptSummary;
+    }
+
+    public int getSummaryUpToIndex() {
+        return summaryUpToIndex;
+    }
+
+    public void setSummaryUpToIndex(int summaryUpToIndex) {
+        this.summaryUpToIndex = summaryUpToIndex;
+    }
+
+    public String getAnonymousTranscriptSummary() {
+        return anonymousTranscriptSummary;
+    }
+
+    public void setAnonymousTranscriptSummary(String anonymousTranscriptSummary) {
+        this.anonymousTranscriptSummary = anonymousTranscriptSummary;
+    }
+
+    public int getAnonymousSummaryUpToIndex() {
+        return anonymousSummaryUpToIndex;
+    }
+
+    public void setAnonymousSummaryUpToIndex(int anonymousSummaryUpToIndex) {
+        this.anonymousSummaryUpToIndex = anonymousSummaryUpToIndex;
     }
     private SharedTaskList taskList;
     /** Agents dynamically added during the discussion (recruited or created). */
@@ -162,6 +334,24 @@ public class GroupConversation {
     private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
     private int pausedAtPhaseIndex = -1;
     private int pausedTurnCount = 0;
+    /**
+     * Transcript index where the PAUSED repeat's entries begin (I6), or {@code -1}.
+     * A human turn pauses MID-repeat, after other speakers already appended this
+     * repeat's entries — the resumed leg recomputing "size at top of repeat" would
+     * slice only what came AFTER the pause, so the convergence check (and every
+     * later consumer of the repeat slice) silently loses the pre-pause
+     * contributions. Persisted with the pause, consumed exactly once with the
+     * speaker bookmark. {@code -1} on legacy documents keeps the old recompute.
+     */
+    private int pausedRepeatSliceBase = -1;
+
+    public int getPausedRepeatSliceBase() {
+        return pausedRepeatSliceBase;
+    }
+
+    public void setPausedRepeatSliceBase(int pausedRepeatSliceBase) {
+        this.pausedRepeatSliceBase = pausedRepeatSliceBase;
+    }
     private String pausedPhaseName;
     private Instant pausedAt;
     private HitlPauseType hitlPauseType;
@@ -169,13 +359,18 @@ public class GroupConversation {
     private String hitlPauseReason;
     /**
      * Where inside a SEQUENTIAL phase's speaker list a pause landed (Wave 0, F2).
-     * {@code null} for every pause today — {@code PHASE} and {@code TASK} pauses
-     * (the only kinds that exist) both land at a phase/task boundary, never
-     * mid-speaker-list. Exists for I6 (human as a group member), which pauses
-     * between one speaker and the next within a running SEQUENTIAL phase; see
-     * {@link ResumePoint}'s own Javadoc for why PARALLEL phases never set this.
+     * {@code null} for {@code PHASE} and {@code TASK} pauses, which land at a
+     * phase/task boundary, never mid-speaker-list. I6's HUMAN_TURN pauses are the
+     * producer: they pause ON a specific speaker within a running phase; see
+     * {@link ResumePoint}'s own Javadoc (and its {@code HUMAN_TURN_PARALLEL}
+     * carve-out) for the resume semantics.
      */
     private ResumePoint resumePoint;
+    /**
+     * The human member's turn an {@code AWAITING_HUMAN_INPUT} pause is waiting on
+     * (I6). Non-null exactly while the state is AWAITING_HUMAN_INPUT.
+     */
+    private PendingHumanInput pendingHumanInput;
     /** Timeout policy copied from config at pause time (Phase 6d). */
     private HitlTimeoutPolicy hitlTimeoutPolicy;
     /**
@@ -226,15 +421,112 @@ public class GroupConversation {
     private transient AgentGroupConfiguration.ProtocolConfig.CostPolicy costCeilingOutcome;
 
     /**
-     * A parent discussion's remaining cost budget at the moment it dispatched this
-     * nested one (I1), or {@code null} for a top-level discussion (and for a parent
-     * that has no ceiling of its own). The discussion runs under
-     * {@code min(own configured ceiling, this)} — see
-     * {@code GroupConversationService.effectiveCostCeiling}. Transient: it is a
-     * property of one dispatch, not of the stored discussion.
+     * One accepted artifact write (I17), queued by the artifact tools on the LIVE
+     * instance and drained by {@code MemberTurnExecutor} after the turn to fire the
+     * {@code artifact_updated} event. This indirection exists because tools have no
+     * listener reference — {@code ToolAssemblyContext} carries none — while the
+     * turn executor does. Transient and concurrent: PARALLEL phases run members
+     * (and so their tools) concurrently.
+     */
+    public record ArtifactChange(String artifactId, String name, String type, long version, String editorAgentId,
+            String status, boolean created) {
+    }
+
+    @JsonIgnore
+    private final transient Queue<ArtifactChange> pendingArtifactChanges = new ConcurrentLinkedQueue<>();
+
+    /**
+     * Serializes the drain HANDOFF over {@link #pendingArtifactChanges}. The queue
+     * itself is safe, but two PARALLEL turns ending together would split it between
+     * their drains and could then publish v2's event before v1's. The mutex is held
+     * only around the drain and the publisher flag — never across the listener
+     * callbacks, so a slow SSE client cannot block other turns' end-of-turn drains.
+     * See {@code MemberTurnExecutor#announceArtifactChanges}.
      */
     @JsonIgnore
-    private transient Double inheritedCostCeiling;
+    private final transient Object artifactAnnounceMutex = new Object();
+
+    /** The monitor {@code MemberTurnExecutor} serializes announce passes on. */
+    @JsonIgnore
+    public Object artifactAnnounceMutex() {
+        return artifactAnnounceMutex;
+    }
+
+    /**
+     * Whether a thread is currently PUBLISHING drained artifact changes. Guarded by
+     * {@link #artifactAnnounceMutex} (never read or written outside it) — this flag
+     * is what lets the mutex be released during the listener callbacks themselves:
+     * the active publisher keeps looping over late arrivals, and every other thread
+     * hands off and leaves instead of blocking on a slow SSE client. Deliberately
+     * not {@code isX}-named: runtime coordination state, invisible to Jackson.
+     */
+    private transient boolean artifactAnnouncePublishing;
+
+    @JsonIgnore
+    public boolean artifactAnnouncePublishing() {
+        return artifactAnnouncePublishing;
+    }
+
+    @JsonIgnore
+    public void artifactAnnouncePublishing(boolean publishing) {
+        this.artifactAnnouncePublishing = publishing;
+    }
+
+    /** Queues an accepted artifact write for the turn executor to announce. */
+    @JsonIgnore
+    public void queueArtifactChange(ArtifactChange change) {
+        if (change != null) {
+            pendingArtifactChanges.add(change);
+        }
+    }
+
+    /** Drains queued artifact writes — each drained exactly once. */
+    @JsonIgnore
+    public List<ArtifactChange> drainArtifactChanges() {
+        List<ArtifactChange> drained = new ArrayList<>();
+        ArtifactChange change;
+        while ((change = pendingArtifactChanges.poll()) != null) {
+            drained.add(change);
+        }
+        return drained;
+    }
+
+    /**
+     * The discussion's shared artifacts (I17), populated at READ time by
+     * {@code GroupConversationService.readGroupConversation} from the artifact
+     * store — never persisted with this document (artifacts have their own
+     * collection; see {@link SharedArtifact}). Serialized when populated so REST's
+     * status payload and MCP's {@code read_group_conversation} both carry it;
+     * {@code READ_ONLY} because a stored copy must never be trusted back. Mirrors
+     * the {@code availableActions} idiom.
+     */
+    @JsonIgnore
+    private transient List<SharedArtifact> artifacts;
+
+    @JsonProperty(value = "artifacts", access = JsonProperty.Access.READ_ONLY)
+    public List<SharedArtifact> getArtifacts() {
+        return artifacts;
+    }
+
+    @JsonIgnore
+    public void setArtifacts(List<SharedArtifact> artifacts) {
+        this.artifacts = artifacts;
+    }
+
+    /**
+     * A parent discussion's remaining cost budget at the moment it dispatched this
+     * nested one (I1), or a cadence run's {@code maxCostPerRun} (I13), or
+     * {@code null} for an unconstrained top-level discussion. The discussion runs
+     * under {@code min(own configured ceiling, this)} — see
+     * {@code GroupConversationService.effectiveCostCeiling}.
+     * <p>
+     * PERSISTED (final-review finding): this was transient, so every HITL
+     * pause/resume re-read the document and silently DROPPED the ceiling — a
+     * cadence discussion whose group config had no ceiling of its own resumed with
+     * unlimited spend after one human approval. The ceiling is a property of the
+     * RUN, and the run survives pauses.
+     */
+    private Double inheritedCostCeiling;
 
     /**
      * A single entry in the discussion transcript. Each entry records one agent's
@@ -390,11 +682,155 @@ public class GroupConversation {
      *            pause landed on; on resume, speakers before this index are skipped
      *            rather than re-run
      * @param pauseKind
-     *            free-text tag for observability (REST/MCP status payloads) — not
-     *            consulted by any resume logic, which keys off this record's mere
-     *            presence rather than what kind of mid-phase pause it names
+     *            which kind of mid-phase pause this bookmark records. For most
+     *            kinds it is a pure observability tag (resume logic keys off this
+     *            record's mere presence), with ONE exception:
+     *            {@link #RESUME_KIND_HUMAN_TURN_PARALLEL} tells the resumed leg
+     *            that {@code speakerIdx} indexes the phase's HUMAN-only sublist and
+     *            that the agent fan-out already ran — the parallel executor then
+     *            skips straight to the remaining human turns instead of re-running
+     *            the fan-out (the sole carve-out from the "PARALLEL never honors a
+     *            bookmark" rule above; see I6)
      */
     public record ResumePoint(int phaseIdx, int repeatIdx, int speakerIdx, String pauseKind) {
+    }
+
+    /** {@link ResumePoint#pauseKind()} of a sequential HUMAN member turn (I6). */
+    public static final String RESUME_KIND_HUMAN_TURN = "HUMAN_TURN";
+
+    /**
+     * {@link ResumePoint#pauseKind()} of a HUMAN turn in a PARALLEL phase (I6):
+     * {@code speakerIdx} indexes the phase's human-only sublist, and the resumed
+     * leg must NOT re-run the agent fan-out.
+     */
+    public static final String RESUME_KIND_HUMAN_TURN_PARALLEL = "HUMAN_TURN_PARALLEL";
+
+    /**
+     * The one turn a paused {@code AWAITING_HUMAN_INPUT} discussion is waiting on
+     * (I6). Persisted with the document so the prompt survives a restart and the
+     * approval/inbox surfaces can display exactly what the member was asked.
+     *
+     * @param memberId
+     *            the HUMAN member's {@code agentId} — the human principal id;
+     *            submissions must come from this principal (or an admin)
+     * @param displayName
+     *            the member's display name, for transcript attribution and UI
+     * @param phaseIdx
+     *            phase the turn belongs to (matches the {@link ResumePoint})
+     * @param repeatIdx
+     *            repeat of that phase
+     * @param speakerIdx
+     *            the member's index — into the phase's resolved speaker list for
+     *            sequential turns, into the human-only sublist for parallel ones
+     * @param entryType
+     *            {@link TranscriptEntryType} name the submitted content is recorded
+     *            as — captured at pause time so a config edit while paused cannot
+     *            re-type the entry (a human OPINION is an OPINION)
+     * @param renderedPrompt
+     *            the phase input rendered for this member exactly as an agent would
+     *            have received it — what the UI shows the human
+     * @param onTimeout
+     *            the group's {@code humanMemberConfig.onTimeout} policy name at
+     *            pause time (SKIP_TURN or ABORT) — bookmarked so crash recovery
+     *            re-arms the same policy the pause promised, config edits
+     *            notwithstanding
+     * @param requestedAt
+     *            when the turn was requested
+     */
+    public record PendingHumanInput(String memberId, String displayName, int phaseIdx, int repeatIdx, int speakerIdx,
+            String entryType, String renderedPrompt, String onTimeout, Instant requestedAt) {
+    }
+
+    /**
+     * The negotiation's working state (I11): open/superseded proposals and the
+     * concession ledger. Persisted with the document — the ledger is the record,
+     * quoted back into every bargaining turn (accountability is the anti-sycophancy
+     * mechanism) and into the outcome.
+     * <p>
+     * Lists are copy-on-write for the same reason the roster lists are: Jackson
+     * walks them unguarded on every persist while a turn may append.
+     */
+    public static class NegotiationState {
+
+        private List<Proposal> proposals = new CopyOnWriteArrayList<>();
+        private List<Concession> concessions = new CopyOnWriteArrayList<>();
+
+        /**
+         * Read-only view — all mutation goes through {@link #addProposal},
+         * {@link #replaceProposal} and {@link #addConcession}, so the table cannot be
+         * edited behind the state's back.
+         */
+        public List<Proposal> getProposals() {
+            return Collections.unmodifiableList(proposals);
+        }
+
+        public void setProposals(List<Proposal> proposals) {
+            this.proposals = proposals != null ? new CopyOnWriteArrayList<>(proposals) : new CopyOnWriteArrayList<>();
+        }
+
+        /** Read-only view — see {@link #getProposals}. */
+        public List<Concession> getConcessions() {
+            return Collections.unmodifiableList(concessions);
+        }
+
+        public void setConcessions(List<Concession> concessions) {
+            this.concessions = concessions != null ? new CopyOnWriteArrayList<>(concessions) : new CopyOnWriteArrayList<>();
+        }
+
+        public void addProposal(Proposal proposal) {
+            proposals.add(proposal);
+        }
+
+        /** In-place status/signature transition; a no-op if {@code oldOne} is gone. */
+        public void replaceProposal(Proposal oldOne, Proposal newOne) {
+            int idx = proposals.indexOf(oldOne);
+            if (idx >= 0) {
+                proposals.set(idx, newOne);
+            }
+        }
+
+        public void addConcession(Concession concession) {
+            concessions.add(concession);
+        }
+    }
+
+    /**
+     * One proposal on the negotiation table (I11).
+     *
+     * @param id
+     *            stable id ("p1", "p2", …) — what a BARGAIN turn's {@code accept}
+     *            names
+     * @param byAgentId
+     *            the proposer (implicitly the first acceptor of their own terms)
+     * @param round
+     *            the phase repeat the proposal was made in
+     * @param terms
+     *            the proposal's terms — a String in v1, deliberately untyped
+     * @param status
+     *            OPEN, SUPERSEDED (the proposer made a newer proposal) or REJECTED
+     * @param acceptedBy
+     *            agent ids that accepted these terms
+     * @param acceptanceEntryIndices
+     *            agentId → absolute transcript index of that agent's accepting
+     *            entry. The signed transcript entries ARE the co-signatures — no
+     *            new crypto; these indices are what the AGREEMENT decision quotes
+     *            in {@code tally.signedAcceptances}
+     */
+    public record Proposal(String id, String byAgentId, int round, String terms, String status,
+            List<String> acceptedBy, Map<String, Integer> acceptanceEntryIndices) {
+    }
+
+    /** Proposal status: still on the table. */
+    public static final String PROPOSAL_OPEN = "OPEN";
+    /** Proposal status: replaced by the proposer's own newer proposal. */
+    public static final String PROPOSAL_SUPERSEDED = "SUPERSEDED";
+
+    /**
+     * One ledger line (I11): what an agent gave up, and what they received in
+     * return — every concession must name its counterpart; that structure is what
+     * stops sycophantic instant-agreement.
+     */
+    public record Concession(String byAgentId, int round, String gaveUp, String inReturnFor, String refProposalId) {
     }
 
     /**
@@ -481,6 +917,14 @@ public class GroupConversation {
         /** Paused for human approval — HITL foundation (Phase 9b). */
         AWAITING_APPROVAL,
         /**
+         * Paused because a HUMAN group member's turn is up (I6). Deliberately NOT
+         * {@link #AWAITING_APPROVAL}: approval endpoints must never accept free text,
+         * and an inbox must be able to tell "approve/reject this" from "you're up".
+         * Resolved only by {@code submitHumanInput} (or its timeout policy) — never by
+         * the approve/resume surface.
+         */
+        AWAITING_HUMAN_INPUT,
+        /**
          * Terminal — member conversations ended, ephemeral agents cleaned up, no
          * further follow-ups.
          */
@@ -488,7 +932,12 @@ public class GroupConversation {
     }
 
     public enum HitlPauseType {
-        PHASE, TASK
+        PHASE, TASK,
+        /**
+         * A HUMAN group member's turn (I6) — see
+         * {@link GroupConversationState#AWAITING_HUMAN_INPUT}.
+         */
+        HUMAN_TURN
     }
 
     // --- Getters/Setters ---
@@ -615,6 +1064,23 @@ public class GroupConversation {
 
     public void setDecision(DecisionRecord decision) {
         this.decision = decision;
+    }
+
+    public NegotiationState getNegotiation() {
+        return negotiation;
+    }
+
+    public void setNegotiation(NegotiationState negotiation) {
+        this.negotiation = negotiation;
+    }
+
+    /** The negotiation state, created on first use (I11). */
+    @JsonIgnore
+    public NegotiationState negotiationState() {
+        if (negotiation == null) {
+            negotiation = new NegotiationState();
+        }
+        return negotiation;
     }
 
     public int getDepth() {
@@ -752,6 +1218,9 @@ public class GroupConversation {
             // FAILED and CANCELLED are terminal but closeable — close ends member
             // conversations and reclaims ephemeral agents.
             case FAILED, CANCELLED -> List.of("close");
+            // I6: the one state a human member acts on — the UI switches to an
+            // input prompt instead of approve/reject buttons.
+            case AWAITING_HUMAN_INPUT -> List.of("submitHumanInput");
             case IN_PROGRESS, SYNTHESIZING, CREATED, AWAITING_APPROVAL -> List.of();
             case CLOSED -> List.of();
         };
@@ -825,6 +1294,14 @@ public class GroupConversation {
 
     public void setResumePoint(ResumePoint resumePoint) {
         this.resumePoint = resumePoint;
+    }
+
+    public PendingHumanInput getPendingHumanInput() {
+        return pendingHumanInput;
+    }
+
+    public void setPendingHumanInput(PendingHumanInput pendingHumanInput) {
+        this.pendingHumanInput = pendingHumanInput;
     }
 
     public AgentGroupConfiguration.ProtocolConfig.CostPolicy getCostCeilingOutcome() {

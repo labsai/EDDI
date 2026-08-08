@@ -135,7 +135,9 @@ public class HitlCrashRecoveryObserver {
         LOGGER.info("HITL crash recovery running...");
         int rearmedRegular = repairRegularPaused();
         int recoveredInProgress = recoverRegularInProgress();
-        int rearmedGroup = repairGroupPaused();
+        // Two independent sweeps: a failing AWAITING_APPROVAL query must not
+        // silently skip the AWAITING_HUMAN_INPUT re-arm (I6), or vice versa.
+        int rearmedGroup = repairGroupPaused() + repairGroupHumanPaused();
 
         if (rearmedRegular > 0 || recoveredInProgress > 0 || rearmedGroup > 0) {
             LOGGER.warnf("HITL crash recovery: re-armed %d regular + %d group timeout schedule(s), "
@@ -385,6 +387,59 @@ public class HitlCrashRecoveryObserver {
     }
 
     /**
+     * I6: re-arms the turn timeout of discussions waiting on a HUMAN member. The
+     * SKIP_TURN/ABORT policy is bookmarked on the pending record (it is not a
+     * {@code HitlTimeoutPolicy}), the duration on the shared bookmark field, and
+     * the schedule's surface routes the fire to the human-turn handler.
+     */
+    private int repairGroupHumanPaused() {
+        try {
+            List<GroupConversation> pausedGcs = groupConversationStore.findByState(GroupConversationState.AWAITING_HUMAN_INPUT);
+            int count = 0;
+            for (GroupConversation gc : pausedGcs) {
+                try {
+                    var pending = gc.getPendingHumanInput();
+                    if (pending == null || gc.getHitlApprovalTimeout() == null || gc.getHitlApprovalTimeout().isBlank()) {
+                        continue; // wait-indefinitely turn, or a half-written pause — nothing to arm
+                    }
+                    String groupConversationId = gc.getId();
+                    Instant scannedPausedAt = gc.getPausedAt();
+                    if (rearmSchedule(HitlSchedules.groupTimeoutScheduleName(groupConversationId),
+                            HitlSchedules.SURFACE_GROUP_HUMAN, groupConversationId,
+                            null, pending.onTimeout() != null ? pending.onTimeout() : "SKIP_TURN",
+                            gc.getHitlApprovalTimeout(), scannedPausedAt,
+                            () -> groupStillHumanPaused(groupConversationId, scannedPausedAt))) {
+                        count++;
+                    }
+                } catch (Exception e) {
+                    LOGGER.warnf("Failed to repair human-paused group conversation %s: %s", gc.getId(), e.getMessage());
+                }
+            }
+            return count;
+        } catch (Exception e) {
+            LOGGER.warnf("Error during group human-pause repair: %s", e.getMessage());
+            return 0;
+        }
+    }
+
+    /** {@code groupStillPaused}'s I6 twin — same pause-identity re-check. */
+    private boolean groupStillHumanPaused(String groupConversationId, Instant scannedPausedAt) {
+        try {
+            var current = groupConversationStore.read(groupConversationId);
+            if (current == null || current.getState() != GroupConversationState.AWAITING_HUMAN_INPUT) {
+                return false;
+            }
+            if (scannedPausedAt == null) {
+                return true;
+            }
+            return scannedPausedAt.equals(current.getPausedAt());
+        } catch (Exception e) {
+            LOGGER.debugf("Human-pause re-check failed for %s: %s", groupConversationId, e.getMessage());
+            return true; // keep the schedule; the handler no-ops on a non-paused state
+        }
+    }
+
+    /**
      * Idempotently replaces the one-shot HITL timeout schedule: deletes any
      * existing schedule of that name and creates a fresh one at the original due
      * time (pausedAt + timeout), or {@link #REARM_GRACE} after startup if the due
@@ -398,6 +453,18 @@ public class HitlCrashRecoveryObserver {
      */
     private boolean rearmSchedule(String scheduleName, String surface, String conversationId,
                                   String agentId, HitlTimeoutPolicy policy, String approvalTimeout,
+                                  Instant pausedAt, java.util.function.BooleanSupplier stillPaused) {
+        return rearmSchedule(scheduleName, surface, conversationId, agentId, policy.name(), approvalTimeout,
+                pausedAt, stillPaused);
+    }
+
+    /**
+     * String-policy variant (I6): human-turn schedules carry {@code OnHumanTimeout}
+     * names (SKIP_TURN/ABORT), which are not {@code HitlTimeoutPolicy} values — the
+     * fire handler branches on the surface before parsing.
+     */
+    private boolean rearmSchedule(String scheduleName, String surface, String conversationId,
+                                  String agentId, String policyName, String approvalTimeout,
                                   Instant pausedAt, java.util.function.BooleanSupplier stillPaused) {
         if (approvalTimeout == null || approvalTimeout.isBlank() || pausedAt == null) {
             LOGGER.warnf("Cannot re-arm HITL timeout for %s: missing approvalTimeout/pausedAt in bookmark",
@@ -431,7 +498,7 @@ public class HitlCrashRecoveryObserver {
             schedule.setCreatedAt(Instant.now());
             schedule.setMetadata(Map.of(
                     HitlSchedules.METADATA_TYPE_KEY, HitlSchedules.METADATA_TYPE_TIMEOUT,
-                    HitlSchedules.METADATA_POLICY_KEY, policy.name(),
+                    HitlSchedules.METADATA_POLICY_KEY, policyName,
                     HitlSchedules.METADATA_SURFACE_KEY, surface,
                     HitlSchedules.METADATA_CONVERSATION_ID_KEY, conversationId));
             scheduleStore.createSchedule(schedule);
@@ -453,7 +520,7 @@ public class HitlCrashRecoveryObserver {
             }
 
             LOGGER.infof("Re-armed HITL timeout for %s (%s) at %s (policy: %s)",
-                    conversationId, surface, fireAt, policy);
+                    conversationId, surface, fireAt, policyName);
             return true;
         } catch (Exception e) {
             LOGGER.warnf("Failed to re-arm HITL timeout for %s: %s", conversationId, e.getMessage());

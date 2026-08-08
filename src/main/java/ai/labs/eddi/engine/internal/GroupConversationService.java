@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
@@ -26,6 +27,7 @@ import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
@@ -36,13 +38,18 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
+import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
+import ai.labs.eddi.engine.internal.groups.GroupCostLedger;
 import ai.labs.eddi.engine.internal.groups.GroupHitlCoordinator;
+import ai.labs.eddi.engine.internal.groups.RetroEngine;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.internal.groups.GroupLifecycleOps;
 import ai.labs.eddi.engine.internal.groups.GroupSigningGuard;
 import ai.labs.eddi.engine.internal.groups.MemberTurnExecutor;
+import ai.labs.eddi.engine.internal.groups.NegotiationEngine;
 import ai.labs.eddi.engine.internal.groups.PhaseExecutionEngine;
 import ai.labs.eddi.engine.internal.groups.PhaseOutcome;
 import ai.labs.eddi.engine.internal.groups.TaskForceEngine;
@@ -51,6 +58,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
+import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -178,6 +186,7 @@ public class GroupConversationService implements IGroupConversationService {
     private final GroupSigningGuard signingGuard;
     private final MemberTurnExecutor memberTurnExecutor;
     private final PhaseExecutionEngine phaseExecutionEngine;
+    private final FacilitatorEngine facilitatorEngine;
     private final TaskForceEngine taskForceEngine;
     private final GroupHitlCoordinator hitlCoordinator;
 
@@ -207,6 +216,31 @@ public class GroupConversationService implements IGroupConversationService {
      */
     @Inject
     LiveDiscussionRegistry liveDiscussionRegistry;
+
+    /**
+     * I8's lesson store. Same field-injection pattern and null-safety as
+     * {@link #attachmentStore} — {@code null} in direct-construction unit tests,
+     * where a RETRO phase runs but persists nothing (warned, never failed).
+     */
+    @Inject
+    IUserMemoryStore userMemoryStore;
+
+    /**
+     * I17's artifact store. Same field-injection pattern and null-safety as
+     * {@link #attachmentStore} — {@code null} in direct-construction unit tests,
+     * where reads simply carry no artifacts and lifecycle cascades no-op.
+     */
+    @Inject
+    ISharedArtifactStore sharedArtifactStore;
+
+    /**
+     * Shared LLM summarization for I9 transcript windowing. Same field-injection
+     * pattern and null-safety as {@link #attachmentStore} — {@code null} in the
+     * direct-construction unit tests, where an enabled window falls back to the
+     * plain truncation marker instead of summarizing.
+     */
+    @Inject
+    SummarizationService summarizationService;
 
     // In-node fast-fail guard for concurrent post-discussion operations
     // (follow-up, continue, close) on the same conversation: a second
@@ -289,6 +323,9 @@ public class GroupConversationService implements IGroupConversationService {
         this.memberTurnExecutor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, contextBuilder, this,
                 counterGroupMemberPauseSkipped, DEFAULT_AGENT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES);
         this.phaseExecutionEngine = new PhaseExecutionEngine(memberTurnExecutor, contextBuilder, executorService, callerIdentityContext);
+        // I12: the deployment store is field-injected (RECRUIT's deployed-and-ready
+        // check), so the engine takes a supplier that reads it lazily.
+        this.facilitatorEngine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry);
         this.taskForceEngine = new TaskForceEngine(memberTurnExecutor, templatingEngine, jsonSerialization, executorService, callerIdentityContext,
                 activeTokens, DEFAULT_AGENT_TIMEOUT_SECONDS, MEMBER_TURN_CANCEL_DRAIN_SECONDS);
         // Constructed last, same reasoning as memberTurnExecutor above: needs `this`
@@ -496,6 +533,63 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     /**
+     * Starts a cadence-driven discussion (I13): {@code startAndDiscussAsync} with
+     * two overrides a scheduled backlog run needs — the pulled backlog tasks
+     * replace the config's pre-configured task list (a runtime copy; the stored
+     * config is never written), and the cadence's dollar ceiling rides the
+     * inherited-ceiling slot so {@code effectiveCostCeiling} takes the tighter of
+     * it and the group's own {@code maxCostPerDiscussion}.
+     * <p>
+     * The config instance mutated here is this call's own fresh read from the store
+     * — deserialized per read, shared with nothing.
+     */
+    public GroupConversation startCadenceDiscussionAsync(String groupId, String question, String userId,
+                                                         List<AgentGroupConfiguration.TaskDefinition> injectedTasks,
+                                                         Double maxCostPerRun, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        if (groupId == null) {
+            throw new IllegalArgumentException("groupId must not be null");
+        }
+        rejectIfShuttingDown();
+
+        IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
+        if (currentGroupId == null) {
+            throw new IResourceStore.ResourceNotFoundException("Group not found.");
+        }
+        AgentGroupConfiguration config = groupStore.read(groupId, currentGroupId.getVersion());
+        if (config == null) {
+            throw new IResourceStore.ResourceNotFoundException("Group configuration not found.");
+        }
+        if (injectedTasks != null && !injectedTasks.isEmpty()) {
+            config.setTasks(List.copyOf(injectedTasks));
+        }
+
+        List<DiscussionPhase> phases = resolvePhases(config);
+        if (phases.isEmpty()) {
+            throw new GroupDiscussionException("No discussion phases are defined for this group.");
+        }
+
+        GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
+        gc.setInheritedCostCeiling(maxCostPerRun);
+        activeTokens.put(gc.getId(), new DiscussionControlToken());
+        final var discussionCaller = callerIdentityContext.captureOrCurrent();
+        try {
+            executorService.submit(callerIdentityContext.withIdentity(discussionCaller, () -> {
+                try {
+                    executeDiscussion(gc, config, phases, question, listener, 0);
+                } catch (Exception e) {
+                    LOGGER.errorf("Cadence group discussion failed for %s: %s", LogSanitizer.sanitize(groupId), e.getMessage());
+                }
+            }));
+        } catch (RuntimeException e) {
+            activeTokens.remove(gc.getId());
+            failConversation(gc);
+            throw new GroupDiscussionException("Failed to start cadence discussion: " + e.getMessage(), e);
+        }
+        return gc;
+    }
+
+    /**
      * Materialize discussion attachments and bind them to the group conversation.
      * Delegates to {@link GroupAttachmentBinder}; see its Javadoc for behavior.
      * Constructed per call (not cached) since {@link #attachmentStore} is a
@@ -566,6 +660,17 @@ public class GroupConversationService implements IGroupConversationService {
                         resolvedProtocol.onCostExceeded());
         int maxTurns = protocol.maxTurns() > 0 ? protocol.maxTurns() : 50;
 
+        // I12: the loop iterates a runtime COPY of the phase list. A facilitator
+        // move may diverge it mid-run (CALL_VOTE inserts a phase, EXTEND_PHASE bumps
+        // a repeat count); on divergence the copy is persisted to gc.runtimePhases,
+        // which every resume path then prefers over the config's phases — a bookmark
+        // taken against the diverged list must never be re-indexed into the
+        // config's. Preferring an already-persisted runtime list here is the resume
+        // half of that same rule.
+        List<DiscussionPhase> phaseList = gc.getRuntimePhases() != null && !gc.getRuntimePhases().isEmpty()
+                ? new ArrayList<>(gc.getRuntimePhases())
+                : new ArrayList<>(phases);
+
         // Store the group's DynamicAgentConfig on the GC so executeAgentTurn()
         // can pass it to member agents via context variables, allowing
         // AgentOrchestrator to enforce group-level guardrails on dynamic tools.
@@ -607,13 +712,13 @@ public class GroupConversationService implements IGroupConversationService {
         if (startPhaseIndex == 0 && listener != null) {
             if (gc.getRound() <= 1) {
                 listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(gc.getId(), gc.getGroupId(), question,
-                        config.getStyle() != null ? config.getStyle().name() : "ROUND_TABLE", phases.size(),
+                        config.getStyle() != null ? config.getStyle().name() : "ROUND_TABLE", phaseList.size(),
                         config.getMembers() != null
                                 ? config.getMembers().stream().map(GroupMember::agentId).toList()
                                 : List.of()));
             } else {
                 listener.onRoundStart(new GroupConversationEventSink.RoundStartEvent(
-                        gc.getId(), gc.getRound(), question, phases.size()));
+                        gc.getId(), gc.getRound(), question, phaseList.size()));
             }
         }
 
@@ -648,8 +753,8 @@ public class GroupConversationService implements IGroupConversationService {
             }
 
             // Execute each phase
-            for (int phaseIdx = startPhaseIndex; phaseIdx < phases.size(); phaseIdx++) {
-                DiscussionPhase phase = phases.get(phaseIdx);
+            for (int phaseIdx = startPhaseIndex; phaseIdx < phaseList.size(); phaseIdx++) {
+                DiscussionPhase phase = phaseList.get(phaseIdx);
 
                 // NEW-3: Check control token at top of phase loop
                 var token = activeTokens.get(gc.getId());
@@ -672,12 +777,35 @@ public class GroupConversationService implements IGroupConversationService {
                     continue;
                 }
 
+                // I11: the one skip condition — a phase marked skipIf=AGREEMENT_REACHED
+                // (the negotiation's arbitration) is only needed when bargaining
+                // failed; a reached agreement makes it provably redundant. Checked
+                // deterministically against the typed decision, never inferred.
+                if (phase.skipIf() == AgentGroupConfiguration.PhaseSkipCondition.AGREEMENT_REACHED
+                        && gc.getDecision() != null && gc.getDecision().type() == DecisionType.AGREEMENT) {
+                    LOGGER.infof("Group %s: skipping phase '%s' — agreement already reached",
+                            LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(phase.name()));
+                    continue;
+                }
+
                 // I2: the previous repeat's contributions, the baseline the
                 // convergence judge compares against. Scoped to this phase — a
                 // comparison across two different phases would be meaningless.
                 List<TranscriptEntry> previousRepeatEntries = null;
 
-                for (int repeat = 0; repeat < Math.max(phase.repeats(), 1); repeat++) {
+                // I6: a mid-phase bookmark names the repeat the pause landed on —
+                // start THERE instead of replaying every earlier repeat (each
+                // replayed repeat is a full round of duplicate turns and spend).
+                // Peeked, not consumed: the loop's own read-and-clear below still
+                // owns the speaker offset. Clamped so a bookmark from a config
+                // whose repeats shrank cannot skip the phase entirely.
+                int startRepeat = 0;
+                GroupConversation.ResumePoint repeatBookmark = gc.getResumePoint();
+                if (repeatBookmark != null && repeatBookmark.phaseIdx() == phaseIdx) {
+                    startRepeat = Math.min(Math.max(repeatBookmark.repeatIdx(), 0), Math.max(phase.repeats(), 1) - 1);
+                }
+
+                for (int repeat = startRepeat; repeat < Math.max(phase.repeats(), 1); repeat++) {
 
                     // --- maxTurns safety cap ---
                     if (turnCounter.get() >= maxTurns) {
@@ -718,34 +846,85 @@ public class GroupConversationService implements IGroupConversationService {
                     // what guarantees this matches on the very first (phaseIdx, repeat)
                     // this leg visits, before executeDiscussion is ever called.
                     int startSpeakerIdx = 0;
+                    Integer parallelHumanResumeIdx = null;
                     GroupConversation.ResumePoint resumePoint = gc.getResumePoint();
                     if (resumePoint != null) {
                         gc.setResumePoint(null);
                         if (resumePoint.phaseIdx() == phaseIdx && resumePoint.repeatIdx() == repeat) {
-                            startSpeakerIdx = resumePoint.speakerIdx();
+                            // I6: a parallel human bookmark indexes the phase's
+                            // human-only sublist and means the agent fan-out already
+                            // ran — routed to executeParallelPhase below instead of
+                            // the sequential offset.
+                            if (GroupConversation.RESUME_KIND_HUMAN_TURN_PARALLEL.equals(resumePoint.pauseKind())) {
+                                parallelHumanResumeIdx = resumePoint.speakerIdx();
+                            } else {
+                                startSpeakerIdx = resumePoint.speakerIdx();
+                            }
                         }
+                    }
+
+                    // I9: extend the rolling window summary this repeat's FULL/
+                    // ANONYMOUS-scope turns will render with. At the boundary, never
+                    // per member turn — that per-turn re-feeding is the quadratic
+                    // cost the window exists to stop. A no-op unless the window is
+                    // enabled and the transcript outgrew it since the last extension.
+                    // Ceiling-gated like the convergence judge and the dissent round:
+                    // summarization is optional spend, and a discussion that already
+                    // blew its budget must not pay for one more LLM call the next
+                    // executor's own gate is about to stop anyway.
+                    if (!GroupCostLedger.wouldExceedCeiling(gc, protocol)) {
+                        contextBuilder.updateWindowSummary(gc, phase, config.getContextWindow(), summarizationService);
                     }
 
                     // I2: mark where this repeat's entries begin. TranscriptEntry
                     // carries phaseIndex but no repeat index, so with repeats > 1 the
                     // only way to say "what this repeat produced" is by position.
+                    // I6: a human-turn pause landed MID-repeat — the persisted base
+                    // (taken when the pause committed) wins over a recompute that
+                    // would only see post-pause entries. Read-and-clear with the same
+                    // one-shot discipline as the speaker bookmark above.
                     int transcriptSizeBeforeRepeat = gc.getTranscript().size();
+                    if (gc.getPausedRepeatSliceBase() >= 0) {
+                        transcriptSizeBeforeRepeat = Math.min(gc.getPausedRepeatSliceBase(), transcriptSizeBeforeRepeat);
+                        gc.setPausedRepeatSliceBase(-1);
+                    }
 
                     // --- Task-oriented phase routing ---
-                    if (phase.type() == PhaseType.PLAN || phase.type() == PhaseType.EXECUTE || phase.type() == PhaseType.VERIFY) {
-                        executeTaskPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
-                    } else if (phase.targetEachPeer()) {
-                        phaseExecutionEngine.executePeerTargetedPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener,
-                                turnCounter,
-                                maxTurns);
-                    } else if (phase.turnOrder() == TurnOrder.PARALLEL) {
-                        // F2: PARALLEL never honors a speaker offset — see
-                        // GroupConversation.ResumePoint's Javadoc for why a parallel
-                        // resume always re-runs its whole fan-out instead.
-                        executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
-                    } else {
-                        phaseExecutionEngine.executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter,
-                                maxTurns, startSpeakerIdx);
+                    // I6: the dispatch is wrapped so a HUMAN member's turn — surfaced
+                    // by the executors as a HumanTurnRequired signal — commits an
+                    // AWAITING_HUMAN_INPUT pause and ends this leg, exactly like the
+                    // commitPause call sites below end theirs.
+                    try {
+                        if (phase.type() == PhaseType.PLAN || phase.type() == PhaseType.EXECUTE || phase.type() == PhaseType.VERIFY) {
+                            executeTaskPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+                        } else if (phase.targetEachPeer()) {
+                            phaseExecutionEngine.executePeerTargetedPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener,
+                                    turnCounter,
+                                    maxTurns);
+                        } else if (phase.turnOrder() == TurnOrder.PARALLEL) {
+                            // F2: PARALLEL never honors a speaker offset — with I6's
+                            // one carve-out: a HUMAN_TURN_PARALLEL bookmark resumes
+                            // the phase's human tail instead of re-running the
+                            // fan-out; see GroupConversation.ResumePoint's Javadoc.
+                            executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns,
+                                    parallelHumanResumeIdx);
+                        } else {
+                            phaseExecutionEngine.executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener,
+                                    turnCounter,
+                                    maxTurns, startSpeakerIdx);
+                        }
+                    } catch (PhaseExecutionEngine.HumanTurnRequired humanTurn) {
+                        // I6 slice-base fix: the pause lands MID-repeat, after other
+                        // speakers appended this repeat's entries. Persist where the
+                        // repeat began so the resumed leg's convergence slice (and
+                        // every later consumer of repeatEntries) still covers the
+                        // pre-pause contributions instead of only what follows.
+                        gc.setPausedRepeatSliceBase(transcriptSizeBeforeRepeat);
+                        hitlCoordinator.commitHumanTurnPause(gc, phaseIdx, phase, repeat, humanTurn,
+                                turnCounter.get() + 1, contextBuilder.mapPhaseToEntryType(phase.type()).name(),
+                                listener, config);
+                        convertPauseToCancelIfSignalled(gc, listener);
+                        return gc;
                     }
 
                     // I1: a phase executor hit the cost ceiling and stopped scheduling
@@ -816,6 +995,80 @@ public class GroupConversationService implements IGroupConversationService {
                                 repeatEntries, previousRepeatEntries, listener, turnCounter, maxTurns);
                     }
 
+                    // I11: fold this repeat's PROPOSAL/BARGAIN turns into the
+                    // negotiation state, then test for unanimous acceptance — which
+                    // ends the phase's repeats early through the same outcome
+                    // plumbing convergence uses. Applied BEFORE the persist below so
+                    // the table and the turns that produced it share one write.
+                    if (phase.type() == PhaseType.PROPOSAL || phase.type() == PhaseType.BARGAIN) {
+                        NegotiationEngine.applyRepeat(gc, repeatEntries, transcriptSizeBeforeRepeat, repeat);
+                        if (phase.type() == PhaseType.BARGAIN
+                                && NegotiationEngine.checkAndRecordAgreement(gc, speakers, config.getModeratorAgentId(), phase.name())) {
+                            outcome = PhaseOutcome.endRepeats("Unanimous acceptance — agreement reached");
+                            if (listener != null) {
+                                listener.onDecisionReached(
+                                        new GroupConversationEventSink.DecisionReachedEvent(gc.getDecision()));
+                            }
+                        }
+                    }
+
+                    // I12: EACH_REPEAT facilitator checkpoint — the CONSULT runs here,
+                    // after convergence but BEFORE the last-repeat decision block, and
+                    // its effects are split by kind (final-review finding, both halves):
+                    // • END_PHASE folds into `outcome` so the block below sees a real
+                    // phase end and still tallies ballots / records the verdict /
+                    // runs the dissent round — the plain `break` it used to take
+                    // skipped all of that, leaving cast VOTE ballots untallied.
+                    // • EXTEND_PHASE applies now, before `lastRepeat` is computed, so
+                    // extending a final repeat DEFERS the decision block instead of
+                    // re-running one that already fired (duplicate dissent rounds,
+                    // decision_reached twice, tally overwritten).
+                    // • INSERT_VOTE and ESCALATE are stashed and applied after the
+                    // block — an escalation at a final repeat must not skip the
+                    // repeat's own decisions on its way out.
+                    FacilitatorEngine.FacilitatorAction deferredFacilitatorAction = null;
+                    boolean facilitatorMidPhaseResume = false;
+                    if (config.getFacilitator() != null && config.getFacilitator().enabled()
+                            && config.getFacilitator().checkAfter() == AgentGroupConfiguration.FacilitatorCheckpoint.EACH_REPEAT
+                            && !costCeilingSynthesizeNow) {
+                        boolean moreRepeats = repeat < Math.max(phase.repeats(), 1) - 1;
+                        boolean midPhaseResume = moreRepeats && outcome.isContinue();
+                        boolean escalationTarget = midPhaseResume || phaseIdx + 1 < phaseList.size();
+                        var facilitatorCtx = new FacilitatorEngine.CheckpointContext(
+                                phaseIdx, repeat, true, moreRepeats, !outcome.isContinue(), escalationTarget);
+                        var facilitatorAction = facilitatorEngine.checkpoint(gc, config, phase, facilitatorCtx,
+                                protocol, question, listener, turnCounter, maxTurns);
+                        switch (facilitatorAction.kind()) {
+                            case END_PHASE -> {
+                                LOGGER.infof("Facilitator ended phase '%s' of group %s after repeat %d",
+                                        LogSanitizer.sanitize(phase.name()), LogSanitizer.sanitize(gc.getGroupId()), repeat);
+                                outcome = PhaseOutcome.endRepeats("Facilitator ended the phase");
+                            }
+                            case EXTEND_PHASE -> {
+                                // The extension lives in the RUNTIME phase list (a new
+                                // record with repeats+1), not a loose counter — so the
+                                // loop bound, the resume clamp and the drift check all
+                                // read the same extended value after a pause.
+                                // Full canonical ctor — a compat overload here silently
+                                // dropped skipIf, so extending an arbitration-adjacent
+                                // phase erased its AGREEMENT_REACHED skip condition.
+                                phase = new DiscussionPhase(phase.name(), phase.type(), phase.participants(),
+                                        phase.turnOrder(), phase.contextScope(), phase.targetEachPeer(),
+                                        phase.inputTemplate(), Math.max(phase.repeats(), 1) + 1, phase.requiresApproval(),
+                                        phase.convergence(), phase.allowAbstention(), phase.voteConfig(), phase.skipIf());
+                                phaseList.set(phaseIdx, phase);
+                                persistRuntimePhases(gc, phaseList);
+                            }
+                            case INSERT_VOTE, ESCALATE -> {
+                                deferredFacilitatorAction = facilitatorAction;
+                                facilitatorMidPhaseResume = midPhaseResume;
+                            }
+                            case NONE -> {
+                                // no-op; any rejection entry rides the next persist
+                            }
+                        }
+                    }
+
                     // I4: the minority report. Placed AFTER the convergence slice above
                     // and BEFORE the persist below — after, so the DISSENT entries do
                     // not land inside repeatEntries where the convergence judge would
@@ -843,11 +1096,47 @@ public class GroupConversationService implements IGroupConversationService {
                         // verdict landing on top of a dissent-only record. Same
                         // last-repeat reasoning as below — a draft judgment is not the
                         // decision.
-                        phaseExecutionEngine.recordDebateVerdict(gc, config, phase, phaseIdx, speakers);
+                        boolean verdictRecorded = phaseExecutionEngine.recordDebateVerdict(gc, config, phase, phaseIdx, speakers);
+                        // I11: an arbitration phase (skipIf=AGREEMENT_REACHED) that
+                        // RAN means bargaining failed — its conclusion is the
+                        // discussion's VERDICT. Never overwrites an existing decision;
+                        // `arbitrated` is true only when THIS call set one, so the
+                        // event below cannot re-announce an earlier phase's decision.
+                        boolean arbitrated = false;
+                        if (phase.skipIf() == AgentGroupConfiguration.PhaseSkipCondition.AGREEMENT_REACHED) {
+                            boolean hadDecision = gc.getDecision() != null;
+                            NegotiationEngine.recordArbitration(gc, repeatEntries, phase.name());
+                            arbitrated = !hadDecision && gc.getDecision() != null;
+                        }
                         if (config.isRecordDissents()) {
                             phaseExecutionEngine.runDissentRound(gc, config, phase, protocol, phaseIdx, speakers, listener,
                                     turnCounter, maxTurns);
                         }
+                        // I14 fold-in (§4 gap): decision_reached finally has a producer.
+                        // Fired AFTER the dissent round so the event's record carries the
+                        // merged dissents, and only for a real verdict — a prose-only
+                        // synthesis set no record worth announcing. Covers I11's
+                        // arbitration verdicts through the same late firing.
+                        if (verdictRecorded || arbitrated) {
+                            phaseExecutionEngine.fireDecisionReached(gc, listener);
+                        }
+                    }
+
+                    // I14: a completed VOTE phase tallies into a DecisionRecord (and
+                    // fires decision_reached itself). Last repeat only, same reasoning
+                    // as the verdict above — a re-balloting round's draft tally is not
+                    // the decision.
+                    if (phase.type() == PhaseType.VOTE && lastRepeat) {
+                        phaseExecutionEngine.recordVoteDecision(gc, config, phase, protocol, phaseIdx, repeatEntries, speakers, listener,
+                                turnCounter, maxTurns);
+                    }
+
+                    // I8: a completed RETRO phase harvests its lessons into
+                    // team-owned group memory. Last repeat only — a draft retro is
+                    // not the retrospective — and BEFORE the persist below, so a
+                    // crash cannot lose lessons a stored document claims were taken.
+                    if (phase.type() == PhaseType.RETRO && lastRepeat) {
+                        RetroEngine.harvest(gc, config.getRetroConfig(), repeatEntries, userMemoryStore, phase.name(), listener);
                     }
 
                     gc.setLastModified(Instant.now());
@@ -855,6 +1144,63 @@ public class GroupConversationService implements IGroupConversationService {
 
                     if (listener != null) {
                         listener.onPhaseComplete(new GroupConversationEventSink.PhaseCompleteEvent(phaseIdx, phase.name()));
+                    }
+
+                    // I12: apply the checkpoint's stashed structural effects now that
+                    // the repeat's own decisions are recorded and persisted.
+                    if (deferredFacilitatorAction != null) {
+                        switch (deferredFacilitatorAction.kind()) {
+                            case INSERT_VOTE -> {
+                                phaseList.add(phaseIdx + 1, deferredFacilitatorAction.insertPhase());
+                                persistRuntimePhases(gc, phaseList);
+                            }
+                            case ESCALATE -> {
+                                // CRITICAL review finding: a BOUNDARY escalation
+                                // (midPhaseResume=false) returns from inside the loop
+                                // BEFORE the phase-boundary HITL gate below — silently
+                                // skipping a requiresApproval phase's mandatory human
+                                // approval (and the TASK-granularity awaiting-task
+                                // pause), with the escalation answerer holding no
+                                // REJECT path. The approval gate supersedes the
+                                // facilitator: the approver is about to be in the loop
+                                // anyway and can read the facilitator's question in
+                                // the transcript entry recorded here. Mid-phase
+                                // escalations are unaffected — the phase is not
+                                // complete, so no boundary gate is owed yet and the
+                                // resumed leg still reaches it at phase end.
+                                boolean boundaryGateWillPause = !facilitatorMidPhaseResume
+                                        && phase.requiresApproval() && !costCeilingSynthesizeNow
+                                        && (!(taskLevelHitl && phase.type() == PhaseType.EXECUTE)
+                                                || (gc.getTaskList() != null
+                                                        && (gc.getTaskList().hasAwaitingApproval()
+                                                                || !gc.getTaskList().findExecutableTasks().isEmpty())));
+                                if (boundaryGateWillPause) {
+                                    var suppressed = deferredFacilitatorAction.escalation();
+                                    gc.getTranscript().add(new TranscriptEntry(
+                                            config.getFacilitator().agentId(), "Facilitator",
+                                            "Facilitator escalation to " + suppressed.principalId()
+                                                    + " suppressed — this phase requires human approval, which takes "
+                                                    + "precedence. The facilitator's question for the approver: "
+                                                    + suppressed.question(),
+                                            phaseIdx, phase.name(), TranscriptEntryType.FACILITATION, Instant.now(),
+                                            null, null));
+                                    LOGGER.infof("Facilitator escalation for group %s suppressed at phase %d — the "
+                                            + "phase's own approval gate takes precedence", gc.getGroupId(), phaseIdx);
+                                    // fall through to the HITL gate below
+                                } else {
+                                    int resumePhaseIdx = facilitatorMidPhaseResume ? phaseIdx : phaseIdx + 1;
+                                    int resumeRepeatIdx = facilitatorMidPhaseResume ? repeat + 1 : 0;
+                                    hitlCoordinator.commitFacilitatorEscalationPause(gc, resumePhaseIdx, resumeRepeatIdx,
+                                            phaseList, deferredFacilitatorAction.escalation(), turnCounter.get() + 1, listener, config);
+                                    convertPauseToCancelIfSignalled(gc, listener);
+                                    return gc;
+                                }
+                            }
+                            default -> {
+                                // END_PHASE/EXTEND_PHASE were applied before the
+                                // decision block; NONE never lands here.
+                            }
+                        }
                     }
 
                     if (!outcome.isContinue()) {
@@ -946,6 +1292,39 @@ public class GroupConversationService implements IGroupConversationService {
                     break;
                 }
 
+                // I12: EACH_PHASE facilitator checkpoint — the default cadence. AFTER
+                // the HITL gate on purpose: a phase that pauses for approval must
+                // never have its approval silently skipped because a facilitator
+                // escalated first (the reverse — a facilitator missing one checkpoint
+                // because the phase paused — is the harmless direction). END_PHASE and
+                // EXTEND_PHASE are invalid at a phase boundary; the engine rejects
+                // them via the context (and save-time validation refuses the combo).
+                if (config.getFacilitator() != null && config.getFacilitator().enabled()
+                        && config.getFacilitator().checkAfter() == AgentGroupConfiguration.FacilitatorCheckpoint.EACH_PHASE
+                        && !costCeilingSynthesizeNow && !endDiscussionEarly) {
+                    var facilitatorCtx = new FacilitatorEngine.CheckpointContext(
+                            phaseIdx, Math.max(phase.repeats(), 1) - 1, false, false, false,
+                            phaseIdx + 1 < phaseList.size());
+                    var facilitatorAction = facilitatorEngine.checkpoint(gc, config, phase, facilitatorCtx,
+                            protocol, question, listener, turnCounter, maxTurns);
+                    switch (facilitatorAction.kind()) {
+                        case INSERT_VOTE -> {
+                            phaseList.add(phaseIdx + 1, facilitatorAction.insertPhase());
+                            persistRuntimePhases(gc, phaseList);
+                        }
+                        case ESCALATE -> {
+                            hitlCoordinator.commitFacilitatorEscalationPause(gc, phaseIdx + 1, 0,
+                                    phaseList, facilitatorAction.escalation(), turnCounter.get() + 1, listener, config);
+                            convertPauseToCancelIfSignalled(gc, listener);
+                            return gc;
+                        }
+                        default -> {
+                            // NONE (incl. every rejection) — nothing to apply;
+                            // END_PHASE/EXTEND_PHASE cannot reach here (rejected above)
+                        }
+                    }
+                }
+
                 // I2: END_DISCUSSION ends the phase loop itself, unlike END_REPEATS
                 // which only ended the repeat loop above. Placed after the HITL gate so
                 // an approval that was already due is still honored.
@@ -996,8 +1375,9 @@ public class GroupConversationService implements IGroupConversationService {
                 }
             }
 
-            // Don't overwrite AWAITING_APPROVAL with COMPLETED
-            if (gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
+            // Don't overwrite AWAITING_APPROVAL (or a human-turn pause) with COMPLETED
+            if (gc.getState() == GroupConversationState.AWAITING_APPROVAL
+                    || gc.getState() == GroupConversationState.AWAITING_HUMAN_INPUT) {
                 return gc;
             }
             // #27/#45: complete with a CAS on the running state this leg believes it
@@ -1009,6 +1389,11 @@ public class GroupConversationService implements IGroupConversationService {
             gc.setState(GroupConversationState.COMPLETED);
             gc.setPausedTurnCount(0); // Clear turn budget state on successful completion
             gc.setHitlLastPauseFingerprint(null); // #4: reset no-progress guard
+            // I12: a facilitator's phase-list divergence is one-off for the round —
+            // a continuation round starts from the config's phases again, and stale
+            // extension counts would misattribute under next round's indices.
+            gc.setRuntimePhases(null);
+            gc.clearFacilitatorExtensions();
             gc.setLastModified(Instant.now());
             try {
                 conversationStore.updateIfState(gc, expectedRunningState);
@@ -1083,6 +1468,13 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupExecutionException("Group discussion failed: " + e.getMessage(), e);
         } finally {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+            // I17: last announce pass for this leg. A member turn that timed out
+            // drained an empty queue in ITS finally, while its still-running agent
+            // could accept an artifact write afterwards; without this, that write's
+            // event is stranded until (unless) another turn runs. A write accepted
+            // after even this pass keeps the artifact (the store write already
+            // committed) — only its live event is best-effort, by design.
+            MemberTurnExecutor.announceArtifactChanges(gc, listener);
             // I1: fold this leg's spend into the lifetime gauge. Recorded as a delta
             // against what this leg started with, so a resumed leg (whose gc arrives
             // already carrying the pre-pause total) contributes only what it newly
@@ -1108,9 +1500,11 @@ public class GroupConversationService implements IGroupConversationService {
             // the no-op signal branch. Resume re-registers a fresh token. Re-check the
             // removed token so a cancel that raced this remove is not silently dropped.
             removeTokenAndConvertIfSignalled(gc, listener);
-            // Drop the incremental verification cursor once this leg ends, but keep it
-            // across an HITL pause so a resume continues from where it left off.
-            if (gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
+            // Drop the incremental verification cursor once this leg ends, but keep
+            // it across ANY pause (approval or a human turn, I6) so a resume
+            // continues from where it left off.
+            if (gc.getState() != GroupConversationState.AWAITING_APPROVAL
+                    && gc.getState() != GroupConversationState.AWAITING_HUMAN_INPUT) {
                 signingGuard.forgetConversation(gc.getId());
             }
             // Defer ephemeral cleanup to closeGroupConversation()/deleteGroupConversation()
@@ -1188,7 +1582,30 @@ public class GroupConversationService implements IGroupConversationService {
     @Override
     public GroupConversation readGroupConversation(String groupConversationId)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
-        return lifecycleOps().readGroupConversation(groupConversationId);
+        GroupConversation gc = lifecycleOps().readGroupConversation(groupConversationId);
+        populateArtifacts(gc);
+        return gc;
+    }
+
+    /**
+     * I17: attaches the discussion's shared artifacts as a read-time derived field,
+     * here in the service so REST's status payload and MCP's
+     * {@code read_group_conversation} both carry them. Best-effort — a status read
+     * must not fail because the artifact store hiccuped.
+     */
+    private void populateArtifacts(GroupConversation gc) {
+        if (sharedArtifactStore == null || gc == null || gc.getId() == null) {
+            return;
+        }
+        try {
+            var artifacts = sharedArtifactStore.listByGroupConversationId(gc.getId());
+            if (!artifacts.isEmpty()) {
+                gc.setArtifacts(artifacts);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Could not attach shared artifacts to group conversation %s: %s",
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
+        }
     }
 
     @Override
@@ -1242,7 +1659,7 @@ public class GroupConversationService implements IGroupConversationService {
 
     private GroupLifecycleOps lifecycleOps() {
         return new GroupLifecycleOps(conversationStore, groupStore, conversationService, agentFactory, agentStore,
-                deploymentStore, operationsInProgress, activeTokens, this,
+                deploymentStore, sharedArtifactStore, operationsInProgress, activeTokens, this,
                 counterGroupFollowUp, counterGroupContinue, counterGroupClose, counterGroupFailure);
     }
 
@@ -1267,6 +1684,31 @@ public class GroupConversationService implements IGroupConversationService {
         // Expand style preset
         DiscussionStyle style = config.getStyle() != null ? config.getStyle() : DiscussionStyle.ROUND_TABLE;
         return DiscussionStylePresets.expand(style, config.getMaxRounds());
+    }
+
+    /**
+     * The phase list a RESUME must execute and drift-check against (I12): the
+     * conversation's persisted runtime list when a facilitator diverged it, else
+     * the config's phases. Every resume surface (approval resume, human-turn
+     * submission, timeout skip) goes through this — re-resolving the config for a
+     * conversation whose pause was taken against a diverged list would mis-index
+     * the bookmark.
+     */
+    public List<DiscussionPhase> effectivePhases(GroupConversation gc, AgentGroupConfiguration config) {
+        List<DiscussionPhase> runtime = gc.getRuntimePhases();
+        return runtime != null && !runtime.isEmpty() ? runtime : resolvePhases(config);
+    }
+
+    /**
+     * Persists a facilitator-diverged phase list (I12). The write is the whole
+     * document, which also carries the FACILITATION entry and move counters the
+     * checkpoint just produced — one write, one consistent snapshot.
+     */
+    private void persistRuntimePhases(GroupConversation gc, List<DiscussionPhase> phaseList)
+            throws IResourceStore.ResourceStoreException {
+        gc.setRuntimePhases(List.copyOf(phaseList));
+        gc.setLastModified(Instant.now());
+        conversationStore.update(gc);
     }
 
     private ProtocolConfig resolveProtocol(AgentGroupConfiguration config) {
@@ -1365,6 +1807,17 @@ public class GroupConversationService implements IGroupConversationService {
                 LOGGER.warnf("Phase '%s' requires MODERATOR but none is configured — using '%s' (first by speakingOrder) as the sole "
                         + "synthesizer. Configure moderatorAgentId to choose deliberately.", phase.name(), synthesizer.agentId());
                 return List.of(synthesizer);
+            }
+            // I6: preserve the roster's identity for the moderator instead of
+            // synthesizing a fresh AGENT-typed member — the 4-arg ctor silently
+            // demoted a HUMAN moderator to an agent, sending their synthesis turn
+            // to a (nonexistent) LLM agent instead of pausing for their input.
+            GroupMember rosterModerator = allMembers != null
+                    ? allMembers.stream().filter(m -> moderatorAgentId.equals(m.agentId())).findFirst().orElse(null)
+                    : null;
+            if (rosterModerator != null) {
+                return List.of(new GroupMember(rosterModerator.agentId(), rosterModerator.displayName(), 0, "MODERATOR",
+                        rosterModerator.memberType()));
             }
             return List.of(new GroupMember(moderatorAgentId, "Moderator", 0, "MODERATOR"));
         }
@@ -1610,6 +2063,17 @@ public class GroupConversationService implements IGroupConversationService {
         phaseExecutionEngine.executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
     }
 
+    /**
+     * I6 overload: {@code humanResumeIdx} resumes a parallel phase's human tail.
+     */
+    private void executeParallelPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
+                                      ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
+                                      java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns, Integer humanResumeIdx)
+            throws GroupDiscussionException {
+        phaseExecutionEngine.executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns,
+                humanResumeIdx);
+    }
+
     // =================================================================
     // Agent turn execution
     // =================================================================
@@ -1690,6 +2154,9 @@ public class GroupConversationService implements IGroupConversationService {
             throws IResourceStore.ResourceStoreException {
 
         GroupConversation gc = new GroupConversation();
+        // The field initialiser is the LEGACY sentinel so key-less stored documents
+        // read as legacy — a genuinely new document must claim current explicitly.
+        gc.setSchemaVersion(GroupConversation.CURRENT_SCHEMA_VERSION);
         gc.setGroupId(groupId);
         gc.setUserId(userId);
         gc.setState(GroupConversationState.IN_PROGRESS);
@@ -1783,6 +2250,19 @@ public class GroupConversationService implements IGroupConversationService {
             IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
         rejectIfShuttingDown();
         return hitlCoordinator.resumeDiscussion(groupConversationId, request, listener);
+    }
+
+    @Override
+    public GroupConversation submitHumanInput(String groupConversationId, String memberId, String content, String submittedBy)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException,
+            IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+        rejectIfShuttingDown();
+        return hitlCoordinator.submitHumanInput(groupConversationId, memberId, content, submittedBy, null);
+    }
+
+    @Override
+    public void skipHumanTurnOnTimeout(String groupConversationId) {
+        hitlCoordinator.skipHumanTurnOnTimeout(groupConversationId);
     }
 
     private void restoreGroupPause(GroupConversation gc, int phaseIndex, String phaseName,

@@ -18,6 +18,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -141,6 +142,52 @@ class UserMemoryToolScopingTest {
         assertTrue(result.contains("maxEntriesPerUser"), "the error must tell the caller what to do; got: " + result);
         verify(store, never()).deleteEntry(any());
         verify(store, never()).upsert(any());
+    }
+
+    // ==================== I8 — team-owned lessons ====================
+
+    @Test
+    @DisplayName("I8 — eviction can never touch a team-owned retro lesson, even when it is the oldest entry the store returns")
+    void evictOldestNeverTouchesTeamOwnedLessons() throws Exception {
+        config.setMaxEntriesPerUser(2);
+        config.setOnCapReached("evict_oldest");
+
+        // The lesson lives under the synthetic team owner with the fixed "retro"
+        // source. Structurally it can never surface from getAllEntries(USER) —
+        // but even if a store bug returned it, the sourceAgentId filter is a
+        // second independent wall. This test breaches the first wall on purpose.
+        var teamLesson = new UserMemoryEntry("lesson-1", IUserMemoryStore.TEAM_OWNER_PREFIX + "g1", "retro:abc",
+                "Cap debate rounds", "context", Visibility.group, "retro", List.of("g1"), "gc-1", false, 0,
+                Instant.parse("2019-01-01T00:00:00Z"), Instant.parse("2019-01-01T00:00:00Z"));
+        var own = entry("own-1", "mine", Visibility.self, AGENT_B, List.of(), Instant.parse("2024-01-01T00:00:00Z"));
+        when(store.countEntries(USER)).thenReturn(2L);
+        when(store.getAllEntries(USER)).thenReturn(List.of(teamLesson, own));
+        when(store.upsert(any())).thenReturn("new-id");
+
+        String result = toolFor(AGENT_B, List.of("g1")).rememberFact("fresh_fact", "value", "fact", "self");
+
+        assertTrue(result.contains("✅ Remembered"), result);
+        verify(store, never()).deleteEntry("lesson-1");
+        verify(store).deleteEntry("own-1");
+    }
+
+    @Test
+    @DisplayName("I8 — a personal visibility:self entry never surfaces to another user's tool, groups shared or not")
+    void personalEntriesNeverCrossUsers() throws Exception {
+        // The tool always queries by ITS user's id — a shared group cannot widen
+        // the personal scope. The store is queried for USER only; nothing about
+        // user-2 is ever requested. The fixture genuinely belongs to user-2
+        // (review finding: the shared helper stamped USER, so the assert passed
+        // because AGENT_A was foreign, not because the entry crossed users).
+        var otherUsersPrivate = new UserMemoryEntry("p-1", "user-2", "salary", "value-of-salary", "fact",
+                Visibility.self, AGENT_A, List.of("g1"), "conv-x", false, 0, Instant.now(), Instant.now());
+        when(store.filterEntries(USER, "salary")).thenReturn(List.of(otherUsersPrivate));
+
+        String result = toolFor(AGENT_B, List.of("g1")).searchMemory("salary");
+
+        assertFalse(result.contains("value-of-salary"), result);
+        verify(store, never()).filterEntries(eq("user-2"), any());
+        verify(store, never()).getAllEntries("user-2");
     }
 
     @Test

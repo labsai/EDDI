@@ -17,8 +17,10 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
+import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -28,6 +30,7 @@ import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -73,6 +76,125 @@ class MemberTurnExecutorTest {
 
     private ProtocolConfig protocol(MemberFailurePolicy failurePolicy) {
         return new ProtocolConfig(60, failurePolicy, 2, MemberUnavailablePolicy.SKIP);
+    }
+
+    /**
+     * I17: artifact tools have no listener reference, so accepted writes ride the
+     * live discussion's change queue until the turn executor drains it. Announced
+     * even for a turn that itself went sideways (here: agent not deployed →
+     * SKIPPED) — the write already happened.
+     */
+    @Test
+    void executeAgentTurn_announcesQueuedArtifactChanges_andDrainsExactlyOnce() throws Exception {
+        var executor = executor();
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 1, AGENT_A, "DRAFT", true));
+        var listener = Mockito.mock(GroupDiscussionEventListener.class);
+
+        executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, listener);
+
+        var captor = ArgumentCaptor.forClass(GroupConversationEventSink.ArtifactUpdatedEvent.class);
+        verify(listener).onArtifactUpdated(captor.capture());
+        assertEquals("doc", captor.getValue().name());
+        assertTrue(captor.getValue().created());
+
+        // A second turn must not re-announce the same change.
+        executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, listener);
+        verify(listener, times(1)).onArtifactUpdated(any());
+    }
+
+    @Test
+    void executeAgentTurn_nullListener_stillDrainsTheQueue() throws Exception {
+        var executor = executor();
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 1, AGENT_A, "DRAFT", true));
+
+        executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null);
+
+        assertTrue(gc.drainArtifactChanges().isEmpty(), "the queue must never grow unbounded on the no-listener path");
+    }
+
+    /**
+     * I17 review follow-up: a write accepted AFTER a turn's own drain (a timed-out
+     * member's still-running agent) is picked up by the discussion leg's final
+     * announce pass instead of being stranded in the queue.
+     */
+    @Test
+    void announceArtifactChanges_lateWrite_deliveredByLaterPass() {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        var listener = Mockito.mock(GroupDiscussionEventListener.class);
+
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 1, AGENT_A, "DRAFT", true));
+        MemberTurnExecutor.announceArtifactChanges(gc, listener);
+
+        // The late write, after every turn's own finally already drained.
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 2, AGENT_A, "DRAFT", false));
+        MemberTurnExecutor.announceArtifactChanges(gc, listener);
+
+        var captor = ArgumentCaptor.forClass(GroupConversationEventSink.ArtifactUpdatedEvent.class);
+        verify(listener, times(2)).onArtifactUpdated(captor.capture());
+        assertEquals(1, captor.getAllValues().get(0).version());
+        assertEquals(2, captor.getAllValues().get(1).version(), "events must arrive in write order");
+    }
+
+    /**
+     * PR #637 review round 2: the announce mutex guards the drain HANDOFF, not the
+     * listener callbacks — a slow SSE client must not block other turns'
+     * end-of-turn drains. A change queued WHILE the publisher is mid-callback
+     * (simulated here by queueing from inside the listener and re-entering the
+     * announce) rides the active publisher's next loop instead of blocking or being
+     * stranded, and the reentrant call returns immediately.
+     */
+    @Test
+    void announceArtifactChanges_arrivalDuringCallbacks_ridesThePublisherLoop() {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        var listener = Mockito.mock(GroupDiscussionEventListener.class);
+        Mockito.doAnswer(inv -> {
+            GroupConversationEventSink.ArtifactUpdatedEvent event = inv.getArgument(0);
+            if (event.version() == 1) {
+                // A write lands while the publisher is inside a callback; the
+                // writer's own announce call must hand off, not block or recurse.
+                gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 2,
+                        AGENT_A, "DRAFT", false));
+                MemberTurnExecutor.announceArtifactChanges(gc, listener);
+            }
+            return null;
+        }).when(listener).onArtifactUpdated(Mockito.any());
+
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 1, AGENT_A, "DRAFT", true));
+        MemberTurnExecutor.announceArtifactChanges(gc, listener);
+
+        var captor = ArgumentCaptor.forClass(GroupConversationEventSink.ArtifactUpdatedEvent.class);
+        verify(listener, times(2)).onArtifactUpdated(captor.capture());
+        assertEquals(1, captor.getAllValues().get(0).version());
+        assertEquals(2, captor.getAllValues().get(1).version(),
+                "the mid-callback write is published exactly once, in order, by the active publisher's loop");
+        assertTrue(gc.drainArtifactChanges().isEmpty(), "nothing stranded");
+    }
+
+    @Test
+    void announceArtifactChanges_singlePass_preservesWriteOrder() {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        var listener = Mockito.mock(GroupDiscussionEventListener.class);
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 1, AGENT_A, "DRAFT", true));
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 2, AGENT_A, "DRAFT", false));
+
+        MemberTurnExecutor.announceArtifactChanges(gc, listener);
+
+        var captor = ArgumentCaptor.forClass(GroupConversationEventSink.ArtifactUpdatedEvent.class);
+        verify(listener, times(2)).onArtifactUpdated(captor.capture());
+        assertEquals(1, captor.getAllValues().get(0).version());
+        assertEquals(2, captor.getAllValues().get(1).version());
     }
 
     @Test
@@ -269,7 +391,32 @@ class MemberTurnExecutorTest {
                 null, null);
 
         assertEquals("Nested answer", entry.content());
-        assertEquals(0.42, gc.getMemberCosts().get("sub-group-1"));
+        // Attribution is keyed per child discussion (agentId:childId) so a member's
+        // later children add to — rather than replace — its earlier ones.
+        assertEquals(0.42, gc.getMemberCosts().get("sub-group-1:sub-gc-1"));
         assertEquals(0.42, gc.getTotalCost());
+    }
+
+    /**
+     * I6 defense in depth: the phase loops intercept HUMAN speakers BEFORE this
+     * method and pause the discussion — any caller reaching it with a human
+     * (convergence judge, dissent round, task-force wave, nested group) is an
+     * automated context that cannot pause, and gets a SKIPPED entry instead of an
+     * attempted LLM call against a person.
+     */
+    @Test
+    void executeAgentTurn_humanMember_skippedInAutomatedContexts() throws Exception {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        var human = new GroupMember("h-1", "Hannah", 1, null, MemberType.HUMAN);
+
+        var entry = executor().executeAgentTurn(human, gc, "input", protocol(MemberFailurePolicy.SKIP), 0,
+                phase(PhaseType.OPINION), null, null);
+
+        assertEquals(TranscriptEntryType.SKIPPED, entry.type());
+        assertEquals("h-1", entry.speakerAgentId());
+        assertEquals("Hannah", entry.speakerDisplayName());
+        assertTrue(entry.errorReason().contains("Human member"), entry.errorReason());
     }
 }

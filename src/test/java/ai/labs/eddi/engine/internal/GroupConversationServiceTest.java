@@ -303,6 +303,26 @@ class GroupConversationServiceTest {
         }
 
         @Test
+        void moderator_whoIsAHumanMember_keepsHumanTypeAndName() throws Exception {
+            var phase = new DiscussionPhase("Synth", PhaseType.SYNTHESIS, "MODERATOR",
+                    AgentGroupConfiguration.TurnOrder.SEQUENTIAL, AgentGroupConfiguration.ContextScope.FULL,
+                    false, null, 1);
+            var members = List.of(
+                    new GroupMember("a1", "Alice", 1, "MEMBER"),
+                    new GroupMember("h-1", "Hannah", 2, null, AgentGroupConfiguration.MemberType.HUMAN));
+
+            List<GroupMember> result = invoke(phase, members, "h-1");
+
+            assertEquals(1, result.size());
+            assertEquals("h-1", result.get(0).agentId());
+            // I6: the 4-arg ctor synthesized a fresh AGENT-typed moderator, silently
+            // demoting a HUMAN — their synthesis turn then went to a (nonexistent)
+            // LLM agent instead of pausing for their input.
+            assertEquals(AgentGroupConfiguration.MemberType.HUMAN, result.get(0).memberType());
+            assertEquals("Hannah", result.get(0).displayName());
+        }
+
+        @Test
         void moderator_withNullModerator_picksOneDeterministicSynthesizer() throws Exception {
             var phase = new DiscussionPhase("Synth", PhaseType.SYNTHESIS, "MODERATOR",
                     AgentGroupConfiguration.TurnOrder.SEQUENTIAL, AgentGroupConfiguration.ContextScope.FULL,
@@ -982,6 +1002,12 @@ class GroupConversationServiceTest {
             inProgress.setGroupId("group-1");
             inProgress.setState(GroupConversationState.IN_PROGRESS);
             inProgress.setRound(1);
+            // Final-review finding: the negotiation table is a round-scoped
+            // conclusion. Seed round 1's table with a signed proposal — round 2
+            // must NOT be able to reach "unanimous agreement" on it.
+            inProgress.negotiationState().addProposal(new GroupConversation.Proposal(
+                    "p1", "a1", 0, "round 1 terms", GroupConversation.PROPOSAL_OPEN,
+                    java.util.List.of("a1"), java.util.Map.of("a1", 3)));
             when(conversationStore.read("gc-1")).thenReturn(gc, inProgress);
             when(conversationStore.compareAndSetState("gc-1",
                     GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
@@ -992,6 +1018,8 @@ class GroupConversationServiceTest {
                     () -> service.continueDiscussion("gc-1", "round two question", null));
 
             assertEquals(2, inProgress.getRound());
+            assertNull(inProgress.getNegotiation(),
+                    "round 1's proposals and signatures must not survive into round 2's bargaining");
             var transcript = inProgress.getTranscript();
             assertFalse(transcript.isEmpty());
             var last = transcript.get(transcript.size() - 1);

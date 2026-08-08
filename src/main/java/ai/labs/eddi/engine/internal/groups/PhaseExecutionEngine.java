@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.internal.GroupConversationService.MemberTurnCancelled
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -87,6 +88,60 @@ public class PhaseExecutionEngine {
         this.contextBuilder = contextBuilder;
         this.executorService = executorService;
         this.callerIdentityContext = callerIdentityContext;
+    }
+
+    /**
+     * Control-flow signal (I6): the phase reached a HUMAN member's turn and the
+     * discussion must pause for their input. Thrown by the sequential loop and the
+     * parallel human tail, caught ONLY by {@code executeDiscussion}'s phase
+     * dispatch, which commits the {@code AWAITING_HUMAN_INPUT} pause and returns. A
+     * RuntimeException on purpose — it must fly through method signatures that
+     * declare {@code GroupDiscussionException} WITHOUT being caught by the generic
+     * failure handling (the same reasoning as
+     * {@code GroupConversationService.MemberTurnCancelledException}).
+     */
+    public static final class HumanTurnRequired extends RuntimeException {
+        private final transient GroupMember member;
+        private final int speakerIdx;
+        private final String renderedPrompt;
+        private final boolean parallel;
+
+        /**
+         * @param member
+         *            the HUMAN member whose turn is up
+         * @param speakerIdx
+         *            the member's index — into the phase's resolved speaker list for
+         *            sequential turns, into the phase's human-only sublist for parallel
+         *            ones ({@code parallel} distinguishes the two)
+         * @param renderedPrompt
+         *            the phase input rendered for this member, exactly as an agent
+         *            would have received it
+         * @param parallel
+         *            whether this turn belongs to a PARALLEL phase's human tail
+         */
+        public HumanTurnRequired(GroupMember member, int speakerIdx, String renderedPrompt, boolean parallel) {
+            super("Human member turn required: " + member.agentId(), null, false, false);
+            this.member = member;
+            this.speakerIdx = speakerIdx;
+            this.renderedPrompt = renderedPrompt;
+            this.parallel = parallel;
+        }
+
+        public GroupMember member() {
+            return member;
+        }
+
+        public int speakerIdx() {
+            return speakerIdx;
+        }
+
+        public String renderedPrompt() {
+            return renderedPrompt;
+        }
+
+        public boolean parallel() {
+            return parallel;
+        }
     }
 
     public void executeSequentialPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
@@ -404,6 +459,157 @@ public class PhaseExecutionEngine {
     }
 
     /**
+     * The conversation key the vote tiebreaker's private conversation lives under
+     * (I14). Not the moderator's agent id, for exactly
+     * {@link #JUDGE_CONVERSATION_KEY}'s reason: the tiebreak prompt must not become
+     * the moderator's recent history.
+     */
+    static final String TIEBREAK_CONVERSATION_KEY = "__vote_tiebreak";
+
+    /**
+     * Tallies a completed VOTE phase into the discussion's {@link DecisionRecord}
+     * and fires {@code decision_reached} (I14).
+     * <p>
+     * Quorum failures and ties go to the phase's {@code tiePolicy}:
+     * {@code MODERATOR_DECIDES} runs one moderator turn choosing among the
+     * unresolved options (method {@code vote+moderator-tiebreak});
+     * {@code NO_DECISION} records the honest {@code NONE}. {@code
+     * HUMAN_DECIDES} is save-time rejected until I6 ships human members, so
+     * reaching it here means hand-edited storage — it degrades to NO_DECISION with
+     * a WARN rather than guessing.
+     * <p>
+     * Like every decision producer, failure is prose-only, never a failed
+     * discussion.
+     */
+    public void recordVoteDecision(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase, ProtocolConfig protocol,
+                                   int phaseIdx, List<TranscriptEntry> repeatEntries, List<GroupMember> speakers,
+                                   GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns) {
+        var voteConfig = phase.voteConfig() != null ? phase.voteConfig() : new AgentGroupConfiguration.VoteConfig();
+        List<TranscriptEntry> transcriptSnapshot;
+        synchronized (gc.getTranscript()) {
+            transcriptSnapshot = List.copyOf(gc.getTranscript());
+        }
+        List<String> options = VoteTallyEngine.resolveOptions(voteConfig, transcriptSnapshot);
+        if (options.size() < 2) {
+            LOGGER.warnf("Group %s: VOTE phase '%s' resolved %d option(s) — a vote needs at least two; recording NONE",
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phase.name()), options.size());
+            setDecisionCarryingDissents(gc, new DecisionRecord(DecisionType.NONE,
+                    "The vote could not run: only " + options.size() + " option(s) were available.",
+                    null, null, List.of(), VoteTallyEngine.METHOD_VOTE, phase.name(), null));
+            fireDecisionReached(gc, listener);
+            return;
+        }
+
+        List<TranscriptEntry> ballots = repeatEntries.stream().filter(e -> e != null && e.type() == TranscriptEntryType.VOTE).toList();
+        int participants = speakers != null ? speakers.size() : ballots.size();
+        var outcome = VoteTallyEngine.tally(ballots, participants, options, voteConfig, phase.name());
+
+        DecisionRecord decision = outcome.decision();
+        if (!outcome.unresolvedOptions().isEmpty()) {
+            decision = switch (voteConfig.tiePolicy()) {
+                case MODERATOR_DECIDES -> {
+                    // The tiebreak is a real LLM call — same two budgets as the
+                    // convergence judge and the dissent round. Without this gate a
+                    // tied vote issued one uncounted turn even after the discussion
+                    // exhausted maxTurns or blew its cost ceiling.
+                    if ((maxTurns > 0 && turnCounter != null && turnCounter.get() >= maxTurns)
+                            || GroupCostLedger.wouldExceedCeiling(gc, protocol)) {
+                        LOGGER.warnf("Group %s: VOTE phase '%s' tied but the turn/cost budget is exhausted — keeping NO_DECISION",
+                                LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phase.name()));
+                        yield outcome.decision();
+                    }
+                    if (turnCounter != null) {
+                        turnCounter.incrementAndGet();
+                    }
+                    yield moderatorTiebreak(gc, config, phase, protocol, phaseIdx, outcome, listener);
+                }
+                case HUMAN_DECIDES -> {
+                    LOGGER.warnf("Group %s: VOTE phase '%s' has tiePolicy HUMAN_DECIDES, which needs human group members (I6) — "
+                            + "recording NO_DECISION", LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phase.name()));
+                    yield outcome.decision();
+                }
+                case NO_DECISION -> outcome.decision();
+            };
+        }
+
+        setDecisionCarryingDissents(gc, decision);
+        LOGGER.infof("Group %s: VOTE phase '%s' concluded: %s", LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phase.name()),
+                decision.type() == DecisionType.VOTE
+                        ? LogSanitizer.sanitize(decision.outcome())
+                        : "no decision (" + LogSanitizer.sanitize(decision.outcome()) + ")");
+        fireDecisionReached(gc, listener);
+    }
+
+    /**
+     * One moderator turn choosing among the unresolved options. The reply is
+     * resolved by the same exact-scan rule as a tier-2 ballot; an unreadable reply
+     * keeps the tally's honest NONE.
+     */
+    private DecisionRecord moderatorTiebreak(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
+                                             ProtocolConfig protocol, int phaseIdx, VoteTallyEngine.TallyOutcome outcome,
+                                             GroupDiscussionEventListener listener) {
+        String moderatorAgentId = config.getModeratorAgentId();
+        if (moderatorAgentId == null || moderatorAgentId.isBlank()) {
+            LOGGER.warnf("Group %s: tiePolicy MODERATOR_DECIDES but the group names no moderatorAgentId — keeping NO_DECISION",
+                    LogSanitizer.sanitize(gc.getId()));
+            return outcome.decision();
+        }
+        String reason = outcome.quorumReached() ? "The vote tied between" : "The vote did not reach quorum; decide among";
+        String input = """
+                %s these options:
+                %s
+
+                As the moderator, choose exactly ONE. Reply with ONLY the exact text of the option you choose.
+                """.formatted(reason, outcome.unresolvedOptions().stream().map(o -> "- " + o).collect(Collectors.joining("\n")));
+        try {
+            var moderator = new GroupMember(moderatorAgentId, "Vote Tiebreaker", 0, "MODERATOR");
+            TranscriptEntry reply = memberTurnExecutor.executeAgentTurn(moderator, gc, input, protocol, phaseIdx, phase, null, listener,
+                    null, TIEBREAK_CONVERSATION_KEY);
+            String choice = VoteTallyEngine.resolveChoice(reply != null ? reply.content() : null, outcome.unresolvedOptions());
+            if (choice == null) {
+                LOGGER.warnf("Group %s: the tiebreaker's reply named no single option — keeping NO_DECISION",
+                        LogSanitizer.sanitize(gc.getId()));
+                return outcome.decision();
+            }
+            DecisionRecord base = outcome.decision();
+            // Dissents against the CHOSEN option, from the carried ballots — the
+            // unresolved record's own list is necessarily empty, and reusing it
+            // dropped the minority report for exactly the closest votes.
+            return new DecisionRecord(DecisionType.VOTE,
+                    "\"%s\" chosen by the moderator (%s).".formatted(choice,
+                            outcome.quorumReached() ? "tie break" : "quorum failure"),
+                    choice, base.tally(), VoteTallyEngine.losingDissents(outcome.ballots(), choice),
+                    VoteTallyEngine.METHOD_TIEBREAK, phase.name(), reply.content());
+        } catch (Exception e) {
+            LOGGER.warnf("Group %s: vote tiebreak failed (%s) — keeping NO_DECISION",
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
+            return outcome.decision();
+        }
+    }
+
+    /** Immutable-record merge: a new decision keeps dissents already collected. */
+    private static void setDecisionCarryingDissents(GroupConversation gc, DecisionRecord decision) {
+        DecisionRecord existing = gc.getDecision();
+        if (existing != null && existing.dissents() != null && !existing.dissents().isEmpty()
+                && (decision.dissents() == null || decision.dissents().isEmpty())) {
+            decision = new DecisionRecord(decision.type(), decision.outcome(), decision.winner(), decision.tally(),
+                    existing.dissents(), decision.method(), decision.decidedAtPhase(), decision.raw());
+        }
+        gc.setDecision(decision);
+    }
+
+    /**
+     * The {@code decision_reached} producer (the §4 gap, folded in with I14): fired
+     * whenever a {@link DecisionRecord} lands on the discussion. The Slack listener
+     * skips {@code NONE} records itself; SSE forwards everything.
+     */
+    public void fireDecisionReached(GroupConversation gc, GroupDiscussionEventListener listener) {
+        if (listener != null && gc.getDecision() != null) {
+            listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(gc.getDecision()));
+        }
+    }
+
+    /**
      * Merges dissents into the discussion's {@code DecisionRecord}, creating a
      * {@code NONE}-type record when no decision-producing feature ran. Records are
      * immutable, so an existing one is rebuilt rather than mutated.
@@ -496,7 +702,8 @@ public class PhaseExecutionEngine {
                                        AtomicInteger turnCounter, int maxTurns, int startSpeakerIdx)
             throws GroupDiscussionException {
         int from = Math.min(Math.max(startSpeakerIdx, 0), speakers.size());
-        for (GroupMember speaker : speakers.subList(from, speakers.size())) {
+        for (int idx = from; idx < speakers.size(); idx++) {
+            GroupMember speaker = speakers.get(idx);
             if (turnCounter.get() >= maxTurns) {
                 break;
             }
@@ -505,13 +712,28 @@ public class PhaseExecutionEngine {
             if (GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)) {
                 break;
             }
+            // I6: a human's turn pauses the discussion. AFTER the budget checks —
+            // an exhausted budget means no more turns, the human's included — and
+            // BEFORE the turn count (the pause commit accounts for the turn, so a
+            // restored pause does not double-count it). The prompt is rendered
+            // HERE, against exactly the transcript an agent speaker would see.
+            if (speaker.memberType() == AgentGroupConfiguration.MemberType.HUMAN) {
+                String humanInput = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null,
+                        GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc,
+                        config.getRetroConfig());
+                throw new HumanTurnRequired(speaker, idx, humanInput, false);
+            }
             turnCounter.incrementAndGet();
             if (listener != null) {
                 listener.onSpeakerStart(
                         new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
             }
             String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null,
-                    GroupConversationService.rosterWithRecruits(config, gc));
+                    GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc,
+                    config.getRetroConfig());
+            // I11: the negotiation table lives on gc, which buildPhaseInput does
+            // not see — appended here (no-op for non-negotiation phases).
+            input = NegotiationEngine.appendStateIfRelevant(input, gc, phase);
             TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(entry);
             if (listener != null) {
@@ -525,6 +747,48 @@ public class PhaseExecutionEngine {
                                      ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
                                      AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
+        executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns, null);
+    }
+
+    /**
+     * @param humanResumeIdx
+     *            {@code null} for every fresh run. Non-null only when resuming an
+     *            I6 {@code HUMAN_TURN_PARALLEL} pause: the agent fan-out already
+     *            ran before the pause, so the resumed leg skips straight to the
+     *            phase's human tail, starting at this index into the human-only
+     *            sublist (see {@code GroupConversation.ResumePoint}).
+     */
+    public void executeParallelPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
+                                     ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
+                                     AtomicInteger turnCounter, int maxTurns, Integer humanResumeIdx)
+            throws GroupDiscussionException {
+
+        // I6: humans never join the fan-out — an LLM answers in seconds, a human
+        // in minutes-to-days, and a paused future would pin the whole batch.
+        // Agents run first (concurrently), then humans are prompted sequentially,
+        // each pausing the discussion in turn.
+        List<GroupMember> humans = speakers.stream()
+                .filter(s -> s.memberType() == AgentGroupConfiguration.MemberType.HUMAN).toList();
+        List<GroupMember> agentSpeakers = humans.isEmpty()
+                ? speakers
+                : speakers.stream().filter(s -> s.memberType() != AgentGroupConfiguration.MemberType.HUMAN).toList();
+
+        if (humanResumeIdx != null) {
+            // Resumed leg: the fan-out already ran before the pause. The remaining
+            // humans' prompts must stay blind to their peers — the fresh leg uses
+            // the pre-fan-out snapshot for that, which no longer exists here, so
+            // the resumed bound is "no entries of this phase at all" (deliberately
+            // a touch stronger for repeats > 1 than the fresh-leg bound; a blind
+            // round that stays blind is the honest failure direction).
+            List<TranscriptEntry> blindTranscript;
+            synchronized (gc.getTranscript()) {
+                blindTranscript = gc.getTranscript().stream()
+                        .filter(e -> e == null || e.phaseIndex() != phaseIdx).toList();
+            }
+            promptHumanTail(gc, config, humans, phase, protocol, question, phaseIdx, turnCounter, maxTurns,
+                    humanResumeIdx, blindTranscript);
+            return;
+        }
 
         // I1: whole-batch check — a PARALLEL phase fans every speaker out at once,
         // so there is no per-speaker checkpoint to gate individually; this is the
@@ -535,13 +799,13 @@ public class PhaseExecutionEngine {
         }
 
         // Cap batch size to remaining turn budget
-        int remainingTurns = maxTurns > 0 ? Math.max(0, maxTurns - turnCounter.get()) : speakers.size();
+        int remainingTurns = maxTurns > 0 ? Math.max(0, maxTurns - turnCounter.get()) : agentSpeakers.size();
         if (remainingTurns == 0) {
             return;
         }
         List<GroupMember> batchSpeakers = maxTurns > 0
-                ? speakers.subList(0, Math.min(speakers.size(), remainingTurns))
-                : speakers;
+                ? agentSpeakers.subList(0, Math.min(agentSpeakers.size(), remainingTurns))
+                : agentSpeakers;
 
         // SAFETY: Snapshot the transcript so parallel tasks each see a consistent view.
         // Iterating a Collections.synchronizedList requires holding its monitor.
@@ -586,7 +850,10 @@ public class PhaseExecutionEngine {
                 .map(speaker -> CompletableFuture.supplyAsync(callerIdentityContext.withIdentitySupplying(phaseCaller, () -> {
                     try {
                         String input = contextBuilder.buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null,
-                                GroupConversationService.rosterWithRecruits(config, gc));
+                                GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc,
+                                config.getRetroConfig());
+                        // I11: see the sequential loop — appended, not templated.
+                        input = NegotiationEngine.appendStateIfRelevant(input, gc, phase);
                         return memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
                     } catch (MemberTurnCancelledException e) {
                         // The orchestrator stopped waiting for this batch — surface the
@@ -678,6 +945,35 @@ public class PhaseExecutionEngine {
         }
         // Count all completed turns for this batch (parallel turns are atomic batches)
         turnCounter.addAndGet(batchSpeakers.size());
+
+        // I6: the human tail, prompted against the PRE-fan-out snapshot so a
+        // "parallel" (independent) round stays independent — a human answering
+        // after the agents must not read their answers first.
+        promptHumanTail(gc, config, humans, phase, protocol, question, phaseIdx, turnCounter, maxTurns, 0, snapshotTranscript);
+    }
+
+    /**
+     * Prompts a PARALLEL phase's HUMAN members one at a time, from
+     * {@code startIdx}. Throws {@link HumanTurnRequired} for the first human whose
+     * turn is still owed — one pause per human, sequentially. Budget checks mirror
+     * the sequential loop: an exhausted budget owes no more turns, human or not.
+     */
+    private void promptHumanTail(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> humans, DiscussionPhase phase,
+                                 ProtocolConfig protocol, String question, int phaseIdx, AtomicInteger turnCounter, int maxTurns,
+                                 int startIdx, List<TranscriptEntry> promptTranscript) {
+        for (int i = Math.max(0, startIdx); i < humans.size(); i++) {
+            if (maxTurns > 0 && turnCounter.get() >= maxTurns) {
+                return;
+            }
+            if (GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)) {
+                return;
+            }
+            GroupMember human = humans.get(i);
+            String input = contextBuilder.buildPhaseInput(phase, human, question, promptTranscript, phaseIdx, null,
+                    GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc,
+                    config.getRetroConfig());
+            throw new HumanTurnRequired(human, i, input, true);
+        }
     }
 
     /**
@@ -715,7 +1011,8 @@ public class PhaseExecutionEngine {
                             new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
                 }
                 String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target,
-                        GroupConversationService.rosterWithRecruits(config, gc));
+                        GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc,
+                        config.getRetroConfig());
                 TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId(),
                         listener);
                 gc.getTranscript().add(entry);

@@ -5,6 +5,492 @@
 
 ---
 
+## 🔎 fix(groups): pre-merge deep review — facilitator HITL bypass, CALL_VOTE guards, metric cardinality, template honesty (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i10-templates`)
+
+Final pre-merge review (20-agent workflow: 6 focused reviewers over the facilitator subsystem — which never received an external bot review (#643 rate-limited) — the I10 templates and the merge seams; every non-minor finding independently double-verified). Six confirmed findings, all fixed:
+
+1. **CRITICAL — facilitator escalation bypassed the phase-boundary HITL gate.** A deferred EACH_REPEAT `ESCALATE_HUMAN` at a phase's final repeat returned from inside the repeat loop before the `requiresApproval` gate: the phase's mandatory human approval (and the TASK-granularity awaiting-task pause) never fired, and the escalation answerer has no REJECT path — a silent compliance bypass. Now the boundary gate supersedes the escalation: when the just-completed phase's gate will pause, the escalation is suppressed with a FACILITATION entry that preserves the facilitator's question for the approver, and control falls through to the normal gate. Mid-phase escalations are unaffected (no gate is owed yet). Pinned by `escalate_atTheBoundaryOfAnApprovalGatedPhase_theApprovalGateWins`.
+2. **CALL_VOTE could clobber a recorded decision.** Unlike END_PHASE/EXTEND_PHASE it had no `phaseEndedBySignal` guard, and the inserted vote's tally unconditionally replaces `gc.decision` — destroying a signed AGREEMENT (breaking `skipIf=AGREEMENT_REACHED`) or a debate VERDICT (resurfacing the raw-judgment-JSON defect). CALL_VOTE is now rejected when the phase ended by signal or a DecisionRecord already exists.
+3. **Unbounded metric label cardinality.** `recordRejection` used the raw LLM-authored move string as the `move` tag of `eddi_group_facilitator_moves_total` — every hallucinated name a new Prometheus time series for the JVM's lifetime (and injectable via transcript content echoed in the briefing). The tag is bounded to enum names + `UNKNOWN`; `rawMove` is also length-capped at parse.
+4. **The deferred EACH_REPEAT branch was untested.** ESCALATE/CALL_VOTE were e2e-tested only at EACH_PHASE; the mid-phase resume arithmetic (same phase, repeat+1) and the boundary arm (phase+1, repeat 0) had zero coverage. Three e2e tests added.
+5. **negotiation-table.json promised a human-arbiter mode that does not exist** — a human principal as arbiter would neither warn at save nor pause synthesis (the arbiter is only `moderatorAgentId`, never a HUMAN roster member); phases would be silently SKIPPED. The manifest now states the arbiter must be a deployed agent and points to decision-board / hitlConfig for human decision-makers.
+6. **research-pod.json silently degraded its context window** — `summarizeOverflow` defaults true but no summarizer model is named, tripping the save-time warning on a SHIPPED template and truncating instead of summarizing at runtime. Now explicitly `false` (honest truncation).
+
+Minor also fixed: the human-input 409 body no longer misstates config-drift as "not awaiting human input" — the two static drift messages pass through so the operator learns the config changed instead of retrying forever.
+
+Suites: FacilitatorEngineTest 42 (+3), Facilitator e2e 12 (+3), templates/REST/HITL 96 — all green.
+
+---
+
+
+## 🔎 fix(groups): I8 review round 3 — retro ceilings + creation-ordered FIFO (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i8-retro-memory`)
+
+Two accepted CodeRabbit findings, one rebutted:
+
+1. **RetroConfig ceilings (major)** — the compact ctor accepted any positive int, so `Integer.MAX_VALUE` unbounded the per-run write count and the retained-lesson set. Hard ceilings: `CEILING_MAX_PER_RUN` 20, `CEILING_MAX_STORED` 500 (clamped, not rejected — same normalization style as the rest of the record).
+2. **FIFO vs reharvest (major)** — eviction used the `most_recent` recall order (sorted by `updatedAt`); reharvesting an existing lesson refreshes `updatedAt`, so an old-but-reharvested lesson could shield itself while a later-CREATED lesson got evicted. Eviction now sorts by `createdAt` (which the store `setOnInsert`s — the stable insertion stamp), nulls oldest-first. Regression test reharvests an old lesson before exceeding the cap and asserts the oldest-created is the one evicted.
+3. **Rebutted: RETRO entries lost on mid-repeat HITL resume** — on this branch nothing ever creates a speaker-level `ResumePoint` (producers are I6 human turns and I12 escalations, on other branches), so a RETRO phase cannot resume mid-repeat here. On the integration branch, where producers exist, the I6 `pausedRepeatSliceBase` fix restores the true repeat base at top-of-repeat before `repeatEntries` is sliced — the RETRO harvest reads that same slice, so pre-pause lessons are preserved (pinned by the HumanPauseRepeatSlice tests).
+## 🔎 fix(groups): I13 review round 3 — revision parse guard, convergence limit, test pins (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams`)
+
+Six findings from the CodeRabbit/CodeQL round on the round-2 push, all accepted:
+
+1. **NumberFormatException in casRevision (CodeQL, both #644 and #645)** — `Long.parseLong` on a persisted value; a corrupt revision surfaced as an uncaught runtime exception (bare 500 at REST). Guarded: non-numeric revision throws the method's declared `ResourceStoreException` with the value named; the instance keeps the corrupt value for diagnosis.
+2. **Convergence limit (major)** — `findWorkspaceIds` fetched at most 2 ids; with 3+ concurrent creators, different racers could see different subsets and compute different survivors, never converging. Limit raised to 50 so every realistic racer set fits one query.
+3. **Javadoc detachment (minor)** — `casRevision` was inserted between `casRunningDiscussion`'s Javadoc and its declaration, silently detaching it. Reordered; the claim Javadoc is re-attached.
+4. **Legacy null-revision window (minor)** — documented on `IGroupWorkspaceStore.casRevision`: one unconditional stamp per pre-revision document, CAS'd forever after.
+5. **Deletion-order pin (minor)** — the schedule-retirement test now uses `InOrder`, protecting the crash-recoverable order (schedules before workspace), not just the calls.
+6. **Write-path pins (minor)** — the backlog rejection tests assert `never().casRevision(any())` (the actual write path) alongside the legacy `update` pin; the lost-settle test uses `verifyNoMoreInteractions` so the failed conditional release is provably the ONLY store interaction.
+
+---
+
+## 🔎 fix(groups): I13 review round 2 — workspace concurrency + schedule lifecycle (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams`)
+
+Five accepted findings from the CodeRabbit/CodeQL round on PR #644:
+
+1. **Atomic backlog adds (major)** — both backlog-add surfaces (REST `addBacklogTask`, MCP `add_team_task`) validated the cap/duplicate rules against their own snapshot and then issued a whole-document `update`, so two concurrent adds could both pass under the cap and the later write dropped the earlier task. New optimistic-concurrency primitive: `GroupWorkspace.revision` (string stamp) + `IGroupWorkspaceStore.casRevision` (revision-conditional store via `storeIfFieldEquals`, bump-in-write, loser restores its stamp). Both surfaces run a 3-attempt read-validate-mutate-CAS loop; exhaustion is an honest 409/error telling the caller to retry. Pre-revision documents get stamped by one plain write, then CAS'd forever after.
+2. **Duplicate workspace documents (major)** — `readOrCreate` read-then-inserted with no unique constraint (the storage abstraction has none), so concurrent creators could each insert a document and split subsequent writes. Now: after inserting, re-query; every racer that does not hold the deterministic survivor (lexicographically smallest id = earliest ObjectId) deletes its own insert and adopts the survivor. `find()` picks the same survivor when duplicates linger, so readers and racers always agree.
+3. **Orphaned schedule on failed cadence write (major)** — `addCadence` created the `ScheduleConfiguration` before the workspace write; a failed write left an enabled schedule no cadence names, firing "cadence no longer exists" forever with no delete path. The failed write now compensates by deleting the schedule.
+4. **Group deletion left cadence schedules behind (major)** — permanent group deletion removed only the workspace; enabled schedules kept firing "No workspace exists". `RestAgentGroupStore` now retires every cadence's schedule BEFORE deleting the workspace (crash between the two leaves the recoverable order).
+5. **Log sanitization (minor + CodeQL 478/480)** — the run-claim disappearance warning sanitizes `groupId`; the same treatment in the new casRevision path.
+
+Tests: GroupWorkspaceStoreTest (new, 5: CAS bump/restore/legacy-stamp, duplicate convergence in readOrCreate and find), RestGroupWorkspaceTest 14 (+2: lost-CAS retry/exhaustion, schedule cleanup on failed write), McpGroupToolsTest 53 (+1 retry/exhaustion), RestAgentGroupStoreTest (+1 schedule retirement). All green.
+
+---
+
+## 🔎 fix(groups): I8 review round 2 — retro cap semantics + event contract (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i8-retro-memory`)
+
+Four accepted findings from the CodeRabbit round on the stacked PR (#644, which carries this branch):
+
+1. **Template quoted the wrong cap (major)** — the RETRO prompt always rendered `DEFAULT_MAX_PER_RUN` (3), so a group configured above it could never obtain its configured number of lessons. `buildPhaseInput` gained a `RetroConfig` parameter (config-less overloads keep the default); all three agent-turn call sites in `PhaseExecutionEngine` pass `config.getRetroConfig()`. RetroEngine's parse-time enforcement is unchanged and remains the server-side limit.
+2. **Per-entry cap multiplied (major)** — `harvest` applied `maxLessonsPerRun` to each RETRO transcript entry, so a multi-speaker or multi-repeat retro could store `cap × entries`. Now a per-harvest `remaining` allowance shared across entries.
+3. **Missing zero-count event (minor)** — the null-memory-store branch returned before `retro_recorded`; it now fires the event with `lessonsStored = 0`, honoring the contract that a RETRO phase always emits it.
+4. **Fixture didn't cross users (minor)** — `personalEntriesNeverCrossUsers` built its "other user's" entry with the shared helper that stamps USER; it now genuinely belongs to `user-2`.
+
+Tests: RetroEngineTest 8 (+2: per-harvest cap, null-store zero event), GroupContextBuilderTest 41 (+1: configured cap quoted, default fallback), PhaseExecutionEngineTest stub widened to the new arity. All green.
+## 🔎 fix(groups): I6 review round — schema bump, approver full-view scope, persist-time assertion (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i6-human-members`)
+
+Three accepted CodeRabbit findings on PR #640 (all against the pausedRepeatSliceBase fix commit):
+
+1. **Schema version (major)** — `pausedRepeatSliceBase` is persisted state the resumed leg depends on, but `CURRENT_SCHEMA_VERSION` stayed 3. Bumped to 4 (no migration entry: Jackson defaults legacy documents to -1, the exact pre-v4 behavior). On the integration branch v4 is the release shape shared with I11's `negotiationState` and I12's `runtimePhases`.
+2. **Approver transcript scope (major, security)** — the `detail=full` gate used the shared `paused` predicate, which also covers `AWAITING_HUMAN_INPUT`; an `eddi-approver` could read the full transcript of a discussion merely waiting on a human member's turn. Both surfaces (REST `getGroupApprovalStatus`, MCP `get_group_approval_status`) now gate the approver window on a dedicated `awaitingApproval` predicate; summary fields keep the wider one. Regression tests on both surfaces (approver + human-turn pause → 403/FORBIDDEN).
+3. **Persist-time assertion (minor)** — the mid-repeat pause test asserted only the in-memory instance; a captor would hold the same mutable object, so the test now records `pausedRepeatSliceBase` inside the `update()` stub at persist time and asserts the last persisted value.
+
+---
+## 🔎 fix(groups): I13 + HITL fixes from the final cross-branch review (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams`)
+
+Fixes from the 23-agent final review (5 dimensions, every non-minor finding adversarially double-verified; 9 confirmed across all branches — the four below are the ones on this branch's surface):
+
+1. **Settle race (major/concurrency)** — `TeamCadenceService.settle()` released the claim with an **unconditional** `update()`, so a writeback racing a concurrent reconcile (schedule fire on another pod, or the REST read-repair) could clobber a *newer* claim, orphaning that discussion's outcomes. Now conditional: `settle(workspace, gc, settledDiscussionId)` releases via `casRunningDiscussion(workspace, settledDiscussionId)`; both writebacks capture the id before clearing and return the verdict; a lost race drops the caller's mutations (`writeback_lostSettleRace_dropsMutations` pins it). Reconcile propagates the verdict so a losing caller treats the workspace as busy.
+2. **Cost ceiling lost on HITL resume (major/cost-bounds)** — `GroupConversation.inheritedCostCeiling` was `@JsonIgnore transient`, so a cadence run that paused for approval resumed with **no ceiling**. Now a persisted field (documented as a review finding in the Javadoc).
+3. **Backlog write caps bypassed (major/security)** — REST `addBacklogTask` and MCP `add_team_task` skipped the caps the agent tool surface enforces: subject ≤ `MAX_AGENT_TASK_SUBJECT_LENGTH` (200), description ≤ `MAX_AGENT_TASK_DESCRIPTION_LENGTH` (4000), and duplicate subjects (case-insensitive) now 409/error — writeback matches outcomes **by subject**, so duplicates made outcome attribution ambiguous. Plus two bound minors: cadence count capped at 20/workspace, `inputTemplate` ≤ 4000 chars.
+4. **Unbounded failure-feedback growth (major/cost-bounds)** — the COMPLETED writeback appended each failed run's **entire agent output** to the persisted task description every run. New `appendFeedbackBounded`: 500-char per-run slice, total trimmed from the front (oldest first) to the shared 4000-char description cap.
+
+Also on this branch's surface: the **claim-CAS exception path** now cancels the just-started discussion before rethrowing (previously it leaked an unclaimed discussion running to completion with outcomes no writeback collects), the template-failure log sanitizes the exception message, and `GroupHitlCoordinator`'s executor-saturated resume rollback uses remove-and-recheck (`removeTokenAndConvertIfSignalled`) like every sibling rollback path — a cancel signalled between token registration and the rollback was silently dropped, leaving a "cancelled" discussion stuck AWAITING_APPROVAL (regression test added, mutation-verified: reverting the fix fails it).
+
+**Rebutted (deliberate, not fixed):** MCP `list_team_backlog` requiring `eddi-viewer` while REST listing requires editor — consistent with the read_group/list_groups viewer convention across all MCP group read tools.
+
+**Tests:** TeamCadenceServiceTest 17 (+3), RestGroupWorkspaceTest 12 (+3), McpGroupToolsTest 52 (+2), GroupHitlCoordinatorTest 16 (+1). All green.
+
+---
+## 🔎 fix(groups): I12 final-review findings — checkpoint runs before the decision block (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i12-facilitator`)
+
+Two confirmed MAJORs from the final multi-agent review pass, one root cause: the EACH_REPEAT facilitator checkpoint sat AFTER the last-repeat decision block.
+
+- **END_PHASE skipped the decisions:** it fired only mid-phase (where `lastRepeat` is false) and took a plain `break` past the block — a VOTE phase it ended never tallied its cast ballots; verdicts, dissent rounds and retro harvests were skipped the same way.
+- **EXTEND_PHASE at a final repeat re-ran them:** the block had already fired for that repeat, and the extension made the next repeat "final" again — duplicate dissent rounds, `decision_reached` twice, the tally overwritten.
+
+**Fix:** the consult now runs after convergence but BEFORE `lastRepeat` is computed, with effects split by kind — END_PHASE folds into the phase outcome (the block sees a real phase end and records everything), EXTEND_PHASE applies immediately (deferring the block to the true final repeat), and INSERT_VOTE/ESCALATE are stashed and applied after the block, so an escalation on a final repeat cannot skip that repeat's decisions on its way out. Two new mutation-check E2Es: END_PHASE on a VOTE phase still tallies (fails against the old `break`), and always-EXTEND on a dissent-recording SYNTHESIS runs exactly one dissent round (fails against the old ordering).
+## 🔎 fix(groups): I11 final-review finding — negotiation state survives into round 2 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i11-negotiation`)
+
+Confirmed MAJOR from the final multi-agent review pass: `continueDiscussion` clears every other round-scoped conclusion (`synthesizedAnswer`, `decision`) with an explicit rationale, but not the persisted negotiation table — so round 2 of a NEGOTIATION group ran against round 1's proposals, and one fresh acceptance could reach "unanimous agreement" on signatures cast for a DIFFERENT question, with `tally.signedAcceptances` pointing at round 1's transcript entries. Fixed: `setNegotiation(null)` at round start, mutation-checked (the continuation test seeds a signed round-1 proposal and asserts it does not survive).
+## 🔎 fix(groups): I6 final-review finding — mid-repeat pause loses the repeat slice (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i6-human-members`)
+
+Confirmed CRITICAL from the final multi-agent review pass (2 independent verifiers traced it): a human turn pauses MID-repeat, after other speakers already appended this repeat's entries — but the resumed leg recomputed `transcriptSizeBeforeRepeat` from the current transcript size, so the repeat slice covered only post-pause entries. Every consumer of that slice silently lost the pre-pause contributions: the convergence check on this branch, and (on the integration tree) VOTE tallies missing every agent ballot cast before the human's — a wrong election, reported as legitimate.
+
+**Fix:** new persisted `pausedRepeatSliceBase` on `GroupConversation` (−1 = unset; legacy documents keep the old recompute), written when the human-turn pause commits (the catch site has the true base in scope) and consumed exactly once with the same read-and-clear discipline as the speaker bookmark. Tests: the pause persists the base pointing at the top of the repeat (fails without the write), and a resumed leg consumes it exactly once (fails without the consume).
+## 🧩 feat(groups): I10 — preset templates on the all-features integration branch (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i10-templates` — the integration branch: I14+I6+I12 base, merged with I11, I18, I8+I13, I17 and the pre-feature defects branch (N1/N2/N3/I9))
+
+Final queue item, shipped last by design so templates only reference features that exist. This branch is ALSO the proof the user story demanded: every feature branch merged into one tree, compiled clean, full suites green.
+
+- **Integration merges, verified per the big-merge memory:** 5 sequential merges with a clean compile + suite run after each. Real semantic resolutions: `DiscussionPhase` unified to 13 components (`voteConfig` 12th + `skipIf` 13th) with BOTH 12-arg compat ctors kept so each branch's call sites compile unchanged; `PhaseType` unions to 15 (VOTE + PROPOSAL + BARGAIN + RETRO — pins updated); schema v4's Javadoc now names BOTH resume-critical fields (I12 `runtimePhases`, I11 `negotiationState`); the SYNTHESIS decision block runs debate verdicts AND I11 arbitration with one late `decision_reached` firing after the dissent round (an `arbitrated` flag is true only when THIS call set the decision, so the event never re-announces an earlier phase's); `AgentGroupStore.create/update` runs all five validators; every listener/SSE/Slack surface carries all events. 3880 tests, 0 failures (27 known environmental SlackWebApiClient socket errors).
+- **Cross-branch defect the integration run caught (the reason this branch exists):** I9's windowing overload (defects branch) and I6's human-turn prompt render (human-members branch) had never met — merged, agents got windowed context while a HUMAN member's rendered prompt silently used the unwindowed compat overload, breaking I6's "the human sees exactly what an agent speaker would" contract. Both human-prompt sites now pass `config.getContextWindow()`; the I6 blindness tests verify the windowing overload. The same resolution applies when #636 and #640 merge to main.
+- **Templates:** `src/main/resources/group-templates/` (index + 5 JSONs, the initial-agents classpath pattern): `research-pod` (DELPHI-style + convergence + retro + windowing + ceiling), `editorial-team` (shared artifact + CAS updates + dissents), `ops-task-force` (BID assignment + agent-filed tasks + recruitment), `decision-board` (HUMAN director deliberates and votes; ties to the chair — **deviation upheld:** `HUMAN_DECIDES` tie-breaking stays save-time rejected; its resume machinery (a pending ballot the human's answer must parse back into the tally) is real work, not the "small follow-up" the I14 note hoped, and shipping a silently-degrading enum value would be a lie), `negotiation-table` (typed bargaining; human-arbiter option documented). Placeholder mechanism is deliberately minimal: member `agentId`s are `$role` markers, substitution is the ONLY templating — what you read is what the store validates.
+- **`GroupTemplateService`**: classpath loading (one bad template logs loudly and skips, never breaks startup), manifest listing, `instantiate(templateId, name, roleAssignments)` failing loudly and completely on missing/unknown roles BEFORE building anything. **REST** `/groupstore/templates` (list/read/instantiate → `RestAgentGroupStore.createGroup`, the normal path — a template earns no validation bypass). **MCP** `list_group_templates` + `create_group_from_template` (whitelisted).
+- Store validators (`validateVotePhases`, `humanMemberProblems`, `validateFacilitator`) widened to public — they are now the cross-package save-time validation surface the template integration test exercises.
+
+**Tests (+13):** every template loads, instantiates with dummy assignments and passes the ENTIRE save-time matrix (HITL + vote + human + facilitator + artifact validators) — the plan's designated integration test of all Wave 1–3 config surfaces; placeholder-free rosters; decision-board's HUMAN member survives; negotiation preset expands; missing/unknown/unknown-template errors name what is wrong; REST instantiation captured through the store path with 400s saving nothing; MCP filter pins green.
+
+
+## 🔎 fix(groups): I12 PR #643 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i12-facilitator`)
+
+All 5 findings (CodeQL ×4 incl. 1 high, code-quality ×1) accepted and fixed:
+
+- **TOCTOU (high):** the briefing's task summary called `taskList.getTasks()` twice — an emptiness check then a re-read, each under its own monitor acquisition. One snapshot, streamed once.
+- **`facilitatorExtensions` encapsulated** (the NegotiationState treatment): the getter returns an unmodifiable view; mutation goes through `recordFacilitatorExtension`/`clearFacilitatorExtensions`/`facilitatorExtensionCount` — the extension caps cannot be edited behind the conversation's back. Engine, service, lifecycle-ops and tests rewired.
+- **Log injection ×3:** the two budget-skip debug logs and the END_PHASE info log sanitize their caller-influenced values (conversation id, groupId, phase name).
+
+Suites: facilitator + service + conversation tests (154) green.
+
+---
+
+## 🎛️ feat(groups): I12 — facilitator with bounded moves (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i12-facilitator` — stacked: I14 branch + merge of I6, because the moves ARE those features)
+
+Eighth queue item. The plan's resolution of "adaptive orchestration" vs deterministic governance: a facilitator agent is briefed at checkpoints and **selects from config-enumerated moves** — validated, capped, audit-logged; every failure degrades to CONTINUE.
+
+- **Integration merge first (big-merge memory applied):** merged `feat/group-i6-human-members` into a branch cut from `feat/group-i14-voting`; 5 conflicted files resolved by keeping both sides (AgentGroupStore create/update now run vote + human + facilitator validation; Slack listener keeps tally block AND human notice; both test blocks; both doc sections; both changelog entries). Verified per the memory: clean compile, 2912 tests green across `engine.internal`+`configs.groups`+`engine.hitl`+`engine.mcp`, hot files (GroupConversationService/PhaseExecutionEngine/AgentGroupConfiguration) spot-checked for both features, enum pins consistent (PhaseType 12, MemberType 3, DiscussionStyle 7 — no NEGOTIATION here, that's I11's branch).
+- **Config:** `FacilitatorConfig {enabled=false, agentId (required when enabled), allowedMoves (default [CONTINUE] — an enabled-but-unconfigured facilitator is a pure observer), checkAfter=EACH_PHASE|EACH_REPEAT, maxMovesPerDiscussion=10 (non-CONTINUE only), escalateTo}`. Save-time matrix (`AgentGroupStore.validateFacilitator`): enabled needs agentId; END_PHASE/EXTEND_PHASE + EACH_PHASE rejected (they act on remaining repeats — a boundary checkpoint has none, the config could only produce noise); ESCALATE_HUMAN needs escalateTo; cap ≤ 100.
+- **`FacilitatorEngine` (new R1-style collaborator):** compact briefing (position, budget arithmetic, roster, per-type entry counts, capped excerpts — bounded-by-construction, asserted in a test with a 50k-char transcript); the consult runs under the judge precedent (own `__facilitator` conversation key, skipped at either budget, counts a turn, cost on the I1 ledger); three-tier parse mirroring VoteTallyEngine; per-move context validation (a convergence exit is never overruled). Executed → peer-hidden FACILITATION entry + `group.facilitator` audit event + `eddi_group_facilitator_moves_total{move,outcome}`; rejected → CONTINUE + WARN + FACILITATION entry recording the attempt (never consumes the budget); null reply/exception → CONTINUE with no entry (nothing was tried).
+- **Moves:** END_PHASE breaks the repeat loop; EXTEND_PHASE rewrites the phase record with repeats+1 (≤2/phase, persisted in `facilitatorExtensions` so a pause can't refill it); CALL_VOTE builds the vote phase to I14's enforced PARALLEL+NONE shape and inserts at `phaseIdx+1`; RECRUIT mirrors RecruitAgentTool's full matrix (already-member incl. config roster, `maxRecruitedAgentsPerDiscussion`, deployed-and-ready, synchronized double-check commit); ESCALATE_HUMAN rides I6's machinery whole — new `commitFacilitatorEscalationPause` bookmarks the RESUME point (next repeat mid-phase / next phase at a boundary) with `speakerIdx=-1` so the shared `+1` advance lands at speaker 0, and the answer records as peer-visible FOLLOW_UP.
+- **Runtime phase divergence (F6 bump 3→4):** the loop iterates a runtime copy; on divergence it persists to `gc.runtimePhases`, and EVERY resume surface (`resumeDiscussion`, `resolveHumanTurn` — which submissions AND timeout skips share) now resolves `effectivePhases(gc, config)` so bookmarks and drift checks compare against the list the pause was taken from. v4 is load-bearing: an older pod resuming a diverged doc would mis-index every bookmark — exactly what the newer-than-current refusal exists for (no migration entry needed; identity default). Divergence is one-off: completion clears it, and `continueDiscussion` clears defensively.
+- **Checkpoint placement, both deliberate:** EACH_REPEAT after the repeat's own bookkeeping (briefing describes a settled repeat) and before the outcome break (context flags carry how it ended); EACH_PHASE AFTER the HITL gate — a gated phase's approval must never be silently skipped because a facilitator escalated first (the reverse — one missed checkpoint — is the harmless direction).
+
+**Tests (+39 engine, +5 store, +4 config pins/defaults, +2 coordinator, +7 service E2E; suites green):** parse tiers; every move happy/disallowed/malformed/invalid-in-context; move cap; extension cap (E2E: repeats=1 + always-extend runs exactly 3 rounds — the cap is what stops the loop); budget gates never call the model; briefing boundedness (<5k chars against a 100k transcript, no full entry content); mutation-check: un-listed move degrades to CONTINUE with zero effect and a rejection record; CALL_VOTE E2E proves the runtime insertion ran (ballots + VOTE DecisionRecord from a config with no vote phase) and completion clears `runtimePhases`; escalation E2E (pause shape on the configured principal) + coordinator submit test proving the drift check passes ONLY because effectivePhases returns the runtime list; facilitator-unavailable and CONTINUE-everywhere leave the discussion untouched. 3 existing coordinator stubs re-pointed `resolvePhases`→`effectivePhases`.
+
+**Files:** `AgentGroupConfiguration` (FacilitatorConfig/FacilitatorMove/FacilitatorCheckpoint), `GroupConversation` (schema v4, runtimePhases, facilitatorMoveCount, facilitatorExtensions), `FacilitatorEngine` (new), `GroupConversationService` (runtime phase list, two checkpoint sites, effectivePhases, completion clear), `GroupHitlCoordinator` (escalation pause, effectivePhases at both resume surfaces), `GroupLifecycleOps` (round-start clear), `AgentGroupStore` (validateFacilitator), `docs/group-conversations.md`, 5 test classes.
+
+---
+
+## 🔎 fix(groups): I14 PR #638 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i14-voting`)
+
+All 14 review comments (CodeQL ×6, code-quality ×1, CodeRabbit ×6, + enum-count CI failure) triaged; every one accepted and fixed:
+
+- **CI failure**: `AgentGroupConfigurationTest.phaseType_allValues` pins the enum size at 11; VOTE is the 12th. Fixed here (and the same pin fixed for RETRO on the I8 branch — the local targeted regressions missed this class; noted for future enum-touching branches).
+- **The moderator tiebreak is now budget-gated** (the one real architecture defect): it is an LLM turn, and it ran unguarded after `maxTurns` was exhausted or the cost ceiling fired — the only extra call in `PhaseExecutionEngine` without the gate `checkConvergence` and `runDissentRound` both carry. `recordVoteDecision` now takes `(turnCounter, maxTurns)`, blocks the tiebreak on either budget (keeping the honest NO_DECISION), and counts the turn it does spend.
+- **Losing-side dissents survive a tie-policy resolution**: the unresolved tally's record necessarily has no dissents, and `moderatorTiebreak` reused it — so the minority report vanished for exactly the closest votes. `TallyOutcome` now carries the parsed ballots; the tiebreak computes `losingDissents(ballots, chosenOption)` against ITS choice.
+- **Weighted-total ties compare with an epsilon** (1e-9), not `==`: totals are sums of non-representable doubles, so 0.1+0.2 vs 0.3 — a genuine tie — silently crowned one side on the last bit.
+- **Ballot weights must be finite**: NaN passes every `<` comparison and poisons the totals; infinity decides every vote alone. Save-time rejection alongside the existing `>= 0`.
+- **Slack tally lines are width-bounded** (`buildPreview`, 120 chars): a LAST_SYNTHESIS option can be a paragraph, and six of those pushed the whole decision message past Slack's limit — `postSafe` then swallowed the loss, winner and all.
+- **CodeQL log injection ×6** in `PhaseExecutionEngine` sanitized (`LogSanitizer` on conversation/phase/outcome/exception values); the flagged useless null check in `moderatorTiebreak` removed (control flow guarantees non-null there).
+
+**Tests:** +6 (floating-point tie; outcome-carries-ballots + dissent-vs-choice; NaN/∞ weight rejection ×2 scenarios; tiebreak blocked at budget spends nothing; tiebreak within budget counts its turn AND carries the loser's dissent — the last one fails against the pre-fix code on both the counter and the dissent assertions). `engine.internal` + `configs.groups` suites: 1711 green; checkstyle clean.
+
+---
+
+## 🗳️ feat(groups): I14 — voting with structural ballot independence (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i14-voting`)
+
+Second Wave 2 queue item. A `VOTE` phase collects explicit ballots; the deliverable is the **auditable process artifact** (weighted tally, raw ballots, losing-side dissents), not epistemics — LLM ballots are correlated and the plan says so out loud.
+
+- **Model:** `PhaseType.VOTE` (the new enum value flushed every exhaustive switch at compile time — `mapPhaseToEntryType` now maps to F4's existing `TranscriptEntryType.VOTE`, so commit-reveal peer-hiding worked before any new code ran); `VoteConfig` (MAJORITY|APPROVAL, EXPLICIT|LAST_SYNTHESIS options, quorum, per-agent weights, `weightByConfidence` — default off with the correlated-self-report caveat in its Javadoc — and `tiePolicy`) as a 12th `DiscussionPhase` component with the usual compat constructor.
+- **Independence is enforced, not advised:** `AgentGroupStore.validateVotePhases` HARD-rejects a VOTE phase that is not PARALLEL + `ContextScope.NONE` (plus: `targetEachPeer`, EXPLICIT with <2 options, negative weights). `HUMAN_DECIDES` is **save-time rejected until I6 ships human members** — the plan sequences I14 before I6, so shipping a silently-degrading enum value would be a lie; the queue's I6 item wires it. Deviation recorded here.
+- **`VoteTallyEngine`:** three-tier ballot parse mirroring `DebateVerdictParser` (strict JSON with `FAIL_ON_TRAILING_TOKENS` → embedded JSON → exactly-one-option text scan; out-of-contract votes are non-ballots, never write-ins), `Option A:` line extraction from the newest synthesis, weighted tally, quorum with abstentions/garbage counting against the denominator, dissents from losing statements.
+- **Wiring:** the discussion loop tallies on the VOTE phase's last repeat; `PhaseExecutionEngine.recordVoteDecision` applies the tie policy — `MODERATOR_DECIDES` runs one moderator turn under `__vote_tiebreak` (the judge's separate-conversation-key rule: a "reply with ONLY the option" prompt must not become the moderator's recent history), resolved by the same exact-scan rule as a ballot.
+- **`decision_reached` finally fires (the §4 gap, folded in as planned):** `fireDecisionReached` runs for vote decisions AND for I3 debate verdicts — after the dissent round, so the event's record carries the merged dissents. Slack renders a bounded tally block for VOTE records (instanceof-guarded — the tally map crossed serialization).
+
+**Tests (121 across the touched classes green; full `engine.internal` suite green; checkstyle clean):** parse tiers incl. ambiguous-two-options and out-of-contract refusals; label voting ("Option B" → positional); LAST_SYNTHESIS extraction (newest synthesis, colon and dash forms); weighted majority; exact tie → unresolved (never a winner by list position); confidence weighting on/off flips a tie; quorum arithmetic pinned to the "2 of 5" message; dissents + raw-ballot audit; tiebreak choice resolution; save-time validation matrix (PARALLEL/NONE/options/weights/HUMAN_DECIDES); service-level E2E: majority vote records the decision and fires `decision_reached` with the winner; tie + MODERATOR_DECIDES resolves via one tiebreak turn with method `vote+moderator-tiebreak`; tie + NO_DECISION records an honest NONE and the discussion does not fail; ballots land as VOTE entries. Slack tally block + malformed-tally no-throw.
+
+**Files:** `AgentGroupConfiguration` (VOTE + VoteConfig/VoteMethod/OptionsSource/TiePolicy), `AgentGroupStore`, `DiscussionStylePresets` (TEMPLATE_VOTE), `GroupContextBuilder` (VOTE branch + entry-type mapping), `VoteTallyEngine` (new), `PhaseExecutionEngine` (recordVoteDecision + fireDecisionReached), `GroupConversationService` (loop wiring), `SlackGroupDiscussionListener` (tally block), `docs/group-conversations.md`, 4 test classes.
+
+---
+
+## 🔎 fix(groups): I6 PR #640 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i6-human-members`)
+
+CI failure + all 20 review comments (CodeQL ×5, code-quality ×4, CodeRabbit ×11) triaged; every one accepted and fixed:
+
+- **CI**: `submit_group_human_input` added to `McpToolFilter`'s whitelist (a non-whitelisted MCP tool is unreachable dead code — the guard test caught exactly that).
+- **The pending member can now READ their turn**: new `HitlAccessGuard.requireGroupConversationReadAccess` — owner/admin/approver PLUS the human member a pending turn waits on — used by the REST and MCP approval-status endpoints (whose summary now carries `pendingMemberId`/`pendingHumanPrompt` on both surfaces). The full-transcript view stays role-gated: the member's working material is the rendered prompt, never the transcript.
+- **Mid-phase resume no longer replays earlier repeats**: the phase loop starts at the bookmark's `repeatIdx` (clamped) — each replayed repeat was a full round of duplicate turns and spend.
+- **Metric/audit/resume-event moved AFTER the successful executor submit** in the human-turn resolution (a rolled-back attempt must not pollute the resume metric or the EU-AI-Act trail — the rule `resumeDiscussion` already followed); the rollback path now re-checks the control token (`removeTokenAndConvertIfSignalled`) so a cancel racing the rollback is not dropped; and the method returns a **freshly-read copy** instead of the live instance the background leg mutates under the serializer.
+- **Slack listener releases its completion latch on a human pause** (it blocked `awaitCompletion`'s full 300s on every human turn); **deletion of an `AWAITING_HUMAN_INPUT` conversation runs the paused-cleanup branch** (timeout schedule + ephemeral agents + signing cursor); **the signing cursor now survives a human pause** in `executeDiscussion`'s finally; **crash-recovery sweeps are isolated** (a failing approval query no longer skips the human re-arm).
+- **Inbox starvation fixed**: both pause states are queried with the full limit, merged oldest-pause-first, then capped — approvals can no longer push a member's own turn out of the window.
+- **Validation**: `turnTimeout` must be positive (PT0S/PT-4H parsed but armed an immediately-firing timeout that silently skipped every turn); `"members": null` cannot NPE the nested/moderator checks.
+- **F2 drift guard explicitly scoped to approval bookmarks** (human bookmarks never reach `resumeDiscussion` — disjoint states — and their advanced `speakerIdx+1` semantics would false-positive at the last-speaker boundary; the executors clamp instead).
+- CodeQL ×5 sanitized; the `HumanTurnRequired` `@param` docs moved from class to constructor Javadoc (×4).
+
+**Tests:** +7 (read-access matrix incl. stranger-refused + wrong-group-404; full-view refusal for the pending member; PT0S/PT-4H rejection; null-members no-NPE; MCP guard/gate re-alignment ×2). Suites: 2882 green across `engine.internal` + `configs.groups` + `engine.hitl` + `engine.mcp`; checkstyle clean.
+
+---
+
+## 🙋 feat(groups): I6 — humans as group members (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i6-human-members`)
+
+Fourth Wave 2 queue item. Humans can finally *speak*, not just gate: a `MemberType.HUMAN` member's turn pauses the discussion in a **new state `AWAITING_HUMAN_INPUT`** until they submit — deliberately not `AWAITING_APPROVAL` (approval endpoints must never accept free text; inboxes must tell "approve/reject" from "you're up").
+
+- **Turn flow, exactly per the plan:** the phase loops intercept HUMAN speakers before any LLM machinery, render their input *exactly like an agent's* (`buildPhaseInput`), and surface a `HumanTurnRequired` control-flow signal; `executeDiscussion` catches it, and `GroupHitlCoordinator.commitHumanTurnPause` persists `PendingHumanInput{memberId, displayName, phaseIdx, repeatIdx, speakerIdx, entryType, renderedPrompt, onTimeout, requestedAt}` + the F2 `ResumePoint` — writer-less until now, this is its first producer. The human's turn is counted at the pause (`pausedTurnCount = turns+1`), so it is never free.
+- **Submission:** `POST /groups/{groupId}/conversations/{id}/human-input` + MCP `submit_group_human_input`. Authorization is a NEW guard (`requireGroupHumanInputAccess`): the pending member's own principal or admin — deliberately narrower than approve (an `eddi-approver` may decide approvals; speaking as another human is impersonation). The answer lands as the phase's natural entry type (captured at pause time so config edits can't re-type it), the bookmark advances past the answered speaker, the CAS out of `AWAITING_HUMAN_INPUT` makes double-submits a 409, and the discussion re-enters like an approval resume. Drift-checks run BEFORE any mutation — a stale bookmark refuses the submission instead of needing rollback; the one post-CAS failure (executor saturation) rolls the append back and restores the pause.
+- **Timeouts:** `humanMemberConfig {turnTimeout (ISO-8601, null=wait), onTimeout=SKIP_TURN|ABORT}`, riding the HITL schedule machinery with a new surface `group-human` — the SKIP_TURN/ABORT policies are NOT `HitlTimeoutPolicy` values, so the fire handler branches on surface before parsing. SKIP_TURN writes the plan's SKIPPED entry ("no response from <name> within <d>") and resumes; ABORT cancels gracefully. Crash recovery re-arms human-turn timeouts (policy bookmarked on the pending record).
+- **PARALLEL phases:** humans never join the fan-out; agents run first, humans are then prompted sequentially against the **pre-fan-out snapshot** (blindness preserved). The one carve-out from "PARALLEL never honors a bookmark": a `HUMAN_TURN_PARALLEL` resume skips the fan-out entirely and resumes the human tail — no duplicate agent turns on resume.
+- **Save-time matrix** (`AgentGroupStore.validateHumanMembers`, hard-throws — safe because no legacy doc can contain the new enum value): displayName required; no humans in task-force (PLAN/EXECUTE/VERIFY) or `targetEachPeer` groups (preset-EXPANDED, or the check is inert); nested groups containing humans rejected one level deep (runtime backstop in `MemberTurnExecutor` cancels a stranded `AWAITING_HUMAN_INPUT` child); `turnTimeout` must parse. Human moderator allowed + warned — and `resolveParticipants` now preserves the roster's member for the moderator id (the 4-arg ctor silently DEMOTED a human moderator to an agent).
+- **Surfaces:** `human_input_requested` event (constant + record + listener default + SSE forward incl. OpenAPI list + Slack "you're up" notice, mrkdwn-escaped); pending human turns join the existing inbox as `pauseType: "HUMAN_TURN"` + `pendingMemberId` (no third inbox) and the member sees their own turns without owning the conversation; `availableActions` gains `submitHumanInput`; MCP `get_group_approval_status` reports the pending member and their rendered prompt; cancel paths (`cancelDiscussion`, pause→cancel conversion, `removeTokenAndConvertIfSignalled`) all treat the new state as a first-class pause.
+- **Defense in depth:** a HUMAN member reaching `executeAgentTurn` (convergence judge, dissent round, task-force wave, nested group — contexts that cannot pause) yields a SKIPPED entry, mirroring the member-HITL SKIP precedent.
+- **Deviation, recorded:** the I14 `HUMAN_DECIDES` tie-policy wiring stays save-time-rejected — I14 (PR #638) is not merged; wiring it is a small follow-up once both branches land (I12 needs both anyway).
+
+**Tests (+23 across 8 classes; `engine.internal` + `configs.groups` + `engine.hitl` suites 1869 green; checkstyle clean):** sequential pause with rendered prompt + absolute index + budget-before-human ordering; parallel fan-out-then-human with pre-fan-out blindness (captor on the prompt transcript), resume-tail without fan-out re-run, and post-resume blindness; commitHumanTurnPause bookmark/pending/schedule shape (surface + policy asserted); submit→record→advance→CAS→re-enter (captured runnable proves the re-entry coords); wrong member / wrong state / blank / oversize / config drift all refuse BEFORE mutation; SKIP_TURN timeout writes the named SKIPPED entry and advances; cancel-of-human-pause clears the pending turn; timeout-handler routing (SKIP_TURN/ABORT/unknown-degrades); guard matrix (member ok, admin ok, owner+approver FORBIDDEN, wrong-group 404, auth-off no-op, inbox shows the member their turn); save-time matrix; human-moderator preservation; defense-in-depth skip; 4 enum pins updated (the I14/I8 CI lesson — caught locally this time).
+## 🔎 fix(groups): I11 PR #641 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i11-negotiation`)
+
+All 12 review comments (CodeQL ×4, code-quality ×3, CodeRabbit ×5) triaged; every one accepted and fixed:
+
+- **Stale signatures could reach "unanimity" (the real defect):** `applyMove` never withdrew an agent's earlier signature when they moved. Now: putting new terms on the table (`addProposal`, both the PROPOSAL path and a BARGAIN counter) **withdraws the mover's signatures from every other open proposal** — and, symmetrically, signing someone else's terms **supersedes the signer's own open offer**. A turn carrying BOTH `accept` and `proposal` resolves deterministically for the proposal (the accept is ignored with a WARN — new terms mean the mover is not settling). Mutation-checked: without the withdrawal, the new test's agreement check would pass on a signature its signatory abandoned.
+- **Schema v4 (CodeRabbit Major, accepted):** `negotiationState` is resume-critical — an older deployment re-saving a paused v4 document would drop the table and the agreement check would run empty. `CURRENT_SCHEMA_VERSION` 3→4, identity hop (v3 docs have no negotiation state). Note: the I12 branch bumps to 4 for `runtimePhases` with the same reasoning — on merge the two v4s coalesce into one release-shape v4, which is correct: both features ship together and any pre-release pod must refuse both.
+- **`NegotiationState` encapsulated** (code-quality ×2): getters return unmodifiable views; mutation goes through `addProposal`/`replaceProposal`/`addConcession` — the table cannot be edited behind the state's back.
+- **Unused `phase` parameter dropped** from `applyRepeat` (call sites updated); **moderator filter null-safe** (`filter(Objects::nonNull)` before the id comparison); **CodeQL ×4** log-injection sites sanitized (`LogSanitizer` in `NegotiationEngine` ×3 + the service's skipIf log).
+
+**Tests:** +3 (counter-proposal withdraws the stale signature AND blocks the stale agreement; accept+proposal in one turn → proposal wins; GROUP member's signature not required for unanimity) and 2 extended (superseded-proposal acceptance is inert — the case the DisplayName claimed; the scripted bargain now asserts p2 is SUPERSEDED once its owner signs p3). `NegotiationEngineTest` 15 green; group suites green.
+
+---
+
+## 🤝 feat(groups): I11 — NEGOTIATION style, the trade form (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i11-negotiation`)
+
+First Wave 3 queue item. EDDI had win/lose decision forms and no **trade** form; a negotiation's output is a drafted compromise with an explicit **concession ledger** for human sign-off. The typed structure IS the anti-sycophancy mechanism.
+
+- **Phase types `PROPOSAL` + `BARGAIN`; `skipIf="AGREEMENT_REACHED"`** — a single enum condition, deliberately NOT an expression language (a phase is skipped for a reason the engine can PROVE against the typed decision). The arbitration phase is its only user.
+- **`NegotiationState` on `GroupConversation`**: proposals `{id, byAgentId, round, terms (String v1), status OPEN|SUPERSEDED, acceptedBy, acceptanceEntryIndices}` + concessions `{byAgentId, round, gaveUp, inReturnFor, refProposalId}`. Persisted with the document — a pause/resume keeps the table as it stood.
+- **The BARGAIN turn contract** (`{"accept", "proposal": {"terms"}, "concessions": [{"gaveUp","inReturnFor"}]}` + free-text reasoning): three-tier parse mirroring `VoteTallyEngine` (strict → embedded → give up, FAIL_ON_TRAILING_TOKENS); an unparseable turn is prose with NO state effect (WARN, never a guessed acceptance). A concession that names nothing in return is NOT recorded — the rule is the structure, and the baked-in template says so. A new proposal supersedes the mover's own open one; the proposer signs their own terms implicitly.
+- **Ledger accountability:** the open proposals + concession ledger are appended to every PROPOSAL/BARGAIN turn (and to negotiation SYNTHESIS turns — arbitration and final synthesis quote the record). Appended by `NegotiationEngine.appendStateIfRelevant` at the two input-build sites rather than templated, because the state lives on the conversation, which `buildPhaseInput` deliberately does not see.
+- **Agreement**: all non-moderator participants signed the same OPEN proposal → the bargaining phase's repeats end early through the SAME `PhaseOutcome.endRepeats` plumbing convergence uses, and `DecisionRecord{AGREEMENT, method="negotiation"}` carries `tally.signedAcceptances` — each signatory mapped to the transcript index of their (already signed) acceptance entry. The entries ARE the co-signatures; no new crypto. `decision_reached` fires (its F3 event finally has a second producer).
+- **Preset `NEGOTIATION`** (① Positions & Interests, PARALLEL+NONE — interests enable integrative trades ② Opening Proposals ③ Bargaining, repeats=maxRounds ④ Arbitration, MODERATOR + `skipIf` + its own TEMPLATE_ARBITRATION — the default synthesis template asks for a balanced summary, an arbitrator DECIDES ⑤ Synthesis). Arbitration that RUNS records its conclusion as `DecisionRecord{VERDICT, method="arbitration"}` (never overwriting an existing decision).
+- Enum additions are compat-safe; `describe_discussion_styles` (REST) gained the entry via an exhaustive switch the compiler flagged.
+
+**Tests (12 new in `NegotiationEngineTest` + preset shape + 2 enum pins; `engine.internal` + `configs.groups` suites 1694 green; checkstyle clean):** parse tiers incl. the JSON-plus-reasoning form; concession-must-name-return; implicit self-signature with the authoring entry index; supersession; unknown/superseded acceptance + unparseable turn inertness; ledger accumulation with round + refProposal attribution; unanimous acceptance with signed indices asserted exactly; partial acceptance ≠ agreement; arbitration records once and never overwrites; ledger rendering into the turn (and its no-op paths); and the plan's **scripted 3-round bargain converging in round 3** — propose → counter+concede → sign — as living documentation of the protocol.
+## 🔎 fix(groups): I18 PR #642 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i18-bidding`)
+
+All 6 CodeQL log-injection findings in `TaskForceEngine`'s bid round accepted and fixed: `LogSanitizer` applied to every caller-influenced value in the bid-round logs (groupId, task subject, bidder/winner agentId, exception messages) — 7 sites sanitized, the 6 flagged plus the bid-turn-failure log the scan will otherwise flag next round. Bid suites (51) green.
+
+---
+
+## 🏷️ feat(groups): I18 — bid-based task assignment, CNP-lite (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i18-bidding`)
+
+Second Wave 3 queue item (adopted from the research review, scoped down — the turn-auction extension stays REJECTED: an extra call per member per turn to decide who talks doubles cost to save cost). The planner cannot know members' actual fit or load; the Contract Net Protocol's announce-bid-award loop maps onto the existing wave scheduler.
+
+- **`assignmentMode = ROLE (default) | BID`** on `TaskDefinition` (per task) and `GroupTaskConfig` (group default), both with compat constructors — every pre-I18 config resolves to ROLE through `TaskBidEngine.effectiveMode`'s task → group → ROLE chain.
+- **PLAN leaves BID-mode tasks unassigned** (both the pre-configured and LLM-planned paths) — assigning there would preempt the auction with the planner's guess.
+- **The wave's bid round** (`TaskForceEngine.runBidRoundIfNeeded`, before each wave's grouping so awards join the same wave): eligible members (non-moderator AGENTs) each get one **blind, parallel** bid turn — the prompt carries the announced batch and NOTHING else (no transcript, no peer bids; blindness is what makes the self-assessed confidences comparable, and the honesty rule is stated to the model: an inflated confidence wins you work you will fail at, on the record). Replies land as `BID` transcript entries — F4's blind-bid visibility (peer-hidden while the phase runs) has its first producer.
+- **Deterministic award, never a stalled wave**: highest confidence per task; ties break by speaking order then agent id (identical on every pod); a task nobody bid on falls back to ROLE/round-robin; the auction skips itself with a LOG (a silent cap reads as coverage) when <2 bidders, <2 unassigned tasks, or the turn budget cannot cover one bid turn per member. Bid turns count toward the turn budget and their cost flows through the normal member-turn attribution.
+- **The award is per-task metadata** (`SharedTaskList.awardedBids[taskId] = AwardedBid{agentId, confidence, estimatedComplexity, rationale}`), deliberately NOT a global DecisionRecord — an award is a scheduling fact about one task, not the discussion's conclusion.
+- Parse discipline mirrors `VoteTallyEngine`: three tiers, FAIL_ON_TRAILING_TOKENS, unknown subjects dropped (an out-of-contract bid is never guessed onto a task), confidence clamped to [0,1], first-bid-per-task within one reply.
+
+**Tests (13 new: 8 `TaskBidEngineTest` + 5 `TaskForceEngineTest`; `engine.internal` + `configs.groups` suites 1694 green; checkstyle clean):** parse tiers + clamping + unknown-subject drop; award to highest confidence; tie-break determinism (speaking order, then agent id); no-bids absence; effective-mode chain; worthwhile-auction caps; blind prompt content; engine-level award with recorded bid + turn accounting + BID entries; **blindness asserted on the captured prompts** (no peer rationale/confidence leaks); no-bids ROLE fallback never stalls; skip-conditions make zero LLM calls; ROLE-mode tasks never auctioned.
+## 🔎 fix(groups): I13 PR #644 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams`)
+
+All 3 findings (CodeQL ×2, code-quality ×1) accepted and fixed: the workspace-deletion and cadence-deletion logs sanitize their caller-influenced values; `GroupWorkspace.getCadences` returns an unmodifiable view with mutation through new `addCadence`/`removeCadence` (the NegotiationState treatment) — REST layer and tests rewired. Suites (73) green.
+
+---
+
+## 🏭 feat(groups): I13 — standing teams (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams` — stacked on the I8 branch: retro lessons flow through I8 unchanged)
+
+Ninth queue item, the Wave 3 flagship. A group conversation is an episode; the **`GroupWorkspace`** is what persists — backlog, cadences, metrics. Deliberately thin glue over existing machinery: the backlog IS a `SharedTaskList`, scheduling IS `SchedulePollerService`, the run ceiling IS I1's inherited-ceiling slot.
+
+- **Model + store:** `GroupWorkspace` (own collection, one doc per group id): `backlog` (SharedTaskList reused whole so pulled tasks flow straight into the task-force machinery), `metrics {discussions, tasksVerified, totalCost, lastRunAt, perMemberStats}` (per-member stats are reliability RECORDING only — the research-adopted substrate; no routing/weighting in v1), `cadences [{cadenceId, scheduleRef, inputTemplate (Qute), maxBacklogTasksPerRun=5, maxCostPerRun, createdBy}]`, `runningDiscussionId` + `pulledTaskIds`. `IGroupWorkspaceStore`/`GroupWorkspaceStore` follow the GroupConversationStore single-version pattern; `casRunningDiscussion` is a conditional store write (`storeIfFieldEquals`) — cluster-safe, no in-JVM locks, idle sentinel `""` because the CAS compares a concrete stored value.
+- **`TeamCadenceService`** (the DreamService pattern, exactly): metadata contract `teamCadenceType="team_cadence"` + a dedicated `ScheduleFireExecutor.fireTeamCadence` branch, so cluster claim/lease/retry/dead-letter/fire-logs come free. The fire protocol is crash-proof by construction: **reconcile** (a finished previous run is written back FIRST; one still running — possibly paused at an HITL gate for days — skips the fire) → **pull** (top-N executable by priority; empty pull skips, logged) → **claim** (CAS; a lost race cancels the just-started discussion and stands down) → **run**. Deliberate skips are COMPLETED fires with the reason logged; real failures are FAILED so they retry and dead-letter.
+- **Task injection without config writes:** new `GroupConversationService.startCadenceDiscussionAsync` — the pulled tasks replace `config.tasks` on the call's own fresh read (a runtime copy; the stored config is never written) and `maxCostPerRun` rides `inheritedCostCeiling`, so `effectiveCostCeiling` takes the tighter of it and the group's own ceiling (dollar-primary, the Dream precedent). The discussion runs under the cadence **creator's** identity (`createdBy`), not a synthetic scheduler user.
+- **Writeback** at the next fire or on workspace read (read-repair in the REST layer) — never from the discussion thread, so a crash loses nothing: VERIFIED stays VERIFIED on the backlog + credits the assignee's stats; anything else returns to PENDING with the reviewer feedback appended to the description (the cross-run retry loop); FAILED/CANCELLED returns every pulled task untouched; a vanished discussion releases the claim instead of stalling every future fire.
+- **Surfaces:** REST `/groupstore/groups/{groupId}/workspace` (GET workspace/backlog with read-repair; POST backlog — cap 200 with an actionable 409; POST/DELETE cadences — the cron is validated at creation by computing the first fire, and the schedule carries the dispatch metadata); MCP `add_team_task` + `list_team_backlog` (whitelisted; filter pins green). **Teardown:** a permanent group deletion cascades to the workspace; a soft delete keeps it (the group can come back).
+
+**Tests (+14 TeamCadenceServiceTest, +9 RestGroupWorkspaceTest, +2 fire-executor dispatch, +4 MCP, +2 cascade):** fire pulls top-priority tasks and the captured `startCadenceDiscussionAsync` call carries them, the creator identity and the dollar ceiling; every skip (empty backlog, still-running, lost claim → cancel); reconcile-then-run; writeback matrix (VERIFIED credited / failed-with-feedback returns as the retry loop / FAILED returns untouched / vanished releases) — the feedback-appended and VERIFIED assertions are the mutation-check; backlog cap actionable on both surfaces; cadence schedule metadata + invalid-cron-fails-at-creation; permanent-delete cascade vs soft-delete keep.
+
+---
+
+## 🔎 fix(groups): I8 PR #639 CI round 1 + plan-mandated test extension (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i8-retro-memory`)
+
+Follow-ups on the open PR (commits `8025962c6`, `c2b4b7a79`, `3de3de69e`):
+
+- **CI failures**: `AgentGroupConfigurationTest.phaseType_allValues` pins the enum size (RETRO is this branch's 12th value — same pin fixed for VOTE on the I14 branch), and `PostgresUserMemoryStoreUnitTest.getVisibleEntries_withGroupIds_includesGroupClause` pinned the pre-I8 bind order — now asserts all nine parameters incl. the derived `group:` owners. The third failing check (ClusterFuzzLite) was a transient gcr.io 403 pulling the fuzz image — it passed on the sibling PRs minutes later.
+- **CodeQL**: the four flagged RetroEngine log sinks sanitized (conversation id, phase name, team owner, exception message).
+- **Plan-mandated tests** the first commit missed (`UserMemoryToolScopingTest` extension, named explicitly in the I8 plan item): eviction can never delete a team-owned lesson even with the store wall deliberately breached (the fixed `"retro"` sourceAgentId is a second independent wall), and personal `visibility:self` entries never cross users through a shared group.
+
+---
+
+## 🧠 feat(groups): I8 — retro phases harvest team-owned group memory (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i8-retro-memory`)
+
+Third Wave 2 queue item, and the substrate I13 (Standing Teams) builds on. Discussions stop evaporating: a `RETRO` phase's lessons persist and surface as `{properties.*}` in every member's later discussions.
+
+- **`PhaseType.RETRO`** + built-in template (full-transcript review, JSON lessons contract) + `RetroConfig {maxLessonsPerRun=3, maxStoredLessons=50}`. The template *quotes* the default per-run cap; `RetroEngine` *enforces* the configured one at parse time regardless — the context builder deliberately does not receive the group config.
+- **Storage exactly as the plan resolved (V2):** `IUserMemoryStore.upsert` under the synthetic team owner `"group:"+groupId` with `group` visibility. New `TEAM_OWNER_PREFIX` contract constant; lessons belong to the team, not the human who ran the discussion, and survive that human's GDPR erasure without carrying their identity.
+- **The additive synthetic-team-owner recall branch, on BOTH backends:** Mongo's `buildVisibilityFilter` and Postgres's `buildVisibilityQuery` (+ its bind order) now OR in a narrow team scope — owner ids DERIVED from the supplied group ids (never caller-supplied), `group` visibility, group-id overlap. The user's own scope is untouched, per the plan's "do not widen the existing user-scoped group branch". Both made package-private static so the filter/SQL shapes are directly assertable — and both are pinned side by side so the backends cannot drift.
+- **Idempotency + bounded growth:** key `retro:<sha256(lesson)[0..16]>` with a FIXED `sourceAgentId` ("retro") — the upsert identity for group entries is `(userId, key, sourceAgentId)`, so a real speaker id would have made the same lesson from two speakers two rows. FIFO eviction past `maxStoredLessons` via the newest-first recall (everything past the cap is the oldest); `RetroEngine` is the ONLY reaper — `UserMemoryTool`'s eviction only ever touches the calling agent's `self` entries.
+- **Wiring:** discussion-loop harvest on the RETRO phase's last repeat, before the persist (a crash must not lose lessons a stored document claims were taken); `IUserMemoryStore` reaches the facade by the established null-safe field-injection pattern. New `retro_recorded` event (constant + record + listener default + SSE forward) — fires even at zero lessons stored, which is itself signal.
+
+**Tests (11 new, all green; `engine.internal` + `configs.properties` suites 1572 green; checkstyle clean):** parse tiers (strict/fenced/prose-refused); per-run cap enforced past what the model was told; idempotent team-owned upsert against a REAL in-memory store with the production upsert identity (a mocked idempotency claim would prove nothing); FIFO evicts the oldest and never the newest; `retro_recorded` carries the stored count; null store and failing store never fail the discussion; Mongo filter shape (no-groups → user scope only; with-groups → derived `group:` owners paired with group visibility; no foreign human id reachable); Postgres SQL shape incl. the `??|` escape arithmetic pinning the bind order.
+
+**Files:** `AgentGroupConfiguration` (RETRO + RetroConfig), `DiscussionStylePresets` (TEMPLATE_RETRO), `GroupContextBuilder` (RETRO branch + entry mapping), `RetroEngine` (new), `GroupConversationService` (wiring + store injection), `IUserMemoryStore` (TEAM_OWNER_PREFIX + contract Javadoc), `MongoUserMemoryStore`, `PostgresUserMemoryStore`, `GroupConversationEventSink`/listener/SSE, `docs/group-conversations.md`, 3 test classes.
+## 🔎 fix(groups): I17 PR #637 review round 2 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i17-shared-artifacts`)
+
+Two comments triaged:
+
+- **Announce mutex no longer held across listener callbacks (CodeRabbit Major, accepted):** `announceArtifactChanges` held `artifactAnnounceMutex` through `onArtifactUpdated`, so one slow/backpressured SSE client blocked every other turn's end-of-turn drain. Now the mutex guards only the HANDOFF: exactly one thread at a time is the publisher — it drains under the mutex, releases it, fires the callbacks, and loops for late arrivals; every other thread sees the publisher flag and leaves, its changes guaranteed to ride the publisher's next pass. Write order preserved (single announcer, FIFO queue), no caller ever blocks on a listener. New test drives a write + reentrant announce from INSIDE a callback: published exactly once, in order, nothing stranded, no deadlock.
+- **CodeQL log-injection (stale):** raised against the initial commit 6aeba1393; the flagged attach-artifacts log was sanitized in round 1 (74c0acaf7). Reply-only.
+
+`MemberTurnExecutorTest` (14) + artifact suites green.
+
+---
+
+## 🔎 fix(groups): I17 PR #637 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i17-shared-artifacts`)
+
+All 11 review comments (CodeRabbit ×9, Copilot/CodeQL ×2) triaged; every one accepted and fixed:
+
+- **Meta-schema validation at save time** (`ArtifactValidators.schemaSpecProblem`): `getSchema(spec)` only parses — `{"type":"strng"}` passed and misbehaved at write time. Specs now also validate *as instances* against the bundled 2020-12 meta-schema (no network I/O; degrades to parse-only with a WARN if the bundled resource can't load, rather than rejecting every config).
+- **ReDoS bound on REGEX validators**: config-authored pattern × 256 KB LLM content could backtrack catastrophically and pin the member turn. `checkRegex` now matches through a deadline-guarded `CharSequence` (500 ms, sampled every 1024 char accesses) and refuses the write on expiry — fails closed, like every other broken-spec path.
+- **`[null]` validator entries**: `List.copyOf` NPE'd during config deserialization, preempting `requireValidSpecs`' positional message; now an unmodifiable null-tolerant copy.
+- **Artifact event ordering + late writes**: drain+announce now holds a per-conversation mutex (two PARALLEL turns ending together could split the queue and publish v2 before v1), and `executeDiscussion`'s `finally` runs one **final announce pass per leg** so a write accepted by a timed-out member's still-running agent is announced instead of stranded. A write after even that pass keeps the artifact — only its live event is best-effort, by design.
+- **`listByGroupConversationId` order**: both backends sort DESC; the interface promises oldest-first. Now re-sorted in Java per the contract.
+- **`deleteByGroupConversationId`**: same processed-set/no-progress guard as `deleteAllForUser` — an undislodgeable row is counted once and ends the loop instead of spinning `MAX_ERASURE_PASSES` times and inflating the count.
+- **Slack mrkdwn injection**: artifact name/editor id are LLM-authored; `<!channel>` in a name rendered as a real broadcast. Both fields now `&`/`<`/`>`-escaped.
+- **Oversize refusal rounds up** (`Math.ceilDiv`): MAX+1 bytes no longer reads "256 KB is over the 256 KB limit".
+- **GDPR cascade Javadoc** now names the shared-artifact step; **CodeQL log injection** at `populateArtifacts` sanitized.
+
+**Tests:** +7 (meta-schema reject, null-entry positional message, catastrophic-regex deadline, late-write announce pass, single-pass write order, oldest-first sort, no-spin cascade delete). Touched suites 1961 tests — green except the 27 known environmental socket-bound errors (SafeHttpClient/SlackWebApi/Weather/WebScraper), which fail identically on an untouched tree.
+
+---
+
+## 📄 feat(groups): I17 — shared artifacts (blackboard-lite) (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i17-shared-artifacts`)
+
+First Wave 2 queue item from `planning/group-collaboration-NEXT.md` §3. Agents can now **co-edit typed documents** instead of only talking: four member tools — `createArtifact`, `readArtifact`, `proposeArtifactUpdate`, `listArtifacts` — gated by a new `artifactConfig` on the group config.
+
+**Design decisions, per the plan (and the plan's own rejections honored):**
+
+- **Own collection, never embedded.** `SharedArtifact` + `ISharedArtifactStore`/`SharedArtifactStore` follow `GroupConversationStore`'s single-version runtime-document pattern. The discussion loop's whole-document stale-snapshot persists cannot clobber artifact writes, which is also why — unlike I5's task tools — the artifact tools write **through the store directly**. The live registry is still consulted: membership at assembly (`getForMember`, the caller-supplied-id IDOR guard), liveness at write time, and accepted writes ride a new transient change queue on the live `GroupConversation`.
+- **Deterministic CAS-and-retry, explicitly not an LLM fusion arbiter.** The version CAS needed a storage primitive that doesn't exist for numbers: `storeIfFieldEquals(String)` text-compares, which "works" on Postgres (`data->>` renders JSON numbers as text) and **silently never matches on Mongo** (typed BSON equality). New `storeIfFieldEquals(…, long)` overload on `IResourceStorage` + both backends, same no-silent-degrade contract (the default throws). Stale writers get the plan's sentence: *"artifact changed since you read it (now vN); re-read and merge your change."*
+- **Declarative validators only.** `JSON_SCHEMA` (new dependency `com.networknt:json-schema-validator` — the victools libraries only *generate* schemas), `REGEX`, `MAX_LENGTH`. Specs hard-fail the config save (`ArtifactValidators.requireValidSpecs` from `AgentGroupStore`, `HitlConfigValidation`'s contract); write-time failures are rejection sentences and the gate fails closed on a broken spec. Content ≤ 256 KB.
+- **Events without a listener reference:** tools can't fire SSE/Slack events (`ToolAssemblyContext` carries no listener — the structural gap that left I5's planned `task_added_by_agent` unfired). Accepted writes queue an `ArtifactChange` on the live instance; `MemberTurnExecutor` drains the queue in a `finally` after every turn and fires the new `artifact_updated` event (sink constant + record + SSE forward + Slack line + OpenAPI description lists). Drained even with a null listener so the queue cannot grow unbounded.
+- **Lifecycle:** artifacts are attached to the discussion status payload at read time in the service (so REST *and* MCP `read_group_conversation` carry them — `availableActions` idiom, `READ_ONLY`, never trusted back from storage); close/delete cascade removes them (`GroupLifecycleOps`, warn-and-continue so a broken artifact store can't make discussions undeletable); GDPR erasure sweeps them **user-keyed** via a stamped `ownerUserId` (page/exact-recheck/fail-loud contract copied from the group store) as a new `GdprComplianceService` cascade step.
+- **Caps:** `maxArtifactsPerDiscussion` (default 5) counted inside a `synchronized (liveInstance)` block — creation is check-then-act and PARALLEL phases genuinely race; updates need no lock, the CAS decides.
+
+**Tests (148 across 8 classes, all green):** tools against a real in-memory CAS store (stale-version retry sentence with the CURRENT version, concurrent same-version writers → exactly one winner, FINAL freeze, foreign-discussion ids don't resolve, validator chain, refusals leave no side effect); provider gate matrix (every uncertainty → contribute nothing, membership not existence, `enableBuiltInTools` still applies); store CAS through the numeric overload with `verify(never()).store(…)`; anchored+escaped filters with Java exact-recheck; erasure paging/fail-loud; lifecycle cascade ordering (`inOrder` artifact-delete before document-delete) + cascade-failure-still-deletes; GDPR step + not-resolvable skip + failure-continues; turn-executor drain (exactly once, null-listener drain); Slack lines incl. degenerate-payload skip. **Mutation notes:** degrading the store CAS to an unconditional store does not even compile (the gone-document catch becomes unreachable) — the CAS call is structurally load-bearing; the Mockito-verified negatives (`never().store`, `specs().isEmpty()`) pin the rest.
+
+**Files:** `SharedArtifact`, `ISharedArtifactStore`, `SharedArtifactStore`, `ArtifactValidators`, `ArtifactTools`, `ArtifactToolsProvider` (+ `AgentOrchestrator` phase-1 wiring), `AgentGroupConfiguration` (`ArtifactConfig`/`ArtifactValidator`/`ValidatorKind`), `GroupConversation` (change queue + read-time `artifacts`), `IResourceStorage` + Mongo/Postgres (numeric CAS), `GroupConversationEventSink`/listener/SSE/Slack, `GroupLifecycleOps`, `GroupConversationService`, `GdprComplianceService`, `AgentGroupStore`, `pom.xml`, `docs/group-conversations.md`, 8 test classes.
+## 🔍 fix(review): PR #636 review findings — NaN cost guard, ceiling-gated summarizer, visible-entry boundary (2026-08-08)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`, PR [#636](https://github.com/labsai/EDDI/pull/636))
+
+Every reviewer finding on #636 triaged; the real ones fixed, each with a pinning test:
+
+- **NaN poisons the cost ledger (CodeRabbit, real).** Both `GroupCostLedger.recordSystemCost` and `LlmTask.accumulateCost` guarded with `delta <= 0.0` — NaN fails *every* comparison, so it slipped through, made `totalCost` NaN, and every ceiling comparison against NaN is false: the ceiling silently never fires again. Now `!Double.isFinite(x) || !(x > 0.0)`. Tests: NaN/∞/non-positive rejected in both accumulators.
+- **Summarizer spend must be ceiling-gated (Copilot, real).** The I9 boundary call now runs behind `GroupCostLedger.wouldExceedCeiling`, exactly like the convergence judge and the dissent round. The pinning test needed care — the first attempt was vacuous because the per-turn gate fired before any boundary could (mutation survived); rebuilt so the first phase completes under the gate while blowing the ceiling cumulatively. **Mutation-checked: removing the guard fails exactly this test.**
+- **Summary boundary counts raw entries, not visible ones (Copilot, real).** Bookkeeping rows (SKIPPED/CONVERGENCE/…) in the tail shrank the verbatim window below `maxRecentEntries` while newer real contributions got summarized away. New `summaryBoundary` walks back over `isSummarizable` entries (one shared predicate with `renderForSummarizer`). Test: bookkeeping interleaved in the tail keeps the 3 newest *visible* entries verbatim.
+- **Blank summarizer identifiers (CodeRabbit, real-minor).** Whitespace-only `llmProvider`/`llmModel` bypassed the null checks and reached `SummarizationService`. Normalized to null in `ContextWindowConfig`'s compact constructor (the one choke point); the store warn simplifies to null checks. Test: blank identifiers → truncation fallback, `verifyNoInteractions(summarizer)`.
+- **CodeQL log injection ×4 (real).** `gc.getId()` and the group name are caller-influenced; the three windowing WARNs and the save-time warn now go through `LogSanitizer.sanitize`.
+- **Live-transcript iteration (CodeRabbit, partly right).** The `updateWindowSummary` copy already held the correct monitor (`Collections.synchronizedList`'s mutex IS the wrapper object — the PhaseExecutionEngine comment documents this), but the windowed `filterByScope`'s indexed walk over the LIVE list could interleave with tool-thread appends (recruitment's FACILITATION entries). It now copies under the wrapper monitor first.
+- **`memberCosts` key shape (CodeRabbit, documentation).** The "agentId → cost" Javadoc was stale *before* the nested-cost fix — I2's `__convergence_judge` and I4's `__dissent__*` conversation keys already live in that map. Rewritten to the actual invariant: one key = one conversation, `totalCost` = sum of everything. Copying a member total onto `memberCosts[agentId]` (the suggested fix) would double-count in the re-sum.
+
+144 tests across the touched classes green; checkstyle clean.
+
+---
+
+## 🪟 feat(groups): N2/I9 — transcript windowing for rendered member context (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+Third and last pre-feature item from `planning/group-collaboration-NEXT.md` §2 — a live cost bug, not a new collaboration mode: FULL-scope phases re-fed the entire transcript to every member every turn (~quadratic prompt cost), and every queued Wave 2/3 item makes transcripts longer. Landed in `GroupContextBuilder` per the plan (`### I9`, plan line ~337).
+
+- **Config:** `AgentGroupConfiguration.ContextWindowConfig` (`contextWindow`) — `enabled=false`, `maxRecentEntries=30`, `summarizeOverflow=true`, plus `llmProvider`/`llmModel` for the summarizer and optional `inputPricePer1M`/`outputPricePer1M` (I1 attribution, reusing N1's shared `TokenPricing`). Boolean-not-boolean for `summarizeOverflow` so an omitted JSON key means true; compact-constructor normalization in the `GroupTaskConfig` style. Save-time warn in `AgentGroupStore` when summarization is on but no model is named.
+- **Rendering:** windowed `filterByScope` overload — when the FULL/ANONYMOUS scope-filtered context exceeds the cap, older entries collapse into one leading "System" pseudo-entry: the rolling summary when it covers the omitted range, else the `[n earlier entries omitted]` truncation marker (the `summarizeOverflow=false` path and the failure fallback). The verbatim/summary split is the summary's **raw-transcript boundary**, so there is never a gap or duplication; between boundaries the tail may grow a few entries past the cap and the next boundary re-tightens. The stored transcript is never modified; signing verifies raw entries as before.
+- **Summaries:** extended **incrementally at phase boundaries only** (`updateWindowSummary`, called from the discussion loop before each repeat — never per member turn), previous summary + new slice, mirroring `ConversationSummarizer`'s self-correcting algorithm via the shared `SummarizationService` (unification rule). Failure or empty answer leaves stored state untouched: WARN, truncation fallback, next boundary catches up with a larger batch. Summarizer spend lands on the discussion ledger via `GroupCostLedger.recordSystemCost` keyed `system:summarizer:{variant}:{boundary}` (idempotent per extension, distinct extensions sum).
+- **One deliberate deviation from the plan text:** the plan named a single `transcriptSummary`/`summaryUpToIndex` pair *and* required ANONYMOUS summarizer input to use "Anonymous" labels. One shared summary cannot satisfy both — a FULL-built summary carries real names and would de-anonymize an ANONYMOUS phase through the back door. `GroupConversation` therefore carries a second, lazily-built pair (`anonymousTranscriptSummary`/`anonymousSummaryUpToIndex`); a group that never uses ANONYMOUS never pays for it. Fields are additive with correct defaults — no `CURRENT_SCHEMA_VERSION` bump (a legacy document simply starts summarizing at its next boundary).
+- **Wiring:** `PhaseExecutionEngine`'s three `buildPhaseInput` call sites pass `config.getContextWindow()` + gc; `SummarizationService` reaches the facade by the established field-injection pattern (null in direct-construction unit tests → truncation fallback). The I2 convergence judge's input is untouched (already bounded to two rounds); SYNTHESIS deliberately keeps the full picture.
+
+**Tests** (`GroupContextBuilderWindowingTest`, 13): boundary at exactly the cap (must exceed, not meet); truncation marker; summary + boundary-split tail (no gap/duplication); ANONYMOUS uses the anonymous summary and labels (the named FULL summary must not surface); incremental extension (second call sees previous summary + only the new slice); failure/empty-answer state untouched + rendering falls back; priced summarization reaches `totalCost`; no summarizer call outside its remit (wrong phase type/scope, below cap, summarization off); config normalization. **Mutation-checked:** re-feeding the whole prefix instead of the new slice fails exactly the incremental test. `PhaseExecutionEngineTest`'s input stub updated to the new 9-arg overload (same reasoning as its own comment: a shorter stub silently nulls every input). Full `engine.internal` suite: 1438 green; checkstyle clean.
+
+**Files:** `AgentGroupConfiguration.java`, `GroupConversation.java`, `GroupContextBuilder.java`, `PhaseExecutionEngine.java`, `GroupConversationService.java`, `GroupCostLedger.java`, `AgentGroupStore.java`, `TokenPricing.java` (now public), `docs/group-conversations.md`, `planning/group-collaboration-NEXT.md` (all three §2 items marked done), tests.
+
+---
+
+## 🪜 fix(schema): N3 — legacy documents now enter the migration ladder at the bottom (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+Second pre-feature defect from `planning/group-collaboration-NEXT.md` §2, filed by the round-5 review of #626. `GroupConversation.schemaVersion` was initialised to `CURRENT_SCHEMA_VERSION` (3). Every pre-F6 production document has no `schemaVersion` key, Jackson leaves the initialiser standing, so those documents loaded **claiming schema 3 while being version-1-shaped** — and `prepareForResume`'s ladder ran `for (v = 3; v < 3; ...)`: zero iterations on exactly the documents it exists for. Fixed now, while it is free: no released build has ever written a versioned document, so nothing in production carries a wrong claim to migrate away from.
+
+- **Test first, watched it fail:** `documentWithoutVersionKey_claimsLegacyVersionNotCurrent` deserialises `{}` and asserts version 1 — failed with `expected: <1> but was: <3>` before the fix, exactly the round-5 finding. This is the case none of the four previous review rounds' tests covered (they all *set* a version).
+- **The fix is a split, not a re-initialisation:** new `LEGACY_SCHEMA_VERSION = 1` is the field initialiser (the version a key-less document claims — it never moves), and the single creation point (`GroupConversationService.createGroupConversation`) stamps `CURRENT_SCHEMA_VERSION` explicitly. The initialiser alone cannot distinguish "absent" from "current" — Jackson runs the no-arg constructor either way — so the stamp must live at creation.
+- **`ConversationMemorySnapshot` got the identical split** even though its `CURRENT` is still 1 (correct only by coincidence — first bump to 2 would have silently re-created the group side's bug). Its stamp lives in `ConversationMemoryUtilities.getMemorySnapshot`, the one place snapshots are built from live memory. A pinning test asserts `LEGACY_SCHEMA_VERSION` stays 1 when `CURRENT` bumps.
+- **(b) Stale Javadoc fixed:** `GroupConversationSchemaMigrations.MIGRATIONS` claimed `CURRENT_SCHEMA_VERSION` is 1 and "there is nothing yet to migrate from" — it is 3, and the identity-default path has already been exercised twice. Rewritten (plus the single-conversation mirror and the stale test-class Javadoc).
+
+**Mutation-checked:** removing the creation stamp fails exactly `discuss_stampsCurrentSchemaVersionOnTheCreatedDocument` (a fresh document would persist claiming legacy). Deserialisation side proven by the red→green cycle above. 133 tests across the six touched classes green.
+
+⚠️ **Surefire note for the next session:** `-Dtest=ClassName` prints `Tests run: 0` for the parent of `@Nested` tests while the nested groups report under their `@DisplayName` — read the run TOTAL, not the class line, before concluding nothing ran.
+
+**Files:** `GroupConversation.java`, `GroupConversationService.java`, `ConversationMemorySnapshot.java`, `ConversationMemoryUtilities.java`, both `*SchemaMigrations.java`, tests.
+
+---
+
+## 🧮 fix(groups): nested-group cost is summed per child discussion, not overwritten (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+The N1 fold-in flagged in `planning/group-collaboration-NEXT.md` §4. `GroupCostLedger.accumulateNestedGroupCost` keyed `memberCosts` by the GROUP member's `agentId`, but every turn of a GROUP member spawns a **fresh child discussion** whose `totalCost` starts at 0 — and the map records by replacement (idempotency invariant: one key = one conversation's cumulative cost). So child N's total replaced child N−1's, only the last child's spend survived the re-sum, and the parent's ceiling checks ran against an undercount.
+
+Fix keeps the replacement invariant instead of breaking it with deltas: the attribution key is now `agentId:childConversationId` — one key per child conversation, replacement stays idempotent, multiple children of the same member sum. A child without an id falls back to the plain agentId (old behaviour). No production reader indexes `memberCosts` by agentId — the map is serialized whole.
+
+`MemberTurnExecutorTest.executeGroupMemberTurn_rollsUpChildDiscussionCost` pinned the old single-key shape and was updated to the new contract. New `GroupCostLedgerTest` case: two children ($1.00, $0.50) of one member total $1.50, not $0.50. **Mutation-checked:** reverting to the agentId key fails exactly that new test.
+
+**Files:** `GroupCostLedger.java`, `GroupCostLedgerTest.java`, `MemberTurnExecutorTest.java`.
+
+---
+
+## 💰 fix(llm): N1 — price ordinary model calls so the ledger's common case is no longer $0 (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+First of the three pre-feature defects from `planning/group-collaboration-NEXT.md` §2. `AUDIT_COST` was written from `cascadeCostUsd + toolCostUsd` only, so a plain model call — no cascade, no priced tool — contributed **$0.00**: I1's `maxCostPerDiscussion` ceiling could never trip for an ordinary group, and `memberCosts`/`totalCost` were served over REST as if authoritative.
+
+- **`LlmConfiguration.Task` gains `inputPricePer1M`/`outputPricePer1M`** — same names and nullable semantics as the cascade fields (null = unpriced, contributes $0), so nothing changes for anyone not setting prices. Config-driven per Golden Rule 1: no hardcoded provider price table — it would be wrong within weeks.
+- **The pricing arithmetic now lives once, in `TokenPricing.cost()`.** `CascadingModelExecutor.computeCost` (step→cascade price resolution) and `LlmTask.accumulateAuditEvidence` (task-level prices for plain calls) both delegate — the formula cannot drift between paths (§4.7 unification rule).
+- **Precedence is explicit, not accidental:** `accumulateAuditEvidence` discriminates on the presence of the `cascadeCostUsd` metadata key, which the cascade branch always writes. A cascade run is priced by its steps alone; task-level prices apply only to non-cascade calls — cascade steps may target entirely different models, so inheriting the task price would price the wrong model. (This matches the precedence concern pre-filed in `docs/superpowers/specs/2026-07-21-manager-coverage-backend-design.md`.) Pinned by a test with deliberately absurd task prices on a cascade turn.
+- **Validation:** negative task-level prices fail deployment (`CascadeConfigValidator`, same new-field hard-error rationale as cascade pricing; the validator now also runs its task-level block for cascade-less tasks).
+- **`GroupCostLedger`'s "Known gap (V1)" Javadoc** rewritten — the gap is closed; `totalCost` remains a lower bound only for members whose configs carry no prices.
+
+**Tests** (`LlmTaskAuditLedgerTest`, `CascadeConfigValidatorTest`): plain priced legacy call accumulates the expected dollars; priced agent-mode turn sums token + tool cost; unpriced call still writes no cost key; cascade with absurd task prices set is priced by the cascade alone; negative task price throws at deploy. **Mutation-checked:** reverting the pricing line to `0.0` fails exactly the two new priced-plain-call tests and nothing else.
+
+The group-side chain (AUDIT_COST → `GroupCostLedger` → ceiling policies ABORT/SYNTHESIZE_NOW) was already pinned end-to-end by `GroupConversationServiceCostCeilingTest` with stubbed member cost; what could not exist before this fix — a plain call producing nonzero AUDIT_COST — is now the pinned link.
+
+**Files:** `LlmConfiguration.java`, `TokenPricing.java` (new), `CascadingModelExecutor.java`, `LlmTask.java`, `CascadeConfigValidator.java`, `GroupCostLedger.java`, `docs/langchain.md`, tests.
+
+---
+
 ## 🔀 merge: bring `origin/main` (PR #627 HITL request pinning) into the branch (2026-08-07)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))

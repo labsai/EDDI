@@ -519,6 +519,7 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Records cost; only refuses calls when `enforceBudget` is on | (unlimited) |
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-in** — a ceiling without it is report-only, and is named in a startup WARN | false (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
+| `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (and any group cost ceiling). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls           | true                   |
 | `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global` | (all `user`)   |
 | `defaultToolCacheScope`    | string   | Cache partition for tools without an override    | `user`                 |

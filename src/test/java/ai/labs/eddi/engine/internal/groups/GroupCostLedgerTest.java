@@ -173,6 +173,26 @@ class GroupCostLedgerTest {
     }
 
     @Test
+    void accumulateNestedGroupCost_multipleChildDiscussions_sumRatherThanOverwrite() {
+        var gc = gc();
+        // Two turns of the same GROUP member = two FRESH child discussions, each
+        // starting its own totalCost at 0. Keyed by agentId alone, child 2's $0.50
+        // would replace child 1's $1.00 and the group would under-report by half.
+        var firstChild = gc();
+        firstChild.setId("child-1");
+        firstChild.setTotalCost(1.00);
+        var secondChild = gc();
+        secondChild.setId("child-2");
+        secondChild.setTotalCost(0.50);
+
+        GroupCostLedger.accumulateNestedGroupCost(gc, AGENT_A, firstChild);
+        GroupCostLedger.accumulateNestedGroupCost(gc, AGENT_A, secondChild);
+
+        assertEquals(1.50, gc.getTotalCost(), 1e-9,
+                "each child discussion is separate spend — a member's later child must not erase its earlier one");
+    }
+
+    @Test
     void accumulateNestedGroupCost_mixesWithIndividualMembers() {
         var gc = gc();
         GroupCostLedger.accumulateMemberCost(gc, AGENT_A, buildSnapshot(new ConversationStepData(MemoryKeys.AUDIT_COST, 0.10, null, null)));
@@ -182,6 +202,36 @@ class GroupCostLedgerTest {
         GroupCostLedger.accumulateNestedGroupCost(gc, AGENT_B, subConversation);
 
         assertEquals(0.60, gc.getTotalCost(), 1e-9);
+    }
+
+    // =================================================================
+    // recordSystemCost (I9 summarizer spend)
+    // =================================================================
+
+    @Test
+    void recordSystemCost_records_andDistinctKeysSum() {
+        var gc = gc();
+        GroupCostLedger.recordSystemCost(gc, "system:summarizer:full:10", 0.01);
+        GroupCostLedger.recordSystemCost(gc, "system:summarizer:full:20", 0.02);
+        // Idempotent re-run of the same operation replaces, never doubles.
+        GroupCostLedger.recordSystemCost(gc, "system:summarizer:full:20", 0.02);
+
+        assertEquals(0.03, gc.getTotalCost(), 1e-9);
+    }
+
+    @Test
+    void recordSystemCost_rejectsNaNInfinityAndNonPositive() {
+        var gc = gc();
+        GroupCostLedger.recordSystemCost(gc, "k", Double.NaN);
+        GroupCostLedger.recordSystemCost(gc, "k", Double.POSITIVE_INFINITY);
+        GroupCostLedger.recordSystemCost(gc, "k", 0.0);
+        GroupCostLedger.recordSystemCost(gc, "k", -1.0);
+        GroupCostLedger.recordSystemCost(gc, null, 1.0);
+
+        // One NaN in the map would make totalCost NaN, and every ceiling
+        // comparison against NaN is false — the ceiling silently stops firing.
+        assertTrue(gc.getMemberCosts().isEmpty());
+        assertEquals(0.0, gc.getTotalCost());
     }
 
     // =================================================================

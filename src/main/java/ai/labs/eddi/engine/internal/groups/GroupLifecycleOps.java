@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LifecyclePolicy;
@@ -36,6 +37,8 @@ import io.micrometer.core.instrument.Counter;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -83,6 +86,7 @@ public class GroupLifecycleOps {
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;
     private final IDeploymentStore deploymentStore;
+    private final ISharedArtifactStore sharedArtifactStore;
     private final Set<String> operationsInProgress;
     private final ConcurrentHashMap<String, DiscussionControlToken> activeTokens;
     private final GroupConversationService groupConversationService;
@@ -93,7 +97,7 @@ public class GroupLifecycleOps {
 
     public GroupLifecycleOps(IGroupConversationStore conversationStore, IAgentGroupStore groupStore,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
-            IDeploymentStore deploymentStore, Set<String> operationsInProgress,
+            IDeploymentStore deploymentStore, ISharedArtifactStore sharedArtifactStore, Set<String> operationsInProgress,
             ConcurrentHashMap<String, DiscussionControlToken> activeTokens,
             GroupConversationService groupConversationService, Counter counterGroupFollowUp,
             Counter counterGroupContinue, Counter counterGroupClose, Counter counterGroupFailure) {
@@ -103,6 +107,7 @@ public class GroupLifecycleOps {
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
         this.deploymentStore = deploymentStore;
+        this.sharedArtifactStore = sharedArtifactStore;
         this.operationsInProgress = operationsInProgress;
         this.activeTokens = activeTokens;
         this.groupConversationService = groupConversationService;
@@ -138,7 +143,8 @@ public class GroupLifecycleOps {
             // schedule fires against a deleted conversation, ephemeral dynamic
             // agents stay deployed forever, and the signing guard's verification
             // cursor leaks.
-            if (gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
+            if (gc.getState() == GroupConversationState.AWAITING_APPROVAL
+                    || gc.getState() == GroupConversationState.AWAITING_HUMAN_INPUT) {
                 groupConversationService.deleteGroupHitlTimeoutSchedule(groupConversationId);
                 groupConversationService.cleanupAfterTerminalState(gc);
             }
@@ -153,6 +159,10 @@ public class GroupLifecycleOps {
             // operations. Delete is terminal, so reclaim any dynamically-created agents
             // here; otherwise deleting a COMPLETED conversation would orphan them.
             cleanupEphemeralAgentsForGroup(gc);
+            // I17: artifacts live in their own collection keyed by this conversation
+            // — remove them with their discussion, before the document goes (while
+            // the id is still provably a discussion the caller could delete).
+            deleteArtifactsForGroupConversation(groupConversationId);
             conversationStore.delete(groupConversationId);
         } catch (IResourceStore.ResourceNotFoundException e) {
             LOGGER.warnf("Group conversation %s not found for deletion", LogSanitizer.sanitize(groupConversationId));
@@ -364,6 +374,19 @@ public class GroupLifecycleOps {
             // and had this round's dissents merged onto them.
             gc.setSynthesizedAnswer(null);
             gc.setDecision(null);
+            // I12: same defensive class as the two fields above — completion already
+            // clears the facilitator's one-off phase divergence, but a continuation
+            // must never run round N+1 against round N's inserted phases or count
+            // its extensions against stale phase indices.
+            gc.setRuntimePhases(null);
+            gc.clearFacilitatorExtensions();
+            // I11 (final-review finding): the negotiation table is a ROUND-scoped
+            // conclusion like the two fields above. Left in place, round 2 of a
+            // NEGOTIATION group runs against round 1's proposals — a single fresh
+            // acceptance can then reach "unanimous agreement" on signatures cast
+            // for a DIFFERENT question, and the signed-acceptance indices in the
+            // decision would even point at round 1's transcript entries.
+            gc.setNegotiation(null);
             gc.setResumeQuestion(question);
             gc.getTranscript().add(new TranscriptEntry(
                     "user", "User", question, 0, "Question",
@@ -476,6 +499,11 @@ public class GroupLifecycleOps {
             // Ephemeral agent cleanup (deferred from executeDiscussion)
             cleanupEphemeralAgentsForGroup(gc);
 
+            // I17: close is a lifecycle end — the working artifacts go with it.
+            // Their durable trace is the transcript (accepted updates are announced
+            // there and a synthesis quotes what mattered), not the working copies.
+            deleteArtifactsForGroupConversation(groupConversationId);
+
             LOGGER.infof("Group conversation %s closed — member conversations ended, ephemeral agents cleaned up",
                     LogSanitizer.sanitize(groupConversationId));
 
@@ -486,13 +514,46 @@ public class GroupLifecycleOps {
         }
     }
 
+    /**
+     * I17 cascade: removes the discussion's shared artifacts. Warn-and-continue on
+     * failure — a broken artifact store must not make discussions undeletable; the
+     * user-keyed GDPR erasure sweep (which fails loudly) is the completeness
+     * guarantee, this is the tidy path.
+     */
+    private void deleteArtifactsForGroupConversation(String groupConversationId) {
+        if (sharedArtifactStore == null) {
+            return;
+        }
+        try {
+            long removed = sharedArtifactStore.deleteByGroupConversationId(groupConversationId);
+            if (removed > 0) {
+                LOGGER.infof("Removed %d shared artifact(s) of group conversation %s", removed, LogSanitizer.sanitize(groupConversationId));
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to remove shared artifacts of group conversation %s: %s",
+                    LogSanitizer.sanitize(groupConversationId), e.getMessage());
+        }
+    }
+
     public List<PendingApprovalSummary> listGroupPendingApprovals(String groupId, int limit)
             throws IResourceStore.ResourceStoreException {
         // Bounded summaries — never hand full transcripts to a listing endpoint.
         // The groupId filter is applied in the QUERY (not post-limit), so a busy
         // deployment cannot push this group's items past the limit window.
         int clamped = Math.max(1, Math.min(limit, 1000));
-        return conversationStore.findByState(GroupConversationState.AWAITING_APPROVAL, groupId, clamped).stream()
+        // I6: pending human turns join the SAME inbox — pauseType "HUMAN_TURN"
+        // (plus pendingMemberId) is the kind discriminator; no third inbox. Both
+        // states are queried with the FULL limit and merged oldest-pause-first,
+        // then capped — filling the window with approvals before ever querying
+        // human turns would starve exactly the entries a member's own inbox
+        // filter needs to see.
+        var pending = new ArrayList<>(
+                conversationStore.findByState(GroupConversationState.AWAITING_APPROVAL, groupId, clamped));
+        pending.addAll(conversationStore.findByState(GroupConversationState.AWAITING_HUMAN_INPUT, groupId, clamped));
+        pending.sort(Comparator.comparing(GroupConversation::getPausedAt,
+                Comparator.nullsLast(Comparator.naturalOrder())));
+        return pending.stream()
+                .limit(clamped)
                 .map(gc -> {
                     var summary = new PendingApprovalSummary(
                             gc.getId(), null, gc.getUserId(), gc.getPausedAt(),
@@ -500,6 +561,12 @@ public class GroupLifecycleOps {
                             gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy().name() : null);
                     summary.setGroupId(gc.getGroupId());
                     summary.setApprovalTimeout(gc.getHitlApprovalTimeout());
+                    if (gc.getHitlPauseType() != null) {
+                        summary.setPauseType(gc.getHitlPauseType().name());
+                    }
+                    if (gc.getPendingHumanInput() != null) {
+                        summary.setPendingMemberId(gc.getPendingHumanInput().memberId());
+                    }
                     return summary;
                 })
                 .toList();
