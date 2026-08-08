@@ -5,7 +5,10 @@
 > holds the **design** for each item and does not repeat status — go there only for the one
 > item you are about to build, using the section pointers below.
 >
-> **Last updated:** 2026-08-07 · after the `fix/group-pre-feature-defects` branch (N1 + N2/I9 + N3, §2 below — all three done)
+> **Last updated:** 2026-08-08 · **the queue is empty.** Every item in §3 (I17, I14, I8, I6,
+> I11, I18, I12, I13, I10) shipped and merged to `main` on 2026-08-08 via PRs #636–#645. The
+> §2 pre-feature defects shipped 2026-08-07. This file is now a *record*, not a work list —
+> see §3 for what landed and §4 for what deliberately remains.
 
 ---
 
@@ -22,8 +25,8 @@ builds on (F1–F6), and shipped six feature items.
 | **Wave 1** — I1 cost ceiling, I2 convergence + early exit, I3 structured verdicts, I4 abstention + minority report | ✅ Done |
 | **Wave 2** — I5 agent-filed tasks, I7 recruitment + delegation timeout | ✅ Done |
 | **Pre-feature defects** — N1 plain-call pricing, N2/I9 transcript windowing, N3 schema sentinel (§2) | ✅ Done (2026-08-07, `fix/group-pre-feature-defects`) |
-| **Wave 2** — I6, I8, I14, I17 | ⬜ Queued (see §3) |
-| **Wave 3** — I10, I11, I12, I13, I18 | ⬜ Queued (see §3) |
+| **Wave 2** — I6, I8, I14, I17 | ✅ Done (2026-08-08, PRs #637–#640) |
+| **Wave 3** — I10, I11, I12, I13, I18 | ✅ Done (2026-08-08, PRs #641–#645) |
 | **Excluded — do not start** — I15 cross-team process DAGs, I16 A2A remote members | ❌ Out of scope |
 
 **The refactor is done. Nothing below is blocked on more refactoring.** Every remaining item
@@ -147,9 +150,32 @@ watch it fail, then fix (a).
 
 ---
 
-## 3. The queue after that
+## 3. The queue after that — ✅ ALL DONE (2026-08-08)
 
-Recommended order. Deviating is fine if you have a reason — record it in `docs/changelog.md`.
+Every row below shipped in the recommended order, one PR per item, merged to `main` on
+2026-08-08. The table is kept for the dependency reasoning; details for each item are in
+[`docs/changelog.md`](../docs/changelog.md) (entries of 2026-08-07 and 2026-08-08) and the
+user-facing behaviour is documented in
+[`docs/group-conversations.md`](../docs/group-conversations.md).
+
+| Item | PR |
+| --- | --- |
+| I17 shared artifacts | #637 |
+| I14 voting | #638 |
+| I8 retro → group memory | #639 |
+| I6 human as group member | #640 |
+| I11 NEGOTIATION style | #641 |
+| I18 bid-based assignment | #642 |
+| I12 facilitator | #643 |
+| I13 standing teams | #644 |
+| I10 preset templates + integration | #645 |
+
+**Deviations from the plan, recorded:** none of substance — each item followed its design in
+[`group-collaboration-improvements-plan.md`](group-collaboration-improvements-plan.md). Three
+constraints emerged during implementation and are now enforced in code: `HUMAN_DECIDES` tie-break
+remains save-time rejected (it needs its own resume machinery on top of I6), the facilitator's
+`ESCALATE_HUMAN` yields to a phase's own approval gate rather than bypassing it, and
+`CALL_VOTE` is refused when a `DecisionRecord` already exists.
 
 | # | Item | Size | Plan § | What it unlocks | Depends on |
 | --- | --- | --- | --- | --- | --- |
@@ -174,9 +200,9 @@ of what precedes them; building them early means building them twice.
 
 Recorded so they are not rediscovered. Fix opportunistically, or fold into a related item.
 
-- **`decision_reached` never fires.** I3 writes `DecisionRecord`, but no producer calls the sink
-  event, so verdicts reach REST/MCP and never SSE or Slack.
-  `SlackGroupDiscussionListener.onDecisionReached` is dead code today. *(Natural fold-in: I14.)*
+- ~~**`decision_reached` never fires.**~~ ✅ Fixed with I14 (2026-08-08): the phase decision
+  block fires it after the dissent round, so the event carries the merged dissents. Covers
+  I11's arbitration verdicts through the same firing.
 - ~~**Nested-group cost is overwritten, not accumulated.**~~ ✅ Fixed with N1 (2026-08-07):
   attribution is keyed per child discussion (`agentId:childId`), so children sum.
 - **`allowAbstention` on a SYNTHESIS phase** yields a `COMPLETED` discussion with no answer.
@@ -188,8 +214,9 @@ Recorded so they are not rediscovered. Fix opportunistically, or fold into a rel
 - **`getRecruitedAgentIds()` check-and-add is guarded by the caller,** not the model. The right
   fix moves the atomic operation into `GroupConversation` (as `SharedTaskList.addAgentTask`
   already does). Latent today — copy-on-write list, single mutator.
-- **`docs/group-conversations.md` drift:** REST/MCP tables omit the HITL and lifecycle
-  endpoints; the task-status table omits `BLOCKED`/`AWAITING_APPROVAL`.
+- ~~**`docs/group-conversations.md` drift.**~~ ✅ Fixed 2026-08-08: REST/MCP tables completed,
+  `BLOCKED`/`AWAITING_APPROVAL` added, plus new sections for per-phase controls, dissent, and
+  the SSE event catalogue.
 
 ### Checked and cleared — do not re-investigate
 

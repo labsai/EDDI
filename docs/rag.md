@@ -197,6 +197,7 @@ These are visible in the conversation memory snapshot and the audit ledger.
 | `mistral` | `mistral-embed` | `apiKey` | Mistral AI embedding model |
 | `bedrock` | `amazon.titan-embed-text-v2:0` | — | Uses AWS credentials chain; `region` (default: `us-east-1`) |
 | `cohere` | `embed-english-v3.0` | `apiKey` | Excellent multilingual support |
+| `gemini` | `gemini-embedding-2` | `apiKey` | Google Gemini embeddings |
 | `vertex` | `text-embedding-005` | `project` | `location` (default: `us-central1`); uses GCP credentials |
 
 ## Vector Stores
@@ -208,6 +209,7 @@ These are visible in the conversation memory snapshot and the audit ledger.
 | `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName`, `collectionName`, `indexName` |
 | `elasticsearch` | — | `serverUrl` (default: `localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
 | `qdrant` | — | `host` (default: `localhost`), `port` (default: `6334`); optional `apiKey`, `useTls`; `collectionName` |
+| `chroma` | — | `baseUrl` (default: `http://localhost:8000`); `collectionName` |
 
 ## Status
 

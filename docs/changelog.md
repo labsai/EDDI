@@ -5,6 +5,60 @@
 
 ---
 
+## 📚 docs: post-merge documentation refresh for the group-collaboration set (2026-08-08)
+
+**Repo:** EDDI (`docs/group-collaboration-refresh`)
+
+The nine group-collaboration items merged to `main` (PRs #636–#645); this brings every
+user-facing doc in line with what actually shipped. Each claim below was verified against the
+source, not against the plan.
+
+**`docs/group-conversations.md`** (the main reference, +230 lines):
+- Corrected `GET /groupstore/groups` — that endpoint does not exist; listing is
+  `GET /groupstore/groups/descriptors`.
+- Corrected the `HUMAN_DECIDES` note: I6 shipped humans as group *members*, but the tie-break
+  is still save-time rejected because it needs its own resume machinery.
+- Completed the REST table (+21 rows: streaming, follow-up/continue/close/cancel, approve,
+  human-input, approval-status, pending-approvals, all 3 template routes, all 5 workspace
+  routes) and the MCP table (+10 tools).
+- Completed the reference tables: `PhaseType` gained `VOTE`/`PROPOSAL`/`BARGAIN`/`RETRO`;
+  `TaskStatus` gained `BLOCKED`/`AWAITING_APPROVAL`; `ProtocolConfig` gained `maxTurns`,
+  `maxCostPerDiscussion`, `onCostExceeded` (all three were referenced elsewhere but never
+  defined); `DynamicAgentConfig` gained `maxDelegationDepth`/`allowedDelegationTargets`.
+- New sections for things referenced but never documented: **per-phase controls**
+  (`repeats`/`requiresApproval`/`convergence`/`allowAbstention`), **dissent (I4)**, and the
+  **SSE event catalogue** (all 23 events).
+- Documented the new RETRO hard ceilings (20/run, 500 stored) and creation-ordered FIFO.
+- Structure: moved the orphaned `taskListConfig` cap paragraph back out of the windowing
+  section, re-parented bid-based assignment under TASK_FORCE (it is task-force machinery, not
+  negotiation), and fixed 8 headings that were glued to the preceding paragraph.
+
+**`README.md`**: 6 → 7 built-in styles; ten new capability bullets (voting, artifacts, human
+members, facilitator, negotiation, bidding, team memory, standing teams, templates); a HITL
+bullet for humans-as-members; MCP tool count 60+ → 80+ (actual 82); test badge 11,000+ →
+14,000+ (actual 14,233); an OpenAI-Compatible API docs row.
+
+**`AGENTS.md`**: Phase 10 row 6 → 7 styles; new Completed rows 10c (Group Deliberation) and
+10d (Group Work Products); test count 12,000+ → 14,000+; the HITL-remaining row now
+distinguishes the still-reserved `inGroupTurns: INBOX` from the shipped human-member work; §4.2
+gained the *opt-in by absence* convention, which governs every group capability and lived only
+in Javadoc.
+
+**`docs/README.md`**: version 6.0.0 → 6.2.0; MCP 48+ → 80+; group styles list; HITL and
+OpenAI-Compatible entries. **`docs/SUMMARY.md`**: added the missing `hitl.md` and
+`open-webui-integration.md` (both shipped flagships absent from the index), plus the monitoring
+guide, code-review standards, build reproducibility and changelog. **`docs/rag.md`**: added the
+`gemini` embedding provider and `chroma` vector store rows — the code supports 8 and 6, the
+tables listed 7 and 5.
+
+**`planning/group-collaboration-NEXT.md`**: the queue is empty — every §3 item marked done with
+its PR number, the three implementation-time constraints recorded as deviations, and the two
+§4 gaps that this work closed (`decision_reached` never firing, the doc drift itself) struck
+through.
+
+---
+
+
 ## 🔎 fix(groups): pre-merge deep review — facilitator HITL bypass, CALL_VOTE guards, metric cardinality, template honesty (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i10-templates`)

@@ -43,6 +43,7 @@
 
 - [Conversations](conversations.md)
 - [Group Conversations](group-conversations.md)
+- [Human-in-the-Loop (HITL)](hitl.md)
 - [Managed Agents](managed-agents.md)
 - [Scheduled Execution & Heartbeats](scheduling.md)
 - [Capability Matching](capability-match-guide.md)
@@ -54,6 +55,7 @@
 - [MCP Server](mcp-server.md)
 - [A2A Protocol](a2a-protocol.md)
 - [Slack Integration](slack-integration.md)
+- [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
 
 ## Security & Compliance
 
@@ -83,9 +85,13 @@
 - [Release & Versioning Strategy](release-versioning.md)
 - [Release Signing & Verification](release-signing.md)
 - [Metrics & Monitoring](metrics.md)
+- [Monitoring & Tracing Guide](monitoring/monitoring-guide.md)
 - [Log Administration](log-administration.md)
 
 ## Reference
 
 - [Agent Sync Architecture](agent-sync-architecture.md)
+- [Code Review Standards](code-review-standards.md)
+- [Build Reproducibility](build-reproducibility.md)
+- [Changelog](changelog.md)
 - [FAQs](how-to....md)
