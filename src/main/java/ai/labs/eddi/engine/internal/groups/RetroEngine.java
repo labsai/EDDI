@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -114,7 +115,7 @@ public final class RetroEngine {
                                IUserMemoryStore userMemoryStore, String phaseName, GroupDiscussionEventListener listener) {
         if (userMemoryStore == null) {
             LOGGER.warnf("Group %s: RETRO phase '%s' ran but no user memory store is available — lessons are not persisted",
-                    gc.getId(), phaseName);
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phaseName));
             return;
         }
         RetroConfig config = retroConfig != null ? retroConfig : new RetroConfig();
@@ -133,13 +134,15 @@ public final class RetroEngine {
                             Instant.now(), Instant.now()));
                     stored++;
                 } catch (Exception e) {
-                    LOGGER.warnf("Group %s: failed to store a retro lesson: %s", gc.getId(), e.getMessage());
+                    LOGGER.warnf("Group %s: failed to store a retro lesson: %s",
+                            LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
                 }
             }
         }
         if (stored > 0) {
             evictPastCap(userMemoryStore, teamOwner, gc.getGroupId(), config.maxStoredLessons());
-            LOGGER.infof("Group %s: RETRO phase '%s' stored %d lesson(s) for team %s", gc.getId(), phaseName, stored, teamOwner);
+            LOGGER.infof("Group %s: RETRO phase '%s' stored %d lesson(s) for team %s",
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phaseName), stored, LogSanitizer.sanitize(teamOwner));
         }
         if (listener != null) {
             listener.onRetroRecorded(new GroupConversationEventSink.RetroRecordedEvent(gc.getGroupId(), phaseName, stored));
@@ -163,7 +166,8 @@ public final class RetroEngine {
                 }
             }
         } catch (Exception e) {
-            LOGGER.warnf("Failed to FIFO-evict retro lessons for %s: %s", teamOwner, e.getMessage());
+            LOGGER.warnf("Failed to FIFO-evict retro lessons for %s: %s",
+                    LogSanitizer.sanitize(teamOwner), LogSanitizer.sanitize(e.getMessage()));
         }
     }
 
