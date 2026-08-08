@@ -5,6 +5,21 @@
 
 ---
 
+## 🔎 fix(groups): I8 review round 2 — retro cap semantics + event contract (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i8-retro-memory`)
+
+Four accepted findings from the CodeRabbit round on the stacked PR (#644, which carries this branch):
+
+1. **Template quoted the wrong cap (major)** — the RETRO prompt always rendered `DEFAULT_MAX_PER_RUN` (3), so a group configured above it could never obtain its configured number of lessons. `buildPhaseInput` gained a `RetroConfig` parameter (config-less overloads keep the default); all three agent-turn call sites in `PhaseExecutionEngine` pass `config.getRetroConfig()`. RetroEngine's parse-time enforcement is unchanged and remains the server-side limit.
+2. **Per-entry cap multiplied (major)** — `harvest` applied `maxLessonsPerRun` to each RETRO transcript entry, so a multi-speaker or multi-repeat retro could store `cap × entries`. Now a per-harvest `remaining` allowance shared across entries.
+3. **Missing zero-count event (minor)** — the null-memory-store branch returned before `retro_recorded`; it now fires the event with `lessonsStored = 0`, honoring the contract that a RETRO phase always emits it.
+4. **Fixture didn't cross users (minor)** — `personalEntriesNeverCrossUsers` built its "other user's" entry with the shared helper that stamps USER; it now genuinely belongs to `user-2`.
+
+Tests: RetroEngineTest 8 (+2: per-harvest cap, null-store zero event), GroupContextBuilderTest 41 (+1: configured cap quoted, default fallback), PhaseExecutionEngineTest stub widened to the new arity. All green.
+
+---
+
 ## 🔎 fix(groups): I8 PR #639 CI round 1 + plan-mandated test extension (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i8-retro-memory`)

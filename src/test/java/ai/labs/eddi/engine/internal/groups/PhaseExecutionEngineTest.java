@@ -57,7 +57,7 @@ class PhaseExecutionEngineTest {
         // 6-arg one left every turn running with a null input, so a regression that
         // dropped the phase rendering entirely and passed the raw question through
         // would not have failed a single test here.
-        when(contextBuilder.buildPhaseInput(any(), any(), any(), any(), anyInt(), any(), any()))
+        when(contextBuilder.buildPhaseInput(any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn("rendered-input");
         return new PhaseExecutionEngine(memberTurnExecutor, contextBuilder,
                 Executors.newVirtualThreadPerTaskExecutor(), new CallerIdentityContext(null, null));

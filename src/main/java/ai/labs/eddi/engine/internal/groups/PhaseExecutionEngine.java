@@ -511,7 +511,7 @@ public class PhaseExecutionEngine {
                         new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
             }
             String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null,
-                    GroupConversationService.rosterWithRecruits(config, gc));
+                    GroupConversationService.rosterWithRecruits(config, gc), config.getRetroConfig());
             TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(entry);
             if (listener != null) {
@@ -586,7 +586,7 @@ public class PhaseExecutionEngine {
                 .map(speaker -> CompletableFuture.supplyAsync(callerIdentityContext.withIdentitySupplying(phaseCaller, () -> {
                     try {
                         String input = contextBuilder.buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null,
-                                GroupConversationService.rosterWithRecruits(config, gc));
+                                GroupConversationService.rosterWithRecruits(config, gc), config.getRetroConfig());
                         return memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
                     } catch (MemberTurnCancelledException e) {
                         // The orchestrator stopped waiting for this batch — surface the
@@ -715,7 +715,7 @@ public class PhaseExecutionEngine {
                             new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
                 }
                 String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target,
-                        GroupConversationService.rosterWithRecruits(config, gc));
+                        GroupConversationService.rosterWithRecruits(config, gc), config.getRetroConfig());
                 TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId(),
                         listener);
                 gc.getTranscript().add(entry);

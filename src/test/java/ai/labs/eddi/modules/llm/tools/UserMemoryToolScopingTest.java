@@ -176,10 +176,12 @@ class UserMemoryToolScopingTest {
     void personalEntriesNeverCrossUsers() throws Exception {
         // The tool always queries by ITS user's id — a shared group cannot widen
         // the personal scope. The store is queried for USER only; nothing about
-        // user-2 is ever requested, and a self entry of another AGENT under the
-        // same user stays hidden too (the existing G1 wall).
-        var otherAgentsPrivate = entry("p-1", "salary", Visibility.self, AGENT_A, List.of("g1"), Instant.now());
-        when(store.filterEntries(USER, "salary")).thenReturn(List.of(otherAgentsPrivate));
+        // user-2 is ever requested. The fixture genuinely belongs to user-2
+        // (review finding: the shared helper stamped USER, so the assert passed
+        // because AGENT_A was foreign, not because the entry crossed users).
+        var otherUsersPrivate = new UserMemoryEntry("p-1", "user-2", "salary", "value-of-salary", "fact",
+                Visibility.self, AGENT_A, List.of("g1"), "conv-x", false, 0, Instant.now(), Instant.now());
+        when(store.filterEntries(USER, "salary")).thenReturn(List.of(otherUsersPrivate));
 
         String result = toolFor(AGENT_B, List.of("g1")).searchMemory("salary");
 
