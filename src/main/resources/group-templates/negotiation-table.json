@@ -1,0 +1,32 @@
+{
+  "manifest": {
+    "templateId": "negotiation-table",
+    "title": "Negotiation Table",
+    "description": "Two parties negotiate under the typed bargaining protocol: stated interests, opening proposals, bargaining rounds against a quoted concession ledger, arbitration only if no unanimous agreement is signed, and a final synthesis quoting the ledger. For a human arbiter, assign a human principal as the arbiter role — every synthesis then waits on that person (the save warns about it).",
+    "requiredRoles": [
+      { "role": "partyA", "description": "First negotiating party" },
+      { "role": "partyB", "description": "Second negotiating party" },
+      { "role": "arbiter", "description": "Arbitrates if bargaining fails; synthesizes the outcome (may be a human principal)" }
+    ]
+  },
+  "config": {
+    "name": "Negotiation Table",
+    "description": "Typed two-party bargaining with a concession ledger and arbitration fallback",
+    "style": "NEGOTIATION",
+    "maxRounds": 4,
+    "moderatorAgentId": "$arbiter",
+    "members": [
+      { "agentId": "$partyA", "displayName": "Party A", "speakingOrder": 1 },
+      { "agentId": "$partyB", "displayName": "Party B", "speakingOrder": 2 }
+    ],
+    "protocol": {
+      "agentTimeoutSeconds": 180,
+      "onAgentFailure": "SKIP",
+      "maxRetries": 2,
+      "onMemberUnavailable": "SKIP",
+      "maxTurns": 40,
+      "maxCostPerDiscussion": 5.0,
+      "onCostExceeded": "SYNTHESIZE_NOW"
+    }
+  }
+}

@@ -132,7 +132,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
      * {@link #moderatorlessPhaseNames}): every problem with this config's HUMAN
      * members that needs no store access. Empty list = valid.
      */
-    static List<String> humanMemberProblems(AgentGroupConfiguration config) {
+    public static List<String> humanMemberProblems(AgentGroupConfiguration config) {
         List<AgentGroupConfiguration.GroupMember> humans = config.getMembers() == null
                 ? List.of()
                 : config.getMembers().stream()
@@ -259,7 +259,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
      * + NONE requirement: enforced structurally at save time, not advised in a
      * prompt at run time.
      */
-    static void validateVotePhases(AgentGroupConfiguration groupConfiguration) {
+    public static void validateVotePhases(AgentGroupConfiguration groupConfiguration) {
         List<DiscussionPhase> phases = groupConfiguration.getPhases();
         if (phases == null) {
             return;
@@ -312,7 +312,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
      * phase-boundary checkpoint has none — every attempt would be rejected at
      * runtime, which is a config that can only ever produce noise.
      */
-    static void validateFacilitator(AgentGroupConfiguration config) {
+    public static void validateFacilitator(AgentGroupConfiguration config) {
         var facilitator = config.getFacilitator();
         if (facilitator == null || !facilitator.enabled()) {
             return;

@@ -5,6 +5,21 @@
 
 ---
 
+## 🧩 feat(groups): I10 — preset templates on the all-features integration branch (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i10-templates` — the integration branch: I14+I6+I12 base, merged with I11, I18, I8+I13, I17 and the pre-feature defects branch (N1/N2/N3/I9))
+
+Final queue item, shipped last by design so templates only reference features that exist. This branch is ALSO the proof the user story demanded: every feature branch merged into one tree, compiled clean, full suites green.
+
+- **Integration merges, verified per the big-merge memory:** 5 sequential merges with a clean compile + suite run after each. Real semantic resolutions: `DiscussionPhase` unified to 13 components (`voteConfig` 12th + `skipIf` 13th) with BOTH 12-arg compat ctors kept so each branch's call sites compile unchanged; `PhaseType` unions to 15 (VOTE + PROPOSAL + BARGAIN + RETRO — pins updated); schema v4's Javadoc now names BOTH resume-critical fields (I12 `runtimePhases`, I11 `negotiationState`); the SYNTHESIS decision block runs debate verdicts AND I11 arbitration with one late `decision_reached` firing after the dissent round (an `arbitrated` flag is true only when THIS call set the decision, so the event never re-announces an earlier phase's); `AgentGroupStore.create/update` runs all five validators; every listener/SSE/Slack surface carries all events. 3880 tests, 0 failures (27 known environmental SlackWebApiClient socket errors).
+- **Cross-branch defect the integration run caught (the reason this branch exists):** I9's windowing overload (defects branch) and I6's human-turn prompt render (human-members branch) had never met — merged, agents got windowed context while a HUMAN member's rendered prompt silently used the unwindowed compat overload, breaking I6's "the human sees exactly what an agent speaker would" contract. Both human-prompt sites now pass `config.getContextWindow()`; the I6 blindness tests verify the windowing overload. The same resolution applies when #636 and #640 merge to main.
+- **Templates:** `src/main/resources/group-templates/` (index + 5 JSONs, the initial-agents classpath pattern): `research-pod` (DELPHI-style + convergence + retro + windowing + ceiling), `editorial-team` (shared artifact + CAS updates + dissents), `ops-task-force` (BID assignment + agent-filed tasks + recruitment), `decision-board` (HUMAN director deliberates and votes; ties to the chair — **deviation upheld:** `HUMAN_DECIDES` tie-breaking stays save-time rejected; its resume machinery (a pending ballot the human's answer must parse back into the tally) is real work, not the "small follow-up" the I14 note hoped, and shipping a silently-degrading enum value would be a lie), `negotiation-table` (typed bargaining; human-arbiter option documented). Placeholder mechanism is deliberately minimal: member `agentId`s are `$role` markers, substitution is the ONLY templating — what you read is what the store validates.
+- **`GroupTemplateService`**: classpath loading (one bad template logs loudly and skips, never breaks startup), manifest listing, `instantiate(templateId, name, roleAssignments)` failing loudly and completely on missing/unknown roles BEFORE building anything. **REST** `/groupstore/templates` (list/read/instantiate → `RestAgentGroupStore.createGroup`, the normal path — a template earns no validation bypass). **MCP** `list_group_templates` + `create_group_from_template` (whitelisted).
+- Store validators (`validateVotePhases`, `humanMemberProblems`, `validateFacilitator`) widened to public — they are now the cross-package save-time validation surface the template integration test exercises.
+
+**Tests (+13):** every template loads, instantiates with dummy assignments and passes the ENTIRE save-time matrix (HITL + vote + human + facilitator + artifact validators) — the plan's designated integration test of all Wave 1–3 config surfaces; placeholder-free rosters; decision-board's HUMAN member survives; negotiation preset expands; missing/unknown/unknown-template errors name what is wrong; REST instantiation captured through the store path with 400s saving nothing; MCP filter pins green.
+
+
 ## 🔎 fix(groups): I12 PR #643 review round 1 (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i12-facilitator`)

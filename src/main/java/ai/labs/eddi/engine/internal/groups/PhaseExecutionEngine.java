@@ -719,7 +719,7 @@ public class PhaseExecutionEngine {
             // HERE, against exactly the transcript an agent speaker would see.
             if (speaker.memberType() == AgentGroupConfiguration.MemberType.HUMAN) {
                 String humanInput = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null,
-                        GroupConversationService.rosterWithRecruits(config, gc));
+                        GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc);
                 throw new HumanTurnRequired(speaker, idx, humanInput, false);
             }
             turnCounter.incrementAndGet();
@@ -967,7 +967,7 @@ public class PhaseExecutionEngine {
             }
             GroupMember human = humans.get(i);
             String input = contextBuilder.buildPhaseInput(phase, human, question, promptTranscript, phaseIdx, null,
-                    GroupConversationService.rosterWithRecruits(config, gc));
+                    GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc);
             throw new HumanTurnRequired(human, i, input, true);
         }
     }

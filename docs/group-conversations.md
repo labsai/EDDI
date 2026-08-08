@@ -511,6 +511,31 @@ artifact — FINAL artifacts accept no further updates. Artifacts are deleted
 with their discussion (close/delete cascade) and by GDPR erasure; the durable
 trace of the work is the transcript.
 
+## Preset Templates (I10)
+
+Enterprises understand "research pod" and "decision board", not
+`contextScope: OWN_FEEDBACK`. Packaged templates ship complete, validated
+group configs whose member slots are **named roles** — instantiation just
+assigns agents (or human principals) to them and saves through the normal
+store path, so every save-time validation applies.
+
+```
+GET  /groupstore/templates                       → manifests (id, title, roles)
+GET  /groupstore/templates/{id}                  → manifest + full config
+POST /groupstore/templates/{id}/instantiate      {"name": "...", "roleAssignments": {"researcher1": "<agentId>", ...}}
+```
+
+MCP: `list_group_templates`, `create_group_from_template`. Missing or unknown
+roles fail loudly, naming the template's real roles.
+
+| Template | Style | What it packages |
+|---|---|---|
+| `research-pod` | DELPHI-style CUSTOM | Blind estimates → anonymous convergence rounds (I2) → synthesis → retro into team memory (I8), windowed context (I9), dollar ceiling (I1) |
+| `editorial-team` | CUSTOM | Writer drafts a shared artifact (I17), editors propose CAS-guarded updates, dissents recorded (I4) |
+| `ops-task-force` | TASK_FORCE | Bid-based assignment (I18), agent-filed tasks (I5), specialist recruitment (I7), ceiling |
+| `decision-board` | CUSTOM | Hybrid board with a HUMAN director (I6) deliberating and voting (I14); options distilled by the chair, ties to the chair |
+| `negotiation-table` | NEGOTIATION | Typed two-party bargaining with concession ledger (I11); the arbiter role may be a human principal |
+
 ## Nested Groups (Group-of-Groups)
 
 Members can be other groups. The sub-group runs its own discussion and its synthesized answer becomes the member's response.

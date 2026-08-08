@@ -8,6 +8,9 @@ import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
+import ai.labs.eddi.configs.groups.templates.GroupTemplateService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
@@ -34,6 +37,7 @@ import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 
@@ -49,6 +53,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 public class McpGroupTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpGroupTools.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final IRestAgentGroupStore groupStore;
     private final IGroupConversationService groupConversationService;
@@ -56,11 +61,13 @@ public class McpGroupTools {
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
     private final IGroupWorkspaceStore workspaceStore;
+    private final GroupTemplateService templateService;
     private final boolean authEnabled;
 
     @Inject
     public McpGroupTools(IRestAgentGroupStore groupStore, IGroupConversationService groupConversationService, IJsonSerialization jsonSerialization,
             SecurityIdentity identity, OwnershipValidator ownershipValidator, IGroupWorkspaceStore workspaceStore,
+            GroupTemplateService templateService,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
         this.groupStore = groupStore;
         this.groupConversationService = groupConversationService;
@@ -68,6 +75,7 @@ public class McpGroupTools {
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
         this.workspaceStore = workspaceStore;
+        this.templateService = templateService;
         this.authEnabled = authEnabled;
     }
 
@@ -573,6 +581,52 @@ public class McpGroupTools {
                     workspace != null ? workspace.getBacklog().getTasks() : List.of());
         } catch (Exception e) {
             LOGGER.errorf("list_team_backlog failed: %s", e.getMessage());
+            return errorJson(e.getMessage());
+        }
+    }
+
+    // =================================================================
+    // I10 — org/team preset templates
+    // =================================================================
+
+    @Tool(description = "List the packaged group templates (I10): research-pod, editorial-team, ops-task-force, "
+            + "decision-board, negotiation-table. Each entry names its required roles — the keys "
+            + "create_group_from_template expects.")
+    public String list_group_templates() {
+        requireRole(identity, authEnabled, "eddi-viewer");
+        try {
+            return jsonSerialization.serialize(templateService.list());
+        } catch (Exception e) {
+            LOGGER.errorf("list_group_templates failed: %s", e.getMessage());
+            return errorJson(e.getMessage());
+        }
+    }
+
+    @Tool(description = "Create a group from a packaged template (I10) by assigning agents to its named roles. "
+            + "roleAssignments is a JSON object mapping role -> agent id (for HUMAN roles: the principal id). "
+            + "Saves through the normal store path, so every save-time validation applies.")
+    @Blocking
+    public String create_group_from_template(@ToolArg(description = "Template id, e.g. 'research-pod'") String templateId,
+                                             @ToolArg(description = "Name for the new group (optional)") String name,
+                                             @ToolArg(description = "JSON object: role -> agent id") String roleAssignments) {
+        requireRole(identity, authEnabled, "eddi-editor");
+        try {
+            Map<String, String> assignments = roleAssignments != null && !roleAssignments.isBlank()
+                    ? MAPPER.readValue(roleAssignments, new TypeReference<Map<String, String>>() {
+                    })
+                    : Map.of();
+            AgentGroupConfiguration config = templateService.instantiate(templateId, name, assignments);
+            Response response = groupStore.createGroup(config);
+            if (response.getStatus() >= 300) {
+                return errorJson("Group creation failed with status " + response.getStatus());
+            }
+            String location = response.getLocation() != null ? response.getLocation().toString() : "";
+            return "Created group '" + config.getName() + "' from template '" + templateId + "'"
+                    + (location.isEmpty() ? "" : " at " + location);
+        } catch (IllegalArgumentException e) {
+            return errorJson(e.getMessage());
+        } catch (Exception e) {
+            LOGGER.errorf("create_group_from_template failed: %s", e.getMessage());
             return errorJson(e.getMessage());
         }
     }

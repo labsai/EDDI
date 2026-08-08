@@ -40,6 +40,13 @@ class McpGroupToolsTest {
     private IGroupWorkspaceStore workspaceStore;
     private McpGroupTools tools;
 
+    private static ai.labs.eddi.configs.groups.templates.GroupTemplateService templateService() {
+        var service = new ai.labs.eddi.configs.groups.templates.GroupTemplateService(
+                new com.fasterxml.jackson.databind.ObjectMapper());
+        service.loadTemplates();
+        return service;
+    }
+
     @BeforeEach
     void setUp() throws Exception {
         groupStore = mock(IRestAgentGroupStore.class);
@@ -53,7 +60,7 @@ class McpGroupToolsTest {
         // authorization disabled — OwnershipValidator's checks are no-ops, matching the
         // pre-existing tests. Ownership enforcement is covered separately below.
         tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, mockIdentity,
-                new OwnershipValidator(false), workspaceStore, false);
+                new OwnershipValidator(false), workspaceStore, templateService(), false);
     }
 
     // --- describe_discussion_styles ---
@@ -461,7 +468,7 @@ class McpGroupToolsTest {
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(role)).thenReturn(true);
         return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, identity,
-                new OwnershipValidator(true), workspaceStore, true);
+                new OwnershipValidator(true), workspaceStore, templateService(), true);
     }
 
     /**
@@ -476,7 +483,7 @@ class McpGroupToolsTest {
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(anyString())).thenReturn(true);
         return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, identity,
-                new OwnershipValidator(true), workspaceStore, true);
+                new OwnershipValidator(true), workspaceStore, templateService(), true);
     }
 
     @Test

@@ -237,7 +237,7 @@ class PhaseExecutionEngineTest {
         // Blindness: the human's prompt renders from the PRE-fan-out snapshot.
         var transcriptCaptor = org.mockito.ArgumentCaptor.forClass(List.class);
         verify(contextBuilder).buildPhaseInput(any(), argThat(m -> "h".equals(m.agentId())), any(),
-                transcriptCaptor.capture(), anyInt(), any(), any());
+                transcriptCaptor.capture(), anyInt(), any(), any(), any(), any());
         assertTrue(transcriptCaptor.getValue().isEmpty(),
                 "a 'parallel' (independent) round must stay independent — the human must not read the batch's answers");
     }
@@ -272,7 +272,7 @@ class PhaseExecutionEngineTest {
         verifyNoInteractions(memberTurnExecutor);
         var transcriptCaptor = org.mockito.ArgumentCaptor.forClass(List.class);
         verify(contextBuilder).buildPhaseInput(any(), argThat(m -> "h2".equals(m.agentId())), any(),
-                transcriptCaptor.capture(), anyInt(), any(), any());
+                transcriptCaptor.capture(), anyInt(), any(), any(), any(), any());
         assertTrue(transcriptCaptor.getValue().isEmpty(),
                 "the resumed human prompt excludes this phase's entries entirely — the blindness bound survives the pause");
     }

@@ -50,6 +50,7 @@ public class McpToolFilter implements ToolFilter {
             // Group Conversations (Phase 10)
             "describe_discussion_styles", "list_groups", "read_group", "create_group", "update_group", "delete_group", "discuss_with_group",
             "add_team_task", "list_team_backlog",
+            "list_group_templates", "create_group_from_template",
             "read_group_conversation", "list_group_conversations", "start_group_discussion", "delete_group_conversation",
             // Group Conversation Follow-Ups
             "followup_with_member", "continue_group_discussion", "close_group_conversation",
