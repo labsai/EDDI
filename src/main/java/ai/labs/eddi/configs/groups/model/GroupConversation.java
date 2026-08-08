@@ -330,6 +330,24 @@ public class GroupConversation {
     private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
     private int pausedAtPhaseIndex = -1;
     private int pausedTurnCount = 0;
+    /**
+     * Transcript index where the PAUSED repeat's entries begin (I6), or {@code -1}.
+     * A human turn pauses MID-repeat, after other speakers already appended this
+     * repeat's entries — the resumed leg recomputing "size at top of repeat" would
+     * slice only what came AFTER the pause, so the convergence check (and every
+     * later consumer of the repeat slice) silently loses the pre-pause
+     * contributions. Persisted with the pause, consumed exactly once with the
+     * speaker bookmark. {@code -1} on legacy documents keeps the old recompute.
+     */
+    private int pausedRepeatSliceBase = -1;
+
+    public int getPausedRepeatSliceBase() {
+        return pausedRepeatSliceBase;
+    }
+
+    public void setPausedRepeatSliceBase(int pausedRepeatSliceBase) {
+        this.pausedRepeatSliceBase = pausedRepeatSliceBase;
+    }
     private String pausedPhaseName;
     private Instant pausedAt;
     private HitlPauseType hitlPauseType;

@@ -414,6 +414,74 @@ class GroupConversationServiceExtendedTest {
         }
     }
 
+    /**
+     * Review finding (final pass): a human turn pauses MID-repeat, after other
+     * speakers already appended this repeat's entries — a resumed leg recomputing
+     * "transcript size at top of repeat" sliced only the post-pause entries, so the
+     * convergence check (and every later consumer of the repeat slice) silently
+     * lost the pre-pause contributions.
+     */
+    @Nested
+    class HumanPauseRepeatSlice {
+
+        private AgentGroupConfiguration humanConfig() {
+            var c = new AgentGroupConfiguration();
+            c.setName("Hybrid");
+            c.setStyle(DiscussionStyle.CUSTOM);
+            c.setMembers(List.of(new GroupMember("a1", "Alice", 1, null),
+                    new GroupMember("h1", "Hannah", 2, null, AgentGroupConfiguration.MemberType.HUMAN),
+                    new GroupMember("a2", "Bob", 3, null)));
+            c.setPhases(List.of(new AgentGroupConfiguration.DiscussionPhase("Discuss", PhaseType.OPINION, "ALL",
+                    TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false)));
+            c.setProtocol(new ProtocolConfig(60, ProtocolConfig.MemberFailurePolicy.SKIP, 2,
+                    ProtocolConfig.MemberUnavailablePolicy.SKIP));
+            return c;
+        }
+
+        @Test
+        void midRepeatHumanPause_persistsTheRepeatSliceBase() throws Exception {
+            setupStore(humanConfig());
+            stubAgent("a1", "Opinion A");
+
+            GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.AWAITING_HUMAN_INPUT, gc.getState());
+            assertEquals(2, gc.getTranscript().size(), "the QUESTION entry plus a1's pre-pause opinion");
+            assertEquals(1, gc.getPausedRepeatSliceBase(),
+                    "the repeat began AFTER the question entry — the resumed leg must slice from there, "
+                            + "not from the pause point (which would lose a1's contribution)");
+        }
+
+        @Test
+        void resumedLeg_consumesThePersistedBase_exactlyOnce() throws Exception {
+            var config = humanConfig();
+            setupStore(config);
+            stubAgent("a2", "Opinion B");
+            // The resumed leg: a1 and the human already answered before the pause;
+            // the bookmark stands past the human, and the persisted base points at
+            // the top of the repeat.
+            var gc = new GroupConversation();
+            gc.setId("gc-resume");
+            gc.setGroupId(GROUP_ID);
+            gc.setUserId(USER_ID);
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            gc.setOriginalQuestion(QUESTION);
+            gc.getTranscript().add(new TranscriptEntry("a1", "Alice", "Opinion A", 0, "Discuss",
+                    TranscriptEntryType.OPINION, java.time.Instant.now(), null, null));
+            gc.getTranscript().add(new TranscriptEntry("h1", "Hannah", "Human view", 0, "Discuss",
+                    TranscriptEntryType.OPINION, java.time.Instant.now(), null, null));
+            gc.setResumePoint(new GroupConversation.ResumePoint(0, 0, 2, GroupConversation.RESUME_KIND_HUMAN_TURN));
+            gc.setPausedRepeatSliceBase(0);
+
+            service.executeDiscussion(gc, config, service.resolvePhases(config), QUESTION, null, 0);
+
+            assertEquals(-1, gc.getPausedRepeatSliceBase(),
+                    "the base is consumed exactly once by the resumed repeat — a stale base must never bleed forward");
+            assertEquals(GroupConversationState.COMPLETED, gc.getState());
+            assertEquals(3, gc.getTranscript().size(), "only a2 ran on the resumed leg");
+        }
+    }
+
     @Nested
     class AsyncDiscussion {
 
