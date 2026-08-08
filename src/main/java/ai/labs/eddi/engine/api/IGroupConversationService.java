@@ -252,6 +252,8 @@ public interface IGroupConversationService {
         }
         default void onRetroRecorded(GroupConversationEventSink.RetroRecordedEvent event) {
         }
+        default void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
+        }
     }
 
     // --- Exceptions ---

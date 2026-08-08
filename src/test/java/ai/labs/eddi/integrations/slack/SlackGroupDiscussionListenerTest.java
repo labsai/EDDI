@@ -522,4 +522,40 @@ class SlackGroupDiscussionListenerTest {
 
         verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Winner: *X*"));
     }
+
+    // ─── Artifact updated (I17) ───
+
+    @Test
+    void onArtifactUpdated_created_postsNameVersionAndEditor() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        listener.onArtifactUpdated(new GroupConversationEventSink.ArtifactUpdatedEvent(
+                "art-1", "design-doc", "MARKDOWN", 1, "agent-a", "DRAFT", true));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("design-doc"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("created"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("v1"));
+    }
+
+    @Test
+    void onArtifactUpdated_finalUpdate_marksFinal_inCompactThread() {
+        listener.onGroupStart(groupStart("SINGLE", 1));
+
+        listener.onArtifactUpdated(new GroupConversationEventSink.ArtifactUpdatedEvent(
+                "art-1", "design-doc", "MARKDOWN", 4, "agent-b", "FINAL", false));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("FINAL"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("updated"));
+    }
+
+    @Test
+    void onArtifactUpdated_degeneratePayload_doesNotThrowOrPost() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        assertDoesNotThrow(() -> listener.onArtifactUpdated(null));
+        assertDoesNotThrow(() -> listener.onArtifactUpdated(new GroupConversationEventSink.ArtifactUpdatedEvent(
+                null, null, null, 0, null, null, false)));
+
+        verify(slackApi, times(1)).postMessage(any(), any(), any(), any());
+    }
 }

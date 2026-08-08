@@ -434,6 +434,45 @@ Per-member stats are reliability **recording only** — nothing routes or
 weights on them in v1. A *permanent* group deletion cascades to the workspace;
 a soft (versioned) delete keeps it, because the group can come back. Not in
 v1: cross-team handoff, Manager UI, reputation weighting.
+## Shared artifacts (blackboard-lite)
+
+Without artifacts, the transcript is the only medium — every structured thing an
+agent produces is prose the next agent re-parses. `artifactConfig` gives members
+four tools to **create together**: `createArtifact(name, type, content)`,
+`readArtifact(nameOrId)`, `proposeArtifactUpdate(nameOrId, content,
+expectedVersion, markFinal?)` and `listArtifacts()`. Artifacts are typed
+documents (`TEXT`, `MARKDOWN`, `JSON`) in their own collection, listed on the
+discussion's REST/MCP status payload as `artifacts`, and announced over SSE and
+Slack as `artifact_updated` events.
+
+```json
+"artifactConfig": {
+  "allowArtifactTools": true,
+  "maxArtifactsPerDiscussion": 5,
+  "validators": [
+    { "kind": "JSON_SCHEMA", "spec": "{\"type\":\"object\",\"required\":[\"title\"]}" },
+    { "kind": "MAX_LENGTH", "spec": "20000" }
+  ]
+}
+```
+
+**Concurrency is deterministic compare-and-set, not an LLM merge.** Every update
+presents the version it read; a stale writer is told *"artifact changed since
+you read it (now v3); re-read and merge your change"* and retries against fresh
+content. The failure mode is a retry, never a silent bad merge.
+
+**Validators are declarative only** — `JSON_SCHEMA`, `REGEX` (content must
+contain a match), `MAX_LENGTH` (characters) — never code. Specs are checked at
+config save time; at write time a failing validator refuses the write with its
+message and stores nothing. Content is additionally capped at 256 KB per
+artifact.
+
+Off by default with the same absence discipline as the task tools: no opt-in
+means the tools are never assembled. The member agent's own
+`enableBuiltInTools` switch still applies. `markFinal: true` freezes an
+artifact — FINAL artifacts accept no further updates. Artifacts are deleted
+with their discussion (close/delete cascade) and by GDPR erasure; the durable
+trace of the work is the transcript.
 
 ## Nested Groups (Group-of-Groups)
 

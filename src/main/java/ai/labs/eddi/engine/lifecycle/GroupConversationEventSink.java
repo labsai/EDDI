@@ -75,6 +75,13 @@ public final class GroupConversationEventSink {
      * itself signal for an observer.
      */
     public static final String EVENT_RETRO_RECORDED = "retro_recorded";
+    /**
+     * A member created or updated a shared artifact (I17). Fired by the turn
+     * executor after the turn that made the write — tools have no listener
+     * reference, so accepted writes ride the live discussion's artifact-change
+     * queue until the executor drains it.
+     */
+    public static final String EVENT_ARTIFACT_UPDATED = "artifact_updated";
 
     // --- Event payloads ---
 
@@ -185,5 +192,18 @@ public final class GroupConversationEventSink {
 
     /** A RETRO phase stored lessons into team-owned group memory (I8). */
     public record RetroRecordedEvent(String groupId, String phaseName, int lessonsStored) {
+    }
+
+    /**
+     * A member created or updated a shared artifact (I17). Carries metadata only,
+     * never the content — an SSE observer reads the artifact through the REST
+     * payload, and content can be a quarter megabyte.
+     *
+     * @param created
+     *            {@code true} for a fresh artifact (v1), {@code false} for an
+     *            accepted update
+     */
+    public record ArtifactUpdatedEvent(String artifactId, String name, String type, long version, String editorAgentId,
+            String status, boolean created) {
     }
 }

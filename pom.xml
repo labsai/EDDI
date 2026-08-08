@@ -333,6 +333,13 @@
             <artifactId>jsonschema-module-jackson</artifactId>
             <version>4.38.0</version>
         </dependency>
+        <!-- JSON Schema VALIDATION (victools above only GENERATES schemas) — used
+             by the declarative shared-artifact validators (I17). -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>1.5.4</version>
+        </dependency>
         <dependency>
             <groupId>jakarta.annotation</groupId>
             <artifactId>jakarta.annotation-api</artifactId>

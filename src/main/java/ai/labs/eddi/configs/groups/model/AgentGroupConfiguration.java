@@ -11,6 +11,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Size;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -218,7 +219,75 @@ public class AgentGroupConfiguration {
 
     /**
      * A member of the group. Members can be individual agents, nested groups, or
-     * humans (I6).
+     * humans (I6). Whether members may create and co-edit shared artifacts
+     * mid-discussion (I17). {@code null} means the artifact tools are absent
+     * entirely.
+     */
+    private ArtifactConfig artifactConfig;
+
+    public ArtifactConfig getArtifactConfig() {
+        return artifactConfig;
+    }
+
+    public void setArtifactConfig(ArtifactConfig artifactConfig) {
+        this.artifactConfig = artifactConfig;
+    }
+
+    /**
+     * Governs shared artifacts (I17, blackboard-lite): typed documents members
+     * co-edit through tools instead of re-parsing each other's prose. Same
+     * opt-in-by-absence discipline as {@link GroupTaskConfig}: off means the tools
+     * are never assembled, and there is no permissive standalone default.
+     *
+     * @param allowArtifactTools
+     *            master switch, default off
+     * @param maxArtifactsPerDiscussion
+     *            ceiling on artifacts per discussion (default 5). Non-positive
+     *            falls back to the default — 0 must never mean unlimited for an LLM
+     *            write surface
+     * @param validators
+     *            declarative validation chain every accepted write must pass —
+     *            {@link ValidatorKind#JSON_SCHEMA}, {@link ValidatorKind#REGEX} or
+     *            {@link ValidatorKind#MAX_LENGTH} with a {@code spec}. Declarative
+     *            <em>only</em>, never arbitrary code. Failed validation rejects the
+     *            write with the validator's message; nothing is stored
+     */
+    public record ArtifactConfig(boolean allowArtifactTools, int maxArtifactsPerDiscussion, List<ArtifactValidator> validators) {
+
+        public static final int DEFAULT_MAX_ARTIFACTS = 5;
+
+        /** Same normalization choke point as {@link GroupTaskConfig}. */
+        public ArtifactConfig {
+            if (maxArtifactsPerDiscussion <= 0) {
+                maxArtifactsPerDiscussion = DEFAULT_MAX_ARTIFACTS;
+            }
+            // Not List.copyOf: it NPEs on a null ELEMENT ("validators": [null]),
+            // preempting ArtifactValidators.requireValidSpecs' actionable message.
+            validators = validators == null ? List.of() : Collections.unmodifiableList(new ArrayList<>(validators));
+        }
+
+        /** Disabled, cap at its default, no validators. */
+        public ArtifactConfig() {
+            this(false, DEFAULT_MAX_ARTIFACTS, List.of());
+        }
+    }
+
+    /**
+     * One declarative artifact validator (I17): {@code kind} selects the check,
+     * {@code spec} parameterizes it — a JSON schema document, a regex the content
+     * must match, or a maximum character count. Specs are validated at save time so
+     * a typo fails the config save, not a member's turn.
+     */
+    public record ArtifactValidator(ValidatorKind kind, String spec) {
+    }
+
+    /** The closed set of declarative artifact validators (I17). */
+    public enum ValidatorKind {
+        JSON_SCHEMA, REGEX, MAX_LENGTH
+    }
+
+    /**
+     * A member of the group. Members can be individual agents or nested groups.
      * <p>
      * For {@code MemberType.GROUP} members, the {@code agentId} field contains the
      * group configuration ID instead. The sub-group runs its own discussion and its

@@ -368,6 +368,39 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
                 : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
+    @Override
+    public void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
+        // Degenerate payload → skip rather than posting noise, same as
+        // onDecisionReached's NONE guard.
+        if (event == null || event.name() == null) {
+            return;
+        }
+        String emoji = event.created() ? "📄" : "✏️";
+        String verb = event.created() ? "created" : "updated";
+        var sb = new StringBuilder();
+        sb.append(String.format("%s *Artifact \"%s\"* %s (v%d)", emoji, escapeMrkdwn(event.name()), verb, event.version()));
+        if (event.editorAgentId() != null && !event.editorAgentId().isBlank()) {
+            sb.append(String.format(" by %s", escapeMrkdwn(event.editorAgentId())));
+        }
+        if ("FINAL".equals(event.status())) {
+            sb.append(" — FINAL");
+        }
+
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, sb.toString().stripTrailing());
+    }
+
+    /**
+     * Escapes Slack's three mrkdwn control characters. Without this, an
+     * LLM-authored artifact name (or an agent id) containing e.g.
+     * {@code <!channel>} renders as a real channel broadcast.
+     */
+    private static String escapeMrkdwn(String value) {
+        return value == null
+                ? null
+                : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
     // ─── HITL (human-in-the-loop) ───
 
     @Override

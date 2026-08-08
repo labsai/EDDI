@@ -152,6 +152,72 @@ public class MemberTurnExecutor {
                                             DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener,
                                             GroupConversationService.MemberTurnCancellation cancellation, String conversationKey)
             throws GroupDiscussionException {
+        try {
+            return doExecuteAgentTurn(member, gc, input, protocol, phaseIdx, phase, targetAgentId, listener, cancellation, conversationKey);
+        } finally {
+            // I17: announce artifact writes this turn made. In a finally because an
+            // accepted write already happened whatever the turn's own outcome —
+            // a timeout or cancellation after the write must not swallow the event.
+            // Drained even with a null listener so the queue never grows unbounded.
+            announceArtifactChanges(gc, listener);
+        }
+    }
+
+    /**
+     * I17: fires {@code artifact_updated} for every write queued during the turn.
+     * Public (not just the per-turn finally) because the discussion loop calls it
+     * once more when the leg ends, so a write accepted by a timed-out member's
+     * still-running agent — whose own turn already drained — is announced rather
+     * than stranded in the queue.
+     * <p>
+     * <b>The mutex guards the HANDOFF, never the callbacks.</b> PARALLEL turns
+     * ending together must not split the queue between their drains and publish
+     * v2's event before v1's — but holding the monitor across
+     * {@code listener.onArtifactUpdated} would let one slow, backpressured SSE
+     * client block every other turn's end-of-turn drain. So exactly one thread at a
+     * time is the <em>publisher</em>: it drains under the mutex, releases it, fires
+     * the callbacks, and loops for anything that arrived meanwhile; every other
+     * thread sees the publisher flag and leaves, its changes guaranteed to ride the
+     * publisher's next loop. Write order is preserved (single announcer, FIFO
+     * queue) and no caller ever blocks on a listener.
+     */
+    public static void announceArtifactChanges(GroupConversation gc, GroupDiscussionEventListener listener) {
+        while (true) {
+            List<GroupConversation.ArtifactChange> changes;
+            synchronized (gc.artifactAnnounceMutex()) {
+                if (gc.artifactAnnouncePublishing()) {
+                    // The active publisher's next loop iteration drains our
+                    // changes — leaving keeps this thread off the slow path.
+                    return;
+                }
+                changes = gc.drainArtifactChanges();
+                if (changes.isEmpty()) {
+                    return;
+                }
+                gc.artifactAnnouncePublishing(true);
+            }
+            try {
+                if (listener != null) {
+                    for (GroupConversation.ArtifactChange change : changes) {
+                        listener.onArtifactUpdated(new GroupConversationEventSink.ArtifactUpdatedEvent(
+                                change.artifactId(), change.name(), change.type(), change.version(),
+                                change.editorAgentId(), change.status(), change.created()));
+                    }
+                }
+            } finally {
+                synchronized (gc.artifactAnnounceMutex()) {
+                    gc.artifactAnnouncePublishing(false);
+                }
+            }
+            // Loop: drain-and-publish anything queued while the callbacks ran —
+            // a thread that handed off above relies on exactly this pass.
+        }
+    }
+
+    private TranscriptEntry doExecuteAgentTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
+                                               DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener,
+                                               GroupConversationService.MemberTurnCancellation cancellation, String conversationKey)
+            throws GroupDiscussionException {
 
         if (cancellation != null && cancellation.isCancelled()) {
             throw new GroupConversationService.MemberTurnCancelledException();

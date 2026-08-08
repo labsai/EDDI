@@ -14,10 +14,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Transcript record for a group conversation. Persisted with a single-version
@@ -322,6 +324,99 @@ public class GroupConversation {
      */
     @JsonIgnore
     private transient AgentGroupConfiguration.ProtocolConfig.CostPolicy costCeilingOutcome;
+
+    /**
+     * One accepted artifact write (I17), queued by the artifact tools on the LIVE
+     * instance and drained by {@code MemberTurnExecutor} after the turn to fire the
+     * {@code artifact_updated} event. This indirection exists because tools have no
+     * listener reference — {@code ToolAssemblyContext} carries none — while the
+     * turn executor does. Transient and concurrent: PARALLEL phases run members
+     * (and so their tools) concurrently.
+     */
+    public record ArtifactChange(String artifactId, String name, String type, long version, String editorAgentId,
+            String status, boolean created) {
+    }
+
+    @JsonIgnore
+    private final transient Queue<ArtifactChange> pendingArtifactChanges = new ConcurrentLinkedQueue<>();
+
+    /**
+     * Serializes the drain HANDOFF over {@link #pendingArtifactChanges}. The queue
+     * itself is safe, but two PARALLEL turns ending together would split it between
+     * their drains and could then publish v2's event before v1's. The mutex is held
+     * only around the drain and the publisher flag — never across the listener
+     * callbacks, so a slow SSE client cannot block other turns' end-of-turn drains.
+     * See {@code MemberTurnExecutor#announceArtifactChanges}.
+     */
+    @JsonIgnore
+    private final transient Object artifactAnnounceMutex = new Object();
+
+    /** The monitor {@code MemberTurnExecutor} serializes announce passes on. */
+    @JsonIgnore
+    public Object artifactAnnounceMutex() {
+        return artifactAnnounceMutex;
+    }
+
+    /**
+     * Whether a thread is currently PUBLISHING drained artifact changes. Guarded by
+     * {@link #artifactAnnounceMutex} (never read or written outside it) — this flag
+     * is what lets the mutex be released during the listener callbacks themselves:
+     * the active publisher keeps looping over late arrivals, and every other thread
+     * hands off and leaves instead of blocking on a slow SSE client. Deliberately
+     * not {@code isX}-named: runtime coordination state, invisible to Jackson.
+     */
+    private transient boolean artifactAnnouncePublishing;
+
+    @JsonIgnore
+    public boolean artifactAnnouncePublishing() {
+        return artifactAnnouncePublishing;
+    }
+
+    @JsonIgnore
+    public void artifactAnnouncePublishing(boolean publishing) {
+        this.artifactAnnouncePublishing = publishing;
+    }
+
+    /** Queues an accepted artifact write for the turn executor to announce. */
+    @JsonIgnore
+    public void queueArtifactChange(ArtifactChange change) {
+        if (change != null) {
+            pendingArtifactChanges.add(change);
+        }
+    }
+
+    /** Drains queued artifact writes — each drained exactly once. */
+    @JsonIgnore
+    public List<ArtifactChange> drainArtifactChanges() {
+        List<ArtifactChange> drained = new ArrayList<>();
+        ArtifactChange change;
+        while ((change = pendingArtifactChanges.poll()) != null) {
+            drained.add(change);
+        }
+        return drained;
+    }
+
+    /**
+     * The discussion's shared artifacts (I17), populated at READ time by
+     * {@code GroupConversationService.readGroupConversation} from the artifact
+     * store — never persisted with this document (artifacts have their own
+     * collection; see {@link SharedArtifact}). Serialized when populated so REST's
+     * status payload and MCP's {@code read_group_conversation} both carry it;
+     * {@code READ_ONLY} because a stored copy must never be trusted back. Mirrors
+     * the {@code availableActions} idiom.
+     */
+    @JsonIgnore
+    private transient List<SharedArtifact> artifacts;
+
+    @JsonProperty(value = "artifacts", access = JsonProperty.Access.READ_ONLY)
+    public List<SharedArtifact> getArtifacts() {
+        return artifacts;
+    }
+
+    @JsonIgnore
+    public void setArtifacts(List<SharedArtifact> artifacts) {
+        this.artifacts = artifacts;
+    }
 
     /**
      * A parent discussion's remaining cost budget at the moment it dispatched this

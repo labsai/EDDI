@@ -205,6 +205,57 @@ Third Wave 2 queue item, and the substrate I13 (Standing Teams) builds on. Discu
 **Tests (11 new, all green; `engine.internal` + `configs.properties` suites 1572 green; checkstyle clean):** parse tiers (strict/fenced/prose-refused); per-run cap enforced past what the model was told; idempotent team-owned upsert against a REAL in-memory store with the production upsert identity (a mocked idempotency claim would prove nothing); FIFO evicts the oldest and never the newest; `retro_recorded` carries the stored count; null store and failing store never fail the discussion; Mongo filter shape (no-groups → user scope only; with-groups → derived `group:` owners paired with group visibility; no foreign human id reachable); Postgres SQL shape incl. the `??|` escape arithmetic pinning the bind order.
 
 **Files:** `AgentGroupConfiguration` (RETRO + RetroConfig), `DiscussionStylePresets` (TEMPLATE_RETRO), `GroupContextBuilder` (RETRO branch + entry mapping), `RetroEngine` (new), `GroupConversationService` (wiring + store injection), `IUserMemoryStore` (TEAM_OWNER_PREFIX + contract Javadoc), `MongoUserMemoryStore`, `PostgresUserMemoryStore`, `GroupConversationEventSink`/listener/SSE, `docs/group-conversations.md`, 3 test classes.
+## 🔎 fix(groups): I17 PR #637 review round 2 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i17-shared-artifacts`)
+
+Two comments triaged:
+
+- **Announce mutex no longer held across listener callbacks (CodeRabbit Major, accepted):** `announceArtifactChanges` held `artifactAnnounceMutex` through `onArtifactUpdated`, so one slow/backpressured SSE client blocked every other turn's end-of-turn drain. Now the mutex guards only the HANDOFF: exactly one thread at a time is the publisher — it drains under the mutex, releases it, fires the callbacks, and loops for late arrivals; every other thread sees the publisher flag and leaves, its changes guaranteed to ride the publisher's next pass. Write order preserved (single announcer, FIFO queue), no caller ever blocks on a listener. New test drives a write + reentrant announce from INSIDE a callback: published exactly once, in order, nothing stranded, no deadlock.
+- **CodeQL log-injection (stale):** raised against the initial commit 6aeba1393; the flagged attach-artifacts log was sanitized in round 1 (74c0acaf7). Reply-only.
+
+`MemberTurnExecutorTest` (14) + artifact suites green.
+
+---
+
+## 🔎 fix(groups): I17 PR #637 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i17-shared-artifacts`)
+
+All 11 review comments (CodeRabbit ×9, Copilot/CodeQL ×2) triaged; every one accepted and fixed:
+
+- **Meta-schema validation at save time** (`ArtifactValidators.schemaSpecProblem`): `getSchema(spec)` only parses — `{"type":"strng"}` passed and misbehaved at write time. Specs now also validate *as instances* against the bundled 2020-12 meta-schema (no network I/O; degrades to parse-only with a WARN if the bundled resource can't load, rather than rejecting every config).
+- **ReDoS bound on REGEX validators**: config-authored pattern × 256 KB LLM content could backtrack catastrophically and pin the member turn. `checkRegex` now matches through a deadline-guarded `CharSequence` (500 ms, sampled every 1024 char accesses) and refuses the write on expiry — fails closed, like every other broken-spec path.
+- **`[null]` validator entries**: `List.copyOf` NPE'd during config deserialization, preempting `requireValidSpecs`' positional message; now an unmodifiable null-tolerant copy.
+- **Artifact event ordering + late writes**: drain+announce now holds a per-conversation mutex (two PARALLEL turns ending together could split the queue and publish v2 before v1), and `executeDiscussion`'s `finally` runs one **final announce pass per leg** so a write accepted by a timed-out member's still-running agent is announced instead of stranded. A write after even that pass keeps the artifact — only its live event is best-effort, by design.
+- **`listByGroupConversationId` order**: both backends sort DESC; the interface promises oldest-first. Now re-sorted in Java per the contract.
+- **`deleteByGroupConversationId`**: same processed-set/no-progress guard as `deleteAllForUser` — an undislodgeable row is counted once and ends the loop instead of spinning `MAX_ERASURE_PASSES` times and inflating the count.
+- **Slack mrkdwn injection**: artifact name/editor id are LLM-authored; `<!channel>` in a name rendered as a real broadcast. Both fields now `&`/`<`/`>`-escaped.
+- **Oversize refusal rounds up** (`Math.ceilDiv`): MAX+1 bytes no longer reads "256 KB is over the 256 KB limit".
+- **GDPR cascade Javadoc** now names the shared-artifact step; **CodeQL log injection** at `populateArtifacts` sanitized.
+
+**Tests:** +7 (meta-schema reject, null-entry positional message, catastrophic-regex deadline, late-write announce pass, single-pass write order, oldest-first sort, no-spin cascade delete). Touched suites 1961 tests — green except the 27 known environmental socket-bound errors (SafeHttpClient/SlackWebApi/Weather/WebScraper), which fail identically on an untouched tree.
+
+---
+
+## 📄 feat(groups): I17 — shared artifacts (blackboard-lite) (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i17-shared-artifacts`)
+
+First Wave 2 queue item from `planning/group-collaboration-NEXT.md` §3. Agents can now **co-edit typed documents** instead of only talking: four member tools — `createArtifact`, `readArtifact`, `proposeArtifactUpdate`, `listArtifacts` — gated by a new `artifactConfig` on the group config.
+
+**Design decisions, per the plan (and the plan's own rejections honored):**
+
+- **Own collection, never embedded.** `SharedArtifact` + `ISharedArtifactStore`/`SharedArtifactStore` follow `GroupConversationStore`'s single-version runtime-document pattern. The discussion loop's whole-document stale-snapshot persists cannot clobber artifact writes, which is also why — unlike I5's task tools — the artifact tools write **through the store directly**. The live registry is still consulted: membership at assembly (`getForMember`, the caller-supplied-id IDOR guard), liveness at write time, and accepted writes ride a new transient change queue on the live `GroupConversation`.
+- **Deterministic CAS-and-retry, explicitly not an LLM fusion arbiter.** The version CAS needed a storage primitive that doesn't exist for numbers: `storeIfFieldEquals(String)` text-compares, which "works" on Postgres (`data->>` renders JSON numbers as text) and **silently never matches on Mongo** (typed BSON equality). New `storeIfFieldEquals(…, long)` overload on `IResourceStorage` + both backends, same no-silent-degrade contract (the default throws). Stale writers get the plan's sentence: *"artifact changed since you read it (now vN); re-read and merge your change."*
+- **Declarative validators only.** `JSON_SCHEMA` (new dependency `com.networknt:json-schema-validator` — the victools libraries only *generate* schemas), `REGEX`, `MAX_LENGTH`. Specs hard-fail the config save (`ArtifactValidators.requireValidSpecs` from `AgentGroupStore`, `HitlConfigValidation`'s contract); write-time failures are rejection sentences and the gate fails closed on a broken spec. Content ≤ 256 KB.
+- **Events without a listener reference:** tools can't fire SSE/Slack events (`ToolAssemblyContext` carries no listener — the structural gap that left I5's planned `task_added_by_agent` unfired). Accepted writes queue an `ArtifactChange` on the live instance; `MemberTurnExecutor` drains the queue in a `finally` after every turn and fires the new `artifact_updated` event (sink constant + record + SSE forward + Slack line + OpenAPI description lists). Drained even with a null listener so the queue cannot grow unbounded.
+- **Lifecycle:** artifacts are attached to the discussion status payload at read time in the service (so REST *and* MCP `read_group_conversation` carry them — `availableActions` idiom, `READ_ONLY`, never trusted back from storage); close/delete cascade removes them (`GroupLifecycleOps`, warn-and-continue so a broken artifact store can't make discussions undeletable); GDPR erasure sweeps them **user-keyed** via a stamped `ownerUserId` (page/exact-recheck/fail-loud contract copied from the group store) as a new `GdprComplianceService` cascade step.
+- **Caps:** `maxArtifactsPerDiscussion` (default 5) counted inside a `synchronized (liveInstance)` block — creation is check-then-act and PARALLEL phases genuinely race; updates need no lock, the CAS decides.
+
+**Tests (148 across 8 classes, all green):** tools against a real in-memory CAS store (stale-version retry sentence with the CURRENT version, concurrent same-version writers → exactly one winner, FINAL freeze, foreign-discussion ids don't resolve, validator chain, refusals leave no side effect); provider gate matrix (every uncertainty → contribute nothing, membership not existence, `enableBuiltInTools` still applies); store CAS through the numeric overload with `verify(never()).store(…)`; anchored+escaped filters with Java exact-recheck; erasure paging/fail-loud; lifecycle cascade ordering (`inOrder` artifact-delete before document-delete) + cascade-failure-still-deletes; GDPR step + not-resolvable skip + failure-continues; turn-executor drain (exactly once, null-listener drain); Slack lines incl. degenerate-payload skip. **Mutation notes:** degrading the store CAS to an unconditional store does not even compile (the gone-document catch becomes unreachable) — the CAS call is structurally load-bearing; the Mockito-verified negatives (`never().store`, `specs().isEmpty()`) pin the rest.
+
+**Files:** `SharedArtifact`, `ISharedArtifactStore`, `SharedArtifactStore`, `ArtifactValidators`, `ArtifactTools`, `ArtifactToolsProvider` (+ `AgentOrchestrator` phase-1 wiring), `AgentGroupConfiguration` (`ArtifactConfig`/`ArtifactValidator`/`ValidatorKind`), `GroupConversation` (change queue + read-time `artifacts`), `IResourceStorage` + Mongo/Postgres (numeric CAS), `GroupConversationEventSink`/listener/SSE/Slack, `GroupLifecycleOps`, `GroupConversationService`, `GdprComplianceService`, `AgentGroupStore`, `pom.xml`, `docs/group-conversations.md`, 8 test classes.
 
 ---
 

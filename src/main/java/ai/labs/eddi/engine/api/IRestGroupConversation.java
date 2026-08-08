@@ -99,8 +99,8 @@ public interface IRestGroupConversation {
     @Operation(summary = "Start a group discussion with SSE streaming",
                description = "Starts a group discussion asynchronously and streams progress events "
                        + "(group_start, phase_start, speaker_start, speaker_complete, "
-                       + "phase_complete, synthesis_start, group_complete, group_error) "
-                       + "via Server-Sent Events.")
+                       + "phase_complete, synthesis_start, group_complete, group_error, "
+                       + "artifact_updated) via Server-Sent Events.")
     @APIResponse(responseCode = "200", description = "SSE event stream of discussion progress.")
     @APIResponse(responseCode = "400", description = "Missing/blank or oversized 'question', or an oversized attachment.")
     @APIResponse(responseCode = "404", description = "Group not found.")
@@ -186,6 +186,8 @@ public interface IRestGroupConversation {
                        + "synthesis_start, group_complete, group_error), plus the HITL events "
                        + "(awaiting_approval, hitl_resume, cancelled, member_pause_skipped, "
                        + "human_input_requested). NOTE: "
+                       + "synthesis_start, group_complete, group_error, artifact_updated), plus the HITL "
+                       + "events (awaiting_approval, hitl_resume, cancelled, member_pause_skipped). NOTE: "
                        + "'attachments' are NOT supported on a continuation and are rejected with a "
                        + "terminal group_error event rather than silently ignored.")
     @APIResponse(responseCode = "200", description = "SSE event stream of continuation progress.")

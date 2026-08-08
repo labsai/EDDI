@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LifecyclePolicy;
@@ -85,6 +86,7 @@ public class GroupLifecycleOps {
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;
     private final IDeploymentStore deploymentStore;
+    private final ISharedArtifactStore sharedArtifactStore;
     private final Set<String> operationsInProgress;
     private final ConcurrentHashMap<String, DiscussionControlToken> activeTokens;
     private final GroupConversationService groupConversationService;
@@ -95,7 +97,7 @@ public class GroupLifecycleOps {
 
     public GroupLifecycleOps(IGroupConversationStore conversationStore, IAgentGroupStore groupStore,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
-            IDeploymentStore deploymentStore, Set<String> operationsInProgress,
+            IDeploymentStore deploymentStore, ISharedArtifactStore sharedArtifactStore, Set<String> operationsInProgress,
             ConcurrentHashMap<String, DiscussionControlToken> activeTokens,
             GroupConversationService groupConversationService, Counter counterGroupFollowUp,
             Counter counterGroupContinue, Counter counterGroupClose, Counter counterGroupFailure) {
@@ -105,6 +107,7 @@ public class GroupLifecycleOps {
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
         this.deploymentStore = deploymentStore;
+        this.sharedArtifactStore = sharedArtifactStore;
         this.operationsInProgress = operationsInProgress;
         this.activeTokens = activeTokens;
         this.groupConversationService = groupConversationService;
@@ -156,6 +159,10 @@ public class GroupLifecycleOps {
             // operations. Delete is terminal, so reclaim any dynamically-created agents
             // here; otherwise deleting a COMPLETED conversation would orphan them.
             cleanupEphemeralAgentsForGroup(gc);
+            // I17: artifacts live in their own collection keyed by this conversation
+            // — remove them with their discussion, before the document goes (while
+            // the id is still provably a discussion the caller could delete).
+            deleteArtifactsForGroupConversation(groupConversationId);
             conversationStore.delete(groupConversationId);
         } catch (IResourceStore.ResourceNotFoundException e) {
             LOGGER.warnf("Group conversation %s not found for deletion", LogSanitizer.sanitize(groupConversationId));
@@ -485,6 +492,11 @@ public class GroupLifecycleOps {
             // Ephemeral agent cleanup (deferred from executeDiscussion)
             cleanupEphemeralAgentsForGroup(gc);
 
+            // I17: close is a lifecycle end — the working artifacts go with it.
+            // Their durable trace is the transcript (accepted updates are announced
+            // there and a synthesis quotes what mattered), not the working copies.
+            deleteArtifactsForGroupConversation(groupConversationId);
+
             LOGGER.infof("Group conversation %s closed — member conversations ended, ephemeral agents cleaned up",
                     LogSanitizer.sanitize(groupConversationId));
 
@@ -492,6 +504,27 @@ public class GroupLifecycleOps {
             return conversationStore.read(groupConversationId);
         } finally {
             operationsInProgress.remove(groupConversationId);
+        }
+    }
+
+    /**
+     * I17 cascade: removes the discussion's shared artifacts. Warn-and-continue on
+     * failure — a broken artifact store must not make discussions undeletable; the
+     * user-keyed GDPR erasure sweep (which fails loudly) is the completeness
+     * guarantee, this is the tidy path.
+     */
+    private void deleteArtifactsForGroupConversation(String groupConversationId) {
+        if (sharedArtifactStore == null) {
+            return;
+        }
+        try {
+            long removed = sharedArtifactStore.deleteByGroupConversationId(groupConversationId);
+            if (removed > 0) {
+                LOGGER.infof("Removed %d shared artifact(s) of group conversation %s", removed, LogSanitizer.sanitize(groupConversationId));
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to remove shared artifacts of group conversation %s: %s",
+                    LogSanitizer.sanitize(groupConversationId), e.getMessage());
         }
     }
 

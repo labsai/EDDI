@@ -948,6 +948,12 @@ public class RestGroupConversation implements IRestGroupConversation {
                 // Not terminal — a retro can precede further phases.
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_RETRO_RECORDED, toJson(event));
             }
+
+            @Override
+            public void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
+                // Not terminal — artifacts are edited throughout the discussion.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_ARTIFACT_UPDATED, toJson(event));
+            }
         };
     }
 
