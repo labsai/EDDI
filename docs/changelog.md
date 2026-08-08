@@ -5,6 +5,18 @@
 
 ---
 
+## 🔎 fix(groups): I8 PR #639 CI round 1 + plan-mandated test extension (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i8-retro-memory`)
+
+Follow-ups on the open PR (commits `8025962c6`, `c2b4b7a79`, `3de3de69e`):
+
+- **CI failures**: `AgentGroupConfigurationTest.phaseType_allValues` pins the enum size (RETRO is this branch's 12th value — same pin fixed for VOTE on the I14 branch), and `PostgresUserMemoryStoreUnitTest.getVisibleEntries_withGroupIds_includesGroupClause` pinned the pre-I8 bind order — now asserts all nine parameters incl. the derived `group:` owners. The third failing check (ClusterFuzzLite) was a transient gcr.io 403 pulling the fuzz image — it passed on the sibling PRs minutes later.
+- **CodeQL**: the four flagged RetroEngine log sinks sanitized (conversation id, phase name, team owner, exception message).
+- **Plan-mandated tests** the first commit missed (`UserMemoryToolScopingTest` extension, named explicitly in the I8 plan item): eviction can never delete a team-owned lesson even with the store wall deliberately breached (the fixed `"retro"` sourceAgentId is a second independent wall), and personal `visibility:self` entries never cross users through a shared group.
+
+---
+
 ## 🧠 feat(groups): I8 — retro phases harvest team-owned group memory (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i8-retro-memory`)
