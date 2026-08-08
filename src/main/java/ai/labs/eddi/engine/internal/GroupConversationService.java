@@ -39,8 +39,10 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
 import ai.labs.eddi.engine.internal.groups.GroupHitlCoordinator;
+import ai.labs.eddi.engine.internal.groups.RetroEngine;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.internal.groups.GroupLifecycleOps;
 import ai.labs.eddi.engine.internal.groups.GroupSigningGuard;
@@ -211,6 +213,14 @@ public class GroupConversationService implements IGroupConversationService {
      */
     @Inject
     LiveDiscussionRegistry liveDiscussionRegistry;
+
+    /**
+     * I8's lesson store. Same field-injection pattern and null-safety as
+     * {@link #attachmentStore} — {@code null} in direct-construction unit tests,
+     * where a RETRO phase runs but persists nothing (warned, never failed).
+     */
+    @Inject
+    IUserMemoryStore userMemoryStore;
 
     // In-node fast-fail guard for concurrent post-discussion operations
     // (follow-up, continue, close) on the same conversation: a second
@@ -499,6 +509,63 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupDiscussionException("Failed to start group discussion: " + e.getMessage(), e);
         }
 
+        return gc;
+    }
+
+    /**
+     * Starts a cadence-driven discussion (I13): {@code startAndDiscussAsync} with
+     * two overrides a scheduled backlog run needs — the pulled backlog tasks
+     * replace the config's pre-configured task list (a runtime copy; the stored
+     * config is never written), and the cadence's dollar ceiling rides the
+     * inherited-ceiling slot so {@code effectiveCostCeiling} takes the tighter of
+     * it and the group's own {@code maxCostPerDiscussion}.
+     * <p>
+     * The config instance mutated here is this call's own fresh read from the store
+     * — deserialized per read, shared with nothing.
+     */
+    public GroupConversation startCadenceDiscussionAsync(String groupId, String question, String userId,
+                                                         List<AgentGroupConfiguration.TaskDefinition> injectedTasks,
+                                                         Double maxCostPerRun, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        if (groupId == null) {
+            throw new IllegalArgumentException("groupId must not be null");
+        }
+        rejectIfShuttingDown();
+
+        IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
+        if (currentGroupId == null) {
+            throw new IResourceStore.ResourceNotFoundException("Group not found.");
+        }
+        AgentGroupConfiguration config = groupStore.read(groupId, currentGroupId.getVersion());
+        if (config == null) {
+            throw new IResourceStore.ResourceNotFoundException("Group configuration not found.");
+        }
+        if (injectedTasks != null && !injectedTasks.isEmpty()) {
+            config.setTasks(List.copyOf(injectedTasks));
+        }
+
+        List<DiscussionPhase> phases = resolvePhases(config);
+        if (phases.isEmpty()) {
+            throw new GroupDiscussionException("No discussion phases are defined for this group.");
+        }
+
+        GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
+        gc.setInheritedCostCeiling(maxCostPerRun);
+        activeTokens.put(gc.getId(), new DiscussionControlToken());
+        final var discussionCaller = callerIdentityContext.captureOrCurrent();
+        try {
+            executorService.submit(callerIdentityContext.withIdentity(discussionCaller, () -> {
+                try {
+                    executeDiscussion(gc, config, phases, question, listener, 0);
+                } catch (Exception e) {
+                    LOGGER.errorf("Cadence group discussion failed for %s: %s", LogSanitizer.sanitize(groupId), e.getMessage());
+                }
+            }));
+        } catch (RuntimeException e) {
+            activeTokens.remove(gc.getId());
+            failConversation(gc);
+            throw new GroupDiscussionException("Failed to start cadence discussion: " + e.getMessage(), e);
+        }
         return gc;
     }
 
@@ -958,6 +1025,14 @@ public class GroupConversationService implements IGroupConversationService {
                     if (phase.type() == PhaseType.VOTE && lastRepeat) {
                         phaseExecutionEngine.recordVoteDecision(gc, config, phase, protocol, phaseIdx, repeatEntries, speakers, listener,
                                 turnCounter, maxTurns);
+                    }
+
+                    // I8: a completed RETRO phase harvests its lessons into
+                    // team-owned group memory. Last repeat only — a draft retro is
+                    // not the retrospective — and BEFORE the persist below, so a
+                    // crash cannot lose lessons a stored document claims were taken.
+                    if (phase.type() == PhaseType.RETRO && lastRepeat) {
+                        RetroEngine.harvest(gc, config.getRetroConfig(), repeatEntries, userMemoryStore, phase.name(), listener);
                     }
 
                     gc.setLastModified(Instant.now());

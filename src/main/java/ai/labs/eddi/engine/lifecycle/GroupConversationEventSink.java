@@ -69,6 +69,12 @@ public final class GroupConversationEventSink {
      * "approve/reject".
      */
     public static final String EVENT_HUMAN_INPUT_REQUESTED = "human_input_requested";
+    /**
+     * A RETRO phase harvested lessons into team-owned group memory (I8). Fires even
+     * with zero lessons stored — "the retro ran and found nothing durable" is
+     * itself signal for an observer.
+     */
+    public static final String EVENT_RETRO_RECORDED = "retro_recorded";
 
     // --- Event payloads ---
 
@@ -175,5 +181,9 @@ public final class GroupConversationEventSink {
      *            run — the concrete saving
      */
     public record ConvergenceReachedEvent(int phaseIndex, String phaseName, int repeat, int repeatsSkipped, String reason) {
+    }
+
+    /** A RETRO phase stored lessons into team-owned group memory (I8). */
+    public record RetroRecordedEvent(String groupId, String phaseName, int lessonsStored) {
     }
 }

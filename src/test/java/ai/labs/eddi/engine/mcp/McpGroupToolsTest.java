@@ -4,9 +4,13 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupWorkspace;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
@@ -33,6 +37,7 @@ class McpGroupToolsTest {
     private IRestAgentGroupStore groupStore;
     private IGroupConversationService groupConversationService;
     private IJsonSerialization jsonSerialization;
+    private IGroupWorkspaceStore workspaceStore;
     private McpGroupTools tools;
 
     @BeforeEach
@@ -40,6 +45,7 @@ class McpGroupToolsTest {
         groupStore = mock(IRestAgentGroupStore.class);
         groupConversationService = mock(IGroupConversationService.class);
         jsonSerialization = mock(IJsonSerialization.class);
+        workspaceStore = mock(IGroupWorkspaceStore.class);
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
 
         var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
@@ -47,7 +53,7 @@ class McpGroupToolsTest {
         // authorization disabled — OwnershipValidator's checks are no-ops, matching the
         // pre-existing tests. Ownership enforcement is covered separately below.
         tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, mockIdentity,
-                new OwnershipValidator(false), false);
+                new OwnershipValidator(false), workspaceStore, false);
     }
 
     // --- describe_discussion_styles ---
@@ -455,7 +461,7 @@ class McpGroupToolsTest {
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(role)).thenReturn(true);
         return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, identity,
-                new OwnershipValidator(true), true);
+                new OwnershipValidator(true), workspaceStore, true);
     }
 
     /**
@@ -470,7 +476,7 @@ class McpGroupToolsTest {
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(anyString())).thenReturn(true);
         return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, identity,
-                new OwnershipValidator(true), true);
+                new OwnershipValidator(true), workspaceStore, true);
     }
 
     @Test
@@ -685,5 +691,63 @@ class McpGroupToolsTest {
         verify(jsonSerialization).serialize(captor.capture());
         assertEquals(1, captor.getValue().size(), "a non-owner must not see another user's transcript via list");
         assertEquals("gc-mine", captor.getValue().get(0).getId());
+    }
+
+    // --- I13: standing-team backlog ---
+
+    private GroupWorkspace teamWorkspace() throws Exception {
+        var workspace = new GroupWorkspace();
+        workspace.setId("ws-1");
+        workspace.setGroupId("g1");
+        var resourceId = mock(IResourceStore.IResourceId.class);
+        lenient().when(resourceId.getVersion()).thenReturn(1);
+        lenient().when(groupStore.getCurrentResourceId("g1")).thenReturn(resourceId);
+        lenient().when(workspaceStore.readOrCreate("g1")).thenReturn(workspace);
+        lenient().when(workspaceStore.find("g1")).thenReturn(workspace);
+        return workspace;
+    }
+
+    @Test
+    void addTeamTask_persistsWithPriority() throws Exception {
+        var workspace = teamWorkspace();
+
+        String result = tools.add_team_task("g1", "Ship the feature", "with tests", "7");
+
+        assertFalse(result.contains("error"), result);
+        assertEquals(1, workspace.getBacklog().size());
+        assertEquals(7, workspace.getBacklog().getTasks().get(0).priority());
+        verify(workspaceStore).update(workspace);
+    }
+
+    @Test
+    void addTeamTask_backlogCap_isActionable() throws Exception {
+        var workspace = teamWorkspace();
+        for (int i = 0; i < GroupWorkspace.MAX_BACKLOG_SIZE; i++) {
+            workspace.getBacklog().addTask(
+                    new TaskItem("Task " + i, "", 0));
+        }
+
+        String result = tools.add_team_task("g1", "One more", null, null);
+
+        assertTrue(result.contains("complete or delete"), "the cap error says what to do about it: " + result);
+        verify(workspaceStore, never()).update(any());
+    }
+
+    @Test
+    void addTeamTask_blankSubject_errors() throws Exception {
+        assertTrue(tools.add_team_task("g1", "  ", null, null).contains("error"));
+    }
+
+    @Test
+    void listTeamBacklog_serializesTasks_andEmptyWithoutWorkspace() throws Exception {
+        teamWorkspace();
+        tools.add_team_task("g1", "A task", null, null);
+
+        tools.list_team_backlog("g1");
+        verify(jsonSerialization, atLeastOnce()).serialize(any());
+
+        when(workspaceStore.find("g1")).thenReturn(null);
+        String result = tools.list_team_backlog("g1");
+        assertFalse(result.contains("error"), "no workspace is an empty backlog, not an error: " + result);
     }
 }

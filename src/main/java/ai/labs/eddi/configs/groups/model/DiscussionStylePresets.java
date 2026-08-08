@@ -349,6 +349,28 @@ public final class DiscussionStylePresets {
             open proposals and the concession ledger (appended below); state your \
             decision and its reasoning plainly.""";
 
+    /**
+     * The retrospective prompt (I8). The JSON contract line is what
+     * {@code RetroEngine}'s three-tier parse reads; the cap is quoted to the model
+     * AND enforced by the parser regardless.
+     */
+    public static final String TEMPLATE_RETRO = """
+            The discussion on the question below has concluded:
+            "{question}"
+
+            Full transcript:
+            {#for entry in transcript}
+            [{entry.phaseName}] {entry.speaker}: "{entry.content}"
+            {/for}
+
+            Review how this group worked. What worked, what failed, and what should
+            this group do differently next time? Distill LESSONS the group should
+            remember for future discussions — durable, actionable, not a summary of
+            this question's answer.
+
+            Respond with ONLY this JSON, no other text (max {maxLessonsPerRun} lessons):
+            {"lessons": [{"lesson": "<one sentence the group should remember>", "context": "<when it applies>"}]}""";
+
     // Template lookup by phase type
     private static final Map<PhaseType, String> DEFAULT_TEMPLATES = Map.ofEntries(
             Map.entry(PhaseType.OPINION, TEMPLATE_OPINION_INDEPENDENT),
@@ -364,7 +386,8 @@ public final class DiscussionStylePresets {
             Map.entry(PhaseType.VERIFY, TEMPLATE_VERIFY),
             Map.entry(PhaseType.VOTE, TEMPLATE_VOTE),
             Map.entry(PhaseType.PROPOSAL, TEMPLATE_PROPOSAL),
-            Map.entry(PhaseType.BARGAIN, TEMPLATE_BARGAIN));
+            Map.entry(PhaseType.BARGAIN, TEMPLATE_BARGAIN),
+            Map.entry(PhaseType.RETRO, TEMPLATE_RETRO));
 
     /**
      * Returns the default template for a given phase type.

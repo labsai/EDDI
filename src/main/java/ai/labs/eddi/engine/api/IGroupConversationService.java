@@ -250,6 +250,8 @@ public interface IGroupConversationService {
         }
         default void onHumanInputRequested(GroupConversationEventSink.HumanInputRequestedEvent event) {
         }
+        default void onRetroRecorded(GroupConversationEventSink.RetroRecordedEvent event) {
+        }
     }
 
     // --- Exceptions ---

@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.groups.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
@@ -30,6 +31,7 @@ class RestAgentGroupStoreTest {
     private IAgentGroupStore groupStore;
     private IDocumentDescriptorStore documentDescriptorStore;
     private IJsonSchemaCreator jsonSchemaCreator;
+    private IGroupWorkspaceStore workspaceStore;
     private RestAgentGroupStore restStore;
 
     @BeforeEach
@@ -37,7 +39,8 @@ class RestAgentGroupStoreTest {
         groupStore = mock(IAgentGroupStore.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
-        restStore = new RestAgentGroupStore(groupStore, documentDescriptorStore, jsonSchemaCreator);
+        workspaceStore = mock(IGroupWorkspaceStore.class);
+        restStore = new RestAgentGroupStore(groupStore, documentDescriptorStore, jsonSchemaCreator, workspaceStore);
     }
 
     @Nested
@@ -126,6 +129,29 @@ class RestAgentGroupStoreTest {
             restStore.deleteGroup("group-1", 1, false);
 
             verify(groupStore).delete("group-1", 1);
+        }
+
+        @Test
+        @DisplayName("I13: a PERMANENT delete cascades to the standing workspace")
+        void permanentDelete_cascadesToWorkspace() throws Exception {
+            when(groupStore.getCurrentResourceId("group-1"))
+                    .thenReturn(createResourceId("group-1", 1));
+
+            restStore.deleteGroup("group-1", 1, true);
+
+            verify(groupStore).deleteAllPermanently("group-1");
+            verify(workspaceStore).deleteByGroupId("group-1");
+        }
+
+        @Test
+        @DisplayName("I13: a soft (versioned) delete keeps the workspace — the group can come back")
+        void softDelete_keepsWorkspace() throws Exception {
+            when(groupStore.getCurrentResourceId("group-1"))
+                    .thenReturn(createResourceId("group-1", 1));
+
+            restStore.deleteGroup("group-1", 1, false);
+
+            verify(workspaceStore, never()).deleteByGroupId(anyString());
         }
     }
 

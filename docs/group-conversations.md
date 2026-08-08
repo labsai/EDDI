@@ -364,6 +364,76 @@ turns and **awards** each to the highest self-assessed confidence:
   or when the remaining turn budget cannot cover one bid turn per member.
 - Bid turns are real member turns: they count toward the turn budget and their
   cost lands in the discussion's cost attribution.
+## Retro → group memory
+
+A `RETRO` phase stops discussions from evaporating: the group reviews how it
+worked and distills lessons that persist as **team-owned group memory**, then
+surface as `{properties.*}` in every member's later discussions — institutional
+knowledge that compounds run-over-run.
+
+```json
+{ "name": "Retro", "type": "RETRO", "participants": "MODERATOR" },
+"retroConfig": { "maxLessonsPerRun": 3, "maxStoredLessons": 50 }
+```
+
+- The built-in template asks for `{"lessons": [{"lesson": "...", "context":
+  "..."}]}`; parsing is three-tier (strict JSON → embedded JSON → nothing) and
+  the per-run cap is enforced at parse time whatever the model produced.
+- Lessons are stored under the synthetic owner `group:<groupId>` with `group`
+  visibility — they belong to the team, not to whichever human ran the
+  discussion, and survive that human's GDPR erasure without carrying their
+  identity. The idempotency key `retro:<hash(lesson)>` makes re-running the
+  same retro a no-op.
+- **Bounded growth is non-negotiable:** the stored set FIFOs at
+  `maxStoredLessons` — storing past the cap evicts the oldest.
+- Member conversations already load group-visible entries at init, so recall
+  needs no new namespace. The `retro_recorded` SSE event reports each harvest.
+
+## Standing Teams (I13)
+
+A group *conversation* is an episode; a **team** persists. The `GroupWorkspace`
+(one document per group, own collection) holds what survives between episodes:
+a **backlog** (a `SharedTaskList`, so pulled tasks flow straight into the
+task-force machinery), **cadences** that pull from it on a schedule, and the
+team's running **metrics** — deliberately thin glue over the existing
+schedulers, I1's cost ledger and I8's retro memory.
+
+```
+POST /groupstore/groups/{groupId}/workspace/backlog   {"subject": "...", "description": "...", "priority": 5}
+POST /groupstore/groups/{groupId}/workspace/cadences  {"cronExpression": "0 9 * * 1", "maxBacklogTasksPerRun": 5, "maxCostPerRun": 2.50}
+GET  /groupstore/groups/{groupId}/workspace
+```
+
+MCP: `add_team_task`, `list_team_backlog`. The backlog caps at 200 with an
+actionable error — it is a working set, not an archive.
+
+**Cadence fires ride the schedule machinery whole** (`SchedulePollerService`
+claim/lease/retry/dead-letter; the executor branches on
+`teamCadenceType: "team_cadence"` exactly like Dream consolidation). Each fire:
+
+1. **Reconcile** — a finished previous run is written back first; one still in
+   flight (or paused at an HITL gate for days) skips the fire.
+2. **Pull** — top-N *executable* backlog tasks by priority; an empty pull
+   skips, logged.
+3. **Claim** — a conditional store write on `runningDiscussionId`; two pods
+   firing concurrently cannot both start, without any in-JVM lock.
+4. **Run** — pulled tasks are injected as a runtime copy of `config.tasks`
+   (the stored config is never written) and the cadence's `maxCostPerRun`
+   rides the inherited-ceiling slot: dollar-primary, per the Dream precedent.
+   The discussion runs under the cadence *creator's* identity.
+
+**Writeback** happens at the next fire (or on a workspace read — read-repair),
+never from inside the discussion thread, so a pod crash mid-discussion loses
+nothing. VERIFIED outcomes stay VERIFIED on the backlog and credit the
+assignee's `perMemberStats`; anything else returns to PENDING with the
+reviewer's feedback appended to the description — **the cross-run retry
+loop**. A FAILED/CANCELLED discussion returns every pulled task untouched.
+Retro lessons flow through I8 unchanged (no duplication).
+
+Per-member stats are reliability **recording only** — nothing routes or
+weights on them in v1. A *permanent* group deletion cascades to the workspace;
+a soft (versioned) delete keeps it, because the group can come back. Not in
+v1: cross-team handoff, Manager UI, reputation weighting.
 
 ## Nested Groups (Group-of-Groups)
 

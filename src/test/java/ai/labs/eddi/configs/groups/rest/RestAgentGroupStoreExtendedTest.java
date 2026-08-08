@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.groups.rest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -42,7 +43,8 @@ class RestAgentGroupStoreExtendedTest {
         groupStore = mock(IAgentGroupStore.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
-        restStore = new RestAgentGroupStore(groupStore, documentDescriptorStore, jsonSchemaCreator);
+        restStore = new RestAgentGroupStore(groupStore, documentDescriptorStore, jsonSchemaCreator,
+                mock(IGroupWorkspaceStore.class));
     }
 
     // ==================== updateGroup ====================

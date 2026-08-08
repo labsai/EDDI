@@ -4,8 +4,11 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.GroupWorkspace;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
@@ -52,17 +55,19 @@ public class McpGroupTools {
     private final IJsonSerialization jsonSerialization;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
+    private final IGroupWorkspaceStore workspaceStore;
     private final boolean authEnabled;
 
     @Inject
     public McpGroupTools(IRestAgentGroupStore groupStore, IGroupConversationService groupConversationService, IJsonSerialization jsonSerialization,
-            SecurityIdentity identity, OwnershipValidator ownershipValidator,
+            SecurityIdentity identity, OwnershipValidator ownershipValidator, IGroupWorkspaceStore workspaceStore,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
         this.groupStore = groupStore;
         this.groupConversationService = groupConversationService;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
+        this.workspaceStore = workspaceStore;
         this.authEnabled = authEnabled;
     }
 
@@ -516,6 +521,59 @@ public class McpGroupTools {
         } catch (Exception e) {
             LOGGER.error("close_group_conversation failed", e);
             return errorJson("Failed to close group conversation", "INTERNAL", null);
+        }
+    }
+
+    // =================================================================
+    // I13 — standing-team workspace (backlog for human PMs)
+    // =================================================================
+
+    @Tool(description = "Add a task to a standing team's backlog (I13). The backlog persists across "
+            + "discussions; scheduled cadences pull executable tasks from it into task-force runs. "
+            + "Higher priority runs earlier. Returns the created task.")
+    @Blocking
+    public String add_team_task(@ToolArg(description = "Group configuration ID") String groupId,
+                                @ToolArg(description = "Task subject (short, unique within the backlog)") String subject,
+                                @ToolArg(description = "Task description (optional)") String description,
+                                @ToolArg(description = "Priority, higher runs earlier (default 0)") String priority) {
+        requireRole(identity, authEnabled, "eddi-editor");
+        try {
+            if (subject == null || subject.isBlank()) {
+                return errorJson("subject is required");
+            }
+            if (groupStore.getCurrentResourceId(groupId) == null) {
+                return errorJson("Group not found: " + groupId);
+            }
+            var workspace = workspaceStore.readOrCreate(groupId);
+            if (workspace.getBacklog().size() >= GroupWorkspace.MAX_BACKLOG_SIZE) {
+                return errorJson("The backlog already holds " + GroupWorkspace.MAX_BACKLOG_SIZE
+                        + " tasks — complete or delete existing tasks before adding more");
+            }
+            var task = workspace.getBacklog().addTask(new TaskItem(
+                    subject.trim(), description != null ? description : "", parseIntOrDefault(priority, 0)));
+            workspaceStore.update(workspace);
+            return jsonSerialization.serialize(task);
+        } catch (Exception e) {
+            LOGGER.errorf("add_team_task failed: %s", e.getMessage());
+            return errorJson(e.getMessage());
+        }
+    }
+
+    @Tool(description = "List a standing team's backlog (I13): every task with its status, priority, "
+            + "assignee and verification outcome.")
+    @Blocking
+    public String list_team_backlog(@ToolArg(description = "Group configuration ID") String groupId) {
+        requireRole(identity, authEnabled, "eddi-viewer");
+        try {
+            if (groupStore.getCurrentResourceId(groupId) == null) {
+                return errorJson("Group not found: " + groupId);
+            }
+            var workspace = workspaceStore.find(groupId);
+            return jsonSerialization.serialize(
+                    workspace != null ? workspace.getBacklog().getTasks() : List.of());
+        } catch (Exception e) {
+            LOGGER.errorf("list_team_backlog failed: %s", e.getMessage());
+            return errorJson(e.getMessage());
         }
     }
 }
