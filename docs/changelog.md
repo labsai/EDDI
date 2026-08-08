@@ -5,6 +5,13 @@
 
 ---
 
+## 🔎 fix(groups): I11 final-review finding — negotiation state survives into round 2 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i11-negotiation`)
+
+Confirmed MAJOR from the final multi-agent review pass: `continueDiscussion` clears every other round-scoped conclusion (`synthesizedAnswer`, `decision`) with an explicit rationale, but not the persisted negotiation table — so round 2 of a NEGOTIATION group ran against round 1's proposals, and one fresh acceptance could reach "unanimous agreement" on signatures cast for a DIFFERENT question, with `tally.signedAcceptances` pointing at round 1's transcript entries. Fixed: `setNegotiation(null)` at round start, mutation-checked (the continuation test seeds a signed round-1 proposal and asserts it does not survive).
+
+
 ## 🔎 fix(groups): I11 PR #641 review round 1 (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i11-negotiation`)

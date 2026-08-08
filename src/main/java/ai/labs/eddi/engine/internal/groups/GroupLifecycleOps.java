@@ -364,6 +364,13 @@ public class GroupLifecycleOps {
             // and had this round's dissents merged onto them.
             gc.setSynthesizedAnswer(null);
             gc.setDecision(null);
+            // I11 (final-review finding): the negotiation table is a ROUND-scoped
+            // conclusion like the two fields above. Left in place, round 2 of a
+            // NEGOTIATION group runs against round 1's proposals — a single fresh
+            // acceptance can then reach "unanimous agreement" on signatures cast
+            // for a DIFFERENT question, and the signed-acceptance indices in the
+            // decision would even point at round 1's transcript entries.
+            gc.setNegotiation(null);
             gc.setResumeQuestion(question);
             gc.getTranscript().add(new TranscriptEntry(
                     "user", "User", question, 0, "Question",

@@ -982,6 +982,12 @@ class GroupConversationServiceTest {
             inProgress.setGroupId("group-1");
             inProgress.setState(GroupConversationState.IN_PROGRESS);
             inProgress.setRound(1);
+            // Final-review finding: the negotiation table is a round-scoped
+            // conclusion. Seed round 1's table with a signed proposal — round 2
+            // must NOT be able to reach "unanimous agreement" on it.
+            inProgress.negotiationState().addProposal(new GroupConversation.Proposal(
+                    "p1", "a1", 0, "round 1 terms", GroupConversation.PROPOSAL_OPEN,
+                    java.util.List.of("a1"), java.util.Map.of("a1", 3)));
             when(conversationStore.read("gc-1")).thenReturn(gc, inProgress);
             when(conversationStore.compareAndSetState("gc-1",
                     GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
@@ -992,6 +998,8 @@ class GroupConversationServiceTest {
                     () -> service.continueDiscussion("gc-1", "round two question", null));
 
             assertEquals(2, inProgress.getRound());
+            assertNull(inProgress.getNegotiation(),
+                    "round 1's proposals and signatures must not survive into round 2's bargaining");
             var transcript = inProgress.getTranscript();
             assertFalse(transcript.isEmpty());
             var last = transcript.get(transcript.size() - 1);
