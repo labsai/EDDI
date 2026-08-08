@@ -721,16 +721,23 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public Response getGroupApprovalStatus(String groupId, String gcId, String detail) {
-        validateGroupConversationOwnership(groupId, gcId, true);
+        // I6: the READ guard, not the strict HITL guard — the pending HUMAN
+        // member must be able to see the status of the turn they owe (their
+        // rendered prompt lives in the summary below).
+        hitlAccessGuard.requireGroupConversationReadAccess(groupId, gcId);
         try {
             var gc = groupConversationService.readGroupConversation(gcId);
-            boolean paused = gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL;
+            boolean paused = gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL
+                    || gc.getState() == GroupConversation.GroupConversationState.AWAITING_HUMAN_INPUT;
             if ("full".equals(detail)) {
                 // Approver-only callers (not owner, not admin) may read the full
                 // conversation (incl. transcript) only while it is actually awaiting
-                // approval — mirrors the regular surface's read-scope gate.
-                if (!paused && !ownershipValidator.isAdmin(identity)
-                        && !ownershipValidator.isOwner(identity, gc.getUserId())) {
+                // approval — mirrors the regular surface's read-scope gate. The
+                // pending human member does NOT get the full view either: their
+                // working material is the rendered prompt in the summary.
+                if (!ownershipValidator.isAdmin(identity)
+                        && !ownershipValidator.isOwner(identity, gc.getUserId())
+                        && !(paused && ownershipValidator.isApprover(identity))) {
                     return Response.status(Response.Status.FORBIDDEN)
                             .entity("Full approval status is available to approvers only while the group "
                                     + "conversation is awaiting approval — use the summary view")
@@ -756,6 +763,13 @@ public class RestGroupConversation implements IRestGroupConversation {
             summary.put("pauseReason", paused && gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");
             summary.put("timeoutPolicy", paused && gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy().name() : "");
             summary.put("awaitingApprovalTaskIds", awaitingTaskIds);
+            // I6: a human-turn pause carries WHO is up and WHAT they were asked —
+            // the summary is that member's working view, no transcript needed.
+            if (gc.getPendingHumanInput() != null) {
+                summary.put("pendingMemberId", gc.getPendingHumanInput().memberId());
+                summary.put("pendingMemberDisplayName", gc.getPendingHumanInput().displayName());
+                summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
+            }
             return Response.ok(summary).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)

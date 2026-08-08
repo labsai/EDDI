@@ -161,6 +161,40 @@ public class HitlAccessGuard {
     }
 
     /**
+     * Read access to a group conversation's approval/pause STATUS (I6): the
+     * owner/admin/approver rule, plus the one extra reader the strict guard cannot
+     * admit — the HUMAN member a pending turn is waiting on. The inbox tells that
+     * member they are up; without this, the status API (where their rendered prompt
+     * lives) would refuse to show them what they were asked. Read-only surfaces
+     * only — approve/cancel/submit keep their own guards.
+     *
+     * @throws ForbiddenException
+     *             if the caller may not read this group conversation's status.
+     */
+    public void requireGroupConversationReadAccess(String groupId, String groupConversationId) {
+        GroupConversation gc;
+        try {
+            gc = groupConversationService.readGroupConversation(groupConversationId);
+        } catch (ResourceNotFoundException e) {
+            LOGGER.debugf("Group conversation not found for read-access check: %s", sanitize(groupConversationId));
+            return; // the actual operation 404s
+        } catch (Exception e) {
+            throw new ForbiddenException("Access denied: unable to verify group conversation");
+        }
+        if (groupId != null && !groupId.equals(gc.getGroupId())) {
+            LOGGER.infof("Group conversation %s does not belong to group %s",
+                    sanitize(groupConversationId), sanitize(groupId));
+            throw new jakarta.ws.rs.NotFoundException("Group conversation not found.");
+        }
+        String callerId = identity != null && identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
+        if (gc.getPendingHumanInput() != null && callerId != null
+                && callerId.equals(gc.getPendingHumanInput().memberId())) {
+            return;
+        }
+        ownershipValidator.requireOwnerAdminOrApprover(identity, gc.getUserId(), "group conversation");
+    }
+
+    /**
      * Authorization for submitting a HUMAN member's turn (I6): the caller must BE
      * that member (their principal equals the pending turn's member id) or an
      * admin. Deliberately narrower than the approve surface — an

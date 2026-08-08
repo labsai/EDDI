@@ -293,6 +293,33 @@ class HitlAccessGuardTest {
     }
 
     @Test
+    void readAccess_pendingMemberMayReadTheStatusOfTheirTurn() throws Exception {
+        var gc = humanPausedGc();
+        gc.setPendingHumanInput(new GroupConversation.PendingHumanInput("hannah", "Hannah", 0, 0, 1,
+                "OPINION", "the prompt", "SKIP_TURN", java.time.Instant.now()));
+        callerNamed("hannah");
+        // Not owner, not admin, not approver — the strict guard would refuse.
+        doThrow(new ForbiddenException("no"))
+                .when(ownershipValidator).requireOwnerAdminOrApprover(any(), any(), any());
+
+        guard.requireGroupConversationReadAccess("g1", "gc1");
+    }
+
+    @Test
+    void readAccess_strangerStillRefused_andWrongGroup404s() throws Exception {
+        var gc = humanPausedGc();
+        gc.setPendingHumanInput(new GroupConversation.PendingHumanInput("hannah", "Hannah", 0, 0, 1,
+                "OPINION", "the prompt", "SKIP_TURN", java.time.Instant.now()));
+        callerNamed("mallory");
+        doThrow(new ForbiddenException("no"))
+                .when(ownershipValidator).requireOwnerAdminOrApprover(any(), any(), any());
+
+        assertThrows(ForbiddenException.class, () -> guard.requireGroupConversationReadAccess("g1", "gc1"));
+        assertThrows(jakarta.ws.rs.NotFoundException.class,
+                () -> guard.requireGroupConversationReadAccess("other-group", "gc1"));
+    }
+
+    @Test
     void groupInbox_pendingMemberSeesTheirTurn_withoutOwningTheConversation() throws Exception {
         when(ownershipValidator.isAdmin(identity)).thenReturn(false);
         when(ownershipValidator.isApprover(identity)).thenReturn(false);

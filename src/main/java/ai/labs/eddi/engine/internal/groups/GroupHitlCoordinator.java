@@ -32,6 +32,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.Counter;
 import org.jboss.logging.Logger;
 
@@ -775,7 +776,16 @@ public class GroupHitlCoordinator {
                 // the pause instead, mirroring the phase-name drift branch above.
                 // Independent of savedPhaseName: a resumePoint's own phaseIdx is the
                 // authority for which phase's roster to check.
-                if (savedResumePoint != null) {
+                // I6 scoping: this guard's ">= size means drift" arithmetic is the
+                // APPROVAL bookmark's contract (the bookmarked speaker itself
+                // re-runs, so its index must exist). Human-turn bookmarks cannot
+                // reach this method — their state is AWAITING_HUMAN_INPUT, which
+                // the CAS above rejects — and their advanced (speakerIdx+1)
+                // semantics would false-positive here at the last-speaker
+                // boundary; the executors clamp their indices safely instead.
+                if (savedResumePoint != null
+                        && !GroupConversation.RESUME_KIND_HUMAN_TURN.equals(savedResumePoint.pauseKind())
+                        && !GroupConversation.RESUME_KIND_HUMAN_TURN_PARALLEL.equals(savedResumePoint.pauseKind())) {
                     List<GroupMember> currentSpeakers = savedResumePoint.phaseIdx() < phases.size()
                             // I7: the same roster the phase loop will use, recruits
                             // included — resolving against the config alone would
@@ -981,7 +991,7 @@ public class GroupHitlCoordinator {
                     member.agentId(), member.displayName(), phaseIdx, phase.name()));
         }
         LOGGER.infof("Group discussion %s paused for human input from member '%s' at phase %d",
-                gc.getId(), member.agentId(), phaseIdx);
+                LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(member.agentId()), phaseIdx);
     }
 
     /**
@@ -1018,9 +1028,10 @@ public class GroupHitlCoordinator {
                     HitlSchedules.METADATA_CONVERSATION_ID_KEY, gc.getId()));
             scheduleStore.createSchedule(schedule);
             LOGGER.infof("Scheduled human-turn timeout for %s at %s (policy: %s)",
-                    gc.getId(), fireAt, pending.onTimeout());
+                    LogSanitizer.sanitize(gc.getId()), fireAt, LogSanitizer.sanitize(pending.onTimeout()));
         } catch (Exception e) {
-            LOGGER.warnf("Failed to schedule human-turn timeout for %s: %s", gc.getId(), e.getMessage());
+            LOGGER.warnf("Failed to schedule human-turn timeout for %s: %s",
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
         }
     }
 
@@ -1156,16 +1167,13 @@ public class GroupHitlCoordinator {
         conversationStore.updateIfState(gc, GroupConversationState.AWAITING_HUMAN_INPUT);
 
         // Same post-CAS order as resumeDiscussion: token first (a racing cancel
-        // must find a signalable token), then the schedule, then metrics/audit.
+        // must find a signalable token), then the schedule. The metric, the audit
+        // entry and the resume event are deliberately deferred until the resume is
+        // actually ENQUEUED below — a submit failure rolls the pause back, and a
+        // rolled-back attempt must not pollute the resume metric or the EU-AI-Act
+        // audit trail (the same rule resumeDiscussion follows).
         activeTokens.put(gc.getId(), new DiscussionControlToken());
         deleteGroupHitlTimeoutSchedule(groupConversationId);
-        counterGroupHitlResume.increment();
-        auditHumanTurnResolution(gc, pending, resolvedBy, skipReason != null);
-
-        if (listener != null) {
-            listener.onHitlResume(new GroupConversationEventSink.HitlResumeEvent(
-                    skipReason != null ? "HUMAN_TURN_SKIPPED" : "HUMAN_INPUT", null, resolvedBy));
-        }
 
         final int startFromPhase = pending.phaseIdx();
         var question = gc.getResumeQuestion() != null ? gc.getResumeQuestion() : gc.getOriginalQuestion();
@@ -1203,10 +1211,34 @@ public class GroupHitlCoordinator {
             } catch (Exception restoreEx) {
                 LOGGER.errorf(restoreEx, "Failed to restore human pause for %s", groupConversationId);
             }
-            activeTokens.remove(gc.getId());
+            // Remove-and-recheck, not a plain remove: a cancel signalled between
+            // the token registration above and this rollback would otherwise be
+            // dropped with the discarded token, leaving a "cancelled" discussion
+            // restored to AWAITING_HUMAN_INPUT with an armed timer.
+            removeTokenAndConvertIfSignalled(gc, listener);
             throw new GroupDiscussionException("Could not schedule the resumed discussion — try again", e);
         }
-        return gc;
+
+        // The resume is committed and enqueued — now count it, audit it, and tell
+        // SSE subscribers the discussion is live again.
+        counterGroupHitlResume.increment();
+        auditHumanTurnResolution(gc, pending, resolvedBy, skipReason != null);
+        if (listener != null) {
+            listener.onHitlResume(new GroupConversationEventSink.HitlResumeEvent(
+                    skipReason != null ? "HUMAN_TURN_SKIPPED" : "HUMAN_INPUT", null, resolvedBy));
+        }
+
+        // A freshly-read copy, not the live instance: resumeWork mutates gc on a
+        // background thread (transcript appends, cost maps) while the caller
+        // serializes the return value — handing back the live object is a
+        // serialization-time race.
+        try {
+            return conversationStore.read(groupConversationId);
+        } catch (Exception e) {
+            LOGGER.debugf("Post-resume re-read of %s failed (%s) — returning the pre-resume snapshot state",
+                    groupConversationId, e.getMessage());
+            return gc;
+        }
     }
 
     /** Audit entry for a human turn's resolution (submission or timeout skip). */

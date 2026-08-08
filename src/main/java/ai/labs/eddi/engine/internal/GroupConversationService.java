@@ -677,7 +677,19 @@ public class GroupConversationService implements IGroupConversationService {
                 // comparison across two different phases would be meaningless.
                 List<TranscriptEntry> previousRepeatEntries = null;
 
-                for (int repeat = 0; repeat < Math.max(phase.repeats(), 1); repeat++) {
+                // I6: a mid-phase bookmark names the repeat the pause landed on —
+                // start THERE instead of replaying every earlier repeat (each
+                // replayed repeat is a full round of duplicate turns and spend).
+                // Peeked, not consumed: the loop's own read-and-clear below still
+                // owns the speaker offset. Clamped so a bookmark from a config
+                // whose repeats shrank cannot skip the phase entirely.
+                int startRepeat = 0;
+                GroupConversation.ResumePoint repeatBookmark = gc.getResumePoint();
+                if (repeatBookmark != null && repeatBookmark.phaseIdx() == phaseIdx) {
+                    startRepeat = Math.min(Math.max(repeatBookmark.repeatIdx(), 0), Math.max(phase.repeats(), 1) - 1);
+                }
+
+                for (int repeat = startRepeat; repeat < Math.max(phase.repeats(), 1); repeat++) {
 
                     // --- maxTurns safety cap ---
                     if (turnCounter.get() >= maxTurns) {
@@ -1133,9 +1145,11 @@ public class GroupConversationService implements IGroupConversationService {
             // the no-op signal branch. Resume re-registers a fresh token. Re-check the
             // removed token so a cancel that raced this remove is not silently dropped.
             removeTokenAndConvertIfSignalled(gc, listener);
-            // Drop the incremental verification cursor once this leg ends, but keep it
-            // across an HITL pause so a resume continues from where it left off.
-            if (gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
+            // Drop the incremental verification cursor once this leg ends, but keep
+            // it across ANY pause (approval or a human turn, I6) so a resume
+            // continues from where it left off.
+            if (gc.getState() != GroupConversationState.AWAITING_APPROVAL
+                    && gc.getState() != GroupConversationState.AWAITING_HUMAN_INPUT) {
                 signingGuard.forgetConversation(gc.getId());
             }
             // Defer ephemeral cleanup to closeGroupConversation()/deleteGroupConversation()

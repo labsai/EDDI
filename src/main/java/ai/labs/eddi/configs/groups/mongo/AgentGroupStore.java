@@ -14,6 +14,7 @@ import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -92,8 +93,11 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         if (!problems.isEmpty()) {
             throw new IllegalArgumentException(String.join("; ", problems));
         }
+        // "members": null in the JSON reaches here as a literal null list — the
+        // pure helper already tolerates it; there is nothing human to validate.
+        List<AgentGroupConfiguration.GroupMember> members = config.getMembers() != null ? config.getMembers() : List.of();
         // Nested check needs the store — kept out of the pure helper.
-        for (var member : config.getMembers()) {
+        for (var member : members) {
             if (member != null && member.memberType() == AgentGroupConfiguration.MemberType.GROUP) {
                 AgentGroupConfiguration child = readChildConfig(member.agentId());
                 if (child != null && hasHumanMembers(child)) {
@@ -105,11 +109,11 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             }
         }
         String moderator = config.getModeratorAgentId();
-        if (moderator != null && config.getMembers().stream()
+        if (moderator != null && members.stream()
                 .anyMatch(m -> m != null && m.memberType() == AgentGroupConfiguration.MemberType.HUMAN
                         && moderator.equals(m.agentId()))) {
             LOGGER.warnf("Group '%s' names HUMAN member '%s' as moderator — every synthesis phase will pause and wait "
-                    + "for their input", config.getName(), moderator);
+                    + "for their input", LogSanitizer.sanitize(config.getName()), LogSanitizer.sanitize(moderator));
         }
     }
 
@@ -157,7 +161,14 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         var humanConfig = config.getHumanMemberConfig();
         if (humanConfig != null && humanConfig.turnTimeout() != null && !humanConfig.turnTimeout().isBlank()) {
             try {
-                Duration.parse(humanConfig.turnTimeout());
+                Duration parsed = Duration.parse(humanConfig.turnTimeout());
+                // Duration.parse accepts PT0S and PT-4H; both would arm a timeout
+                // that fires effectively immediately (past-due clamps to the grace
+                // window), silently skipping every human turn.
+                if (parsed.isZero() || parsed.isNegative()) {
+                    problems.add("humanMemberConfig.turnTimeout must be a positive duration, not '"
+                            + humanConfig.turnTimeout() + "'");
+                }
             } catch (Exception e) {
                 problems.add("humanMemberConfig.turnTimeout must be an ISO-8601 duration (e.g. PT4H), not '"
                         + humanConfig.turnTimeout() + "'");

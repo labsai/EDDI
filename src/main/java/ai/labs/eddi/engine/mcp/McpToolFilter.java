@@ -60,7 +60,7 @@ public class McpToolFilter implements ToolFilter {
             // HITL approval surface (McpHitlTools) — mirrors the REST HITL endpoints
             "list_pending_approvals", "get_approval_status", "resume_conversation", "cancel_conversation",
             "list_group_pending_approvals", "list_all_group_pending_approvals", "get_group_approval_status",
-            "approve_group_phase", "cancel_group_discussion",
+            "approve_group_phase", "cancel_group_discussion", "submit_group_human_input",
             // Persistent user memory (McpMemoryTools) — role-guarded (viewer read / admin
             // write) + per-user ownership
             "list_user_memories", "get_visible_memories", "search_user_memories", "get_memory_by_key",

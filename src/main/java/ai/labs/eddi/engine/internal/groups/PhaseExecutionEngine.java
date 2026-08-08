@@ -98,18 +98,6 @@ public class PhaseExecutionEngine {
      * declare {@code GroupDiscussionException} WITHOUT being caught by the generic
      * failure handling (the same reasoning as
      * {@code GroupConversationService.MemberTurnCancelledException}).
-     *
-     * @param member
-     *            the HUMAN member whose turn is up
-     * @param speakerIdx
-     *            the member's index — into the phase's resolved speaker list for
-     *            sequential turns, into the phase's human-only sublist for parallel
-     *            ones ({@code parallel} distinguishes the two)
-     * @param renderedPrompt
-     *            the phase input rendered for this member, exactly as an agent
-     *            would have received it
-     * @param parallel
-     *            whether this turn belongs to a PARALLEL phase's human tail
      */
     public static final class HumanTurnRequired extends RuntimeException {
         private final transient GroupMember member;
@@ -117,6 +105,19 @@ public class PhaseExecutionEngine {
         private final String renderedPrompt;
         private final boolean parallel;
 
+        /**
+         * @param member
+         *            the HUMAN member whose turn is up
+         * @param speakerIdx
+         *            the member's index — into the phase's resolved speaker list for
+         *            sequential turns, into the phase's human-only sublist for parallel
+         *            ones ({@code parallel} distinguishes the two)
+         * @param renderedPrompt
+         *            the phase input rendered for this member, exactly as an agent
+         *            would have received it
+         * @param parallel
+         *            whether this turn belongs to a PARALLEL phase's human tail
+         */
         public HumanTurnRequired(GroupMember member, int speakerIdx, String renderedPrompt, boolean parallel) {
             super("Human member turn required: " + member.agentId(), null, false, false);
             this.member = member;

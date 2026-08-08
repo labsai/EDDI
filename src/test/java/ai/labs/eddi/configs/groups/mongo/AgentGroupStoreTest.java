@@ -158,6 +158,30 @@ class AgentGroupStoreTest {
     }
 
     @Test
+    void humanTimeout_zeroOrNegative_isRejected() {
+        // Duration.parse accepts both; armed, they would fire effectively
+        // immediately and silently skip every human turn.
+        for (String bad : new String[]{"PT0S", "PT-4H"}) {
+            var config = humanConfig(DiscussionStyle.CUSTOM, List.of(phase("Open", "ALL")), human("h-1", "Hannah"));
+            config.setHumanMemberConfig(new HumanMemberConfig(bad, null));
+
+            var problems = AgentGroupStore.humanMemberProblems(config);
+
+            assertEquals(1, problems.size(), bad);
+            assertTrue(problems.get(0).contains("positive"), problems.toString());
+        }
+    }
+
+    @Test
+    void humanValidation_nullMembersList_neverNPEs() {
+        var config = config(DiscussionStyle.CUSTOM, List.of(phase("Open", "ALL")), "mod");
+        config.setMembers(null);
+
+        assertTrue(AgentGroupStore.humanMemberProblems(config).isEmpty());
+        assertFalse(AgentGroupStore.hasHumanMembers(config));
+    }
+
+    @Test
     void agentOnlyGroups_produceNoHumanProblems() {
         assertTrue(AgentGroupStore.humanMemberProblems(config(DiscussionStyle.TASK_FORCE, null, null)).isEmpty(),
                 "the whole matrix only applies when a HUMAN member exists");

@@ -313,6 +313,11 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
                 groupConversationId != null ? groupConversationId : "unknown");
         String threadTs = expandedMode ? null : userThreadTs;
         postSafe(channelId, threadTs, msg);
+        // A human pause is terminal for THIS listener instance — the discussion
+        // leg ends, and a resumed leg gets its own listener. Without the count
+        // down, SlackEventHandler blocks its full awaitCompletion timeout on
+        // every human pause (the same rule onHitlPause follows).
+        completionLatch.countDown();
     }
 
     /**

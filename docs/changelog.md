@@ -5,6 +5,26 @@
 
 ---
 
+## 🔎 fix(groups): I6 PR #640 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i6-human-members`)
+
+CI failure + all 20 review comments (CodeQL ×5, code-quality ×4, CodeRabbit ×11) triaged; every one accepted and fixed:
+
+- **CI**: `submit_group_human_input` added to `McpToolFilter`'s whitelist (a non-whitelisted MCP tool is unreachable dead code — the guard test caught exactly that).
+- **The pending member can now READ their turn**: new `HitlAccessGuard.requireGroupConversationReadAccess` — owner/admin/approver PLUS the human member a pending turn waits on — used by the REST and MCP approval-status endpoints (whose summary now carries `pendingMemberId`/`pendingHumanPrompt` on both surfaces). The full-transcript view stays role-gated: the member's working material is the rendered prompt, never the transcript.
+- **Mid-phase resume no longer replays earlier repeats**: the phase loop starts at the bookmark's `repeatIdx` (clamped) — each replayed repeat was a full round of duplicate turns and spend.
+- **Metric/audit/resume-event moved AFTER the successful executor submit** in the human-turn resolution (a rolled-back attempt must not pollute the resume metric or the EU-AI-Act trail — the rule `resumeDiscussion` already followed); the rollback path now re-checks the control token (`removeTokenAndConvertIfSignalled`) so a cancel racing the rollback is not dropped; and the method returns a **freshly-read copy** instead of the live instance the background leg mutates under the serializer.
+- **Slack listener releases its completion latch on a human pause** (it blocked `awaitCompletion`'s full 300s on every human turn); **deletion of an `AWAITING_HUMAN_INPUT` conversation runs the paused-cleanup branch** (timeout schedule + ephemeral agents + signing cursor); **the signing cursor now survives a human pause** in `executeDiscussion`'s finally; **crash-recovery sweeps are isolated** (a failing approval query no longer skips the human re-arm).
+- **Inbox starvation fixed**: both pause states are queried with the full limit, merged oldest-pause-first, then capped — approvals can no longer push a member's own turn out of the window.
+- **Validation**: `turnTimeout` must be positive (PT0S/PT-4H parsed but armed an immediately-firing timeout that silently skipped every turn); `"members": null` cannot NPE the nested/moderator checks.
+- **F2 drift guard explicitly scoped to approval bookmarks** (human bookmarks never reach `resumeDiscussion` — disjoint states — and their advanced `speakerIdx+1` semantics would false-positive at the last-speaker boundary; the executors clamp instead).
+- CodeQL ×5 sanitized; the `HumanTurnRequired` `@param` docs moved from class to constructor Javadoc (×4).
+
+**Tests:** +7 (read-access matrix incl. stranger-refused + wrong-group-404; full-view refusal for the pending member; PT0S/PT-4H rejection; null-members no-NPE; MCP guard/gate re-alignment ×2). Suites: 2882 green across `engine.internal` + `configs.groups` + `engine.hitl` + `engine.mcp`; checkstyle clean.
+
+---
+
 ## 🙋 feat(groups): I6 — humans as group members (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i6-human-members`)

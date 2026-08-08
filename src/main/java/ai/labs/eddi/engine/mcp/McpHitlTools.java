@@ -337,12 +337,18 @@ public class McpHitlTools {
             return errorJson("groupId and conversationId are required", "BAD_REQUEST", null);
         }
         try {
-            hitlAccessGuard.requireGroupConversationHitlAccess(groupId, conversationId);
+            // I6: the READ guard — the pending HUMAN member may read the status
+            // of the turn they owe (their rendered prompt is in the summary).
+            hitlAccessGuard.requireGroupConversationReadAccess(groupId, conversationId);
             GroupConversation gc = groupConversationService.readGroupConversation(conversationId);
             boolean paused = gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL
                     || gc.getState() == GroupConversation.GroupConversationState.AWAITING_HUMAN_INPUT;
             if ("full".equals(detail)) {
-                if (!paused && !ownershipValidator.isAdmin(identity) && !ownershipValidator.isOwner(identity, gc.getUserId())) {
+                // The pending human member (admitted by the READ guard) does NOT
+                // get the full view — their working material is the rendered
+                // prompt in the summary. Same gate as the REST surface.
+                if (!ownershipValidator.isAdmin(identity) && !ownershipValidator.isOwner(identity, gc.getUserId())
+                        && !(paused && ownershipValidator.isApprover(identity))) {
                     return errorJson("Full approval status is available to approvers only while the group conversation "
                             + "is awaiting approval — use the summary view", "FORBIDDEN", null);
                 }

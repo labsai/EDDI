@@ -135,7 +135,9 @@ public class HitlCrashRecoveryObserver {
         LOGGER.info("HITL crash recovery running...");
         int rearmedRegular = repairRegularPaused();
         int recoveredInProgress = recoverRegularInProgress();
-        int rearmedGroup = repairGroupPaused();
+        // Two independent sweeps: a failing AWAITING_APPROVAL query must not
+        // silently skip the AWAITING_HUMAN_INPUT re-arm (I6), or vice versa.
+        int rearmedGroup = repairGroupPaused() + repairGroupHumanPaused();
 
         if (rearmedRegular > 0 || recoveredInProgress > 0 || rearmedGroup > 0) {
             LOGGER.warnf("HITL crash recovery: re-armed %d regular + %d group timeout schedule(s), "
@@ -377,7 +379,6 @@ public class HitlCrashRecoveryObserver {
                     LOGGER.warnf("Failed to repair paused group conversation %s: %s", gc.getId(), e.getMessage());
                 }
             }
-            count += repairGroupHumanPaused();
             return count;
         } catch (Exception e) {
             LOGGER.warnf("Error during group pause repair: %s", e.getMessage());
