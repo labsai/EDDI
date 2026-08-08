@@ -5,6 +5,21 @@
 
 ---
 
+## 🔎 fix(groups): I11 PR #641 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i11-negotiation`)
+
+All 12 review comments (CodeQL ×4, code-quality ×3, CodeRabbit ×5) triaged; every one accepted and fixed:
+
+- **Stale signatures could reach "unanimity" (the real defect):** `applyMove` never withdrew an agent's earlier signature when they moved. Now: putting new terms on the table (`addProposal`, both the PROPOSAL path and a BARGAIN counter) **withdraws the mover's signatures from every other open proposal** — and, symmetrically, signing someone else's terms **supersedes the signer's own open offer**. A turn carrying BOTH `accept` and `proposal` resolves deterministically for the proposal (the accept is ignored with a WARN — new terms mean the mover is not settling). Mutation-checked: without the withdrawal, the new test's agreement check would pass on a signature its signatory abandoned.
+- **Schema v4 (CodeRabbit Major, accepted):** `negotiationState` is resume-critical — an older deployment re-saving a paused v4 document would drop the table and the agreement check would run empty. `CURRENT_SCHEMA_VERSION` 3→4, identity hop (v3 docs have no negotiation state). Note: the I12 branch bumps to 4 for `runtimePhases` with the same reasoning — on merge the two v4s coalesce into one release-shape v4, which is correct: both features ship together and any pre-release pod must refuse both.
+- **`NegotiationState` encapsulated** (code-quality ×2): getters return unmodifiable views; mutation goes through `addProposal`/`replaceProposal`/`addConcession` — the table cannot be edited behind the state's back.
+- **Unused `phase` parameter dropped** from `applyRepeat` (call sites updated); **moderator filter null-safe** (`filter(Objects::nonNull)` before the id comparison); **CodeQL ×4** log-injection sites sanitized (`LogSanitizer` in `NegotiationEngine` ×3 + the service's skipIf log).
+
+**Tests:** +3 (counter-proposal withdraws the stale signature AND blocks the stale agreement; accept+proposal in one turn → proposal wins; GROUP member's signature not required for unanimity) and 2 extended (superseded-proposal acceptance is inert — the case the DisplayName claimed; the scripted bargain now asserts p2 is SUPERSEDED once its owner signs p3). `NegotiationEngineTest` 15 green; group suites green.
+
+---
+
 ## 🤝 feat(groups): I11 — NEGOTIATION style, the trade form (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i11-negotiation`)

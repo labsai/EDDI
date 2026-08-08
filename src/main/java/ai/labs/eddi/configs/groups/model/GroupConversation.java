@@ -30,8 +30,16 @@ public class GroupConversation {
      * Current document shape this code understands (Wave 0, F6). Bump whenever a
      * Wave adds a field resume-time logic depends on, and register that version's
      * migration in {@code GroupConversationSchemaMigrations}.
+     * <p>
+     * Version 4 (I11): {@link #negotiationState} — resume-critical bargaining
+     * state. An older deployment resuming (or merely re-saving) a paused v4
+     * document would silently drop the proposals, signed acceptances and the
+     * concession ledger, and the agreement check would then run against an empty
+     * table — exactly the class of corruption the newer-than-current refusal exists
+     * to prevent. No migration entry: v3 documents have no negotiation state and
+     * the field defaults correctly via Jackson (identity hop).
      */
-    public static final int CURRENT_SCHEMA_VERSION = 3;
+    public static final int CURRENT_SCHEMA_VERSION = 4;
     /**
      * The shape this specific document was last written in. Checked before a
      * resume: newer than {@link #CURRENT_SCHEMA_VERSION} refuses (this deployment
@@ -417,20 +425,42 @@ public class GroupConversation {
         private List<Proposal> proposals = new CopyOnWriteArrayList<>();
         private List<Concession> concessions = new CopyOnWriteArrayList<>();
 
+        /**
+         * Read-only view — all mutation goes through {@link #addProposal},
+         * {@link #replaceProposal} and {@link #addConcession}, so the table cannot be
+         * edited behind the state's back.
+         */
         public List<Proposal> getProposals() {
-            return proposals;
+            return Collections.unmodifiableList(proposals);
         }
 
         public void setProposals(List<Proposal> proposals) {
             this.proposals = proposals != null ? new CopyOnWriteArrayList<>(proposals) : new CopyOnWriteArrayList<>();
         }
 
+        /** Read-only view — see {@link #getProposals}. */
         public List<Concession> getConcessions() {
-            return concessions;
+            return Collections.unmodifiableList(concessions);
         }
 
         public void setConcessions(List<Concession> concessions) {
             this.concessions = concessions != null ? new CopyOnWriteArrayList<>(concessions) : new CopyOnWriteArrayList<>();
+        }
+
+        public void addProposal(Proposal proposal) {
+            proposals.add(proposal);
+        }
+
+        /** In-place status/signature transition; a no-op if {@code oldOne} is gone. */
+        public void replaceProposal(Proposal oldOne, Proposal newOne) {
+            int idx = proposals.indexOf(oldOne);
+            if (idx >= 0) {
+                proposals.set(idx, newOne);
+            }
+        }
+
+        public void addConcession(Concession concession) {
+            concessions.add(concession);
         }
     }
 

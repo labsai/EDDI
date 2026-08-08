@@ -100,7 +100,7 @@ class NegotiationEngineTest {
     void apply_proposalTurn() {
         var gc = gc();
 
-        NegotiationEngine.applyRepeat(gc, bargainPhase(), List.of(proposal("a1", "We split revenue 50/50.")), 10, 0);
+        NegotiationEngine.applyRepeat(gc, List.of(proposal("a1", "We split revenue 50/50.")), 10, 0);
 
         var proposals = gc.getNegotiation().getProposals();
         assertEquals(1, proposals.size());
@@ -116,9 +116,9 @@ class NegotiationEngineTest {
     @DisplayName("a new proposal by the same agent SUPERSEDES their open one — one live offer per agent")
     void apply_supersession() {
         var gc = gc();
-        NegotiationEngine.applyRepeat(gc, bargainPhase(), List.of(proposal("a1", "50/50")), 0, 0);
+        NegotiationEngine.applyRepeat(gc, List.of(proposal("a1", "50/50")), 0, 0);
 
-        NegotiationEngine.applyRepeat(gc, bargainPhase(),
+        NegotiationEngine.applyRepeat(gc,
                 List.of(bargain("a1", "{\"proposal\": {\"terms\": \"55/45 with support included\"}}")), 1, 1);
 
         var proposals = gc.getNegotiation().getProposals();
@@ -132,26 +132,69 @@ class NegotiationEngineTest {
     @DisplayName("accepting an unknown or superseded proposal is ignored; an unparseable turn is inert")
     void apply_badMovesAreInert() {
         var gc = gc();
-        NegotiationEngine.applyRepeat(gc, bargainPhase(), List.of(proposal("a1", "50/50")), 0, 0);
+        NegotiationEngine.applyRepeat(gc, List.of(proposal("a1", "50/50")), 0, 0);
         var before = List.copyOf(gc.getNegotiation().getProposals());
 
-        NegotiationEngine.applyRepeat(gc, bargainPhase(), List.of(
+        NegotiationEngine.applyRepeat(gc, List.of(
                 bargain("a2", "{\"accept\": \"p99\"}"),
                 bargain("a2", "Honestly I just want to talk it through some more.")), 1, 1);
 
         assertEquals(before, gc.getNegotiation().getProposals(), "no guessed acceptances, no state drift");
         assertTrue(gc.getNegotiation().getConcessions().isEmpty());
+
+        // p1 is superseded by a1's counter; a2 may no longer sign it.
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a1", "{\"proposal\": {\"terms\": \"55/45\"}}")), 3, 1);
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a2", "{\"accept\": \"p1\"}")), 4, 1);
+        assertEquals(List.of("a1"), gc.getNegotiation().getProposals().get(0).acceptedBy(),
+                "a superseded proposal cannot gain new signatures");
+    }
+
+    @Test
+    @DisplayName("a counter-proposal withdraws the mover's signature from every other open proposal")
+    void apply_counterProposalWithdrawsStaleSignatures() {
+        var gc = gc();
+        NegotiationEngine.applyRepeat(gc, List.of(proposal("a1", "50/50")), 0, 0);
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a2", "{\"accept\": \"p1\"}")), 1, 1);
+        assertEquals(List.of("a1", "a2"), gc.getNegotiation().getProposals().get(0).acceptedBy());
+
+        // a2 moves away — new terms on the table.
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a2", "{\"proposal\": {\"terms\": \"45/55\"}}")), 2, 2);
+
+        Proposal p1 = gc.getNegotiation().getProposals().get(0);
+        assertEquals(List.of("a1"), p1.acceptedBy(), "the abandoned signature is withdrawn");
+        assertFalse(p1.acceptanceEntryIndices().containsKey("a2"), "and its signed entry index with it");
+        // Mutation-check for the agreement path: without the withdrawal, p1 would
+        // now "reach unanimity" on a signature a2 walked away from.
+        assertFalse(NegotiationEngine.checkAndRecordAgreement(gc, List.of(ALICE, BOB, MOD), "mod", "Bargaining"),
+                "no agreement on a stale signature");
+    }
+
+    @Test
+    @DisplayName("a turn carrying both accept and proposal resolves for the proposal — the accept is ignored")
+    void apply_acceptPlusProposal_proposalWins() {
+        var gc = gc();
+        NegotiationEngine.applyRepeat(gc, List.of(proposal("a1", "50/50")), 0, 0);
+
+        NegotiationEngine.applyRepeat(gc, List.of(
+                bargain("a2", "{\"accept\": \"p1\", \"proposal\": {\"terms\": \"45/55\"}}")), 1, 1);
+
+        var proposals = gc.getNegotiation().getProposals();
+        assertEquals(List.of("a1"), proposals.get(0).acceptedBy(),
+                "the accept is ignored — new terms mean the mover is not settling");
+        assertEquals(2, proposals.size());
+        assertEquals("a2", proposals.get(1).byAgentId());
+        assertEquals(GroupConversation.PROPOSAL_OPEN, proposals.get(1).status());
     }
 
     @Test
     @DisplayName("the ledger accumulates across rounds, each line referencing the round it was made in")
     void apply_ledgerAccumulation() {
         var gc = gc();
-        NegotiationEngine.applyRepeat(gc, bargainPhase(), List.of(
+        NegotiationEngine.applyRepeat(gc, List.of(
                 bargain("a1", "{\"proposal\": {\"terms\": \"50/50\"}, "
                         + "\"concessions\": [{\"gaveUp\": \"exclusivity\", \"inReturnFor\": \"faster payout\"}]}")),
                 0, 0);
-        NegotiationEngine.applyRepeat(gc, bargainPhase(), List.of(
+        NegotiationEngine.applyRepeat(gc, List.of(
                 bargain("a2", "{\"concessions\": [{\"gaveUp\": \"launch veto\", \"inReturnFor\": \"quarterly review\"}]}")), 1, 1);
 
         var ledger = gc.getNegotiation().getConcessions();
@@ -170,8 +213,8 @@ class NegotiationEngineTest {
     @DisplayName("unanimous acceptance records the AGREEMENT with the signed entry indices — the co-signatures")
     void agreement_unanimousAcceptance() {
         var gc = gc();
-        NegotiationEngine.applyRepeat(gc, bargainPhase(), List.of(proposal("a1", "We split revenue 50/50.")), 5, 0);
-        NegotiationEngine.applyRepeat(gc, bargainPhase(), List.of(bargain("a2", "{\"accept\": \"p1\"}")), 7, 1);
+        NegotiationEngine.applyRepeat(gc, List.of(proposal("a1", "We split revenue 50/50.")), 5, 0);
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a2", "{\"accept\": \"p1\"}")), 7, 1);
 
         assertTrue(NegotiationEngine.checkAndRecordAgreement(gc, List.of(ALICE, BOB, MOD), "mod", "Bargaining"));
 
@@ -189,7 +232,7 @@ class NegotiationEngineTest {
     @DisplayName("partial acceptance is no agreement; the moderator's signature is not required")
     void agreement_partialIsNone() {
         var gc = gc();
-        NegotiationEngine.applyRepeat(gc, bargainPhase(), List.of(
+        NegotiationEngine.applyRepeat(gc, List.of(
                 proposal("a1", "50/50"),
                 proposal("a2", "60/40")), 0, 0);
 
@@ -229,7 +272,7 @@ class NegotiationEngineTest {
     @DisplayName("the table renders open proposals (with ids and signatories) and the ledger into a BARGAIN turn")
     void render_tableIntoBargainTurn() {
         var gc = gc();
-        NegotiationEngine.applyRepeat(gc, bargainPhase(), List.of(
+        NegotiationEngine.applyRepeat(gc, List.of(
                 bargain("a1", "{\"proposal\": {\"terms\": \"50/50 split\"}, "
                         + "\"concessions\": [{\"gaveUp\": \"exclusivity\", \"inReturnFor\": \"faster payout\"}]}")),
                 0, 0);
@@ -248,7 +291,7 @@ class NegotiationEngineTest {
         var gc = gc();
         assertEquals("PROMPT", NegotiationEngine.appendStateIfRelevant("PROMPT", gc, bargainPhase()));
 
-        NegotiationEngine.applyRepeat(gc, bargainPhase(), List.of(proposal("a1", "50/50")), 0, 0);
+        NegotiationEngine.applyRepeat(gc, List.of(proposal("a1", "50/50")), 0, 0);
         var opinionPhase = new DiscussionPhase("Open", PhaseType.OPINION, "ALL", TurnOrder.SEQUENTIAL,
                 ContextScope.FULL, false, null, 1, false);
         assertEquals("PROMPT", NegotiationEngine.appendStateIfRelevant("PROMPT", gc, opinionPhase));
@@ -266,29 +309,47 @@ class NegotiationEngineTest {
         var participants = List.of(ALICE, BOB, MOD);
 
         // Round 1 — both parties put opening terms on the table. No agreement.
-        NegotiationEngine.applyRepeat(gc, phase, List.of(
+        NegotiationEngine.applyRepeat(gc, List.of(
                 bargain("a1", "{\"proposal\": {\"terms\": \"Alice leads, 60/40 revenue\"}}"),
                 bargain("a2", "{\"proposal\": {\"terms\": \"Shared lead, 50/50 revenue\"}}")), 0, 0);
         assertFalse(NegotiationEngine.checkAndRecordAgreement(gc, participants, "mod", phase.name()));
 
         // Round 2 — Alice counters toward Bob, naming her concession's return.
         // Her first proposal is superseded; still no unanimous signature.
-        NegotiationEngine.applyRepeat(gc, phase, List.of(
+        NegotiationEngine.applyRepeat(gc, List.of(
                 bargain("a1", "{\"proposal\": {\"terms\": \"Shared lead, 55/45 revenue\"}, "
                         + "\"concessions\": [{\"gaveUp\": \"sole lead\", \"inReturnFor\": \"the larger revenue share\"}]}"),
                 bargain("a2", "{\"concessions\": [{\"gaveUp\": \"strict 50/50\", \"inReturnFor\": \"shared lead confirmed\"}]}")), 2, 1);
         assertFalse(NegotiationEngine.checkAndRecordAgreement(gc, participants, "mod", phase.name()));
 
         // Round 3 — Bob signs Alice's open counter. Unanimous; repeats would end here.
-        NegotiationEngine.applyRepeat(gc, phase, List.of(
+        NegotiationEngine.applyRepeat(gc, List.of(
                 bargain("a2", "{\"accept\": \"p3\"}")), 4, 2);
         assertTrue(NegotiationEngine.checkAndRecordAgreement(gc, participants, "mod", phase.name()),
                 "round 3 converges");
+
+        // Signing Alice's terms abandoned Bob's own competing offer — p2 does not
+        // linger OPEN behind the agreement.
+        assertEquals(GroupConversation.PROPOSAL_SUPERSEDED, gc.getNegotiation().getProposals().get(1).status(),
+                "the signer's own open offer is superseded by their acceptance");
 
         var decision = gc.getDecision();
         assertEquals(DecisionType.AGREEMENT, decision.type());
         assertEquals("p3", decision.winner());
         assertTrue(decision.outcome().contains("2 concession"), decision.outcome());
         assertEquals(2, gc.getNegotiation().getConcessions().size());
+    }
+
+    @Test
+    @DisplayName("a GROUP member's signature is not required for unanimity — nested groups cannot sign")
+    void agreement_groupMemberNotRequired() {
+        var gc = gc();
+        var nestedGroup = new GroupMember("g1", "Sub Team", 3, null,
+                ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType.GROUP);
+        NegotiationEngine.applyRepeat(gc, List.of(proposal("a1", "50/50")), 0, 0);
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a2", "{\"accept\": \"p1\"}")), 1, 1);
+
+        assertTrue(NegotiationEngine.checkAndRecordAgreement(gc, List.of(ALICE, BOB, MOD, nestedGroup), "mod",
+                "Bargaining"), "both AGENT participants signed — the GROUP member is not on the required list");
     }
 }

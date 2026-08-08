@@ -16,6 +16,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.NegotiationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.Proposal;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -85,16 +86,20 @@ public final class NegotiationEngine {
      * <p>
      * PROPOSAL entries: the whole turn is the proposal's terms (String v1). BARGAIN
      * entries: the JSON contract — {@code accept} joins an OPEN proposal's
-     * signatories, {@code proposal} supersedes the mover's own open proposals and
-     * puts new terms on the table, {@code concessions} append to the ledger. An
-     * unparseable BARGAIN turn is prose with no state effect.
+     * signatories (and abandons the signer's own open offer), {@code proposal}
+     * supersedes the mover's own open proposals, withdraws their signatures from
+     * everyone else's, and puts new terms on the table; {@code concessions} append
+     * to the ledger. A turn carrying BOTH {@code accept} and {@code proposal} is
+     * resolved for the proposal — the accept is ignored with a WARN, because new
+     * terms mean the mover is not settling on existing ones. An unparseable BARGAIN
+     * turn is prose with no state effect.
      *
      * @param transcriptOffset
      *            absolute transcript index of the repeat's first entry — what turns
      *            a position in {@code repeatEntries} into the signed entry index an
      *            acceptance records
      */
-    public static void applyRepeat(GroupConversation gc, DiscussionPhase phase, List<TranscriptEntry> repeatEntries,
+    public static void applyRepeat(GroupConversation gc, List<TranscriptEntry> repeatEntries,
                                    int transcriptOffset, int round) {
         if (repeatEntries == null || repeatEntries.isEmpty()) {
             return;
@@ -112,7 +117,7 @@ public final class NegotiationEngine {
                 BargainMove move = parseBargain(entry.content());
                 if (move == null) {
                     LOGGER.warnf("Group %s: unparseable BARGAIN turn from '%s' — prose only, no state effect",
-                            gc.getId(), entry.speakerAgentId());
+                            LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(entry.speakerAgentId()));
                     continue;
                 }
                 applyMove(gc, state, entry.speakerAgentId(), move, round, entryIndex);
@@ -159,57 +164,84 @@ public final class NegotiationEngine {
 
     private static void applyMove(GroupConversation gc, NegotiationState state, String agentId, BargainMove move,
                                   int round, int entryIndex) {
-        if (move.accept() != null) {
+        boolean counterProposal = move.proposalTerms() != null;
+        if (move.accept() != null && counterProposal) {
+            // Contradictory intent, resolved deterministically: new terms mean the
+            // mover is NOT settling on existing ones. Honoring the accept would
+            // record a signature the same turn walks away from.
+            LOGGER.warnf("Group %s: '%s' sent accept AND a counter-proposal in one turn — the counter-proposal wins, "
+                    + "the accept is ignored", LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(agentId));
+        } else if (move.accept() != null) {
             Proposal target = findById(state, move.accept());
             if (target == null || !GroupConversation.PROPOSAL_OPEN.equals(target.status())) {
                 LOGGER.warnf("Group %s: '%s' accepted %s proposal '%s' — ignored",
-                        gc.getId(), agentId, target == null ? "unknown" : "non-open", move.accept());
+                        LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(agentId),
+                        target == null ? "unknown" : "non-open", LogSanitizer.sanitize(move.accept()));
             } else if (!target.acceptedBy().contains(agentId)) {
                 List<String> acceptedBy = new ArrayList<>(target.acceptedBy());
                 acceptedBy.add(agentId);
                 Map<String, Integer> indices = new LinkedHashMap<>(target.acceptanceEntryIndices());
                 indices.put(agentId, entryIndex);
-                replace(state, target, new Proposal(target.id(), target.byAgentId(), target.round(), target.terms(),
-                        target.status(), List.copyOf(acceptedBy), Map.copyOf(indices)));
+                state.replaceProposal(target, new Proposal(target.id(), target.byAgentId(), target.round(),
+                        target.terms(), target.status(), List.copyOf(acceptedBy), Map.copyOf(indices)));
+                // Signing someone else's terms abandons the signer's own live
+                // offer — the symmetric half of addProposal's withdrawal rule: any
+                // move that puts an agent's name on new terms removes their
+                // competing one from the table.
+                for (Proposal own : state.getProposals()) {
+                    if (GroupConversation.PROPOSAL_OPEN.equals(own.status())
+                            && own.byAgentId().equals(agentId) && !own.id().equals(target.id())) {
+                        state.replaceProposal(own, new Proposal(own.id(), own.byAgentId(), own.round(), own.terms(),
+                                GroupConversation.PROPOSAL_SUPERSEDED, own.acceptedBy(), own.acceptanceEntryIndices()));
+                    }
+                }
             }
         }
         Proposal added = null;
-        if (move.proposalTerms() != null) {
+        if (counterProposal) {
             added = addProposal(state, agentId, move.proposalTerms(), round, entryIndex);
         }
         for (ParsedConcession c : move.concessions()) {
-            state.getConcessions().add(new Concession(agentId, round, c.gaveUp(), c.inReturnFor(),
+            state.addConcession(new Concession(agentId, round, c.gaveUp(), c.inReturnFor(),
                     added != null ? added.id() : null));
         }
     }
 
     /**
-     * Puts new terms on the table. The proposer's own OPEN proposals are SUPERSEDED
-     * — one live offer per agent — and the proposer signs their own terms
-     * implicitly (their authoring entry is the signature).
+     * Puts new terms on the table. Because a new offer means the mover has moved,
+     * it does two withdrawals first: the proposer's own OPEN proposals are
+     * SUPERSEDED (one live offer per agent), and the proposer's <b>signatures on
+     * every other open proposal are withdrawn</b> — otherwise a proposal could
+     * reach "unanimity" on a signature its signatory abandoned turns ago, which is
+     * exactly the stale-agreement failure the typed ledger exists to prevent. The
+     * proposer then signs their own terms implicitly (the authoring entry is the
+     * signature).
      */
     private static Proposal addProposal(NegotiationState state, String agentId, String terms, int round, int entryIndex) {
         for (Proposal p : state.getProposals()) {
-            if (GroupConversation.PROPOSAL_OPEN.equals(p.status()) && p.byAgentId().equals(agentId)) {
-                replace(state, p, new Proposal(p.id(), p.byAgentId(), p.round(), p.terms(),
+            if (!GroupConversation.PROPOSAL_OPEN.equals(p.status())) {
+                continue;
+            }
+            if (p.byAgentId().equals(agentId)) {
+                state.replaceProposal(p, new Proposal(p.id(), p.byAgentId(), p.round(), p.terms(),
                         GroupConversation.PROPOSAL_SUPERSEDED, p.acceptedBy(), p.acceptanceEntryIndices()));
+            } else if (p.acceptedBy().contains(agentId)) {
+                List<String> acceptedBy = new ArrayList<>(p.acceptedBy());
+                acceptedBy.remove(agentId);
+                Map<String, Integer> indices = new LinkedHashMap<>(p.acceptanceEntryIndices());
+                indices.remove(agentId);
+                state.replaceProposal(p, new Proposal(p.id(), p.byAgentId(), p.round(), p.terms(),
+                        p.status(), List.copyOf(acceptedBy), Map.copyOf(indices)));
             }
         }
         Proposal proposal = new Proposal("p" + (state.getProposals().size() + 1), agentId, round, terms,
                 GroupConversation.PROPOSAL_OPEN, List.of(agentId), Map.of(agentId, entryIndex));
-        state.getProposals().add(proposal);
+        state.addProposal(proposal);
         return proposal;
     }
 
     private static Proposal findById(NegotiationState state, String id) {
         return state.getProposals().stream().filter(p -> p.id().equals(id)).findFirst().orElse(null);
-    }
-
-    private static void replace(NegotiationState state, Proposal oldOne, Proposal newOne) {
-        int idx = state.getProposals().indexOf(oldOne);
-        if (idx >= 0) {
-            state.getProposals().set(idx, newOne);
-        }
     }
 
     /**
@@ -229,6 +261,7 @@ public final class NegotiationEngine {
                 .filter(Objects::nonNull)
                 .filter(m -> m.memberType() != MemberType.GROUP)
                 .map(GroupMember::agentId)
+                .filter(Objects::nonNull)
                 .filter(id -> !id.equals(moderatorAgentId))
                 .distinct()
                 .toList();
@@ -259,7 +292,8 @@ public final class NegotiationEngine {
                                 : " — " + state.getConcessions().size() + " concession(s) on the ledger.");
                 gc.setDecision(new DecisionRecord(DecisionType.AGREEMENT, outcome, p.id(), tally, List.of(),
                         METHOD_NEGOTIATION, phaseName, null));
-                LOGGER.infof("Group %s: negotiation reached agreement on proposal %s", gc.getId(), p.id());
+                LOGGER.infof("Group %s: negotiation reached agreement on proposal %s",
+                        LogSanitizer.sanitize(gc.getId()), p.id());
                 return true;
             }
         }

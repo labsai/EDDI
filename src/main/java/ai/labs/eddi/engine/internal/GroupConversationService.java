@@ -680,7 +680,8 @@ public class GroupConversationService implements IGroupConversationService {
                 // deterministically against the typed decision, never inferred.
                 if (phase.skipIf() == AgentGroupConfiguration.PhaseSkipCondition.AGREEMENT_REACHED
                         && gc.getDecision() != null && gc.getDecision().type() == DecisionType.AGREEMENT) {
-                    LOGGER.infof("Group %s: skipping phase '%s' — agreement already reached", gc.getGroupId(), phase.name());
+                    LOGGER.infof("Group %s: skipping phase '%s' — agreement already reached",
+                            LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(phase.name()));
                     continue;
                 }
 
@@ -834,7 +835,7 @@ public class GroupConversationService implements IGroupConversationService {
                     // plumbing convergence uses. Applied BEFORE the persist below so
                     // the table and the turns that produced it share one write.
                     if (phase.type() == PhaseType.PROPOSAL || phase.type() == PhaseType.BARGAIN) {
-                        NegotiationEngine.applyRepeat(gc, phase, repeatEntries, transcriptSizeBeforeRepeat, repeat);
+                        NegotiationEngine.applyRepeat(gc, repeatEntries, transcriptSizeBeforeRepeat, repeat);
                         if (phase.type() == PhaseType.BARGAIN
                                 && NegotiationEngine.checkAndRecordAgreement(gc, speakers, config.getModeratorAgentId(), phase.name())) {
                             outcome = PhaseOutcome.endRepeats("Unanimous acceptance — agreement reached");
