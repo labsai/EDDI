@@ -489,9 +489,20 @@ public class RestGroupConversation implements IRestGroupConversation {
                     .entity("Group conversation not found.").build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
             LOGGER.infof("Human input for group conversation %s rejected (wrong state): %s", sanitize(gcId), e.getMessage());
+            // Review finding: the blanket "not awaiting human input" body affirmatively
+            // misstated the config-drift case — the conversation IS still awaiting
+            // input, and every retry fails identically while the real cause (a config
+            // edit invalidated the bookmark) lived only in server logs. The two drift
+            // messages are static server-side text (no caller input), so they are safe
+            // to surface; everything else keeps the curated generic body.
+            String message = e.getMessage() != null
+                    && (e.getMessage().startsWith("Group config changed while paused")
+                            || e.getMessage().startsWith("The paused turn's bookmark"))
+                                    ? e.getMessage()
+                                    : "Group conversation is not awaiting human input — the turn may have been resolved, "
+                                            + "timed out, or cancelled.";
             return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
-                    .entity("Group conversation is not awaiting human input — the turn may have been resolved, "
-                            + "timed out, or cancelled.")
+                    .entity(message)
                     .build();
         } catch (IllegalArgumentException e) {
             LOGGER.infof("Human input for group conversation %s rejected (invalid request): %s", sanitize(gcId), e.getMessage());

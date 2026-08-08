@@ -370,6 +370,22 @@ class FacilitatorEngineTest {
         }
     }
 
+    @Test
+    void rejectedUnknownMove_boundsTheMetricTag() {
+        // Review finding: the raw LLM-authored move string became a metric tag
+        // value — unbounded Prometheus label cardinality, one new time series
+        // per hallucinated name for the JVM's lifetime.
+        stubReply("{\"move\": \"WRAP_UP_2026-08-08T12:00:01\", \"reason\": \"done\"}");
+
+        assertEquals(FacilitatorAction.Kind.NONE, checkpoint(midPhaseCtx()).kind());
+
+        var rejected = meterRegistry.find("eddi_group_facilitator_moves_total")
+                .tag("outcome", "rejected").counters();
+        assertEquals(1, rejected.size());
+        assertEquals("UNKNOWN", rejected.iterator().next().getId().getTag("move"),
+                "the tag is bounded to enum names + UNKNOWN — never the raw LLM string");
+    }
+
     // =================================================================
     // CALL_VOTE
     // =================================================================
@@ -394,6 +410,38 @@ class FacilitatorEngineTest {
             assertEquals(List.of("Ship it", "Hold it"), votePhase.voteConfig().options());
             assertEquals(TiePolicy.NO_DECISION, votePhase.voteConfig().tiePolicy());
             assertEquals(1, gc.getFacilitatorMoveCount());
+        }
+
+        @Test
+        void callVote_afterAPhaseEndedBySignal_isRejected() {
+            // Review finding: unlike END_PHASE/EXTEND_PHASE, CALL_VOTE had no
+            // phaseEndedBySignal guard — a facilitator vote could be appended to
+            // a phase that just ended by convergence or unanimous agreement.
+            stubReply("{\"move\": \"CALL_VOTE\", \"args\": {\"options\": [\"Ship it\", \"Hold it\"]}}");
+
+            var action = checkpoint(new CheckpointContext(1, 0, true, true, true, true));
+
+            assertEquals(FacilitatorAction.Kind.NONE, action.kind());
+            assertTrue(facilitationEntries().get(0).content().contains("rejected"));
+            assertEquals(0, gc.getFacilitatorMoveCount(), "a rejected move never consumes budget");
+        }
+
+        @Test
+        void callVote_whenADecisionAlreadyExists_isRejected() {
+            // Review finding: the inserted vote's tally REPLACES gc.decision — a
+            // facilitator vote after a signed AGREEMENT or a debate VERDICT would
+            // destroy the record, break skipIf=AGREEMENT_REACHED, and un-render
+            // the verdict into raw judgment JSON.
+            gc.setDecision(new GroupConversation.DecisionRecord(GroupConversation.DecisionType.AGREEMENT,
+                    "Deal", null, null, List.of(), "unanimous-acceptance", "Bargain", null));
+            stubReply("{\"move\": \"CALL_VOTE\", \"args\": {\"options\": [\"Ship it\", \"Hold it\"]}}");
+
+            var action = checkpoint(boundaryCtx());
+
+            assertEquals(FacilitatorAction.Kind.NONE, action.kind());
+            assertTrue(facilitationEntries().get(0).content().contains("decision record"),
+                    facilitationEntries().get(0).content());
+            assertEquals(GroupConversation.DecisionType.AGREEMENT, gc.getDecision().type(), "the record survives");
         }
 
         @Test

@@ -57,7 +57,7 @@
       }
     ],
     "retroConfig": { "maxLessonsPerRun": 3, "maxStoredLessons": 50 },
-    "contextWindow": { "enabled": true, "maxRecentEntries": 30 },
+    "contextWindow": { "enabled": true, "maxRecentEntries": 30, "summarizeOverflow": false },
     "protocol": {
       "agentTimeoutSeconds": 180,
       "onAgentFailure": "SKIP",

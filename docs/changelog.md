@@ -5,6 +5,26 @@
 
 ---
 
+## 🔎 fix(groups): pre-merge deep review — facilitator HITL bypass, CALL_VOTE guards, metric cardinality, template honesty (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i10-templates`)
+
+Final pre-merge review (20-agent workflow: 6 focused reviewers over the facilitator subsystem — which never received an external bot review (#643 rate-limited) — the I10 templates and the merge seams; every non-minor finding independently double-verified). Six confirmed findings, all fixed:
+
+1. **CRITICAL — facilitator escalation bypassed the phase-boundary HITL gate.** A deferred EACH_REPEAT `ESCALATE_HUMAN` at a phase's final repeat returned from inside the repeat loop before the `requiresApproval` gate: the phase's mandatory human approval (and the TASK-granularity awaiting-task pause) never fired, and the escalation answerer has no REJECT path — a silent compliance bypass. Now the boundary gate supersedes the escalation: when the just-completed phase's gate will pause, the escalation is suppressed with a FACILITATION entry that preserves the facilitator's question for the approver, and control falls through to the normal gate. Mid-phase escalations are unaffected (no gate is owed yet). Pinned by `escalate_atTheBoundaryOfAnApprovalGatedPhase_theApprovalGateWins`.
+2. **CALL_VOTE could clobber a recorded decision.** Unlike END_PHASE/EXTEND_PHASE it had no `phaseEndedBySignal` guard, and the inserted vote's tally unconditionally replaces `gc.decision` — destroying a signed AGREEMENT (breaking `skipIf=AGREEMENT_REACHED`) or a debate VERDICT (resurfacing the raw-judgment-JSON defect). CALL_VOTE is now rejected when the phase ended by signal or a DecisionRecord already exists.
+3. **Unbounded metric label cardinality.** `recordRejection` used the raw LLM-authored move string as the `move` tag of `eddi_group_facilitator_moves_total` — every hallucinated name a new Prometheus time series for the JVM's lifetime (and injectable via transcript content echoed in the briefing). The tag is bounded to enum names + `UNKNOWN`; `rawMove` is also length-capped at parse.
+4. **The deferred EACH_REPEAT branch was untested.** ESCALATE/CALL_VOTE were e2e-tested only at EACH_PHASE; the mid-phase resume arithmetic (same phase, repeat+1) and the boundary arm (phase+1, repeat 0) had zero coverage. Three e2e tests added.
+5. **negotiation-table.json promised a human-arbiter mode that does not exist** — a human principal as arbiter would neither warn at save nor pause synthesis (the arbiter is only `moderatorAgentId`, never a HUMAN roster member); phases would be silently SKIPPED. The manifest now states the arbiter must be a deployed agent and points to decision-board / hitlConfig for human decision-makers.
+6. **research-pod.json silently degraded its context window** — `summarizeOverflow` defaults true but no summarizer model is named, tripping the save-time warning on a SHIPPED template and truncating instead of summarizing at runtime. Now explicitly `false` (honest truncation).
+
+Minor also fixed: the human-input 409 body no longer misstates config-drift as "not awaiting human input" — the two static drift messages pass through so the operator learns the config changed instead of retrying forever.
+
+Suites: FacilitatorEngineTest 42 (+3), Facilitator e2e 12 (+3), templates/REST/HITL 96 — all green.
+
+---
+
+
 ## 🔎 fix(groups): I8 review round 3 — retro ceilings + creation-ordered FIFO (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i8-retro-memory`)

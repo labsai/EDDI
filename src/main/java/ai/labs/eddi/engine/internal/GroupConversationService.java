@@ -1155,12 +1155,46 @@ public class GroupConversationService implements IGroupConversationService {
                                 persistRuntimePhases(gc, phaseList);
                             }
                             case ESCALATE -> {
-                                int resumePhaseIdx = facilitatorMidPhaseResume ? phaseIdx : phaseIdx + 1;
-                                int resumeRepeatIdx = facilitatorMidPhaseResume ? repeat + 1 : 0;
-                                hitlCoordinator.commitFacilitatorEscalationPause(gc, resumePhaseIdx, resumeRepeatIdx,
-                                        phaseList, deferredFacilitatorAction.escalation(), turnCounter.get() + 1, listener, config);
-                                convertPauseToCancelIfSignalled(gc, listener);
-                                return gc;
+                                // CRITICAL review finding: a BOUNDARY escalation
+                                // (midPhaseResume=false) returns from inside the loop
+                                // BEFORE the phase-boundary HITL gate below — silently
+                                // skipping a requiresApproval phase's mandatory human
+                                // approval (and the TASK-granularity awaiting-task
+                                // pause), with the escalation answerer holding no
+                                // REJECT path. The approval gate supersedes the
+                                // facilitator: the approver is about to be in the loop
+                                // anyway and can read the facilitator's question in
+                                // the transcript entry recorded here. Mid-phase
+                                // escalations are unaffected — the phase is not
+                                // complete, so no boundary gate is owed yet and the
+                                // resumed leg still reaches it at phase end.
+                                boolean boundaryGateWillPause = !facilitatorMidPhaseResume
+                                        && phase.requiresApproval() && !costCeilingSynthesizeNow
+                                        && (!(taskLevelHitl && phase.type() == PhaseType.EXECUTE)
+                                                || (gc.getTaskList() != null
+                                                        && (gc.getTaskList().hasAwaitingApproval()
+                                                                || !gc.getTaskList().findExecutableTasks().isEmpty())));
+                                if (boundaryGateWillPause) {
+                                    var suppressed = deferredFacilitatorAction.escalation();
+                                    gc.getTranscript().add(new TranscriptEntry(
+                                            config.getFacilitator().agentId(), "Facilitator",
+                                            "Facilitator escalation to " + suppressed.principalId()
+                                                    + " suppressed — this phase requires human approval, which takes "
+                                                    + "precedence. The facilitator's question for the approver: "
+                                                    + suppressed.question(),
+                                            phaseIdx, phase.name(), TranscriptEntryType.FACILITATION, Instant.now(),
+                                            null, null));
+                                    LOGGER.infof("Facilitator escalation for group %s suppressed at phase %d — the "
+                                            + "phase's own approval gate takes precedence", gc.getGroupId(), phaseIdx);
+                                    // fall through to the HITL gate below
+                                } else {
+                                    int resumePhaseIdx = facilitatorMidPhaseResume ? phaseIdx : phaseIdx + 1;
+                                    int resumeRepeatIdx = facilitatorMidPhaseResume ? repeat + 1 : 0;
+                                    hitlCoordinator.commitFacilitatorEscalationPause(gc, resumePhaseIdx, resumeRepeatIdx,
+                                            phaseList, deferredFacilitatorAction.escalation(), turnCounter.get() + 1, listener, config);
+                                    convertPauseToCancelIfSignalled(gc, listener);
+                                    return gc;
+                                }
                             }
                             default -> {
                                 // END_PHASE/EXTEND_PHASE were applied before the

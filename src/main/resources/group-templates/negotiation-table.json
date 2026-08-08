@@ -2,11 +2,11 @@
   "manifest": {
     "templateId": "negotiation-table",
     "title": "Negotiation Table",
-    "description": "Two parties negotiate under the typed bargaining protocol: stated interests, opening proposals, bargaining rounds against a quoted concession ledger, arbitration only if no unanimous agreement is signed, and a final synthesis quoting the ledger. For a human arbiter, assign a human principal as the arbiter role — every synthesis then waits on that person (the save warns about it).",
+    "description": "Two parties negotiate under the typed bargaining protocol: stated interests, opening proposals, bargaining rounds against a quoted concession ledger, arbitration only if no unanimous agreement is signed, and a final synthesis quoting the ledger. The arbiter must be a deployed AGENT — it moderates the arbitration and synthesis phases. For a human decision-maker in the loop, use the decision-board template (HUMAN roster members) or add hitlConfig approval gates to the instantiated group instead.",
     "requiredRoles": [
       { "role": "partyA", "description": "First negotiating party" },
       { "role": "partyB", "description": "Second negotiating party" },
-      { "role": "arbiter", "description": "Arbitrates if bargaining fails; synthesizes the outcome (may be a human principal)" }
+      { "role": "arbiter", "description": "Arbitrates if bargaining fails; synthesizes the outcome (must be a deployed agent)" }
     ]
   },
   "config": {

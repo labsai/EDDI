@@ -296,6 +296,23 @@ public class FacilitatorEngine {
 
     private FacilitatorAction executeCallVote(GroupConversation gc, FacilitatorConfig fc, DiscussionPhase phase,
                                               CheckpointContext ctx, ParsedMove parsed) {
+        // Review findings: same no-overrule rule as END_PHASE/EXTEND_PHASE — a
+        // phase that already ended by convergence or unanimous agreement is a
+        // deterministic exit the facilitator must not append a vote to. And a
+        // discussion that already carries a DecisionRecord (AGREEMENT, VERDICT,
+        // an earlier vote) must keep it: the inserted vote's tally would
+        // REPLACE it, breaking skipIf=AGREEMENT_REACHED and un-rendering a
+        // debate verdict into raw judgment JSON.
+        if (ctx.phaseEndedBySignal()) {
+            recordRejection(gc, fc, phase, ctx, parsed.move().name(), parsed.reason(),
+                    "CALL_VOTE cannot overrule a phase that already ended by convergence/agreement");
+            return FacilitatorAction.none();
+        }
+        if (gc.getDecision() != null) {
+            recordRejection(gc, fc, phase, ctx, parsed.move().name(), parsed.reason(),
+                    "the discussion already carries a decision record — a facilitator vote would overwrite it");
+            return FacilitatorAction.none();
+        }
         List<String> options = new ArrayList<>();
         JsonNode optionsNode = parsed.args().path("options");
         if (optionsNode.isArray()) {
@@ -468,8 +485,18 @@ public class FacilitatorEngine {
                 + (reason != null && !reason.isBlank() ? ". Facilitator's reason: " + reason.trim() : "");
         gc.getTranscript().add(new TranscriptEntry(fc.agentId(), "Facilitator", content, ctx.phaseIdx(), phase.name(),
                 TranscriptEntryType.FACILITATION, Instant.now(), null, null));
+        // Review finding: the raw LLM-authored move string as a metric tag value
+        // is unbounded label cardinality — every hallucinated name became a new
+        // Prometheus time series for the JVM's lifetime. The tag is bounded to
+        // the enum names + UNKNOWN; the raw string stays in the transcript/log.
+        String moveTag;
+        try {
+            moveTag = FacilitatorMove.valueOf(attemptedMove).name();
+        } catch (IllegalArgumentException | NullPointerException e) {
+            moveTag = "UNKNOWN";
+        }
         meterRegistry.counter("eddi_group_facilitator_moves_total",
-                "move", attemptedMove, "outcome", "rejected").increment();
+                "move", moveTag, "outcome", "rejected").increment();
         LOGGER.warnf("Facilitator move %s rejected for group %s at phase %d: %s",
                 LogSanitizer.sanitize(attemptedMove), LogSanitizer.sanitize(gc.getId()), ctx.phaseIdx(),
                 LogSanitizer.sanitize(why));
@@ -531,6 +558,11 @@ public class FacilitatorEngine {
             return null;
         }
         String rawMove = node.path("move").asText().trim();
+        // Bound the LLM-authored string before it rides into transcript entries
+        // and logs — the model owns its content, not its size.
+        if (rawMove.length() > 60) {
+            rawMove = rawMove.substring(0, 60) + "…";
+        }
         FacilitatorMove move = null;
         try {
             move = FacilitatorMove.valueOf(rawMove.toUpperCase(Locale.ROOT));

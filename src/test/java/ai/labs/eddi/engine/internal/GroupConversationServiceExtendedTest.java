@@ -360,6 +360,88 @@ class GroupConversationServiceExtendedTest {
         }
 
         @Test
+        void escalate_midPhaseAtEachRepeat_bookmarksTheSamePhaseAndNextRepeat() throws Exception {
+            // The DEFERRED EACH_REPEAT branch (review finding: previously untested)
+            // — a mid-phase escalation must resume the SAME phase at repeat+1, or
+            // the resumed leg would re-run the completed repeat (duplicate turns,
+            // double cost) or skip a scheduled one.
+            var config = facilitatorConfig(FacilitatorCheckpoint.EACH_REPEAT, 10, 3,
+                    FacilitatorMove.CONTINUE, FacilitatorMove.ESCALATE_HUMAN);
+            setupStore(config);
+            stubAgent("a1", "Opinion A");
+            stubAgent("a2", "Opinion B");
+            stubAgent("fac", "{\"move\": \"ESCALATE_HUMAN\", \"args\": {\"question\": \"Keep going?\"}, "
+                    + "\"reason\": \"checking in\"}");
+
+            GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.AWAITING_HUMAN_INPUT, gc.getState());
+            assertEquals(2, entriesOfType(gc, TranscriptEntryType.OPINION), "exactly repeat 0 ran before the pause");
+            var bookmark = gc.getResumePoint();
+            assertEquals(0, bookmark.phaseIdx(), "mid-phase: resumes the SAME phase");
+            assertEquals(1, bookmark.repeatIdx(), "…at the NEXT repeat — never re-running the completed one");
+            assertEquals(GroupConversation.RESUME_KIND_HUMAN_TURN, bookmark.pauseKind());
+        }
+
+        @Test
+        void escalate_atFinalRepeatBoundary_bookmarksTheNextPhase() throws Exception {
+            // The deferred branch's OTHER arithmetic arm: a boundary escalation
+            // (final repeat, no approval gate on the phase) resumes at phase+1.
+            var config = facilitatorConfig(FacilitatorCheckpoint.EACH_REPEAT, 10, 1,
+                    FacilitatorMove.CONTINUE, FacilitatorMove.ESCALATE_HUMAN);
+            config.setPhases(List.of(
+                    new AgentGroupConfiguration.DiscussionPhase("Discuss", PhaseType.OPINION, "ALL",
+                            TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false),
+                    new AgentGroupConfiguration.DiscussionPhase("Wrap", PhaseType.SYNTHESIS, "MODERATOR",
+                            TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false)));
+            config.setModeratorAgentId("mod");
+            setupStore(config);
+            stubAgent("a1", "Opinion A");
+            stubAgent("a2", "Opinion B");
+            stubAgent("mod", "The synthesis.");
+            stubAgent("fac", "{\"move\": \"ESCALATE_HUMAN\", \"args\": {\"question\": \"Proceed to wrap-up?\"}, "
+                    + "\"reason\": \"boundary call\"}");
+
+            GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.AWAITING_HUMAN_INPUT, gc.getState());
+            var bookmark = gc.getResumePoint();
+            assertEquals(1, bookmark.phaseIdx(), "boundary: resumes at the NEXT phase");
+            assertEquals(0, bookmark.repeatIdx());
+        }
+
+        @Test
+        void escalate_atTheBoundaryOfAnApprovalGatedPhase_theApprovalGateWins() throws Exception {
+            // CRITICAL review finding: a boundary escalation used to return before
+            // the phase-boundary HITL gate, silently skipping a requiresApproval
+            // phase's mandatory human approval — the escalation answerer has no
+            // REJECT path, so the compliance gate simply vanished.
+            var config = facilitatorConfig(FacilitatorCheckpoint.EACH_REPEAT, 10, 1,
+                    FacilitatorMove.CONTINUE, FacilitatorMove.ESCALATE_HUMAN);
+            config.setPhases(List.of(
+                    new AgentGroupConfiguration.DiscussionPhase("Discuss", PhaseType.OPINION, "ALL",
+                            TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true),
+                    new AgentGroupConfiguration.DiscussionPhase("Wrap", PhaseType.SYNTHESIS, "MODERATOR",
+                            TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false)));
+            config.setModeratorAgentId("mod");
+            setupStore(config);
+            stubAgent("a1", "Opinion A");
+            stubAgent("a2", "Opinion B");
+            stubAgent("fac", "{\"move\": \"ESCALATE_HUMAN\", \"args\": {\"question\": \"Skip approval?\"}, "
+                    + "\"reason\": \"impatient\"}");
+
+            GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(),
+                    "the phase's mandatory approval pause supersedes the facilitator's escalation");
+            assertNull(gc.getPendingHumanInput(), "no human-turn pause was committed");
+            assertTrue(gc.getTranscript().stream().anyMatch(e -> e.type() == TranscriptEntryType.FACILITATION
+                    && e.content() != null && e.content().contains("suppressed")
+                    && e.content().contains("Skip approval?")),
+                    "the suppression entry preserves the facilitator's question for the approver");
+        }
+
+        @Test
         void continueEverywhere_leavesTheDiscussionUntouched() throws Exception {
             var config = facilitatorConfig(FacilitatorCheckpoint.EACH_PHASE, 10, 2, FacilitatorMove.CONTINUE);
             setupStore(config);
