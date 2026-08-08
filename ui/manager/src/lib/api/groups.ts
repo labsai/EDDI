@@ -10,6 +10,8 @@ export const DISCUSSION_STYLES = [
   "DELPHI",
   "DEBATE",
   "TASK_FORCE",
+  /** Contract-Net-lite bargaining between named parties, arbitrated on failure (I11). */
+  "NEGOTIATION",
   "CUSTOM",
 ] as const;
 export type DiscussionStyle = (typeof DISCUSSION_STYLES)[number];
@@ -26,6 +28,14 @@ export const PHASE_TYPES = [
   "PLAN",
   "EXECUTE",
   "VERIFY",
+  /** A ballot phase (I14) — requires turnOrder PARALLEL + contextScope NONE at save time. */
+  "VOTE",
+  /** A negotiation offer phase (I11). */
+  "PROPOSAL",
+  /** A negotiation counter-offer/concession phase (I11). */
+  "BARGAIN",
+  /** Post-discussion retrospective (I8) — harvests lessons into group memory. */
+  "RETRO",
 ] as const;
 export type PhaseType = (typeof PHASE_TYPES)[number];
 
@@ -40,7 +50,7 @@ export type ContextScope =
   | "TASK_ONLY"
   | "TASK_WITH_DEPS";
 
-export type MemberType = "AGENT" | "GROUP";
+export type MemberType = "AGENT" | "GROUP" | "HUMAN";
 
 export type MemberFailurePolicy = "SKIP" | "RETRY" | "ABORT";
 export type MemberUnavailablePolicy = "SKIP" | "FAIL";
@@ -70,6 +80,13 @@ export type GroupConversationState =
   | "FAILED"
   | "CANCELLED"
   | "AWAITING_APPROVAL"
+  /**
+   * A HUMAN group member's turn is up (I6): the discussion is parked on
+   * `pendingHumanInput` until that member submits via `submitHumanInput`, or the
+   * group's `humanMemberConfig` timeout policy resolves the turn. Distinct from
+   * AWAITING_APPROVAL — this is "you're up", not "approve/reject".
+   */
+  | "AWAITING_HUMAN_INPUT"
   // Terminal — member conversations ended, ephemeral agents cleaned up, no
   // further follow-ups/continuations (backend GroupConversationState.CLOSED).
   | "CLOSED";
@@ -78,18 +95,26 @@ export type GroupConversationState =
  * Post-COMPLETED lifecycle operations the backend exposes on a group
  * conversation. Mirrors the identifiers returned by the backend's computed
  * `availableActions` field (GroupConversation.getAvailableActions):
- *   - COMPLETED           → ["followup", "continue", "close"]
- *   - FAILED / CANCELLED  → ["close"]
- *   - all other states    → []
+ *   - COMPLETED             → ["followup", "continue", "close"]
+ *   - FAILED / CANCELLED    → ["close"]
+ *   - AWAITING_HUMAN_INPUT  → ["submitHumanInput"]
+ *   - all other states      → []
  */
-export type GroupConversationAction = "followup" | "continue" | "close";
+export type GroupConversationAction =
+  | "followup"
+  | "continue"
+  | "close"
+  | "submitHumanInput";
 
 /**
  * Mirrors the backend `GroupConversation.TranscriptEntryType` in full. The last
- * eleven are the Wave 0 (F4) additions; six of them have no producer yet
- * (VOTE/PROPOSAL/BARGAIN/HUMAN_INPUT/RETRO/BID are reserved for I11/I14/I6/I8/I18)
- * but are declared because a transcript is rendered by type and an unmodelled
- * value is exactly what used to blank the view — see `entryTypeInfo`.
+ * eleven were declared ahead of their producers as part of the Wave 0 (F4) work;
+ * all now have real producers (VOTE/I14, PROPOSAL+BARGAIN/I11, RETRO/I8, BID/I18)
+ * — except HUMAN_INPUT, which stays declared-but-dead: a HUMAN member's turn is
+ * recorded under the phase's own natural entry type (or FOLLOW_UP for a
+ * facilitator ESCALATE_HUMAN pause), never this value. Still declared because a
+ * transcript is rendered by type and an unmodelled value is exactly what used to
+ * blank the view — see `entryTypeInfo`.
  */
 export type TranscriptEntryType =
   | "QUESTION"
@@ -165,6 +190,57 @@ export interface ConvergenceConfig {
 
 export type ConvergenceJudge = "MODERATOR" | "SERVICE";
 
+/** `VoteConfig.method` (I14). No SUPERMAJORITY exists — only these two. */
+export type VoteMethod = "MAJORITY" | "APPROVAL";
+
+/**
+ * Where a VOTE phase's ballot options come from (I14). `LAST_SYNTHESIS` is the
+ * backend default — options are extracted from the most recent SYNTHESIS output
+ * rather than hand-typed, since a decision-board's "Options" phase is usually
+ * itself LLM-authored.
+ */
+export type VoteOptionsSource = "LAST_SYNTHESIS" | "EXPLICIT";
+
+/**
+ * How a tied ballot resolves (I14). `HUMAN_DECIDES` is a real enum value but is
+ * still save-time REJECTED by the backend pending its resume machinery — despite
+ * I6 (human members) having since shipped, that cross-reference in the backend's
+ * own docs is stale. Treat it as unselectable, matching backend reality, not the
+ * aspirational doc.
+ */
+export type VoteTiePolicy = "MODERATOR_DECIDES" | "HUMAN_DECIDES" | "NO_DECISION";
+
+/** Backend `AgentGroupConfiguration.VoteConfig.DEFAULT_QUORUM`. Valid range (0,1]. */
+export const DEFAULT_VOTE_QUORUM = 0.5;
+
+/**
+ * Ballot configuration for a VOTE-type phase (I14). The backend hard-rejects a
+ * VOTE phase at save time unless `turnOrder="PARALLEL"` and
+ * `contextScope="NONE"` — a ballot cast is blind, matching BID's commit-reveal
+ * discipline.
+ */
+export interface VoteConfig {
+  method: VoteMethod;
+  optionsSource: VoteOptionsSource;
+  /** Only read when `optionsSource === "EXPLICIT"`. */
+  options: string[];
+  /** (0,1]. Backend default 0.5 when unset/non-positive. */
+  quorum: number;
+  /** agentId → weight, for a weighted tally. Empty = every ballot counts equally. */
+  weights: Record<string, number>;
+  /** Scale each ballot's weight by the voter's stated confidence, if parsed. */
+  weightByConfidence: boolean;
+  tiePolicy: VoteTiePolicy;
+}
+
+/**
+ * Early-exit condition for a phase, skipped entirely when its condition already
+ * holds (I11's Arbitration phase, e.g., is a SYNTHESIS phase with
+ * `skipIf: "AGREEMENT_REACHED"` — it only runs when bargaining failed to reach
+ * one). Deliberately a single value today; `null`/absent means never skip.
+ */
+export type PhaseSkipCondition = "AGREEMENT_REACHED";
+
 export interface DiscussionPhase {
   name: string;
   type: PhaseType;
@@ -183,6 +259,15 @@ export interface DiscussionPhase {
    * everybody-abstained exit.
    */
   allowAbstention?: boolean;
+  /**
+   * Ballot configuration for a `type: "VOTE"` phase (I14). Optional even then —
+   * `AgentGroupStore.validateVotePhases` skips a null one and the engine falls
+   * back to its own defaults — but the editor writes an explicit block so the
+   * saved document says what will actually run.
+   */
+  voteConfig?: VoteConfig | null;
+  /** Skip this phase entirely when the condition already holds (I11). `null`/absent = never skip. */
+  skipIf?: PhaseSkipCondition | null;
 }
 
 export interface ProtocolConfig {
@@ -206,6 +291,15 @@ export interface ProtocolConfig {
 }
 
 /**
+ * How a TASK_FORCE task is assigned to a member (I18). `ROLE` is today's
+ * round-robin/role-matched behavior. `BID` is Contract-Net-lite: eligible members
+ * submit blind parallel bids and the highest confidence wins (deterministic
+ * tie-break by speaking order, then agent id — never bidders/tasks
+ * (`auctionWorthwhile`, ≥2 of each), a wave silently falls back to ROLE.
+ */
+export type AssignmentMode = "ROLE" | "BID";
+
+/**
  * Whether and how far members may file their own tasks mid-discussion (EDDI I5).
  * Absent means the `addGroupTask`/`listGroupTasks` tools are not assembled at all
  * — an absent tool costs no prompt tokens and cannot be argued with, which is why
@@ -218,6 +312,14 @@ export interface GroupTaskConfig {
   maxAgentAddedTasksPerDiscussion: number;
   /** Ceiling within one member turn (backend default 3; non-positive → default). */
   maxPerTurn: number;
+  /**
+   * Group-wide default assignment mode (I18). A per-task `TaskDefinition.assignmentMode`
+   * overrides this for pre-configured tasks; LLM-planned tasks always use this
+   * default (they have no backing TaskDefinition). Backend normalizes a missing
+   * value to `"ROLE"` at construction — never actually `null`/absent on a saved
+   * config, but treat it as optional on the way in regardless.
+   */
+  assignmentMode?: AssignmentMode;
 }
 
 export const DEFAULT_MAX_AGENT_TASKS_PER_DISCUSSION = 20;
@@ -257,8 +359,29 @@ export interface TaskItem {
   createdByAgentId?: string | null;
 }
 
+/**
+ * The winning bid a BID-mode task was awarded on (I18) — per-task scheduling
+ * metadata, not a discussion-wide `DecisionRecord`. `confidence` is the bidder's
+ * self-assessed 0..1 score (clamped at parse), `estimatedComplexity` their own
+ * XS/S/M/L estimate verbatim.
+ */
+export interface AwardedBid {
+  agentId: string;
+  confidence: number;
+  estimatedComplexity: string;
+  rationale: string;
+}
+
 export interface SharedTaskList {
   tasks: TaskItem[];
+  /**
+   * taskId → the bid it was awarded on (I18). Only present for BID-mode tasks
+   * that received at least one bid — a BID-mode task nobody bid on falls back to
+   * ROLE assignment and is indistinguishable here from a task configured as ROLE
+   * from the start (cross-reference `AgentGroupConfiguration.tasks[].assignmentMode`
+   * for pre-configured tasks if that distinction matters).
+   */
+  awardedBids?: Record<string, AwardedBid>;
 }
 
 export interface TaskDefinition {
@@ -267,6 +390,8 @@ export interface TaskDefinition {
   assignToRole: string;
   dependsOn: string[] | null;
   priority: number;
+  /** Per-task override of the group's `taskListConfig.assignmentMode` (I18). `null`/absent defers to the group default. */
+  assignmentMode?: AssignmentMode | null;
 }
 
 export const LIFECYCLE_POLICIES = [
@@ -360,7 +485,142 @@ export interface AgentGroupConfiguration {
   recordDissents?: boolean;
   /** Whether members may file their own tasks mid-discussion (I5). Absent = tools not assembled. */
   taskListConfig?: GroupTaskConfig | null;
+  /** Bounds for RETRO-phase lesson harvesting (I8). `null` runs RETRO with defaults (3 per run / 50 stored). */
+  retroConfig?: RetroConfig | null;
+  /** Transcript windowing for long-running discussions (I9). `null` = windowing off entirely. */
+  contextWindow?: ContextWindowConfig | null;
+  /** Governs shared artifacts / blackboard-lite (I17). Absent = artifact tools not assembled. */
+  artifactConfig?: ArtifactConfig | null;
+  /**
+   * Turn-timeout policy for HUMAN members (I6). `null` waits indefinitely. A
+   * group with any HUMAN member should set this deliberately — the backend
+   * accepts the default (wait forever) without complaint.
+   */
+  humanMemberConfig?: HumanMemberConfig | null;
+  /**
+   * Bounded adaptive orchestration (I12). Backend field name is `facilitator`
+   * (NOT `facilitatorConfig`) — verified directly against
+   * `AgentGroupConfiguration.getFacilitator()`. `null`/disabled means no
+   * checkpoint ever runs and the discussion costs nothing extra.
+   */
+  facilitator?: FacilitatorConfig | null;
 }
+
+/**
+ * Bounds for RETRO lessons (I8). Non-positive values fall back to the default;
+ * both are additionally hard-ceilinged (20 / 500) by the backend's compact
+ * constructor — the UI should mirror those ceilings rather than let a save
+ * silently clamp a larger typed value.
+ */
+export interface RetroConfig {
+  maxLessonsPerRun: number;
+  maxStoredLessons: number;
+}
+export const RETRO_DEFAULT_MAX_PER_RUN = 3;
+export const RETRO_DEFAULT_MAX_STORED = 50;
+export const RETRO_CEILING_MAX_PER_RUN = 20;
+export const RETRO_CEILING_MAX_STORED = 500;
+
+/**
+ * Transcript windowing (I9): once a FULL/ANONYMOUS-scope render would exceed
+ * `maxRecentEntries`, older entries are either summarized (if `summarizeOverflow`
+ * and `llmProvider`/`llmModel` are set) or replaced with a plain
+ * `"[N earlier entries omitted]"` marker. ANONYMOUS phases keep a SEPARATE
+ * rolling summary from FULL phases (`GroupConversation.anonymousTranscriptSummary`)
+ * so a summary can never leak real speaker names into an anonymous round.
+ */
+export interface ContextWindowConfig {
+  /** Master switch. `false`/absent = every turn still renders the full scoped transcript. */
+  enabled: boolean;
+  /** Backend default 30 when non-positive. */
+  maxRecentEntries: number;
+  /** `null`/absent behaves as `true` (backend coalesces). Only `false` literal disables summarization. */
+  summarizeOverflow?: boolean | null;
+  /** Required (with llmModel) for summarization to actually run; otherwise falls back to the truncation marker. */
+  llmProvider?: string | null;
+  llmModel?: string | null;
+  /** USD per 1M input/output tokens for the summarizer's own calls (N1-style pricing). `null` = unpriced ($0). */
+  inputPricePer1M?: number | null;
+  outputPricePer1M?: number | null;
+}
+export const CONTEXT_WINDOW_DEFAULT_MAX_RECENT_ENTRIES = 30;
+
+/** The closed set of declarative artifact validators (I17). Declarative only — never arbitrary code. */
+export type ArtifactValidatorKind = "JSON_SCHEMA" | "REGEX" | "MAX_LENGTH";
+
+/**
+ * One declarative artifact validator (I17): `kind` selects the check, `spec`
+ * parameterizes it — a JSON Schema document (JSON_SCHEMA), a pattern the content
+ * must match (REGEX), or a max character count (MAX_LENGTH). Validated at save
+ * time; a failed write is rejected with the validator's own message and nothing
+ * is stored.
+ */
+export interface ArtifactValidator {
+  kind: ArtifactValidatorKind;
+  spec: string;
+}
+
+/**
+ * Governs shared artifacts (I17, blackboard-lite): typed documents members
+ * co-edit through tools instead of re-parsing each other's prose. Same
+ * opt-in-by-absence discipline as {@link GroupTaskConfig}.
+ */
+export interface ArtifactConfig {
+  allowArtifactTools: boolean;
+  maxArtifactsPerDiscussion: number;
+  validators: ArtifactValidator[];
+}
+export const ARTIFACT_DEFAULT_MAX_PER_DISCUSSION = 5;
+
+/** What an expired HUMAN turn does (I6). */
+export type OnHumanTimeout = "SKIP_TURN" | "ABORT";
+
+/**
+ * Per-HUMAN-member turn policy (I6). `turnTimeout` is an ISO-8601 duration
+ * (e.g. `"PT24H"`); `null`/absent waits indefinitely. `onTimeout` defaults to
+ * `SKIP_TURN` (records a SKIPPED entry and moves on) when unset.
+ */
+export interface HumanMemberConfig {
+  turnTimeout: string | null;
+  onTimeout: OnHumanTimeout;
+}
+
+/**
+ * The moves a facilitator may choose from (I12). The move list IS the feature
+ * surface — each non-CONTINUE move drives machinery another feature already
+ * built (I2 phase-exit, I14 vote phases, I7 recruitment, I6 pending human input).
+ */
+export type FacilitatorMove =
+  | "CONTINUE"
+  | "END_PHASE"
+  | "EXTEND_PHASE"
+  | "CALL_VOTE"
+  | "RECRUIT"
+  | "ESCALATE_HUMAN";
+
+/** When a facilitator checkpoint runs (I12). EACH_REPEAT is required for END_PHASE/EXTEND_PHASE, which act mid-phase. */
+export type FacilitatorCheckpoint = "EACH_PHASE" | "EACH_REPEAT";
+
+/**
+ * Bounded adaptive orchestration (I12): a facilitator agent is briefed at
+ * configured checkpoints and chooses ONE move from a config-enumerated list —
+ * never a free-form LLM orchestrator. Every selection is validated; an invalid
+ * or missing choice falls back to CONTINUE.
+ */
+export interface FacilitatorConfig {
+  /** Master switch. `false` (default) = no checkpoint ever runs, no extra cost. */
+  enabled: boolean;
+  /** The agent that plays facilitator — required when enabled. Runs under its own conversation key, never a member's. */
+  agentId: string | null;
+  /** Backend defaults to `["CONTINUE"]` when empty/absent. */
+  allowedMoves: FacilitatorMove[];
+  checkAfter: FacilitatorCheckpoint;
+  /** Backend default 10 when non-positive. */
+  maxMovesPerDiscussion: number;
+  /** Principal id ESCALATE_HUMAN pauses for — required at save time when that move is allowed. */
+  escalateTo: string | null;
+}
+export const FACILITATOR_DEFAULT_MAX_MOVES = 10;
 
 /**
  * Coerce a config as it arrives from the backend into the canonical shapes this
@@ -475,6 +735,126 @@ export interface ResumePoint {
   pauseKind: string | null;
 }
 
+/** Backend `ResumePoint` pause-kind constants for a HUMAN_TURN pause (I6). Free text — display only. */
+export const RESUME_KIND_HUMAN_TURN = "HUMAN_TURN";
+export const RESUME_KIND_HUMAN_TURN_PARALLEL = "HUMAN_TURN_PARALLEL";
+
+/** Proposal status (I11). The backend's own Javadoc mentions a `"REJECTED"` status, but no such
+ *  constant or code path exists — only these two are ever actually set. */
+export type ProposalStatus = "OPEN" | "SUPERSEDED";
+export const PROPOSAL_OPEN: ProposalStatus = "OPEN";
+export const PROPOSAL_SUPERSEDED: ProposalStatus = "SUPERSEDED";
+
+/**
+ * One proposal on the negotiation table (I11). `acceptanceEntryIndices` maps
+ * agentId → the absolute transcript index of that agent's accepting entry — the
+ * signed transcript entries themselves ARE the co-signatures (no separate
+ * crypto), and those indices are what an AGREEMENT decision's
+ * `tally.signedAcceptances` quotes.
+ */
+export interface Proposal {
+  /** Stable id ("p1", "p2", …) — what a BARGAIN turn's accept names. */
+  id: string;
+  byAgentId: string;
+  /** The phase repeat this proposal was made in. */
+  round: number;
+  /** The proposal's terms — a plain string in v1, deliberately untyped. */
+  terms: string;
+  status: ProposalStatus;
+  acceptedBy: string[];
+  acceptanceEntryIndices: Record<string, number>;
+}
+
+/**
+ * One concession ledger line (I11): what an agent gave up, and what they
+ * received in return — every concession must name its counterpart, which is
+ * what stops sycophantic instant-agreement.
+ *
+ * NOTE: this is the shape of `NegotiationState.concessions[]` (field name
+ * `byAgentId`, matching the backend record exactly). A DecisionRecord's
+ * `tally.signedAcceptances`/concession summary for an AGREEMENT decision
+ * serializes the SAME data under the key `"by"` instead — a naming
+ * inconsistency between the live ledger and the decision tally snapshot, not a
+ * typo here.
+ */
+export interface Concession {
+  byAgentId: string;
+  round: number;
+  gaveUp: string;
+  inReturnFor: string;
+  refProposalId: string;
+}
+
+/** The negotiation's working state (I11) — open/superseded proposals and the concession ledger, persisted with the document. */
+export interface NegotiationState {
+  proposals: Proposal[];
+  concessions: Concession[];
+}
+
+/**
+ * A HUMAN group member's turn is up (I6) — what the member's own submission UI
+ * renders. `entryType` is the transcript entry type their response will be
+ * recorded as once submitted (the phase's natural type, mirroring what an agent
+ * in the same seat would produce). `onTimeout` mirrors the config's policy at
+ * pause time (a later config edit does not retroactively change an
+ * already-pending turn).
+ */
+export interface PendingHumanInput {
+  memberId: string;
+  displayName: string;
+  phaseIdx: number;
+  repeatIdx: number;
+  speakerIdx: number;
+  entryType: string;
+  renderedPrompt: string;
+  onTimeout: OnHumanTimeout;
+  requestedAt: string;
+}
+
+/** How consumers should read a `SharedArtifact.content` string (I17). */
+export type ArtifactType = "TEXT" | "MARKDOWN" | "JSON";
+
+/** Editing lifecycle (I17): DRAFT while being worked, FINAL once frozen. `markFinal` is a tool-call param only — persists as this `status`. */
+export type ArtifactStatus = "DRAFT" | "FINAL";
+
+/** One superseded revision of an artifact (I17). `version` is the version this content carried while current. */
+export interface ArtifactRevision {
+  content: string;
+  editorAgentId: string;
+  version: number;
+  at: string;
+}
+
+/**
+ * A typed document group members co-create through artifact tools (I17,
+ * blackboard-lite) — lives in its own backend collection, never embedded in the
+ * `GroupConversation` document. Only ever arrives on the response of a
+ * single-conversation fetch (`getGroupConversation` / SSE has no snapshot
+ * endpoint) — list/discuss/followup/continue/close responses never populate
+ * this array; track updates incrementally via the `artifact_updated` SSE event
+ * if a live view is needed between fetches.
+ *
+ * Hard ceiling: {@link ARTIFACT_MAX_CONTENT_BYTES} UTF-8 bytes on `content`.
+ * History is capped at {@link ARTIFACT_HISTORY_CAP} entries, oldest dropped.
+ */
+export interface SharedArtifact {
+  id: string;
+  groupConversationId: string;
+  ownerUserId: string;
+  name: string;
+  type: ArtifactType;
+  content: string;
+  /** Monotonic edit counter starting at 1 — the CAS token every update must present. */
+  version: number;
+  lastEditorAgentId: string | null;
+  status: ArtifactStatus;
+  history: ArtifactRevision[];
+  createdAt: string;
+  updatedAt: string;
+}
+export const ARTIFACT_MAX_CONTENT_BYTES = 256 * 1024;
+export const ARTIFACT_HISTORY_CAP = 10;
+
 export interface GroupConversation {
   id: string;
   groupId: string;
@@ -552,6 +932,43 @@ export interface GroupConversation {
   hitlApprovalTimeout?: string;
   /** Where inside a SEQUENTIAL phase the pause landed, so a resume skips what already ran (F2). */
   resumePoint?: ResumePoint | null;
+  /**
+   * Repeat-slice base a paused SEQUENTIAL phase's resume rewinds to (I6), `-1`
+   * when not mid-repeat-slice. Informational — the backend resumes correctly
+   * without a client reading this; exposed for observability.
+   */
+  pausedRepeatSliceBase?: number;
+  /** Set when `state === "AWAITING_HUMAN_INPUT"` — the pending member's turn to render and submit. */
+  pendingHumanInput?: PendingHumanInput | null;
+  /** Open/superseded proposals and the concession ledger for a NEGOTIATION-style discussion (I11). `null` until the first PROPOSAL/BARGAIN phase produces state. */
+  negotiation?: NegotiationState | null;
+  /**
+   * A facilitator-diverged phase list (I12) — present once a facilitator move
+   * (EXTEND_PHASE, CALL_VOTE) has altered the plan away from the config's own
+   * `phases`. `null`/absent = the config's phases are still authoritative.
+   */
+  runtimePhases?: DiscussionPhase[] | null;
+  /** Executed non-CONTINUE facilitator moves so far this discussion (I12), capped by `FacilitatorConfig.maxMovesPerDiscussion`. */
+  facilitatorMoveCount?: number;
+  /** EXTEND_PHASE count per phase index (I12), keyed by the phase index as a string. Capped at 2 per phase. */
+  facilitatorExtensions?: Record<string, number>;
+  /** Rolling summary of transcript[0, summaryUpToIndex) for FULL-scope windowing (I9). `null` until the window first overflows. */
+  transcriptSummary?: string | null;
+  summaryUpToIndex?: number;
+  /**
+   * SEPARATE rolling summary built only from "Anonymous"-labelled input, so an
+   * ANONYMOUS-scope phase's summary can never leak real speaker names (I9).
+   */
+  anonymousTranscriptSummary?: string | null;
+  anonymousSummaryUpToIndex?: number;
+  /**
+   * The discussion's shared artifacts (I17). Populated ONLY by
+   * `getGroupConversation` (READ_ONLY, recomputed server-side from the artifact
+   * store on every such read) — absent/undefined on every other response shape
+   * (list, discuss, followup, continue, close, SSE). A stored copy of this array
+   * must never be trusted back to the backend.
+   */
+  artifacts?: SharedArtifact[];
 }
 
 // Re-export descriptor type for group descriptors (same shape as agent descriptors)
@@ -808,6 +1225,31 @@ export function closeGroupConversation(
   );
 }
 
+/**
+ * Submit a HUMAN group member's turn (I6) — records their reply as the pending
+ * transcript entry and resumes an AWAITING_HUMAN_INPUT discussion from the next
+ * speaker. Only the pending member's own principal (or an admin) may call this;
+ * it is a member SPEAKING, not an approval decision, so it is deliberately
+ * separate from the HITL approve endpoints even though both resume a paused
+ * discussion.
+ * POST /groups/{groupId}/conversations/{groupConversationId}/human-input
+ * Body: HumanInputRequest { memberId, content }.
+ * Failures: 400 (blank content, unknown member, or memberId not matching the
+ * pending turn), 403 (not the pending member/admin), 404, 409 (concurrent
+ * modification or the discussion left AWAITING_HUMAN_INPUT some other way).
+ */
+export function submitHumanInput(
+  groupId: string,
+  gcId: string,
+  memberId: string,
+  content: string,
+): Promise<GroupConversation> {
+  return api.post<GroupConversation>(
+    `/groups/${groupId}/conversations/${gcId}/human-input`,
+    { memberId, content },
+  );
+}
+
 // ─── SSE Streaming ──────────────────────────────────────────────
 
 export type GroupSSEEventType =
@@ -840,12 +1282,25 @@ export type GroupSSEEventType =
   // A phase stopped repeating early because its participants converged (I2).
   // Always preceded by a convergence_checked for the same repeat.
   | "convergence_reached"
-  // A DecisionRecord was set on the discussion (F3) — a debate verdict today.
-  | "decision_reached";
+  // A DecisionRecord was set on the discussion (F3) — VERDICT, VOTE (I14) and
+  // AGREEMENT (I11) all confirmed wired; AWARD (I18) not yet confirmed.
+  | "decision_reached"
+  // A HUMAN member's turn is up (I6). Terminal — closes the stream, same as
+  // awaiting_approval; the pending turn's detail lives on `pendingHumanInput`.
+  | "human_input_requested"
+  // A RETRO phase harvested lessons into group memory (I8). NOT terminal — a
+  // retro can precede further phases. Fires even with zero lessons stored.
+  | "retro_recorded"
+  // A member created or updated a shared artifact (I17). NOT terminal. Carries
+  // metadata only, never content.
+  | "artifact_updated";
 //
 // `token` and `synthesis_complete` are declared in the backend's
 // GroupConversationEventSink but no producer emits them; they are deliberately
-// absent here rather than modelled as dead cases.
+// absent here rather than modelled as dead cases. Likewise, a facilitator's own
+// LLM turn (I12) produces NO SSE events at all (no speaker_start/token/
+// speaker_complete) — only re-fetching the transcript reveals it, except
+// ESCALATE_HUMAN, which fires human_input_requested above.
 
 export interface GroupSSEEvent {
   type: GroupSSEEventType;
@@ -952,6 +1407,32 @@ export interface ConvergenceReachedPayload {
 /** Payload of `decision_reached` (F3). */
 export interface DecisionReachedPayload {
   decision: DecisionRecord;
+}
+
+/** Payload of `human_input_requested` (I6). Carries identifiers only — the rendered prompt lives on `pendingHumanInput`. */
+export interface HumanInputRequestedPayload {
+  memberId: string;
+  displayName: string;
+  phaseIndex: number;
+  phaseName: string;
+}
+
+/** Payload of `retro_recorded` (I8). */
+export interface RetroRecordedPayload {
+  groupId: string;
+  phaseName: string;
+  lessonsStored: number;
+}
+
+/** Payload of `artifact_updated` (I17). `created` is `true` for a fresh artifact (v1), `false` for an accepted update. */
+export interface ArtifactUpdatedPayload {
+  artifactId: string;
+  name: string;
+  type: ArtifactType;
+  version: number;
+  editorAgentId: string;
+  status: ArtifactStatus;
+  created: boolean;
 }
 
 /**
@@ -1233,6 +1714,11 @@ export const STYLE_INFO: Record<
     flow: "Agents plan, execute, and verify together",
     icon: "🎯",
   },
+  NEGOTIATION: {
+    label: "Negotiation Table",
+    flow: "Named parties trade concessions to a deal; an arbiter steps in only if bargaining fails",
+    icon: "🤝",
+  },
   CUSTOM: {
     label: "Custom Framework",
     flow: "Define your own discussion phases",
@@ -1336,10 +1822,14 @@ export async function deleteGroupWithMembers(
   version: number,
   config: AgentGroupConfiguration,
 ): Promise<void> {
-  // Collect all agent IDs to delete (members + moderator)
+  // Collect all agent IDs to delete (members + moderator). GROUP members
+  // reference a nested group config, and HUMAN members' `agentId` holds a
+  // human principal id (I6) — neither is a deployed agent to soft-delete.
   const agentIds = new Set<string>();
   for (const m of config.members) {
-    if (m.agentId && m.memberType !== "GROUP") agentIds.add(m.agentId);
+    if (m.agentId && m.memberType !== "GROUP" && m.memberType !== "HUMAN") {
+      agentIds.add(m.agentId);
+    }
   }
   if (config.moderatorAgentId) agentIds.add(config.moderatorAgentId);
 

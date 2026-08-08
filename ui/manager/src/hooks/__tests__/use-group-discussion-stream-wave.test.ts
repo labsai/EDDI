@@ -186,4 +186,93 @@ describe("group stream — Wave 0/1 events", () => {
       "g1", "q", undefined, expect.anything(), attachments,
     );
   });
+
+  // I6 — a HUMAN member's turn is up.
+  it("records a human_input_requested event as a terminal AWAITING_HUMAN_INPUT pause", async () => {
+    mockStreamGroupDiscussion.mockReturnValue(
+      events([
+        ev("human_input_requested", {
+          memberId: "human-1", displayName: "Alex", phaseIndex: 2, phaseName: "Deliberation",
+        }),
+        // A real stream stops here (terminal) — anything after should never apply.
+        ev("phase_start", { phaseIndex: 3, phaseName: "Should not apply", phaseType: "SYNTHESIS", participants: "MODERATOR" }),
+      ]),
+    );
+    const { result } = renderHook(() => useGroupDiscussionStream("g1"));
+    await act(async () => { await result.current.startStream("g1", "q"); });
+
+    expect(result.current.streamState.state).toBe("AWAITING_HUMAN_INPUT");
+    expect(result.current.streamState.isStreaming).toBe(false);
+    expect(result.current.streamState.humanInputRequest).toEqual({
+      memberId: "human-1", displayName: "Alex", phaseIndex: 2, phaseName: "Deliberation",
+    });
+    // Terminal — the phase_start after it must never have been processed.
+    expect(result.current.streamState.currentPhase).toBeNull();
+  });
+
+  it("clears a stale humanInputRequest when a new discussion starts", async () => {
+    mockStreamGroupDiscussion.mockReturnValueOnce(
+      events([ev("human_input_requested", { memberId: "h1", displayName: "Alex", phaseIndex: 0, phaseName: "P" })]),
+    );
+    const { result } = renderHook(() => useGroupDiscussionStream("g1"));
+    await act(async () => { await result.current.startStream("g1", "q1"); });
+    expect(result.current.streamState.humanInputRequest).not.toBeNull();
+
+    mockStreamGroupDiscussion.mockReturnValueOnce(events([]));
+    await act(async () => { await result.current.startStream("g1", "q2"); });
+    expect(result.current.streamState.humanInputRequest).toBeNull();
+  });
+
+  // I8 — retrospective lessons harvested into group memory.
+  it("accumulates retro_recorded events without being terminal", async () => {
+    mockStreamGroupDiscussion.mockReturnValue(
+      events([
+        ev("retro_recorded", { groupId: "g1", phaseName: "Retro", lessonsStored: 3 }),
+        // Not terminal — later events must still be processed.
+        ev("group_complete", { state: "COMPLETED", synthesizedAnswer: "done" }),
+      ]),
+    );
+    const { result } = renderHook(() => useGroupDiscussionStream("g1"));
+    await act(async () => { await result.current.startStream("g1", "q"); });
+
+    expect(result.current.streamState.retroRecorded).toEqual([
+      { groupId: "g1", phaseName: "Retro", lessonsStored: 3 },
+    ]);
+    expect(result.current.streamState.state).toBe("COMPLETED");
+  });
+
+  it("keeps a zero-lesson retro as real signal, not nothing", async () => {
+    mockStreamGroupDiscussion.mockReturnValue(
+      events([ev("retro_recorded", { groupId: "g1", phaseName: "Retro", lessonsStored: 0 })]),
+    );
+    const { result } = renderHook(() => useGroupDiscussionStream("g1"));
+    await act(async () => { await result.current.startStream("g1", "q"); });
+
+    expect(result.current.streamState.retroRecorded).toHaveLength(1);
+    expect(result.current.streamState.retroRecorded[0]!.lessonsStored).toBe(0);
+  });
+
+  // I17 — shared artifact writes.
+  it("accumulates artifact_updated events without being terminal, distinguishing create from update", async () => {
+    mockStreamGroupDiscussion.mockReturnValue(
+      events([
+        ev("artifact_updated", {
+          artifactId: "a1", name: "notes.md", type: "MARKDOWN", version: 1,
+          editorAgentId: "agent-1", status: "DRAFT", created: true,
+        }),
+        ev("artifact_updated", {
+          artifactId: "a1", name: "notes.md", type: "MARKDOWN", version: 2,
+          editorAgentId: "agent-2", status: "DRAFT", created: false,
+        }),
+        ev("group_complete", { state: "COMPLETED", synthesizedAnswer: "done" }),
+      ]),
+    );
+    const { result } = renderHook(() => useGroupDiscussionStream("g1"));
+    await act(async () => { await result.current.startStream("g1", "q"); });
+
+    expect(result.current.streamState.artifactUpdates).toHaveLength(2);
+    expect(result.current.streamState.artifactUpdates[0]!.created).toBe(true);
+    expect(result.current.streamState.artifactUpdates[1]!.created).toBe(false);
+    expect(result.current.streamState.artifactUpdates[1]!.version).toBe(2);
+  });
 });

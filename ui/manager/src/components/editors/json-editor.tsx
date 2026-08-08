@@ -46,8 +46,19 @@ export function JsonEditor({
 
   const handleBeforeMount: BeforeMount = useCallback(
     (monaco) => {
-      // Configure JSON schema for validation and autocomplete
-      monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+      // `languages.json` is a Monaco *language contribution*, not part of the
+      // core editor API — whether it is present depends on which Monaco entry
+      // point the bundler resolved. Dereferencing it unconditionally threw
+      // "Cannot read properties of undefined (reading 'jsonDefaults')" and,
+      // because this runs during render, took the whole page down through the
+      // top-level error boundary rather than costing one editor.
+      //
+      // Schema validation and autocomplete are an enhancement; syntax
+      // highlighting and editing work without them. Degrade, don't crash.
+      const jsonDefaults = monaco.languages?.json?.jsonDefaults;
+      if (!jsonDefaults) return;
+
+      jsonDefaults.setDiagnosticsOptions({
         validate: true,
         allowComments: false,
         trailingCommas: "error",

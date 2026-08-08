@@ -25,6 +25,8 @@ import { QuotasPage } from "@/pages/quotas";
 import { GroupsPage } from "@/pages/groups";
 import { GroupDetailPage } from "@/pages/group-detail";
 import { GroupWizardPage } from "@/pages/group-wizard";
+import { GroupTemplatesPage } from "@/pages/group-templates";
+import { GroupWorkspacePage } from "@/pages/group-workspace";
 import { AgentStudioPage } from "@/pages/agent-studio";
 import { CommandPalette } from "@/components/shared/command-palette";
 
@@ -105,7 +107,9 @@ export function App() {
         <Route path="/manage/gdpr" element={<GdprPage />} />
         <Route path="/manage/groups" element={<GroupsPage />} />
         <Route path="/manage/groups/wizard" element={<GroupWizardPage />} />
+        <Route path="/manage/groups/templates" element={<GroupTemplatesPage />} />
         <Route path="/manage/groups/:id" element={<GroupDetailPage />} />
+        <Route path="/manage/groups/:id/workspace" element={<GroupWorkspacePage />} />
         <Route path="/manage/userdata" element={<UserDataPage />} />
         <Route path="/manage/triggers" element={<TriggersPage />} />
         <Route path="/manage/capabilities" element={<CapabilitiesPage />} />

@@ -20,6 +20,9 @@ import {
   type DecisionReachedPayload,
   type DecisionRecord,
   type GroupAttachmentRef,
+  type HumanInputRequestedPayload,
+  type RetroRecordedPayload,
+  type ArtifactUpdatedPayload,
 } from "@/lib/api/groups";
 import type { GroupApprovalRequest } from "@/lib/api/hitl";
 
@@ -106,6 +109,31 @@ export interface GroupStreamState {
     reason?: string;
     cancelledBy?: string;
   } | null;
+  /**
+   * A HUMAN group member's turn is up (I6, `human_input_requested`). Terminal —
+   * closes the stream, same as `hitlPause`. Only carries identifiers; the
+   * rendered prompt lives on the persisted conversation's `pendingHumanInput`,
+   * which the settle effect in `group-detail.tsx` switches to (same pattern
+   * `hitlPause` already uses).
+   */
+  humanInputRequest: {
+    memberId: string;
+    displayName: string;
+    phaseIndex: number;
+    phaseName: string;
+  } | null;
+  /**
+   * Every `retro_recorded` event this stream has seen (I8) — NOT terminal, a
+   * discussion can run more than one RETRO phase across rounds, so this
+   * accumulates rather than holding only the latest.
+   */
+  retroRecorded: RetroRecordedPayload[];
+  /**
+   * Every `artifact_updated` event this stream has seen (I17) — metadata only,
+   * never content (a full read requires re-fetching the conversation). NOT
+   * terminal; a discussion can write several artifacts across its run.
+   */
+  artifactUpdates: ArtifactUpdatedPayload[];
 }
 
 /** Shared empty state handed to consumers that have no stream yet. Never mutated. */
@@ -129,6 +157,9 @@ const initialState: GroupStreamState = {
   hitlPause: null,
   hitlResume: null,
   cancelInfo: null,
+  humanInputRequest: null,
+  retroRecorded: [],
+  artifactUpdates: [],
 };
 
 /** A clean state with its own collection instances (the shared `initialState`
@@ -141,6 +172,8 @@ function freshState(): GroupStreamState {
     tasksCompleted: new Set(),
     taskVerifications: new Map(),
     convergence: new Map(),
+    retroRecorded: [],
+    artifactUpdates: [],
   };
 }
 
@@ -222,6 +255,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       conversationId: gcId,
       hitlPause: null,
       hitlResume: null,
+      humanInputRequest: null,
       error: null,
       startedAt: s.startedAt ?? new Date().toISOString(),
       activeSpeakers: new Set(),
@@ -268,6 +302,9 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       hitlPause: null,
       hitlResume: null,
       cancelInfo: null,
+      humanInputRequest: null,
+      retroRecorded: [],
+      artifactUpdates: [],
     }));
 
     await consumeStream(
@@ -822,6 +859,26 @@ function handleSSEEvent(
       return true;
     }
 
+    case "human_input_requested": {
+      try {
+        const payload: HumanInputRequestedPayload = JSON.parse(event.data);
+        setState((s) => ({
+          ...s,
+          state: "AWAITING_HUMAN_INPUT" as GroupConversationState,
+          humanInputRequest: {
+            memberId: payload.memberId,
+            displayName: payload.displayName,
+            phaseIndex: payload.phaseIndex,
+            phaseName: payload.phaseName,
+          },
+          isStreaming: false,
+        }));
+      } catch (e) {
+        console.warn('[SSE] Failed to parse human_input_requested event:', e);
+      }
+      return true;
+    }
+
     case "hitl_resume": {
       try {
         const payload = JSON.parse(event.data) as {
@@ -901,6 +958,26 @@ function handleSSEEvent(
         });
       } catch (e) {
         console.warn('[SSE] Failed to parse member_pause_skipped event:', e);
+      }
+      return false;
+    }
+
+    case "retro_recorded": {
+      try {
+        const payload: RetroRecordedPayload = JSON.parse(event.data);
+        setState((s) => ({ ...s, retroRecorded: [...s.retroRecorded, payload] }));
+      } catch (e) {
+        console.warn('[SSE] Failed to parse retro_recorded event:', e);
+      }
+      return false;
+    }
+
+    case "artifact_updated": {
+      try {
+        const payload: ArtifactUpdatedPayload = JSON.parse(event.data);
+        setState((s) => ({ ...s, artifactUpdates: [...s.artifactUpdates, payload] }));
+      } catch (e) {
+        console.warn('[SSE] Failed to parse artifact_updated event:', e);
       }
       return false;
     }

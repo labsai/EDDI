@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
-import { Boxes, Search, Plus, ExternalLink, Copy, Trash2, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { Boxes, Search, Plus, ExternalLink, Copy, Trash2, ArrowUp, ArrowDown, ArrowUpDown, LayoutTemplate } from "lucide-react";
 import { toast } from "sonner";
 import { useEnrichedGroupDescriptors, useDeleteGroup, useDuplicateGroup } from "@/hooks/use-groups";
 import { GroupCard } from "@/components/groups/group-card";
@@ -131,6 +131,14 @@ export function GroupsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => navigate("/manage/groups/templates")}
+            data-testid="browse-templates-btn"
+          >
+            <LayoutTemplate className="h-4 w-4" />
+            {t("groupTemplates.browseButton", "From Template")}
+          </Button>
           <Button onClick={() => setCreateOpen(true)} data-testid="create-group-btn">
             <Plus className="h-4 w-4" />
             {t("createOrWizard.newGroup", "New Group")}

@@ -8,6 +8,7 @@ import {
   cancelGroupDiscussion,
   type HitlDecision,
 } from "@/lib/api/hitl";
+import { submitHumanInput } from "@/lib/api/groups";
 import { useChatStore } from "@/hooks/use-chat";
 
 /** Clear a stale pause banner in the (persistent, app-wide) chat store when the
@@ -108,6 +109,35 @@ export function useCancelGroupDiscussion() {
     onSuccess: () => {
       // Real list key is camelCase ["groupConversations", …] (see use-groups.ts).
       qc.invalidateQueries({ queryKey: ["groupConversations"] });
+      qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
+    },
+  });
+}
+
+/**
+ * Submit a HUMAN group member's turn (I6). Unlike the approve/stream resume,
+ * this is a plain synchronous REST call — the backend has no `/human-input/stream`
+ * variant, so the discussion resumes on the request thread and the response is
+ * the settled `GroupConversation` (the next pause point, or COMPLETED). There is
+ * no live token-by-token progress to show while it's in flight, only a loading
+ * state until it resolves.
+ */
+export function useSubmitHumanInput() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      groupId,
+      gcId,
+      memberId,
+      content,
+    }: {
+      groupId: string;
+      gcId: string;
+      memberId: string;
+      content: string;
+    }) => submitHumanInput(groupId, gcId, memberId, content),
+    onSuccess: (_data, { groupId }) => {
+      qc.invalidateQueries({ queryKey: ["groupConversations", groupId] });
       qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
     },
   });

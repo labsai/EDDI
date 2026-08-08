@@ -19,7 +19,8 @@ const STATE_LABELS: Record<GroupConversationState, string> = {
   CREATED: "Created",
   CANCELLED: "Cancelled",
   AWAITING_APPROVAL: "Pending",
-CLOSED: "Closed",
+  AWAITING_HUMAN_INPUT: "Awaiting your turn",
+  CLOSED: "Closed",
 };
 
 export function stateLabel(s: GroupConversationState): string {

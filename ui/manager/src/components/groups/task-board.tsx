@@ -12,9 +12,11 @@ import {
   ChevronUp,
   Hand,
   UserPlus,
+  Gavel,
 } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import type { AwardedBid } from "@/lib/api/groups";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -36,6 +38,13 @@ interface Task {
    * to notice: it is work the team discovered rather than work it was given.
    */
   filedBy?: string | null;
+  /**
+   * The winning bid this task was assigned by (I18) — only ever present on a
+   * PERSISTED task list (`SharedTaskList.awardedBids`); the live `task_plan_created`
+   * SSE payload carries no bid data at all, so a bid award only becomes visible
+   * once the conversation is reloaded/re-fetched, same as the negotiation ledger.
+   */
+  awardedBid?: AwardedBid | null;
 }
 
 interface TaskVerification {
@@ -189,6 +198,23 @@ function TaskCard({
           <UserPlus className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
           {t("taskBoard.filedBy", "Filed by {{agent}}", { agent: task.filedBy })}
         </p>
+      )}
+
+      {/* Won by bid auction (I18) */}
+      {task.awardedBid && (
+        <div
+          className="mt-1.5 flex items-start gap-1 rounded-md bg-emerald-500/10 px-1.5 py-1 text-[10px] text-emerald-700 dark:text-emerald-400"
+          data-testid={`task-award-${task.id}`}
+          title={task.awardedBid.rationale}
+        >
+          <Gavel className="mt-0.5 h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+          <span>
+            {t("taskBoard.wonByBid", "Won by bid — {{confidence}}% confidence, {{complexity}}", {
+              confidence: Math.round(task.awardedBid.confidence * 100),
+              complexity: task.awardedBid.estimatedComplexity,
+            })}
+          </span>
+        </div>
       )}
 
       {/* Verification feedback */}

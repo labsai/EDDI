@@ -9,7 +9,12 @@ import type {
   ConvergenceConfig,
   ConvergenceJudge,
   DiscussionPhase,
+  VoteConfig,
+  VoteMethod,
+  VoteOptionsSource,
+  VoteTiePolicy,
 } from "@/lib/api/groups";
+import { DEFAULT_VOTE_QUORUM } from "@/lib/api/groups";
 import { getStylePhases } from "@/lib/hitl-config";
 import {
   CONVERGENCE_MIN_REPEATS_FLOOR,
@@ -17,6 +22,19 @@ import {
   convergenceApplies,
   normalizeConvergence,
 } from "@/lib/group-config";
+
+/** Sane defaults for a VOTE phase's ballot config (I14), mirroring the backend's own coalescing. */
+function defaultVoteConfig(existing?: VoteConfig | null): VoteConfig {
+  return {
+    method: existing?.method ?? "MAJORITY",
+    optionsSource: existing?.optionsSource ?? "LAST_SYNTHESIS",
+    options: existing?.options ?? [],
+    quorum: existing?.quorum && existing.quorum > 0 ? existing.quorum : DEFAULT_VOTE_QUORUM,
+    weights: existing?.weights ?? {},
+    weightByConfidence: existing?.weightByConfidence ?? false,
+    tiePolicy: existing?.tiePolicy ?? "NO_DECISION",
+  };
+}
 
 /**
  * Per-phase behaviour that EDDI's Wave 1 added and no Manager surface could
@@ -45,7 +63,16 @@ export function GroupPhaseEditor({
 
   const basePhases = config.phases ?? getStylePhases(config.style, config.maxRounds);
   const [phases, setPhases] = useState<DiscussionPhase[]>(() =>
-    basePhases.map((p) => ({ ...p })),
+    // Seed a VOTE phase's ballot block so the controls below have something to
+    // bind to and the saved document states what will actually run. The backend
+    // tolerates a null voteConfig (validateVotePhases skips it and the engine
+    // uses its own defaults), so this is explicitness rather than a save
+    // requirement — same reasoning as convergence seeding its defaults on
+    // first enable.
+    basePhases.map((p) => ({
+      ...p,
+      voteConfig: p.type === "VOTE" ? defaultVoteConfig(p.voteConfig) : p.voteConfig,
+    })),
   );
 
   const patchPhase = (index: number, patch: Partial<DiscussionPhase>) =>
@@ -63,6 +90,13 @@ export function GroupPhaseEditor({
               }),
             }
           : p,
+      ),
+    );
+
+  const patchVoteConfig = (index: number, patch: Partial<VoteConfig>) =>
+    setPhases((prev) =>
+      prev.map((p, i) =>
+        i === index ? { ...p, voteConfig: { ...defaultVoteConfig(p.voteConfig), ...patch } } : p,
       ),
     );
 
@@ -324,6 +358,120 @@ export function GroupPhaseEditor({
                   "Accepted but not yet wired — the engine falls back to the moderator and logs a warning.",
                 )}
               </p>
+            )}
+
+            {/* Ballot configuration (I14) — every VOTE phase needs one. */}
+            {phase.type === "VOTE" && (
+              <div className="mt-2 space-y-2 border-t border-border pt-2" data-testid={`phase-vote-config-${idx}`}>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label htmlFor={`phase-vote-method-${idx}`} className="mb-0.5 block text-[10px] text-muted-foreground">
+                      {t("groups.voteMethod", "Method")}
+                    </label>
+                    <select
+                      id={`phase-vote-method-${idx}`}
+                      value={phase.voteConfig?.method ?? "MAJORITY"}
+                      onChange={(e) => patchVoteConfig(idx, { method: e.target.value as VoteMethod })}
+                      className={inputCls}
+                      data-testid={`phase-vote-method-${idx}`}
+                    >
+                      <option value="MAJORITY">{t("groups.voteMethodMajority", "Majority")}</option>
+                      <option value="APPROVAL">{t("groups.voteMethodApproval", "Approval")}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor={`phase-vote-quorum-${idx}`} className="mb-0.5 block text-[10px] text-muted-foreground">
+                      {t("groups.voteQuorum", "Quorum")}
+                    </label>
+                    <input
+                      id={`phase-vote-quorum-${idx}`}
+                      type="number"
+                      min={0.01}
+                      max={1}
+                      step={0.05}
+                      value={phase.voteConfig?.quorum ?? DEFAULT_VOTE_QUORUM}
+                      onChange={(e) => {
+                        const v = e.currentTarget.valueAsNumber;
+                        if (Number.isFinite(v)) patchVoteConfig(idx, { quorum: v });
+                      }}
+                      className={inputCls}
+                      data-testid={`phase-vote-quorum-${idx}`}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor={`phase-vote-options-source-${idx}`} className="mb-0.5 block text-[10px] text-muted-foreground">
+                    {t("groups.voteOptionsSource", "Ballot options")}
+                  </label>
+                  <select
+                    id={`phase-vote-options-source-${idx}`}
+                    value={phase.voteConfig?.optionsSource ?? "LAST_SYNTHESIS"}
+                    onChange={(e) => patchVoteConfig(idx, { optionsSource: e.target.value as VoteOptionsSource })}
+                    className={inputCls}
+                    data-testid={`phase-vote-options-source-${idx}`}
+                  >
+                    <option value="LAST_SYNTHESIS">{t("groups.voteOptionsLastSynthesis", "Extract from the last synthesis")}</option>
+                    <option value="EXPLICIT">{t("groups.voteOptionsExplicit", "Explicit list")}</option>
+                  </select>
+                </div>
+
+                {phase.voteConfig?.optionsSource === "EXPLICIT" && (
+                  <div>
+                    <label htmlFor={`phase-vote-options-${idx}`} className="mb-0.5 block text-[10px] text-muted-foreground">
+                      {t("groups.voteOptionsList", "Options (one per line)")}
+                    </label>
+                    <textarea
+                      id={`phase-vote-options-${idx}`}
+                      value={(phase.voteConfig?.options ?? []).join("\n")}
+                      onChange={(e) =>
+                        patchVoteConfig(idx, {
+                          options: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean),
+                        })
+                      }
+                      rows={3}
+                      className="w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      data-testid={`phase-vote-options-${idx}`}
+                    />
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label htmlFor={`phase-vote-tie-${idx}`} className="mb-0.5 block text-[10px] text-muted-foreground">
+                      {t("groups.voteTiePolicy", "On a tie")}
+                    </label>
+                    <select
+                      id={`phase-vote-tie-${idx}`}
+                      value={phase.voteConfig?.tiePolicy ?? "NO_DECISION"}
+                      onChange={(e) => patchVoteConfig(idx, { tiePolicy: e.target.value as VoteTiePolicy })}
+                      className={inputCls}
+                      data-testid={`phase-vote-tie-${idx}`}
+                    >
+                      <option value="NO_DECISION">{t("groups.voteTieNoDecision", "No decision")}</option>
+                      <option value="MODERATOR_DECIDES">{t("groups.voteTieModerator", "Moderator decides")}</option>
+                      {/* Still save-time rejected by the backend pending its resume
+                          machinery — offered disabled rather than omitted, so a
+                          config that already carries it (impossible today, but not
+                          worth a crash if one ever does) is visibly explained
+                          rather than silently reset by this dropdown. */}
+                      <option value="HUMAN_DECIDES" disabled>
+                        {t("groups.voteTieHuman", "Human decides (not yet available)")}
+                      </option>
+                    </select>
+                  </div>
+                  <label className="flex items-end gap-1.5 pb-1.5 text-[11px] text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={!!phase.voteConfig?.weightByConfidence}
+                      onChange={(e) => patchVoteConfig(idx, { weightByConfidence: e.target.checked })}
+                      className="h-3 w-3 rounded border-input accent-primary"
+                      data-testid={`phase-vote-weight-confidence-${idx}`}
+                    />
+                    <span>{t("groups.voteWeightByConfidence", "Weight by confidence")}</span>
+                  </label>
+                </div>
+              </div>
             )}
           </div>
         );

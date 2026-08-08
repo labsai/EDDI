@@ -595,4 +595,64 @@ describe("GroupWizardPage", () => {
     // Advisory board is one template, there should be more
     expect(screen.getByTestId("template-advisory-board")).toBeInTheDocument();
   });
+
+  // I6 — HUMAN group members.
+  describe("HUMAN members", () => {
+    async function reachMembersStepWithTwo(user: ReturnType<typeof userEvent.setup>) {
+      renderWithProviders(<GroupWizardPage />, { initialRoute: "/manage/groups/wizard" });
+      await user.click(screen.getByTestId("template-blank"));
+      await user.type(screen.getByTestId("gw-name"), "Human Test Group");
+      await user.click(screen.getByTestId("group-wizard-next"));
+      await user.click(screen.getByTestId("gw-add-member"));
+      await user.click(screen.getByTestId("gw-add-member"));
+      await waitFor(() => {
+        expect(screen.getByTestId("member-card-1")).toBeInTheDocument();
+      });
+      // Second member is a plain agent in "new" mode — enough by itself to pass
+      // the members-step gate, so any Next-disabling below is attributable to
+      // the first (HUMAN) member specifically.
+      await user.type(screen.getByTestId("member-name-1"), "Agent Two");
+    }
+
+    it("switching a member to Human blocks Next until a principal id is entered", async () => {
+      const user = userEvent.setup();
+      await reachMembersStepWithTwo(user);
+      await user.type(screen.getByTestId("member-name-0"), "Director");
+
+      await user.click(screen.getByTestId("member-type-human-0"));
+      expect(screen.getByTestId("human-principal-id-0")).toBeInTheDocument();
+      // No agent-creation UI (mode toggle / provider picker) within THIS card —
+      // member 1 (an AGENT) legitimately still has its own "Use Existing" toggle.
+      expect(
+        within(screen.getByTestId("member-card-0")).queryByText("Use Existing"),
+      ).not.toBeInTheDocument();
+
+      expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+
+      await user.type(screen.getByTestId("human-principal-id-0"), "director@acme.com");
+      expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
+    });
+
+    it("shows the human turn settings panel only once a member is Human, and validates the duration", async () => {
+      const user = userEvent.setup();
+      await reachMembersStepWithTwo(user);
+      await user.type(screen.getByTestId("member-name-0"), "Director");
+
+      expect(screen.queryByTestId("human-turn-settings")).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId("member-type-human-0"));
+      await user.type(screen.getByTestId("human-principal-id-0"), "director@acme.com");
+      expect(screen.getByTestId("human-turn-settings")).toBeInTheDocument();
+
+      // Blank timeout ("wait indefinitely") is valid — Next stays enabled.
+      expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
+
+      await user.type(screen.getByTestId("human-turn-timeout-input"), "not-a-duration");
+      expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+
+      await user.clear(screen.getByTestId("human-turn-timeout-input"));
+      await user.type(screen.getByTestId("human-turn-timeout-input"), "PT24H");
+      expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
+    });
+  });
 });

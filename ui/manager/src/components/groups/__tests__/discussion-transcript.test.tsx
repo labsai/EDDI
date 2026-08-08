@@ -225,6 +225,9 @@ describe("DiscussionTranscript", () => {
       hitlPause: null,
       hitlResume: null,
       cancelInfo: null,
+      humanInputRequest: null,
+      retroRecorded: [],
+      artifactUpdates: [],
     };
 
     renderWithProviders(
@@ -265,6 +268,9 @@ describe("DiscussionTranscript", () => {
       hitlPause: null,
       hitlResume: null,
       cancelInfo: null,
+      humanInputRequest: null,
+      retroRecorded: [],
+      artifactUpdates: [],
     };
 
     renderWithProviders(
@@ -276,5 +282,27 @@ describe("DiscussionTranscript", () => {
     );
 
     expect(screen.getByText("⚠️ SSE Connection Aborted")).toBeInTheDocument();
+  });
+
+  // I9 — transcript windowing indicator.
+  it("shows the windowing indicator once the persisted conversation carries a rolling summary", () => {
+    renderWithProviders(
+      <DiscussionTranscript
+        conversation={{ ...mockConversation, summaryUpToIndex: 12, transcriptSummary: "Earlier: the group debated X and Y." }}
+        discussionStyle="ROUND_TABLE"
+      />,
+    );
+
+    const badge = screen.getByTestId("transcript-window-summary");
+    expect(badge).toHaveTextContent("12");
+    expect(badge).toHaveAttribute("title", "Earlier: the group debated X and Y.");
+  });
+
+  it("hides the windowing indicator when the conversation was never windowed", () => {
+    renderWithProviders(
+      <DiscussionTranscript conversation={mockConversation} discussionStyle="ROUND_TABLE" />,
+    );
+
+    expect(screen.queryByTestId("transcript-window-summary")).not.toBeInTheDocument();
   });
 });

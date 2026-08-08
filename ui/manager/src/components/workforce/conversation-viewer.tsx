@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { parseTranscriptContent, truncateContent } from "@/components/groups/group-utils";
+import { DiscussionInsights } from "@/components/groups/discussion-insights";
 import {
   entryTypeInfo,
   type TranscriptEntry,
@@ -38,7 +39,8 @@ const STATE_VARIANT: Record<
   FAILED: { label: "Failed", variant: "destructive" },
   CANCELLED: { label: "Cancelled", variant: "secondary" },
   AWAITING_APPROVAL: { label: "Awaiting Approval", variant: "warning" },
-CLOSED: { label: "Closed", variant: "secondary" },
+  AWAITING_HUMAN_INPUT: { label: "Awaiting Your Turn", variant: "warning" },
+  CLOSED: { label: "Closed", variant: "secondary" },
 };
 
 function stateI18nKey(state: GroupConversationState): string {
@@ -50,7 +52,8 @@ function stateI18nKey(state: GroupConversationState): string {
     FAILED: "Workforce.history.failed",
     CANCELLED: "Workforce.history.cancelled",
     AWAITING_APPROVAL: "Workforce.history.awaitingApproval",
-  CLOSED: "Closed",
+    AWAITING_HUMAN_INPUT: "Workforce.history.awaitingHumanInput",
+    CLOSED: "Workforce.history.closed",
   };
   return map[state] ?? "Workforce.history.created";
 }
@@ -94,6 +97,12 @@ const PHASE_ICONS: Record<string, string> = {
   PLAN: "📝",
   TASK_RESULT: "📦",
   VERIFICATION: "☑️",
+  // Wave-3 entry types (I14/I11/I8/I18) — looked up by TranscriptEntryType.
+  VOTE: "🗳️",
+  PROPOSAL: "🤝",
+  BARGAIN: "🔄",
+  RETRO: "🪞",
+  BID: "💰",
 };
 
 // ─── Constants ───────────────────────────────────────────────────
@@ -747,6 +756,13 @@ function ConversationViewer({
         aria-label={t("Workforce.history.transcript", "Conversation transcript")}
         className="flex-1 overflow-y-auto ps-5 pe-5 py-4 space-y-3"
       >
+        {/* Shared artifacts, negotiation ledger and windowing summary
+            (I17/I11/I9) — the same component the Manager transcript and the
+            live board render, so every surface showing a group discussion
+            shows the same state. This viewer reads the single-conversation
+            GET, which is the only response that carries `artifacts`. */}
+        <DiscussionInsights conversation={conversation} />
+
         {processedEntries.map(({ entry, showPhaseHeader }, idx) => {
           const phaseHeader = showPhaseHeader ? (
             <PhaseSeparator

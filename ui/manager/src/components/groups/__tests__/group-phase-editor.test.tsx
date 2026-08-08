@@ -239,4 +239,73 @@ describe("GroupPhaseEditor", () => {
     expect(screen.queryByTestId("group-phase-save")).not.toBeInTheDocument();
     expect(screen.getByTestId("group-phase-editor")).toHaveTextContent("no phases");
   });
+
+  // I14 — VOTE phase ballot configuration.
+  describe("vote phases", () => {
+    function voteConfig() {
+      return makeConfig({
+        style: "CUSTOM",
+        phases: [phase("Ballot", { type: "VOTE", turnOrder: "PARALLEL", contextScope: "NONE" })],
+      });
+    }
+
+    it("seeds a structurally valid voteConfig even with no interaction", () => {
+      renderWithProviders(
+        <GroupPhaseEditor config={voteConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+      );
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      expect(savedConfig().phases![0]!.voteConfig).toEqual({
+        method: "MAJORITY",
+        optionsSource: "LAST_SYNTHESIS",
+        options: [],
+        quorum: 0.5,
+        weights: {},
+        weightByConfidence: false,
+        tiePolicy: "NO_DECISION",
+      });
+    });
+
+    it("switching to an explicit option list reveals the textarea and saves trimmed, non-empty lines", () => {
+      renderWithProviders(
+        <GroupPhaseEditor config={voteConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+      );
+      expect(screen.queryByTestId("phase-vote-options-0")).not.toBeInTheDocument();
+
+      fireEvent.change(screen.getByTestId("phase-vote-options-source-0"), {
+        target: { value: "EXPLICIT" },
+      });
+      const textarea = screen.getByTestId("phase-vote-options-0");
+      fireEvent.change(textarea, { target: { value: "  Option A  \n\nOption B\n" } });
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      const vc = savedConfig().phases![0]!.voteConfig!;
+      expect(vc.optionsSource).toBe("EXPLICIT");
+      expect(vc.options).toEqual(["Option A", "Option B"]);
+    });
+
+    it("saves method, quorum, and weightByConfidence edits", () => {
+      renderWithProviders(
+        <GroupPhaseEditor config={voteConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+      );
+      fireEvent.change(screen.getByTestId("phase-vote-method-0"), { target: { value: "APPROVAL" } });
+      fireEvent.change(screen.getByTestId("phase-vote-quorum-0"), { target: { value: "0.75" } });
+      fireEvent.click(screen.getByTestId("phase-vote-weight-confidence-0"));
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      const vc = savedConfig().phases![0]!.voteConfig!;
+      expect(vc.method).toBe("APPROVAL");
+      expect(vc.quorum).toBeCloseTo(0.75);
+      expect(vc.weightByConfidence).toBe(true);
+    });
+
+    it("never offers HUMAN_DECIDES as a selectable tie policy — still save-time rejected by the backend", () => {
+      renderWithProviders(
+        <GroupPhaseEditor config={voteConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+      );
+      const select = screen.getByTestId("phase-vote-tie-0") as HTMLSelectElement;
+      const humanOption = Array.from(select.options).find((o) => o.value === "HUMAN_DECIDES")!;
+      expect(humanOption.disabled).toBe(true);
+    });
+  });
 });

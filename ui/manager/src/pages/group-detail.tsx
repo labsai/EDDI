@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient, useMutation } from "@tanstack/react-query";
 import {
@@ -7,7 +7,7 @@ import {
   PanelRightOpen, PanelRightClose,
   PanelLeftOpen, PanelLeftClose,
   Maximize2, Minimize2, History, X,
-  AlertTriangle, Plus,
+  AlertTriangle, Plus, Boxes,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -17,7 +17,7 @@ import {
   useDeleteGroupConversation,
 } from "@/hooks/use-groups";
 import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
-import { useCancelGroupDiscussion } from "@/hooks/use-hitl";
+import { useCancelGroupDiscussion, useSubmitHumanInput } from "@/hooks/use-hitl";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
 import { DiscussionInput } from "@/components/groups/discussion-input";
 import { DiscussionActions } from "@/components/groups/discussion-actions";
@@ -51,6 +51,7 @@ const STATE_CONFIG: Record<string, { label: string; color: string; dot: string }
   FAILED: { label: "Failed", color: "text-destructive", dot: "bg-destructive" },
   CREATED: DEFAULT_STATE,
   AWAITING_APPROVAL: { label: "Awaiting Approval", color: "text-orange-500", dot: "bg-orange-500" },
+  AWAITING_HUMAN_INPUT: { label: "Awaiting Your Turn", color: "text-primary", dot: "bg-primary" },
   CANCELLED: { label: "Cancelled", color: "text-muted-foreground", dot: "bg-muted-foreground" },
   ERROR: { label: "Error", color: "text-destructive", dot: "bg-destructive" },
 };
@@ -89,6 +90,7 @@ function friendlyGroupActionError(
 
 export function GroupDetailPage() {
   const { id: groupId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   // Backend requires version — default to 1 if missing from URL (e.g. wizard link).
   // To update after a save: pull setSearchParams from useSearchParams() and call
@@ -131,6 +133,7 @@ export function GroupDetailPage() {
 
   const deleteConvMutation = useDeleteGroupConversation();
   const cancelDiscussionMutation = useCancelGroupDiscussion();
+  const submitHumanInputMutation = useSubmitHumanInput();
 
   // Track an in-flight HITL decision so we can toast on the ACTUAL outcome
   // (hitl_resume ack / FAILED) rather than optimistically.
@@ -168,6 +171,7 @@ export function GroupDetailPage() {
     if (state === "CLOSED") return t("groups.inputDisabledClosed", "This discussion is closed");
     if (state === "FAILED" || state === "CANCELLED") return t("groups.inputDisabledEnded", "This discussion has ended");
     if (state === "AWAITING_APPROVAL") return t("groups.inputDisabledApproval", "Awaiting approval…");
+    if (state === "AWAITING_HUMAN_INPUT") return t("groups.inputDisabledHumanTurn", "Awaiting a member's turn…");
     if (state === "IN_PROGRESS" || state === "SYNTHESIZING") return t("groups.inputDisabledInProgress", "Discussion in progress…");
     if (state === "COMPLETED") return t("groups.inputDisabledCompleted", "Discussion completed");
     return undefined;
@@ -229,6 +233,28 @@ export function GroupDetailPage() {
       pendingDecisionRef.current = null;
     }
   }, [streamState.hitlResume, streamState.state, streamState.error, queryClient, t]);
+
+  // Submit a HUMAN member's pending turn (I6). Unlike approve/reject, this is a
+  // plain synchronous mutation — the backend has no streaming variant, so there
+  // is no live progress to switch to; the settled conversation lands via the
+  // mutation's own query invalidation, and the transcript re-renders once it refetches.
+  const handleSubmitHumanInput = useCallback(
+    (gcId: string, memberId: string, content: string) => {
+      if (!groupId) return;
+      submitHumanInputMutation.mutate(
+        { groupId, gcId, memberId, content },
+        {
+          onSuccess: () => {
+            toast.success(t("groups.humanTurnSubmitted", "Your response was recorded"));
+          },
+          onError: (err) => {
+            toast.error(friendlyGroupActionError(err, t));
+          },
+        },
+      );
+    },
+    [groupId, submitHumanInputMutation, t],
+  );
 
   const handleCancelDiscussion = useCallback(
     (gcId: string) => {
@@ -313,15 +339,19 @@ export function GroupDetailPage() {
       groupId &&
       (streamState.state === "IN_PROGRESS" ||
         streamState.state === "COMPLETED" ||
-        streamState.state === "AWAITING_APPROVAL")
+        streamState.state === "AWAITING_APPROVAL" ||
+        streamState.state === "AWAITING_HUMAN_INPUT")
     ) {
       queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
     }
-    // When the stream settles (completed) or pauses (awaiting approval), switch
-    // the transcript to the persisted conversation so it shows the full pause
-    // metadata (pausedAt, timeout policy/countdown, per-task awaiting list).
+    // When the stream settles (completed) or pauses (awaiting approval / a
+    // member's turn), switch the transcript to the persisted conversation so it
+    // shows the full pause metadata (pausedAt, timeout policy/countdown,
+    // per-task awaiting list, or — for a human turn — the rendered prompt).
     if (
-      (streamState.state === "COMPLETED" || streamState.state === "AWAITING_APPROVAL") &&
+      (streamState.state === "COMPLETED" ||
+        streamState.state === "AWAITING_APPROVAL" ||
+        streamState.state === "AWAITING_HUMAN_INPUT") &&
       streamState.conversationId
     ) {
       setSelectedConvId(streamState.conversationId);
@@ -467,7 +497,7 @@ export function GroupDetailPage() {
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>
-                {(conv.state === "AWAITING_APPROVAL" || conv.state === "IN_PROGRESS") && (
+                {(conv.state === "AWAITING_APPROVAL" || conv.state === "AWAITING_HUMAN_INPUT" || conv.state === "IN_PROGRESS") && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -566,6 +596,20 @@ export function GroupDetailPage() {
             </Button>
           )}
 
+          {/* Standing-team workspace (I13) — persistent backlog + cadences. */}
+          {!isFullscreen && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(`/manage/groups/${groupId}/workspace?version=${version}`)}
+              title={t("groupWorkspace.title", "Standing Team Workspace")}
+              data-testid="open-workspace-btn"
+            >
+              <Boxes className="h-4 w-4" />
+              <span className="hidden sm:inline">{t("groupWorkspace.navLabel", "Workspace")}</span>
+            </Button>
+          )}
+
           {/* Fullscreen toggle */}
           <Button
             variant="outline"
@@ -653,6 +697,9 @@ export function GroupDetailPage() {
               onApprove={handleApproveDiscussion}
               onCancelDiscussion={handleCancelDiscussion}
               isDeciding={cancelDiscussionMutation.isPending}
+              onSubmitHumanInput={handleSubmitHumanInput}
+              isSubmittingHumanInput={submitHumanInputMutation.isPending}
+              humanTurnTimeout={groupConfig.humanMemberConfig?.turnTimeout}
             />
           </div>
           {/* Post-COMPLETED lifecycle action bar — driven entirely by the

@@ -35,6 +35,10 @@ const PHASE_ICONS: Record<PhaseType, string> = {
   PLAN: "📋",
   EXECUTE: "⚡",
   VERIFY: "✅",
+  VOTE: "🗳️",
+  PROPOSAL: "🤝",
+  BARGAIN: "🔄",
+  RETRO: "🪞",
 };
 
 export function PhaseHeader({

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, HandMetal, Pencil, MessagesSquare, GitMerge } from "lucide-react";
+import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, HandMetal, Pencil, MessagesSquare, GitMerge, UserCheck, Gavel } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn, hashColor, getInitials, formatUsd } from "@/lib/utils";
@@ -34,6 +34,7 @@ const PANEL_STYLE_COLORS: Record<DiscussionStyle, { bg: string; border: string; 
   DELPHI: { bg: "bg-violet-500/10", border: "border-violet-500/30", text: "text-violet-600 dark:text-violet-400" },
   DEBATE: { bg: "bg-indigo-500/10", border: "border-indigo-500/30", text: "text-indigo-600 dark:text-indigo-400" },
   TASK_FORCE: { bg: "bg-orange-500/10", border: "border-orange-500/30", text: "text-orange-600 dark:text-orange-400" },
+  NEGOTIATION: { bg: "bg-emerald-500/10", border: "border-emerald-500/30", text: "text-emerald-600 dark:text-emerald-400" },
   CUSTOM: { bg: "bg-secondary/20", border: "border-border", text: "text-foreground" },
 };
 
@@ -196,6 +197,12 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                   <Badge variant="secondary" className="text-[9px] px-1 py-0">
                     <Users className="h-2 w-2 me-0.5" />
                     {t("groups.memberTypeGroup", "Group")}
+                  </Badge>
+                )}
+                {member.memberType === "HUMAN" && (
+                  <Badge variant="secondary" className="text-[9px] px-1 py-0">
+                    <UserCheck className="h-2 w-2 me-0.5" />
+                    {t("groups.memberTypeHuman", "Human")}
                   </Badge>
                 )}
                 {config.moderatorAgentId === member.agentId && (
@@ -513,6 +520,81 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                 ? t("groups.enabled", "Enabled")
                 : t("groups.disabled", "Disabled")}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Advanced collaboration features (I6/I8/I9/I12/I17) — read-only summary.
+          No inline editor yet (unlike Phases/HITL above); each is configured at
+          group-creation time or via the JSON schema editor. Shown only when at
+          least one is actually set, same "don't show a page of offs" rule as
+          the Deliberation section above. */}
+      {(config.humanMemberConfig ||
+        config.retroConfig ||
+        config.contextWindow?.enabled ||
+        config.facilitator?.enabled ||
+        config.artifactConfig?.allowArtifactTools) && (
+        <div>
+          <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <Gavel className="inline h-3 w-3 me-1" />
+            {t("groups.advancedSection", "Advanced Collaboration")}
+          </h4>
+          <div className="space-y-1 rounded-lg border border-border bg-secondary/30 p-2.5">
+            {config.humanMemberConfig && (
+              <InfoRow
+                label={t("groups.humanMemberConfigLabel", "Human turn timeout")}
+                value={
+                  config.humanMemberConfig.turnTimeout
+                    ? `${formatIsoDuration(config.humanMemberConfig.turnTimeout)} → ${
+                        config.humanMemberConfig.onTimeout === "ABORT"
+                          ? t("groupWizard.humanOnTimeoutAbort", "Abort the discussion")
+                          : t("groupWizard.humanOnTimeoutSkip", "Skip their turn and continue")
+                      }`
+                    : t("groups.waitIndefinitely", "Wait indefinitely")
+                }
+              />
+            )}
+            {config.retroConfig && (
+              <InfoRow
+                label={t("groups.retroConfigLabel", "Retro lessons")}
+                value={t("groups.retroConfigValue", "{{perRun}}/run, {{stored}} stored max", {
+                  perRun: config.retroConfig.maxLessonsPerRun,
+                  stored: config.retroConfig.maxStoredLessons,
+                })}
+              />
+            )}
+            {config.contextWindow?.enabled && (
+              <InfoRow
+                label={t("groups.contextWindowLabel", "Transcript window")}
+                value={t("groups.contextWindowValue", "last {{count}} entries{{summarized}}", {
+                  count: config.contextWindow.maxRecentEntries,
+                  summarized:
+                    config.contextWindow.summarizeOverflow === false
+                      ? ""
+                      : ` (${t("groups.summarized", "summarized")})`,
+                })}
+              />
+            )}
+            {config.facilitator?.enabled && (
+              <>
+                <InfoRow
+                  label={t("groups.facilitatorLabel", "Facilitator")}
+                  value={config.facilitator.agentId || t("groups.notSet", "not set")}
+                />
+                <InfoRow
+                  label={t("groups.facilitatorMoves", "Allowed moves")}
+                  value={config.facilitator.allowedMoves.join(", ")}
+                />
+              </>
+            )}
+            {config.artifactConfig?.allowArtifactTools && (
+              <InfoRow
+                label={t("groups.artifactConfigLabel", "Shared artifacts")}
+                value={t("groups.artifactConfigValue", "max {{count}}/discussion", {
+                  count: config.artifactConfig.maxArtifactsPerDiscussion,
+                })}
+              />
+            )}
           </div>
         </div>
       )}

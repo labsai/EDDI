@@ -18,6 +18,13 @@ interface BoardTranscriptProps {
   /** The discussion is still running — keeps a visible "working" row pinned to
    *  the bottom so the transcript never looks finished while it isn't. */
   isLive?: boolean;
+  /**
+   * Rendered above the first entry, INSIDE the scroll box — this component owns
+   * the scroll container, so anything the caller wants to scroll with the
+   * transcript (rather than sit pinned above it) has to come through here.
+   * Used for the shared discussion-insights panels.
+   */
+  header?: React.ReactNode;
 
   className?: string;
 }
@@ -36,6 +43,14 @@ const PHASE_ICONS: Record<string, string> = {
   ARGUE: "📢",
   REBUTTAL: "↩️",
   PLAN: "📝",
+  // Wave-3 phase/entry types (I14/I11/I8/I18). Keyed by both the PhaseType and
+  // the TranscriptEntryType name where they differ, since `inferPhaseType`
+  // looks entries up here directly.
+  VOTE: "🗳️",
+  PROPOSAL: "🤝",
+  BARGAIN: "🔄",
+  RETRO: "🪞",
+  BID: "💰",
 };
 
 // ─── Entry-type badge variants (borrowed from manager) ──────────
@@ -344,6 +359,7 @@ function BoardTranscript({
   boardId,
   synthesizedAnswer,
   isLive = false,
+  header,
   className,
 }: BoardTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -390,6 +406,8 @@ function BoardTranscript({
 
   return (
     <div ref={scrollRef} onScroll={handleScroll} aria-live="polite" aria-relevant="additions" className={cn("flex flex-col gap-2 overflow-y-auto", className)}>
+      {header}
+
       {processedEntries.map(({ entry, showPhaseHeader }, idx) => {
         const delay = Math.min(idx * 60, 600);
 

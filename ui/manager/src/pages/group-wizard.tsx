@@ -21,6 +21,8 @@ import {
   AlertTriangle,
   Pencil,
   HandMetal,
+  UserCheck,
+  Clock,
 } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +37,7 @@ import {
   type DiscussionStyle,
   type GroupMember,
   type AgentGroupConfiguration,
+  type OnHumanTimeout,
 } from "@/lib/api/groups";
 import type { GroupHitlConfig } from "@/lib/api/hitl";
 import {
@@ -88,6 +91,13 @@ interface WizardState {
   hitl: GroupHitlConfig;
   /** Names of the phases that require human approval (the pause trigger). */
   approvalPhases: string[];
+  /**
+   * HUMAN member turn policy (I6) — only meaningful (and only sent) when at
+   * least one member is `memberType: "HUMAN"`. Empty `humanTurnTimeout` = wait
+   * indefinitely.
+   */
+  humanTurnTimeout: string;
+  humanOnTimeout: OnHumanTimeout;
 }
 
 /** Config-step validity gate for the HITL settings. */
@@ -144,6 +154,8 @@ const INITIAL_STATE: WizardState = {
   hitlEnabled: false,
   hitl: DEFAULT_GROUP_HITL_CONFIG,
   approvalPhases: [],
+  humanTurnTimeout: "",
+  humanOnTimeout: "SKIP_TURN",
 };
 
 const STEPS = [
@@ -161,6 +173,7 @@ const STYLE_COLORS: Record<DiscussionStyle, { bg: string; border: string; text: 
   DELPHI: { bg: "bg-violet-500/10", border: "border-violet-500/30", text: "text-violet-600 dark:text-violet-400", accent: "bg-violet-500" },
   DEBATE: { bg: "bg-indigo-500/10", border: "border-indigo-500/30", text: "text-indigo-600 dark:text-indigo-400", accent: "bg-indigo-500" },
   TASK_FORCE: { bg: "bg-orange-500/10", border: "border-orange-500/30", text: "text-orange-600 dark:text-orange-400", accent: "bg-orange-500" },
+  NEGOTIATION: { bg: "bg-emerald-500/10", border: "border-emerald-500/30", text: "text-emerald-600 dark:text-emerald-400", accent: "bg-emerald-500" },
   CUSTOM: { bg: "bg-secondary/20", border: "border-border", text: "text-foreground", accent: "bg-muted-foreground" },
 };
 
@@ -209,10 +222,21 @@ export function GroupWizardPage() {
         return state.name.trim().length > 0 && isHitlConfigValid(state);
       case "members": {
         if (state.members.length < 2) return false;
-        // Every member must have a displayName + be either assigned or in 'new' mode
-        return state.members.every((m) =>
-          m.displayName.trim() && (m.agentId || m.mode === "new")
+        // Every member must have a displayName. A HUMAN member needs its
+        // principal id (agentId) typed in directly — there is no 'new'/agent
+        // creation flow for it, unlike AGENT/GROUP members.
+        const membersValid = state.members.every((m) =>
+          m.displayName.trim() &&
+          (m.memberType === "HUMAN" ? !!m.agentId.trim() : m.agentId || m.mode === "new")
         );
+        if (!membersValid) return false;
+        // An explicitly-typed turn timeout must be a duration the backend can
+        // parse — an unparseable one is silently treated as "wait indefinitely"
+        // there, which is not what typing "abc" or "3h" (missing the P/T grammar) meant.
+        if (state.humanTurnTimeout.trim() && !isValidIsoDuration(state.humanTurnTimeout)) {
+          return false;
+        }
+        return true;
       }
       case "review":
         return true;
@@ -325,6 +349,15 @@ export function GroupWizardPage() {
             // EXECUTE phase); force PHASE elsewhere so it can't be inert-configured.
             granularity: state.style === "TASK_FORCE" ? state.hitl.granularity : "PHASE",
             onTaskRejection: state.hitl.onTaskRejection,
+          }
+        : undefined,
+      // Only sent when a HUMAN member actually exists — an absent
+      // humanMemberConfig on a group with no human members is the backend's own
+      // "wait indefinitely" default, so there is nothing to configure otherwise.
+      humanMemberConfig: updatedMembers.some((m) => m.memberType === "HUMAN")
+        ? {
+            turnTimeout: state.humanTurnTimeout.trim() || null,
+            onTimeout: state.humanOnTimeout,
           }
         : undefined,
     };
@@ -1159,6 +1192,66 @@ function MembersStep({
           {t("groupWizard.needMembers")}
         </p>
       )}
+
+      {/* HUMAN member turn settings (I6) — only relevant once a HUMAN member exists. */}
+      {state.members.some((m) => m.memberType === "HUMAN") && (
+        <div className="mt-4 rounded-xl border border-primary/30 bg-primary/5 p-4" data-testid="human-turn-settings">
+          <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <UserCheck className="h-3.5 w-3.5" />
+            {t("groupWizard.humanTurnSettingsTitle", "Human member turn settings")}
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t(
+              "groupWizard.humanTurnSettingsHint",
+              "The discussion pauses and waits when it's a human member's turn to speak. Choose what happens if they don't respond in time.",
+            )}
+          </p>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                <Clock className="h-3 w-3" />
+                {t("groupWizard.humanTurnTimeoutLabel", "Turn timeout (ISO-8601 duration)")}
+              </label>
+              <input
+                value={state.humanTurnTimeout}
+                onChange={(e) => onChange({ humanTurnTimeout: e.target.value })}
+                placeholder={t("groupWizard.humanTurnTimeoutPlaceholder", "e.g. PT24H — blank waits indefinitely")}
+                className={cn(
+                  "w-full rounded-lg border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring",
+                  state.humanTurnTimeout.trim() && !isValidIsoDuration(state.humanTurnTimeout)
+                    ? "border-destructive"
+                    : "border-input",
+                )}
+                data-testid="human-turn-timeout-input"
+              />
+              {state.humanTurnTimeout.trim() && !isValidIsoDuration(state.humanTurnTimeout) && (
+                <p className="mt-1 text-[11px] text-destructive">
+                  {t("groupWizard.humanTurnTimeoutInvalid", "Not a valid ISO-8601 duration, e.g. PT24H or P1D.")}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                {t("groupWizard.humanOnTimeoutLabel", "On timeout")}
+              </label>
+              <select
+                value={state.humanOnTimeout}
+                onChange={(e) => onChange({ humanOnTimeout: e.target.value as OnHumanTimeout })}
+                disabled={!state.humanTurnTimeout.trim()}
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                data-testid="human-on-timeout-select"
+              >
+                <option value="SKIP_TURN">
+                  {t("groupWizard.humanOnTimeoutSkip", "Skip their turn and continue")}
+                </option>
+                <option value="ABORT">
+                  {t("groupWizard.humanOnTimeoutAbort", "Abort the discussion")}
+                </option>
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1261,6 +1354,19 @@ function MemberCard({
             <Users className="inline h-2.5 w-2.5 me-0.5" />
             Group
           </button>
+          <button
+            onClick={() => onUpdate({ memberType: "HUMAN" })}
+            className={cn(
+              "px-2.5 py-1 text-[10px] font-medium transition-colors",
+              member.memberType === "HUMAN"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            data-testid={`member-type-human-${index}`}
+          >
+            <UserCheck className="inline h-2.5 w-2.5 me-0.5" />
+            {t("groupWizard.memberTypeHuman", "Human")}
+          </button>
         </div>
 
         <button
@@ -1283,6 +1389,25 @@ function MemberCard({
               onUpdate={onUpdate}
               t={t}
             />
+          ) : member.memberType === "HUMAN" ? (
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-muted-foreground">
+                {t("groupWizard.humanPrincipalId", "Principal ID")}
+              </label>
+              <input
+                value={member.agentId}
+                onChange={(e) => onUpdate({ agentId: e.target.value })}
+                placeholder={t("groupWizard.humanPrincipalIdPlaceholder", "The user's login/principal id")}
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                data-testid={`human-principal-id-${index}`}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {t(
+                  "groupWizard.humanPrincipalIdHint",
+                  "The identity that may submit this member's turns — the discussion pauses and waits for them when it's their turn to speak.",
+                )}
+              </p>
+            </div>
           ) : (
             <>
               {/* Mode toggle */}
