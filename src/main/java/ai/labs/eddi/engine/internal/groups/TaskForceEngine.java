@@ -22,6 +22,7 @@ import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.internal.GroupConversationService.MemberTurnCancellation;
 import ai.labs.eddi.engine.internal.GroupConversationService.MemberTurnCancelledException;
 import ai.labs.eddi.engine.internal.TaskListParser;
@@ -182,6 +183,13 @@ public class TaskForceEngine {
             for (int i = 0; i < createdItems.size(); i++) {
                 TaskItem task = createdItems.get(i);
                 TaskDefinition td = config.getTasks().get(i);
+                // I18: BID-mode tasks are deliberately left unassigned — the
+                // EXECUTE wave announces them and awards by bid; assigning here
+                // would preempt the auction with the planner's guess.
+                if (TaskBidEngine.effectiveMode(td, config) == AgentGroupConfiguration.AssignmentMode.BID) {
+                    LOGGER.debugf("Task '%s' is BID-mode — left for the execution wave's auction", task.subject());
+                    continue;
+                }
                 String assignedAgentId = resolveTaskAssignment(
                         td.assignToRole(), config.getMembers(), config.getModeratorAgentId(), i);
                 if (assignedAgentId != null) {
@@ -252,6 +260,14 @@ public class TaskForceEngine {
                 TaskListParser.ParsedTask pt = parsedTasks.get(i);
                 TaskItem task = new TaskItem(pt.subject(), pt.description(), pt.priority());
                 gc.getTaskList().addTask(task);
+
+                // I18: under a BID-mode default, planned tasks stay unassigned for
+                // the execution wave's auction (the planner cannot know members'
+                // actual fit or load — that is the point of bidding).
+                if (TaskBidEngine.effectiveMode(null, config) == AgentGroupConfiguration.AssignmentMode.BID) {
+                    LOGGER.debugf("Planned task '%s' is BID-mode — left for the execution wave's auction", pt.subject());
+                    continue;
+                }
 
                 // Resolve assignment — null-safe (C4 fix)
                 String agentId = TaskListParser.resolveAgent(pt.assignedTo(), config.getMembers());
@@ -331,6 +347,10 @@ public class TaskForceEngine {
             if (GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)) {
                 break;
             }
+
+            // I18: announce-bid-award for this wave's unassigned BID-mode tasks —
+            // runs before the grouping below so awarded tasks join the same wave.
+            runBidRoundIfNeeded(gc, config, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
 
             Map<String, List<TaskItem>> tasksByAgent = gc.getTaskList().findExecutableTasks().stream()
                     .filter(t -> t.assignedAgentId() != null)
@@ -962,6 +982,149 @@ public class TaskForceEngine {
         } catch (Exception e) {
             LOGGER.debugf("Failed to format verification for display: %s", e.getMessage());
             return rawContent;
+        }
+    }
+
+    // --- I18: announce-bid-award (CNP-lite) ---
+
+    /**
+     * Runs one blind, parallel bid round over this wave's unassigned BID-mode tasks
+     * (I18). Eligible members receive the announced batch with NO transcript and NO
+     * peer bids (blindness is what makes the self-assessed confidences comparable);
+     * each task goes to the highest confidence, deterministic tie-break by speaking
+     * order; a task nobody bid on falls back to the ROLE path — an auction must
+     * never stall a wave.
+     * <p>
+     * Skips itself (with a log — a silent cap reads as coverage) when it cannot
+     * beat its own overhead: fewer than {@link TaskBidEngine#MIN_BIDDERS} eligible
+     * members or {@link TaskBidEngine#MIN_TASKS} unassigned tasks, or a turn budget
+     * too small for one bid turn per member.
+     */
+    void runBidRoundIfNeeded(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
+                             ProtocolConfig protocol, String question, int phaseIdx,
+                             GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns) {
+        SharedTaskList taskList = gc.getTaskList();
+        List<TaskItem> unassigned = taskList.findExecutableTasks().stream()
+                .filter(t -> t.assignedAgentId() == null)
+                .filter(t -> TaskBidEngine.effectiveMode(taskDefinitionFor(config, t), config) == AgentGroupConfiguration.AssignmentMode.BID)
+                .toList();
+        if (unassigned.isEmpty()) {
+            return;
+        }
+        List<GroupMember> bidders = config.getMembers().stream()
+                .filter(m -> m != null && m.memberType() == AgentGroupConfiguration.MemberType.AGENT)
+                .filter(m -> !m.agentId().equals(config.getModeratorAgentId()))
+                .toList();
+
+        if (!TaskBidEngine.auctionWorthwhile(bidders.size(), unassigned.size())) {
+            LOGGER.infof("Group %s: skipping bid round (%d bidder(s), %d unassigned task(s) — the auction cannot beat "
+                    + "its own overhead); falling back to ROLE assignment",
+                    gc.getGroupId(), bidders.size(), unassigned.size());
+            fallbackRoleAssign(gc, config, unassigned);
+            return;
+        }
+        if (maxTurns > 0 && turnCounter.get() + bidders.size() > maxTurns) {
+            LOGGER.infof("Group %s: skipping bid round — %d bid turn(s) would exceed the remaining turn budget; "
+                    + "falling back to ROLE assignment", gc.getGroupId(), bidders.size());
+            fallbackRoleAssign(gc, config, unassigned);
+            return;
+        }
+        turnCounter.addAndGet(bidders.size());
+
+        var announcedSubjects = unassigned.stream().map(TaskItem::subject).collect(Collectors.toSet());
+        var cancellation = new MemberTurnCancellation();
+        final var bidCaller = callerIdentityContext.captureOrCurrent();
+        List<CompletableFuture<List<TaskBidEngine.Bid>>> futures = bidders.stream()
+                .map(member -> CompletableFuture.supplyAsync(callerIdentityContext.withIdentitySupplying(bidCaller, () -> {
+                    try {
+                        String prompt = TaskBidEngine.buildBidPrompt(unassigned, member, question);
+                        TranscriptEntry reply = memberTurnExecutor.executeAgentTurn(member, gc, prompt, protocol,
+                                phaseIdx, phase, null, listener, cancellation);
+                        if (reply != null && reply.content() != null && !reply.content().isBlank()) {
+                            // Recorded as a BID entry — peer-hidden while the phase
+                            // runs (F4's blind-bid rule), auditable afterwards.
+                            gc.getTranscript().add(new TranscriptEntry(member.agentId(), member.displayName(),
+                                    reply.content(), phaseIdx, phase.name(), TranscriptEntryType.BID,
+                                    Instant.now(), null, null));
+                        }
+                        return TaskBidEngine.parseBids(reply != null ? reply.content() : null, member, announcedSubjects);
+                    } catch (Exception e) {
+                        LOGGER.warnf("Bid turn failed for '%s': %s — casting no bids", member.agentId(), e.getMessage());
+                        return List.<TaskBidEngine.Bid>of();
+                    }
+                }), executorService)).toList();
+
+        List<TaskBidEngine.Bid> allBids = new ArrayList<>();
+        long deadlineNanos = System.nanoTime()
+                + TimeUnit.SECONDS.toNanos(GroupConversationService.parallelBatchBudgetSeconds(protocol));
+        for (CompletableFuture<List<TaskBidEngine.Bid>> future : futures) {
+            try {
+                long remainingNanos = Math.max(0, deadlineNanos - System.nanoTime());
+                allBids.addAll(future.get(remainingNanos, TimeUnit.NANOSECONDS));
+            } catch (TimeoutException e) {
+                cancellation.cancel();
+                LOGGER.warnf("Group %s: bid round timed out — late bidders cast no bids", gc.getGroupId());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                cancellation.cancel();
+                break;
+            } catch (ExecutionException e) {
+                LOGGER.warnf("Group %s: bid future failed: %s", gc.getGroupId(), e.getMessage());
+            }
+        }
+
+        Map<String, SharedTaskList.AwardedBid> awards = TaskBidEngine.award(unassigned, allBids);
+        synchronized (taskList) {
+            for (TaskItem task : unassigned) {
+                SharedTaskList.AwardedBid winner = awards.get(task.id());
+                if (winner != null) {
+                    GroupMember member = findMemberIncludingDynamic(config.getMembers(), gc, winner.agentId());
+                    taskList.assignTask(task.id(), winner.agentId(),
+                            member != null ? member.displayName() : winner.agentId());
+                    taskList.recordAwardedBid(task.id(), winner);
+                    LOGGER.infof("Group %s: task '%s' awarded to '%s' (confidence %.2f)",
+                            gc.getGroupId(), task.subject(), winner.agentId(), winner.confidence());
+                }
+            }
+        }
+        // Tasks nobody bid on fall back to ROLE — never stall the wave on silence.
+        fallbackRoleAssign(gc, config, unassigned.stream()
+                .filter(t -> !awards.containsKey(t.id()))
+                .toList());
+    }
+
+    /**
+     * The TaskDefinition a task was created from, matched by subject; null for
+     * planned/filed tasks.
+     */
+    private TaskDefinition taskDefinitionFor(AgentGroupConfiguration config, TaskItem task) {
+        if (config.getTasks() == null) {
+            return null;
+        }
+        return config.getTasks().stream()
+                .filter(td -> td.subject().equalsIgnoreCase(task.subject()))
+                .findFirst().orElse(null);
+    }
+
+    /**
+     * ROLE/round-robin assignment for tasks the auction did not (or could not)
+     * award.
+     */
+    private void fallbackRoleAssign(GroupConversation gc, AgentGroupConfiguration config, List<TaskItem> tasks) {
+        SharedTaskList taskList = gc.getTaskList();
+        synchronized (taskList) {
+            for (int i = 0; i < tasks.size(); i++) {
+                TaskItem task = tasks.get(i);
+                TaskDefinition td = taskDefinitionFor(config, task);
+                String agentId = resolveAssignee(td != null ? td.assignToRole() : null,
+                        config.getMembers(), config.getModeratorAgentId(), i);
+                if (agentId != null) {
+                    GroupMember member = findMember(config.getMembers(), agentId);
+                    taskList.assignTask(task.id(), agentId, member != null ? member.displayName() : agentId);
+                } else {
+                    LOGGER.warnf("Group %s: no fallback assignee for task '%s'", gc.getGroupId(), task.subject());
+                }
+            }
         }
     }
 

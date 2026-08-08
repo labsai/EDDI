@@ -4,12 +4,20 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.AssignmentMode;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupTaskConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -17,10 +25,14 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -47,11 +59,13 @@ class TaskForceEngineTest {
 
     private ITemplatingEngine templatingEngine;
     private IJsonSerialization jsonSerialization;
+    private MemberTurnExecutor memberTurnExecutor;
 
     private TaskForceEngine engine() {
         templatingEngine = mock(ITemplatingEngine.class);
         jsonSerialization = mock(IJsonSerialization.class);
-        return new TaskForceEngine(mock(MemberTurnExecutor.class), templatingEngine, jsonSerialization,
+        memberTurnExecutor = mock(MemberTurnExecutor.class);
+        return new TaskForceEngine(memberTurnExecutor, templatingEngine, jsonSerialization,
                 Executors.newVirtualThreadPerTaskExecutor(), new CallerIdentityContext(null, null),
                 new ConcurrentHashMap<>(), 180, 5);
     }
@@ -292,5 +306,154 @@ class TaskForceEngineTest {
 
         assertTrue(input.contains("Write the report"));
         assertTrue(input.contains("cover Q1 results"));
+    }
+
+    // =================================================================
+    // I18 — announce-bid-award (CNP-lite)
+    // =================================================================
+
+    private AgentGroupConfiguration bidConfig(GroupMember... members) {
+        var config = new AgentGroupConfiguration();
+        config.setName("G");
+        config.setMembers(List.of(members));
+        config.setModeratorAgentId(MODERATOR);
+        config.setTaskListConfig(new GroupTaskConfig(
+                false, 20, 3, AssignmentMode.BID));
+        return config;
+    }
+
+    private GroupConversation gcWithUnassignedTasks(String... subjects) {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        gc.setTaskList(new SharedTaskList());
+        for (String subject : subjects) {
+            gc.getTaskList().addTask(new TaskItem(subject, "desc of " + subject, 0));
+        }
+        return gc;
+    }
+
+    private DiscussionPhase executePhase() {
+        return new DiscussionPhase("Execution", PhaseType.EXECUTE, "ALL", TurnOrder.PARALLEL,
+                ContextScope.TASK_ONLY, false, null, 1, false);
+    }
+
+    private ProtocolConfig protocol() {
+        return new ProtocolConfig(
+                5, MemberFailurePolicy.SKIP, 0,
+                MemberUnavailablePolicy.SKIP);
+    }
+
+    private GroupConversation.TranscriptEntry bidReply(String agentId, String json) {
+        return new TranscriptEntry(agentId, agentId, json, 0, "Execution",
+                TranscriptEntryType.TASK_RESULT, Instant.now(), null, null);
+    }
+
+    @Test
+    void bidRound_awardsToHighestConfidence_andRecordsTheBid() throws Exception {
+        var engine = engine();
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any()))
+                .thenAnswer(inv -> {
+                    GroupMember m = inv.getArgument(0);
+                    return AGENT_A.equals(m.agentId())
+                            ? bidReply(AGENT_A, "{\"bids\": [{\"subject\": \"Task One\", \"confidence\": 0.9, "
+                                    + "\"estimatedComplexity\": \"S\", \"rationale\": \"my specialty\"}]}")
+                            : bidReply(AGENT_B, "{\"bids\": [{\"subject\": \"Task One\", \"confidence\": 0.4}, "
+                                    + "{\"subject\": \"Task Two\", \"confidence\": 0.7}]}");
+                });
+        var gc = gcWithUnassignedTasks("Task One", "Task Two");
+        var turnCounter = new AtomicInteger(0);
+
+        engine.runBidRoundIfNeeded(gc, bidConfig(member(AGENT_A), member(AGENT_B)), executePhase(), protocol(),
+                "Ship it", 0, null, turnCounter, 50);
+
+        var tasks = gc.getTaskList().all();
+        var taskOne = tasks.stream().filter(t -> t.subject().equals("Task One")).findFirst().orElseThrow();
+        var taskTwo = tasks.stream().filter(t -> t.subject().equals("Task Two")).findFirst().orElseThrow();
+        assertEquals(AGENT_A, taskOne.assignedAgentId(), "0.9 beats 0.4");
+        assertEquals(AGENT_B, taskTwo.assignedAgentId(), "the only bidder wins");
+        var award = gc.getTaskList().getAwardedBids().get(taskOne.id());
+        assertEquals(0.9, award.confidence());
+        assertEquals("my specialty", award.rationale());
+        assertEquals(2, turnCounter.get(), "one bid turn per bidder is counted");
+        // Both bid replies are on the transcript as BID entries — peer-hidden
+        // while the phase runs (F4), auditable afterwards.
+        assertEquals(2, gc.getTranscript().stream()
+                .filter(e -> e.type() == TranscriptEntryType.BID).count());
+    }
+
+    @Test
+    void bidRound_blindness_thePromptContainsTasksAndNeverPeerBids() throws Exception {
+        var engine = engine();
+        var inputs = Collections.synchronizedList(new ArrayList<String>());
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any()))
+                .thenAnswer(inv -> {
+                    inputs.add(inv.getArgument(2));
+                    GroupMember m = inv.getArgument(0);
+                    return bidReply(m.agentId(), "{\"bids\": [{\"subject\": \"Task One\", \"confidence\": 0.5, "
+                            + "\"rationale\": \"SECRET-RATIONALE-" + m.agentId() + "\"}]}");
+                });
+        var gc = gcWithUnassignedTasks("Task One", "Task Two");
+
+        engine.runBidRoundIfNeeded(gc, bidConfig(member(AGENT_A), member(AGENT_B)), executePhase(), protocol(),
+                "Ship it", 0, null, new AtomicInteger(0), 50);
+
+        assertEquals(2, inputs.size());
+        for (String input : inputs) {
+            assertTrue(input.contains("Task One") && input.contains("Task Two"), input);
+            assertFalse(input.contains("SECRET-RATIONALE"),
+                    "a bid prompt must never contain a peer's bid — blindness is what makes confidences comparable");
+            assertFalse(input.contains("confidence\": 0.5"), input);
+        }
+    }
+
+    @Test
+    void bidRound_noBids_fallsBackToRoleAssignment_neverStallsTheWave() throws Exception {
+        var engine = engine();
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any()))
+                .thenAnswer(inv -> bidReply(((GroupMember) inv.getArgument(0)).agentId(),
+                        "I would rather not commit to anything today."));
+        var gc = gcWithUnassignedTasks("Task One", "Task Two");
+
+        engine.runBidRoundIfNeeded(gc, bidConfig(member(AGENT_A), member(AGENT_B)), executePhase(), protocol(),
+                "Ship it", 0, null, new AtomicInteger(0), 50);
+
+        assertTrue(gc.getTaskList().all().stream().allMatch(t -> t.assignedAgentId() != null),
+                "every task must still get an owner — an auction never stalls a wave");
+        assertTrue(gc.getTaskList().getAwardedBids().isEmpty(), "no awards were fabricated from silence");
+    }
+
+    @Test
+    void bidRound_skipConditions_singleBidderOrSingleTask_skipsTheAuctionEntirely() throws Exception {
+        var engine = engine();
+        // One eligible bidder — the winner is predetermined; no LLM calls.
+        var gcOneBidder = gcWithUnassignedTasks("Task One", "Task Two");
+        engine.runBidRoundIfNeeded(gcOneBidder, bidConfig(member(AGENT_A)), executePhase(), protocol(),
+                "Ship it", 0, null, new AtomicInteger(0), 50);
+        verifyNoInteractions(memberTurnExecutor);
+        assertTrue(gcOneBidder.getTaskList().all().stream().allMatch(t -> t.assignedAgentId() != null),
+                "skipped auctions still assign via ROLE fallback");
+
+        // One task — round-robin costs zero LLM calls.
+        var gcOneTask = gcWithUnassignedTasks("Task One");
+        engine.runBidRoundIfNeeded(gcOneTask, bidConfig(member(AGENT_A), member(AGENT_B)), executePhase(), protocol(),
+                "Ship it", 0, null, new AtomicInteger(0), 50);
+        verifyNoInteractions(memberTurnExecutor);
+    }
+
+    @Test
+    void bidRound_roleModeTasks_neverAuctioned() throws Exception {
+        var engine = engine();
+        var config = bidConfig(member(AGENT_A), member(AGENT_B));
+        config.setTaskListConfig(new GroupTaskConfig(
+                false, 20, 3)); // ROLE default
+        var gc = gcWithUnassignedTasks("Task One", "Task Two");
+
+        engine.runBidRoundIfNeeded(gc, config, executePhase(), protocol(),
+                "Ship it", 0, null, new AtomicInteger(0), 50);
+
+        verifyNoInteractions(memberTurnExecutor);
+        assertTrue(gc.getTaskList().all().stream().allMatch(t -> t.assignedAgentId() == null),
+                "ROLE-mode tasks are none of the auction's business — the PLAN path owns them");
     }
 }

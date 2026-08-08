@@ -155,6 +155,38 @@ tools.
 a second writer racing it would corrupt the state machine that decides what runs
 next. Filing is the only agent-side write.
 
+### Bid-based assignment (I18, CNP-lite)
+
+The planner cannot know members' actual fit or load. Setting
+`assignmentMode: "BID"` — per task on a `TaskDefinition`, or as the group
+default on `taskListConfig` — leaves those tasks unassigned at PLAN time; the
+execution wave **announces** them to eligible members in blind, parallel bid
+turns and **awards** each to the highest self-assessed confidence:
+
+```json
+"taskListConfig": { "assignmentMode": "BID" },
+"tasks": [
+  { "subject": "Write the migration", "description": "...", "assignmentMode": "BID" }
+]
+```
+
+- Members reply `{"bids": [{"subject", "confidence": 0..1, "estimatedComplexity":
+  "XS|S|M|L", "rationale"}]}` — three-tier parse; prose casts no bids; bids on
+  unannounced tasks are dropped; confidence is clamped.
+- **Blind**: the bid prompt carries the announced tasks and nothing else — no
+  transcript, no peer bids. Bid replies land as `BID` transcript entries
+  (peer-hidden while the phase runs, auditable afterwards).
+- **Deterministic award**: highest confidence; ties break by speaking order,
+  then agent id. The winning bid is recorded per task
+  (`taskList.awardedBids[taskId] = {agentId, confidence, estimatedComplexity,
+  rationale}`).
+- **Never stalls a wave**: a task nobody bid on falls back to the ROLE path,
+  and the auction skips itself entirely (logged) when it cannot beat its own
+  overhead — fewer than 2 eligible bidders or fewer than 2 unassigned tasks —
+  or when the remaining turn budget cannot cover one bid turn per member.
+- Bid turns are real member turns: they count toward the turn budget and their
+  cost lands in the discussion's cost attribution.
+
 Both caps are enforced independently: `maxPerTurn` bounds a runaway single turn,
 `maxAgentAddedTasksPerDiscussion` bounds slow drift across a long discussion. The
 discussion cap counts only agent-filed tasks, so a large planned backlog does not
