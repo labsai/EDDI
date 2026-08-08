@@ -1,6 +1,5 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-import i18n from "@/i18n/config";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -108,8 +107,14 @@ export function formatDuration(ms: number): string {
  * Locale-aware on purpose: the app ships 11 locales, and `de`, `fr`, `ar` and
  * `hi` disagree with en-US about both the decimal separator and where the
  * currency symbol goes — so a hardcoded `` `$${n.toFixed(2)}` `` is wrong in
- * eight of them. The locale comes from the live i18next instance rather than
- * the runtime default, so a user who switched languages in-app sees the change.
+ * eight of them.
+ *
+ * The locale is read off `<html lang>` rather than by importing the i18next
+ * instance. `i18n/config` sets that attribute on init and on every
+ * `languageChanged`, so this still follows an in-app language switch — but this
+ * module stays a leaf. Importing `@/i18n/config` here would make every consumer
+ * of `cn()` run the i18n bootstrap, which touches `document` at module scope,
+ * and would invert the dependency direction of the app's most-imported utility.
  *
  * Sub-cent amounts get four digits: model-call costs are routinely $0.0003, and
  * two digits would render every one of them as "$0.00".
@@ -121,10 +126,20 @@ export function formatDuration(ms: number): string {
  */
 export function formatUsd(value: number): string {
   const digits = value !== 0 && Math.abs(value) < 0.01 ? 4 : 2;
-  return new Intl.NumberFormat(i18n.language, {
+  return new Intl.NumberFormat(activeLocale(), {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(value);
+}
+
+/**
+ * The app's current language, or `undefined` to let `Intl` fall back to the
+ * runtime default. Guarded for a non-DOM environment so this module keeps
+ * working outside the browser.
+ */
+function activeLocale(): string | undefined {
+  if (typeof document === "undefined") return undefined;
+  return document.documentElement.lang || undefined;
 }

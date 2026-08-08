@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { AgentResponseCard } from "@/components/groups/agent-response-card";
@@ -7,6 +7,7 @@ import { DecisionRecordCard } from "@/components/groups/decision-record-card";
 import { DiscussionInput } from "@/components/groups/discussion-input";
 import { PhaseHeader } from "@/components/groups/phase-header";
 import { TaskBoard } from "@/components/groups/task-board";
+import { MAX_GROUP_QUESTION_CHARS } from "@/lib/api/groups";
 import type { DecisionRecord, TranscriptEntry, TranscriptEntryType } from "@/lib/api/groups";
 
 const entry = (type: TranscriptEntryType, content = "…"): TranscriptEntry => ({
@@ -235,6 +236,63 @@ describe("DiscussionInput — group attachments", () => {
     await user.click(screen.getByTestId("start-discussion-btn"));
 
     expect(onSubmit).toHaveBeenCalledWith("Plain question");
+  });
+
+  it("shows each attachment's size, so the total cap is discoverable", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<DiscussionInput onSubmit={vi.fn()} />);
+
+    await user.upload(
+      screen.getByTestId("discussion-file-input"),
+      new File(["x".repeat(2048)], "big.txt", { type: "text/plain" }),
+    );
+
+    expect(await screen.findByText("big.txt")).toBeInTheDocument();
+    expect(screen.getByTestId("discussion-attachments")).toHaveTextContent("2 KB");
+  });
+
+  it("ignores a file already staged rather than charging it to the budget", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<DiscussionInput onSubmit={vi.fn()} />);
+    const input = screen.getByTestId("discussion-file-input");
+    const file = new File(["same"], "dup.txt", { type: "text/plain" });
+
+    await user.upload(input, file);
+    expect(await screen.findByText("dup.txt")).toBeInTheDocument();
+
+    await user.upload(input, file);
+    // One chip, not two.
+    expect(screen.getAllByText("dup.txt")).toHaveLength(1);
+  });
+
+  /**
+   * The backend caps the question at 50,000 chars and fans it out to every member
+   * in every phase. Without a client guard, the whole oversized body is uploaded
+   * and answered with a 400 the user never sees.
+   */
+  it("blocks a question past the backend's character ceiling", async () => {
+    const onSubmit = vi.fn();
+    renderWithProviders(<DiscussionInput onSubmit={onSubmit} />);
+
+    // `user.type` would take a very long time for 50k characters.
+    fireEvent.change(screen.getByTestId("discussion-input"), {
+      target: { value: "x".repeat(MAX_GROUP_QUESTION_CHARS + 1) },
+    });
+
+    expect(screen.getByTestId("start-discussion-btn")).toBeDisabled();
+    fireEvent.submit(screen.getByTestId("discussion-input").closest("form")!);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("accepts a question exactly at the ceiling", () => {
+    const onSubmit = vi.fn();
+    renderWithProviders(<DiscussionInput onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByTestId("discussion-input"), {
+      target: { value: "x".repeat(MAX_GROUP_QUESTION_CHARS) },
+    });
+
+    expect(screen.getByTestId("start-discussion-btn")).not.toBeDisabled();
   });
 
   it("drops an attachment when its chip is dismissed", async () => {

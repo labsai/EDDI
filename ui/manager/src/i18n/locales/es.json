@@ -2407,7 +2407,10 @@
     "convergenceSkipped_many": "· {{count}} rondas adicionales omitidas",
     "convergenceSkipped_other": "· {{count}} rondas adicionales omitidas",
     "convergenceSkipped": "· {{skipped}} ronda(s) adicional(es) omitida(s)",
-    "attachmentTotalTooLarge": "Los adjuntos superan el límite de tamaño total"
+    "attachmentTotalTooLarge": "Los adjuntos superan el límite de tamaño total",
+    "convergenceInert": "Configurado, pero esta fase se ejecuta una sola vez: el juez nunca podrá actuar. Quítalo, o da a la fase más de una repetición.",
+    "questionTooLong": "Una pregunta puede tener como máximo {{max}} caracteres",
+    "charactersOverLimit": "{{current}} / {{max}} caracteres"
   },
   "taskBoard": {
     "title": "Tablero de tareas",
@@ -3163,7 +3166,9 @@
       "allowedDelegationTargetsHint": "Cualquier agente desplegado",
       "allowedDelegationTargetsHelp": "IDs de agentes separados por comas. Déjalo vacío para permitir cualquier agente desplegado.",
       "moderatorlessWarning": "Restringido a un moderador que este equipo no tiene: {{phases}}. El primer miembro por orden de intervención lo sustituirá.",
-      "memberLimit": "Un equipo puede tener como máximo {{max}} miembros"
+      "memberLimit": "Un equipo puede tener como máximo {{max}} miembros",
+      "explicitPhasesNote": "Este equipo define sus fases explícitamente ({{phases}}), así que se ejecutan tal cual: el marco y el número de rondas de arriba ya no cambian el flujo.",
+      "explicitPhasesEdit": "Editar fases"
     }
   },
   "operator": {

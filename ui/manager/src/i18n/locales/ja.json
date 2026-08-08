@@ -2400,7 +2400,10 @@
     "convergenceSkipped_other": "· 以降の {{count}} ラウンドをスキップ",
     "convergenceSkipped_one": "· 以降の {{count}} ラウンドをスキップ",
     "convergenceSkipped": "· 以降の {{skipped}} ラウンドをスキップ",
-    "attachmentTotalTooLarge": "添付ファイルの合計サイズが上限を超えています"
+    "attachmentTotalTooLarge": "添付ファイルの合計サイズが上限を超えています",
+    "convergenceInert": "設定されていますが、このフェーズは 1 回しか実行されないためジャッジは動きません。設定を解除するか、フェーズの反復を 2 回以上にしてください。",
+    "questionTooLong": "質問は最大 {{max}} 文字です",
+    "charactersOverLimit": "{{current}} / {{max}} 文字"
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -3156,7 +3159,9 @@
       "allowedDelegationTargetsHint": "デプロイ済みの任意のエージェント",
       "allowedDelegationTargetsHelp": "カンマ区切りのエージェント ID。空欄にするとデプロイ済みの任意のエージェントを許可します。",
       "moderatorlessWarning": "このタスクフォースに存在しないモデレーターに限定されています: {{phases}}。発言順の最初のメンバーが代行します。",
-      "memberLimit": "タスクフォースのメンバーは最大 {{max}} 名です"
+      "memberLimit": "タスクフォースのメンバーは最大 {{max}} 名です",
+      "explicitPhasesNote": "このタスクフォースはフェーズを明示的に定義しています（{{phases}}）。そのまま実行されるため、上のフレームワークとラウンド数は流れを変えません。",
+      "explicitPhasesEdit": "フェーズを編集"
     }
   },
   "operator": {

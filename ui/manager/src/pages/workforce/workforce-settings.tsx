@@ -512,6 +512,15 @@ function WorkforceSettings() {
     [moderatorAgentId, config?.phases, style, maxRounds],
   );
 
+  /** Whether the stored config pins its own phases — see the note by the style field. */
+  const hasExplicitPhases = (config?.phases?.length ?? 0) > 0;
+
+  /**
+   * A cost ceiling of 0 or less is refused rather than saved, because the
+   * backend would coerce it to "unlimited" — the opposite of what it reads as.
+   */
+  const costCeilingInvalid = !isValidCostCeiling(protocol.maxCostPerDiscussion);
+
   // ─── Member helpers ─────────────────────────────────────────────
   const updateMember = useCallback(
     (index: number, patch: Partial<GroupMember>) => {
@@ -678,6 +687,35 @@ function WorkforceSettings() {
               {STYLE_INFO[style].flow}
             </p>
           </FormField>
+
+          {/* `resolvePhases` returns the stored phase list verbatim when it is
+              non-empty and only expands the preset otherwise — so once phases
+              have been materialized (which choosing approval points or per-phase
+              behaviour in the Manager does), the framework and round controls
+              above stop affecting the discussion entirely. Saying nothing meant
+              a user could change the framework, save successfully, and watch the
+              old flow run. */}
+          {hasExplicitPhases && (
+            <div
+              className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5"
+              data-testid="explicit-phases-note"
+            >
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "Workforce.settings.explicitPhasesNote",
+                  "This task force defines its phases explicitly ({{phases}}), so those run as written — the framework and round count above no longer change the flow.",
+                  { phases: (config?.phases ?? []).map((p) => p.name).join(" → ") },
+                )}{" "}
+                <Link
+                  to={`/manage/groups/${boardId}?version=${version}`}
+                  className="font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  {t("Workforce.settings.explicitPhasesEdit", "Edit phases")}
+                </Link>
+              </p>
+            </div>
+          )}
 
           {/* Max Rounds + Moderator row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -982,15 +1020,32 @@ function WorkforceSettings() {
                       maxCostPerDiscussion: raw === "" ? null : Number(raw),
                     }));
                   }}
+                  aria-describedby={costCeilingInvalid ? "settings-max-cost-error" : undefined}
                   data-testid="settings-max-cost"
                   className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow aria-[invalid=true]:border-destructive"
                 />
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {t(
-                    "Workforce.settings.maxCostHelp",
-                    "Leave empty for no limit. A turn already in flight can still push the total slightly past the ceiling.",
-                  )}
-                </p>
+                {/* An `aria-invalid` red border with no text says something is
+                    wrong without saying what. */}
+                {costCeilingInvalid ? (
+                  <p
+                    id="settings-max-cost-error"
+                    role="alert"
+                    className="mt-1 text-[11px] text-destructive"
+                    data-testid="settings-max-cost-error"
+                  >
+                    {t(
+                      "Workforce.settings.costCeilingInvalid",
+                      "A cost ceiling must be greater than 0. Clear the field for no limit.",
+                    )}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {t(
+                      "Workforce.settings.maxCostHelp",
+                      "Leave empty for no limit. A turn already in flight can still push the total slightly past the ceiling.",
+                    )}
+                  </p>
+                )}
               </FormField>
               <FormField label={t("Workforce.settings.onCostExceeded", "When the ceiling is hit")} htmlFor="settings-on-cost">
                 <select
@@ -1574,7 +1629,11 @@ function WorkforceSettings() {
             variant="primary"
             size="md"
             onClick={handleSave}
-            disabled={!isDirty || isUpdatePending}
+            // Blocked on an invalid cost ceiling as well as on a clean form, the
+            // same way GroupHitlEditor blocks on an invalid timeout. `handleSave`
+            // still re-checks and toasts — this only stops the click from looking
+            // like it might work.
+            disabled={!isDirty || isUpdatePending || costCeilingInvalid}
           >
             {isUpdatePending
               ? t("Workforce.settings.saving", "Saving…")

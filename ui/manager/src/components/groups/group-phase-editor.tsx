@@ -112,12 +112,50 @@ export function GroupPhaseEditor({
       className="space-y-2.5 rounded-lg border border-violet-500/30 bg-violet-500/5 p-2.5"
       data-testid="group-phase-editor"
     >
+      {/* Explained ONCE, here. These two sentences used to sit under every phase
+          — three copies for a PEER_REVIEW group, six for a TASK_FORCE one — which
+          in a sidebar this narrow buried the controls they were describing. */}
+      <dl className="space-y-1 border-b border-violet-500/20 pb-2 text-[10px] text-muted-foreground">
+        <div>
+          <dt className="inline font-medium text-foreground">
+            {t("groups.allowAbstention", "Allow abstention")}
+            {" — "}
+          </dt>
+          <dd className="inline">
+            {t(
+              "groups.allowAbstentionHelp",
+              "A member may decline to add anything new this round instead of restating itself.",
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="inline font-medium text-foreground">
+            {t("groups.convergenceEnable", "Stop early on convergence")}
+            {" — "}
+          </dt>
+          <dd className="inline">
+            {t(
+              "groups.convergenceHelp",
+              "A judge compares each repeat with the previous one and ends the phase once the members stop moving. Costs one call per repeat.",
+            )}{" "}
+            {t(
+              "groups.convergenceNeedsRepeats",
+              "Only available on a phase that repeats — a single pass has nothing to compare against.",
+            )}
+          </dd>
+        </div>
+      </dl>
+
       {phases.map((phase, idx) => {
         const repeats = phase.repeats ?? 1;
         const canConverge = convergenceApplies(phase);
         const convergence = phase.convergence;
         // Comparing more repeats than the phase has would never converge.
         const maxMinRepeats = Math.max(repeats, CONVERGENCE_MIN_REPEATS_FLOOR);
+        // Convergence is switched on for a phase that runs once — legal to store
+        // via the API, impossible to act on. Distinct from simply unavailable.
+        const convergenceInert = !canConverge && !!convergence?.enabled;
+        const convergenceUnavailable = !canConverge && !convergence?.enabled;
         return (
           <div key={`${phase.name}-${idx}`} className="rounded-md border border-border bg-background/60 p-2">
             <div className="mb-1.5 flex items-center gap-1.5">
@@ -138,15 +176,7 @@ export function GroupPhaseEditor({
                 className="mt-0.5 h-3 w-3 rounded border-input accent-primary"
                 data-testid={`phase-abstention-${idx}`}
               />
-              <span>
-                {t("groups.allowAbstention", "Allow abstention")}
-                <span className="block text-[10px] text-muted-foreground">
-                  {t(
-                    "groups.allowAbstentionHelp",
-                    "A member may decline to add anything new this round instead of restating itself.",
-                  )}
-                </span>
-              </span>
+              <span>{t("groups.allowAbstention", "Allow abstention")}</span>
             </label>
 
             {/* Convergence (I2) */}
@@ -154,7 +184,20 @@ export function GroupPhaseEditor({
               <input
                 type="checkbox"
                 checked={!!convergence?.enabled}
-                disabled={!canConverge}
+                // Disabled only when there is nothing to turn OFF. A config
+                // authored through the API can carry convergence on a phase that
+                // runs once; a flat `disabled={!canConverge}` would render that
+                // checkbox checked and frozen, leaving an inert setting the UI
+                // could show but never clear.
+                disabled={convergenceUnavailable}
+                title={
+                  convergenceUnavailable
+                    ? t(
+                        "groups.convergenceNeedsRepeats",
+                        "Only available on a phase that repeats — a single pass has nothing to compare against.",
+                      )
+                    : undefined
+                }
                 onChange={(e) =>
                   patchConvergence(idx, {
                     enabled: e.target.checked,
@@ -168,19 +211,22 @@ export function GroupPhaseEditor({
                 className="mt-0.5 h-3 w-3 rounded border-input accent-primary disabled:opacity-40"
                 data-testid={`phase-convergence-enable-${idx}`}
               />
-              <span className={!canConverge ? "opacity-60" : undefined}>
+              <span className={convergenceUnavailable ? "opacity-60" : undefined}>
                 {t("groups.convergenceEnable", "Stop early on convergence")}
-                <span className="block text-[10px] text-muted-foreground">
-                  {canConverge
-                    ? t(
-                        "groups.convergenceHelp",
-                        "A judge compares each repeat with the previous one and ends the phase once the members stop moving. Costs one call per repeat.",
-                      )
-                    : t(
-                        "groups.convergenceNeedsRepeats",
-                        "Only available on a phase that repeats — a single pass has nothing to compare against.",
-                      )}
-                </span>
+                {/* The only per-phase note left: convergence switched on for a
+                    phase that runs once is specific to THIS phase and needs
+                    attention, unlike the general explanation in the legend. */}
+                {convergenceInert && (
+                  <span
+                    className="block text-[10px] text-amber-600 dark:text-amber-400"
+                    data-testid={`phase-convergence-inert-${idx}`}
+                  >
+                    {t(
+                      "groups.convergenceInert",
+                      "Configured, but this phase runs once — the judge can never run. Clear it, or give the phase more than one repeat.",
+                    )}
+                  </span>
+                )}
               </span>
             </label>
 

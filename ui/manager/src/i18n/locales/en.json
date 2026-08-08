@@ -2444,7 +2444,10 @@
     "convergenceSkipped_one": "· {{count}} further round skipped",
     "convergenceSkipped_other": "· {{count}} further rounds skipped",
     "convergenceSkipped": "· {{skipped}} further round(s) skipped",
-    "attachmentTotalTooLarge": "Attachments exceed the total size limit"
+    "attachmentTotalTooLarge": "Attachments exceed the total size limit",
+    "convergenceInert": "Configured, but this phase runs once — the judge can never run. Clear it, or give the phase more than one repeat.",
+    "questionTooLong": "A question can be at most {{max}} characters",
+    "charactersOverLimit": "{{current}} / {{max}} characters"
   },
   "taskBoard": {
     "title": "Task Board",
@@ -3183,7 +3186,9 @@
       "allowedDelegationTargetsHint": "Any deployed agent",
       "allowedDelegationTargetsHelp": "Comma-separated agent IDs. Leave empty to allow any deployed agent.",
       "moderatorlessWarning": "Restricted to a moderator this task force does not have: {{phases}}. The first member by speaking order will stand in.",
-      "memberLimit": "A task force can hold at most {{max}} members"
+      "memberLimit": "A task force can hold at most {{max}} members",
+      "explicitPhasesNote": "This task force defines its phases explicitly ({{phases}}), so those run as written — the framework and round count above no longer change the flow.",
+      "explicitPhasesEdit": "Edit phases"
     }
   },
   "operator": {

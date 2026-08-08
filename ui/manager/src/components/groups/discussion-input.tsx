@@ -4,10 +4,12 @@ import { Send, Loader2, Expand, RotateCw, Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
+import { cn } from "@/lib/utils";
 import { MAX_ATTACHMENT_BYTES } from "@/lib/api/attachments";
 import {
   MAX_GROUP_ATTACHMENTS,
   MAX_GROUP_ATTACHMENTS_TOTAL_BYTES,
+  MAX_GROUP_QUESTION_CHARS,
   type GroupAttachmentRef,
 } from "@/lib/api/groups";
 
@@ -50,6 +52,22 @@ function readAsBase64(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
+}
+
+/**
+ * Identity of a picked file, for de-duplicating repeat selections. Name + size +
+ * mtime is as close as the File API gets without reading the bytes.
+ */
+function attachmentId(file: File): string {
+  return `${file.name}-${file.size}-${file.lastModified}`;
+}
+
+/** Compact byte size for an attachment chip — the total cap is otherwise invisible. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  return `${(kb / 1024).toFixed(kb / 1024 < 10 ? 1 : 0)} MB`;
 }
 
 /** Min/max heights for auto-growing textarea */
@@ -101,25 +119,33 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
   }, [dialogOpen]);
 
   const addFiles = useCallback(
-    async (files: FileList | null) => {
-      if (!files?.length) return;
+    // Takes an ARRAY, not the live FileList. The caller resets `input.value` to
+    // re-arm the change event, and that clears `input.files` — so the list has to
+    // be materialized synchronously by the caller rather than read across an
+    // `await` in here.
+    async (files: File[]) => {
+      if (!files.length) return;
+      const tooMany = () =>
+        t("groups.attachmentLimit", "At most {{max}} attachments per discussion", {
+          max: MAX_GROUP_ATTACHMENTS,
+        });
       const room = MAX_GROUP_ATTACHMENTS - attachments.length;
       if (room <= 0) {
-        toast.error(
-          t("groups.attachmentLimit", "At most {{max}} attachments per discussion", {
-            max: MAX_GROUP_ATTACHMENTS,
-          }),
-        );
+        toast.error(tooMany());
         return;
       }
-      const picked = Array.from(files).slice(0, room);
-      if (picked.length < files.length) {
-        toast.warning(
-          t("groups.attachmentLimit", "At most {{max}} attachments per discussion", {
-            max: MAX_GROUP_ATTACHMENTS,
-          }),
-        );
-      }
+      // Drop duplicates BEFORE the count and size budgets. Charging a file that
+      // is then discarded as a duplicate would reject a later legitimate one.
+      const seen = new Set(attachments.map((a) => a.id));
+      const fresh = files.filter((f) => {
+        const id = attachmentId(f);
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+      const picked = fresh.slice(0, room);
+      if (picked.length < fresh.length) toast.warning(tooMany());
+
       const accepted: PendingAttachment[] = [];
       // The per-file cap alone is not enough: this endpoint takes the bytes
       // inline, so fifty legal files still become one enormous base64 body.
@@ -141,7 +167,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
         }
         try {
           accepted.push({
-            id: `${file.name}-${file.size}-${file.lastModified}`,
+            id: attachmentId(file),
             fileName: file.name,
             // Browsers leave this empty for types they cannot identify; the
             // backend treats an absent mimeType as "work it out from the bytes".
@@ -154,21 +180,31 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
           toast.error(t("groups.attachmentReadFailed", "Could not read {{name}}", { name: file.name }));
         }
       }
-      if (accepted.length) {
-        setAttachments((prev) => [
-          ...prev,
-          ...accepted.filter((a) => !prev.some((p) => p.id === a.id)),
-        ]);
-      }
+      if (accepted.length) setAttachments((prev) => [...prev, ...accepted]);
     },
-    // `attachments`, not `attachments.length`: the running-total check reads the
-    // entries themselves now, and a remove-then-add pair leaves the length equal
-    // while the sizes differ.
+    // `attachments`, not `attachments.length`: the dedupe and running-total checks
+    // read the entries themselves, and a remove-then-add pair leaves the length
+    // equal while the ids and sizes differ.
     [attachments, t],
   );
 
+  const charCount = question.length;
+  // The backend caps the question at MAX_QUESTION_CHARS and fans it out to every
+  // member in every phase, so this is a real ceiling rather than a tuning knob.
+  const questionTooLong = charCount > MAX_GROUP_QUESTION_CHARS;
+
   function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault();
+    if (questionTooLong) {
+      // Server-side this is a 400 with a bean-validation message the user never
+      // sees, after the whole (potentially large) body has been uploaded.
+      toast.error(
+        t("groups.questionTooLong", "A question can be at most {{max}} characters", {
+          max: MAX_GROUP_QUESTION_CHARS.toLocaleString(),
+        }),
+      );
+      return;
+    }
     if (question.trim() && !isLoading && !disabled) {
       const files =
         canAttach && attachments.length
@@ -185,7 +221,6 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
     }
   }
 
-  const charCount = question.length;
 
   return (
     <>
@@ -201,6 +236,9 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
                 <span className="max-w-[12rem] truncate" title={a.fileName ?? undefined}>
                   {a.fileName}
                 </span>
+                {/* Without a size, the total-size cap can only be discovered by
+                    hitting it. */}
+                <span className="tabular-nums text-muted-foreground">{formatBytes(a.sizeBytes)}</span>
                 <button
                   type="button"
                   onClick={() => setAttachments((prev) => prev.filter((p) => p.id !== a.id))}
@@ -221,7 +259,10 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
               multiple
               className="hidden"
               onChange={(e) => {
-                void addFiles(e.target.files);
+                // Materialize the list here: clearing `value` below also clears
+                // `files`, and `addFiles` awaits between reads.
+                const picked = Array.from(e.target.files ?? []);
+                void addFiles(picked);
                 // Reset so re-picking the same file fires change again.
                 e.target.value = "";
               }}
@@ -282,7 +323,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
         </div>
         <Button
           type="submit"
-          disabled={!question.trim() || isLoading || disabled}
+          disabled={!question.trim() || isLoading || disabled || questionTooLong}
           className="shrink-0"
           data-testid="start-discussion-btn"
         >
@@ -340,8 +381,21 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
               {t("groups.submitShortcut", "Ctrl+Enter to submit")}
             </p>
             {charCount > 0 && (
-              <p className="text-xs text-muted-foreground tabular-nums">
-                {charCount.toLocaleString()} {t("groups.characters", "characters")}
+              <p
+                className={cn(
+                  "text-xs tabular-nums",
+                  questionTooLong ? "font-medium text-destructive" : "text-muted-foreground",
+                )}
+                data-testid="discussion-char-count"
+              >
+                {questionTooLong
+                  ? // `current`, not `count` — i18next reserves `count` for
+                    // pluralization and its typings require a number.
+                    t("groups.charactersOverLimit", "{{current}} / {{max}} characters", {
+                      current: charCount.toLocaleString(),
+                      max: MAX_GROUP_QUESTION_CHARS.toLocaleString(),
+                    })
+                  : `${charCount.toLocaleString()} ${t("groups.characters", "characters")}`}
               </p>
             )}
           </div>
@@ -351,7 +405,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
             </Button>
             <Button
               onClick={() => handleSubmit()}
-              disabled={!question.trim() || isLoading || disabled}
+              disabled={!question.trim() || isLoading || disabled || questionTooLong}
             >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin me-1" />

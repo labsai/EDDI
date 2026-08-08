@@ -2400,7 +2400,10 @@
     "convergenceSkipped_other": "· 已跳过 {{count}} 个后续轮次",
     "convergenceSkipped_one": "· 已跳过 {{count}} 个后续轮次",
     "convergenceSkipped": "· 已跳过 {{skipped}} 个后续轮次",
-    "attachmentTotalTooLarge": "附件超出总大小限制"
+    "attachmentTotalTooLarge": "附件超出总大小限制",
+    "convergenceInert": "已配置，但该阶段只执行一次 — 评审永远不会运行。请清除该设置，或给该阶段多于一次的重复。",
+    "questionTooLong": "问题最多 {{max}} 个字符",
+    "charactersOverLimit": "{{current}} / {{max}} 个字符"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -3156,7 +3159,9 @@
       "allowedDelegationTargetsHint": "任意已部署代理",
       "allowedDelegationTargetsHelp": "以逗号分隔的代理 ID。留空表示允许任意已部署代理。",
       "moderatorlessWarning": "限定由本任务组未指定的主持人执行：{{phases}}。将由发言顺序中的第一位成员代替。",
-      "memberLimit": "一个任务组最多可容纳 {{max}} 名成员"
+      "memberLimit": "一个任务组最多可容纳 {{max}} 名成员",
+      "explicitPhasesNote": "该任务组显式定义了阶段（{{phases}}），将按其原样执行 — 上方的框架与轮次数不再影响流程。",
+      "explicitPhasesEdit": "编辑阶段"
     }
   },
   "operator": {

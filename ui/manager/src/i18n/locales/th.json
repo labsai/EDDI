@@ -2400,7 +2400,10 @@
     "convergenceSkipped_other": "· ข้ามอีก {{count}} รอบ",
     "convergenceSkipped_one": "· ข้ามอีก {{count}} รอบ",
     "convergenceSkipped": "· ข้ามอีก {{skipped}} รอบ",
-    "attachmentTotalTooLarge": "ไฟล์แนบเกินขีดจำกัดขนาดรวม"
+    "attachmentTotalTooLarge": "ไฟล์แนบเกินขีดจำกัดขนาดรวม",
+    "convergenceInert": "ตั้งค่าไว้แล้ว แต่เฟสนี้ทำงานเพียงรอบเดียว ผู้ตัดสินจึงไม่มีโอกาสทำงาน ล้างการตั้งค่านี้ หรือกำหนดให้เฟสวนซ้ำมากกว่าหนึ่งรอบ",
+    "questionTooLong": "คำถามมีความยาวได้ไม่เกิน {{max}} อักขระ",
+    "charactersOverLimit": "{{current}} / {{max}} อักขระ"
   },
   "taskBoard": {
     "title": "บอร์ดงาน",
@@ -3156,7 +3159,9 @@
       "allowedDelegationTargetsHint": "เอเจนต์ที่ปรับใช้แล้วรายใดก็ได้",
       "allowedDelegationTargetsHelp": "รหัสเอเจนต์คั่นด้วยจุลภาค เว้นว่างเพื่ออนุญาตเอเจนต์ที่ปรับใช้แล้วทั้งหมด",
       "moderatorlessWarning": "จำกัดเฉพาะผู้ดำเนินรายการที่ทีมนี้ไม่มี: {{phases}} สมาชิกลำดับแรกตามลำดับการพูดจะทำหน้าที่แทน",
-      "memberLimit": "ทีมหนึ่งมีสมาชิกได้ไม่เกิน {{max}} คน"
+      "memberLimit": "ทีมหนึ่งมีสมาชิกได้ไม่เกิน {{max}} คน",
+      "explicitPhasesNote": "ทีมนี้กำหนดเฟสไว้อย่างชัดเจน ({{phases}}) จึงทำงานตามที่กำหนด — กรอบการทำงานและจำนวนรอบด้านบนไม่มีผลต่อลำดับงานอีกต่อไป",
+      "explicitPhasesEdit": "แก้ไขเฟส"
     }
   },
   "operator": {

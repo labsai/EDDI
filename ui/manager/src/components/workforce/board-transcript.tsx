@@ -6,7 +6,7 @@ import { ChevronDown, ChevronUp, Copy, CheckCircle2 } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { AdvisorResponseCard } from "@/components/workforce/advisor-response-card";
 import type { TranscriptEntry, TranscriptEntryType } from "@/lib/api/groups";
-import { ENTRY_TYPE_INFO } from "@/lib/api/groups";
+import { entryTypeInfo } from "@/lib/api/groups";
 import { formatMarkdownText } from "@/components/groups/group-utils";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -60,6 +60,10 @@ function badgeVariant(
     case "DEFENSE":
     case "TASK_RESULT":
       return "success";
+    case "DISSENT":
+      return "destructive";
+    case "ABSTAINED":
+      return "secondary";
     default:
       return "outline";
   }
@@ -287,7 +291,11 @@ function EnhancedResponseEntry({
   delay: number;
 }) {
   const { t } = useTranslation();
-  const info = ENTRY_TYPE_INFO[entry.type];
+  // `entryTypeInfo`, not a raw ENTRY_TYPE_INFO lookup: the backend's entry-type
+  // enum grows every collaboration wave, and the previous `info && …` guard meant
+  // a DISSENT rendered as an unlabelled contribution — indistinguishable from an
+  // ordinary opinion, which is the one thing a minority report must not be.
+  const info = entryTypeInfo(entry.type);
   const variant = badgeVariant(entry.type);
   const time = formatTime(entry.timestamp);
 
@@ -298,11 +306,7 @@ function EnhancedResponseEntry({
       <AdvisorResponseCard
         displayName={entry.speakerDisplayName}
         agentId={entry.speakerAgentId}
-        role={
-          info
-            ? t(`groups.entryType.${entry.type}`, info.label)
-            : null
-        }
+        role={t(`groups.entryType.${entry.type}`, info.label)}
         roleBadgeVariant={variant}
         content={entry.content}
         boardId={boardId}

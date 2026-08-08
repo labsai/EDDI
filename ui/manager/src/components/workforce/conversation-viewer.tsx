@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { parseTranscriptContent, truncateContent } from "@/components/groups/group-utils";
 import {
-  ENTRY_TYPE_INFO,
+  entryTypeInfo,
   type TranscriptEntry,
   type GroupConversationState,
 } from "@/lib/api/groups";
@@ -131,7 +131,10 @@ function PhaseSeparator({
 }) {
   const { t } = useTranslation();
   const icon = PHASE_ICONS[phaseType] ?? "📌";
-  const typeInfo = ENTRY_TYPE_INFO[phaseType as keyof typeof ENTRY_TYPE_INFO];
+  // Never undefined — see entryTypeInfo. The `as keyof typeof` cast this
+  // replaced satisfied the compiler while the runtime value could still be
+  // absent, which is how eleven entry types ended up unlabelled here.
+  const typeInfo = entryTypeInfo(phaseType);
 
   return (
     <div
@@ -153,11 +156,9 @@ function PhaseSeparator({
         <span>
           {phaseName ?? t("Workforce.history.phase", "Phase")}
         </span>
-        {typeInfo && (
-          <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
-            {typeInfo.label}
-          </Badge>
-        )}
+        <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+          {typeInfo.label}
+        </Badge>
       </div>
       <div className="flex-1 h-px bg-muted" />
     </div>
@@ -197,7 +198,7 @@ function AgentEntryCard({
   index: number;
 }) {
   const { t } = useTranslation();
-  const typeInfo = ENTRY_TYPE_INFO[entry.type as keyof typeof ENTRY_TYPE_INFO];
+  const typeInfo = entryTypeInfo(entry.type);
   const borderClass = agentBorderClass(entry.speakerAgentId);
   const parsedContent = parseTranscriptContent(entry.content ?? "");
   const hasContent = parsedContent.trim().length > 0;
@@ -225,11 +226,9 @@ function AgentEntryCard({
         <span className="font-medium text-sm text-foreground">
           {entry.speakerDisplayName}
         </span>
-        {typeInfo && (
-          <Badge variant="secondary" className="text-[10px]">
-            {typeInfo.label}
-          </Badge>
-        )}
+        <Badge variant="secondary" className="text-[10px]">
+          {typeInfo.label}
+        </Badge>
         {entry.targetAgentId && (
           <span className="text-xs text-muted-foreground">
             → {entry.targetAgentId}

@@ -3,11 +3,11 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import DOMPurify from "dompurify";
-import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2, ListOrdered, User2, XCircle } from "lucide-react";
+import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2, ListOrdered, User2, XCircle, Fingerprint } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@/lib/api/groups";
-import { entryTypeInfo } from "@/lib/api/groups";
+import { entryTypeInfo, hasEnvelopeData } from "@/lib/api/groups";
 import { parseTranscriptContent, formatMarkdownText, parseEmojiVerification, truncateContent, safeFormatDate } from "./group-utils";
 import type { StructuredItem } from "./group-utils";
 
@@ -62,6 +62,26 @@ function defaultBadgeVariant(
     default:
       return "outline";
   }
+}
+
+
+/**
+ * The envelope detail behind the signature badge. Not a verification result —
+ * just what the entry carries, so an operator can correlate it with the
+ * backend's own audit trail. The signature is truncated because the full Base64
+ * is ~88 characters of noise in a tooltip.
+ */
+function signatureTooltip(entry: TranscriptEntry): string {
+  const parts = [`Signature: ${entry.signature!.slice(0, 16)}…`];
+  if (entry.signatureKeyVersion != null) {
+    // Version 0 means the entry was signed before key versioning existed, so
+    // the legacy single `publicKey` field is its key.
+    parts.push(`Key version: ${entry.signatureKeyVersion}`);
+  }
+  if (entry.signatureTimestampMs != null) {
+    parts.push(`Signed at: ${new Date(entry.signatureTimestampMs).toISOString()}`);
+  }
+  return parts.join("\n");
 }
 
 /** Height in px above which we collapse a message (~6 lines of text) */
@@ -235,6 +255,23 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
           {entry.targetAgentId && (
             <span className="text-[10px] text-muted-foreground" title={entry.targetAgentId}>
               → {entry.targetAgentId.slice(0, 8)}…
+            </span>
+          )}
+          {/* Inter-agent signature, when the speaker has `signInterAgentMessages`.
+              Same shape and wording as the audit page's badge: shown only when
+              present, absence meaning unsigned.
+
+              Says "signed", never "verified" — verification needs the speaker's
+              public key at the right version, which only the backend has. A
+              badge claiming more than it checked is worse than no badge. */}
+          {hasEnvelopeData(entry) && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0 text-[10px] font-medium text-emerald-600 cursor-help dark:text-emerald-400"
+              title={signatureTooltip(entry)}
+              data-testid="transcript-signature-badge"
+            >
+              <Fingerprint className="h-2.5 w-2.5" />
+              {t("audit.signed", "Signed")}
             </span>
           )}
           <span className="text-[10px] text-muted-foreground ms-auto">

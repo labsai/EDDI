@@ -2428,7 +2428,10 @@
     "convergenceSkipped_many": "· تم تخطي {{count}} جولة إضافية",
     "convergenceSkipped_other": "· تم تخطي {{count}} جولة إضافية",
     "convergenceSkipped": "· تم تخطي {{skipped}} جولة إضافية",
-    "attachmentTotalTooLarge": "تتجاوز المرفقات الحد الأقصى للحجم الإجمالي"
+    "attachmentTotalTooLarge": "تتجاوز المرفقات الحد الأقصى للحجم الإجمالي",
+    "convergenceInert": "مضبوط، لكن هذه المرحلة تُنفَّذ مرة واحدة — لن يعمل الحَكَم أبدًا. أزل الإعداد أو امنح المرحلة أكثر من تكرار.",
+    "questionTooLong": "يمكن أن يبلغ طول السؤال {{max}} حرفًا كحد أقصى",
+    "charactersOverLimit": "{{current}} / {{max}} حرفًا"
   },
   "taskBoard": {
     "title": "لوحة المهام",
@@ -3184,7 +3187,9 @@
       "allowedDelegationTargetsHint": "أي وكيل منشور",
       "allowedDelegationTargetsHelp": "معرّفات وكلاء مفصولة بفواصل. اتركه فارغًا للسماح لأي وكيل منشور.",
       "moderatorlessWarning": "مقصورة على منسّق لا تملكه فرقة العمل هذه: {{phases}}. سينوب عنه العضو الأول حسب ترتيب الكلام.",
-      "memberLimit": "يمكن أن تضم فرقة العمل {{max}} عضوًا كحد أقصى"
+      "memberLimit": "يمكن أن تضم فرقة العمل {{max}} عضوًا كحد أقصى",
+      "explicitPhasesNote": "تحدّد فرقة العمل هذه مراحلها صراحةً ({{phases}})، فتُنفَّذ كما هي — ولم يعد النمط ولا عدد الجولات أعلاه يغيّر المسار.",
+      "explicitPhasesEdit": "تحرير المراحل"
     }
   },
   "operator": {

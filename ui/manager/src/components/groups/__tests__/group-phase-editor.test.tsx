@@ -116,6 +116,43 @@ describe("GroupPhaseEditor", () => {
     expect(savedConfig().phases![0]!.convergence!.minRepeats).toBe(3);
   });
 
+  /**
+   * A config authored through the API can carry convergence on a phase that runs
+   * once. A flat `disabled={!canConverge}` rendered that checkbox checked AND
+   * frozen — an inert setting the UI could display but never clear.
+   */
+  it("lets an inert convergence block be cleared on a single-pass phase", () => {
+    const config = makeConfig({
+      phases: [
+        phase("Synthesis", {
+          repeats: 1,
+          convergence: { enabled: true, minRepeats: 2, threshold: 0.8, judge: "MODERATOR" },
+        }),
+      ],
+    });
+    renderWithProviders(
+      <GroupPhaseEditor config={config} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+    );
+
+    const box = screen.getByTestId("phase-convergence-enable-0");
+    expect(box).not.toBeDisabled();
+    expect(box).toBeChecked();
+    expect(screen.getByTestId("group-phase-editor")).toHaveTextContent(/judge can never run/i);
+
+    fireEvent.click(box);
+    fireEvent.click(screen.getByTestId("group-phase-save"));
+    expect(savedConfig().phases![0]!.convergence).toBeNull();
+  });
+
+  it("still disables the control when there is nothing to clear", () => {
+    const config = makeConfig({ phases: [phase("Synthesis", { repeats: 1 })] });
+    renderWithProviders(
+      <GroupPhaseEditor config={config} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+    );
+    expect(screen.getByTestId("phase-convergence-enable-0")).toBeDisabled();
+    expect(screen.getByTestId("group-phase-editor")).toHaveTextContent(/Only available on a phase that repeats/i);
+  });
+
   it("labels every convergence control for a screen reader", () => {
     renderWithProviders(
       <GroupPhaseEditor config={makeConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,

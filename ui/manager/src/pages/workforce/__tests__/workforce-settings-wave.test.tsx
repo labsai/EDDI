@@ -66,6 +66,25 @@ describe("WorkforceSettings — group collaboration parity", () => {
      * warning — i.e. saving 0 means the exact opposite of what it reads as. The
      * editor has to refuse it rather than let that happen silently.
      */
+    it("explains an invalid ceiling instead of only colouring the border red", async () => {
+      const user = userEvent.setup();
+      render();
+      await screen.findByDisplayValue("Product Review Panel");
+      await expandSection(user, /Protocol & Resilience/i);
+
+      const field = screen.getByTestId("settings-max-cost");
+      expect(screen.queryByTestId("settings-max-cost-error")).not.toBeInTheDocument();
+
+      await user.clear(field);
+      await user.type(field, "0");
+
+      const error = screen.getByTestId("settings-max-cost-error");
+      expect(error).toHaveTextContent(/greater than 0/i);
+      expect(field).toHaveAttribute("aria-describedby", error.id);
+      // …and the save button must not look like it might work.
+      expect(screen.getByRole("button", { name: /Save Changes/i })).toBeDisabled();
+    });
+
     it("refuses to save a zero ceiling", async () => {
       const user = userEvent.setup();
       const put = capturePut();
@@ -210,6 +229,35 @@ describe("WorkforceSettings — group collaboration parity", () => {
 
       const warning = await screen.findByTestId("moderatorless-phase-warning");
       expect(warning).toHaveTextContent("Synthesis");
+    });
+  });
+
+  /**
+   * `resolvePhases` returns a stored phase list verbatim and only expands the
+   * preset otherwise, and `getStyle`/`getMaxRounds` feed nothing else — so with
+   * phases materialized, both controls are inert. Saying nothing let a user change
+   * the framework, save successfully, and watch the old flow run.
+   */
+  describe("explicit phases", () => {
+    it("says the framework and round count no longer drive the flow", async () => {
+      render();
+      await screen.findByDisplayValue("Product Review Panel");
+
+      const note = screen.getByTestId("explicit-phases-note");
+      // grp1 stores its phases, so the note names them in order.
+      expect(note).toHaveTextContent("Initial Opinions → Critique → Synthesis");
+    });
+
+    it("stays quiet for a preset group that stores no phases", async () => {
+      // grp2 has `phases: null` — the engine expands its preset at run time, so
+      // the framework and round count do still drive the flow.
+      renderPage(
+        "/workforce/grp2/settings?version=1",
+        <WorkforceSettings />,
+        "/workforce/:boardId/settings",
+      );
+      await screen.findByDisplayValue("Strategy Debate");
+      expect(screen.queryByTestId("explicit-phases-note")).not.toBeInTheDocument();
     });
   });
 

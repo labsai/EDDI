@@ -1,2 +1,7 @@
 npx lint-staged
-npx tsc --noEmit
+# `tsc -b`, NOT `tsc --noEmit`. tsconfig.json is a solution file — `"files": []`
+# plus two project references — so `tsc --noEmit` resolves zero input files and
+# exits 0 without checking anything. This hook silently passed everything until
+# a syntax error reached CI, which runs `npm run typecheck` (`tsc -b`) and caught
+# it. Keep the two in step.
+npm run typecheck

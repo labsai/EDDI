@@ -2400,7 +2400,10 @@
     "convergenceSkipped_one": "· {{count}} weitere Runde übersprungen",
     "convergenceSkipped_other": "· {{count}} weitere Runden übersprungen",
     "convergenceSkipped": "· {{skipped}} weitere Runde(n) übersprungen",
-    "attachmentTotalTooLarge": "Anhänge überschreiten die Gesamtgrößenbeschränkung"
+    "attachmentTotalTooLarge": "Anhänge überschreiten die Gesamtgrößenbeschränkung",
+    "convergenceInert": "Konfiguriert, aber diese Phase läuft nur einmal — der Richter kann nie starten. Entferne die Einstellung oder gib der Phase mehr als eine Wiederholung.",
+    "questionTooLong": "Eine Frage darf höchstens {{max}} Zeichen lang sein",
+    "charactersOverLimit": "{{current}} / {{max}} Zeichen"
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -3156,7 +3159,9 @@
       "allowedDelegationTargetsHint": "Beliebiger bereitgestellter Agent",
       "allowedDelegationTargetsHelp": "Kommagetrennte Agent-IDs. Leer lassen, um jeden bereitgestellten Agenten zuzulassen.",
       "moderatorlessWarning": "Auf einen Moderator beschränkt, den diese Task Force nicht hat: {{phases}}. Das erste Mitglied nach Sprechreihenfolge springt ein.",
-      "memberLimit": "Eine Task Force kann höchstens {{max}} Mitglieder haben"
+      "memberLimit": "Eine Task Force kann höchstens {{max}} Mitglieder haben",
+      "explicitPhasesNote": "Diese Task Force definiert ihre Phasen explizit ({{phases}}); sie laufen genau so. Framework und Rundenzahl oben ändern den Ablauf nicht mehr.",
+      "explicitPhasesEdit": "Phasen bearbeiten"
     }
   },
   "operator": {

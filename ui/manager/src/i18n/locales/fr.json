@@ -2407,7 +2407,10 @@
     "convergenceSkipped_many": "· {{count}} tours supplémentaires ignorés",
     "convergenceSkipped_other": "· {{count}} tours supplémentaires ignorés",
     "convergenceSkipped": "· {{skipped}} tour(s) supplémentaire(s) ignoré(s)",
-    "attachmentTotalTooLarge": "Les pièces jointes dépassent la taille totale autorisée"
+    "attachmentTotalTooLarge": "Les pièces jointes dépassent la taille totale autorisée",
+    "convergenceInert": "Configuré, mais cette phase ne s'exécute qu'une fois — le juge ne pourra jamais tourner. Retirez le réglage, ou donnez plus d'une répétition à la phase.",
+    "questionTooLong": "Une question ne peut pas dépasser {{max}} caractères",
+    "charactersOverLimit": "{{current}} / {{max}} caractères"
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -3163,7 +3166,9 @@
       "allowedDelegationTargetsHint": "N'importe quel agent déployé",
       "allowedDelegationTargetsHelp": "Identifiants d'agents séparés par des virgules. Laissez vide pour autoriser tout agent déployé.",
       "moderatorlessWarning": "Réservé à un modérateur que cette équipe n'a pas : {{phases}}. Le premier membre par ordre de parole prendra le relais.",
-      "memberLimit": "Une équipe peut compter au plus {{max}} membres"
+      "memberLimit": "Une équipe peut compter au plus {{max}} membres",
+      "explicitPhasesNote": "Cette équipe définit ses phases explicitement ({{phases}}) : elles s'exécutent telles quelles. Le framework et le nombre de tours ci-dessus ne modifient plus le déroulé.",
+      "explicitPhasesEdit": "Modifier les phases"
     }
   },
   "operator": {

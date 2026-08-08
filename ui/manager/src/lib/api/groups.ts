@@ -1284,7 +1284,14 @@ export const ENTRY_TYPE_INFO: Record<TranscriptEntryType, EntryTypeInfo> = {
  * `.label` threw, blanking the entire transcript rather than one badge. A
  * newer backend must degrade to an unstyled badge, not to a blank screen.
  */
-export function entryTypeInfo(type: TranscriptEntryType | string): EntryTypeInfo {
+export function entryTypeInfo(
+  // Accepts null/undefined too. The whole point of this function is that no
+  // caller has to guard, and a transcript entry arriving without a type — from a
+  // hand-written document, or a field renamed upstream — must cost a badge, not
+  // the screen.
+  type: TranscriptEntryType | string | null | undefined,
+): EntryTypeInfo {
+  if (!type) return { label: "—", color: "muted" };
   return (
     ENTRY_TYPE_INFO[type as TranscriptEntryType] ?? {
       label: humanizeEntryType(type),
