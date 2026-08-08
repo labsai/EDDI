@@ -80,6 +80,8 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
             case DELPHI -> "Anonymous opinion rounds to reduce groupthink and achieve convergence";
             case DEBATE -> "Structured pro/con argumentation with rebuttal and judge";
             case TASK_FORCE -> "Collaborative task accomplishment: plan, execute in parallel, verify, synthesize";
+            case NEGOTIATION -> "Trade, not win/lose: positions, opening proposals, bargaining with a concession "
+                    + "ledger, arbitration only if no agreement, synthesis";
             case CUSTOM -> "User-defined phases for full control over the discussion flow";
         };
     }

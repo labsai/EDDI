@@ -192,6 +192,12 @@ public class AgentGroupConfiguration {
         DEBATE,
         /** Collaborative task accomplishment: plan → execute → verify → synthesis. */
         TASK_FORCE,
+        /**
+         * Trade, not win/lose (I11): positions & interests → opening proposals →
+         * bargaining with a concession ledger → arbitration (skipped once an agreement
+         * is reached) → synthesis.
+         */
+        NEGOTIATION,
         /** User defines phases manually. */
         CUSTOM
     }
@@ -208,7 +214,7 @@ public class AgentGroupConfiguration {
      */
     public record DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
             boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
-            boolean allowAbstention) {
+            boolean allowAbstention, PhaseSkipCondition skipIf) {
 
         /**
          * Convenience constructor with defaults: participants=ALL,
@@ -217,6 +223,18 @@ public class AgentGroupConfiguration {
          */
         public DiscussionPhase(String name, PhaseType type) {
             this(name, type, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false);
+        }
+
+        /**
+         * Backward-compatible constructor without {@code skipIf} (I11) — {@code null}
+         * means the phase always runs, which is the behavior of every phase that
+         * predates I11.
+         */
+        public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
+                boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
+                boolean allowAbstention) {
+            this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence,
+                    allowAbstention, null);
         }
 
         /**
@@ -323,7 +341,31 @@ public class AgentGroupConfiguration {
         /** Task execution by assigned agents. */
         EXECUTE,
         /** Verification of task results. */
-        VERIFY
+        VERIFY,
+        /**
+         * An opening offer in a negotiation (I11) — the whole turn is the proposal's
+         * terms.
+         */
+        PROPOSAL,
+        /**
+         * A bargaining turn (I11): accept an open proposal, counter with a new one,
+         * and/or record concessions — a typed JSON contract, parsed by
+         * {@code NegotiationEngine}.
+         */
+        BARGAIN
+    }
+
+    /**
+     * The one phase-skip condition (I11) — deliberately a single enum, not an
+     * expression language: deterministic governance means a phase is skipped for a
+     * reason the engine can PROVE, not one an expression evaluates to.
+     */
+    public enum PhaseSkipCondition {
+        /**
+         * Skip when the discussion already carries an AGREEMENT decision — the
+         * arbitration phase of a negotiation is only needed when bargaining failed.
+         */
+        AGREEMENT_REACHED
     }
 
     public enum TurnOrder {

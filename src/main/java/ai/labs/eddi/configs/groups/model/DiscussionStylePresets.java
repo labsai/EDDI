@@ -272,6 +272,63 @@ public final class DiscussionStylePresets {
             ]
             ```""";
 
+    /**
+     * The opening offer (I11). The whole reply becomes the proposal's terms —
+     * deliberately prose, not JSON: an opening position is authored, not parsed.
+     */
+    public static final String TEMPLATE_PROPOSAL = """
+            A negotiation is underway on:
+            "{question}"
+
+            {#if previousResponses}
+            Positions and interests stated so far:
+            {#for entry in previousResponses}
+            — {entry.speaker}: "{entry.content}"
+            {/for}
+            {/if}
+
+            As {displayName}, state your OPENING PROPOSAL: concrete terms the \
+            others could accept. Your entire reply is the proposal.""";
+
+    /**
+     * The bargaining contract (I11). The baked-in rules are the anti-sycophancy
+     * mechanism: an acceptance must name a specific proposal id, and a concession
+     * that does not name what was received in return is not recorded. The current
+     * table (open proposals + concession ledger) is appended to this prompt by
+     * {@code NegotiationEngine.appendStateIfRelevant}.
+     */
+    public static final String TEMPLATE_BARGAIN = """
+            A negotiation is underway on:
+            "{question}"
+
+            As {displayName}, make your bargaining move. Reply with JSON in this exact shape \
+            (any field may be null/empty), followed by your free-text reasoning:
+            {"accept": "<proposalId>"|null, "proposal": {"terms": "..."}|null, "concessions": [{"gaveUp": "...", "inReturnFor": "..."}]}
+
+            Rules:
+            - Do not accept any proposal that fails your stated interests.
+            - Every concession must name what you received in return — unreciprocated concessions are not recorded.
+            - The ledger below is the record — it will be quoted in the outcome.""";
+
+    /**
+     * Arbitration (I11): bargaining ended without unanimous acceptance, so the
+     * moderator decides. Only rendered when the phase actually runs — an agreement
+     * skips it entirely ({@code skipIf=AGREEMENT_REACHED}).
+     */
+    public static final String TEMPLATE_ARBITRATION = """
+            You are arbitrating a negotiation on:
+            "{question}"
+
+            The parties bargained but did NOT reach unanimous agreement. The full \
+            transcript is your record:
+            {#for entry in transcript}
+            [{entry.phaseName}] {entry.speaker}: "{entry.content}"
+            {/for}
+
+            As the arbitrator, decide the outcome. Weigh the stated interests, the \
+            open proposals and the concession ledger (appended below); state your \
+            decision and its reasoning plainly.""";
+
     // Template lookup by phase type
     private static final Map<PhaseType, String> DEFAULT_TEMPLATES = Map.ofEntries(
             Map.entry(PhaseType.OPINION, TEMPLATE_OPINION_INDEPENDENT),
@@ -284,7 +341,9 @@ public final class DiscussionStylePresets {
             Map.entry(PhaseType.SYNTHESIS, TEMPLATE_SYNTHESIS),
             Map.entry(PhaseType.PLAN, TEMPLATE_PLAN),
             Map.entry(PhaseType.EXECUTE, TEMPLATE_EXECUTE),
-            Map.entry(PhaseType.VERIFY, TEMPLATE_VERIFY));
+            Map.entry(PhaseType.VERIFY, TEMPLATE_VERIFY),
+            Map.entry(PhaseType.PROPOSAL, TEMPLATE_PROPOSAL),
+            Map.entry(PhaseType.BARGAIN, TEMPLATE_BARGAIN));
 
     /**
      * Returns the default template for a given phase type.
@@ -318,8 +377,35 @@ public final class DiscussionStylePresets {
             case DELPHI -> delphi(rounds);
             case DEBATE -> debate();
             case TASK_FORCE -> taskForce();
+            case NEGOTIATION -> negotiation(rounds);
             case CUSTOM -> List.of();
         };
+    }
+
+    // --- NEGOTIATION (I11) ---
+
+    /**
+     * ① Positions & Interests — PARALLEL and context-free, so parties state genuine
+     * interests before anchoring on each other (interests are what enable
+     * integrative trades). ② Opening Proposals. ③ Bargaining, repeated
+     * {@code rounds} times — the repeat loop exits early on unanimous acceptance. ④
+     * Arbitration — skipped entirely when an agreement was reached. ⑤ Synthesis —
+     * quotes the ledger.
+     */
+    private static List<DiscussionPhase> negotiation(int rounds) {
+        List<DiscussionPhase> phases = new ArrayList<>();
+        phases.add(new DiscussionPhase("Positions & Interests", PhaseType.OPINION, "ALL", TurnOrder.PARALLEL,
+                ContextScope.NONE, false, null, 1));
+        phases.add(new DiscussionPhase("Opening Proposals", PhaseType.PROPOSAL, "ALL", TurnOrder.SEQUENTIAL,
+                ContextScope.FULL, false, null, 1));
+        phases.add(new DiscussionPhase("Bargaining", PhaseType.BARGAIN, "ALL", TurnOrder.SEQUENTIAL,
+                ContextScope.FULL, false, null, rounds));
+        phases.add(new DiscussionPhase("Arbitration", PhaseType.SYNTHESIS, "MODERATOR", TurnOrder.SEQUENTIAL,
+                ContextScope.FULL, false, TEMPLATE_ARBITRATION, 1, false, null, false,
+                AgentGroupConfiguration.PhaseSkipCondition.AGREEMENT_REACHED));
+        phases.add(new DiscussionPhase("Synthesis", PhaseType.SYNTHESIS, "MODERATOR", TurnOrder.SEQUENTIAL,
+                ContextScope.FULL, false, null, 1));
+        return phases;
     }
 
     // --- ROUND_TABLE ---

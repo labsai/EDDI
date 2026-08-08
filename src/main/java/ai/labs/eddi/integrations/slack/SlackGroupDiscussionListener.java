@@ -41,7 +41,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
      * mode (single thread) is too hard to follow with multiple agents.
      */
     private static final Set<String> EXPANDED_STYLES = Set.of(
-            "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI", "TASK_FORCE");
+            "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI", "TASK_FORCE", "NEGOTIATION");
 
     private final SlackWebApiClient slackApi;
     private final String authToken;

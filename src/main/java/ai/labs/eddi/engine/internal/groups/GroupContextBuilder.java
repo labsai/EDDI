@@ -185,6 +185,14 @@ public class GroupContextBuilder {
             case VERIFY -> {
                 // Completed tasks populated by executeTaskPhase
             }
+            case PROPOSAL, BARGAIN -> {
+                // I11: same peer context an OPINION turn gets — the negotiation
+                // TABLE (open proposals + concession ledger) is appended after
+                // rendering by NegotiationEngine.appendStateIfRelevant, because it
+                // lives on the GroupConversation, which this method does not see.
+                List<Map<String, Object>> prev = filterByScope(transcript, phase.contextScope(), phaseIdx, speaker);
+                data.put("previousResponses", prev);
+            }
             default -> {
                 // All PhaseType values handled above; default required by checkstyle
             }
@@ -370,6 +378,8 @@ public class GroupContextBuilder {
             case PLAN -> TranscriptEntryType.PLAN;
             case EXECUTE -> TranscriptEntryType.TASK_RESULT;
             case VERIFY -> TranscriptEntryType.VERIFICATION;
+            case PROPOSAL -> TranscriptEntryType.PROPOSAL;
+            case BARGAIN -> TranscriptEntryType.BARGAIN;
         };
     }
 

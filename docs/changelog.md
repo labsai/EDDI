@@ -5,6 +5,24 @@
 
 ---
 
+## 🤝 feat(groups): I11 — NEGOTIATION style, the trade form (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i11-negotiation`)
+
+First Wave 3 queue item. EDDI had win/lose decision forms and no **trade** form; a negotiation's output is a drafted compromise with an explicit **concession ledger** for human sign-off. The typed structure IS the anti-sycophancy mechanism.
+
+- **Phase types `PROPOSAL` + `BARGAIN`; `skipIf="AGREEMENT_REACHED"`** — a single enum condition, deliberately NOT an expression language (a phase is skipped for a reason the engine can PROVE against the typed decision). The arbitration phase is its only user.
+- **`NegotiationState` on `GroupConversation`**: proposals `{id, byAgentId, round, terms (String v1), status OPEN|SUPERSEDED, acceptedBy, acceptanceEntryIndices}` + concessions `{byAgentId, round, gaveUp, inReturnFor, refProposalId}`. Persisted with the document — a pause/resume keeps the table as it stood.
+- **The BARGAIN turn contract** (`{"accept", "proposal": {"terms"}, "concessions": [{"gaveUp","inReturnFor"}]}` + free-text reasoning): three-tier parse mirroring `VoteTallyEngine` (strict → embedded → give up, FAIL_ON_TRAILING_TOKENS); an unparseable turn is prose with NO state effect (WARN, never a guessed acceptance). A concession that names nothing in return is NOT recorded — the rule is the structure, and the baked-in template says so. A new proposal supersedes the mover's own open one; the proposer signs their own terms implicitly.
+- **Ledger accountability:** the open proposals + concession ledger are appended to every PROPOSAL/BARGAIN turn (and to negotiation SYNTHESIS turns — arbitration and final synthesis quote the record). Appended by `NegotiationEngine.appendStateIfRelevant` at the two input-build sites rather than templated, because the state lives on the conversation, which `buildPhaseInput` deliberately does not see.
+- **Agreement**: all non-moderator participants signed the same OPEN proposal → the bargaining phase's repeats end early through the SAME `PhaseOutcome.endRepeats` plumbing convergence uses, and `DecisionRecord{AGREEMENT, method="negotiation"}` carries `tally.signedAcceptances` — each signatory mapped to the transcript index of their (already signed) acceptance entry. The entries ARE the co-signatures; no new crypto. `decision_reached` fires (its F3 event finally has a second producer).
+- **Preset `NEGOTIATION`** (① Positions & Interests, PARALLEL+NONE — interests enable integrative trades ② Opening Proposals ③ Bargaining, repeats=maxRounds ④ Arbitration, MODERATOR + `skipIf` + its own TEMPLATE_ARBITRATION — the default synthesis template asks for a balanced summary, an arbitrator DECIDES ⑤ Synthesis). Arbitration that RUNS records its conclusion as `DecisionRecord{VERDICT, method="arbitration"}` (never overwriting an existing decision).
+- Enum additions are compat-safe; `describe_discussion_styles` (REST) gained the entry via an exhaustive switch the compiler flagged.
+
+**Tests (12 new in `NegotiationEngineTest` + preset shape + 2 enum pins; `engine.internal` + `configs.groups` suites 1694 green; checkstyle clean):** parse tiers incl. the JSON-plus-reasoning form; concession-must-name-return; implicit self-signature with the authoring entry index; supersession; unknown/superseded acceptance + unparseable turn inertness; ledger accumulation with round + refProposal attribution; unanimous acceptance with signed indices asserted exactly; partial acceptance ≠ agreement; arbitration records once and never overwrites; ledger rendering into the turn (and its no-op paths); and the plan's **scripted 3-round bargain converging in round 3** — propose → counter+concede → sign — as living documentation of the protocol.
+
+---
+
 ## 🔀 merge: bring `origin/main` (PR #627 HITL request pinning) into the branch (2026-08-07)
 
 **Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
