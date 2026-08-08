@@ -4,7 +4,7 @@
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge?v=2)](https://www.bestpractices.dev/projects/12355) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/labsai/EDDI/badge)](https://securityscorecards.dev/viewer/?uri=github.com/labsai/EDDI) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade)
 
-[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) ![Tests](https://img.shields.io/badge/tests-11%2C000%2B-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-%3E90%25-brightgreen)
+[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) ![Tests](https://img.shields.io/badge/tests-14%2C000%2B-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-%3E90%25-brightgreen)
 
 [![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi) [![Latest Release](https://img.shields.io/github/v/release/labsai/EDDI?label=latest&color=blue)](https://github.com/labsai/EDDI/releases) [![Repository: AI Ready](https://img.shields.io/badge/Repository-AI_Ready-blueviolet?logo=robot)](AGENTS.md)
 
@@ -248,11 +248,20 @@ Most multi-agent frameworks (LangGraph, CrewAI, AutoGen) are Python/Node librari
 ### 🤖 Multi-Agent Orchestration
 
 - 🔀 **Intelligent Routing** — Direct conversations to different agents based on context, rules, and intent
-- 🗣️ **Group Conversations** — Multi-agent debates with 6 built-in discussion styles: Round Table, Peer Review, Devil's Advocate, Delphi, Debate, and Task Force
+- 🗣️ **Group Conversations** — Multi-agent debates with 7 built-in discussion styles: Round Table, Peer Review, Devil's Advocate, Delphi, Debate, Task Force, and Negotiation
 - 🔄 **Follow-up & Continue** — After a group discussion completes, follow up with any specific member agent or continue all phases with a new question — agents retain full context across rounds
 - 💬 **Slack Integration** — Deploy agents to Slack channels and run multi-agent debates directly in threads
 - 🪆 **Nested Groups** — Compose groups of groups for tournament brackets, red-team vs blue-team, and panel reviews
 - 🤖 **Dynamic Agents** — Create, recruit, and delegate to new agents at runtime during group discussions with configurable guardrails
+- 🗳️ **Group Voting** — `VOTE` phases collect explicit ballots (majority or approval, weighted, quorum-gated) and record a decision with the full tally, the raw ballots, and the losing side's dissents
+- 📋 **Shared Artifacts** — A blackboard members co-edit through tools, with compare-and-set concurrency and declarative JSON-Schema, regex, or max-length validators — never an LLM merge
+- 🧑‍🤝‍🧑 **Humans as Members** — A person can hold a seat in the group: their turn pauses the discussion until they answer, or the configured timeout policy resolves it
+- 🎚️ **Facilitator** — An optional facilitator agent is briefed at checkpoints and picks one move from a config-enumerated list (end, extend, call a vote, recruit, escalate) — bounded adaptation, never free-form orchestration
+- 🤝 **Negotiation** — Typed two-party bargaining: positions → proposals → a quoted concession ledger → signed acceptances, with arbitration skipped once agreement is reached
+- 🎯 **Bid-Based Assignment** — Contract-Net-lite task auctions: eligible members bid blind in parallel, highest confidence wins, with deterministic tie-break and fallback to role assignment
+- 🎓 **Team Memory** — A `RETRO` phase distils lessons into team-owned group memory, so they surface in every member's later discussions — institutional knowledge that compounds run over run
+- 🏢 **Standing Teams** — A persistent workspace per group: a backlog that survives between discussions, cron cadences that pull from it, cross-run retry of unverified work, and running team metrics
+- 📦 **Preset Group Templates** — Five packaged, validated group configs (research pod, editorial team, ops task force, decision board, negotiation table) — instantiate by assigning agents to named roles, not by hand-writing phases
 - 👥 **Managed Conversations** — Intent-based auto-routing with one conversation per user per intent
 - 🎯 **Capability Matching** — Discover and route to agents by skill, confidence score, and custom attributes
 - 🧙 **Agent Father** — Meta-agent that creates other agents through conversation (ships out of the box)
@@ -277,7 +286,7 @@ EDDI implements open standards — not proprietary APIs:
 
 | Standard                                                             | Role                            | What It Enables                                                                                          |
 | -------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (60+ tools) + Client    | Control EDDI from Antigravity, Claude Desktop, Cursor, Windsurf, or any MCP client — [setup guide](docs/mcp-server.md#client-configuration). Connect agents to external MCP tool servers |
+| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (80+ tools) + Client    | Control EDDI from Antigravity, Claude Desktop, Cursor, Windsurf, or any MCP client — [setup guide](docs/mcp-server.md#client-configuration). Connect agents to external MCP tool servers |
 | **[A2A](https://google.github.io/A2A/)** (Agent-to-Agent Protocol)   | Full implementation             | Cross-platform agent communication, Agent Cards, and skill discovery                                     |
 | **[OpenAPI](https://www.openapis.org/)** 3.1                         | Native generation + consumption | Auto-generated spec. Paste any OpenAPI spec → get a fully deployed API-calling agent                     |
 | **OAuth 2.0 / OIDC**                                                 | Keycloak integration            | Authentication, authorization, and multi-tenant isolation                                                |
@@ -349,6 +358,7 @@ EDDI implements open standards — not proprietary APIs:
 - 🚦 **Turn-Level Approval** — `PAUSE_CONVERSATION` action halts the entire pipeline; new user input returns `409 Conflict` until a human resumes
 - 🔧 **Per-Tool-Call Gating** — Individual tool invocations can require human approval before execution, with glob-pattern allow/exempt lists across built-in, HTTP, MCP, A2A, dynamic, and memory tools
 - 👥 **Group Phase Approval** — Multi-agent discussion phases can require human sign-off at `PHASE` or `TASK` granularity
+- 🧑‍🤝‍🧑 **Humans in the Room** — Beyond approving, a human can be a full group member with their own speaking turn; a facilitator can also pause a discussion to put a question to a named principal
 - ⏱️ **Timeout Policies** — `WAIT_INDEFINITELY`, `AUTO_APPROVE`, `AUTO_REJECT`, or `ABORT` when humans don't respond in time
 - 🔁 **No-Progress Guard** — Detects infinite approval loops (identical pause fingerprints after automated decisions) and breaks the cycle
 - 💬 **Slack Approvals** — Interactive Block Kit cards with redacted argument previews and approver whitelists
@@ -435,10 +445,11 @@ EDDI implements open standards — not proprietary APIs:
 | **[Behavior Rules](docs/behavior-rules.md)**                 | Configuring agent routing logic                    |
 | **[HTTP Calls](docs/httpcalls.md)**                          | External API integration                           |
 | **[RAG](docs/rag.md)**                                       | Knowledge base retrieval setup                     |
-| **[MCP Server](docs/mcp-server.md)**                         | 60+ tools for AI-assisted agent management         |
+| **[MCP Server](docs/mcp-server.md)**                         | 80+ tools for AI-assisted agent management         |
 | **[A2A Protocol](docs/a2a-protocol.md)**                     | Agent-to-Agent peer communication                  |
+| **[OpenAI-Compatible API](docs/open-webui-integration.md)**  | Agents as OpenAI models for Open WebUI & SDKs      |
 | **[Slack Integration](docs/slack-integration.md)**           | Deploy agents to Slack and run group discussions   |
-| **[Group Conversations](docs/group-conversations.md)**       | Multi-agent debate orchestration                   |
+| **[Group Conversations](docs/group-conversations.md)**       | Debate, voting, artifacts, standing teams          |
 | **[User Memory](docs/user-memory.md)**                       | Cross-conversation fact retention                  |
 | **[Memory Policy](docs/memory-policy.md)**                   | Commit flags and strict write discipline            |
 | **[Model Cascading](docs/model-cascade.md)**                 | Cost-optimized multi-model routing                 |

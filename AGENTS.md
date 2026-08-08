@@ -134,10 +134,12 @@ Follow this order unless the user explicitly requests something different.
 | 5     | NATS JetStream           | Event bus abstraction, async processing, coordinator dashboard                                      |
 | 6     | DB-Agnostic Architecture | PostgreSQL adapter, MongoDB sync driver, Caffeine cache, Lombok removal, langchain4j core migration |
 | 7     | Security & Compliance    | Secrets Vault, Audit Ledger (EU AI Act), tenant quota stub                                          |
-| 8     | MCP Integration          | MCP Server (60+ tools), MCP Client, agent discovery, managed conversations                           |
+| 8     | MCP Integration          | MCP Server (80+ tools), MCP Client, agent discovery, managed conversations                           |
 | 8c    | RAG Foundation           | Config-driven vector store retrieval, pgvector, httpCall RAG                                        |
-| 10    | Group Conversations      | Multi-agent debate orchestration, 6 styles (incl. Task Force), group-of-groups                      |
+| 10    | Group Conversations      | Multi-agent debate orchestration, 7 styles (incl. Task Force, Negotiation), group-of-groups         |
 | 10b   | Dynamic Agents           | Runtime agent creation/recruitment/delegation, DynamicAgentConfig guardrails, lifecycle policies, SharedTaskList |
+| 10c   | Group Deliberation       | `VOTE` phases + VoteTallyEngine (quorum, weights, tie policies), NEGOTIATION style + NegotiationEngine, facilitator with bounded moves, humans as group members, dissent recording, transcript windowing |
+| 10d   | Group Work Products      | Shared artifacts (CAS + declarative validators), bid-based task assignment (CNP-lite), `RETRO` → team-owned group memory, standing teams (backlog + cron cadences + metrics), 5 preset group templates |
 | —     | A2A Protocol             | Agent-to-Agent peer communication, Agent Cards, skill discovery                                     |
 | —     | Multi-Model Cascading    | Sequential model escalation with confidence routing                                                 |
 | —     | LLM Provider Expansion   | Added Mistral, Azure OpenAI, Bedrock, Oracle GenAI (12 providers; see `docs/langchain.md`)                                     |
@@ -152,7 +154,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | GDPR/CCPA Framework      | Cascading erasure, data portability, Art. 18 restriction, per-category retention                    |
 | —     | Commit Flags             | Strict write discipline for memory — uncommit failed task data, error digest injection              |
 | —     | Template Preview         | REST endpoint for previewing resolved system prompts with sample/live data                          |
-| —     | Test Coverage            | 12,000+ tests, >90% instruction / >80% branch coverage, OpenSSF Gold compliance                     |
+| —     | Test Coverage            | 14,000+ tests, >90% instruction / >80% branch coverage, OpenSSF Gold compliance                     |
 | —     | Security Hardening v6.0.2 | SSRF prevention, SafeHttpClient, auth guard, vault salt, security headers, CodeQL + Trivy CI       |
 | 9b    | HITL Framework           | Two human-approval gates (turn-level `PAUSE_CONVERSATION` + per-tool-call gating), timeout/no-progress policies, audit ledger, Slack + MCP approval surfaces, crash recovery — see [`docs/hitl.md`](docs/hitl.md) |
 | —     | OpenAI-Compatible API    | `/v1` adapter presenting deployed agents as OpenAI models for Open WebUI and OpenAI SDK clients; per-chat conversation isolation, streaming, multimodal, HITL-aware — see [`docs/open-webui-integration.md`](docs/open-webui-integration.md) |
@@ -165,7 +167,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | Session Forking           | State snapshotting, conversation forking (see `planning/agentic-improvements-plan.md` §7)                                                 |
 | —     | Conversation Chaining     | Cross-session context carry-over (see `planning/conversation-window-management.md` Strategy 3)                                       |
 | 9     | DAG Pipeline              | Parallel tasks, circuit breakers, OpenTelemetry tracing                                                                                   |
-| —     | HITL — remaining          | EDDI-Manager approvals UI (Manager repo) and the reserved `inGroupTurns: INBOX` group-approval mode (core framework shipped — see Completed)              |
+| —     | HITL — remaining          | EDDI-Manager approvals UI (Manager repo) and the reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses. Core framework shipped; humans as group *members* shipped in 10c — see Completed. `VoteConfig.tiePolicy: HUMAN_DECIDES` is likewise still save-time rejected pending its own resume machinery |
 | —     | Guardrails                | Config-driven input/output guardrails in LlmTask (see `planning/guardrails-architecture.md`)                                         |
 | 11b   | Multi-Channel             | Teams adapter (Slack already ships via HITL approval channels; see `planning/multi-agent-ux-improvements.md`)                        |
 | 13    | Debugging & Visualization | Time-traveling debugger, visual pipeline builder                                                                                          |
@@ -324,6 +326,7 @@ Several infrastructure components are already built and should be reused, not du
 - `GroupConversationService.discuss()` creates individual conversations for each member agent
 - Group context (groupId, discussion phase, peer responses) is injected via the conversation's `Context` map
 - `GroupConversationEventSink` streams SSE events for real-time group discussion visibility
+- **Collaboration surfaces are opt-in by absence — but check which kind of absence.** For the two that expose **tools**, `artifactConfig` and `taskListConfig`, a null config means the tools are never *assembled*: they cost no prompt tokens and cannot be argued with, whereas a tool that exists and always says no invites retries. For `contextWindow` and `facilitator`, null means the behaviour does not run at all — no windowing pass, no checkpoint. But `retroConfig` and `humanMemberConfig` are **defaults, not switches**: a null `retroConfig` runs a RETRO phase with the default caps, and a null `humanMemberConfig` still pauses for a HUMAN member's turn — it just waits indefinitely. When adding a group capability, decide which of the three shapes you mean and say so in the field's Javadoc.
 
 When a feature needs to know which group an agent belongs to (e.g., persistent memory with `group` visibility), the groupId comes from the `GroupConversation` context — not from `AgentConfiguration`. The group is a runtime concern, not a static configuration.
 

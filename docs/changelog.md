@@ -5,6 +5,71 @@
 
 ---
 
+## 📚 docs: post-merge documentation refresh for the group-collaboration set (2026-08-08)
+
+**Repo:** EDDI (`docs/group-collaboration-refresh`)
+
+The nine group-collaboration items merged to `main` — PRs #637–#645, alongside #636 which
+carried the pre-feature defect fixes — and this brings every user-facing doc in line with what
+actually shipped. Each claim below was verified against the
+source, not against the plan.
+
+**`docs/group-conversations.md`** (the main reference, +230 lines):
+- Corrected `GET /groupstore/groups` — that endpoint does not exist; listing is
+  `GET /groupstore/groups/descriptors`.
+- Corrected the `HUMAN_DECIDES` note: I6 shipped humans as group *members*, but the tie-break
+  is still save-time rejected because it needs its own resume machinery.
+- Completed the REST table (+20 rows: streaming, follow-up/continue/close/cancel, approve,
+  human-input, approval-status, pending-approvals, all 3 template routes, all 5 workspace
+  routes) and the MCP table (+10 tools).
+- Completed the reference tables: `PhaseType` gained `VOTE`/`PROPOSAL`/`BARGAIN`/`RETRO`;
+  `TaskStatus` gained `BLOCKED`/`AWAITING_APPROVAL`; `ProtocolConfig` gained `maxTurns`,
+  `maxCostPerDiscussion`, `onCostExceeded` (all three were referenced elsewhere but never
+  defined); `DynamicAgentConfig` gained `maxDelegationDepth`/`allowedDelegationTargets`.
+- New sections for things referenced but never documented: **per-phase controls**
+  (`repeats`/`requiresApproval`/`convergence`/`allowAbstention`), **dissent (I4)**, and the
+  **SSE event catalogue** (all 23 events).
+- Documented the new RETRO hard ceilings (20/run, 500 stored) and creation-ordered FIFO.
+- Structure: moved the orphaned `taskListConfig` cap paragraph back out of the windowing
+  section, re-parented bid-based assignment under TASK_FORCE (it is task-force machinery, not
+  negotiation), and unglued 4 headings from the preceding paragraph.
+
+**`README.md`**: 6 → 7 built-in styles; nine new capability bullets (voting, artifacts, human
+members, facilitator, negotiation, bidding, team memory, standing teams, templates) plus a HITL
+bullet for humans-as-members; MCP tool count 60+ → 80+ (actual 82); test badge 11,000+ →
+14,000+ (14,205 test annotations across `src/test`); an OpenAI-Compatible API docs row.
+
+**`AGENTS.md`**: Phase 10 row 6 → 7 styles; new Completed rows 10c (Group Deliberation) and
+10d (Group Work Products); test count 12,000+ → 14,000+; the HITL-remaining row now
+distinguishes the still-reserved `inGroupTurns: INBOX` from the shipped human-member work; §4.2
+gained the *opt-in by absence* convention, which governs every group capability and lived only
+in Javadoc.
+
+**`docs/README.md`**: the hardcoded version line became the dynamic release badge (it had been stuck on 6.0.0, two releases behind); MCP 48+ → 80+; group styles list; HITL and
+OpenAI-Compatible entries. **`docs/SUMMARY.md`**: added the missing `hitl.md` and
+`open-webui-integration.md` (both shipped flagships absent from the index), plus the monitoring
+guide, code-review standards, build reproducibility and changelog. **`docs/rag.md`**: added the
+`gemini` embedding provider and `chroma` vector store rows — the code supports 8 and 6, the
+tables listed 7 and 5.
+
+**Version labels no longer hand-maintained.** Twelve docs carried a hardcoded `**Version:
+6.2.0**` header (and `docs/README.md` a `**Latest version: 6.2.0**` line) that had to be
+touched on every release — and had already drifted: `docs/README.md` still said 6.0.0, two
+releases behind. All of them now use the same dynamic shields.io badge the root README uses
+for its release, which reads the latest GitHub release tag and can never go stale:
+`[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases)`.
+Deliberately **not** converted: `**Version: ≥6.0.0**` in `security.md` and the
+`Available since v6.0.0` status lines in `a2a-protocol.md`/`audit-ledger.md` — those are
+historical minimum-version facts, not "the current release", and pinning them is correct.
+
+**`planning/group-collaboration-NEXT.md`**: the queue is empty — every §3 item marked done with
+its PR number, the three implementation-time constraints recorded as deviations, and the two
+§4 gaps that this work closed (`decision_reached` never firing, the doc drift itself) struck
+through.
+
+---
+
+
 ## 🔎 fix(groups): pre-merge deep review — facilitator HITL bypass, CALL_VOTE guards, metric cardinality, template honesty (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i10-templates`)
