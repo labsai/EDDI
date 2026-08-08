@@ -143,6 +143,43 @@ class MemberTurnExecutorTest {
         assertEquals(2, captor.getAllValues().get(1).version(), "events must arrive in write order");
     }
 
+    /**
+     * PR #637 review round 2: the announce mutex guards the drain HANDOFF, not the
+     * listener callbacks — a slow SSE client must not block other turns'
+     * end-of-turn drains. A change queued WHILE the publisher is mid-callback
+     * (simulated here by queueing from inside the listener and re-entering the
+     * announce) rides the active publisher's next loop instead of blocking or being
+     * stranded, and the reentrant call returns immediately.
+     */
+    @Test
+    void announceArtifactChanges_arrivalDuringCallbacks_ridesThePublisherLoop() {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        var listener = Mockito.mock(GroupDiscussionEventListener.class);
+        Mockito.doAnswer(inv -> {
+            GroupConversationEventSink.ArtifactUpdatedEvent event = inv.getArgument(0);
+            if (event.version() == 1) {
+                // A write lands while the publisher is inside a callback; the
+                // writer's own announce call must hand off, not block or recurse.
+                gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 2,
+                        AGENT_A, "DRAFT", false));
+                MemberTurnExecutor.announceArtifactChanges(gc, listener);
+            }
+            return null;
+        }).when(listener).onArtifactUpdated(Mockito.any());
+
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 1, AGENT_A, "DRAFT", true));
+        MemberTurnExecutor.announceArtifactChanges(gc, listener);
+
+        var captor = ArgumentCaptor.forClass(GroupConversationEventSink.ArtifactUpdatedEvent.class);
+        verify(listener, times(2)).onArtifactUpdated(captor.capture());
+        assertEquals(1, captor.getAllValues().get(0).version());
+        assertEquals(2, captor.getAllValues().get(1).version(),
+                "the mid-callback write is published exactly once, in order, by the active publisher's loop");
+        assertTrue(gc.drainArtifactChanges().isEmpty(), "nothing stranded");
+    }
+
     @Test
     void announceArtifactChanges_singlePass_preservesWriteOrder() {
         var gc = new GroupConversation();

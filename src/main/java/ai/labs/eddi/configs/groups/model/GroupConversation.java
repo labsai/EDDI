@@ -243,11 +243,12 @@ public class GroupConversation {
     private final transient Queue<ArtifactChange> pendingArtifactChanges = new ConcurrentLinkedQueue<>();
 
     /**
-     * Serializes drain-and-announce over {@link #pendingArtifactChanges}. The queue
+     * Serializes the drain HANDOFF over {@link #pendingArtifactChanges}. The queue
      * itself is safe, but two PARALLEL turns ending together would split it between
-     * their drains and could then publish v2's event before v1's; holding this
-     * mutex across the whole drain+announce keeps events in write order. See
-     * {@code MemberTurnExecutor#announceArtifactChanges}.
+     * their drains and could then publish v2's event before v1's. The mutex is held
+     * only around the drain and the publisher flag — never across the listener
+     * callbacks, so a slow SSE client cannot block other turns' end-of-turn drains.
+     * See {@code MemberTurnExecutor#announceArtifactChanges}.
      */
     @JsonIgnore
     private final transient Object artifactAnnounceMutex = new Object();
@@ -256,6 +257,26 @@ public class GroupConversation {
     @JsonIgnore
     public Object artifactAnnounceMutex() {
         return artifactAnnounceMutex;
+    }
+
+    /**
+     * Whether a thread is currently PUBLISHING drained artifact changes. Guarded by
+     * {@link #artifactAnnounceMutex} (never read or written outside it) — this flag
+     * is what lets the mutex be released during the listener callbacks themselves:
+     * the active publisher keeps looping over late arrivals, and every other thread
+     * hands off and leaves instead of blocking on a slow SSE client. Deliberately
+     * not {@code isX}-named: runtime coordination state, invisible to Jackson.
+     */
+    private transient boolean artifactAnnouncePublishing;
+
+    @JsonIgnore
+    public boolean artifactAnnouncePublishing() {
+        return artifactAnnouncePublishing;
+    }
+
+    @JsonIgnore
+    public void artifactAnnouncePublishing(boolean publishing) {
+        this.artifactAnnouncePublishing = publishing;
     }
 
     /** Queues an accepted artifact write for the turn executor to announce. */

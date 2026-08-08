@@ -5,6 +5,19 @@
 
 ---
 
+## 🔎 fix(groups): I17 PR #637 review round 2 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i17-shared-artifacts`)
+
+Two comments triaged:
+
+- **Announce mutex no longer held across listener callbacks (CodeRabbit Major, accepted):** `announceArtifactChanges` held `artifactAnnounceMutex` through `onArtifactUpdated`, so one slow/backpressured SSE client blocked every other turn's end-of-turn drain. Now the mutex guards only the HANDOFF: exactly one thread at a time is the publisher — it drains under the mutex, releases it, fires the callbacks, and loops for late arrivals; every other thread sees the publisher flag and leaves, its changes guaranteed to ride the publisher's next pass. Write order preserved (single announcer, FIFO queue), no caller ever blocks on a listener. New test drives a write + reentrant announce from INSIDE a callback: published exactly once, in order, nothing stranded, no deadlock.
+- **CodeQL log-injection (stale):** raised against the initial commit 6aeba1393; the flagged attach-artifacts log was sanitized in round 1 (74c0acaf7). Reply-only.
+
+`MemberTurnExecutorTest` (14) + artifact suites green.
+
+---
+
 ## 🔎 fix(groups): I17 PR #637 review round 1 (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i17-shared-artifacts`)
