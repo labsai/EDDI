@@ -197,7 +197,17 @@ public class TeamCadenceService {
             for (TaskItem task : pulled) {
                 workspace.getBacklog().updateTask(withStatus(task, TaskStatus.IN_PROGRESS));
             }
-            if (!workspaceStore.casRunningDiscussion(workspace, before)) {
+            boolean claimed;
+            try {
+                claimed = workspaceStore.casRunningDiscussion(workspace, before);
+            } catch (Exception e) {
+                // A store failure during the claim leaves a discussion nobody
+                // references — cancel it before failing, or it runs unclaimed to
+                // completion with outcomes no writeback will ever collect.
+                cancelQuietly(gc.getId());
+                throw e;
+            }
+            if (!claimed) {
                 // Another pod claimed between our read and our write — cancel the
                 // discussion this fire started and stand down.
                 LOGGER.infof("Cadence %s for group %s lost the run claim — cancelling its just-started discussion %s",
@@ -241,18 +251,14 @@ public class TeamCadenceService {
             // stall every future fire.
             LOGGER.warnf("Cadence discussion %s for group %s is gone (%s) — releasing the claim",
                     runningId, LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName());
-            writebackFailure(workspace, null);
-            return true;
+            return writebackFailure(workspace, null);
         }
         return switch (gc.getState()) {
-            case COMPLETED -> {
-                writebackCompleted(workspace, gc);
-                yield true;
-            }
-            case FAILED, CANCELLED -> {
-                writebackFailure(workspace, gc);
-                yield true;
-            }
+            // A lost settle race means another reconciler (or a fresh claim) got
+            // there first — this caller must treat the workspace as busy and let
+            // the next fire read fresh state.
+            case COMPLETED -> writebackCompleted(workspace, gc);
+            case FAILED, CANCELLED -> writebackFailure(workspace, gc);
             default -> false; // IN_PROGRESS, SYNTHESIZING, AWAITING_* — still running
         };
     }
@@ -264,7 +270,8 @@ public class TeamCadenceService {
      * returns to PENDING with the reviewer feedback appended to the description,
      * which is the cross-run retry loop.
      */
-    void writebackCompleted(GroupWorkspace workspace, GroupConversation gc) {
+    boolean writebackCompleted(GroupWorkspace workspace, GroupConversation gc) {
+        String settledDiscussionId = workspace.getRunningDiscussionId();
         SharedTaskList discussionTasks = gc.getTaskList();
         for (String pulledId : workspace.getPulledTaskIds()) {
             TaskItem backlogTask = workspace.getBacklog().findById(pulledId);
@@ -292,7 +299,7 @@ public class TeamCadenceService {
                         ? outcome.verificationNote()
                         : (outcome != null && outcome.result() != null ? outcome.result() : "not completed this run");
                 workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
-                        backlogTask.description() + "\n[Cadence run " + gc.getId() + "] " + feedback,
+                        appendFeedbackBounded(backlogTask.description(), gc.getId(), feedback),
                         TaskStatus.PENDING, null, null, backlogTask.dependsOnIds(), null, null, false,
                         backlogTask.priority(), backlogTask.createdAt(), null));
                 if (outcome != null && outcome.assignedAgentId() != null) {
@@ -301,24 +308,34 @@ public class TeamCadenceService {
                 }
             }
         }
-        settle(workspace, gc);
+        return settle(workspace, gc, settledDiscussionId);
     }
 
     /**
      * Writeback for a FAILED/CANCELLED (or vanished) discussion: every pulled task
      * returns to PENDING untouched — the work simply did not happen.
      */
-    void writebackFailure(GroupWorkspace workspace, GroupConversation gc) {
+    boolean writebackFailure(GroupWorkspace workspace, GroupConversation gc) {
+        String settledDiscussionId = workspace.getRunningDiscussionId();
         for (String pulledId : workspace.getPulledTaskIds()) {
             TaskItem backlogTask = workspace.getBacklog().findById(pulledId);
             if (backlogTask != null && backlogTask.status() != TaskStatus.VERIFIED) {
                 workspace.getBacklog().updateTask(withStatus(backlogTask, TaskStatus.PENDING));
             }
         }
-        settle(workspace, gc);
+        return settle(workspace, gc, settledDiscussionId);
     }
 
-    private void settle(GroupWorkspace workspace, GroupConversation gc) {
+    /**
+     * @return {@code true} if THIS caller's writeback won — the persisted claim
+     *         still named the discussion being settled. {@code false} means a
+     *         concurrent reconcile (schedule fire on another pod, or the REST
+     *         read-repair) settled it first, or a new run already claimed the
+     *         workspace; either way this caller's mutations are stale and MUST die
+     *         unwritten — an unconditional write here clobbered a live claim,
+     *         orphaning its discussion's outcomes (final-review finding).
+     */
+    private boolean settle(GroupWorkspace workspace, GroupConversation gc, String settledDiscussionId) {
         var metrics = workspace.getMetrics();
         metrics.setDiscussions(metrics.getDiscussions() + 1);
         metrics.setLastRunAt(Instant.now());
@@ -328,16 +345,43 @@ public class TeamCadenceService {
         workspace.setRunningDiscussionId(GroupWorkspace.NO_RUNNING_DISCUSSION);
         workspace.setPulledTaskIds(List.of());
         try {
-            workspaceStore.update(workspace);
+            if (!workspaceStore.casRunningDiscussion(workspace, settledDiscussionId)) {
+                LOGGER.infof("Cadence writeback for group %s lost the settle race on discussion %s — another "
+                        + "reconciler settled it (or a new run claimed the workspace); dropping stale mutations",
+                        LogSanitizer.sanitize(workspace.getGroupId()), settledDiscussionId);
+                return false;
+            }
             cadenceWritebacks.increment();
+            return true;
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to persist cadence writeback for group %s",
                     LogSanitizer.sanitize(workspace.getGroupId()));
+            return false;
         }
     }
 
     private MemberStats memberStats(GroupWorkspace workspace, String agentId) {
         return workspace.getMetrics().getPerMemberStats().computeIfAbsent(agentId, k -> new MemberStats());
+    }
+
+    /** One failed run's feedback slice — enough context, never a whole turn. */
+    static final int MAX_FEEDBACK_CHARS = 500;
+
+    /**
+     * Bounded feedback append (final-review finding): {@code outcome.result()} is
+     * the agent's ENTIRE turn output, and a task failing every run appended it to a
+     * PERSISTED description each time — unbounded document growth that also rode
+     * into the next run's PLAN/bid prompts. The feedback is capped per run and the
+     * accumulated description trimmed from the FRONT (oldest feedback first) to the
+     * shared task-description ceiling.
+     */
+    static String appendFeedbackBounded(String description, String runId, String feedback) {
+        String slice = feedback.length() <= MAX_FEEDBACK_CHARS
+                ? feedback
+                : feedback.substring(0, MAX_FEEDBACK_CHARS) + "…";
+        String combined = (description != null ? description : "") + "\n[Cadence run " + runId + "] " + slice;
+        int cap = SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH;
+        return combined.length() <= cap ? combined : "…" + combined.substring(combined.length() - cap + 1);
     }
 
     private static TaskItem withStatus(TaskItem task, TaskStatus status) {
@@ -384,7 +428,7 @@ public class TeamCadenceService {
                     "taskCount", pulled.size()));
         } catch (Exception e) {
             LOGGER.warnf("Cadence %s input template failed to render (%s) — using the plain backlog summary",
-                    LogSanitizer.sanitize(cadence.cadenceId()), e.getMessage());
+                    LogSanitizer.sanitize(cadence.cadenceId()), LogSanitizer.sanitize(e.getMessage()));
             return summary.toString();
         }
     }

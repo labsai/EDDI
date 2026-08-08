@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestGroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.Cadence;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
@@ -42,6 +43,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 public class RestGroupWorkspace implements IRestGroupWorkspace {
 
     private static final Logger LOG = Logger.getLogger(RestGroupWorkspace.class);
+
+    /** A workspace is a team's schedule, not a cron farm. */
+    static final int MAX_CADENCES_PER_WORKSPACE = 20;
+    /** The template renders into a discussion question — bound the prose. */
+    static final int MAX_INPUT_TEMPLATE_LENGTH = 4000;
 
     private final IGroupWorkspaceStore workspaceStore;
     private final IAgentGroupStore groupStore;
@@ -95,6 +101,23 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(Map.of("error", "subject is required")).build();
         }
+        // Final-review finding: the agent tool surface enforces these; a human
+        // surface bypassing them let one request grow the persisted document
+        // arbitrarily and made duplicate subjects ambiguous for the writeback's
+        // subject-based outcome matching.
+        if (request.subject().trim().length() > SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "subject exceeds " + SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH
+                            + " characters"))
+                    .build();
+        }
+        if (request.description() != null
+                && request.description().length() > SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "description exceeds " + SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH
+                            + " characters"))
+                    .build();
+        }
         try {
             requireGroupExists(groupId);
             GroupWorkspace workspace = workspaceStore.readOrCreate(groupId);
@@ -105,8 +128,15 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
                                 + " tasks — complete or delete existing tasks before adding more"))
                         .build();
             }
+            String subject = request.subject().trim();
+            if (workspace.getBacklog().getTasks().stream().anyMatch(t -> subject.equalsIgnoreCase(t.subject()))) {
+                return Response.status(Response.Status.CONFLICT)
+                        .entity(Map.of("error", "A backlog task with that subject already exists — "
+                                + "writeback matches outcomes by subject, so subjects must be unique"))
+                        .build();
+            }
             TaskItem task = workspace.getBacklog().addTask(new TaskItem(
-                    request.subject().trim(),
+                    subject,
                     request.description() != null ? request.description() : "",
                     request.priority()));
             workspaceStore.update(workspace);
@@ -135,6 +165,17 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
             Instant firstFire = CronParser.computeNextFire(request.cronExpression().trim(), Instant.now(), zone);
 
             GroupWorkspace workspace = workspaceStore.readOrCreate(groupId);
+            if (workspace.getCadences().size() >= MAX_CADENCES_PER_WORKSPACE) {
+                return Response.status(Response.Status.CONFLICT)
+                        .entity(Map.of("error", "This workspace already has " + MAX_CADENCES_PER_WORKSPACE
+                                + " cadences — delete one before adding more"))
+                        .build();
+            }
+            if (request.inputTemplate() != null && request.inputTemplate().length() > MAX_INPUT_TEMPLATE_LENGTH) {
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity(Map.of("error", "inputTemplate exceeds " + MAX_INPUT_TEMPLATE_LENGTH + " characters"))
+                        .build();
+            }
             String cadenceId = UUID.randomUUID().toString();
             String principal = identity != null && identity.getPrincipal() != null
                     && identity.getPrincipal().getName() != null && !identity.getPrincipal().getName().isBlank()

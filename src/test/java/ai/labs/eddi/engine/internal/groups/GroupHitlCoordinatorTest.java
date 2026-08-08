@@ -594,4 +594,52 @@ class GroupHitlCoordinatorTest {
         verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_HUMAN_INPUT);
         verify(scheduleStore).deleteSchedulesByName(anyString());
     }
+
+    /**
+     * Final-review minor: the executor-saturated rollback used a PLAIN token remove
+     * while every sibling rollback path uses remove-and-recheck. A cancel signalled
+     * between the token registration (right after the resume CAS) and the rollback
+     * was silently dropped with the discarded token — the operator was told
+     * "cancelled", yet the discussion sat restored to AWAITING_APPROVAL forever.
+     */
+    @Test
+    void resumeRollback_onSaturatedExecutor_convertsASignalledCancel() throws Exception {
+        var activeTokens = new ConcurrentHashMap<String, DiscussionControlToken>();
+        var executorService = mock(ExecutorService.class);
+        conversationStore = mock(IGroupConversationStore.class);
+        groupStore = mock(IAgentGroupStore.class);
+        scheduleStore = mock(IScheduleStore.class);
+        var coordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore,
+                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, null, "default"),
+                activeTokens, executorService, new CallerIdentityContext(null, null),
+                Mockito.mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.hitl.pause"),
+                new SimpleMeterRegistry().counter("test.hitl.resume"),
+                new SimpleMeterRegistry().counter("test.group.failure"));
+
+        var gc = gc(GroupConversationState.AWAITING_APPROVAL);
+        gc.setSchemaVersion(GroupConversation.CURRENT_SCHEMA_VERSION);
+        gc.setPausedAtPhaseIndex(0);
+        gc.setPausedPhaseName("Phase 1");
+        gc.setHitlPauseType(GroupConversation.HitlPauseType.PHASE);
+        gc.setPausedAt(java.time.Instant.now());
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        when(executorService.submit(any(Runnable.class))).thenAnswer(invocation -> {
+            // The racing cancel: lands after the fresh token was registered but
+            // before the rollback runs — exactly the dropped window.
+            activeTokens.get(GC_ID).setSignal(ControlSignal.CANCEL_GRACEFUL);
+            throw new java.util.concurrent.RejectedExecutionException("saturated");
+        });
+        var decision = new ai.labs.eddi.engine.lifecycle.model.HitlDecision();
+        decision.setVerdict(ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.APPROVED);
+        var request = new ai.labs.eddi.engine.internal.GroupApprovalRequest();
+        request.setDecision(decision);
+
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> coordinator.resumeDiscussion(GC_ID, request, null));
+
+        assertTrue(activeTokens.isEmpty(), "the rollback must not leak the control token");
+        assertEquals(GroupConversationState.CANCELLED, gc.getState(),
+                "a cancel signalled during the rollback window converts the restored pause instead of vanishing");
+    }
 }

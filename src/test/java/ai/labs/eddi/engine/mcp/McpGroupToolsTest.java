@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -743,6 +744,29 @@ class McpGroupToolsTest {
     @Test
     void addTeamTask_blankSubject_errors() throws Exception {
         assertTrue(tools.add_team_task("g1", "  ", null, null).contains("error"));
+    }
+
+    @Test
+    void addTeamTask_oversizedFields_error() throws Exception {
+        teamWorkspace();
+        String longSubject = "s".repeat(SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH + 1);
+        assertTrue(tools.add_team_task("g1", longSubject, null, null).contains("error"));
+        String longDescription = "d".repeat(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH + 1);
+        assertTrue(tools.add_team_task("g1", "Ok", longDescription, null).contains("error"));
+        verify(workspaceStore, never()).update(any());
+    }
+
+    @Test
+    void addTeamTask_duplicateSubject_errors() throws Exception {
+        var workspace = teamWorkspace();
+        workspace.getBacklog().addTask(new TaskItem("Ship it", "", 0));
+
+        String result = tools.add_team_task("g1", "ship IT", null, null);
+
+        assertTrue(result.contains("error"), result);
+        assertTrue(result.contains("subject"), "the error names the conflict: " + result);
+        assertEquals(1, workspace.getBacklog().size());
+        verify(workspaceStore, never()).update(any());
     }
 
     @Test

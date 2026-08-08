@@ -854,9 +854,12 @@ public class GroupHitlCoordinator {
             // Executor saturated/shut down — no thread will run the resume. The CAS
             // above already consumed the pause; restore it so the approval remains
             // actionable instead of leaving an IN_PROGRESS zombie.
-            activeTokens.remove(gc.getId());
             restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, null,
                     savedTimeoutPolicy, savedApprovalTimeout);
+            // Remove-and-recheck like every other rollback path — a plain remove
+            // here dropped a cancel signalled between token registration and this
+            // rollback, leaving a "cancelled" discussion stuck AWAITING_APPROVAL.
+            removeTokenAndConvertIfSignalled(gc, listener);
             throw new IResourceStore.ResourceStoreException(
                     "Failed to submit resumed group discussion: " + e.getMessage(), e);
         }

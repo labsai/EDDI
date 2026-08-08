@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.templates.GroupTemplateService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
@@ -549,6 +550,12 @@ public class McpGroupTools {
             if (subject == null || subject.isBlank()) {
                 return errorJson("subject is required");
             }
+            if (subject.trim().length() > SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH) {
+                return errorJson("subject exceeds " + SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH + " characters");
+            }
+            if (description != null && description.length() > SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH) {
+                return errorJson("description exceeds " + SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH + " characters");
+            }
             if (groupStore.getCurrentResourceId(groupId) == null) {
                 return errorJson("Group not found: " + groupId);
             }
@@ -557,8 +564,13 @@ public class McpGroupTools {
                 return errorJson("The backlog already holds " + GroupWorkspace.MAX_BACKLOG_SIZE
                         + " tasks — complete or delete existing tasks before adding more");
             }
+            String trimmedSubject = subject.trim();
+            if (workspace.getBacklog().getTasks().stream().anyMatch(t -> trimmedSubject.equalsIgnoreCase(t.subject()))) {
+                return errorJson("A backlog task with that subject already exists — writeback matches outcomes "
+                        + "by subject, so subjects must be unique");
+            }
             var task = workspace.getBacklog().addTask(new TaskItem(
-                    subject.trim(), description != null ? description : "", parseIntOrDefault(priority, 0)));
+                    trimmedSubject, description != null ? description : "", parseIntOrDefault(priority, 0)));
             workspaceStore.update(workspace);
             return jsonSerialization.serialize(task);
         } catch (Exception e) {
