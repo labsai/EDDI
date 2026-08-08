@@ -272,8 +272,10 @@ public class ArtifactTools {
         }
         int bytes = SharedArtifact.contentBytes(content);
         if (bytes > SharedArtifact.MAX_CONTENT_BYTES) {
+            // Ceil, not truncate: MAX+1 bytes must not read "256 KB is over the
+            // 256 KB limit" — the model retries at the same size on that sentence.
             return "The content is %d KB, over the %d KB limit for a single artifact. Split it or shorten it."
-                    .formatted(bytes / 1024, SharedArtifact.MAX_CONTENT_BYTES / 1024);
+                    .formatted(Math.ceilDiv(bytes, 1024), SharedArtifact.MAX_CONTENT_BYTES / 1024);
         }
         return ArtifactValidators.firstRejection(config.validators(), content);
     }

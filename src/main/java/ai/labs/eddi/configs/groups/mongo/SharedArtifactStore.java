@@ -17,6 +17,7 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -142,6 +143,9 @@ public class SharedArtifactStore implements ISharedArtifactStore {
                     LOGGER.warnf("Skipping unreadable shared artifact %s: %s", resourceId.getId(), e.getMessage());
                 }
             }
+            // findResources sorts DESC on both backends; the contract is oldest first.
+            artifacts.sort(Comparator.comparing(SharedArtifact::getCreatedAt,
+                    Comparator.nullsLast(Comparator.naturalOrder())));
             return artifacts;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to list shared artifacts: " + e.getMessage(), e);
@@ -154,16 +158,29 @@ public class SharedArtifactStore implements ISharedArtifactStore {
             return 0;
         }
         long deleted = 0;
+        var processed = new HashSet<String>();
         // maxArtifactsPerDiscussion bounds a discussion's artifacts far below one
-        // page, but the loop stays honest anyway: delete until a pass finds nothing.
+        // page, but the loop stays honest anyway: delete until a pass finds
+        // nothing — with the same processed-set/no-progress guard as
+        // deleteAllForUser, so a row removeAllPermanently cannot dislodge is
+        // counted once and ends the loop instead of spinning it.
         for (int pass = 0; pass < MAX_ERASURE_PASSES; pass++) {
             List<SharedArtifact> artifacts = listByGroupConversationId(groupConversationId);
             if (artifacts.isEmpty()) {
                 return deleted;
             }
+            long newThisPass = 0;
             for (SharedArtifact artifact : artifacts) {
+                if (!processed.add(artifact.getId())) {
+                    continue;
+                }
+                newThisPass++;
                 delete(artifact.getId());
                 deleted++;
+            }
+            if (newThisPass == 0) {
+                LOGGER.warnf("Cascade delete made no progress; %d shared artifact(s) may remain", artifacts.size());
+                return deleted;
             }
         }
         return deleted;

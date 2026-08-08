@@ -165,16 +165,24 @@ public class MemberTurnExecutor {
 
     /**
      * I17: fires {@code artifact_updated} for every write queued during the turn.
+     * The whole drain+announce holds the conversation's announce mutex: PARALLEL
+     * turns ending together would otherwise split the queue between their drains
+     * and could publish v2's event before v1's. Public (not just the per-turn
+     * finally) because the discussion loop calls it once more when the leg ends, so
+     * a write accepted by a timed-out member's still-running agent — whose own turn
+     * already drained — is announced rather than stranded in the queue.
      */
-    private static void announceArtifactChanges(GroupConversation gc, GroupDiscussionEventListener listener) {
-        List<GroupConversation.ArtifactChange> changes = gc.drainArtifactChanges();
-        if (listener == null || changes.isEmpty()) {
-            return;
-        }
-        for (GroupConversation.ArtifactChange change : changes) {
-            listener.onArtifactUpdated(new GroupConversationEventSink.ArtifactUpdatedEvent(
-                    change.artifactId(), change.name(), change.type(), change.version(),
-                    change.editorAgentId(), change.status(), change.created()));
+    public static void announceArtifactChanges(GroupConversation gc, GroupDiscussionEventListener listener) {
+        synchronized (gc.artifactAnnounceMutex()) {
+            List<GroupConversation.ArtifactChange> changes = gc.drainArtifactChanges();
+            if (listener == null || changes.isEmpty()) {
+                return;
+            }
+            for (GroupConversation.ArtifactChange change : changes) {
+                listener.onArtifactUpdated(new GroupConversationEventSink.ArtifactUpdatedEvent(
+                        change.artifactId(), change.name(), change.type(), change.version(),
+                        change.editorAgentId(), change.status(), change.created()));
+            }
         }
     }
 

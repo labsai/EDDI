@@ -118,6 +118,48 @@ class MemberTurnExecutorTest {
         assertTrue(gc.drainArtifactChanges().isEmpty(), "the queue must never grow unbounded on the no-listener path");
     }
 
+    /**
+     * I17 review follow-up: a write accepted AFTER a turn's own drain (a timed-out
+     * member's still-running agent) is picked up by the discussion leg's final
+     * announce pass instead of being stranded in the queue.
+     */
+    @Test
+    void announceArtifactChanges_lateWrite_deliveredByLaterPass() {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        var listener = Mockito.mock(GroupDiscussionEventListener.class);
+
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 1, AGENT_A, "DRAFT", true));
+        MemberTurnExecutor.announceArtifactChanges(gc, listener);
+
+        // The late write, after every turn's own finally already drained.
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 2, AGENT_A, "DRAFT", false));
+        MemberTurnExecutor.announceArtifactChanges(gc, listener);
+
+        var captor = ArgumentCaptor.forClass(GroupConversationEventSink.ArtifactUpdatedEvent.class);
+        verify(listener, times(2)).onArtifactUpdated(captor.capture());
+        assertEquals(1, captor.getAllValues().get(0).version());
+        assertEquals(2, captor.getAllValues().get(1).version(), "events must arrive in write order");
+    }
+
+    @Test
+    void announceArtifactChanges_singlePass_preservesWriteOrder() {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        var listener = Mockito.mock(GroupDiscussionEventListener.class);
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 1, AGENT_A, "DRAFT", true));
+        gc.queueArtifactChange(new GroupConversation.ArtifactChange("art-1", "doc", "TEXT", 2, AGENT_A, "DRAFT", false));
+
+        MemberTurnExecutor.announceArtifactChanges(gc, listener);
+
+        var captor = ArgumentCaptor.forClass(GroupConversationEventSink.ArtifactUpdatedEvent.class);
+        verify(listener, times(2)).onArtifactUpdated(captor.capture());
+        assertEquals(1, captor.getAllValues().get(0).version());
+        assertEquals(2, captor.getAllValues().get(1).version());
+    }
+
     @Test
     void errorEntry_nullMember_usesUnknownFallbacks() {
         var entry = executor().errorEntry(null, 0, phase(PhaseType.OPINION), "boom");

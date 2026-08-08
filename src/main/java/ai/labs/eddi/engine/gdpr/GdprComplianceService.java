@@ -134,6 +134,7 @@ public class GdprComplianceService {
      * <li>Delete all managed conversation mappings (and invalidate their
      * cache)</li>
      * <li>Delete all group conversation transcripts</li>
+     * <li>Delete all shared artifacts owned by the user</li>
      * <li>Delete all schedules owned by the user</li>
      * <li>Pseudonymize database log entries</li>
      * <li>Pseudonymize audit ledger entries</li>

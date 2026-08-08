@@ -1092,6 +1092,13 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupExecutionException("Group discussion failed: " + e.getMessage(), e);
         } finally {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+            // I17: last announce pass for this leg. A member turn that timed out
+            // drained an empty queue in ITS finally, while its still-running agent
+            // could accept an artifact write afterwards; without this, that write's
+            // event is stranded until (unless) another turn runs. A write accepted
+            // after even this pass keeps the artifact (the store write already
+            // committed) — only its live event is best-effort, by design.
+            MemberTurnExecutor.announceArtifactChanges(gc, listener);
             // I1: fold this leg's spend into the lifetime gauge. Recorded as a delta
             // against what this leg started with, so a resumed leg (whose gc arrives
             // already carrying the pre-pause total) contributes only what it newly
@@ -1218,7 +1225,8 @@ public class GroupConversationService implements IGroupConversationService {
                 gc.setArtifacts(artifacts);
             }
         } catch (Exception e) {
-            LOGGER.warnf("Could not attach shared artifacts to group conversation %s: %s", gc.getId(), e.getMessage());
+            LOGGER.warnf("Could not attach shared artifacts to group conversation %s: %s",
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
         }
     }
 

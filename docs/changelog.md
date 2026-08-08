@@ -5,6 +5,26 @@
 
 ---
 
+## 🔎 fix(groups): I17 PR #637 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i17-shared-artifacts`)
+
+All 11 review comments (CodeRabbit ×9, Copilot/CodeQL ×2) triaged; every one accepted and fixed:
+
+- **Meta-schema validation at save time** (`ArtifactValidators.schemaSpecProblem`): `getSchema(spec)` only parses — `{"type":"strng"}` passed and misbehaved at write time. Specs now also validate *as instances* against the bundled 2020-12 meta-schema (no network I/O; degrades to parse-only with a WARN if the bundled resource can't load, rather than rejecting every config).
+- **ReDoS bound on REGEX validators**: config-authored pattern × 256 KB LLM content could backtrack catastrophically and pin the member turn. `checkRegex` now matches through a deadline-guarded `CharSequence` (500 ms, sampled every 1024 char accesses) and refuses the write on expiry — fails closed, like every other broken-spec path.
+- **`[null]` validator entries**: `List.copyOf` NPE'd during config deserialization, preempting `requireValidSpecs`' positional message; now an unmodifiable null-tolerant copy.
+- **Artifact event ordering + late writes**: drain+announce now holds a per-conversation mutex (two PARALLEL turns ending together could split the queue and publish v2 before v1), and `executeDiscussion`'s `finally` runs one **final announce pass per leg** so a write accepted by a timed-out member's still-running agent is announced instead of stranded. A write after even that pass keeps the artifact — only its live event is best-effort, by design.
+- **`listByGroupConversationId` order**: both backends sort DESC; the interface promises oldest-first. Now re-sorted in Java per the contract.
+- **`deleteByGroupConversationId`**: same processed-set/no-progress guard as `deleteAllForUser` — an undislodgeable row is counted once and ends the loop instead of spinning `MAX_ERASURE_PASSES` times and inflating the count.
+- **Slack mrkdwn injection**: artifact name/editor id are LLM-authored; `<!channel>` in a name rendered as a real broadcast. Both fields now `&`/`<`/`>`-escaped.
+- **Oversize refusal rounds up** (`Math.ceilDiv`): MAX+1 bytes no longer reads "256 KB is over the 256 KB limit".
+- **GDPR cascade Javadoc** now names the shared-artifact step; **CodeQL log injection** at `populateArtifacts` sanitized.
+
+**Tests:** +7 (meta-schema reject, null-entry positional message, catastrophic-regex deadline, late-write announce pass, single-pass write order, oldest-first sort, no-spin cascade delete). Touched suites 1961 tests — green except the 27 known environmental socket-bound errors (SafeHttpClient/SlackWebApi/Weather/WebScraper), which fail identically on an untouched tree.
+
+---
+
 ## 📄 feat(groups): I17 — shared artifacts (blackboard-lite) (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i17-shared-artifacts`)

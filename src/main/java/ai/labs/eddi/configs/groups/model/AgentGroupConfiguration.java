@@ -11,6 +11,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Size;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -186,7 +187,9 @@ public class AgentGroupConfiguration {
             if (maxArtifactsPerDiscussion <= 0) {
                 maxArtifactsPerDiscussion = DEFAULT_MAX_ARTIFACTS;
             }
-            validators = validators == null ? List.of() : List.copyOf(validators);
+            // Not List.copyOf: it NPEs on a null ELEMENT ("validators": [null]),
+            // preempting ArtifactValidators.requireValidSpecs' actionable message.
+            validators = validators == null ? List.of() : Collections.unmodifiableList(new ArrayList<>(validators));
         }
 
         /** Disabled, cap at its default, no validators. */

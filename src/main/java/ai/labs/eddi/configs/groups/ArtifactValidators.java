@@ -10,11 +10,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
+import com.networknt.schema.SchemaId;
+import com.networknt.schema.SchemaLocation;
 import com.networknt.schema.SpecVersion;
 import com.networknt.schema.ValidationMessage;
+import org.jboss.logging.Logger;
 
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
@@ -45,6 +49,34 @@ public final class ArtifactValidators {
 
     private static final JsonSchemaFactory SCHEMA_FACTORY = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012);
 
+    /**
+     * The 2020-12 meta-schema, resolved from the library's bundled copy (no network
+     * I/O). {@code getSchema(spec)} alone only parses — it accepts schemas with
+     * invalid keyword values — so save-time validation additionally validates the
+     * spec <em>as an instance</em> against this. Null only if the bundled resource
+     * could not load, in which case save-time validation degrades to parse-only
+     * rather than rejecting every config.
+     */
+    private static final JsonSchema META_SCHEMA;
+
+    static {
+        JsonSchema metaSchema = null;
+        try {
+            metaSchema = SCHEMA_FACTORY.getSchema(SchemaLocation.of(SchemaId.V202012));
+        } catch (Exception e) {
+            Logger.getLogger(ArtifactValidators.class)
+                    .warnf("2020-12 meta-schema unavailable; schema specs are checked by parse only: %s", e.getMessage());
+        }
+        META_SCHEMA = metaSchema;
+    }
+
+    /**
+     * Wall-clock budget for one config-authored regex against one artifact's
+     * content. A catastrophically backtracking pattern must abort instead of
+     * pinning the member turn for its full timeout.
+     */
+    private static final long REGEX_DEADLINE_NANOS = TimeUnit.MILLISECONDS.toNanos(500);
+
     private ArtifactValidators() {
     }
 
@@ -71,10 +103,9 @@ public final class ArtifactValidators {
             }
             switch (validator.kind()) {
                 case JSON_SCHEMA -> {
-                    try {
-                        SCHEMA_FACTORY.getSchema(spec);
-                    } catch (Exception e) {
-                        throw new IllegalArgumentException(path + " is not a valid JSON schema: " + e.getMessage());
+                    String problem = schemaSpecProblem(spec);
+                    if (problem != null) {
+                        throw new IllegalArgumentException(path + " is not a valid JSON schema: " + problem);
                     }
                 }
                 case REGEX -> {
@@ -142,13 +173,91 @@ public final class ArtifactValidators {
 
     private static String checkRegex(String spec, String content) {
         try {
-            if (!Pattern.compile(spec, Pattern.DOTALL).matcher(content).find()) {
+            if (!Pattern.compile(spec, Pattern.DOTALL).matcher(deadlineGuarded(content)).find()) {
                 return "The content does not match this discussion's required pattern for artifacts. Expected to find a match of: " + spec;
             }
         } catch (PatternSyntaxException e) {
             return "This discussion's artifact pattern validator is misconfigured; the write was refused.";
+        } catch (MatchDeadlineExceededException e) {
+            return "This discussion's artifact pattern validator did not finish in time; the write was refused.";
         }
         return null;
+    }
+
+    /**
+     * Save-time schema check, two layers: the spec must parse, and it must itself
+     * satisfy the 2020-12 meta-schema — {@code getSchema(spec)} alone accepts e.g.
+     * {@code {"type": "strng"}} and only misbehaves at write time. Returns the
+     * problem, or {@code null} for a valid spec.
+     */
+    private static String schemaSpecProblem(String spec) {
+        JsonNode schemaNode;
+        try {
+            schemaNode = MAPPER.readTree(spec);
+        } catch (Exception e) {
+            return e.getMessage();
+        }
+        if (META_SCHEMA != null) {
+            Set<ValidationMessage> violations = META_SCHEMA.validate(schemaNode);
+            if (!violations.isEmpty()) {
+                return violations.stream()
+                        .limit(MAX_QUOTED_VIOLATIONS)
+                        .map(ValidationMessage::getMessage)
+                        .collect(Collectors.joining("; "));
+            }
+        }
+        try {
+            SCHEMA_FACTORY.getSchema(spec);
+        } catch (Exception e) {
+            return e.getMessage();
+        }
+        return null;
+    }
+
+    /**
+     * Thrown by {@link #deadlineGuarded}'s wrapper when the match budget is spent.
+     */
+    private static final class MatchDeadlineExceededException extends RuntimeException {
+        MatchDeadlineExceededException() {
+            super("regex match exceeded its time budget", null, false, false);
+        }
+    }
+
+    /**
+     * Wraps content so a regex match aborts once {@link #REGEX_DEADLINE_NANOS} is
+     * spent. Backtracking re-reads characters, so the deadline check in
+     * {@code charAt} (sampled, to keep the fast path cheap) is hit constantly by
+     * exactly the pathological patterns it exists to stop. Single-matcher use only
+     * — the sampling counter is not thread-safe, matching a Matcher's own contract.
+     */
+    private static CharSequence deadlineGuarded(String content) {
+        long deadline = System.nanoTime() + REGEX_DEADLINE_NANOS;
+        return new CharSequence() {
+            private int accesses;
+
+            @Override
+            public int length() {
+                return content.length();
+            }
+
+            @Override
+            public char charAt(int index) {
+                if ((++accesses & 0x3FF) == 0 && System.nanoTime() > deadline) {
+                    throw new MatchDeadlineExceededException();
+                }
+                return content.charAt(index);
+            }
+
+            @Override
+            public CharSequence subSequence(int start, int end) {
+                return content.subSequence(start, end);
+            }
+
+            @Override
+            public String toString() {
+                return content;
+            }
+        };
     }
 
     private static String checkJsonSchema(String spec, String content) {

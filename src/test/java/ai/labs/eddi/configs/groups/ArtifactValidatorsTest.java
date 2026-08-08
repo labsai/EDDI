@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ValidatorKind;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -69,6 +70,29 @@ class ArtifactValidatorsTest {
                 () -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(null, "x"))));
         assertThrows(IllegalArgumentException.class,
                 () -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, " "))));
+    }
+
+    @Test
+    @DisplayName("a schema with an invalid keyword VALUE fails the save — parse alone would admit it")
+    void invalidKeywordValue_failsMetaSchema() {
+        // {"type":"strng"} is perfectly valid JSON and getSchema() parses it;
+        // only meta-schema validation catches the typo'd simple type.
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> ArtifactValidators.requireValidSpecs(config(
+                        new ArtifactValidator(ValidatorKind.JSON_SCHEMA, "{\"type\":\"strng\"}"))));
+        assertTrue(e.getMessage().contains("validators[0]"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("a null validator ENTRY fails the save with the positional message, not an NPE")
+    void nullValidatorEntry_actionableNotNpe() {
+        // Arrays.asList permits the null element; the config copy must too
+        // (List.copyOf would NPE during deserialization, preempting this message).
+        var config = new ArtifactConfig(true, 5, Arrays.asList(
+                new ArtifactValidator(ValidatorKind.MAX_LENGTH, "10"), null));
+
+        var e = assertThrows(IllegalArgumentException.class, () -> ArtifactValidators.requireValidSpecs(config));
+        assertTrue(e.getMessage().contains("validators[1]"), e.getMessage());
     }
 
     // =================================================================
@@ -133,6 +157,23 @@ class ArtifactValidatorsTest {
         String rejection = ArtifactValidators.firstRejection(validators, "12345");
         assertNotNull(rejection);
         assertTrue(rejection.contains("character"), "the length failure comes first: " + rejection);
+    }
+
+    @Test
+    @DisplayName("a catastrophically backtracking pattern aborts on its deadline instead of pinning the turn")
+    void catastrophicRegex_abortsOnDeadline() {
+        // (a+)+$ against a long non-matching tail backtracks exponentially —
+        // unguarded it runs for astronomical time, not the ~500ms budget.
+        var validators = List.of(new ArtifactValidator(ValidatorKind.REGEX, "(a+)+$"));
+        String content = "a".repeat(60_000) + "b";
+
+        long start = System.nanoTime();
+        String rejection = ArtifactValidators.firstRejection(validators, content);
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        assertNotNull(rejection, "a runaway match must refuse the write, not admit it");
+        assertTrue(rejection.contains("did not finish in time"), rejection);
+        assertTrue(elapsedMs < 5_000, "the deadline guard must abort far below the member-turn timeout, took " + elapsedMs + "ms");
     }
 
     @Test

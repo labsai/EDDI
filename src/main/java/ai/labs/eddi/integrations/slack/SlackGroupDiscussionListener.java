@@ -305,9 +305,9 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         String emoji = event.created() ? "📄" : "✏️";
         String verb = event.created() ? "created" : "updated";
         var sb = new StringBuilder();
-        sb.append(String.format("%s *Artifact \"%s\"* %s (v%d)", emoji, event.name(), verb, event.version()));
+        sb.append(String.format("%s *Artifact \"%s\"* %s (v%d)", emoji, escapeMrkdwn(event.name()), verb, event.version()));
         if (event.editorAgentId() != null && !event.editorAgentId().isBlank()) {
-            sb.append(String.format(" by %s", event.editorAgentId()));
+            sb.append(String.format(" by %s", escapeMrkdwn(event.editorAgentId())));
         }
         if ("FINAL".equals(event.status())) {
             sb.append(" — FINAL");
@@ -315,6 +315,17 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
         String threadTs = expandedMode ? null : userThreadTs;
         postSafe(channelId, threadTs, sb.toString().stripTrailing());
+    }
+
+    /**
+     * Escapes Slack's three mrkdwn control characters. Without this, an
+     * LLM-authored artifact name (or an agent id) containing e.g.
+     * {@code <!channel>} renders as a real channel broadcast.
+     */
+    private static String escapeMrkdwn(String value) {
+        return value == null
+                ? null
+                : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     // ─── HITL (human-in-the-loop) ───

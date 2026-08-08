@@ -242,6 +242,22 @@ public class GroupConversation {
     @JsonIgnore
     private final transient Queue<ArtifactChange> pendingArtifactChanges = new ConcurrentLinkedQueue<>();
 
+    /**
+     * Serializes drain-and-announce over {@link #pendingArtifactChanges}. The queue
+     * itself is safe, but two PARALLEL turns ending together would split it between
+     * their drains and could then publish v2's event before v1's; holding this
+     * mutex across the whole drain+announce keeps events in write order. See
+     * {@code MemberTurnExecutor#announceArtifactChanges}.
+     */
+    @JsonIgnore
+    private final transient Object artifactAnnounceMutex = new Object();
+
+    /** The monitor {@code MemberTurnExecutor} serializes announce passes on. */
+    @JsonIgnore
+    public Object artifactAnnounceMutex() {
+        return artifactAnnounceMutex;
+    }
+
     /** Queues an accepted artifact write for the turn executor to announce. */
     @JsonIgnore
     public void queueArtifactChange(ArtifactChange change) {

@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -170,6 +171,26 @@ class SharedArtifactStoreTest {
     }
 
     @Test
+    @DisplayName("the listing honors the interface contract: oldest first, whatever order the backend returns")
+    void list_sortsOldestFirst() throws Exception {
+        var newer = artifact("a-new", "gc-1", "user-1", 1);
+        newer.setCreatedAt(Instant.parse("2026-02-02T00:00:00Z"));
+        var older = artifact("a-old", "gc-1", "user-1", 1);
+        older.setCreatedAt(Instant.parse("2026-01-01T00:00:00Z"));
+        var newerResource = resource("a-new", newer);
+        var olderResource = resource("a-old", older);
+        // Both backends sort DESC on the sort field — the store must re-sort.
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("createdAt"), eq(0), anyInt()))
+                .thenReturn(List.of(resourceId("a-new"), resourceId("a-old")));
+        when(storage.read("a-new", 1)).thenReturn(newerResource);
+        when(storage.read("a-old", 1)).thenReturn(olderResource);
+
+        List<SharedArtifact> result = store.listByGroupConversationId("gc-1");
+
+        assertEquals(List.of("a-old", "a-new"), result.stream().map(SharedArtifact::getId).toList());
+    }
+
+    @Test
     @DisplayName("an id that fails the SAFE_ID gate is never interpolated into a query")
     void list_unsafeId_neverQueries() throws Exception {
         assertTrue(store.listByGroupConversationId("gc.*injection").isEmpty());
@@ -250,5 +271,22 @@ class SharedArtifactStoreTest {
 
         verify(storage).removeAllPermanently("a-1");
         verify(storage).removeAllPermanently("a-2");
+    }
+
+    @Test
+    @DisplayName("a row the backend will not dislodge is counted once and ends the loop — no spin, no inflated count")
+    void cascadeDelete_undeletableRow_noSpinNoOvercount() throws Exception {
+        var stuck = artifact("a-1", "gc-1", "user-1", 1);
+        var r1 = resource("a-1", stuck);
+        // removeAllPermanently "succeeds" but the row keeps appearing in listings
+        // — the backend path that motivated the processed-set guard.
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("createdAt"), eq(0), anyInt()))
+                .thenReturn(List.of(resourceId("a-1")));
+        when(storage.read("a-1", 1)).thenReturn(r1);
+
+        assertEquals(1, store.deleteByGroupConversationId("gc-1"),
+                "the count must reflect distinct artifacts, not delete attempts");
+
+        verify(storage, times(1)).removeAllPermanently("a-1");
     }
 }
