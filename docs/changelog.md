@@ -5,6 +5,22 @@
 
 ---
 
+## 🏭 feat(groups): I13 — standing teams (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams` — stacked on the I8 branch: retro lessons flow through I8 unchanged)
+
+Ninth queue item, the Wave 3 flagship. A group conversation is an episode; the **`GroupWorkspace`** is what persists — backlog, cadences, metrics. Deliberately thin glue over existing machinery: the backlog IS a `SharedTaskList`, scheduling IS `SchedulePollerService`, the run ceiling IS I1's inherited-ceiling slot.
+
+- **Model + store:** `GroupWorkspace` (own collection, one doc per group id): `backlog` (SharedTaskList reused whole so pulled tasks flow straight into the task-force machinery), `metrics {discussions, tasksVerified, totalCost, lastRunAt, perMemberStats}` (per-member stats are reliability RECORDING only — the research-adopted substrate; no routing/weighting in v1), `cadences [{cadenceId, scheduleRef, inputTemplate (Qute), maxBacklogTasksPerRun=5, maxCostPerRun, createdBy}]`, `runningDiscussionId` + `pulledTaskIds`. `IGroupWorkspaceStore`/`GroupWorkspaceStore` follow the GroupConversationStore single-version pattern; `casRunningDiscussion` is a conditional store write (`storeIfFieldEquals`) — cluster-safe, no in-JVM locks, idle sentinel `""` because the CAS compares a concrete stored value.
+- **`TeamCadenceService`** (the DreamService pattern, exactly): metadata contract `teamCadenceType="team_cadence"` + a dedicated `ScheduleFireExecutor.fireTeamCadence` branch, so cluster claim/lease/retry/dead-letter/fire-logs come free. The fire protocol is crash-proof by construction: **reconcile** (a finished previous run is written back FIRST; one still running — possibly paused at an HITL gate for days — skips the fire) → **pull** (top-N executable by priority; empty pull skips, logged) → **claim** (CAS; a lost race cancels the just-started discussion and stands down) → **run**. Deliberate skips are COMPLETED fires with the reason logged; real failures are FAILED so they retry and dead-letter.
+- **Task injection without config writes:** new `GroupConversationService.startCadenceDiscussionAsync` — the pulled tasks replace `config.tasks` on the call's own fresh read (a runtime copy; the stored config is never written) and `maxCostPerRun` rides `inheritedCostCeiling`, so `effectiveCostCeiling` takes the tighter of it and the group's own ceiling (dollar-primary, the Dream precedent). The discussion runs under the cadence **creator's** identity (`createdBy`), not a synthetic scheduler user.
+- **Writeback** at the next fire or on workspace read (read-repair in the REST layer) — never from the discussion thread, so a crash loses nothing: VERIFIED stays VERIFIED on the backlog + credits the assignee's stats; anything else returns to PENDING with the reviewer feedback appended to the description (the cross-run retry loop); FAILED/CANCELLED returns every pulled task untouched; a vanished discussion releases the claim instead of stalling every future fire.
+- **Surfaces:** REST `/groupstore/groups/{groupId}/workspace` (GET workspace/backlog with read-repair; POST backlog — cap 200 with an actionable 409; POST/DELETE cadences — the cron is validated at creation by computing the first fire, and the schedule carries the dispatch metadata); MCP `add_team_task` + `list_team_backlog` (whitelisted; filter pins green). **Teardown:** a permanent group deletion cascades to the workspace; a soft delete keeps it (the group can come back).
+
+**Tests (+14 TeamCadenceServiceTest, +9 RestGroupWorkspaceTest, +2 fire-executor dispatch, +4 MCP, +2 cascade):** fire pulls top-priority tasks and the captured `startCadenceDiscussionAsync` call carries them, the creator identity and the dollar ceiling; every skip (empty backlog, still-running, lost claim → cancel); reconcile-then-run; writeback matrix (VERIFIED credited / failed-with-feedback returns as the retry loop / FAILED returns untouched / vanished releases) — the feedback-appended and VERIFIED assertions are the mutation-check; backlog cap actionable on both surfaces; cadence schedule metadata + invalid-cron-fails-at-creation; permanent-delete cascade vs soft-delete keep.
+
+---
+
 ## 🔎 fix(groups): I8 PR #639 CI round 1 + plan-mandated test extension (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i8-retro-memory`)

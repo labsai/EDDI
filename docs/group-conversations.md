@@ -185,6 +185,52 @@ knowledge that compounds run-over-run.
 - Member conversations already load group-visible entries at init, so recall
   needs no new namespace. The `retro_recorded` SSE event reports each harvest.
 
+## Standing Teams (I13)
+
+A group *conversation* is an episode; a **team** persists. The `GroupWorkspace`
+(one document per group, own collection) holds what survives between episodes:
+a **backlog** (a `SharedTaskList`, so pulled tasks flow straight into the
+task-force machinery), **cadences** that pull from it on a schedule, and the
+team's running **metrics** — deliberately thin glue over the existing
+schedulers, I1's cost ledger and I8's retro memory.
+
+```
+POST /groupstore/groups/{groupId}/workspace/backlog   {"subject": "...", "description": "...", "priority": 5}
+POST /groupstore/groups/{groupId}/workspace/cadences  {"cronExpression": "0 9 * * 1", "maxBacklogTasksPerRun": 5, "maxCostPerRun": 2.50}
+GET  /groupstore/groups/{groupId}/workspace
+```
+
+MCP: `add_team_task`, `list_team_backlog`. The backlog caps at 200 with an
+actionable error — it is a working set, not an archive.
+
+**Cadence fires ride the schedule machinery whole** (`SchedulePollerService`
+claim/lease/retry/dead-letter; the executor branches on
+`teamCadenceType: "team_cadence"` exactly like Dream consolidation). Each fire:
+
+1. **Reconcile** — a finished previous run is written back first; one still in
+   flight (or paused at an HITL gate for days) skips the fire.
+2. **Pull** — top-N *executable* backlog tasks by priority; an empty pull
+   skips, logged.
+3. **Claim** — a conditional store write on `runningDiscussionId`; two pods
+   firing concurrently cannot both start, without any in-JVM lock.
+4. **Run** — pulled tasks are injected as a runtime copy of `config.tasks`
+   (the stored config is never written) and the cadence's `maxCostPerRun`
+   rides the inherited-ceiling slot: dollar-primary, per the Dream precedent.
+   The discussion runs under the cadence *creator's* identity.
+
+**Writeback** happens at the next fire (or on a workspace read — read-repair),
+never from inside the discussion thread, so a pod crash mid-discussion loses
+nothing. VERIFIED outcomes stay VERIFIED on the backlog and credit the
+assignee's `perMemberStats`; anything else returns to PENDING with the
+reviewer's feedback appended to the description — **the cross-run retry
+loop**. A FAILED/CANCELLED discussion returns every pulled task untouched.
+Retro lessons flow through I8 unchanged (no duplication).
+
+Per-member stats are reliability **recording only** — nothing routes or
+weights on them in v1. A *permanent* group deletion cascades to the workspace;
+a soft (versioned) delete keeps it, because the group can come back. Not in
+v1: cross-team handoff, Manager UI, reputation weighting.
+
 ## Nested Groups (Group-of-Groups)
 
 Members can be other groups. The sub-group runs its own discussion and its synthesized answer becomes the member's response.

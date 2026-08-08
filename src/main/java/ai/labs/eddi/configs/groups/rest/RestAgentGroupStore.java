@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.groups.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
@@ -43,14 +44,17 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     private final IAgentGroupStore groupStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
+    private final IGroupWorkspaceStore workspaceStore;
     private final RestVersionInfo<AgentGroupConfiguration> restVersionInfo;
 
     @Inject
-    public RestAgentGroupStore(IAgentGroupStore groupStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator) {
+    public RestAgentGroupStore(IAgentGroupStore groupStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
+            IGroupWorkspaceStore workspaceStore) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, groupStore, documentDescriptorStore);
         this.groupStore = groupStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
+        this.workspaceStore = workspaceStore;
     }
 
     @Override
@@ -137,7 +141,19 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     @Override
     public Response deleteGroup(String id, Integer version, Boolean permanent) {
-        return restVersionInfo.delete(id, version, permanent);
+        Response response = restVersionInfo.delete(id, version, permanent);
+        // I13: a permanently deleted group takes its standing workspace with it —
+        // backlog, cadences and metrics are meaningless without the config they
+        // belong to, and an orphaned cadence would keep firing into errors. A
+        // soft (versioned) delete keeps the workspace: the group can come back.
+        if (Boolean.TRUE.equals(permanent) && response.getStatus() < 300) {
+            try {
+                workspaceStore.deleteByGroupId(id);
+            } catch (Exception e) {
+                LOG.errorf(e, "Failed to cascade workspace deletion for group %s", sanitize(id));
+            }
+        }
+        return response;
     }
 
     @Override
