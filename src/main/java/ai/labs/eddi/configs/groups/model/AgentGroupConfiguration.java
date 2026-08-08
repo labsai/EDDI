@@ -122,6 +122,15 @@ public class AgentGroupConfiguration {
 
         public static final int DEFAULT_MAX_PER_RUN = 3;
         public static final int DEFAULT_MAX_STORED = 50;
+        /**
+         * Hard ceilings (review finding): the compact constructor accepted any positive
+         * int, so a config carrying {@code Integer.MAX_VALUE} made the per-run write
+         * count and the retained-lesson count effectively unbounded — exactly the
+         * bounded-growth guarantee this record exists to enforce on an LLM-driven write
+         * surface.
+         */
+        public static final int CEILING_MAX_PER_RUN = 20;
+        public static final int CEILING_MAX_STORED = 500;
 
         /** Same normalization choke point as {@link GroupTaskConfig}. */
         public RetroConfig {
@@ -131,6 +140,8 @@ public class AgentGroupConfiguration {
             if (maxStoredLessons <= 0) {
                 maxStoredLessons = DEFAULT_MAX_STORED;
             }
+            maxLessonsPerRun = Math.min(maxLessonsPerRun, CEILING_MAX_PER_RUN);
+            maxStoredLessons = Math.min(maxStoredLessons, CEILING_MAX_STORED);
         }
 
         /** Both caps at their defaults. */

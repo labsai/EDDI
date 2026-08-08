@@ -5,6 +5,18 @@
 
 ---
 
+## 🔎 fix(groups): I8 review round 3 — retro ceilings + creation-ordered FIFO (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i8-retro-memory`)
+
+Two accepted CodeRabbit findings, one rebutted:
+
+1. **RetroConfig ceilings (major)** — the compact ctor accepted any positive int, so `Integer.MAX_VALUE` unbounded the per-run write count and the retained-lesson set. Hard ceilings: `CEILING_MAX_PER_RUN` 20, `CEILING_MAX_STORED` 500 (clamped, not rejected — same normalization style as the rest of the record).
+2. **FIFO vs reharvest (major)** — eviction used the `most_recent` recall order (sorted by `updatedAt`); reharvesting an existing lesson refreshes `updatedAt`, so an old-but-reharvested lesson could shield itself while a later-CREATED lesson got evicted. Eviction now sorts by `createdAt` (which the store `setOnInsert`s — the stable insertion stamp), nulls oldest-first. Regression test reharvests an old lesson before exceeding the cap and asserts the oldest-created is the one evicted.
+3. **Rebutted: RETRO entries lost on mid-repeat HITL resume** — on this branch nothing ever creates a speaker-level `ResumePoint` (producers are I6 human turns and I12 escalations, on other branches), so a RETRO phase cannot resume mid-repeat here. On the integration branch, where producers exist, the I6 `pausedRepeatSliceBase` fix restores the true repeat base at top-of-repeat before `repeatEntries` is sliced — the RETRO harvest reads that same slice, so pre-pause lessons are preserved (pinned by the HumanPauseRepeatSlice tests).
+
+---
+
 ## 🔎 fix(groups): I8 review round 2 — retro cap semantics + event contract (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i8-retro-memory`)

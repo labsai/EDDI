@@ -25,6 +25,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 
@@ -164,15 +165,24 @@ public final class RetroEngine {
     }
 
     /**
-     * FIFO at the stored cap: the recall is newest-first, so everything past the
-     * cap in that ordering is the oldest — evicted so institutional memory stays
-     * bounded. Team-owned entries are untouchable by {@code UserMemoryTool}'s own
-     * eviction (which only ever removes the calling agent's {@code self} entries),
-     * so this is the ONLY reaper.
+     * FIFO at the stored cap, ordered by CREATION time. The {@code most_recent}
+     * recall order sorts by {@code updatedAt}, and reharvesting an existing lesson
+     * refreshes that — so eviction keyed on recall order could evict a
+     * later-CREATED lesson while an old-but-reharvested one survived (review
+     * finding). {@code createdAt} is {@code setOnInsert} at the store, so it is the
+     * stable insertion stamp FIFO needs. Team-owned entries are untouchable by
+     * {@code UserMemoryTool}'s own eviction (which only ever removes the calling
+     * agent's {@code self} entries), so this is the ONLY reaper.
      */
     private static void evictPastCap(IUserMemoryStore store, String teamOwner, String groupId, int maxStoredLessons) {
         try {
-            List<UserMemoryEntry> entries = store.getVisibleEntries(teamOwner, RETRO_SOURCE, List.of(groupId), "most_recent", -1);
+            List<UserMemoryEntry> entries = store.getVisibleEntries(teamOwner, RETRO_SOURCE, List.of(groupId), "most_recent", -1)
+                    .stream()
+                    // Newest created first; entries without a createdAt (pre-stamp
+                    // documents) count as oldest and are evicted first.
+                    .sorted(Comparator.comparing(UserMemoryEntry::createdAt,
+                            Comparator.nullsFirst(Comparator.naturalOrder())).reversed())
+                    .toList();
             for (int i = maxStoredLessons; i < entries.size(); i++) {
                 UserMemoryEntry oldest = entries.get(i);
                 if (oldest.id() != null) {
