@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
+import ai.labs.eddi.configs.groups.rest.RestGroupWorkspace;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
@@ -551,20 +552,27 @@ public class McpGroupTools {
             if (groupStore.getCurrentResourceId(groupId) == null) {
                 return errorJson("Group not found: " + groupId);
             }
-            var workspace = workspaceStore.readOrCreate(groupId);
-            if (workspace.getBacklog().size() >= GroupWorkspace.MAX_BACKLOG_SIZE) {
-                return errorJson("The backlog already holds " + GroupWorkspace.MAX_BACKLOG_SIZE
-                        + " tasks — complete or delete existing tasks before adding more");
-            }
             String trimmedSubject = subject.trim();
-            if (workspace.getBacklog().getTasks().stream().anyMatch(t -> trimmedSubject.equalsIgnoreCase(t.subject()))) {
-                return errorJson("A backlog task with that subject already exists — writeback matches outcomes "
-                        + "by subject, so subjects must be unique");
+            // Optimistic-concurrency retry — same reasoning as the REST surface: a
+            // lost CAS re-reads and re-validates so concurrent adds cannot drop
+            // each other or slip past the cap.
+            for (int attempt = 0; attempt < RestGroupWorkspace.MAX_CAS_ATTEMPTS; attempt++) {
+                var workspace = workspaceStore.readOrCreate(groupId);
+                if (workspace.getBacklog().size() >= GroupWorkspace.MAX_BACKLOG_SIZE) {
+                    return errorJson("The backlog already holds " + GroupWorkspace.MAX_BACKLOG_SIZE
+                            + " tasks — complete or delete existing tasks before adding more");
+                }
+                if (workspace.getBacklog().getTasks().stream().anyMatch(t -> trimmedSubject.equalsIgnoreCase(t.subject()))) {
+                    return errorJson("A backlog task with that subject already exists — writeback matches outcomes "
+                            + "by subject, so subjects must be unique");
+                }
+                var task = workspace.getBacklog().addTask(new TaskItem(
+                        trimmedSubject, description != null ? description : "", parseIntOrDefault(priority, 0)));
+                if (workspaceStore.casRevision(workspace)) {
+                    return jsonSerialization.serialize(task);
+                }
             }
-            var task = workspace.getBacklog().addTask(new TaskItem(
-                    trimmedSubject, description != null ? description : "", parseIntOrDefault(priority, 0)));
-            workspaceStore.update(workspace);
-            return jsonSerialization.serialize(task);
+            return errorJson("The workspace is being modified concurrently — retry the request");
         } catch (Exception e) {
             LOGGER.errorf("add_team_task failed: %s", e.getMessage());
             return errorJson(e.getMessage());

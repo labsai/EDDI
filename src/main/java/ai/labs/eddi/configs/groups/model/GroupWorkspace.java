@@ -82,6 +82,15 @@ public class GroupWorkspace {
     private List<String> pulledTaskIds = new CopyOnWriteArrayList<>();
     private Instant created;
     private Instant lastModified;
+    /**
+     * Optimistic-concurrency stamp for read-modify-write surfaces (review finding:
+     * two concurrent backlog adds could both pass the cap/duplicate checks against
+     * their own snapshots and the later whole-document write dropped the earlier
+     * task). Bumped by {@code IGroupWorkspaceStore.casRevision}; stored as a string
+     * because the conditional-store primitive compares string field equality.
+     * {@code null} on documents created before this field existed.
+     */
+    private String revision = "0";
 
     /**
      * One scheduled pull from the backlog.
@@ -292,5 +301,13 @@ public class GroupWorkspace {
 
     public void setLastModified(Instant lastModified) {
         this.lastModified = lastModified;
+    }
+
+    public String getRevision() {
+        return revision;
+    }
+
+    public void setRevision(String revision) {
+        this.revision = revision;
     }
 }

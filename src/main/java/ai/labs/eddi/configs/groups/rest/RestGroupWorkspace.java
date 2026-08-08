@@ -48,6 +48,8 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
     static final int MAX_CADENCES_PER_WORKSPACE = 20;
     /** The template renders into a discussion question — bound the prose. */
     static final int MAX_INPUT_TEMPLATE_LENGTH = 4000;
+    /** Lost-CAS retries before telling the caller to try again. */
+    public static final int MAX_CAS_ATTEMPTS = 3;
 
     private final IGroupWorkspaceStore workspaceStore;
     private final IAgentGroupStore groupStore;
@@ -120,27 +122,37 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
         }
         try {
             requireGroupExists(groupId);
-            GroupWorkspace workspace = workspaceStore.readOrCreate(groupId);
-            if (workspace.getBacklog().size() >= GroupWorkspace.MAX_BACKLOG_SIZE) {
-                // Actionable, not silent: say WHAT is full and what to do about it.
-                return Response.status(Response.Status.CONFLICT)
-                        .entity(Map.of("error", "The backlog already holds " + GroupWorkspace.MAX_BACKLOG_SIZE
-                                + " tasks — complete or delete existing tasks before adding more"))
-                        .build();
-            }
             String subject = request.subject().trim();
-            if (workspace.getBacklog().getTasks().stream().anyMatch(t -> subject.equalsIgnoreCase(t.subject()))) {
-                return Response.status(Response.Status.CONFLICT)
-                        .entity(Map.of("error", "A backlog task with that subject already exists — "
-                                + "writeback matches outcomes by subject, so subjects must be unique"))
-                        .build();
+            // Optimistic-concurrency retry (review finding): the cap and duplicate
+            // checks run against THIS caller's snapshot; a plain whole-document
+            // update let two concurrent adds both pass under the cap and the later
+            // write drop the earlier task. A lost CAS re-reads and re-validates.
+            for (int attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+                GroupWorkspace workspace = workspaceStore.readOrCreate(groupId);
+                if (workspace.getBacklog().size() >= GroupWorkspace.MAX_BACKLOG_SIZE) {
+                    // Actionable, not silent: say WHAT is full and what to do about it.
+                    return Response.status(Response.Status.CONFLICT)
+                            .entity(Map.of("error", "The backlog already holds " + GroupWorkspace.MAX_BACKLOG_SIZE
+                                    + " tasks — complete or delete existing tasks before adding more"))
+                            .build();
+                }
+                if (workspace.getBacklog().getTasks().stream().anyMatch(t -> subject.equalsIgnoreCase(t.subject()))) {
+                    return Response.status(Response.Status.CONFLICT)
+                            .entity(Map.of("error", "A backlog task with that subject already exists — "
+                                    + "writeback matches outcomes by subject, so subjects must be unique"))
+                            .build();
+                }
+                TaskItem task = workspace.getBacklog().addTask(new TaskItem(
+                        subject,
+                        request.description() != null ? request.description() : "",
+                        request.priority()));
+                if (workspaceStore.casRevision(workspace)) {
+                    return Response.status(Response.Status.CREATED).entity(task).build();
+                }
             }
-            TaskItem task = workspace.getBacklog().addTask(new TaskItem(
-                    subject,
-                    request.description() != null ? request.description() : "",
-                    request.priority()));
-            workspaceStore.update(workspace);
-            return Response.status(Response.Status.CREATED).entity(task).build();
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "The workspace is being modified concurrently — retry the request"))
+                    .build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
         } catch (Exception e) {
@@ -201,7 +213,20 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
             var cadence = new Cadence(cadenceId, scheduleId, request.inputTemplate(),
                     request.maxBacklogTasksPerRun(), request.maxCostPerRun(), principal);
             workspace.addCadence(cadence);
-            workspaceStore.update(workspace);
+            try {
+                workspaceStore.update(workspace);
+            } catch (Exception e) {
+                // Compensate (review finding): the schedule exists but no cadence
+                // names its scheduleRef — it would fire into "cadence no longer
+                // exists" forever and deleteCadence could never reach it.
+                try {
+                    scheduleStore.deleteSchedule(scheduleId);
+                } catch (Exception cleanupFailure) {
+                    LOG.errorf(cleanupFailure, "Orphaned schedule %s for group %s after a failed workspace write",
+                            scheduleId, sanitize(groupId));
+                }
+                throw e;
+            }
             LOG.infof("Cadence %s created for group %s (schedule %s, cron '%s')", cadenceId, sanitize(groupId),
                     scheduleId, sanitize(request.cronExpression()));
             return Response.status(Response.Status.CREATED).entity(cadence).build();

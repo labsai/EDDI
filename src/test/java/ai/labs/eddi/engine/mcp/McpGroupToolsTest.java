@@ -705,6 +705,7 @@ class McpGroupToolsTest {
         lenient().when(groupStore.getCurrentResourceId("g1")).thenReturn(resourceId);
         lenient().when(workspaceStore.readOrCreate("g1")).thenReturn(workspace);
         lenient().when(workspaceStore.find("g1")).thenReturn(workspace);
+        lenient().when(workspaceStore.casRevision(workspace)).thenReturn(true);
         return workspace;
     }
 
@@ -717,7 +718,8 @@ class McpGroupToolsTest {
         assertFalse(result.contains("error"), result);
         assertEquals(1, workspace.getBacklog().size());
         assertEquals(7, workspace.getBacklog().getTasks().get(0).priority());
-        verify(workspaceStore).update(workspace);
+        verify(workspaceStore).casRevision(workspace);
+        verify(workspaceStore, never()).update(any());
     }
 
     @Test
@@ -737,6 +739,27 @@ class McpGroupToolsTest {
     @Test
     void addTeamTask_blankSubject_errors() throws Exception {
         assertTrue(tools.add_team_task("g1", "  ", null, null).contains("error"));
+    }
+
+    @Test
+    void addTeamTask_lostCas_retriesThenGivesUp() throws Exception {
+        teamWorkspace();
+        // Each read returns a FRESH document — a re-read must reflect the
+        // concurrent writer's state, never this caller's failed mutation.
+        when(workspaceStore.readOrCreate("g1")).thenAnswer(inv -> {
+            var w = new GroupWorkspace();
+            w.setId("ws-1");
+            w.setGroupId("g1");
+            return w;
+        });
+        when(workspaceStore.casRevision(any())).thenReturn(false, true);
+        assertFalse(tools.add_team_task("g1", "Ship it", null, null).contains("error"));
+        verify(workspaceStore, times(2)).readOrCreate("g1");
+
+        when(workspaceStore.casRevision(any())).thenReturn(false);
+        String result = tools.add_team_task("g1", "Another", null, null);
+        assertTrue(result.contains("error"), result);
+        assertTrue(result.contains("concurrently"), "exhausted retries tell the caller to retry: " + result);
     }
 
     @Test

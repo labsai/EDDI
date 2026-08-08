@@ -40,6 +40,18 @@ public interface IGroupWorkspaceStore {
      * {@code false} when another pod won the claim (or released it) in between —
      * the caller skips its run.
      */
+    /**
+     * Optimistic-concurrency write: persists {@code workspace} only if its
+     * {@code revision} still matches what this caller read, bumping it in the same
+     * write. Use for every read-modify-write surface (backlog adds) so two
+     * concurrent editors cannot silently drop each other's changes — the loser
+     * re-reads and retries.
+     *
+     * @return {@code true} if the write landed; {@code false} if a concurrent
+     *         writer changed the workspace first (re-read before retrying)
+     */
+    boolean casRevision(GroupWorkspace workspace) throws IResourceStore.ResourceStoreException;
+
     boolean casRunningDiscussion(GroupWorkspace workspace, String expectedRunning)
             throws IResourceStore.ResourceStoreException;
 }
