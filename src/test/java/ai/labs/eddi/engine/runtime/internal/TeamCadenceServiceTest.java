@@ -38,6 +38,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -314,8 +315,13 @@ class TeamCadenceServiceTest {
 
         assertFalse(service.writebackCompleted(workspace, gc),
                 "a concurrent reconciler settled first — this caller's writeback must report defeat");
+        // The ONLY store interaction is the failed conditional release — the
+        // in-memory mutations (task statuses, metrics, cleared claim fields) die
+        // with this discarded snapshot; any additional store call here would be a
+        // partial persistence of a lost race (review nitpick: pin the write
+        // surface, not just the update() legacy path).
         verify(workspaceStore).casRunningDiscussion(workspace, GC_ID);
-        verify(workspaceStore, never()).update(any());
+        verifyNoMoreInteractions(workspaceStore);
     }
 
     @Test

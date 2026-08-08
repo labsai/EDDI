@@ -126,6 +126,7 @@ class RestGroupWorkspaceTest {
         assertTrue(String.valueOf(response.getEntity()).contains("complete or delete"),
                 "the error says what to do about it: " + response.getEntity());
         verify(workspaceStore, never()).update(any());
+        verify(workspaceStore, never()).casRevision(any());
     }
 
     @Test
@@ -146,6 +147,7 @@ class RestGroupWorkspaceTest {
         assertEquals(400, rest.addBacklogTask(GROUP_ID, new BacklogTaskRequest("Ok", longDescription, 0)).getStatus());
 
         verify(workspaceStore, never()).update(any());
+        verify(workspaceStore, never()).casRevision(any());
     }
 
     @Test
@@ -160,6 +162,7 @@ class RestGroupWorkspaceTest {
         assertTrue(String.valueOf(response.getEntity()).contains("subject"), String.valueOf(response.getEntity()));
         assertEquals(1, workspace.getBacklog().size());
         verify(workspaceStore, never()).update(any());
+        verify(workspaceStore, never()).casRevision(any());
     }
 
     @Test

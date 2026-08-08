@@ -219,6 +219,41 @@ class RetroEngineTest {
     }
 
     @Test
+    @DisplayName("FIFO survives a reharvest: eviction orders by CREATION, not by the refreshed updatedAt")
+    void harvest_fifoEviction_reharvestDoesNotShieldOldLessons() throws Exception {
+        var config = new RetroConfig(3, 2);
+        RetroEngine.harvest(gc, config, List.of(retroEntry("{\"lessons\":[{\"lesson\":\"alpha oldest\"}]}")), store, "Retro", null);
+        Thread.sleep(5);
+        RetroEngine.harvest(gc, config, List.of(retroEntry("{\"lessons\":[{\"lesson\":\"beta middle\"}]}")), store, "Retro", null);
+        Thread.sleep(5);
+        // Reharvest alpha: its updatedAt refreshes, its createdAt does not. The
+        // recall order (most_recent = updatedAt) now lists alpha first — eviction
+        // keyed on recall order would evict beta, keeping the OLDER lesson.
+        RetroEngine.harvest(gc, config, List.of(retroEntry("{\"lessons\":[{\"lesson\":\"alpha oldest\"}]}")), store, "Retro", null);
+        Thread.sleep(5);
+        RetroEngine.harvest(gc, config, List.of(retroEntry("{\"lessons\":[{\"lesson\":\"gamma newest\"}]}")), store, "Retro", null);
+
+        assertEquals(2, store.byId.size());
+        List<String> values = store.byId.values().stream().map(e -> e.value().toString()).toList();
+        assertTrue(values.stream().noneMatch(v -> v.contains("alpha oldest")),
+                "FIFO evicts the oldest-CREATED lesson even after a reharvest refreshed it: " + values);
+        assertTrue(values.stream().anyMatch(v -> v.contains("beta middle")), values.toString());
+        assertTrue(values.stream().anyMatch(v -> v.contains("gamma newest")), values.toString());
+    }
+
+    @Test
+    @DisplayName("RetroConfig clamps runaway values to hard ceilings — bounded growth is non-negotiable")
+    void retroConfig_ceilingsClampRunawayValues() {
+        var runaway = new RetroConfig(Integer.MAX_VALUE, Integer.MAX_VALUE);
+        assertEquals(RetroConfig.CEILING_MAX_PER_RUN, runaway.maxLessonsPerRun());
+        assertEquals(RetroConfig.CEILING_MAX_STORED, runaway.maxStoredLessons());
+
+        var sane = new RetroConfig(5, 100);
+        assertEquals(5, sane.maxLessonsPerRun(), "values under the ceiling pass through");
+        assertEquals(100, sane.maxStoredLessons());
+    }
+
+    @Test
     @DisplayName("retro_recorded fires with the stored count; a null store warns and never throws")
     void harvest_eventAndNullStore() {
         var listener = Mockito.mock(GroupDiscussionEventListener.class);
