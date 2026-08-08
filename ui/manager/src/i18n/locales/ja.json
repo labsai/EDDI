@@ -2241,7 +2241,18 @@
       "SKIPPED": "スキップ済み",
       "PLAN": "計画",
       "TASK_RESULT": "タスク結果",
-      "VERIFICATION": "検証"
+      "VERIFICATION": "検証",
+      "FOLLOW_UP": "フォローアップ",
+      "ABSTAINED": "棄権",
+      "DISSENT": "反対意見",
+      "CONVERGENCE": "収束",
+      "FACILITATION": "進行",
+      "VOTE": "投票",
+      "PROPOSAL": "提案",
+      "BARGAIN": "逆提案",
+      "HUMAN_INPUT": "人による入力",
+      "RETRO": "振り返り",
+      "BID": "入札"
     },
     "flow": {
       "Opinion": "意見",
@@ -2332,7 +2343,61 @@
     "sendFollowup": "フォローアップを送信",
     "closeConfirmTitle": "このディスカッションを終了しますか？",
     "closeConfirmButton": "ディスカッションを終了",
-    "closeConfirmDismiss": "戻る"
+    "closeConfirmDismiss": "戻る",
+    "protocolMaxCost": "コスト上限",
+    "protocolOnCostExceeded": "到達時",
+    "costAbort": "中止",
+    "costSynthesize": "すぐに統合",
+    "deliberationSection": "審議",
+    "recordDissents": "少数意見",
+    "agentFiledTasks": "エージェント登録タスク",
+    "agentFiledCaps": "上限",
+    "agentFiledCapsValue": "{{perDiscussion}} / 議論 · {{perTurn}} / ターン",
+    "moderatorlessWarning": "このグループに存在しないモデレーターに限定されています: {{phases}}。発言順の最初のメンバーが代行します。",
+    "delegationDepth": "最大深度",
+    "delegationTimeout": "委任タイムアウト",
+    "secondsShort": "{{seconds}}秒",
+    "delegationTargets": "許可リスト",
+    "phaseBehaviour": "フェーズの挙動",
+    "phaseBehaviourNone": "棄権も収束も未設定です — 「編集」でメンバーのパスを許可するか、合意時に反復フェーズを終了できます。",
+    "abstentionShort": "棄権",
+    "convergenceShort": "収束 ≥{{threshold}}",
+    "phasesSaved": "フェーズ設定を保存しました",
+    "phasesNoneToEdit": "このグループにはフェーズが定義されていません。フェーズごとの挙動を調整する前に、議論スタイルを選ぶか設定にフェーズを追加してください。",
+    "phaseRepeats": "×{{repeats}}",
+    "allowAbstention": "棄権を許可",
+    "allowAbstentionHelp": "メンバーは同じ内容を繰り返す代わりに、このラウンドで新たな発言を控えられます。",
+    "convergenceEnable": "収束したら早期終了",
+    "convergenceHelp": "ジャッジが各反復を直前の反復と比較し、メンバーの立場が動かなくなった時点でフェーズを終了します。反復ごとに1回の呼び出しが発生します。",
+    "convergenceNeedsRepeats": "反復するフェーズでのみ利用できます — 1回だけの実行には比較対象がありません。",
+    "convergenceMinRepeats": "最小反復数",
+    "convergenceThreshold": "しきい値",
+    "convergenceJudge": "ジャッジ",
+    "judgeModerator": "モデレーター",
+    "judgeService": "サービス",
+    "judgeServiceNote": "受け付けられますがまだ接続されていません — エンジンはモデレーターにフォールバックし、警告を記録します。",
+    "convergenceReached": "収束",
+    "convergenceChecked": "収束チェック",
+    "convergenceScore": "一致度 {{score}}",
+    "convergenceSkipped": "· 以降の {{skipped}} ラウンドをスキップ",
+    "decisionWinner": "勝者: {{winner}}",
+    "decisionTie": "引き分け",
+    "decisionDecidedAt": "{{phase}} で決定",
+    "decisionUnparsed": "ジャッジの回答を構造化された判定として読み取れなかったため、以下に原文のまま残し、結論は文章のままとします。",
+    "minorityReport": "少数意見 ({{total}})",
+    "attachFiles": "ファイルを添付",
+    "attachmentLimit": "1つの議論につき添付は最大 {{max}} 件です",
+    "attachmentTooLarge": "{{name}} は大きすぎて添付できません",
+    "attachmentReadFailed": "{{name}} を読み取れませんでした",
+    "removeAttachment": "{{name}} を削除",
+    "decisionType": {
+      "VERDICT": "判定",
+      "VOTE": "投票",
+      "AGREEMENT": "合意",
+      "AWARD": "割当",
+      "NONE": "構造化された決定なし"
+    },
+    "abstainedBody": "このラウンドでは新たな発言を控えました。"
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -2352,7 +2417,8 @@
     "verificationFailed": "不合格",
     "showMore": "もっと表示",
     "showLess": "折りたたむ",
-    "awaitingApproval": "承認待ち"
+    "awaitingApproval": "承認待ち",
+    "filedBy": "{{agent}} が登録"
   },
   "memories": {
     "title": "ユーザーメモリ",
@@ -3061,7 +3127,33 @@
     "dashboard": "ダッシュボード",
     "settings": {
       "hitlApprovalPointsNote": "これらの設定は承認の挙動を制御します。ディスカッションのどの時点で承認が必要かは、Manager でフェーズごとに設定します。",
-      "hitlOpenManager": "承認ポイントを設定"
+      "hitlOpenManager": "承認ポイントを設定",
+      "deliberation": "審議の質",
+      "deliberationDesc": "少数意見を記録し、議論中に見つかった作業をメンバーが登録できるようにします",
+      "recordDissents": "少数意見を記録する",
+      "recordDissentsDesc": "各統合のあと、それを書かなかった全メンバーが短いターンを得て、なお同意できない点を述べます。メンバーごとに1回の追加呼び出しが発生します。",
+      "agentFiledTasks": "メンバーが自分でタスクを登録できるようにする",
+      "agentFiledTasksDesc": "エージェントが議論中に見つけた作業が実際のタスクとなり、次の実行ウェーブが拾います。オフの場合、このグループにはツール自体が存在しません。",
+      "maxTasksPerDiscussion": "議論あたりの最大登録タスク数",
+      "maxTasksPerDiscussionHelp": "エージェントが登録したタスクのみを数えるため、計画済みの大きなバックログで枯渇しません。",
+      "maxTasksPerTurn": "ターンあたりの最大登録タスク数",
+      "maxTasksPerTurnHelp": "暴走した1ターンを抑えます。議論単位の上限はゆっくりした逸脱を抑えます。",
+      "maxCost": "コスト上限 (USD)",
+      "maxCostUnlimited": "制限なし",
+      "maxCostHelp": "空欄で制限なし。すでに実行中のターンにより合計が上限をわずかに超えることがあります。",
+      "onCostExceeded": "上限に達したとき",
+      "costSynthesize": "すぐに統合 — 結論まで飛ばす",
+      "costAbort": "中止 — 議論を直ちに失敗させる",
+      "costCeilingInvalid": "コスト上限は 0 より大きい必要があります。制限なしにするにはフィールドを空にしてください。",
+      "maxDelegationDepth": "最大委任深度",
+      "maxDelegationDepthHelp": "A が B に、B が C に委任するのが深度 2 です。これを超えるホップは拒否され、これが委任ループを止めます。",
+      "delegationTimeout": "委任タイムアウト (秒)",
+      "delegationTimeoutHelp": "委任するエージェントが委任先を待つ時間です。委任先がツールや入れ子の議論を実行する場合は大きくしてください。",
+      "allowedDelegationTargets": "委任許可リスト",
+      "allowedDelegationTargetsHint": "デプロイ済みの任意のエージェント",
+      "allowedDelegationTargetsHelp": "カンマ区切りのエージェント ID。空欄にするとデプロイ済みの任意のエージェントを許可します。",
+      "moderatorlessWarning": "このタスクフォースに存在しないモデレーターに限定されています: {{phases}}。発言順の最初のメンバーが代行します。",
+      "memberLimit": "タスクフォースのメンバーは最大 {{max}} 名です"
     }
   },
   "operator": {
@@ -3095,7 +3187,8 @@
       "environment": "環境",
       "authMode": "オペレーターの認証方法",
       "authModeHint": "オペレーターは EDDI の管理 API を呼び出します。この設定で、その呼び出しが持つ資格情報が決まります。",
-      "authNoneBlocked": "この環境では認証が有効なため、認証なしのツール呼び出しは拒否されます。オペレーターのデプロイ自体は成功しますが、その後すべての照会に失敗します。「あなたの ID」を選択してください。",      "scope": {
+      "authNoneBlocked": "この環境では認証が有効なため、認証なしのツール呼び出しは拒否されます。オペレーターのデプロイ自体は成功しますが、その後すべての照会に失敗します。「あなたの ID」を選択してください。",
+      "scope": {
         "label": "権限範囲",
         "hint": "オペレーターに許可する操作です。書き込みは常に承認を待ちます — 下記の安全ルールをご覧ください。",
         "readOnly": {
@@ -3110,7 +3203,6 @@
         "unavailableFirstActivation": "初回の有効化では利用できません。まず読み取り専用で有効化して承認ゲートが健全であることを証明し、その後再設定して書き込み権限を付与してください。",
         "writeWarning": "有効化すると書き込みカナリアテストが実行されます。これは実際の、無害なテスト書き込みで、このデプロイが完了する前に承認待ちで一時停止する必要があります。一時停止しない場合、有効化は拒否され、未検証の書き込みゲートのままデプロイされた状態にせず、オペレーターは削除されます。"
       },
-
       "safetyPreamble": "安全上のルール（編集不可）",
       "safetyPreambleHint": "常に先頭に付加され、ツールが返すものはすべて信頼できないデータとして扱うようオペレーターに指示します。",
       "promptBody": "オペレーターへの指示",
@@ -3222,7 +3314,6 @@
     },
     "toast": {
       "activated": "プラットフォームオペレーターを有効にしました",
-
       "activatedReadWrite": "プラットフォームオペレーターを有効化しました — 書き込み権限を確認済みです",
       "deactivated": "プラットフォームオペレーターを無効にしました",
       "reset": "プラットフォームオペレーターを削除しました",

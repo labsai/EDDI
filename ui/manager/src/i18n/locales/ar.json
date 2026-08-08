@@ -2261,7 +2261,18 @@
       "SKIPPED": "تم التخطي",
       "PLAN": "خطة",
       "TASK_RESULT": "نتيجة المهمة",
-      "VERIFICATION": "تحقق"
+      "VERIFICATION": "تحقق",
+      "FOLLOW_UP": "متابعة",
+      "ABSTAINED": "امتنع",
+      "DISSENT": "اعتراض",
+      "CONVERGENCE": "تقارب",
+      "FACILITATION": "تيسير",
+      "VOTE": "صوت",
+      "PROPOSAL": "اقتراح",
+      "BARGAIN": "عرض مضاد",
+      "HUMAN_INPUT": "مدخل بشري",
+      "RETRO": "مراجعة استرجاعية",
+      "BID": "عطاء"
     },
     "flow": {
       "Opinion": "رأي",
@@ -2356,7 +2367,61 @@
     "count_zero": "{{count}} مجموعة",
     "count_two": "مجموعتان",
     "count_few": "{{count}} مجموعات",
-    "count_many": "{{count}} مجموعة"
+    "count_many": "{{count}} مجموعة",
+    "protocolMaxCost": "سقف التكلفة",
+    "protocolOnCostExceeded": "عند بلوغه",
+    "costAbort": "إحباط",
+    "costSynthesize": "التلخيص الآن",
+    "deliberationSection": "التداول",
+    "recordDissents": "تقرير الأقلية",
+    "agentFiledTasks": "مهام أنشأها الوكلاء",
+    "agentFiledCaps": "الحدود",
+    "agentFiledCapsValue": "{{perDiscussion}} / نقاش · {{perTurn}} / دور",
+    "moderatorlessWarning": "مقصورة على منسّق لا تملكه هذه المجموعة: {{phases}}. سينوب عنه العضو الأول حسب ترتيب الكلام.",
+    "delegationDepth": "أقصى عمق",
+    "delegationTimeout": "مهلة التفويض",
+    "secondsShort": "{{seconds}} ث",
+    "delegationTargets": "قائمة السماح",
+    "phaseBehaviour": "سلوك المراحل",
+    "phaseBehaviourNone": "لم يُضبط الامتناع ولا التقارب — اضغط تحرير للسماح بالتمرير أو لإنهاء مرحلة متكررة عند الاتفاق.",
+    "abstentionShort": "امتناع",
+    "convergenceShort": "تقارب ≥{{threshold}}",
+    "phasesSaved": "تم حفظ إعدادات المراحل",
+    "phasesNoneToEdit": "لا تحدّد هذه المجموعة أي مراحل. اختر نمط نقاش أو أضف مراحل إلى الإعداد قبل ضبط سلوك كل مرحلة.",
+    "phaseRepeats": "×{{repeats}}",
+    "allowAbstention": "السماح بالامتناع",
+    "allowAbstentionHelp": "يمكن للعضو أن يمتنع عن إضافة جديد في هذه الجولة بدلاً من تكرار نفسه.",
+    "convergenceEnable": "الإيقاف مبكرًا عند التقارب",
+    "convergenceHelp": "يقارن حَكَمٌ كل تكرار بسابقه وينهي المرحلة حين تتوقف مواقف الأعضاء عن التغيّر. يكلّف نداءً واحدًا لكل تكرار.",
+    "convergenceNeedsRepeats": "متاح فقط في مرحلة متكررة — المرور الواحد لا شيء يقارن به.",
+    "convergenceMinRepeats": "أدنى تكرارات",
+    "convergenceThreshold": "العتبة",
+    "convergenceJudge": "الحَكَم",
+    "judgeModerator": "المنسّق",
+    "judgeService": "خدمة",
+    "judgeServiceNote": "مقبول لكنه غير موصول بعد — يعود المحرك إلى المنسّق ويسجّل تحذيرًا.",
+    "convergenceReached": "تقارب",
+    "convergenceChecked": "فحص التقارب",
+    "convergenceScore": "توافق {{score}}",
+    "convergenceSkipped": "· تم تخطي {{skipped}} جولة إضافية",
+    "decisionWinner": "الفائز: {{winner}}",
+    "decisionTie": "تعادل",
+    "decisionDecidedAt": "تقرّر في {{phase}}",
+    "decisionUnparsed": "تعذّرت قراءة إجابة الحَكَم كحكم منظّم، لذا حُفظت حرفيًا أدناه وبقيت الخلاصة نصًا عاديًا.",
+    "minorityReport": "تقرير الأقلية ({{total}})",
+    "attachFiles": "إرفاق ملفات",
+    "attachmentLimit": "بحد أقصى {{max}} مرفقًا لكل نقاش",
+    "attachmentTooLarge": "{{name}} أكبر من أن يُرفق",
+    "attachmentReadFailed": "تعذّرت قراءة {{name}}",
+    "removeAttachment": "إزالة {{name}}",
+    "decisionType": {
+      "VERDICT": "الحكم",
+      "VOTE": "تصويت",
+      "AGREEMENT": "اتفاق",
+      "AWARD": "إسناد",
+      "NONE": "لا قرار منظّم"
+    },
+    "abstainedBody": "لم يضف جديدًا في هذه الجولة."
   },
   "taskBoard": {
     "title": "لوحة المهام",
@@ -2376,7 +2441,8 @@
     "verificationFailed": "فاشل",
     "showMore": "عرض المزيد",
     "showLess": "عرض أقل",
-    "awaitingApproval": "في انتظار الموافقة"
+    "awaitingApproval": "في انتظار الموافقة",
+    "filedBy": "أنشأها {{agent}}"
   },
   "memories": {
     "title": "ذاكرة المستخدم",
@@ -3085,7 +3151,33 @@
     "dashboard": "لوحة التحكم",
     "settings": {
       "hitlApprovalPointsNote": "تتحكم هذه الإعدادات في كيفية عمل الموافقة. أما نقاط المناقشة التي تتطلب موافقة فيتم تكوينها لكل مرحلة في الـ Manager.",
-      "hitlOpenManager": "تحديد نقاط الموافقة"
+      "hitlOpenManager": "تحديد نقاط الموافقة",
+      "deliberation": "جودة التداول",
+      "deliberationDesc": "تسجيل آراء الأقلية والسماح للأعضاء بإنشاء العمل الذي يكتشفونه أثناء النقاش",
+      "recordDissents": "تسجيل تقرير الأقلية",
+      "recordDissentsDesc": "بعد كل تلخيص، يحصل كل عضو لم يكتبه على دور قصير ليبيّن مواضع اعتراضه المتبقية. يكلّف نداءً إضافيًا لكل عضو.",
+      "agentFiledTasks": "السماح للأعضاء بإنشاء مهامهم",
+      "agentFiledTasksDesc": "العمل الذي يكتشفه الوكيل أثناء النقاش يصبح مهمة فعلية تلتقطها موجة التنفيذ التالية. عند الإيقاف لا توجد الأدوات لهذه المجموعة أصلًا.",
+      "maxTasksPerDiscussion": "أقصى مهام مُنشأة / نقاش",
+      "maxTasksPerDiscussionHelp": "يحتسب المهام التي ينشئها الوكلاء فقط، حتى لا يستنفده تراكم مخطَّط كبير.",
+      "maxTasksPerTurn": "أقصى مهام مُنشأة / دور",
+      "maxTasksPerTurnHelp": "يحدّ من دور منفلت؛ أما سقف النقاش فيحدّ من الانحراف البطيء.",
+      "maxCost": "سقف التكلفة (دولار)",
+      "maxCostUnlimited": "بلا حد",
+      "maxCostHelp": "اتركه فارغًا لعدم وجود حد. قد يتجاوز دورٌ جارٍ بالفعل السقف بقليل.",
+      "onCostExceeded": "عند بلوغ السقف",
+      "costSynthesize": "التلخيص الآن — القفز مباشرة إلى الخلاصة",
+      "costAbort": "إحباط — إفشال النقاش فورًا",
+      "costCeilingInvalid": "يجب أن يكون سقف التكلفة أكبر من 0. أفرغ الحقل لعدم وجود حد.",
+      "maxDelegationDepth": "أقصى عمق للتفويض",
+      "maxDelegationDepthHelp": "تفويض أ إلى ب ثم ب إلى ج هو عمق 2. تُرفض القفزة التي تتجاوز ذلك — وهذا ما يوقف دورة التفويض.",
+      "delegationTimeout": "مهلة التفويض (ثوانٍ)",
+      "delegationTimeoutHelp": "مدة انتظار الوكيل المفوِّض لمفوَّضه. ارفعها عندما ينفّذ المفوَّض أدوات أو نقاشًا متداخلًا.",
+      "allowedDelegationTargets": "قائمة السماح بالتفويض",
+      "allowedDelegationTargetsHint": "أي وكيل منشور",
+      "allowedDelegationTargetsHelp": "معرّفات وكلاء مفصولة بفواصل. اتركه فارغًا للسماح لأي وكيل منشور.",
+      "moderatorlessWarning": "مقصورة على منسّق لا تملكه فرقة العمل هذه: {{phases}}. سينوب عنه العضو الأول حسب ترتيب الكلام.",
+      "memberLimit": "يمكن أن تضم فرقة العمل {{max}} عضوًا كحد أقصى"
     }
   },
   "operator": {
@@ -3119,7 +3211,8 @@
       "environment": "البيئة",
       "authMode": "كيفية مصادقة المُشغّل",
       "authModeHint": "يستدعي المُشغّل واجهة إدارة EDDI لديك. هذا يحدّد بيانات الاعتماد التي تحملها تلك الاستدعاءات.",
-      "authNoneBlocked": "المصادقة مُفعّلة في هذا النشر، لذا سيتم رفض استدعاءات الأدوات غير المُصادَق عليها. سيُنشر المُشغّل بنجاح ثم يفشل في كل عملية بحث. اختر بدلاً من ذلك «هويتك».",      "scope": {
+      "authNoneBlocked": "المصادقة مُفعّلة في هذا النشر، لذا سيتم رفض استدعاءات الأدوات غير المُصادَق عليها. سيُنشر المُشغّل بنجاح ثم يفشل في كل عملية بحث. اختر بدلاً من ذلك «هويتك».",
+      "scope": {
         "label": "الصلاحية",
         "hint": "ما يُسمح للمُشغّل بفعله. كل عملية كتابة تظل بانتظار موافقتك — انظر قواعد الأمان أدناه.",
         "readOnly": {
@@ -3134,7 +3227,6 @@
         "unavailableFirstActivation": "غير متاح عند التفعيل الأول. فعّل أولًا وضع القراءة فقط لإثبات أن بوابة الموافقة موثوقة، ثم أعد التهيئة لمنح صلاحية الكتابة.",
         "writeWarning": "سيؤدي التفعيل إلى تشغيل اختبار كتابة تجريبي: عملية كتابة اختبارية حقيقية وغير ضارة يجب أن تنتظر الموافقة قبل انتهاء هذا النشر. إذا لم تتوقف مؤقتًا، يُرفض التفعيل ويُزال المُشغّل بدلًا من إبقائه منشورًا ببوابة كتابة غير موثوقة."
       },
-
       "safetyPreamble": "قواعد الأمان (غير قابلة للتعديل)",
       "safetyPreambleHint": "تُضاف دائمًا في البداية، وتوجّه المُشغّل إلى التعامل مع كل ما تُرجعه أدواته كبيانات غير موثوقة.",
       "promptBody": "تعليمات المُشغّل",
@@ -3246,7 +3338,6 @@
     },
     "toast": {
       "activated": "تم تفعيل مُشغّل المنصة",
-
       "activatedReadWrite": "تم تفعيل مُشغّل المنصة — تم التحقق من صلاحية الكتابة",
       "deactivated": "تم إلغاء تفعيل مُشغّل المنصة",
       "reset": "تم حذف مُشغّل المنصة",

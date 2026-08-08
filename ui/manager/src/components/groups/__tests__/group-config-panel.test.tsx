@@ -146,4 +146,99 @@ describe("GroupConfigPanel", () => {
       expect(deletedAgents).not.toContain("agent-group-sub");
     });
   });
+
+  describe("group collaboration parity", () => {
+    it("shows the cost ceiling and its policy", () => {
+      renderWithProviders(
+        <GroupConfigPanel
+          config={{
+            ...mockConfig,
+            protocol: { ...mockConfig.protocol!, maxCostPerDiscussion: 2.5, onCostExceeded: "ABORT" },
+          }}
+        />,
+      );
+      expect(screen.getByText("$2.50")).toBeInTheDocument();
+      expect(screen.getByText("Abort")).toBeInTheDocument();
+    });
+
+    it("omits the cost rows when there is no ceiling", () => {
+      renderWithProviders(<GroupConfigPanel config={mockConfig} />);
+      expect(screen.queryByText("Cost Ceiling")).not.toBeInTheDocument();
+    });
+
+    it("summarizes the deliberation settings that are on", () => {
+      renderWithProviders(
+        <GroupConfigPanel
+          config={{
+            ...mockConfig,
+            recordDissents: true,
+            taskListConfig: {
+              allowAgentTaskCreation: true,
+              maxAgentAddedTasksPerDiscussion: 12,
+              maxPerTurn: 2,
+            },
+          }}
+        />,
+      );
+      expect(screen.getByText("Minority report")).toBeInTheDocument();
+      expect(screen.getByText("12 / discussion · 2 / turn")).toBeInTheDocument();
+    });
+
+    it("says nothing about deliberation when neither setting is on", () => {
+      renderWithProviders(<GroupConfigPanel config={mockConfig} />);
+      expect(screen.queryByText("Minority report")).not.toBeInTheDocument();
+    });
+
+    /**
+     * Every preset ends in a phase restricted to the moderator, and the backend
+     * only ever wrote this warning to its own log.
+     */
+    it("warns about a phase restricted to a moderator the group lacks", () => {
+      renderWithProviders(<GroupConfigPanel config={{ ...mockConfig, moderatorAgentId: null }} />);
+      expect(screen.getByTestId("group-moderatorless-warning")).toHaveTextContent("Synthesis");
+    });
+
+    it("stays quiet when a moderator is named", () => {
+      renderWithProviders(<GroupConfigPanel config={mockConfig} />);
+      expect(screen.queryByTestId("group-moderatorless-warning")).not.toBeInTheDocument();
+    });
+
+    it("normalizes the backend's hyphenated lifecycle policy for display", () => {
+      renderWithProviders(
+        <GroupConfigPanel
+          config={{
+            ...mockConfig,
+            dynamicAgents: {
+              enabled: true, allowCreation: false, allowRecruitment: true, allowDelegation: true,
+              maxCreatedAgentsPerDiscussion: 5, maxRecruitedAgentsPerDiscussion: 10,
+              maxDelegationsPerTask: 3, delegationTimeoutSeconds: 90,
+              allowedProviders: [], allowedModels: {}, inheritParentModel: true,
+              // The wire form Jackson's @JsonValue actually writes.
+              lifecyclePolicy: "keep-deployed" as never,
+            },
+          }}
+        />,
+      );
+      expect(screen.getByText("keep deployed")).toBeInTheDocument();
+      // Delegation guardrails, with the backend default filled in for the depth
+      // this config leaves unset. Scoped to its own row: "3" is also the group's
+      // maxRounds and its maxDelegationsPerTask.
+      const depthRow = screen.getByText("Max Depth").parentElement!;
+      expect(depthRow).toHaveTextContent("3");
+      expect(screen.getByText("90s")).toBeInTheDocument();
+    });
+
+    /** Both inline editors write the whole config at the same version. */
+    it("closes the approval editor when the phase editor is opened", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="g1" groupVersion={2} />);
+
+      await user.click(screen.getByTestId("group-hitl-edit"));
+      expect(screen.getByTestId("group-hitl-editor")).toBeInTheDocument();
+
+      await user.click(screen.getByTestId("group-phase-edit"));
+      expect(screen.getByTestId("group-phase-editor")).toBeInTheDocument();
+      expect(screen.queryByTestId("group-hitl-editor")).not.toBeInTheDocument();
+    });
+  });
 });

@@ -1,16 +1,22 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, HandMetal, Pencil } from "lucide-react";
+import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, HandMetal, Pencil, MessagesSquare, GitMerge } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import type { AgentGroupConfiguration, DiscussionStyle, DiscussionPhase } from "@/lib/api/groups";
-import { STYLE_INFO } from "@/lib/api/groups";
+import { STYLE_INFO, normalizeLifecyclePolicy } from "@/lib/api/groups";
+import {
+  effectiveDelegationDepth,
+  effectiveDelegationTimeout,
+  moderatorlessPhaseNames,
+} from "@/lib/group-config";
 import { timeoutPolicyLabel, granularityLabel, rejectionPolicyLabel } from "@/lib/hitl-labels";
 import { formatIsoDuration } from "@/lib/hitl-config";
 import { toast } from "sonner";
 import { useDeleteGroup, useDeleteGroupWithMembers } from "@/hooks/use-groups";
 import { GroupHitlEditor } from "./group-hitl-editor";
+import { GroupPhaseEditor } from "./group-phase-editor";
 import { useNavigate } from "react-router-dom";
 
 interface GroupConfigPanelProps {
@@ -48,7 +54,12 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
   const styleInfo = STYLE_INFO[config.style] || STYLE_INFO.ROUND_TABLE;
   const styleColors = PANEL_STYLE_COLORS[config.style as DiscussionStyle] || PANEL_STYLE_COLORS.ROUND_TABLE;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<"group" | "all" | null>(null);
+  // Mutually exclusive on purpose. Both editors write the whole config from
+  // their own snapshot at the same `groupVersion`, so having both open means the
+  // second save either loses the first one's edit or 409s — neither is a state
+  // worth letting a user assemble.
   const [editingHitl, setEditingHitl] = useState(false);
+  const [editingPhases, setEditingPhases] = useState(false);
   const canEditHitl = !!groupId && groupVersion != null;
   const deleteGroupMutation = useDeleteGroup();
   const deleteWithMembersMutation = useDeleteGroupWithMembers();
@@ -56,6 +67,30 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
   const hitl = config.hitlConfig;
   const approvalPhaseNames = (config.phases ?? []).filter((p) => p.requiresApproval).map((p) => p.name);
   const hasHitl = !!hitl || approvalPhaseNames.length > 0;
+  const moderatorlessPhases = useMemo(() => moderatorlessPhaseNames(config), [config]);
+  const canEditPhases = !!groupId && groupVersion != null;
+
+  /**
+   * One row per phase that has abstention or convergence turned on. Phases with
+   * neither are omitted — listing "off" for every phase of a six-phase preset
+   * buries the one that is configured.
+   */
+  const phaseBehaviourSummary = useMemo(() => {
+    return (config.phases ?? [])
+      .filter((p) => p.allowAbstention || p.convergence?.enabled)
+      .map((p) => {
+        const parts: string[] = [];
+        if (p.allowAbstention) parts.push(t("groups.abstentionShort", "abstain"));
+        if (p.convergence?.enabled) {
+          parts.push(
+            t("groups.convergenceShort", "converge ≥{{threshold}}", {
+              threshold: p.convergence.threshold.toFixed(2),
+            }),
+          );
+        }
+        return { name: p.name, value: parts.join(" · ") };
+      });
+  }, [config.phases, t]);
 
   function handleDeleteGroupOnly() {
     if (!groupId || groupVersion == null) return;
@@ -190,7 +225,120 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             {config.protocol.maxTurns != null && config.protocol.maxTurns > 0 && (
               <InfoRow label={t("groups.protocolMaxTurns", "Max Turns")} value={String(config.protocol.maxTurns)} />
             )}
+            {config.protocol.maxCostPerDiscussion != null && config.protocol.maxCostPerDiscussion > 0 && (
+              <>
+                <InfoRow
+                  label={t("groups.protocolMaxCost", "Cost Ceiling")}
+                  value={formatUsd(config.protocol.maxCostPerDiscussion)}
+                />
+                <InfoRow
+                  label={t("groups.protocolOnCostExceeded", "When hit")}
+                  value={
+                    (config.protocol.onCostExceeded ?? "SYNTHESIZE_NOW") === "ABORT"
+                      ? t("groups.costAbort", "Abort")
+                      : t("groups.costSynthesize", "Synthesize now")
+                  }
+                />
+              </>
+            )}
           </div>
+        </div>
+      )}
+
+      {/* Per-phase behaviour — abstention and convergence, both of which live on
+          the phase list and have no other editing surface. */}
+      {canEditPhases && (
+        <div>
+          <h4 className="mb-1.5 flex items-center text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <GitMerge className="inline h-3 w-3 me-1" />
+            {t("groups.phaseBehaviour", "Phase Behaviour")}
+            {!editingPhases && (
+              <button
+                type="button"
+                onClick={() => { setEditingHitl(false); setEditingPhases(true); }}
+                className="ms-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case text-primary transition-colors hover:bg-primary/10"
+                data-testid="group-phase-edit"
+              >
+                <Pencil className="h-2.5 w-2.5" />
+                {t("groups.hitlEdit", "Edit")}
+              </button>
+            )}
+          </h4>
+          {editingPhases ? (
+            <GroupPhaseEditor
+              config={config}
+              groupId={groupId!}
+              groupVersion={groupVersion!}
+              onDone={() => setEditingPhases(false)}
+            />
+          ) : (
+            <div className="space-y-1 rounded-lg border border-border bg-secondary/30 p-2.5">
+              {phaseBehaviourSummary.length > 0 ? (
+                phaseBehaviourSummary.map((row) => (
+                  <InfoRow key={row.name} label={row.name} value={row.value} />
+                ))
+              ) : (
+                <p className="text-[10px] text-muted-foreground">
+                  {t(
+                    "groups.phaseBehaviourNone",
+                    "No abstention or convergence configured — click Edit to let members pass, or to stop a repeating phase once they agree.",
+                  )}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Deliberation quality — only shown when something is actually on, so an
+          untouched group's panel does not grow two rows of "off". */}
+      {(config.recordDissents || config.taskListConfig?.allowAgentTaskCreation) && (
+        <div>
+          <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <MessagesSquare className="inline h-3 w-3 me-1" />
+            {t("groups.deliberationSection", "Deliberation")}
+          </h4>
+          <div className="space-y-1 rounded-lg border border-border bg-secondary/30 p-2.5">
+            {config.recordDissents && (
+              <InfoRow
+                label={t("groups.recordDissents", "Minority report")}
+                value={t("groups.enabled", "Enabled")}
+              />
+            )}
+            {config.taskListConfig?.allowAgentTaskCreation && (
+              <>
+                <InfoRow
+                  label={t("groups.agentFiledTasks", "Agent-filed tasks")}
+                  value={t("groups.enabled", "Enabled")}
+                />
+                <InfoRow
+                  label={t("groups.agentFiledCaps", "Caps")}
+                  value={t("groups.agentFiledCapsValue", "{{perDiscussion}} / discussion · {{perTurn}} / turn", {
+                    perDiscussion: config.taskListConfig.maxAgentAddedTasksPerDiscussion,
+                    perTurn: config.taskListConfig.maxPerTurn,
+                  })}
+                />
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* A phase restricted to a moderator the group does not name cannot run as
+          written — the engine substitutes the first member by speaking order. */}
+      {moderatorlessPhases.length > 0 && (
+        <div
+          className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5"
+          data-testid="group-moderatorless-warning"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <p className="text-[10px] leading-relaxed text-muted-foreground">
+            {t(
+              "groups.moderatorlessWarning",
+              "Restricted to a moderator this group does not have: {{phases}}. The first member by speaking order will stand in.",
+              { phases: moderatorlessPhases.join(", ") },
+            )}
+          </p>
         </div>
       )}
 
@@ -203,7 +351,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             {canEditHitl && !editingHitl && (
               <button
                 type="button"
-                onClick={() => setEditingHitl(true)}
+                onClick={() => { setEditingPhases(false); setEditingHitl(true); }}
                 className="ms-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case text-primary transition-colors hover:bg-primary/10"
                 data-testid="group-hitl-edit"
               >
@@ -315,14 +463,37 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
               />
             )}
             {config.dynamicAgents.allowDelegation && (
-              <InfoRow
-                label={t("groups.dynamicDelegation", "Delegation")}
-                value={t("groups.dynamicMaxPerTask", "✓ (max {{count}}/task)", { count: config.dynamicAgents.maxDelegationsPerTask })}
-              />
+              <>
+                <InfoRow
+                  label={t("groups.dynamicDelegation", "Delegation")}
+                  value={t("groups.dynamicMaxPerTask", "✓ (max {{count}}/task)", { count: config.dynamicAgents.maxDelegationsPerTask })}
+                />
+                <InfoRow
+                  label={t("groups.delegationDepth", "Max Depth")}
+                  value={String(effectiveDelegationDepth(config.dynamicAgents.maxDelegationDepth))}
+                />
+                <InfoRow
+                  label={t("groups.delegationTimeout", "Delegate Timeout")}
+                  value={t("groups.secondsShort", "{{seconds}}s", {
+                    seconds: effectiveDelegationTimeout(config.dynamicAgents.delegationTimeoutSeconds),
+                  })}
+                />
+                {(config.dynamicAgents.allowedDelegationTargets?.length ?? 0) > 0 && (
+                  <InfoRow
+                    label={t("groups.delegationTargets", "Allow-list")}
+                    value={config.dynamicAgents.allowedDelegationTargets!.join(", ")}
+                  />
+                )}
+              </>
             )}
             <InfoRow
               label={t("groups.lifecyclePolicy", "Lifecycle")}
-              value={t(`groups.lifecycle.${config.dynamicAgents.lifecyclePolicy}`, config.dynamicAgents.lifecyclePolicy.replace(/_/g, " ").toLowerCase())}
+              value={(() => {
+                // The backend writes this enum hyphenated and lower-case
+                // (@JsonValue); the i18n keys are the canonical constants.
+                const policy = normalizeLifecyclePolicy(config.dynamicAgents.lifecyclePolicy);
+                return t(`groups.lifecycle.${policy}`, policy.replace(/_/g, " ").toLowerCase());
+              })()}
             />
             {config.dynamicAgents.allowedProviders.length > 0 && (
               <InfoRow
@@ -421,6 +592,11 @@ function InfoRow({ label, value }: { label: string; value: string }) {
       <span className="font-medium text-foreground">{value}</span>
     </div>
   );
+}
+
+/** A cost ceiling, at cent precision — it is a dollar amount, not a score. */
+function formatUsd(value: number): string {
+  return `$${value.toFixed(2)}`;
 }
 
 /** Format allowedModels Record<string, string[]> into a compact display string */

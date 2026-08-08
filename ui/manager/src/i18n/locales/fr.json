@@ -2246,7 +2246,18 @@
       "SKIPPED": "Ignoré",
       "PLAN": "Plan",
       "TASK_RESULT": "Résultat de tâche",
-      "VERIFICATION": "Vérification"
+      "VERIFICATION": "Vérification",
+      "FOLLOW_UP": "Relance",
+      "ABSTAINED": "Abstention",
+      "DISSENT": "Désaccord",
+      "CONVERGENCE": "Convergence",
+      "FACILITATION": "Facilitation",
+      "VOTE": "Vote",
+      "PROPOSAL": "Proposition",
+      "BARGAIN": "Contre-offre",
+      "HUMAN_INPUT": "Apport humain",
+      "RETRO": "Rétrospective",
+      "BID": "Offre"
     },
     "flow": {
       "Opinion": "Opinion",
@@ -2338,7 +2349,61 @@
     "closeConfirmTitle": "Clôturer cette discussion ?",
     "closeConfirmButton": "Clôturer la discussion",
     "closeConfirmDismiss": "Retour",
-    "count_many": "{{count}} groupes"
+    "count_many": "{{count}} groupes",
+    "protocolMaxCost": "Plafond de coût",
+    "protocolOnCostExceeded": "À l'atteinte",
+    "costAbort": "Interrompre",
+    "costSynthesize": "Synthétiser maintenant",
+    "deliberationSection": "Délibération",
+    "recordDissents": "Avis minoritaire",
+    "agentFiledTasks": "Tâches créées par les agents",
+    "agentFiledCaps": "Limites",
+    "agentFiledCapsValue": "{{perDiscussion}} / discussion · {{perTurn}} / tour",
+    "moderatorlessWarning": "Réservé à un modérateur que ce groupe n'a pas : {{phases}}. Le premier membre par ordre de parole prendra le relais.",
+    "delegationDepth": "Profondeur max.",
+    "delegationTimeout": "Délai du délégué",
+    "secondsShort": "{{seconds}}s",
+    "delegationTargets": "Liste autorisée",
+    "phaseBehaviour": "Comportement des phases",
+    "phaseBehaviourNone": "Ni abstention ni convergence configurées — cliquez sur Modifier pour autoriser les passes ou arrêter une phase répétée dès l'accord.",
+    "abstentionShort": "abstention",
+    "convergenceShort": "convergence ≥{{threshold}}",
+    "phasesSaved": "Réglages de phase enregistrés",
+    "phasesNoneToEdit": "Ce groupe ne définit aucune phase. Choisissez un style de discussion, ou ajoutez des phases à la configuration, avant de régler leur comportement.",
+    "phaseRepeats": "×{{repeats}}",
+    "allowAbstention": "Autoriser l'abstention",
+    "allowAbstentionHelp": "Un membre peut renoncer à ajouter du nouveau ce tour-ci plutôt que de se répéter.",
+    "convergenceEnable": "Arrêter tôt en cas de convergence",
+    "convergenceHelp": "Un juge compare chaque répétition à la précédente et met fin à la phase dès que les membres cessent d'évoluer. Coûte un appel par répétition.",
+    "convergenceNeedsRepeats": "Disponible uniquement sur une phase répétée — un passage unique n'a rien à comparer.",
+    "convergenceMinRepeats": "Répétitions min.",
+    "convergenceThreshold": "Seuil",
+    "convergenceJudge": "Juge",
+    "judgeModerator": "Modérateur",
+    "judgeService": "Service",
+    "judgeServiceNote": "Accepté mais pas encore branché — le moteur bascule sur le modérateur et journalise un avertissement.",
+    "convergenceReached": "Convergé",
+    "convergenceChecked": "Contrôle de convergence",
+    "convergenceScore": "accord {{score}}",
+    "convergenceSkipped": "· {{skipped}} tour(s) supplémentaire(s) ignoré(s)",
+    "decisionWinner": "Vainqueur : {{winner}}",
+    "decisionTie": "Égalité",
+    "decisionDecidedAt": "Décidé lors de {{phase}}",
+    "decisionUnparsed": "La réponse du juge n'a pas pu être lue comme un verdict structuré : elle figure telle quelle ci-dessous et la conclusion reste en prose.",
+    "minorityReport": "Avis minoritaire ({{total}})",
+    "attachFiles": "Joindre des fichiers",
+    "attachmentLimit": "Au plus {{max}} pièces jointes par discussion",
+    "attachmentTooLarge": "{{name}} est trop volumineux pour être joint",
+    "attachmentReadFailed": "Impossible de lire {{name}}",
+    "removeAttachment": "Retirer {{name}}",
+    "decisionType": {
+      "VERDICT": "Verdict",
+      "VOTE": "Vote",
+      "AGREEMENT": "Accord",
+      "AWARD": "Attribution",
+      "NONE": "Aucune décision structurée"
+    },
+    "abstainedBody": "N'a rien ajouté de nouveau ce tour-ci."
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -2358,7 +2423,8 @@
     "verificationFailed": "Échoué",
     "showMore": "afficher plus",
     "showLess": "afficher moins",
-    "awaitingApproval": "En attente d'approbation"
+    "awaitingApproval": "En attente d'approbation",
+    "filedBy": "Créée par {{agent}}"
   },
   "memories": {
     "title": "Mémoire utilisateur",
@@ -3067,7 +3133,33 @@
     "dashboard": "Tableau de bord",
     "settings": {
       "hitlApprovalPointsNote": "Ces paramètres définissent le comportement d'une approbation. Les points d'une discussion qui en requièrent une se configurent par phase dans le Manager.",
-      "hitlOpenManager": "Définir les points d'approbation"
+      "hitlOpenManager": "Définir les points d'approbation",
+      "deliberation": "Qualité de la délibération",
+      "deliberationDesc": "Consigner les avis minoritaires et laisser les membres créer le travail découvert en cours de discussion",
+      "recordDissents": "Consigner un avis minoritaire",
+      "recordDissentsDesc": "Après chaque synthèse, chaque membre qui ne l'a pas rédigée dispose d'un tour bref pour dire où il reste en désaccord. Coûte un appel supplémentaire par membre.",
+      "agentFiledTasks": "Laisser les membres créer leurs propres tâches",
+      "agentFiledTasksDesc": "Le travail qu'un agent découvre en cours de discussion devient une vraie tâche reprise par la prochaine vague d'exécution. Désactivé, les outils n'existent tout simplement pas pour ce groupe.",
+      "maxTasksPerDiscussion": "Tâches créées max. / discussion",
+      "maxTasksPerDiscussionHelp": "Ne compte que les tâches créées par les agents, afin qu'un grand backlog planifié ne l'épuise pas.",
+      "maxTasksPerTurn": "Tâches créées max. / tour",
+      "maxTasksPerTurnHelp": "Limite un tour qui s'emballe ; le plafond par discussion limite la dérive lente.",
+      "maxCost": "Plafond de coût (USD)",
+      "maxCostUnlimited": "Aucune limite",
+      "maxCostHelp": "Laissez vide pour aucune limite. Un tour déjà en cours peut encore dépasser légèrement le plafond.",
+      "onCostExceeded": "Lorsque le plafond est atteint",
+      "costSynthesize": "Synthétiser maintenant — passer directement à la conclusion",
+      "costAbort": "Interrompre — faire échouer la discussion immédiatement",
+      "costCeilingInvalid": "Un plafond de coût doit être supérieur à 0. Videz le champ pour aucune limite.",
+      "maxDelegationDepth": "Profondeur de délégation max.",
+      "maxDelegationDepthHelp": "A délègue à B qui délègue à C : profondeur 2. Le saut qui dépasserait cette valeur est refusé — c'est ce qui brise un cycle de délégation.",
+      "delegationTimeout": "Délai de délégation (secondes)",
+      "delegationTimeoutHelp": "Durée d'attente d'un agent délégant vis-à-vis de son délégué. Augmentez-la si le délégué exécute des outils ou une discussion imbriquée.",
+      "allowedDelegationTargets": "Liste de délégation autorisée",
+      "allowedDelegationTargetsHint": "N'importe quel agent déployé",
+      "allowedDelegationTargetsHelp": "Identifiants d'agents séparés par des virgules. Laissez vide pour autoriser tout agent déployé.",
+      "moderatorlessWarning": "Réservé à un modérateur que cette équipe n'a pas : {{phases}}. Le premier membre par ordre de parole prendra le relais.",
+      "memberLimit": "Une équipe peut compter au plus {{max}} membres"
     }
   },
   "operator": {
@@ -3101,7 +3193,8 @@
       "environment": "Environnement",
       "authMode": "Authentification de l'opérateur",
       "authModeHint": "L'opérateur appelle votre API d'administration EDDI. Ce réglage détermine les identifiants portés par ces appels.",
-      "authNoneBlocked": "L'authentification est activée sur ce déploiement : les appels d'outils non authentifiés seraient rejetés. L'opérateur se déploierait correctement puis échouerait à chaque recherche. Choisissez plutôt « Votre identité ».",      "scope": {
+      "authNoneBlocked": "L'authentification est activée sur ce déploiement : les appels d'outils non authentifiés seraient rejetés. L'opérateur se déploierait correctement puis échouerait à chaque recherche. Choisissez plutôt « Votre identité ».",
+      "scope": {
         "label": "Capacité",
         "hint": "Ce que l'opérateur est autorisé à faire. Chaque écriture reste en attente de votre approbation — voir les règles de sécurité ci-dessous.",
         "readOnly": {
@@ -3116,7 +3209,6 @@
         "unavailableFirstActivation": "Non disponible lors de la première activation. Activez d'abord en lecture seule pour prouver que la passerelle d'approbation est fiable, puis reconfigurez pour accorder l'accès en écriture.",
         "writeWarning": "L'activation exécutera un test canari d'écriture : une écriture de test réelle et inoffensive qui doit rester en attente d'approbation avant la fin de ce déploiement. Si elle ne se met pas en pause, l'activation est refusée et l'opérateur est supprimé plutôt que laissé déployé avec une passerelle d'écriture non vérifiée."
       },
-
       "safetyPreamble": "Règles de sécurité (non modifiables)",
       "safetyPreambleHint": "Toujours ajoutées en tête. Elles indiquent à l'opérateur de traiter tout ce que renvoient ses outils comme des données non fiables.",
       "promptBody": "Instructions de l'opérateur",
@@ -3228,7 +3320,6 @@
     },
     "toast": {
       "activated": "Opérateur de plateforme activé",
-
       "activatedReadWrite": "Opérateur de plateforme activé — accès en écriture vérifié",
       "deactivated": "Opérateur de plateforme désactivé",
       "reset": "Opérateur de plateforme supprimé",

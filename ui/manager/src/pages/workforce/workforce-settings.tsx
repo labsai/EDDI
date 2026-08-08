@@ -14,6 +14,8 @@ import {
   ChevronRight,
   Clock,
   Info,
+  AlertTriangle,
+  MessagesSquare,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -26,16 +28,29 @@ import {
 import {
   STYLE_INFO,
   DISCUSSION_STYLES,
+  MAX_DISCUSSION_ROUNDS,
+  MAX_GROUP_MEMBERS,
+  DEFAULT_MAX_DELEGATION_DEPTH,
+  DEFAULT_DELEGATION_TIMEOUT_SECONDS,
+  normalizeLifecyclePolicy,
   type DiscussionStyle,
   type GroupMember,
   type ProtocolConfig,
   type TaskDefinition,
   type DynamicAgentConfig,
+  type GroupTaskConfig,
   type LifecyclePolicy,
+  type CostPolicy,
   type MemberFailurePolicy,
   type MemberUnavailablePolicy,
 } from "@/lib/api/groups";
 import type { GroupHitlConfig, HitlTimeoutPolicy, HitlGranularity, HitlRejectionPolicy } from "@/lib/api/hitl";
+import {
+  DEFAULT_GROUP_TASK_CONFIG,
+  isValidCostCeiling,
+  moderatorlessPhaseNames,
+  normalizeGroupTaskConfig,
+} from "@/lib/group-config";
 import { DEFAULT_AGENT_TIMEOUT_SECONDS } from "@/lib/group-templates";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentPicker } from "@/components/shared/agent-picker";
@@ -86,6 +101,7 @@ function SectionHeader({
 const DEFAULT_PROTOCOL: ProtocolConfig = {
   agentTimeoutSeconds: DEFAULT_AGENT_TIMEOUT_SECONDS, onAgentFailure: "SKIP", maxRetries: 2,
   onMemberUnavailable: "SKIP", maxTurns: 0,
+  maxCostPerDiscussion: null, onCostExceeded: "SYNTHESIZE_NOW",
 };
 const DEFAULT_HITL: GroupHitlConfig = {
   approvalTimeout: null, timeoutPolicy: "WAIT_INDEFINITELY",
@@ -95,9 +111,24 @@ const DEFAULT_DYNAMIC: DynamicAgentConfig = {
   enabled: false, allowCreation: false, allowRecruitment: false,
   allowDelegation: true, maxCreatedAgentsPerDiscussion: 5,
   maxRecruitedAgentsPerDiscussion: 10, maxDelegationsPerTask: 3,
+  maxDelegationDepth: DEFAULT_MAX_DELEGATION_DEPTH,
+  delegationTimeoutSeconds: DEFAULT_DELEGATION_TIMEOUT_SECONDS,
+  allowedDelegationTargets: [],
   allowedProviders: [], allowedModels: {}, inheritParentModel: true,
   lifecyclePolicy: "EPHEMERAL",
 };
+
+/**
+ * "a, b ,, c" → ["a", "b", "c"]. Empty entries are dropped rather than stored:
+ * a blank agent id in `allowedDelegationTargets` would match nothing and read as
+ * a real restriction.
+ */
+function parseDelegationTargets(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 // ─── Form Field ──────────────────────────────────────────────────
 
@@ -253,6 +284,10 @@ function WorkforceSettings() {
   const [hitlConfig, setHitlConfig] = useState<GroupHitlConfig>(DEFAULT_HITL);
   const [dynamicAgents, setDynamicAgents] = useState<DynamicAgentConfig>(DEFAULT_DYNAMIC);
   const [tasks, setTasks] = useState<TaskDefinition[]>([]);
+  const [recordDissents, setRecordDissents] = useState(false);
+  const [taskListConfig, setTaskListConfig] = useState<GroupTaskConfig>(DEFAULT_GROUP_TASK_CONFIG);
+  /** Raw text of the delegation allow-list; see the field for why it is separate. */
+  const [delegationTargetsDraft, setDelegationTargetsDraft] = useState("");
 
   // ─── UI state ────────────────────────────────────────────────────
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -271,10 +306,21 @@ function WorkforceSettings() {
     setMaxRounds(config.maxRounds ?? 3);
     setModeratorAgentId(config.moderatorAgentId ?? null);
     setMembers(config.members ?? []);
-    if (config.protocol) setProtocol(config.protocol);
+    if (config.protocol) setProtocol({ ...DEFAULT_PROTOCOL, ...config.protocol });
     if (config.hitlConfig) setHitlConfig({ ...DEFAULT_HITL, ...config.hitlConfig });
-    if (config.dynamicAgents) setDynamicAgents({ ...DEFAULT_DYNAMIC, ...config.dynamicAgents });
+    if (config.dynamicAgents) {
+      setDelegationTargetsDraft((config.dynamicAgents.allowedDelegationTargets ?? []).join(", "));
+      setDynamicAgents({
+        ...DEFAULT_DYNAMIC,
+        ...config.dynamicAgents,
+        // `getGroup` already canonicalises this, but the settings page is also
+        // reachable with a config from a cache written before that existed.
+        lifecyclePolicy: normalizeLifecyclePolicy(config.dynamicAgents.lifecyclePolicy),
+      });
+    }
     if (config.tasks) setTasks(config.tasks);
+    setRecordDissents(!!config.recordDissents);
+    if (config.taskListConfig) setTaskListConfig(normalizeGroupTaskConfig(config.taskListConfig));
     setInitialized(true);
   }, [config, initialized]);
 
@@ -287,16 +333,38 @@ function WorkforceSettings() {
     if (maxRounds !== (config.maxRounds ?? 3)) return true;
     if (moderatorAgentId !== (config.moderatorAgentId ?? null)) return true;
     if (JSON.stringify(members) !== JSON.stringify(config.members ?? [])) return true;
-    if (JSON.stringify(protocol) !== JSON.stringify(config.protocol ?? DEFAULT_PROTOCOL)) return true;
+    // Compare against the SAME defaults-merged shape the form was initialised
+    // with. Comparing raw `config.protocol` marks the page dirty forever the
+    // moment a default key (a cost ceiling the stored config never carried) is
+    // merged in on load.
+    if (JSON.stringify(protocol) !== JSON.stringify({ ...DEFAULT_PROTOCOL, ...(config.protocol ?? {}) })) return true;
     // Only counts when there is a hitlConfig to persist to. This page cannot
     // create one (approval points, which are what actually gate a pause, are set
     // in the Manager), so tracking edits that can never be saved left the page
     // permanently dirty after a successful save.
     if (config.hitlConfig && JSON.stringify(hitlConfig) !== JSON.stringify({ ...DEFAULT_HITL, ...config.hitlConfig })) return true;
-    if (JSON.stringify(dynamicAgents) !== JSON.stringify({ ...DEFAULT_DYNAMIC, ...(config.dynamicAgents ?? {}) })) return true;
+    if (
+      JSON.stringify(dynamicAgents) !==
+      JSON.stringify({
+        ...DEFAULT_DYNAMIC,
+        ...(config.dynamicAgents ?? {}),
+        ...(config.dynamicAgents
+          ? { lifecyclePolicy: normalizeLifecyclePolicy(config.dynamicAgents.lifecyclePolicy) }
+          : {}),
+      })
+    ) return true;
     if (JSON.stringify(tasks) !== JSON.stringify(config.tasks ?? [])) return true;
+    if (recordDissents !== !!config.recordDissents) return true;
+    if (
+      JSON.stringify(taskListConfig) !==
+      JSON.stringify(
+        config.taskListConfig
+          ? normalizeGroupTaskConfig(config.taskListConfig)
+          : DEFAULT_GROUP_TASK_CONFIG,
+      )
+    ) return true;
     return false;
-  }, [config, name, description, style, maxRounds, moderatorAgentId, members, protocol, hitlConfig, dynamicAgents, tasks]);
+  }, [config, name, description, style, maxRounds, moderatorAgentId, members, protocol, hitlConfig, dynamicAgents, tasks, recordDissents, taskListConfig]);
 
   // ─── Beforeunload guard ─────────────────────────────────────────
   useEffect(() => {
@@ -313,6 +381,17 @@ function WorkforceSettings() {
     if (!boardId || !config) return;
     if (!name.trim()) {
       toast.error(t("Workforce.settings.nameRequired", "Task force name is required"));
+      return;
+    }
+    // The backend silently coerces a non-positive ceiling to "unlimited" — the
+    // exact opposite of what a 0 was meant to say. Refuse it here instead.
+    if (!isValidCostCeiling(protocol.maxCostPerDiscussion)) {
+      toast.error(
+        t(
+          "Workforce.settings.costCeilingInvalid",
+          "A cost ceiling must be greater than 0. Clear the field for no limit.",
+        ),
+      );
       return;
     }
     const updatedConfig = {
@@ -333,6 +412,13 @@ function WorkforceSettings() {
       ...(config.hitlConfig ? { hitlConfig } : {}),
       dynamicAgents,
       tasks: style === "TASK_FORCE" ? tasks : config.tasks,
+      recordDissents,
+      // Absent means the addGroupTask/listGroupTasks tools are never assembled.
+      // Writing a disabled block instead would be equivalent for the engine but
+      // is noise in the stored document, so only persist it once it is on — or
+      // once the group already carried one, so turning it back off is savable.
+      taskListConfig:
+        taskListConfig.allowAgentTaskCreation || config.taskListConfig ? taskListConfig : undefined,
     };
     try {
       await updateGroupAsync(
@@ -359,6 +445,8 @@ function WorkforceSettings() {
     hitlConfig,
     dynamicAgents,
     tasks,
+    recordDissents,
+    taskListConfig,
     version,
     updateGroupAsync,
     t,
@@ -417,6 +505,13 @@ function WorkforceSettings() {
     t,
   ]);
 
+  // Recomputed from the LIVE form state rather than the saved config, so the
+  // warning appears the moment the moderator is cleared, not after a save.
+  const moderatorlessPhases = useMemo(
+    () => moderatorlessPhaseNames({ moderatorAgentId, phases: config?.phases ?? null, style, maxRounds }),
+    [moderatorAgentId, config?.phases, style, maxRounds],
+  );
+
   // ─── Member helpers ─────────────────────────────────────────────
   const updateMember = useCallback(
     (index: number, patch: Partial<GroupMember>) => {
@@ -436,6 +531,16 @@ function WorkforceSettings() {
       if (members.some((m) => m.agentId === member.agentId)) {
         toast.warning(
           t("Workforce.settings.duplicateMember", "This agent is already a member")
+        );
+        return;
+      }
+      // Bean-validated server-side (`@Size(max = MAX_MEMBERS)`), so exceeding it
+      // fails the whole save with a validation error rather than the one add.
+      if (members.length >= MAX_GROUP_MEMBERS) {
+        toast.error(
+          t("Workforce.settings.memberLimit", "A task force can hold at most {{max}} members", {
+            max: MAX_GROUP_MEMBERS,
+          })
         );
         return;
       }
@@ -584,14 +689,17 @@ function WorkforceSettings() {
                 id="settings-max-rounds"
                 type="number"
                 min={1}
-                max={20}
+                // The backend's own ceiling. Clamping lower here would silently
+                // rewrite a valid config authored elsewhere the first time
+                // someone touched this field.
+                max={MAX_DISCUSSION_ROUNDS}
                 step={1}
                 value={maxRounds}
                 onChange={(e) => {
                   const val = Number(e.target.value);
                   if (isNaN(val)) return;
                   setMaxRounds(
-                    Math.max(1, Math.min(20, val))
+                    Math.max(1, Math.min(MAX_DISCUSSION_ROUNDS, val))
                   );
                 }}
                 className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
@@ -621,6 +729,26 @@ function WorkforceSettings() {
               </select>
             </FormField>
           </div>
+
+          {/* Every preset ends in a phase restricted to the moderator. Without
+              one the engine stands in the first member by speaking order and
+              says so at runtime — a substitution the author never asked for, and
+              one the backend only ever wrote to its own log. */}
+          {moderatorlessPhases.length > 0 && (
+            <div
+              className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5"
+              data-testid="moderatorless-phase-warning"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "Workforce.settings.moderatorlessWarning",
+                  "Restricted to a moderator this task force does not have: {{phases}}. The first member by speaking order will stand in.",
+                  { phases: moderatorlessPhases.join(", ") },
+                )}
+              </p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -831,6 +959,176 @@ function WorkforceSettings() {
                 onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setProtocol((p) => ({ ...p, maxTurns: Math.max(0, Math.min(100, v)) })); }}
                 className="h-10 w-full sm:w-1/2 rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
             </FormField>
+
+            {/* Cost ceiling (EDDI I1) — a dollar bound on the whole discussion,
+                checked before each turn and each TASK_FORCE execute wave. */}
+            <div className="grid grid-cols-1 gap-5 border-t border-border pt-4 sm:grid-cols-2">
+              <FormField label={t("Workforce.settings.maxCost", "Cost Ceiling (USD)")} htmlFor="settings-max-cost">
+                <input
+                  id="settings-max-cost"
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={protocol.maxCostPerDiscussion ?? ""}
+                  placeholder={t("Workforce.settings.maxCostUnlimited", "No limit")}
+                  aria-invalid={!isValidCostCeiling(protocol.maxCostPerDiscussion)}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setProtocol((p) => ({
+                      ...p,
+                      // An empty field means "no limit" — distinct from 0, which
+                      // the backend would coerce to no limit anyway but which
+                      // reads as "never run". Save refuses that; see handleSave.
+                      maxCostPerDiscussion: raw === "" ? null : Number(raw),
+                    }));
+                  }}
+                  data-testid="settings-max-cost"
+                  className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow aria-[invalid=true]:border-destructive"
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {t(
+                    "Workforce.settings.maxCostHelp",
+                    "Leave empty for no limit. A turn already in flight can still push the total slightly past the ceiling.",
+                  )}
+                </p>
+              </FormField>
+              <FormField label={t("Workforce.settings.onCostExceeded", "When the ceiling is hit")} htmlFor="settings-on-cost">
+                <select
+                  id="settings-on-cost"
+                  value={protocol.onCostExceeded ?? "SYNTHESIZE_NOW"}
+                  disabled={protocol.maxCostPerDiscussion == null}
+                  onChange={(e) => setProtocol((p) => ({ ...p, onCostExceeded: e.target.value as CostPolicy }))}
+                  className="h-10 w-full cursor-pointer appearance-none rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground transition-shadow focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="SYNTHESIZE_NOW">{t("Workforce.settings.costSynthesize", "Synthesize now — skip ahead to the conclusion")}</option>
+                  <option value="ABORT">{t("Workforce.settings.costAbort", "Abort — fail the discussion immediately")}</option>
+                </select>
+              </FormField>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ═══════════════════════════════════════════════════════════
+          SECTION 3b: Deliberation quality (dissents, agent-filed tasks)
+          ═══════════════════════════════════════════════════════════ */}
+      <section className="mb-10" aria-labelledby="section-deliberation">
+        <button
+          type="button"
+          onClick={() => toggleSection("deliberation")}
+          className="w-full rounded-lg text-start transition-colors hover:bg-muted/50"
+          aria-expanded={expandedSections.deliberation ?? false}
+        >
+          <SectionHeader
+            icon={<MessagesSquare className="h-4 w-4" />}
+            title={t("Workforce.settings.deliberation", "Deliberation Quality")}
+            id="section-deliberation"
+            description={t(
+              "Workforce.settings.deliberationDesc",
+              "Capture minority views and let members file work they discover mid-discussion",
+            )}
+            expanded={expandedSections.deliberation ?? false}
+          />
+        </button>
+
+        {(expandedSections.deliberation ?? false) && (
+          <div className="space-y-5 rounded-xl border border-border bg-card p-5 shadow-sm animate-in fade-in-0 slide-in-from-top-2 duration-200">
+            {/* Minority report (I4) */}
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {t("Workforce.settings.recordDissents", "Record a minority report")}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    "Workforce.settings.recordDissentsDesc",
+                    "After each synthesis, every member who did not write it gets one short turn to state where they still disagree. Costs one extra call per member.",
+                  )}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={recordDissents}
+                aria-label={t("Workforce.settings.recordDissents", "Record a minority report")}
+                onClick={() => setRecordDissents((v) => !v)}
+                data-testid="settings-record-dissents"
+                className={cn(
+                  "relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  recordDissents ? "bg-primary" : "bg-muted",
+                )}
+              >
+                <span className={cn("pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform", recordDissents ? "translate-x-5" : "translate-x-0")} />
+              </button>
+            </div>
+
+            {/* Agent-filed tasks (I5) */}
+            <div className="flex items-start justify-between gap-4 border-t border-border pt-4">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {t("Workforce.settings.agentFiledTasks", "Let members file their own tasks")}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    "Workforce.settings.agentFiledTasksDesc",
+                    "Work an agent discovers mid-discussion becomes a real task the next execution wave picks up. Off means the tools do not exist for this group at all.",
+                  )}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={taskListConfig.allowAgentTaskCreation}
+                aria-label={t("Workforce.settings.agentFiledTasks", "Let members file their own tasks")}
+                onClick={() => setTaskListConfig((p) => ({ ...p, allowAgentTaskCreation: !p.allowAgentTaskCreation }))}
+                data-testid="settings-agent-filed-tasks"
+                className={cn(
+                  "relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  taskListConfig.allowAgentTaskCreation ? "bg-primary" : "bg-muted",
+                )}
+              >
+                <span className={cn("pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform", taskListConfig.allowAgentTaskCreation ? "translate-x-5" : "translate-x-0")} />
+              </button>
+            </div>
+
+            {taskListConfig.allowAgentTaskCreation && (
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <FormField label={t("Workforce.settings.maxTasksPerDiscussion", "Max filed tasks / discussion")} htmlFor="settings-tasks-per-discussion">
+                  <input
+                    id="settings-tasks-per-discussion"
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={taskListConfig.maxAgentAddedTasksPerDiscussion}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (!isNaN(v)) setTaskListConfig((p) => ({ ...p, maxAgentAddedTasksPerDiscussion: Math.max(1, Math.min(200, v)) }));
+                    }}
+                    className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                  />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {t("Workforce.settings.maxTasksPerDiscussionHelp", "Counts only agent-filed tasks, so a large planned backlog does not exhaust it.")}
+                  </p>
+                </FormField>
+                <FormField label={t("Workforce.settings.maxTasksPerTurn", "Max filed tasks / turn")} htmlFor="settings-tasks-per-turn">
+                  <input
+                    id="settings-tasks-per-turn"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={taskListConfig.maxPerTurn}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (!isNaN(v)) setTaskListConfig((p) => ({ ...p, maxPerTurn: Math.max(1, Math.min(20, v)) }));
+                    }}
+                    className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                  />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {t("Workforce.settings.maxTasksPerTurnHelp", "Bounds a runaway single turn; the discussion cap bounds slow drift.")}
+                  </p>
+                </FormField>
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -1000,6 +1298,71 @@ function WorkforceSettings() {
                       className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
                   </FormField>
                 </div>
+
+                {/* Delegation guardrails. Only meaningful while delegation is on
+                    — a depth cap on a capability nobody has is noise. */}
+                {dynamicAgents.allowDelegation && (
+                  <div className="space-y-5 border-t border-border pt-4">
+                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                      <FormField label={t("Workforce.settings.maxDelegationDepth", "Max Delegation Depth")} htmlFor="settings-delegation-depth">
+                        <input
+                          id="settings-delegation-depth"
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={dynamicAgents.maxDelegationDepth ?? DEFAULT_MAX_DELEGATION_DEPTH}
+                          onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setDynamicAgents((p) => ({ ...p, maxDelegationDepth: Math.max(1, Math.min(10, v)) })); }}
+                          data-testid="settings-delegation-depth"
+                          className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                        />
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {t("Workforce.settings.maxDelegationDepthHelp", "A delegating to B delegating to C is depth 2. The hop that would exceed this is refused — this is what stops a delegation cycle.")}
+                        </p>
+                      </FormField>
+                      <FormField label={t("Workforce.settings.delegationTimeout", "Delegation Timeout (seconds)")} htmlFor="settings-delegation-timeout">
+                        <input
+                          id="settings-delegation-timeout"
+                          type="number"
+                          min={1}
+                          max={900}
+                          value={dynamicAgents.delegationTimeoutSeconds ?? DEFAULT_DELEGATION_TIMEOUT_SECONDS}
+                          onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setDynamicAgents((p) => ({ ...p, delegationTimeoutSeconds: Math.max(1, Math.min(900, v)) })); }}
+                          data-testid="settings-delegation-timeout"
+                          className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                        />
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {t("Workforce.settings.delegationTimeoutHelp", "How long a delegating agent waits for its delegate. Raise it when the delegate runs tools or a nested discussion.")}
+                        </p>
+                      </FormField>
+                    </div>
+                    <FormField label={t("Workforce.settings.allowedDelegationTargets", "Delegation Allow-list")} htmlFor="settings-delegation-targets">
+                      {/* Edited as free text and parsed on change into the config
+                          list, but DISPLAYED from its own draft. Rendering
+                          `list.join(", ")` back into the field re-serializes on
+                          every keystroke, so the separator you just typed
+                          disappears under the cursor and " , " becomes
+                          impossible to type. */}
+                      <input
+                        id="settings-delegation-targets"
+                        type="text"
+                        value={delegationTargetsDraft}
+                        placeholder={t("Workforce.settings.allowedDelegationTargetsHint", "Any deployed agent")}
+                        onChange={(e) => {
+                          setDelegationTargetsDraft(e.target.value);
+                          setDynamicAgents((p) => ({
+                            ...p,
+                            allowedDelegationTargets: parseDelegationTargets(e.target.value),
+                          }));
+                        }}
+                        data-testid="settings-delegation-targets"
+                        className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                      />
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        {t("Workforce.settings.allowedDelegationTargetsHelp", "Comma-separated agent IDs. Leave empty to allow any deployed agent.")}
+                      </p>
+                    </FormField>
+                  </div>
+                )}
 
                 {/* Model & lifecycle */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 border-t border-border pt-4">

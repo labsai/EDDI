@@ -2241,7 +2241,18 @@
       "SKIPPED": "건너뜀",
       "PLAN": "계획",
       "TASK_RESULT": "작업 결과",
-      "VERIFICATION": "검증"
+      "VERIFICATION": "검증",
+      "FOLLOW_UP": "후속 질문",
+      "ABSTAINED": "기권",
+      "DISSENT": "반대 의견",
+      "CONVERGENCE": "수렴",
+      "FACILITATION": "진행 조치",
+      "VOTE": "투표",
+      "PROPOSAL": "제안",
+      "BARGAIN": "역제안",
+      "HUMAN_INPUT": "사람의 입력",
+      "RETRO": "회고",
+      "BID": "입찰"
     },
     "flow": {
       "Opinion": "의견",
@@ -2332,7 +2343,61 @@
     "sendFollowup": "후속 메시지 보내기",
     "closeConfirmTitle": "이 토론을 종료하시겠습니까?",
     "closeConfirmButton": "토론 종료",
-    "closeConfirmDismiss": "뒤로"
+    "closeConfirmDismiss": "뒤로",
+    "protocolMaxCost": "비용 상한",
+    "protocolOnCostExceeded": "도달 시",
+    "costAbort": "중단",
+    "costSynthesize": "즉시 종합",
+    "deliberationSection": "심의",
+    "recordDissents": "소수 의견",
+    "agentFiledTasks": "에이전트가 등록한 작업",
+    "agentFiledCaps": "상한",
+    "agentFiledCapsValue": "{{perDiscussion}} / 토론 · {{perTurn}} / 턴",
+    "moderatorlessWarning": "이 그룹에 없는 진행자로 제한됨: {{phases}}. 발언 순서상 첫 번째 구성원이 대신합니다.",
+    "delegationDepth": "최대 깊이",
+    "delegationTimeout": "위임 제한 시간",
+    "secondsShort": "{{seconds}}초",
+    "delegationTargets": "허용 목록",
+    "phaseBehaviour": "단계 동작",
+    "phaseBehaviourNone": "기권과 수렴이 모두 설정되지 않았습니다 — 편집을 눌러 구성원이 넘어가게 하거나, 합의 시 반복 단계를 종료하세요.",
+    "abstentionShort": "기권",
+    "convergenceShort": "수렴 ≥{{threshold}}",
+    "phasesSaved": "단계 설정이 저장되었습니다",
+    "phasesNoneToEdit": "이 그룹에는 단계가 정의되어 있지 않습니다. 단계별 동작을 조정하기 전에 토론 방식을 고르거나 설정에 단계를 추가하세요.",
+    "phaseRepeats": "×{{repeats}}",
+    "allowAbstention": "기권 허용",
+    "allowAbstentionHelp": "구성원은 같은 말을 반복하는 대신 이번 라운드에 새 내용을 추가하지 않을 수 있습니다.",
+    "convergenceEnable": "수렴 시 조기 종료",
+    "convergenceHelp": "심판이 각 반복을 이전 반복과 비교해 구성원의 입장이 더는 바뀌지 않으면 단계를 끝냅니다. 반복마다 호출 1회가 듭니다.",
+    "convergenceNeedsRepeats": "반복되는 단계에서만 사용할 수 있습니다 — 한 번만 실행하면 비교할 대상이 없습니다.",
+    "convergenceMinRepeats": "최소 반복",
+    "convergenceThreshold": "임계값",
+    "convergenceJudge": "심판",
+    "judgeModerator": "진행자",
+    "judgeService": "서비스",
+    "judgeServiceNote": "허용되지만 아직 연결되지 않았습니다 — 엔진이 진행자로 대체하고 경고를 기록합니다.",
+    "convergenceReached": "수렴됨",
+    "convergenceChecked": "수렴 검사",
+    "convergenceScore": "일치도 {{score}}",
+    "convergenceSkipped": "· 이후 {{skipped}}개 라운드 건너뜀",
+    "decisionWinner": "승자: {{winner}}",
+    "decisionTie": "무승부",
+    "decisionDecidedAt": "{{phase}}에서 결정",
+    "decisionUnparsed": "심판의 답변을 구조화된 판정으로 읽을 수 없어 아래에 원문 그대로 남기고 결론은 산문으로 유지합니다.",
+    "minorityReport": "소수 의견 ({{total}})",
+    "attachFiles": "파일 첨부",
+    "attachmentLimit": "토론당 첨부는 최대 {{max}}개입니다",
+    "attachmentTooLarge": "{{name}}은(는) 너무 커서 첨부할 수 없습니다",
+    "attachmentReadFailed": "{{name}}을(를) 읽을 수 없습니다",
+    "removeAttachment": "{{name}} 제거",
+    "decisionType": {
+      "VERDICT": "판정",
+      "VOTE": "투표",
+      "AGREEMENT": "합의",
+      "AWARD": "낙찰",
+      "NONE": "구조화된 결정 없음"
+    },
+    "abstainedBody": "이번 라운드에는 새로운 내용을 더하지 않았습니다."
   },
   "taskBoard": {
     "title": "작업 보드",
@@ -2352,7 +2417,8 @@
     "verificationFailed": "실패",
     "showMore": "더 보기",
     "showLess": "접기",
-    "awaitingApproval": "승인 대기 중"
+    "awaitingApproval": "승인 대기 중",
+    "filedBy": "{{agent}}이(가) 등록"
   },
   "memories": {
     "title": "사용자 메모리",
@@ -3061,7 +3127,33 @@
     "dashboard": "대시보드",
     "settings": {
       "hitlApprovalPointsNote": "이 설정은 승인 동작 방식을 제어합니다. 토론의 어느 지점에서 승인이 필요한지는 Manager에서 단계별로 구성합니다.",
-      "hitlOpenManager": "승인 지점 설정"
+      "hitlOpenManager": "승인 지점 설정",
+      "deliberation": "심의 품질",
+      "deliberationDesc": "소수 의견을 기록하고, 토론 중 발견한 작업을 구성원이 등록하도록 허용합니다",
+      "recordDissents": "소수 의견 기록",
+      "recordDissentsDesc": "각 종합 이후, 그것을 작성하지 않은 모든 구성원이 짧은 턴을 얻어 여전히 동의하지 않는 지점을 밝힙니다. 구성원당 호출 1회가 추가됩니다.",
+      "agentFiledTasks": "구성원이 직접 작업을 등록하도록 허용",
+      "agentFiledTasksDesc": "에이전트가 토론 중 발견한 작업이 실제 작업이 되어 다음 실행 웨이브가 처리합니다. 끄면 이 그룹에는 해당 도구가 아예 존재하지 않습니다.",
+      "maxTasksPerDiscussion": "토론당 최대 등록 작업",
+      "maxTasksPerDiscussionHelp": "에이전트가 등록한 작업만 계산하므로, 계획된 대형 백로그가 이 한도를 소진하지 않습니다.",
+      "maxTasksPerTurn": "턴당 최대 등록 작업",
+      "maxTasksPerTurnHelp": "폭주하는 한 턴을 제한합니다. 토론 단위 상한은 느린 이탈을 제한합니다.",
+      "maxCost": "비용 상한 (USD)",
+      "maxCostUnlimited": "제한 없음",
+      "maxCostHelp": "비워 두면 제한이 없습니다. 이미 진행 중인 턴 때문에 총액이 상한을 조금 넘길 수 있습니다.",
+      "onCostExceeded": "상한에 도달하면",
+      "costSynthesize": "즉시 종합 — 결론으로 건너뛰기",
+      "costAbort": "중단 — 토론을 즉시 실패 처리",
+      "costCeilingInvalid": "비용 상한은 0보다 커야 합니다. 제한을 없애려면 필드를 비우세요.",
+      "maxDelegationDepth": "최대 위임 깊이",
+      "maxDelegationDepthHelp": "A가 B에게, B가 C에게 위임하면 깊이 2입니다. 이를 넘는 호출은 거부되며, 이것이 위임 순환을 끊습니다.",
+      "delegationTimeout": "위임 제한 시간 (초)",
+      "delegationTimeoutHelp": "위임하는 에이전트가 수임자를 기다리는 시간입니다. 수임자가 도구나 중첩 토론을 실행하면 늘리세요.",
+      "allowedDelegationTargets": "위임 허용 목록",
+      "allowedDelegationTargetsHint": "배포된 아무 에이전트",
+      "allowedDelegationTargetsHelp": "쉼표로 구분한 에이전트 ID. 비워 두면 배포된 모든 에이전트를 허용합니다.",
+      "moderatorlessWarning": "이 태스크포스에 없는 진행자로 제한됨: {{phases}}. 발언 순서상 첫 번째 구성원이 대신합니다.",
+      "memberLimit": "태스크포스는 최대 {{max}}명의 구성원을 둘 수 있습니다"
     }
   },
   "operator": {
@@ -3095,7 +3187,8 @@
       "environment": "환경",
       "authMode": "오퍼레이터 인증 방식",
       "authModeHint": "오퍼레이터는 EDDI 관리 API를 호출합니다. 이 설정이 해당 호출에 실릴 자격 증명을 결정합니다.",
-      "authNoneBlocked": "이 배포는 인증이 켜져 있어 인증되지 않은 도구 호출은 거부됩니다. 오퍼레이터는 배포에는 성공하지만 이후 모든 조회에 실패합니다. 대신 \"사용자 ID\"를 선택하세요.",      "scope": {
+      "authNoneBlocked": "이 배포는 인증이 켜져 있어 인증되지 않은 도구 호출은 거부됩니다. 오퍼레이터는 배포에는 성공하지만 이후 모든 조회에 실패합니다. 대신 \"사용자 ID\"를 선택하세요.",
+      "scope": {
         "label": "권한 범위",
         "hint": "오퍼레이터가 수행할 수 있는 작업입니다. 모든 쓰기 작업은 여전히 승인을 기다립니다 — 아래 안전 규칙을 참고하세요.",
         "readOnly": {
@@ -3110,7 +3203,6 @@
         "unavailableFirstActivation": "처음 활성화할 때는 사용할 수 없습니다. 먼저 읽기 전용으로 활성화하여 승인 게이트가 안전함을 증명한 뒤, 다시 구성하여 쓰기 권한을 부여하세요.",
         "writeWarning": "활성화하면 쓰기 카나리 테스트가 실행됩니다: 실제이지만 무해한 테스트 쓰기 작업으로, 이 배포가 완료되기 전에 승인을 기다리며 일시 중지되어야 합니다. 일시 중지되지 않으면 활성화가 거부되고, 검증되지 않은 쓰기 게이트 상태로 배포된 채 남겨두는 대신 오퍼레이터가 제거됩니다."
       },
-
       "safetyPreamble": "안전 규칙 (수정 불가)",
       "safetyPreambleHint": "항상 앞에 추가되며, 도구가 반환하는 모든 것을 신뢰할 수 없는 데이터로 다루도록 오퍼레이터에게 지시합니다.",
       "promptBody": "오퍼레이터 지침",
@@ -3222,7 +3314,6 @@
     },
     "toast": {
       "activated": "플랫폼 오퍼레이터를 활성화했습니다",
-
       "activatedReadWrite": "플랫폼 오퍼레이터가 활성화되었습니다 — 쓰기 권한이 확인되었습니다",
       "deactivated": "플랫폼 오퍼레이터를 비활성화했습니다",
       "reset": "플랫폼 오퍼레이터를 삭제했습니다",

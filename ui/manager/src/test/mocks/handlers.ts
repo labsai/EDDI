@@ -2029,7 +2029,24 @@ export const handlers = [
           { name: "Critique", type: "CRITIQUE", participants: "*", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: true, inputTemplate: null, repeats: 1 },
           { name: "Synthesis", type: "SYNTHESIS", participants: "moderator", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: false, inputTemplate: null, repeats: 1 },
         ],
-        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+        protocol: {
+          agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP",
+          // EDDI I1 — a dollar ceiling on the whole discussion.
+          maxCostPerDiscussion: 2.5, onCostExceeded: "SYNTHESIZE_NOW",
+        },
+        dynamicAgents: {
+          enabled: false, allowCreation: false, allowRecruitment: false, allowDelegation: true,
+          maxCreatedAgentsPerDiscussion: 5, maxRecruitedAgentsPerDiscussion: 10,
+          maxDelegationsPerTask: 3, maxDelegationDepth: 3, delegationTimeoutSeconds: 120,
+          allowedDelegationTargets: [], allowedProviders: [], allowedModels: {},
+          inheritParentModel: true,
+          // Hyphenated and lower-case, exactly as Jackson's @JsonValue writes it
+          // on AgentGroupConfiguration.LifecyclePolicy. A mock that returned the
+          // canonical constant would hide the mismatch this format caused.
+          lifecyclePolicy: "keep-deployed",
+        },
+        recordDissents: true,
+        taskListConfig: { allowAgentTaskCreation: true, maxAgentAddedTasksPerDiscussion: 20, maxPerTurn: 3 },
       },
       grp2: {
         name: "Strategy Debate",

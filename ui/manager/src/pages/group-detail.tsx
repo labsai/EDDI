@@ -36,6 +36,7 @@ import {
   closeGroupConversation,
   type DiscussionStyle,
   type AgentGroupConfiguration,
+  type GroupAttachmentRef,
 } from "@/lib/api/groups";
 import type { HitlVerdict } from "@/lib/api/hitl";
 import { STYLE_THEME } from "@/components/groups/discussion-transcript";
@@ -172,17 +173,20 @@ export function GroupDetailPage() {
     return undefined;
   }, [streamState.isStreaming, selectedConvId, selectedConversation, t]);
 
-  const handleInputSubmit = useCallback((question: string) => {
+  const handleInputSubmit = useCallback((question: string, attachments?: GroupAttachmentRef[]) => {
     if (!groupId) return;
     if (inputMode === "continue" && selectedConvId) {
-      // SSE streaming continuation
+      // SSE streaming continuation. Attachments are deliberately not forwarded:
+      // the backend only shares files with member agents when a discussion
+      // starts, and rejects a continuation carrying any. DiscussionInput hides
+      // the affordance in this mode, so there should be none to drop.
       continueStream(groupId, selectedConvId, question);
       toast.info(t("groups.continueStreamStarted", "Continuation started — streaming live"));
     } else {
       // New discussion
       pendingDecisionRef.current = null;
       setSelectedConvId(null);
-      startStream(groupId, question);
+      startStream(groupId, question, attachments);
       toast.info(t("groups.discussionStarted", "Discussion started — streaming live"));
     }
   }, [groupId, inputMode, selectedConvId, continueStream, startStream, t]);

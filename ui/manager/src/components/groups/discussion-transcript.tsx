@@ -7,6 +7,8 @@ import { PhaseHeader } from "./phase-header";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { AgentResponseCard } from "./agent-response-card";
 import { TaskBoard } from "./task-board";
+import { DecisionRecordCard } from "./decision-record-card";
+import { hasDisplayableDecision } from "@/lib/group-config";
 import { parseTranscriptContent, safeFormatDate } from "./group-utils";
 import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, SharedTaskList, TaskDefinition } from "@/lib/api/groups";
 import type { HitlVerdict } from "@/lib/api/hitl";
@@ -139,7 +141,20 @@ const STYLE_THEME: Record<DiscussionStyle, {
   },
 };
 
-/** Infer PhaseType from TranscriptEntryType */
+/**
+ * Infer PhaseType from TranscriptEntryType — used only to pick the phase
+ * header's icon, from whichever entry opens the group.
+ *
+ * Several entry types have no PhaseType of their own because they are recorded
+ * *inside* another phase rather than by one: DISSENT and ABSTAINED belong to the
+ * SYNTHESIS phase that provoked them, CONVERGENCE to the repeating phase it
+ * judged. They are mapped to the phase they live in so a group that happens to
+ * open with one is not labelled an opinion round. The remaining unmapped types
+ * (FOLLOW_UP, and the not-yet-produced VOTE/PROPOSAL/BARGAIN/HUMAN_INPUT/RETRO/
+ * BID) fall back to OPINION, and carry their own `phaseName` from the backend —
+ * "Follow-up" for the follow-up exchange — which is what the header actually
+ * shows.
+ */
 function entryTypeToPhaseType(type: TranscriptEntryType): PhaseType {
   const map: Partial<Record<TranscriptEntryType, PhaseType>> = {
     OPINION: "OPINION",
@@ -150,6 +165,9 @@ function entryTypeToPhaseType(type: TranscriptEntryType): PhaseType {
     ARGUMENT: "ARGUE",
     REBUTTAL: "REBUTTAL",
     SYNTHESIS: "SYNTHESIS",
+    DISSENT: "SYNTHESIS",
+    ABSTAINED: "SYNTHESIS",
+    CONVERGENCE: "OPINION",
     PLAN: "PLAN",
     TASK_RESULT: "EXECUTE",
     VERIFICATION: "VERIFY",
@@ -231,6 +249,9 @@ export function DiscussionTranscript({
   const effectiveCurrentPhase = isStreaming ? streamState!.currentPhase?.name : conversation?.currentPhaseName;
   const currentPhaseIndex = isStreaming ? streamState!.currentPhase?.index : conversation?.currentPhaseIndex;
   const effectiveSynthesis = isStreaming ? streamState!.synthesizedAnswer : conversation?.synthesizedAnswer;
+  // A live stream learns the decision from `decision_reached`; a reloaded
+  // conversation carries it on the document.
+  const effectiveDecision = isStreaming ? streamState!.decision : conversation?.decision;
   // S3 fix: memoize question extraction to avoid scanning transcript on every render
   const effectiveQuestion = useMemo(
     () => isStreaming
@@ -347,6 +368,10 @@ export function DiscussionTranscript({
   // Phase flow steps for breadcrumb
   const flowSteps = STYLE_INFO_FLOW[style] || [];
 
+  // The cost ledger lives on the persisted conversation; no SSE event carries a
+  // running total, so a live stream shows nothing until the document is reloaded.
+  const costTotal = conversation?.totalCost;
+
   return (
     <div className="flex flex-col h-full">
       {/* Question header — style-aware background */}
@@ -366,6 +391,23 @@ export function DiscussionTranscript({
               {isStreaming && (
                 <Badge variant="outline" className={cn("text-[10px] animate-pulse border-current", theme.accent)}>
                   {t("groups.liveIndicator", "● LIVE")}
+                </Badge>
+              )}
+              {/* Accumulated cost (EDDI F5 cost ledger) — what a configured cost
+                  ceiling is measured against.
+
+                  Rendered ONLY when positive, and deliberately so: the ledger
+                  currently accrues cascade and priced-tool spend, so a discussion
+                  of ordinary model calls totals exactly 0. Showing "$0.00" would
+                  read as "this was free" rather than "this was not priced". */}
+              {costTotal != null && costTotal > 0 && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] tabular-nums"
+                  title={formatMemberCostBreakdown(conversation?.memberCosts, conversation?.memberDisplayNames)}
+                  data-testid="discussion-cost"
+                >
+                  ${costTotal.toFixed(costTotal < 0.01 ? 4 : 2)}
                 </Badge>
               )}
               {/* Allow HTML toggle — opt-in for trusted content */}
@@ -449,7 +491,11 @@ export function DiscussionTranscript({
         )}
         {/* Also show task board for completed TASK_FORCE conversations loaded from API */}
         {style === "TASK_FORCE" && !isStreaming && conversation?.taskList && (
-          <MemoizedApiTaskBoard taskList={conversation.taskList} t={t} />
+          <MemoizedApiTaskBoard
+            taskList={conversation.taskList}
+            memberDisplayNames={conversation.memberDisplayNames}
+            t={t}
+          />
         )}
 
         {phases.map((phase, idx) => (
@@ -463,6 +509,11 @@ export function DiscussionTranscript({
               phase.phaseIndex === (isStreaming ? streamState!.currentPhase?.index : conversation?.currentPhaseIndex)
             }
             defaultExpanded={true}
+            // `?.` on the map as well as on streamState: a stream state created
+            // before convergence tracking existed (a rehydrated store, a partial
+            // test double) has no map, and reading `.get` off it would take down
+            // the whole transcript rather than drop one badge.
+            convergence={streamState?.convergence?.get(phase.phaseIndex)}
           >
             {phase.entries.map((entry, entryIdx) => (
               <AgentResponseCard
@@ -476,6 +527,13 @@ export function DiscussionTranscript({
             ))}
           </PhaseHeader>
         ))}
+
+        {/* Structured decision (verdict / tally / minority report). Rendered
+            ABOVE the prose synthesis: for a DEBATE the synthesis body IS the
+            judge's reasoning, so the finding it argues for has to come first. */}
+        {hasDisplayableDecision(effectiveDecision) && (
+          <DecisionRecordCard decision={effectiveDecision} />
+        )}
 
         {/* Synthesized answer highlight */}
         {parsedSynthesis && (
@@ -609,16 +667,45 @@ export function DiscussionTranscript({
   );
 }
 
+/**
+ * Per-member spend, as the tooltip on the total. Only members that actually
+ * accrued cost appear — a zero row says nothing the absence of a row does not.
+ */
+function formatMemberCostBreakdown(
+  memberCosts: Record<string, number> | undefined,
+  memberDisplayNames: Record<string, string> | undefined,
+): string | undefined {
+  if (!memberCosts) return undefined;
+  const rows = Object.entries(memberCosts)
+    .filter(([, cost]) => typeof cost === "number" && cost > 0)
+    .sort(([, a], [, b]) => b - a)
+    .map(([agentId, cost]) => `${memberDisplayNames?.[agentId] ?? agentId}: $${cost.toFixed(4)}`);
+  return rows.length ? rows.join("\n") : undefined;
+}
+
 /** Memoized wrapper for API-loaded task boards to avoid re-creating Set/Map on every render */
-function MemoizedApiTaskBoard({ taskList, t }: { taskList: SharedTaskList; t: (key: string, fallback: string) => string }) {
+function MemoizedApiTaskBoard({
+  taskList,
+  memberDisplayNames,
+  t,
+}: {
+  taskList: SharedTaskList;
+  /** agentId → display name, so a filed-by attribution is a name and not a hex id. */
+  memberDisplayNames?: Record<string, string>;
+  t: (key: string, fallback: string) => string;
+}) {
   const taskPlan = useMemo(
     () => taskList.tasks.map(task => ({
       id: task.id,
       subject: task.subject,
       assignedTo: task.assignedDisplayName || task.assignedAgentId || t("taskBoard.unassigned", "Unassigned"),
       priority: task.priority,
+      // Only the persisted task list carries this; the live `task_plan_created`
+      // event predates agent-filed tasks and describes the PLAN phase's output,
+      // which by definition has no filer.
+      filedBy: memberDisplayNames?.[task.createdByAgentId ?? ""] ?? task.createdByAgentId ?? null,
     })),
-    [taskList, t],
+    [taskList, t, memberDisplayNames],
   );
   const tasksInProgress = useMemo(
     () => new Set(taskList.tasks.filter(task => task.status === "IN_PROGRESS").map(task => task.id)),

@@ -2246,7 +2246,18 @@
       "SKIPPED": "Omitido",
       "PLAN": "Plan",
       "TASK_RESULT": "Resultado de tarea",
-      "VERIFICATION": "Verificación"
+      "VERIFICATION": "Verificación",
+      "FOLLOW_UP": "Seguimiento",
+      "ABSTAINED": "Abstención",
+      "DISSENT": "Discrepancia",
+      "CONVERGENCE": "Convergencia",
+      "FACILITATION": "Facilitación",
+      "VOTE": "Voto",
+      "PROPOSAL": "Propuesta",
+      "BARGAIN": "Contraoferta",
+      "HUMAN_INPUT": "Aporte humano",
+      "RETRO": "Retrospectiva",
+      "BID": "Puja"
     },
     "flow": {
       "Opinion": "Opinión",
@@ -2338,7 +2349,61 @@
     "closeConfirmTitle": "¿Cerrar esta discusión?",
     "closeConfirmButton": "Cerrar discusión",
     "closeConfirmDismiss": "Volver",
-    "count_many": "{{count}} grupos"
+    "count_many": "{{count}} grupos",
+    "protocolMaxCost": "Límite de coste",
+    "protocolOnCostExceeded": "Al alcanzarlo",
+    "costAbort": "Abortar",
+    "costSynthesize": "Sintetizar ahora",
+    "deliberationSection": "Deliberación",
+    "recordDissents": "Voto particular",
+    "agentFiledTasks": "Tareas creadas por agentes",
+    "agentFiledCaps": "Límites",
+    "agentFiledCapsValue": "{{perDiscussion}} / debate · {{perTurn}} / turno",
+    "moderatorlessWarning": "Restringido a un moderador que este grupo no tiene: {{phases}}. El primer miembro por orden de intervención lo sustituirá.",
+    "delegationDepth": "Profundidad máx.",
+    "delegationTimeout": "Tiempo del delegado",
+    "secondsShort": "{{seconds}}s",
+    "delegationTargets": "Lista permitida",
+    "phaseBehaviour": "Comportamiento de fases",
+    "phaseBehaviourNone": "Sin abstención ni convergencia configuradas: pulsa Editar para permitir pasar o detener una fase repetida al haber acuerdo.",
+    "abstentionShort": "abstención",
+    "convergenceShort": "convergencia ≥{{threshold}}",
+    "phasesSaved": "Ajustes de fase guardados",
+    "phasesNoneToEdit": "Este grupo no define fases. Elige un estilo de debate, o añade fases a la configuración, antes de ajustar su comportamiento.",
+    "phaseRepeats": "×{{repeats}}",
+    "allowAbstention": "Permitir abstención",
+    "allowAbstentionHelp": "Un miembro puede no aportar nada nuevo en esta ronda en lugar de repetirse.",
+    "convergenceEnable": "Detener antes al converger",
+    "convergenceHelp": "Un juez compara cada repetición con la anterior y termina la fase cuando los miembros dejan de moverse. Cuesta una llamada por repetición.",
+    "convergenceNeedsRepeats": "Solo disponible en una fase que se repite: una única pasada no tiene con qué compararse.",
+    "convergenceMinRepeats": "Repeticiones mín.",
+    "convergenceThreshold": "Umbral",
+    "convergenceJudge": "Juez",
+    "judgeModerator": "Moderador",
+    "judgeService": "Servicio",
+    "judgeServiceNote": "Aceptado pero aún sin conectar: el motor recurre al moderador y registra un aviso.",
+    "convergenceReached": "Convergido",
+    "convergenceChecked": "Comprobación de convergencia",
+    "convergenceScore": "acuerdo {{score}}",
+    "convergenceSkipped": "· {{skipped}} ronda(s) adicional(es) omitida(s)",
+    "decisionWinner": "Ganador: {{winner}}",
+    "decisionTie": "Empate",
+    "decisionDecidedAt": "Decidido en {{phase}}",
+    "decisionUnparsed": "La respuesta del juez no pudo leerse como un veredicto estructurado: se conserva literal abajo y la conclusión queda en prosa.",
+    "minorityReport": "Voto particular ({{total}})",
+    "attachFiles": "Adjuntar archivos",
+    "attachmentLimit": "Como máximo {{max}} adjuntos por debate",
+    "attachmentTooLarge": "{{name}} es demasiado grande para adjuntar",
+    "attachmentReadFailed": "No se pudo leer {{name}}",
+    "removeAttachment": "Quitar {{name}}",
+    "decisionType": {
+      "VERDICT": "Veredicto",
+      "VOTE": "Votación",
+      "AGREEMENT": "Acuerdo",
+      "AWARD": "Adjudicación",
+      "NONE": "Sin decisión estructurada"
+    },
+    "abstainedBody": "No aportó nada nuevo en esta ronda."
   },
   "taskBoard": {
     "title": "Tablero de tareas",
@@ -2358,7 +2423,8 @@
     "verificationFailed": "Fallido",
     "showMore": "mostrar más",
     "showLess": "mostrar menos",
-    "awaitingApproval": "Esperando aprobación"
+    "awaitingApproval": "Esperando aprobación",
+    "filedBy": "Creada por {{agent}}"
   },
   "memories": {
     "title": "Memoria del usuario",
@@ -3067,7 +3133,33 @@
     "dashboard": "Panel",
     "settings": {
       "hitlApprovalPointsNote": "Estos ajustes controlan cómo se comporta una aprobación. Qué puntos de una discusión la requieren se configura por fase en el Manager.",
-      "hitlOpenManager": "Definir puntos de aprobación"
+      "hitlOpenManager": "Definir puntos de aprobación",
+      "deliberation": "Calidad de la deliberación",
+      "deliberationDesc": "Registrar opiniones minoritarias y permitir que los miembros creen el trabajo que descubren durante el debate",
+      "recordDissents": "Registrar un voto particular",
+      "recordDissentsDesc": "Tras cada síntesis, cada miembro que no la escribió tiene un turno breve para indicar en qué sigue en desacuerdo. Cuesta una llamada extra por miembro.",
+      "agentFiledTasks": "Permitir que los miembros creen sus propias tareas",
+      "agentFiledTasksDesc": "El trabajo que un agente descubre durante el debate se convierte en una tarea real que recoge la siguiente oleada de ejecución. Desactivado, las herramientas ni siquiera existen para este grupo.",
+      "maxTasksPerDiscussion": "Máx. tareas creadas / debate",
+      "maxTasksPerDiscussionHelp": "Solo cuenta las tareas creadas por agentes, para que un backlog planificado grande no lo agote.",
+      "maxTasksPerTurn": "Máx. tareas creadas / turno",
+      "maxTasksPerTurnHelp": "Acota un turno desbocado; el tope por debate acota la deriva lenta.",
+      "maxCost": "Límite de coste (USD)",
+      "maxCostUnlimited": "Sin límite",
+      "maxCostHelp": "Déjalo vacío para no poner límite. Un turno ya en curso puede superar ligeramente el techo.",
+      "onCostExceeded": "Cuando se alcanza el límite",
+      "costSynthesize": "Sintetizar ahora: saltar directamente a la conclusión",
+      "costAbort": "Abortar: hacer fallar el debate de inmediato",
+      "costCeilingInvalid": "Un límite de coste debe ser mayor que 0. Vacía el campo para no poner límite.",
+      "maxDelegationDepth": "Profundidad máx. de delegación",
+      "maxDelegationDepthHelp": "A delega en B y B en C: profundidad 2. El salto que superaría este valor se rechaza; eso es lo que corta un ciclo de delegación.",
+      "delegationTimeout": "Tiempo de delegación (segundos)",
+      "delegationTimeoutHelp": "Cuánto espera un agente delegante a su delegado. Súbelo si el delegado ejecuta herramientas o un debate anidado.",
+      "allowedDelegationTargets": "Lista de delegación permitida",
+      "allowedDelegationTargetsHint": "Cualquier agente desplegado",
+      "allowedDelegationTargetsHelp": "IDs de agentes separados por comas. Déjalo vacío para permitir cualquier agente desplegado.",
+      "moderatorlessWarning": "Restringido a un moderador que este equipo no tiene: {{phases}}. El primer miembro por orden de intervención lo sustituirá.",
+      "memberLimit": "Un equipo puede tener como máximo {{max}} miembros"
     }
   },
   "operator": {
@@ -3101,7 +3193,8 @@
       "environment": "Entorno",
       "authMode": "Cómo se autentica el operador",
       "authModeHint": "El operador llama a tu API de administración de EDDI. Esto determina qué credenciales llevan esas llamadas.",
-      "authNoneBlocked": "Esta instalación tiene la autenticación activada, por lo que las llamadas de herramientas sin autenticar serían rechazadas. El operador se desplegaría correctamente y luego fallaría en cada consulta. Elige «Tu identidad» en su lugar.",      "scope": {
+      "authNoneBlocked": "Esta instalación tiene la autenticación activada, por lo que las llamadas de herramientas sin autenticar serían rechazadas. El operador se desplegaría correctamente y luego fallaría en cada consulta. Elige «Tu identidad» en su lugar.",
+      "scope": {
         "label": "Capacidad",
         "hint": "Lo que el operador puede hacer. Cada escritura sigue esperando tu aprobación — consulta las reglas de seguridad más abajo.",
         "readOnly": {
@@ -3116,7 +3209,6 @@
         "unavailableFirstActivation": "No disponible en la primera activación. Activa primero en modo de solo lectura para demostrar que la puerta de aprobación es fiable, y luego vuelve a configurar para conceder acceso de escritura.",
         "writeWarning": "Al activar se ejecutará una prueba canario de escritura: una escritura de prueba real e inofensiva que debe quedar a la espera de aprobación antes de que termine este despliegue. Si no se pausa, la activación se rechaza y el operador se elimina en lugar de dejarlo desplegado con una puerta de escritura sin verificar."
       },
-
       "safetyPreamble": "Reglas de seguridad (no editables)",
       "safetyPreambleHint": "Se anteponen siempre. Indican al operador que trate todo lo que devuelvan sus herramientas como datos no fiables.",
       "promptBody": "Instrucciones del operador",
@@ -3228,7 +3320,6 @@
     },
     "toast": {
       "activated": "Operador de plataforma activado",
-
       "activatedReadWrite": "Operador de la plataforma activado — acceso de escritura verificado",
       "deactivated": "Operador de plataforma desactivado",
       "reset": "Operador de plataforma eliminado",

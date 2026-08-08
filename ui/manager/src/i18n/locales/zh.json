@@ -2241,7 +2241,18 @@
       "SKIPPED": "已跳过",
       "PLAN": "计划",
       "TASK_RESULT": "任务结果",
-      "VERIFICATION": "验证"
+      "VERIFICATION": "验证",
+      "FOLLOW_UP": "追问",
+      "ABSTAINED": "弃权",
+      "DISSENT": "异议",
+      "CONVERGENCE": "收敛",
+      "FACILITATION": "引导",
+      "VOTE": "投票",
+      "PROPOSAL": "提议",
+      "BARGAIN": "还价",
+      "HUMAN_INPUT": "人工输入",
+      "RETRO": "复盘",
+      "BID": "竞标"
     },
     "flow": {
       "Opinion": "观点",
@@ -2332,7 +2343,61 @@
     "sendFollowup": "发送跟进",
     "closeConfirmTitle": "关闭此讨论？",
     "closeConfirmButton": "关闭讨论",
-    "closeConfirmDismiss": "返回"
+    "closeConfirmDismiss": "返回",
+    "protocolMaxCost": "成本上限",
+    "protocolOnCostExceeded": "达到时",
+    "costAbort": "中止",
+    "costSynthesize": "立即汇总",
+    "deliberationSection": "审议",
+    "recordDissents": "少数意见",
+    "agentFiledTasks": "代理提交的任务",
+    "agentFiledCaps": "上限",
+    "agentFiledCapsValue": "{{perDiscussion}} / 讨论 · {{perTurn}} / 轮次",
+    "moderatorlessWarning": "限定由本组未指定的主持人执行：{{phases}}。将由发言顺序中的第一位成员代替。",
+    "delegationDepth": "最大深度",
+    "delegationTimeout": "委派超时",
+    "secondsShort": "{{seconds}}秒",
+    "delegationTargets": "允许列表",
+    "phaseBehaviour": "阶段行为",
+    "phaseBehaviourNone": "未配置弃权或收敛 — 点击“编辑”可允许成员跳过，或在达成一致后结束重复阶段。",
+    "abstentionShort": "弃权",
+    "convergenceShort": "收敛 ≥{{threshold}}",
+    "phasesSaved": "阶段设置已保存",
+    "phasesNoneToEdit": "该组未定义任何阶段。请先选择讨论风格或在配置中添加阶段，再调整各阶段行为。",
+    "phaseRepeats": "×{{repeats}}",
+    "allowAbstention": "允许弃权",
+    "allowAbstentionHelp": "成员可以在本轮不再补充新内容，而不是重复自己。",
+    "convergenceEnable": "收敛时提前结束",
+    "convergenceHelp": "评审会将每一轮与上一轮比较，并在成员立场不再变化时结束该阶段。每轮消耗一次调用。",
+    "convergenceNeedsRepeats": "仅在会重复的阶段可用 — 单次执行没有可比较的对象。",
+    "convergenceMinRepeats": "最少重复",
+    "convergenceThreshold": "阈值",
+    "convergenceJudge": "评审",
+    "judgeModerator": "主持人",
+    "judgeService": "服务",
+    "judgeServiceNote": "已接受但尚未接通 — 引擎将回退到主持人并记录一条警告。",
+    "convergenceReached": "已收敛",
+    "convergenceChecked": "收敛检查",
+    "convergenceScore": "一致度 {{score}}",
+    "convergenceSkipped": "· 已跳过 {{skipped}} 个后续轮次",
+    "decisionWinner": "胜方：{{winner}}",
+    "decisionTie": "平局",
+    "decisionDecidedAt": "在 {{phase}} 阶段裁定",
+    "decisionUnparsed": "评审的回答无法解析为结构化裁定，因此原文保留在下方，结论以散文形式呈现。",
+    "minorityReport": "少数意见（{{total}}）",
+    "attachFiles": "附加文件",
+    "attachmentLimit": "每场讨论最多 {{max}} 个附件",
+    "attachmentTooLarge": "{{name}} 太大，无法附加",
+    "attachmentReadFailed": "无法读取 {{name}}",
+    "removeAttachment": "移除 {{name}}",
+    "decisionType": {
+      "VERDICT": "裁定",
+      "VOTE": "投票",
+      "AGREEMENT": "共识",
+      "AWARD": "授予",
+      "NONE": "无结构化决定"
+    },
+    "abstainedBody": "本轮未补充新内容。"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -2352,7 +2417,8 @@
     "verificationFailed": "未通过",
     "showMore": "显示更多",
     "showLess": "收起",
-    "awaitingApproval": "等待审批"
+    "awaitingApproval": "等待审批",
+    "filedBy": "由 {{agent}} 提交"
   },
   "memories": {
     "title": "用户记忆",
@@ -3061,7 +3127,33 @@
     "dashboard": "仪表板",
     "settings": {
       "hitlApprovalPointsNote": "这些设置控制审批的行为方式。讨论中哪些环节需要审批，是在 Manager 中按阶段配置的。",
-      "hitlOpenManager": "设置审批环节"
+      "hitlOpenManager": "设置审批环节",
+      "deliberation": "审议质量",
+      "deliberationDesc": "记录少数意见，并允许成员登记讨论中发现的工作",
+      "recordDissents": "记录少数意见",
+      "recordDissentsDesc": "每次汇总之后，未撰写汇总的每位成员都会获得一次简短发言，说明仍存在的分歧。每位成员额外消耗一次调用。",
+      "agentFiledTasks": "允许成员自行登记任务",
+      "agentFiledTasksDesc": "代理在讨论中发现的工作会成为真正的任务，由下一波执行接手。关闭时，这些工具对本组根本不存在。",
+      "maxTasksPerDiscussion": "每场讨论最多登记任务数",
+      "maxTasksPerDiscussionHelp": "只统计代理登记的任务，因此庞大的既定待办不会耗尽额度。",
+      "maxTasksPerTurn": "每轮最多登记任务数",
+      "maxTasksPerTurnHelp": "限制单轮失控；讨论级上限则限制缓慢漂移。",
+      "maxCost": "成本上限（美元）",
+      "maxCostUnlimited": "无限制",
+      "maxCostHelp": "留空表示不限。已在进行中的一轮仍可能使总额略微超出上限。",
+      "onCostExceeded": "达到上限时",
+      "costSynthesize": "立即汇总 — 直接跳到结论",
+      "costAbort": "中止 — 立即使讨论失败",
+      "costCeilingInvalid": "成本上限必须大于 0。清空该字段表示不限。",
+      "maxDelegationDepth": "最大委派深度",
+      "maxDelegationDepthHelp": "A 委派给 B、B 再委派给 C 即深度 2。超出该值的调用会被拒绝 — 这正是打断委派循环的机制。",
+      "delegationTimeout": "委派超时（秒）",
+      "delegationTimeoutHelp": "委派方等待受委派方的时长。当受委派方需要运行工具或嵌套讨论时应调高。",
+      "allowedDelegationTargets": "委派允许列表",
+      "allowedDelegationTargetsHint": "任意已部署代理",
+      "allowedDelegationTargetsHelp": "以逗号分隔的代理 ID。留空表示允许任意已部署代理。",
+      "moderatorlessWarning": "限定由本任务组未指定的主持人执行：{{phases}}。将由发言顺序中的第一位成员代替。",
+      "memberLimit": "一个任务组最多可容纳 {{max}} 名成员"
     }
   },
   "operator": {
@@ -3095,7 +3187,8 @@
       "environment": "环境",
       "authMode": "操作员的身份验证方式",
       "authModeHint": "操作员会调用你的 EDDI 管理 API。此设置决定这些调用携带何种凭据。",
-      "authNoneBlocked": "本部署已启用身份验证，未经身份验证的工具调用会被拒绝。操作员虽能成功部署，但随后每次查询都会失败。请改选「你的身份」。",      "scope": {
+      "authNoneBlocked": "本部署已启用身份验证，未经身份验证的工具调用会被拒绝。操作员虽能成功部署，但随后每次查询都会失败。请改选「你的身份」。",
+      "scope": {
         "label": "权限范围",
         "hint": "操作员被允许执行的操作。每次写入仍会等待你的批准——请参阅下方的安全规则。",
         "readOnly": {
@@ -3110,7 +3203,6 @@
         "unavailableFirstActivation": "首次激活时不可用。请先以只读方式激活，以证明审批关卡可靠，然后重新配置以授予写入权限。",
         "writeWarning": "激活将运行一次写入金丝雀测试：一次真实、无害的测试写入，必须在此部署完成前等待批准。如果它没有暂停，激活将被拒绝，操作员将被移除，而不是带着未经验证的写入关卡继续部署。"
       },
-
       "safetyPreamble": "安全规则（不可编辑）",
       "safetyPreambleHint": "始终置于最前。它要求操作员将工具返回的一切内容视为不可信数据。",
       "promptBody": "操作员指令",
@@ -3222,7 +3314,6 @@
     },
     "toast": {
       "activated": "平台操作员已启用",
-
       "activatedReadWrite": "平台操作员已激活——写入权限已验证",
       "deactivated": "平台操作员已停用",
       "reset": "平台操作员已删除",

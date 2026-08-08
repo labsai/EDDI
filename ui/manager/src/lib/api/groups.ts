@@ -45,6 +45,23 @@ export type MemberType = "AGENT" | "GROUP";
 export type MemberFailurePolicy = "SKIP" | "RETRY" | "ABORT";
 export type MemberUnavailablePolicy = "SKIP" | "FAIL";
 
+/**
+ * What happens once `ProtocolConfig.maxCostPerDiscussion` is exceeded (EDDI I1).
+ * The backend's canonical constructor coalesces a null to SYNTHESIZE_NOW, so
+ * every reader may treat the field as set once a ceiling exists.
+ */
+export type CostPolicy = "SYNTHESIZE_NOW" | "ABORT";
+
+/** Backend `AgentGroupConfiguration.MAX_MEMBERS` — every member is one LLM call per phase. */
+export const MAX_GROUP_MEMBERS = 100;
+
+/**
+ * Backend `AgentGroupConfiguration.MAX_DISCUSSION_ROUNDS`. `maxRounds` multiplies
+ * into concrete phases for ROUND_TABLE and DELPHI and every phase fans out to
+ * every member, so this value alone multiplies the cost of one discussion.
+ */
+export const MAX_DISCUSSION_ROUNDS = 50;
+
 export type GroupConversationState =
   | "CREATED"
   | "IN_PROGRESS"
@@ -67,6 +84,13 @@ export type GroupConversationState =
  */
 export type GroupConversationAction = "followup" | "continue" | "close";
 
+/**
+ * Mirrors the backend `GroupConversation.TranscriptEntryType` in full. The last
+ * eleven are the Wave 0 (F4) additions; six of them have no producer yet
+ * (VOTE/PROPOSAL/BARGAIN/HUMAN_INPUT/RETRO/BID are reserved for I11/I14/I6/I8/I18)
+ * but are declared because a transcript is rendered by type and an unmodelled
+ * value is exactly what used to blank the view — see `entryTypeInfo`.
+ */
 export type TranscriptEntryType =
   | "QUESTION"
   | "OPINION"
@@ -81,7 +105,29 @@ export type TranscriptEntryType =
   | "SKIPPED"
   | "PLAN"
   | "TASK_RESULT"
-  | "VERIFICATION";
+  | "VERIFICATION"
+  /** User-to-member or member-to-user follow-up exchange between rounds. */
+  | "FOLLOW_UP"
+  /** A speaker declined to add anything new this round (I4). Peer-hidden. */
+  | "ABSTAINED"
+  /** A member's recorded disagreement with a synthesis (I4). Peer-visible. */
+  | "DISSENT"
+  /** A convergence judge's agreement-score result (I2). Peer-hidden. */
+  | "CONVERGENCE"
+  /** A facilitator's bounded intervention, e.g. a recruitment (I12/I7). Peer-hidden. */
+  | "FACILITATION"
+  /** A cast ballot (I14). */
+  | "VOTE"
+  /** A negotiation offer (I11). */
+  | "PROPOSAL"
+  /** A negotiation counter-offer or concession (I11). */
+  | "BARGAIN"
+  /** A human group member's contribution (I6). */
+  | "HUMAN_INPUT"
+  /** Retrospective phase output, feeding group memory (I8). */
+  | "RETRO"
+  /** A bid for a task assignment (I18). */
+  | "BID";
 
 // ─── Data Models ─────────────────────────────────────────────────
 
@@ -93,6 +139,32 @@ export interface GroupMember {
   memberType?: MemberType;
 }
 
+/**
+ * Early-exit detection for a phase whose `repeats > 1` (EDDI I2). Without it a
+ * DELPHI-style phase burns exactly `repeats` rounds even once the members have
+ * stopped changing their positions.
+ *
+ * The backend's compact constructor normalises on read, so a partially-specified
+ * object is legal: `minRepeats` below 2 is raised to 2 (there is nothing to
+ * compare a first repeat against), a `threshold` outside (0,1] falls back to 0.8,
+ * and a blank `judge` becomes MODERATOR.
+ */
+export interface ConvergenceConfig {
+  /** Off by default — an LLM judge costs a call per repeat. */
+  enabled: boolean;
+  /** The judge is skipped until this many repeats have completed (default 2, floor 2). */
+  minRepeats: number;
+  /** Agreement score at or above which the phase is converged (default 0.8, compared with >=). */
+  threshold: number;
+  /**
+   * `"MODERATOR"` (default) runs the group's moderator as judge. `"SERVICE"` is
+   * accepted but currently falls back to MODERATOR with a backend warning.
+   */
+  judge: ConvergenceJudge;
+}
+
+export type ConvergenceJudge = "MODERATOR" | "SERVICE";
+
 export interface DiscussionPhase {
   name: string;
   type: PhaseType;
@@ -103,6 +175,14 @@ export interface DiscussionPhase {
   inputTemplate: string | null;
   repeats: number;
   requiresApproval?: boolean;
+  /** Convergence-based early exit (I2). `null`/absent = off. Only acts when `repeats > 1`. */
+  convergence?: ConvergenceConfig | null;
+  /**
+   * Let a participant decline to add anything new this round (I4), recorded as an
+   * ABSTAINED entry. Also what feeds convergence's deterministic
+   * everybody-abstained exit.
+   */
+  allowAbstention?: boolean;
 }
 
 export interface ProtocolConfig {
@@ -111,7 +191,37 @@ export interface ProtocolConfig {
   maxRetries: number;
   onMemberUnavailable: MemberUnavailablePolicy;
   maxTurns?: number;
+  /**
+   * Dollar ceiling on the discussion's accumulated cost (I1). `null` = unlimited.
+   * Checked before each turn and each TASK_FORCE EXECUTE wave, so an already
+   * in-flight turn may still push the total past it.
+   *
+   * A non-positive value is coerced to `null` (unlimited) by `AgentGroupStore` at
+   * save time — the UI refuses it up front rather than letting a save silently
+   * mean the opposite of what was typed.
+   */
+  maxCostPerDiscussion?: number | null;
+  /** What to do once the ceiling is hit. Absent defaults to SYNTHESIZE_NOW. */
+  onCostExceeded?: CostPolicy | null;
 }
+
+/**
+ * Whether and how far members may file their own tasks mid-discussion (EDDI I5).
+ * Absent means the `addGroupTask`/`listGroupTasks` tools are not assembled at all
+ * — an absent tool costs no prompt tokens and cannot be argued with, which is why
+ * the backend prefers absence to a tool that always refuses.
+ */
+export interface GroupTaskConfig {
+  /** Master switch. Off = the tools do not exist for this group. */
+  allowAgentTaskCreation: boolean;
+  /** Ceiling across the whole discussion (backend default 20; non-positive → default). */
+  maxAgentAddedTasksPerDiscussion: number;
+  /** Ceiling within one member turn (backend default 3; non-positive → default). */
+  maxPerTurn: number;
+}
+
+export const DEFAULT_MAX_AGENT_TASKS_PER_DISCUSSION = 20;
+export const DEFAULT_MAX_AGENT_TASKS_PER_TURN = 3;
 
 // ─── Task Models ────────────────────────────────────────────────
 
@@ -139,6 +249,12 @@ export interface TaskItem {
   priority: number;
   createdAt: string;
   completedAt: string | null;
+  /**
+   * The member that filed this task via `addGroupTask` (I5). `null` for tasks
+   * authored by config or by the PLAN phase — which is what every task was before
+   * agent-filed tasks existed.
+   */
+  createdByAgentId?: string | null;
 }
 
 export interface SharedTaskList {
@@ -153,11 +269,35 @@ export interface TaskDefinition {
   priority: number;
 }
 
-export type LifecyclePolicy =
-  | "EPHEMERAL"
-  | "KEEP_DEPLOYED"
-  | "UNDEPLOY_ONLY"
-  | "AGENT_DECIDES";
+export const LIFECYCLE_POLICIES = [
+  "EPHEMERAL",
+  "KEEP_DEPLOYED",
+  "UNDEPLOY_ONLY",
+  "AGENT_DECIDES",
+] as const;
+export type LifecyclePolicy = (typeof LIFECYCLE_POLICIES)[number];
+
+/**
+ * `AgentGroupConfiguration.LifecyclePolicy` is the one group enum carrying
+ * Jackson's `@JsonValue`, so the backend *writes* `"ephemeral"`,
+ * `"keep-deployed"`, `"undeploy-only"`, `"agent-decides"` — lower-case, hyphenated
+ * — while its `@JsonCreator` *reads* either form. Everything on this side speaks
+ * the canonical constant, and every config that arrives is normalised through
+ * here on the way in (`normalizeGroupConfig`).
+ *
+ * Without this a stored `"ephemeral"` matched no `<option>` in the settings
+ * editor, so the control showed the wrong policy and saving it wrote a value the
+ * user never chose.
+ */
+export function normalizeLifecyclePolicy(
+  value: string | null | undefined,
+): LifecyclePolicy {
+  if (!value) return "EPHEMERAL";
+  const canonical = value.trim().toUpperCase().replace(/-/g, "_");
+  return (LIFECYCLE_POLICIES as readonly string[]).includes(canonical)
+    ? (canonical as LifecyclePolicy)
+    : "EPHEMERAL";
+}
 
 export interface DynamicAgentConfig {
   enabled: boolean;
@@ -167,11 +307,30 @@ export interface DynamicAgentConfig {
   maxCreatedAgentsPerDiscussion: number;
   maxRecruitedAgentsPerDiscussion: number;
   maxDelegationsPerTask: number;
+  /**
+   * Maximum delegation hops (backend default 3). A→B→C is depth 2; the call that
+   * would exceed this is refused. Without a bound an A→B→A cycle recursed until a
+   * per-hop watchdog happened to fire.
+   */
+  maxDelegationDepth?: number;
+  /**
+   * Seconds a delegating agent waits for its delegate's turn (backend default 60).
+   * Non-positive falls back to the default rather than meaning "wait forever".
+   */
+  delegationTimeoutSeconds?: number;
+  /**
+   * Agent IDs this group's members may delegate to. Empty/absent means any
+   * deployed agent.
+   */
+  allowedDelegationTargets?: string[] | null;
   allowedProviders: string[];
   allowedModels: Record<string, string[]>;
   inheritParentModel: boolean;
   lifecyclePolicy: LifecyclePolicy;
 }
+
+export const DEFAULT_MAX_DELEGATION_DEPTH = 3;
+export const DEFAULT_DELEGATION_TIMEOUT_SECONDS = 60;
 
 export interface AgentGroupConfiguration {
   name: string;
@@ -188,6 +347,36 @@ export interface AgentGroupConfiguration {
   dynamicAgents?: DynamicAgentConfig;
   /** Human-in-the-loop approval configuration */
   hitlConfig?: import("./hitl").GroupHitlConfig;
+  /**
+   * After each SYNTHESIS phase, give every participant who did NOT write the
+   * synthesis one short turn to state where they still materially disagree (I4).
+   * Non-PASS replies become public DISSENT entries and populate
+   * `GroupConversation.decision.dissents`.
+   *
+   * Opt-in because it costs one extra short call per non-synthesizer — but the
+   * alternative is asking the synthesizer to report the objections to its own
+   * summary, which is the failure mode a minority report exists to prevent.
+   */
+  recordDissents?: boolean;
+  /** Whether members may file their own tasks mid-discussion (I5). Absent = tools not assembled. */
+  taskListConfig?: GroupTaskConfig | null;
+}
+
+/**
+ * Coerce a config as it arrives from the backend into the canonical shapes this
+ * codebase assumes. Today that is only `lifecyclePolicy`'s wire format (see
+ * {@link normalizeLifecyclePolicy}); the seam exists so the next `@JsonValue`
+ * enum has one obvious home instead of a normalisation scattered per consumer.
+ *
+ * Returns the SAME object when nothing needed changing, so callers comparing by
+ * reference (dirty tracking) are unaffected on the common path.
+ */
+export function normalizeGroupConfig<T extends AgentGroupConfiguration>(config: T): T {
+  const dynamic = config.dynamicAgents;
+  if (!dynamic) return config;
+  const canonical = normalizeLifecyclePolicy(dynamic.lifecyclePolicy);
+  if (canonical === dynamic.lifecyclePolicy) return config;
+  return { ...config, dynamicAgents: { ...dynamic, lifecyclePolicy: canonical } };
 }
 
 export interface TranscriptEntry {
@@ -200,6 +389,90 @@ export interface TranscriptEntry {
   timestamp: string;
   errorReason: string | null;
   targetAgentId: string | null;
+  /** Base64 Ed25519 signature when the speaker has `signInterAgentMessages`. */
+  signature?: string | null;
+  /** Replay-protection nonce; null on unsigned entries. */
+  signatureNonce?: string | null;
+  /** Epoch millis the envelope was signed; null on unsigned entries. */
+  signatureTimestampMs?: number | null;
+  /** Signing key version. `0` means the pre-versioning legacy `publicKey`. */
+  signatureKeyVersion?: number | null;
+}
+
+/**
+ * `true` when an entry carries full envelope data (signature + nonce + timestamp)
+ * and is therefore cryptographically verifiable — the frontend mirror of
+ * `TranscriptEntry.hasEnvelopeData()`. A bare `signature` is from an older
+ * backend and can be displayed but not verified.
+ */
+export function hasEnvelopeData(entry: TranscriptEntry): boolean {
+  return (
+    !!entry.signature &&
+    !!entry.signatureNonce &&
+    entry.signatureTimestampMs != null
+  );
+}
+
+/** What kind of conclusion a {@link DecisionRecord} represents (EDDI Wave 0, F3). */
+export type DecisionType =
+  /** A debate judged to a winner (I3). */
+  | "VERDICT"
+  /** A tallied ballot (I14). */
+  | "VOTE"
+  /** A negotiated compromise both sides accepted (I11). */
+  | "AGREEMENT"
+  /** A task/turn awarded by bid (I18). */
+  | "AWARD"
+  /** No structured decision was produced — prose-only conclusion. */
+  | "NONE";
+
+/** One member's recorded disagreement with a decision (I4/F3). */
+export interface Dissent {
+  agentId: string;
+  displayName: string;
+  /** The member's own short statement of where they disagree. */
+  position: string;
+}
+
+/**
+ * Typed outcome of a discussion, or of one decision-producing phase within it
+ * (F3). `synthesizedAnswer` is always prose; this is the structured alternative,
+ * so a caller wanting the winner or the tally does not have to parse English.
+ *
+ * A parse failure in the producing feature falls back to `type: "NONE"` with
+ * `raw` set to the unparsed text rather than dropping the record — so `type`
+ * being NONE with a non-empty `raw` means "we tried and could not read it", not
+ * "nothing happened".
+ */
+export interface DecisionRecord {
+  type: DecisionType;
+  /** Human-readable one-liner, safe to display without interpreting `tally`. */
+  outcome: string | null;
+  /** The winning side/option/agent; `null` for a tie or a non-competitive agreement. */
+  winner: string | null;
+  /** Structured detail specific to `type` — side→score for VERDICT, option→weight for VOTE. */
+  tally: Record<string, unknown> | null;
+  /** Members who disagreed. Empty (never null) when nobody did or dissent-recording is off. */
+  dissents: Dissent[];
+  /** Free-text tag naming the mechanism, e.g. "debate-judgment", "majority". */
+  method: string | null;
+  /** Name of the phase that produced this decision. */
+  decidedAtPhase: string | null;
+  /** The unparsed source text, kept for audit even when `type` is NONE. */
+  raw?: string | null;
+}
+
+/**
+ * Where a pause landed inside a running SEQUENTIAL phase (F2), so a resume skips
+ * the speakers that already ran. PARALLEL phases never produce one — their
+ * resume re-runs the whole fan-out.
+ */
+export interface ResumePoint {
+  phaseIdx: number;
+  repeatIdx: number;
+  speakerIdx: number;
+  /** Free-text tag for observability; no resume logic reads it. */
+  pauseKind: string | null;
 }
 
 export interface GroupConversation {
@@ -210,9 +483,24 @@ export interface GroupConversation {
   originalQuestion: string;
   transcript: TranscriptEntry[];
   memberConversationIds: Record<string, string>;
+  /**
+   * agentId → display name for every member the discussion has ever had,
+   * including runtime recruits. This is what `followupGroupMember` resolves a
+   * human-typed name against.
+   */
+  memberDisplayNames?: Record<string, string>;
+  /** Per-member accumulated cost in USD (F5 cost ledger). */
+  memberCosts?: Record<string, number>;
+  /** Accumulated cost of the whole discussion in USD (F5) — what I1's ceiling bounds. */
+  totalCost?: number;
   currentPhaseIndex: number;
   currentPhaseName: string | null;
   synthesizedAnswer: string | null;
+  /**
+   * Structured conclusion (F3) — a debate verdict today, votes/agreements/awards
+   * later. `null` until a decision-producing phase runs.
+   */
+  decision?: DecisionRecord | null;
   depth: number;
   /** Task list for TASK_FORCE style discussions */
   taskList: SharedTaskList | null;
@@ -220,6 +508,12 @@ export interface GroupConversation {
   dynamicMembers: GroupMember[];
   /** Agent IDs created during this discussion (for lifecycle cleanup) */
   createdAgentIds: string[];
+  /**
+   * Agent IDs recruited into this discussion (I7). Distinct from
+   * `createdAgentIds`: recruits are pre-existing deployed agents the discussion
+   * borrowed, so teardown never undeploys them.
+   */
+  recruitedAgentIds?: string[];
   /** Agent IDs retained by creators (agent-decides policy) */
   retainedAgentIds: string[];
   /**
@@ -227,6 +521,17 @@ export interface GroupConversation {
    * `undefined` on legacy documents that predate the field.
    */
   round?: number;
+  /**
+   * Transcript index where the CURRENT round's entries begin. Scans that must not
+   * pick up a previous round's conclusion (latest synthesis, verdict, dissents)
+   * start here. `0`/absent means "the whole transcript", which is exactly right
+   * for a first round.
+   */
+  roundStartTranscriptIndex?: number;
+  /** The question a `continue` round is running, when different from `originalQuestion`. */
+  resumeQuestion?: string | null;
+  /** Document schema version (F6). Informational — the backend migrates on read. */
+  schemaVersion?: number;
   /**
    * Backend-computed list of operations currently available on this conversation
    * (READ_ONLY, always recomputed from `state` server-side — never trusted from a
@@ -245,6 +550,8 @@ export interface GroupConversation {
   hitlPauseReason?: string;
   hitlTimeoutPolicy?: import("./hitl").HitlTimeoutPolicy;
   hitlApprovalTimeout?: string;
+  /** Where inside a SEQUENTIAL phase the pause landed, so a resume skips what already ran (F2). */
+  resumePoint?: ResumePoint | null;
 }
 
 // Re-export descriptor type for group descriptors (same shape as agent descriptors)
@@ -275,9 +582,9 @@ export function getGroup(
 ): Promise<AgentGroupConfiguration> {
   // Backend requires version — omitting it causes 400 (RuntimeUtilities.checkNotNull)
   const versionSuffix = version != null ? `?version=${version}` : "";
-  return api.get<AgentGroupConfiguration>(
-    `/groupstore/groups/${id}${versionSuffix}`
-  );
+  return api
+    .get<AgentGroupConfiguration>(`/groupstore/groups/${id}${versionSuffix}`)
+    .then(normalizeGroupConfig);
 }
 
 export function createGroup(
@@ -325,14 +632,60 @@ export function getGroupJsonSchema(): Promise<Record<string, unknown>> {
 
 // --- Group Conversations ---
 
+/**
+ * One attachment on a group discussion request. Deliberately NOT the
+ * `AttachmentRef` of `lib/api/attachments.ts`: that one references a `storageRef`
+ * already uploaded to an existing conversation, and a group conversation does not
+ * exist until this call creates it. The backend therefore takes the content
+ * itself — inline base64 `data` (+ `mimeType`) or a hosted `url` — stores it bound
+ * to the new group conversation and grants every member access.
+ *
+ * Backend ceilings: at most {@link MAX_GROUP_ATTACHMENTS} per request, a `url` of
+ * 2048 chars, a `fileName` of 255, a `mimeType` of 255, and `data` bounded by
+ * `eddi.attachments.max-size-bytes`.
+ */
+export interface GroupAttachmentRef {
+  mimeType?: string | null;
+  /** Base64 payload WITHOUT a data: URI prefix. Mutually exclusive with `url`. */
+  data?: string | null;
+  url?: string | null;
+  fileName?: string | null;
+}
+
+/** Backend `IRestGroupConversation.MAX_ATTACHMENTS_PER_REQUEST`. */
+export const MAX_GROUP_ATTACHMENTS = 50;
+
+/** Backend `IRestGroupConversation.MAX_QUESTION_CHARS`. */
+export const MAX_GROUP_QUESTION_CHARS = 50_000;
+
+/**
+ * Body of a start/continue discussion request. `attachments` is only accepted by
+ * the START endpoints — see {@link continueGroupDiscussion}.
+ */
+function discussBody(
+  question: string,
+  userId?: string,
+  attachments?: GroupAttachmentRef[],
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    question,
+    userId: userId || "manager-user",
+  };
+  // Omit rather than send [] — the backend treats absent and empty the same, and
+  // an omitted key keeps the request byte-identical to the pre-attachment one.
+  if (attachments?.length) body.attachments = attachments;
+  return body;
+}
+
 export function startGroupDiscussion(
   groupId: string,
   question: string,
-  userId?: string
+  userId?: string,
+  attachments?: GroupAttachmentRef[],
 ): Promise<GroupConversation> {
   return api.post<GroupConversation>(
     `/groups/${groupId}/conversations`,
-    { question, userId: userId || "manager-user" }
+    discussBody(question, userId, attachments),
   );
 }
 
@@ -463,7 +816,20 @@ export type GroupSSEEventType =
   | "cancelled"
   // A member agent's own conversation paused mid-turn (unsupported in a group);
   // its turn is recorded SKIPPED with a reason.
-  | "member_pause_skipped";
+  | "member_pause_skipped"
+  // A convergence check ran after a phase repeat (I2). Fires on EVERY check,
+  // converged or not, so an observer sees a phase approaching agreement rather
+  // than only the moment it stops.
+  | "convergence_checked"
+  // A phase stopped repeating early because its participants converged (I2).
+  // Always preceded by a convergence_checked for the same repeat.
+  | "convergence_reached"
+  // A DecisionRecord was set on the discussion (F3) — a debate verdict today.
+  | "decision_reached";
+//
+// `token` and `synthesis_complete` are declared in the backend's
+// GroupConversationEventSink but no producer emits them; they are deliberately
+// absent here rather than modelled as dead cases.
 
 export interface GroupSSEEvent {
   type: GroupSSEEventType;
@@ -543,6 +909,35 @@ export interface TaskVerifiedPayload {
   feedback: string;
 }
 
+/** Payload of `convergence_checked` (I2). */
+export interface ConvergenceCheckedPayload {
+  phaseIndex: number;
+  phaseName: string;
+  /** 0-based index of the repeat that was just checked. */
+  repeat: number;
+  /** The judge's 0..1 score, or `-1` when no judge ran (all abstained, or a parse failure). */
+  agreementScore: number;
+  /** Whether this check ended the phase's repeats. */
+  converged: boolean;
+  /** One-line explanation, already display-ready. */
+  reason: string;
+}
+
+/** Payload of `convergence_reached` (I2). */
+export interface ConvergenceReachedPayload {
+  phaseIndex: number;
+  phaseName: string;
+  repeat: number;
+  /** How many further repeats the phase was configured for but will not run. */
+  repeatsSkipped: number;
+  reason: string;
+}
+
+/** Payload of `decision_reached` (F3). */
+export interface DecisionReachedPayload {
+  decision: DecisionRecord;
+}
+
 /**
  * Read a Server-Sent Events response body as a stream of parsed group events.
  * Shared by the initial-discussion and approve/resume streaming endpoints.
@@ -619,10 +1014,11 @@ export async function* streamGroupDiscussion(
   question: string,
   userId?: string,
   signal?: AbortSignal,
+  attachments?: GroupAttachmentRef[],
 ): AsyncGenerator<GroupSSEEvent> {
   const response = await postSSE(
     `/groups/${groupId}/conversations/stream`,
-    { question, userId: userId || "manager-user" },
+    discussBody(question, userId, attachments),
     signal,
   );
   yield* readGroupSSE(response);
@@ -828,11 +1224,13 @@ export const STYLE_INFO: Record<
   },
 };
 
+export interface EntryTypeInfo {
+  label: string;
+  color: string;
+}
+
 /** Entry type display info */
-export const ENTRY_TYPE_INFO: Record<
-  TranscriptEntryType,
-  { label: string; color: string }
-> = {
+export const ENTRY_TYPE_INFO: Record<TranscriptEntryType, EntryTypeInfo> = {
   QUESTION: { label: "Question", color: "blue" },
   OPINION: { label: "Opinion", color: "green" },
   CRITIQUE: { label: "Critique", color: "orange" },
@@ -847,7 +1245,46 @@ export const ENTRY_TYPE_INFO: Record<
   PLAN: { label: "Plan", color: "sky" },
   TASK_RESULT: { label: "Task Result", color: "emerald" },
   VERIFICATION: { label: "Verification", color: "amber" },
+  FOLLOW_UP: { label: "Follow-up", color: "blue" },
+  ABSTAINED: { label: "Abstained", color: "muted" },
+  DISSENT: { label: "Dissent", color: "red" },
+  CONVERGENCE: { label: "Convergence", color: "violet" },
+  FACILITATION: { label: "Facilitation", color: "sky" },
+  VOTE: { label: "Vote", color: "indigo" },
+  PROPOSAL: { label: "Proposal", color: "teal" },
+  BARGAIN: { label: "Counter-offer", color: "orange" },
+  HUMAN_INPUT: { label: "Human input", color: "blue" },
+  RETRO: { label: "Retrospective", color: "violet" },
+  BID: { label: "Bid", color: "emerald" },
 };
+
+/**
+ * Display info for a transcript entry type, never `undefined`.
+ *
+ * The backend's enum grows with each collaboration wave, and a group conversation
+ * is rendered by looking its entries' types up in {@link ENTRY_TYPE_INFO}. When a
+ * type arrived that this build did not know — `FOLLOW_UP`, which the Manager
+ * itself produces, was one — the lookup returned `undefined` and dereferencing
+ * `.label` threw, blanking the entire transcript rather than one badge. A
+ * newer backend must degrade to an unstyled badge, not to a blank screen.
+ */
+export function entryTypeInfo(type: TranscriptEntryType | string): EntryTypeInfo {
+  return (
+    ENTRY_TYPE_INFO[type as TranscriptEntryType] ?? {
+      label: humanizeEntryType(type),
+      color: "muted",
+    }
+  );
+}
+
+/** "TASK_RESULT" → "Task Result", for a type this build has no entry for. */
+function humanizeEntryType(type: string): string {
+  return type
+    .split("_")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
 
 // ─── Bulk Operations ─────────────────────────────────────────────
 

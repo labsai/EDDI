@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronUp,
   Hand,
+  UserPlus,
 } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +27,15 @@ interface Task {
   assignedTo: string;
   displayName?: string;
   priority: number;
+  /**
+   * Display name (or id) of the member that filed this task via `addGroupTask`
+   * (EDDI I5). Absent for the tasks the PLAN phase or the config authored — which
+   * is every task in a group that has not enabled agent-filed tasks.
+   *
+   * Worth showing because a task nobody planned is the one a reviewer most needs
+   * to notice: it is work the team discovered rather than work it was given.
+   */
+  filedBy?: string | null;
 }
 
 interface TaskVerification {
@@ -169,6 +179,17 @@ function TaskCard({
           {priority.label}
         </span>
       </div>
+
+      {/* Filed by a member rather than planned — see Task.filedBy */}
+      {task.filedBy && (
+        <p
+          className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground"
+          data-testid={`task-filed-by-${task.id}`}
+        >
+          <UserPlus className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+          {t("taskBoard.filedBy", "Filed by {{agent}}", { agent: task.filedBy })}
+        </p>
+      )}
 
       {/* Verification feedback */}
       {status === "verified" && verification && (

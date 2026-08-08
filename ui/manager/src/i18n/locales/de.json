@@ -2241,7 +2241,18 @@
       "SKIPPED": "Übersprungen",
       "PLAN": "Plan",
       "TASK_RESULT": "Aufgabenergebnis",
-      "VERIFICATION": "Überprüfung"
+      "VERIFICATION": "Überprüfung",
+      "FOLLOW_UP": "Nachfrage",
+      "ABSTAINED": "Enthalten",
+      "DISSENT": "Widerspruch",
+      "CONVERGENCE": "Konvergenz",
+      "FACILITATION": "Moderation",
+      "VOTE": "Stimme",
+      "PROPOSAL": "Vorschlag",
+      "BARGAIN": "Gegenangebot",
+      "HUMAN_INPUT": "Menschliche Eingabe",
+      "RETRO": "Retrospektive",
+      "BID": "Gebot"
     },
     "flow": {
       "Opinion": "Meinung",
@@ -2332,7 +2343,61 @@
     "sendFollowup": "Folgefrage senden",
     "closeConfirmTitle": "Diese Diskussion schließen?",
     "closeConfirmButton": "Diskussion schließen",
-    "closeConfirmDismiss": "Zurück"
+    "closeConfirmDismiss": "Zurück",
+    "protocolMaxCost": "Kostenobergrenze",
+    "protocolOnCostExceeded": "Bei Erreichen",
+    "costAbort": "Abbrechen",
+    "costSynthesize": "Jetzt zusammenfassen",
+    "deliberationSection": "Beratung",
+    "recordDissents": "Minderheitenvotum",
+    "agentFiledTasks": "Von Agenten angelegte Aufgaben",
+    "agentFiledCaps": "Grenzen",
+    "agentFiledCapsValue": "{{perDiscussion}} / Diskussion · {{perTurn}} / Zug",
+    "moderatorlessWarning": "Auf einen Moderator beschränkt, den diese Gruppe nicht hat: {{phases}}. Das erste Mitglied nach Sprechreihenfolge springt ein.",
+    "delegationDepth": "Max. Tiefe",
+    "delegationTimeout": "Delegations-Timeout",
+    "secondsShort": "{{seconds}}s",
+    "delegationTargets": "Positivliste",
+    "phaseBehaviour": "Phasenverhalten",
+    "phaseBehaviourNone": "Weder Enthaltung noch Konvergenz konfiguriert — mit „Bearbeiten“ dürfen Mitglieder passen, oder eine wiederholte Phase endet bei Einigkeit.",
+    "abstentionShort": "enthalten",
+    "convergenceShort": "Konvergenz ≥{{threshold}}",
+    "phasesSaved": "Phaseneinstellungen gespeichert",
+    "phasesNoneToEdit": "Diese Gruppe definiert keine Phasen. Wähle einen Diskussionsstil oder ergänze Phasen in der Konfiguration, bevor du phasenweises Verhalten einstellst.",
+    "phaseRepeats": "×{{repeats}}",
+    "allowAbstention": "Enthaltung erlauben",
+    "allowAbstentionHelp": "Ein Mitglied darf in dieser Runde nichts Neues beitragen, statt sich zu wiederholen.",
+    "convergenceEnable": "Bei Konvergenz früh beenden",
+    "convergenceHelp": "Ein Richter vergleicht jede Wiederholung mit der vorigen und beendet die Phase, sobald sich die Mitglieder nicht mehr bewegen. Kostet einen Aufruf je Wiederholung.",
+    "convergenceNeedsRepeats": "Nur bei einer wiederholten Phase verfügbar — ein einzelner Durchlauf hat keinen Vergleich.",
+    "convergenceMinRepeats": "Min. Wiederholungen",
+    "convergenceThreshold": "Schwellenwert",
+    "convergenceJudge": "Richter",
+    "judgeModerator": "Moderator",
+    "judgeService": "Dienst",
+    "judgeServiceNote": "Wird akzeptiert, ist aber noch nicht angebunden — die Engine weicht auf den Moderator aus und protokolliert eine Warnung.",
+    "convergenceReached": "Konvergiert",
+    "convergenceChecked": "Konvergenzprüfung",
+    "convergenceScore": "Übereinstimmung {{score}}",
+    "convergenceSkipped": "· {{skipped}} weitere Runde(n) übersprungen",
+    "decisionWinner": "Sieger: {{winner}}",
+    "decisionTie": "Unentschieden",
+    "decisionDecidedAt": "Entschieden in {{phase}}",
+    "decisionUnparsed": "Die Antwort des Richters ließ sich nicht als strukturiertes Urteil lesen; sie steht unten wörtlich, und das Fazit bleibt Fließtext.",
+    "minorityReport": "Minderheitenvotum ({{total}})",
+    "attachFiles": "Dateien anhängen",
+    "attachmentLimit": "Höchstens {{max}} Anhänge pro Diskussion",
+    "attachmentTooLarge": "{{name}} ist zu groß zum Anhängen",
+    "attachmentReadFailed": "{{name}} konnte nicht gelesen werden",
+    "removeAttachment": "{{name}} entfernen",
+    "decisionType": {
+      "VERDICT": "Urteil",
+      "VOTE": "Abstimmung",
+      "AGREEMENT": "Einigung",
+      "AWARD": "Zuschlag",
+      "NONE": "Keine strukturierte Entscheidung"
+    },
+    "abstainedBody": "Hat in dieser Runde nichts Neues beigetragen."
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -2352,7 +2417,8 @@
     "verificationFailed": "Fehlgeschlagen",
     "showMore": "mehr anzeigen",
     "showLess": "weniger anzeigen",
-    "awaitingApproval": "Warten auf Genehmigung"
+    "awaitingApproval": "Warten auf Genehmigung",
+    "filedBy": "Angelegt von {{agent}}"
   },
   "groupWizard": {
     "groupMemberHint": "Diese Gruppe nimmt als verschachtelte Untergruppe an der Diskussion teil.",
@@ -3061,7 +3127,33 @@
     "dashboard": "Übersicht",
     "settings": {
       "hitlApprovalPointsNote": "Diese Einstellungen bestimmen, wie eine Genehmigung abläuft. Welche Punkte einer Diskussion eine Genehmigung erfordern, wird pro Phase im Manager konfiguriert.",
-      "hitlOpenManager": "Genehmigungspunkte festlegen"
+      "hitlOpenManager": "Genehmigungspunkte festlegen",
+      "deliberation": "Qualität der Beratung",
+      "deliberationDesc": "Minderheitsmeinungen festhalten und Mitgliedern erlauben, mitten in der Diskussion entdeckte Arbeit anzulegen",
+      "recordDissents": "Minderheitenvotum erfassen",
+      "recordDissentsDesc": "Nach jeder Zusammenfassung erhält jedes Mitglied, das sie nicht verfasst hat, einen kurzen Zug, um verbleibende Einwände zu nennen. Kostet einen zusätzlichen Aufruf je Mitglied.",
+      "agentFiledTasks": "Mitglieder eigene Aufgaben anlegen lassen",
+      "agentFiledTasksDesc": "Arbeit, die ein Agent mitten in der Diskussion entdeckt, wird zu einer echten Aufgabe, die die nächste Ausführungswelle aufgreift. Aus bedeutet, dass die Werkzeuge für diese Gruppe gar nicht existieren.",
+      "maxTasksPerDiscussion": "Max. angelegte Aufgaben / Diskussion",
+      "maxTasksPerDiscussionHelp": "Zählt nur von Agenten angelegte Aufgaben, damit ein großer geplanter Rückstand sie nicht aufbraucht.",
+      "maxTasksPerTurn": "Max. angelegte Aufgaben / Zug",
+      "maxTasksPerTurnHelp": "Begrenzt einen ausufernden Einzelzug; die Diskussionsgrenze begrenzt langsames Abdriften.",
+      "maxCost": "Kostenobergrenze (USD)",
+      "maxCostUnlimited": "Kein Limit",
+      "maxCostHelp": "Leer lassen für kein Limit. Ein bereits laufender Zug kann die Summe noch leicht über die Grenze treiben.",
+      "onCostExceeded": "Beim Erreichen der Grenze",
+      "costSynthesize": "Jetzt zusammenfassen — direkt zum Fazit springen",
+      "costAbort": "Abbrechen — die Diskussion sofort scheitern lassen",
+      "costCeilingInvalid": "Eine Kostenobergrenze muss größer als 0 sein. Für kein Limit das Feld leeren.",
+      "maxDelegationDepth": "Max. Delegationstiefe",
+      "maxDelegationDepthHelp": "A delegiert an B, B an C — das ist Tiefe 2. Der Sprung, der dies überschreiten würde, wird abgelehnt; das stoppt einen Delegationszyklus.",
+      "delegationTimeout": "Delegations-Timeout (Sekunden)",
+      "delegationTimeoutHelp": "Wie lange ein delegierender Agent auf seinen Delegierten wartet. Erhöhe den Wert, wenn der Delegierte Werkzeuge oder eine verschachtelte Diskussion ausführt.",
+      "allowedDelegationTargets": "Delegations-Positivliste",
+      "allowedDelegationTargetsHint": "Beliebiger bereitgestellter Agent",
+      "allowedDelegationTargetsHelp": "Kommagetrennte Agent-IDs. Leer lassen, um jeden bereitgestellten Agenten zuzulassen.",
+      "moderatorlessWarning": "Auf einen Moderator beschränkt, den diese Task Force nicht hat: {{phases}}. Das erste Mitglied nach Sprechreihenfolge springt ein.",
+      "memberLimit": "Eine Task Force kann höchstens {{max}} Mitglieder haben"
     }
   },
   "operator": {
@@ -3095,7 +3187,8 @@
       "environment": "Umgebung",
       "authMode": "Authentifizierung des Operators",
       "authModeHint": "Der Operator ruft Ihre EDDI-Admin-API auf. Diese Einstellung legt fest, welche Zugangsdaten diese Aufrufe mitführen.",
-      "authNoneBlocked": "Für diese Installation ist die Authentifizierung aktiviert, daher würden nicht authentifizierte Tool-Aufrufe abgelehnt. Der Operator würde erfolgreich deployt und danach bei jeder Abfrage scheitern. Wählen Sie stattdessen „Ihre Identität“.",      "scope": {
+      "authNoneBlocked": "Für diese Installation ist die Authentifizierung aktiviert, daher würden nicht authentifizierte Tool-Aufrufe abgelehnt. Der Operator würde erfolgreich deployt und danach bei jeder Abfrage scheitern. Wählen Sie stattdessen „Ihre Identität“.",
+      "scope": {
         "label": "Berechtigung",
         "hint": "Was der Operator tun darf. Jede Änderung wartet weiterhin auf Ihre Genehmigung — siehe die Sicherheitsregeln unten.",
         "readOnly": {
@@ -3110,7 +3203,6 @@
         "unavailableFirstActivation": "Bei der ersten Aktivierung nicht verfügbar. Aktivieren Sie zunächst mit Nur-Lesezugriff, um zu belegen, dass das Genehmigungsgate zuverlässig funktioniert, und konfigurieren Sie dann neu, um Schreibzugriff zu gewähren.",
         "writeWarning": "Beim Aktivieren wird ein Schreib-Kanarientest ausgeführt: ein echter, harmloser Testschreibvorgang, der vor Abschluss dieses Deployments auf Ihre Genehmigung warten muss. Pausiert er nicht, wird die Aktivierung verweigert und der Operator entfernt, statt mit einem ungeprüften Schreib-Gate bereitgestellt zu bleiben."
       },
-
       "safetyPreamble": "Sicherheitsregeln (nicht bearbeitbar)",
       "safetyPreambleHint": "Wird immer vorangestellt. Sie weist den Operator an, alles von seinen Tools Zurückgelieferte als nicht vertrauenswürdige Daten zu behandeln.",
       "promptBody": "Anweisungen für den Operator",
@@ -3222,7 +3314,6 @@
     },
     "toast": {
       "activated": "Plattform-Operator aktiviert",
-
       "activatedReadWrite": "Platform Operator aktiviert — Schreibzugriff verifiziert",
       "deactivated": "Plattform-Operator deaktiviert",
       "reset": "Plattform-Operator gelöscht",

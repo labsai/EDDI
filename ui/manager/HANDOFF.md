@@ -3,6 +3,16 @@
 ## Current Status (v6.0.0 Feature Work)
 
 ### Completed Phases
+- **Group Collaboration Wave Parity** (branch: `feat/group-collaboration-wave-parity`): Closes the gap opened by EDDI PR [#626](https://github.com/labsai/EDDI/pull/626) (`refactor/group-service-split`, merged to EDDI `main` 2026-08-07), which shipped Wave 0 (F1–F6) + Wave 1 (I1–I4) + Wave 2 (I5, I7). A full endpoint- and model-level sweep of EDDI `main` against this repo found the drift confined to group collaboration — agents, channels, HITL/tool-approvals (incl. #627 request pinning), quotas, variables, user-memory, secrets and schedules were already aligned. Includes:
+  - **Two live bugs.** (1) `ENTRY_TYPE_INFO[entry.type]` was indexed unguarded and `.label` dereferenced, so a transcript containing any of the eleven entry types F4 added threw a TypeError and blanked the view — including `FOLLOW_UP`, which the Manager itself produces via `followupGroupMember`. Replaced by `entryTypeInfo()`, which degrades to a humanized label. (2) `AgentGroupConfiguration.LifecyclePolicy` is the one group enum carrying Jackson's `@JsonValue`, so the backend writes `"keep-deployed"`; the Manager typed it `"KEEP_DEPLOYED"` and fed it straight into a `<select>`, so a saved lifecycle never round-tripped. Normalized in `getGroup` and at every read site.
+  - **Config parity**: `recordDissents` (I4), `taskListConfig` (I5), `protocol.maxCostPerDiscussion` + `onCostExceeded` (I1), per-phase `convergence` + `allowAbstention` (I2/I4), `dynamicAgents.maxDelegationDepth`/`delegationTimeoutSeconds`/`allowedDelegationTargets` (I7/F18), and the backend's `MAX_MEMBERS`/`MAX_DISCUSSION_ROUNDS` bounds.
+  - **New `GroupPhaseEditor`** for per-phase abstention and convergence, mounted beside the approval editor in the group config panel. Materializes a preset group's phases the same behaviour-preserving way the approval editor does, and carries `requiresApproval` through untouched so the two compose. The two are now mutually exclusive — both write the whole config at one version.
+  - **Runtime visibility**: `DecisionRecord` (F3) rendered as a verdict card with winner, tally and minority report (and an unparsed judgment kept verbatim rather than hidden); the F5 cost ledger on the transcript header with a per-member breakdown; convergence progress on the phase header; `TaskItem.createdByAgentId` as filed-by attribution on the task board; transcript signature-envelope fields.
+  - **Two save-time rules the backend only logged**: a phase restricted to a moderator the group does not name, and a non-positive cost ceiling (which the backend silently coerces to *unlimited* — the opposite of what it reads as, so the editor refuses it).
+  - **SSE**: `convergence_checked`, `convergence_reached`, `decision_reached`. (`token` and `synthesis_complete` are declared in `GroupConversationEventSink` but have no producer, so they are deliberately not modelled.)
+  - **Group discussion attachments** — `DiscussRequest.attachments` was supported by the backend and never sent; the input now stages inline base64 files (hidden on a continuation, which the backend rejects). Closes "File upload for group chat" from the wishlist below.
+  - **Review-pass finds**: the delegation allow-list re-serialized its parsed list into the field on every keystroke, making a separator impossible to type; an abstention's deliberately-null content rendered as "No response", reporting a deliberate pass as a failed turn; `PHASE_CLASSES` in the analytics phase bar was an exhaustive `Record` over a growing backend enum.
+  - **Tests**: 4675 → 4777. New files for the API surface, `lib/group-config`, the stream events, the phase editor, the config panel and the settings page; the crash fix, the wire-format normalization, the cost-ceiling refusal and the convergence cleanup were each mutation-checked (reverted, watched fail, restored). i18n: 90 keys across all 11 locales, genuinely translated so the `i18n-quality` debt ratchet does not move.
 - **Critical Review Hardening** (branch: `claude/repo-review-grading-13c5d7`): Full-repo review followed by fixes for every defect found. Includes:
   - **Chat output corruption**: `formatMarkdownText` applied prose repairs to code, URLs and JSON — its comments claimed to skip link destinations and inline code but the regexes did not. Protected regions are now masked before any rule runs, and the lowercase→uppercase splitter is removed (it cannot distinguish a dropped space from `apiKey`).
   - **SSE framing**: `chat.ts` was the only one of three parsers that assigned rather than appended `data:` lines, trimmed token payloads, and ignored CRLF. Extracted `parseSseFrame` into `sse-utils.ts` as the shared implementation.
@@ -134,7 +144,7 @@
 5. Full LLM config editor per agent
 6. BYOK API key management
 7. Language switcher
-8. File upload for group chat
+8. ~~File upload for group chat~~ — done in `feat/group-collaboration-wave-parity` (inline base64 on the start endpoint; a continuation still cannot carry attachments, by backend design)
 
 **Key files to reference:**
 - Design tokens: `src/index.css` (L1-60)

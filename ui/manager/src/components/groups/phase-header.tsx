@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Users, Zap } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { ChevronDown, ChevronRight, Users, Zap, GitMerge } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { PhaseType, TurnOrder } from "@/lib/api/groups";
+import type { ConvergenceProgress } from "@/hooks/use-group-discussion-stream";
 
 interface PhaseHeaderProps {
   name: string;
@@ -11,6 +13,13 @@ interface PhaseHeaderProps {
   entryCount: number;
   isActive?: boolean;
   defaultExpanded?: boolean;
+  /**
+   * Convergence result for this phase (EDDI I2), when one was checked. Shown on
+   * the header rather than inside the entries because it is a statement about the
+   * phase — how close the members came to agreeing, and whether that ended the
+   * repeats early — not another contribution to it.
+   */
+  convergence?: ConvergenceProgress;
   children: React.ReactNode;
 }
 
@@ -35,8 +44,10 @@ export function PhaseHeader({
   entryCount,
   isActive,
   defaultExpanded = true,
+  convergence,
   children,
 }: PhaseHeaderProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(defaultExpanded);
   const icon = PHASE_ICONS[type] || "📋";
 
@@ -79,6 +90,45 @@ export function PhaseHeader({
           </Badge>
         </div>
       </button>
+
+      {/* Convergence result — outside the collapsible body, because "this phase
+          stopped early" is the kind of thing you need to see with the phase
+          collapsed. */}
+      {convergence && (
+        <div
+          className={cn(
+            "flex items-start gap-2 border-t px-3 py-2",
+            convergence.converged
+              ? "border-violet-500/30 bg-violet-500/5"
+              : "border-border bg-secondary/20",
+          )}
+          data-testid={`phase-convergence-${convergence.phaseIndex}`}
+        >
+          <GitMerge className="mt-0.5 h-3 w-3 shrink-0 text-violet-500" aria-hidden="true" />
+          <div className="min-w-0 text-[11px] text-muted-foreground">
+            <span className="font-medium text-foreground">
+              {convergence.converged
+                ? t("groups.convergenceReached", "Converged")
+                : t("groups.convergenceChecked", "Convergence check")}
+            </span>
+            {convergence.agreementScore != null && (
+              <span className="ms-1.5 tabular-nums">
+                {t("groups.convergenceScore", "agreement {{score}}", {
+                  score: convergence.agreementScore.toFixed(2),
+                })}
+              </span>
+            )}
+            {convergence.repeatsSkipped != null && convergence.repeatsSkipped > 0 && (
+              <span className="ms-1.5">
+                {t("groups.convergenceSkipped", "· {{skipped}} further round(s) skipped", {
+                  skipped: convergence.repeatsSkipped,
+                })}
+              </span>
+            )}
+            {convergence.reason && <p className="mt-0.5">{convergence.reason}</p>}
+          </div>
+        </div>
+      )}
 
       {/* Entries */}
       {expanded && (

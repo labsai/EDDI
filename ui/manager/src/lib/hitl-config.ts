@@ -35,6 +35,11 @@ function phase(
     inputTemplate: null,
     repeats,
     requiresApproval: false,
+    // No preset enables either: the backend builds its presets with the
+    // constructor that predates I2/I4, and `DiscussionStylePresets` documents
+    // DELPHI's recommended convergence config rather than baking it in.
+    convergence: null,
+    allowAbstention: false,
   };
 }
 
