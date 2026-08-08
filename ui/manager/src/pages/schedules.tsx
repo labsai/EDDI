@@ -1,3 +1,4 @@
+import { formatUsd } from "@/lib/utils";
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
@@ -76,7 +77,7 @@ function isHitlTimeoutSchedule(s: ScheduleConfiguration): boolean {
 function formatCost(cost?: number): string {
   if (cost == null) return "—";
   if (cost < 0) return "∞";
-  return `$${cost.toFixed(4)}`;
+  return formatUsd(cost);
 }
 
 // ==================== Status Badge ====================
