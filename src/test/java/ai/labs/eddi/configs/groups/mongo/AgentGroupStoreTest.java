@@ -276,4 +276,72 @@ class AgentGroupStoreTest {
         assertFalse(AgentGroupStore.hasHumanMembers(config(DiscussionStyle.CUSTOM, null, null)));
         assertTrue(AgentGroupStore.hasHumanMembers(humanConfig(DiscussionStyle.CUSTOM, null, human("h", "H"))));
     }
+
+    // =================================================================
+    // I12 — facilitator save-time matrix
+    // =================================================================
+
+    private AgentGroupConfiguration facilitatorConfig(AgentGroupConfiguration.FacilitatorConfig facilitator) {
+        var c = config(DiscussionStyle.CUSTOM, List.of(phase("Open", "ALL")), null);
+        c.setFacilitator(facilitator);
+        return c;
+    }
+
+    @Test
+    void facilitator_enabledWithoutAgentId_isRejected() {
+        var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateFacilitator(
+                facilitatorConfig(new AgentGroupConfiguration.FacilitatorConfig(true, "  ", null, null, 0, null))));
+        assertTrue(ex.getMessage().contains("agentId"), ex.getMessage());
+    }
+
+    @Test
+    void facilitator_midPhaseMovesWithPhaseBoundaryCadence_isRejected() {
+        // END_PHASE/EXTEND_PHASE act on remaining repeats; an EACH_PHASE checkpoint
+        // has none — the config could only ever produce rejected attempts.
+        for (var move : new AgentGroupConfiguration.FacilitatorMove[]{
+                AgentGroupConfiguration.FacilitatorMove.END_PHASE,
+                AgentGroupConfiguration.FacilitatorMove.EXTEND_PHASE}) {
+            var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateFacilitator(
+                    facilitatorConfig(new AgentGroupConfiguration.FacilitatorConfig(true, "fac", List.of(move),
+                            AgentGroupConfiguration.FacilitatorCheckpoint.EACH_PHASE, 10, null))),
+                    move.name());
+            assertTrue(ex.getMessage().contains("EACH_REPEAT"), ex.getMessage());
+        }
+        assertDoesNotThrow(() -> AgentGroupStore.validateFacilitator(
+                facilitatorConfig(new AgentGroupConfiguration.FacilitatorConfig(true, "fac",
+                        List.of(AgentGroupConfiguration.FacilitatorMove.END_PHASE),
+                        AgentGroupConfiguration.FacilitatorCheckpoint.EACH_REPEAT, 10, null))));
+    }
+
+    @Test
+    void facilitator_escalateWithoutPrincipal_isRejected() {
+        var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateFacilitator(
+                facilitatorConfig(new AgentGroupConfiguration.FacilitatorConfig(true, "fac",
+                        List.of(AgentGroupConfiguration.FacilitatorMove.ESCALATE_HUMAN),
+                        AgentGroupConfiguration.FacilitatorCheckpoint.EACH_PHASE, 10, "  "))));
+        assertTrue(ex.getMessage().contains("escalateTo"), ex.getMessage());
+
+        assertDoesNotThrow(() -> AgentGroupStore.validateFacilitator(
+                facilitatorConfig(new AgentGroupConfiguration.FacilitatorConfig(true, "fac",
+                        List.of(AgentGroupConfiguration.FacilitatorMove.ESCALATE_HUMAN),
+                        AgentGroupConfiguration.FacilitatorCheckpoint.EACH_PHASE, 10, "boss@example.com"))));
+    }
+
+    @Test
+    void facilitator_excessiveMoveBudget_isRejected() {
+        var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateFacilitator(
+                facilitatorConfig(new AgentGroupConfiguration.FacilitatorConfig(true, "fac", null, null, 101, null))));
+        assertTrue(ex.getMessage().contains("100"), ex.getMessage());
+    }
+
+    @Test
+    void facilitator_disabledOrAbsent_isNeverValidated() {
+        assertDoesNotThrow(() -> AgentGroupStore.validateFacilitator(facilitatorConfig(null)));
+        // Disabled: even a shape that would be rejected when enabled passes —
+        // an operator may stage a config before switching it on.
+        assertDoesNotThrow(() -> AgentGroupStore.validateFacilitator(
+                facilitatorConfig(new AgentGroupConfiguration.FacilitatorConfig(false, null,
+                        List.of(AgentGroupConfiguration.FacilitatorMove.ESCALATE_HUMAN),
+                        AgentGroupConfiguration.FacilitatorCheckpoint.EACH_PHASE, 10, null))));
+    }
 }

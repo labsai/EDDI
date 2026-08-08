@@ -48,6 +48,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
+        validateFacilitator(groupConfiguration);
         normalizeNonPositiveCostCeiling(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         return super.create(groupConfiguration);
@@ -61,6 +62,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
+        validateFacilitator(groupConfiguration);
         normalizeNonPositiveCostCeiling(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         return super.update(id, version, groupConfiguration);
@@ -292,6 +294,42 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                     throw new IllegalArgumentException(path + ".weights['" + weight.getKey() + "'] must be finite and >= 0");
                 }
             }
+        }
+    }
+
+    /**
+     * I12 save-time checks for {@code facilitator}. Hard rejections, same safety
+     * argument as {@link #validateVotePhases}: no legacy document can contain the
+     * new config block, so a throw can never brick an existing group.
+     * <p>
+     * The END_PHASE/EXTEND_PHASE-with-EACH_PHASE combination is rejected rather
+     * than warned: both moves act on a phase's remaining repeats, and a
+     * phase-boundary checkpoint has none — every attempt would be rejected at
+     * runtime, which is a config that can only ever produce noise.
+     */
+    static void validateFacilitator(AgentGroupConfiguration config) {
+        var facilitator = config.getFacilitator();
+        if (facilitator == null || !facilitator.enabled()) {
+            return;
+        }
+        if (facilitator.agentId() == null || facilitator.agentId().isBlank()) {
+            throw new IllegalArgumentException("facilitator.agentId is required when the facilitator is enabled");
+        }
+        var moves = facilitator.allowedMoves();
+        boolean midPhaseMoves = moves.contains(AgentGroupConfiguration.FacilitatorMove.END_PHASE)
+                || moves.contains(AgentGroupConfiguration.FacilitatorMove.EXTEND_PHASE);
+        if (midPhaseMoves && facilitator.checkAfter() == AgentGroupConfiguration.FacilitatorCheckpoint.EACH_PHASE) {
+            throw new IllegalArgumentException("facilitator.allowedMoves contains END_PHASE/EXTEND_PHASE, which act "
+                    + "mid-phase — set checkAfter to EACH_REPEAT, or drop those moves");
+        }
+        if (moves.contains(AgentGroupConfiguration.FacilitatorMove.ESCALATE_HUMAN)
+                && (facilitator.escalateTo() == null || facilitator.escalateTo().isBlank())) {
+            throw new IllegalArgumentException("facilitator.escalateTo is required when ESCALATE_HUMAN is an allowed move "
+                    + "— an escalation must name the principal it waits on");
+        }
+        if (facilitator.maxMovesPerDiscussion() > 100) {
+            throw new IllegalArgumentException("facilitator.maxMovesPerDiscussion must be at most 100 — the facilitator "
+                    + "is a bounded intervention mechanism, not an orchestrator");
         }
     }
 

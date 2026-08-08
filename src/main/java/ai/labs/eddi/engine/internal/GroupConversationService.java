@@ -36,6 +36,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
+import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
 import ai.labs.eddi.engine.internal.groups.GroupHitlCoordinator;
@@ -178,6 +179,7 @@ public class GroupConversationService implements IGroupConversationService {
     private final GroupSigningGuard signingGuard;
     private final MemberTurnExecutor memberTurnExecutor;
     private final PhaseExecutionEngine phaseExecutionEngine;
+    private final FacilitatorEngine facilitatorEngine;
     private final TaskForceEngine taskForceEngine;
     private final GroupHitlCoordinator hitlCoordinator;
 
@@ -289,6 +291,9 @@ public class GroupConversationService implements IGroupConversationService {
         this.memberTurnExecutor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, contextBuilder, this,
                 counterGroupMemberPauseSkipped, DEFAULT_AGENT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES);
         this.phaseExecutionEngine = new PhaseExecutionEngine(memberTurnExecutor, contextBuilder, executorService, callerIdentityContext);
+        // I12: the deployment store is field-injected (RECRUIT's deployed-and-ready
+        // check), so the engine takes a supplier that reads it lazily.
+        this.facilitatorEngine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry);
         this.taskForceEngine = new TaskForceEngine(memberTurnExecutor, templatingEngine, jsonSerialization, executorService, callerIdentityContext,
                 activeTokens, DEFAULT_AGENT_TIMEOUT_SECONDS, MEMBER_TURN_CANCEL_DRAIN_SECONDS);
         // Constructed last, same reasoning as memberTurnExecutor above: needs `this`
@@ -566,6 +571,17 @@ public class GroupConversationService implements IGroupConversationService {
                         resolvedProtocol.onCostExceeded());
         int maxTurns = protocol.maxTurns() > 0 ? protocol.maxTurns() : 50;
 
+        // I12: the loop iterates a runtime COPY of the phase list. A facilitator
+        // move may diverge it mid-run (CALL_VOTE inserts a phase, EXTEND_PHASE bumps
+        // a repeat count); on divergence the copy is persisted to gc.runtimePhases,
+        // which every resume path then prefers over the config's phases — a bookmark
+        // taken against the diverged list must never be re-indexed into the
+        // config's. Preferring an already-persisted runtime list here is the resume
+        // half of that same rule.
+        List<DiscussionPhase> phaseList = gc.getRuntimePhases() != null && !gc.getRuntimePhases().isEmpty()
+                ? new ArrayList<>(gc.getRuntimePhases())
+                : new ArrayList<>(phases);
+
         // Store the group's DynamicAgentConfig on the GC so executeAgentTurn()
         // can pass it to member agents via context variables, allowing
         // AgentOrchestrator to enforce group-level guardrails on dynamic tools.
@@ -607,13 +623,13 @@ public class GroupConversationService implements IGroupConversationService {
         if (startPhaseIndex == 0 && listener != null) {
             if (gc.getRound() <= 1) {
                 listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(gc.getId(), gc.getGroupId(), question,
-                        config.getStyle() != null ? config.getStyle().name() : "ROUND_TABLE", phases.size(),
+                        config.getStyle() != null ? config.getStyle().name() : "ROUND_TABLE", phaseList.size(),
                         config.getMembers() != null
                                 ? config.getMembers().stream().map(GroupMember::agentId).toList()
                                 : List.of()));
             } else {
                 listener.onRoundStart(new GroupConversationEventSink.RoundStartEvent(
-                        gc.getId(), gc.getRound(), question, phases.size()));
+                        gc.getId(), gc.getRound(), question, phaseList.size()));
             }
         }
 
@@ -648,8 +664,8 @@ public class GroupConversationService implements IGroupConversationService {
             }
 
             // Execute each phase
-            for (int phaseIdx = startPhaseIndex; phaseIdx < phases.size(); phaseIdx++) {
-                DiscussionPhase phase = phases.get(phaseIdx);
+            for (int phaseIdx = startPhaseIndex; phaseIdx < phaseList.size(); phaseIdx++) {
+                DiscussionPhase phase = phaseList.get(phaseIdx);
 
                 // NEW-3: Check control token at top of phase loop
                 var token = activeTokens.get(gc.getId());
@@ -909,6 +925,62 @@ public class GroupConversationService implements IGroupConversationService {
                         listener.onPhaseComplete(new GroupConversationEventSink.PhaseCompleteEvent(phaseIdx, phase.name()));
                     }
 
+                    // I12: EACH_REPEAT facilitator checkpoint — after the repeat's own
+                    // bookkeeping (convergence, dissent, vote, persist) so the briefing
+                    // describes a settled repeat, and BEFORE the outcome break so the
+                    // engine can validate moves against how the repeat ended (a
+                    // facilitator never overrules a convergence exit; the context flags
+                    // make that structural rather than advisory).
+                    if (config.getFacilitator() != null && config.getFacilitator().enabled()
+                            && config.getFacilitator().checkAfter() == AgentGroupConfiguration.FacilitatorCheckpoint.EACH_REPEAT
+                            && !costCeilingSynthesizeNow) {
+                        boolean moreRepeats = repeat < Math.max(phase.repeats(), 1) - 1;
+                        boolean midPhaseResume = moreRepeats && outcome.isContinue();
+                        boolean escalationTarget = midPhaseResume || phaseIdx + 1 < phaseList.size();
+                        var facilitatorCtx = new FacilitatorEngine.CheckpointContext(
+                                phaseIdx, repeat, true, moreRepeats, !outcome.isContinue(), escalationTarget);
+                        var facilitatorAction = facilitatorEngine.checkpoint(gc, config, phase, facilitatorCtx,
+                                protocol, question, listener, turnCounter, maxTurns);
+                        switch (facilitatorAction.kind()) {
+                            case END_PHASE -> {
+                                gc.setLastModified(Instant.now());
+                                conversationStore.update(gc);
+                            }
+                            case EXTEND_PHASE -> {
+                                // The extension lives in the RUNTIME phase list (a new
+                                // record with repeats+1), not a loose counter — so the
+                                // loop bound, the resume clamp and the drift check all
+                                // read the same extended value after a pause.
+                                phase = new DiscussionPhase(phase.name(), phase.type(), phase.participants(),
+                                        phase.turnOrder(), phase.contextScope(), phase.targetEachPeer(),
+                                        phase.inputTemplate(), Math.max(phase.repeats(), 1) + 1, phase.requiresApproval(),
+                                        phase.convergence(), phase.allowAbstention(), phase.voteConfig());
+                                phaseList.set(phaseIdx, phase);
+                                persistRuntimePhases(gc, phaseList);
+                            }
+                            case INSERT_VOTE -> {
+                                phaseList.add(phaseIdx + 1, facilitatorAction.insertPhase());
+                                persistRuntimePhases(gc, phaseList);
+                            }
+                            case ESCALATE -> {
+                                int resumePhaseIdx = midPhaseResume ? phaseIdx : phaseIdx + 1;
+                                int resumeRepeatIdx = midPhaseResume ? repeat + 1 : 0;
+                                hitlCoordinator.commitFacilitatorEscalationPause(gc, resumePhaseIdx, resumeRepeatIdx,
+                                        phaseList, facilitatorAction.escalation(), turnCounter.get() + 1, listener, config);
+                                convertPauseToCancelIfSignalled(gc, listener);
+                                return gc;
+                            }
+                            case NONE -> {
+                                // no-op; any rejection entry rides the next persist
+                            }
+                        }
+                        if (facilitatorAction.kind() == FacilitatorEngine.FacilitatorAction.Kind.END_PHASE) {
+                            LOGGER.infof("Facilitator ended phase '%s' of group %s after repeat %d",
+                                    phase.name(), gc.getGroupId(), repeat);
+                            break;
+                        }
+                    }
+
                     if (!outcome.isContinue()) {
                         LOGGER.infof("Phase '%s' of group %s ended early after repeat %d: %s",
                                 phase.name(), gc.getGroupId(), repeat, outcome.reason());
@@ -998,6 +1070,39 @@ public class GroupConversationService implements IGroupConversationService {
                     break;
                 }
 
+                // I12: EACH_PHASE facilitator checkpoint — the default cadence. AFTER
+                // the HITL gate on purpose: a phase that pauses for approval must
+                // never have its approval silently skipped because a facilitator
+                // escalated first (the reverse — a facilitator missing one checkpoint
+                // because the phase paused — is the harmless direction). END_PHASE and
+                // EXTEND_PHASE are invalid at a phase boundary; the engine rejects
+                // them via the context (and save-time validation refuses the combo).
+                if (config.getFacilitator() != null && config.getFacilitator().enabled()
+                        && config.getFacilitator().checkAfter() == AgentGroupConfiguration.FacilitatorCheckpoint.EACH_PHASE
+                        && !costCeilingSynthesizeNow && !endDiscussionEarly) {
+                    var facilitatorCtx = new FacilitatorEngine.CheckpointContext(
+                            phaseIdx, Math.max(phase.repeats(), 1) - 1, false, false, false,
+                            phaseIdx + 1 < phaseList.size());
+                    var facilitatorAction = facilitatorEngine.checkpoint(gc, config, phase, facilitatorCtx,
+                            protocol, question, listener, turnCounter, maxTurns);
+                    switch (facilitatorAction.kind()) {
+                        case INSERT_VOTE -> {
+                            phaseList.add(phaseIdx + 1, facilitatorAction.insertPhase());
+                            persistRuntimePhases(gc, phaseList);
+                        }
+                        case ESCALATE -> {
+                            hitlCoordinator.commitFacilitatorEscalationPause(gc, phaseIdx + 1, 0,
+                                    phaseList, facilitatorAction.escalation(), turnCounter.get() + 1, listener, config);
+                            convertPauseToCancelIfSignalled(gc, listener);
+                            return gc;
+                        }
+                        default -> {
+                            // NONE (incl. every rejection) — nothing to apply;
+                            // END_PHASE/EXTEND_PHASE cannot reach here (rejected above)
+                        }
+                    }
+                }
+
                 // I2: END_DISCUSSION ends the phase loop itself, unlike END_REPEATS
                 // which only ended the repeat loop above. Placed after the HITL gate so
                 // an approval that was already due is still honored.
@@ -1062,6 +1167,11 @@ public class GroupConversationService implements IGroupConversationService {
             gc.setState(GroupConversationState.COMPLETED);
             gc.setPausedTurnCount(0); // Clear turn budget state on successful completion
             gc.setHitlLastPauseFingerprint(null); // #4: reset no-progress guard
+            // I12: a facilitator's phase-list divergence is one-off for the round —
+            // a continuation round starts from the config's phases again, and stale
+            // extension counts would misattribute under next round's indices.
+            gc.setRuntimePhases(null);
+            gc.getFacilitatorExtensions().clear();
             gc.setLastModified(Instant.now());
             try {
                 conversationStore.updateIfState(gc, expectedRunningState);
@@ -1322,6 +1432,31 @@ public class GroupConversationService implements IGroupConversationService {
         // Expand style preset
         DiscussionStyle style = config.getStyle() != null ? config.getStyle() : DiscussionStyle.ROUND_TABLE;
         return DiscussionStylePresets.expand(style, config.getMaxRounds());
+    }
+
+    /**
+     * The phase list a RESUME must execute and drift-check against (I12): the
+     * conversation's persisted runtime list when a facilitator diverged it, else
+     * the config's phases. Every resume surface (approval resume, human-turn
+     * submission, timeout skip) goes through this — re-resolving the config for a
+     * conversation whose pause was taken against a diverged list would mis-index
+     * the bookmark.
+     */
+    public List<DiscussionPhase> effectivePhases(GroupConversation gc, AgentGroupConfiguration config) {
+        List<DiscussionPhase> runtime = gc.getRuntimePhases();
+        return runtime != null && !runtime.isEmpty() ? runtime : resolvePhases(config);
+    }
+
+    /**
+     * Persists a facilitator-diverged phase list (I12). The write is the whole
+     * document, which also carries the FACILITATION entry and move counters the
+     * checkpoint just produced — one write, one consistent snapshot.
+     */
+    private void persistRuntimePhases(GroupConversation gc, List<DiscussionPhase> phaseList)
+            throws IResourceStore.ResourceStoreException {
+        gc.setRuntimePhases(List.copyOf(phaseList));
+        gc.setLastModified(Instant.now());
+        conversationStore.update(gc);
     }
 
     private ProtocolConfig resolveProtocol(AgentGroupConfiguration config) {

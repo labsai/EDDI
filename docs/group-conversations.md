@@ -247,6 +247,61 @@ roster like any agent, but their turn **pauses the discussion**
   humans cannot be nested as a GROUP member. A human **moderator** is allowed —
   every synthesis then waits on that person (the save warns about it).
 
+## Facilitator with bounded moves (I12)
+
+Orchestration is static choreography; nothing reacts ("we've agreed — stop",
+"we need a specialist — recruit"). A full LLM orchestrator conflicts with
+deterministic governance, so the facilitator chooses among
+**config-enumerated moves** — validated, capped, audit-logged:
+
+```json
+{
+  "facilitator": {
+    "enabled": true,
+    "agentId": "facilitator-agent",
+    "allowedMoves": ["CONTINUE", "CALL_VOTE", "ESCALATE_HUMAN"],
+    "checkAfter": "EACH_PHASE",
+    "maxMovesPerDiscussion": 10,
+    "escalateTo": "gregor@example.com"
+  }
+}
+```
+
+At each checkpoint (`EACH_PHASE` default, or `EACH_REPEAT`) the facilitator
+agent receives a **compact briefing** — phase/repeat position, budget
+arithmetic, roster, entry counts, capped excerpts, *never the full transcript*
+— and replies `{"move", "args", "reason"}`. Moves v1:
+
+- `CONTINUE` — the ambient no-op and every failure's fallback. Silent.
+- `END_PHASE` / `EXTEND_PHASE` — skip the remaining repeats / add one (≤2
+  extensions per phase, still bounded by `maxTurns`). They act mid-phase, so
+  the save **rejects** them unless `checkAfter: EACH_REPEAT`. A convergence
+  exit is never overruled.
+- `CALL_VOTE` — inserts a one-off VOTE phase next (`args.options`, 2–10),
+  built to I14's enforced PARALLEL+NONE shape by construction.
+- `RECRUIT` — brings a deployed agent in (`args.agentId`), the same
+  validation path as I7's `recruitAgent` tool.
+- `ESCALATE_HUMAN` — pauses the discussion (`AWAITING_HUMAN_INPUT`) for the
+  configured `escalateTo` principal with the facilitator's question, riding
+  I6's pending-input machinery whole; the answer records as a peer-visible
+  `FOLLOW_UP` and the discussion resumes.
+
+**Bounds and honesty.** The consult itself is a real LLM turn (counted, cost
+on the I1 ledger, skipped once either budget is gone). Executed non-CONTINUE
+moves are capped by `maxMovesPerDiscussion` (default 10) and each lands as a
+peer-hidden `FACILITATION` entry + audit event + the
+`eddi_group_facilitator_moves_total{move,outcome}` counter. Anything
+unparseable, disallowed or invalid-in-context degrades to CONTINUE **and is
+recorded as a rejected attempt** — the audit trail must show the model tried.
+Facilitator failure never fails a discussion.
+
+**Runtime phase divergence.** CALL_VOTE and EXTEND_PHASE mutate a runtime
+copy of the phase list, persisted on the conversation (schema v4). Every
+resume path — approval, human turn, timeout skip — executes and drift-checks
+against that list, so a pause taken inside an inserted phase resumes
+correctly. The divergence is one-off: completion (and every new round) starts
+from the config again.
+
 ## Nested Groups (Group-of-Groups)
 
 Members can be other groups. The sub-group runs its own discussion and its synthesized answer becomes the member's response.

@@ -367,6 +367,12 @@ public class GroupLifecycleOps {
             // and had this round's dissents merged onto them.
             gc.setSynthesizedAnswer(null);
             gc.setDecision(null);
+            // I12: same defensive class as the two fields above — completion already
+            // clears the facilitator's one-off phase divergence, but a continuation
+            // must never run round N+1 against round N's inserted phases or count
+            // its extensions against stale phase indices.
+            gc.setRuntimePhases(null);
+            gc.getFacilitatorExtensions().clear();
             gc.setResumeQuestion(question);
             gc.getTranscript().add(new TranscriptEntry(
                     "user", "User", question, 0, "Question",

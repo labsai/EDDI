@@ -236,6 +236,184 @@ class GroupConversationServiceExtendedTest {
         }
     }
 
+    /**
+     * I12 — the bounded facilitator end-to-end: checkpoint cadences, runtime
+     * phase-list divergence (CALL_VOTE, EXTEND_PHASE), END_PHASE, escalation
+     * pauses, and the degrade-to-CONTINUE guarantees under failure.
+     */
+    @Nested
+    class Facilitator {
+
+        private AgentGroupConfiguration facilitatorConfig(FacilitatorCheckpoint checkAfter, int maxMoves,
+                                                          int repeats, FacilitatorMove... moves) {
+            var c = new AgentGroupConfiguration();
+            c.setName("Facilitated Group");
+            c.setStyle(DiscussionStyle.CUSTOM);
+            c.setMembers(List.of(new GroupMember("a1", "Alice", 1, null), new GroupMember("a2", "Bob", 2, null)));
+            c.setPhases(List.of(new AgentGroupConfiguration.DiscussionPhase("Discuss", PhaseType.OPINION, "ALL",
+                    TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, repeats, false)));
+            c.setFacilitator(new AgentGroupConfiguration.FacilitatorConfig(true, "fac", List.of(moves), checkAfter,
+                    maxMoves, "boss@example.com"));
+            c.setProtocol(new ProtocolConfig(60, ProtocolConfig.MemberFailurePolicy.SKIP, 2,
+                    ProtocolConfig.MemberUnavailablePolicy.SKIP));
+            return c;
+        }
+
+        private long entriesOfType(GroupConversation gc, TranscriptEntryType type) {
+            return gc.getTranscript().stream().filter(e -> e.type() == type).count();
+        }
+
+        @Test
+        void callVote_insertsAOneOffVotePhase_thatActuallyRuns() throws Exception {
+            var config = facilitatorConfig(FacilitatorCheckpoint.EACH_PHASE, 1, 1,
+                    FacilitatorMove.CONTINUE, FacilitatorMove.CALL_VOTE);
+            setupStore(config);
+            // The members' single stub answers both their opinion turn and the
+            // inserted ballot — a valid ballot is a fine opinion for this test.
+            stubAgent("a1", "{\"vote\": \"Ship it\"}");
+            stubAgent("a2", "{\"vote\": \"Ship it\"}");
+            stubAgent("fac", "{\"move\": \"CALL_VOTE\", \"args\": {\"options\": [\"Ship it\", \"Hold it\"]}, "
+                    + "\"reason\": \"split opinions\"}");
+
+            GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, gc.getState());
+            assertEquals(2, entriesOfType(gc, TranscriptEntryType.VOTE),
+                    "the config had NO vote phase — these ballots prove the runtime insertion ran");
+            assertNotNull(gc.getDecision());
+            assertEquals(GroupConversation.DecisionType.VOTE, gc.getDecision().type());
+            assertEquals("Ship it", gc.getDecision().winner());
+            assertNull(gc.getRuntimePhases(), "the divergence is one-off — completion clears it");
+            // Checkpoint 1 (after Discuss) executed CALL_VOTE; checkpoint 2 (after
+            // the inserted vote) had no budget left (maxMoves=1) and was rejected.
+            assertEquals(2, entriesOfType(gc, TranscriptEntryType.FACILITATION));
+        }
+
+        @Test
+        void endPhase_atEachRepeat_skipsTheRemainingRepeats() throws Exception {
+            var config = facilitatorConfig(FacilitatorCheckpoint.EACH_REPEAT, 10, 3,
+                    FacilitatorMove.CONTINUE, FacilitatorMove.END_PHASE);
+            setupStore(config);
+            stubAgent("a1", "Opinion A");
+            stubAgent("a2", "Opinion B");
+            stubAgent("fac", "{\"move\": \"END_PHASE\", \"reason\": \"positions are clear\"}");
+
+            GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, gc.getState());
+            assertEquals(2, entriesOfType(gc, TranscriptEntryType.OPINION),
+                    "repeats=3 would produce 6 opinions — END_PHASE after repeat 1 leaves exactly one round");
+            assertTrue(gc.getTranscript().stream().anyMatch(e -> e.type() == TranscriptEntryType.FACILITATION
+                    && e.content() != null && e.content().contains("ended phase")));
+        }
+
+        @Test
+        void extendPhase_addsRepeats_andTheCapHolds() throws Exception {
+            var config = facilitatorConfig(FacilitatorCheckpoint.EACH_REPEAT, 10, 1,
+                    FacilitatorMove.CONTINUE, FacilitatorMove.EXTEND_PHASE);
+            setupStore(config);
+            stubAgent("a1", "Opinion A");
+            stubAgent("a2", "Opinion B");
+            // Always asks to extend: 1 configured repeat + 2 allowed extensions = 3
+            // rounds, then the per-phase cap rejects the third ask.
+            stubAgent("fac", "{\"move\": \"EXTEND_PHASE\", \"reason\": \"still productive\"}");
+
+            GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, gc.getState());
+            assertEquals(6, entriesOfType(gc, TranscriptEntryType.OPINION),
+                    "2 members × (1 configured + 2 extended) repeats — the cap is what stops the loop");
+            assertTrue(gc.getFacilitatorExtensions().isEmpty(), "completion clears the per-phase extension counts");
+        }
+
+        @Test
+        void escalateHuman_pausesForTheConfiguredPrincipal() throws Exception {
+            var config = facilitatorConfig(FacilitatorCheckpoint.EACH_PHASE, 10, 1,
+                    FacilitatorMove.CONTINUE, FacilitatorMove.ESCALATE_HUMAN);
+            // A second phase so the escalation has somewhere to resume into.
+            config.setPhases(List.of(
+                    new AgentGroupConfiguration.DiscussionPhase("Discuss", PhaseType.OPINION, "ALL",
+                            TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false),
+                    new AgentGroupConfiguration.DiscussionPhase("Wrap", PhaseType.SYNTHESIS, "MODERATOR",
+                            TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false)));
+            config.setModeratorAgentId("mod");
+            setupStore(config);
+            stubAgent("a1", "Opinion A");
+            stubAgent("a2", "Opinion B");
+            stubAgent("mod", "The synthesis.");
+            stubAgent("fac", "{\"move\": \"ESCALATE_HUMAN\", \"args\": {\"question\": \"Do we have budget for this?\"}, "
+                    + "\"reason\": \"commercial call\"}");
+
+            GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.AWAITING_HUMAN_INPUT, gc.getState());
+            var pending = gc.getPendingHumanInput();
+            assertNotNull(pending);
+            assertEquals("boss@example.com", pending.memberId(), "the pause waits on the CONFIGURED principal");
+            assertEquals("Do we have budget for this?", pending.renderedPrompt());
+            assertEquals(TranscriptEntryType.FOLLOW_UP.name(), pending.entryType(),
+                    "the answer lands as peer-visible guidance, not hidden bookkeeping");
+            var bookmark = gc.getResumePoint();
+            assertEquals(1, bookmark.phaseIdx(), "resumes at the NEXT phase");
+            assertEquals(-1, bookmark.speakerIdx(), "the +1 advance on submission starts it at speaker 0");
+            assertEquals(GroupConversation.RESUME_KIND_HUMAN_TURN, bookmark.pauseKind());
+        }
+
+        @Test
+        void continueEverywhere_leavesTheDiscussionUntouched() throws Exception {
+            var config = facilitatorConfig(FacilitatorCheckpoint.EACH_PHASE, 10, 2, FacilitatorMove.CONTINUE);
+            setupStore(config);
+            stubAgent("a1", "Opinion A");
+            stubAgent("a2", "Opinion B");
+            stubAgent("fac", "{\"move\": \"CONTINUE\", \"reason\": \"healthy\"}");
+
+            GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, gc.getState());
+            assertEquals(4, entriesOfType(gc, TranscriptEntryType.OPINION), "2 members × 2 repeats, unchanged");
+            assertEquals(0, entriesOfType(gc, TranscriptEntryType.FACILITATION), "CONTINUE is silent");
+            assertNull(gc.getRuntimePhases());
+        }
+
+        @Test
+        void effectivePhases_prefersTheRuntimeList_overTheConfig() {
+            var config = facilitatorConfig(FacilitatorCheckpoint.EACH_PHASE, 10, 1, FacilitatorMove.CONTINUE);
+            var gc = new GroupConversation();
+            var diverged = List.of(
+                    config.getPhases().get(0),
+                    new AgentGroupConfiguration.DiscussionPhase("Facilitator Vote", PhaseType.VOTE, "ALL",
+                            TurnOrder.PARALLEL, ContextScope.NONE, false, null, 1, false));
+
+            assertEquals(config.getPhases(), service.effectivePhases(gc, config),
+                    "no divergence → the config is authoritative");
+
+            gc.setRuntimePhases(diverged);
+            assertEquals(diverged, service.effectivePhases(gc, config),
+                    "a persisted runtime list wins — the bookmark was taken against it");
+
+            gc.setRuntimePhases(List.of());
+            assertEquals(config.getPhases(), service.effectivePhases(gc, config), "empty behaves as unset");
+        }
+
+        @Test
+        void facilitatorAgentUnavailable_discussionCompletesNormally() throws Exception {
+            var config = facilitatorConfig(FacilitatorCheckpoint.EACH_PHASE, 10, 1,
+                    FacilitatorMove.CONTINUE, FacilitatorMove.END_PHASE);
+            setupStore(config);
+            stubAgent("a1", "Opinion A");
+            stubAgent("a2", "Opinion B");
+            // "fac" is never stubbed: getLatestReadyAgent returns null → the
+            // SKIP unavailable-policy yields a contentless reply → no intervention.
+
+            GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, gc.getState());
+            assertEquals(2, entriesOfType(gc, TranscriptEntryType.OPINION));
+            assertEquals(0, entriesOfType(gc, TranscriptEntryType.FACILITATION),
+                    "a facilitator that never replied has no attempt to record");
+        }
+    }
+
     @Nested
     class AsyncDiscussion {
 

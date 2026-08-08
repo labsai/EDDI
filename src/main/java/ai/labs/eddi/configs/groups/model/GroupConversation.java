@@ -30,8 +30,14 @@ public class GroupConversation {
      * Current document shape this code understands (Wave 0, F6). Bump whenever a
      * Wave adds a field resume-time logic depends on, and register that version's
      * migration in {@code GroupConversationSchemaMigrations}.
+     * <p>
+     * Version 4 (I12): {@link #runtimePhases} — a facilitator-diverged phase list a
+     * resume MUST honor. An older deployment resuming a v4 document would silently
+     * run the config's phases instead, mis-indexing every bookmark into a list the
+     * pause was not taken against — exactly the class of corruption the
+     * newer-than-current refusal exists to prevent.
      */
-    public static final int CURRENT_SCHEMA_VERSION = 3;
+    public static final int CURRENT_SCHEMA_VERSION = 4;
     /**
      * The shape this specific document was last written in. Checked before a
      * resume: newer than {@link #CURRENT_SCHEMA_VERSION} refuses (this deployment
@@ -132,6 +138,66 @@ public class GroupConversation {
     public void setRoundStartTranscriptIndex(int roundStartTranscriptIndex) {
         this.roundStartTranscriptIndex = roundStartTranscriptIndex;
     }
+
+    /**
+     * The phase list the CURRENT round actually runs (I12), persisted only once a
+     * facilitator move diverges it from the config's phases — a CALL_VOTE insertion
+     * or an EXTEND_PHASE repeat bump. {@code null} means the config is
+     * authoritative, which is every discussion without a facilitator intervention.
+     * <p>
+     * Load-bearing across a pause: every resume path (approval, human turn, crash
+     * recovery) must execute and drift-check against THIS list when it is set —
+     * resolving the config's phases instead would mis-index the bookmark into a
+     * list the pause was not taken against. Schema version 4 guards exactly that
+     * (see {@link #CURRENT_SCHEMA_VERSION}). Cleared when a round completes: a
+     * facilitator's insertions are one-off by design, so a continuation round
+     * starts from the config again.
+     */
+    private List<AgentGroupConfiguration.DiscussionPhase> runtimePhases;
+
+    /**
+     * Executed non-CONTINUE facilitator moves so far (I12) — the counter
+     * {@code FacilitatorConfig.maxMovesPerDiscussion} caps. Persisted so a
+     * pause/resume cannot refill the budget. Rejected attempts never increment it.
+     */
+    private int facilitatorMoveCount;
+
+    /**
+     * EXTEND_PHASE count per phase index (I12), capped at 2 per phase. Keyed by the
+     * phase's index rendered as a string (document maps key by string). Safe under
+     * CALL_VOTE insertions: insertions land at {@code currentPhase + 1}, so an
+     * index that already carries a count (current or earlier) never shifts, and
+     * later phases have no counts yet. Cleared with {@link #runtimePhases} when the
+     * round completes.
+     */
+    private Map<String, Integer> facilitatorExtensions = new ConcurrentHashMap<>();
+
+    public List<AgentGroupConfiguration.DiscussionPhase> getRuntimePhases() {
+        return runtimePhases;
+    }
+
+    public void setRuntimePhases(List<AgentGroupConfiguration.DiscussionPhase> runtimePhases) {
+        this.runtimePhases = runtimePhases;
+    }
+
+    public int getFacilitatorMoveCount() {
+        return facilitatorMoveCount;
+    }
+
+    public void setFacilitatorMoveCount(int facilitatorMoveCount) {
+        this.facilitatorMoveCount = facilitatorMoveCount;
+    }
+
+    public Map<String, Integer> getFacilitatorExtensions() {
+        return facilitatorExtensions;
+    }
+
+    public void setFacilitatorExtensions(Map<String, Integer> facilitatorExtensions) {
+        this.facilitatorExtensions = facilitatorExtensions != null
+                ? new ConcurrentHashMap<>(facilitatorExtensions)
+                : new ConcurrentHashMap<>();
+    }
+
     private SharedTaskList taskList;
     /** Agents dynamically added during the discussion (recruited or created). */
     private List<AgentGroupConfiguration.GroupMember> dynamicMembers = new CopyOnWriteArrayList<>();

@@ -389,7 +389,7 @@ class GroupHitlCoordinatorTest {
         when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(resId);
         var config = humanGroupConfig("PT4H");
         when(groupStore.read(GROUP_ID, 1)).thenReturn(config);
-        when(groupConversationService.resolvePhases(config)).thenReturn(List.of(opinionPhase()));
+        when(groupConversationService.effectivePhases(any(), eq(config))).thenReturn(List.of(opinionPhase()));
         var runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
 
         var result = coordinator.submitHumanInput(GC_ID, "h-1", "My considered answer.", "h-1", null);
@@ -458,13 +458,93 @@ class GroupHitlCoordinatorTest {
         when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(resId);
         var config = humanGroupConfig(null);
         when(groupStore.read(GROUP_ID, 1)).thenReturn(config);
-        when(groupConversationService.resolvePhases(config)).thenReturn(List.of(opinionPhase()));
+        when(groupConversationService.effectivePhases(any(), eq(config))).thenReturn(List.of(opinionPhase()));
 
         assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException.class,
                 () -> coordinator.submitHumanInput(GC_ID, "h-1", "text", "h-1", null));
 
         assertTrue(gc.getTranscript().isEmpty(), "drift refuses BEFORE any mutation — no rollback needed");
         assertEquals(GroupConversationState.AWAITING_HUMAN_INPUT, gc.getState());
+    }
+
+    // =================================================================
+    // I12 — facilitator escalation pause
+    // =================================================================
+
+    @Test
+    void commitFacilitatorEscalationPause_pausesOnThePrincipal_withResumeShapedBookmark() throws Exception {
+        var coordinator = coordinator();
+        var gc = gc(GroupConversationState.IN_PROGRESS);
+        var listener = mock(GroupDiscussionEventListener.class);
+        // The RUNTIME list, deliberately different from anything a config would
+        // resolve — the resume phase's name must come from IT.
+        var runtimePhases = List.of(opinionPhase(),
+                new DiscussionPhase("Facilitator Vote", PhaseType.VOTE, "ALL", TurnOrder.PARALLEL,
+                        ContextScope.NONE, false, null, 1, false));
+        var escalation = new FacilitatorEngine.FacilitatorAction.Escalation("boss@example.com", "Budget approved?");
+
+        coordinator.commitFacilitatorEscalationPause(gc, 1, 0, runtimePhases, escalation, 7, listener,
+                humanGroupConfig("PT4H"));
+
+        assertEquals(GroupConversationState.AWAITING_HUMAN_INPUT, gc.getState());
+        assertEquals(HitlPauseType.HUMAN_TURN, gc.getHitlPauseType());
+        assertEquals("Facilitator Vote", gc.getPausedPhaseName(), "read from the runtime list, not the config");
+        assertEquals(7, gc.getPausedTurnCount());
+        assertEquals("PT4H", gc.getHitlApprovalTimeout(), "escalations wait under the group's human-turn rules");
+        var pending = gc.getPendingHumanInput();
+        assertEquals("boss@example.com", pending.memberId());
+        assertEquals("Budget approved?", pending.renderedPrompt());
+        assertEquals("FOLLOW_UP", pending.entryType());
+        assertEquals(-1, pending.speakerIdx());
+        var bookmark = gc.getResumePoint();
+        assertEquals(1, bookmark.phaseIdx());
+        assertEquals(0, bookmark.repeatIdx());
+        assertEquals(-1, bookmark.speakerIdx(), "the shared +1 advance lands the resume at speaker 0");
+        assertEquals(GroupConversation.RESUME_KIND_HUMAN_TURN, bookmark.pauseKind());
+        verify(conversationStore).update(gc);
+        verify(scheduleStore).createSchedule(any());
+        verify(listener).onHumanInputRequested(any(GroupConversationEventSink.HumanInputRequestedEvent.class));
+    }
+
+    @Test
+    void escalationSubmission_resumesAtTheBookmarkedPhase_speakerZero() throws Exception {
+        var coordinator = coordinator();
+        var gc = gc(GroupConversationState.AWAITING_HUMAN_INPUT);
+        gc.setOriginalQuestion("Q?");
+        gc.setPausedAt(Instant.now());
+        gc.setPausedAtPhaseIndex(1);
+        gc.setPausedPhaseName("Facilitator Vote");
+        gc.setHitlPauseType(HitlPauseType.HUMAN_TURN);
+        gc.setPendingHumanInput(new PendingHumanInput("boss@example.com", "boss@example.com", 1, 0, -1,
+                "FOLLOW_UP", "Budget approved?", "SKIP_TURN", Instant.now()));
+        gc.setResumePoint(new GroupConversation.ResumePoint(1, 0, -1, GroupConversation.RESUME_KIND_HUMAN_TURN));
+        var votePhase = new DiscussionPhase("Facilitator Vote", PhaseType.VOTE, "ALL", TurnOrder.PARALLEL,
+                ContextScope.NONE, false, null, 1, false);
+        gc.setRuntimePhases(List.of(opinionPhase(), votePhase));
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        var resId = mock(IResourceStore.IResourceId.class);
+        when(resId.getVersion()).thenReturn(1);
+        when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(resId);
+        var config = humanGroupConfig(null);
+        when(groupStore.read(GROUP_ID, 1)).thenReturn(config);
+        // The coordinator asks for the EFFECTIVE phases; the drift check only
+        // passes because the runtime list (with the inserted vote) is what comes
+        // back — the config alone has no phase named "Facilitator Vote" at index 1.
+        when(groupConversationService.effectivePhases(any(), eq(config)))
+                .thenReturn(List.of(opinionPhase(), votePhase));
+        var runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
+
+        var result = coordinator.submitHumanInput(GC_ID, "boss@example.com", "Yes — approved.", "boss@example.com", null);
+
+        assertEquals(GroupConversationState.IN_PROGRESS, result.getState());
+        var entry = result.getTranscript().get(0);
+        assertEquals(TranscriptEntryType.FOLLOW_UP, entry.type(), "escalation answers are peer-visible guidance");
+        assertEquals("Yes — approved.", entry.content());
+        assertEquals(1, entry.phaseIndex());
+        assertEquals(0, result.getResumePoint().speakerIdx(), "-1 advanced to 0 — the phase starts fresh");
+        verify(executorService).submit(runnableCaptor.capture());
+        runnableCaptor.getValue().run();
+        verify(groupConversationService).executeDiscussion(eq(gc), eq(config), anyList(), eq("Q?"), isNull(), eq(1));
     }
 
     @Test
@@ -478,7 +558,7 @@ class GroupHitlCoordinatorTest {
         when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(resId);
         var config = humanGroupConfig("PT1H");
         when(groupStore.read(GROUP_ID, 1)).thenReturn(config);
-        when(groupConversationService.resolvePhases(config)).thenReturn(List.of(opinionPhase()));
+        when(groupConversationService.effectivePhases(any(), eq(config))).thenReturn(List.of(opinionPhase()));
 
         coordinator.skipHumanTurnOnTimeout(GC_ID);
 

@@ -237,6 +237,119 @@ public class AgentGroupConfiguration {
         ABORT
     }
 
+    /**
+     * A facilitator agent's checkpoint configuration (I12). {@code null} means no
+     * facilitator — the same thing a default-constructed instance means.
+     */
+    private FacilitatorConfig facilitator;
+
+    public FacilitatorConfig getFacilitator() {
+        return facilitator;
+    }
+
+    public void setFacilitator(FacilitatorConfig facilitator) {
+        this.facilitator = facilitator;
+    }
+
+    /**
+     * Bounded adaptive orchestration (I12): a facilitator agent is briefed at
+     * configured checkpoints and chooses one move from a config-enumerated list. A
+     * full LLM orchestrator conflicts with deterministic governance — the
+     * facilitator never free-forms; it selects, and every selection is validated,
+     * capped and audit-logged. Anything unparseable, disallowed or invalid degrades
+     * to {@link FacilitatorMove#CONTINUE}.
+     *
+     * @param enabled
+     *            master switch; {@code false} (default) means no checkpoint ever
+     *            runs and the discussion costs nothing extra
+     * @param agentId
+     *            the agent that plays facilitator — required when enabled. It runs
+     *            under its own conversation key, never a member's
+     * @param allowedMoves
+     *            the moves the facilitator may execute; defaults to
+     *            {@code [CONTINUE]}, which makes an enabled-but-unconfigured
+     *            facilitator a pure observer. {@code END_PHASE} and
+     *            {@code EXTEND_PHASE} act mid-phase and are save-time rejected
+     *            unless {@code checkAfter} is {@code EACH_REPEAT}
+     * @param checkAfter
+     *            checkpoint cadence — after each completed phase (default) or after
+     *            each completed repeat within a phase
+     * @param maxMovesPerDiscussion
+     *            ceiling on <em>executed non-CONTINUE</em> moves across the whole
+     *            discussion (default 10). Rejected attempts do not consume it —
+     *            they are recorded, not budgeted
+     * @param escalateTo
+     *            principal id that {@link FacilitatorMove#ESCALATE_HUMAN} pauses
+     *            for — required at save time when that move is allowed
+     */
+    public record FacilitatorConfig(boolean enabled, String agentId, List<FacilitatorMove> allowedMoves,
+            FacilitatorCheckpoint checkAfter, int maxMovesPerDiscussion, String escalateTo) {
+
+        public static final int DEFAULT_MAX_MOVES = 10;
+
+        /** Normalization choke point, same shape as {@link GroupTaskConfig}. */
+        public FacilitatorConfig {
+            allowedMoves = allowedMoves == null || allowedMoves.isEmpty()
+                    ? List.of(FacilitatorMove.CONTINUE)
+                    : List.copyOf(allowedMoves);
+            if (checkAfter == null) {
+                checkAfter = FacilitatorCheckpoint.EACH_PHASE;
+            }
+            if (maxMovesPerDiscussion <= 0) {
+                maxMovesPerDiscussion = DEFAULT_MAX_MOVES;
+            }
+        }
+
+        /** Disabled, observer-only move list, phase-boundary cadence. */
+        public FacilitatorConfig() {
+            this(false, null, List.of(FacilitatorMove.CONTINUE), FacilitatorCheckpoint.EACH_PHASE, DEFAULT_MAX_MOVES, null);
+        }
+    }
+
+    /**
+     * The moves a facilitator may choose from (I12). The move list IS the feature
+     * surface — each non-CONTINUE move drives machinery another item already built
+     * (I2's phase-exit plumbing, I14's vote phases, I7's recruitment, I6's pending
+     * human input).
+     */
+    public enum FacilitatorMove {
+        /** No intervention — the ambient default and every failure's fallback. */
+        CONTINUE,
+        /** Skip the current phase's remaining repeats. Mid-phase only. */
+        END_PHASE,
+        /**
+         * Add one repeat to the current phase (at most 2 extensions per phase, still
+         * bounded by {@code maxTurns}). Mid-phase only.
+         */
+        EXTEND_PHASE,
+        /**
+         * Insert a one-off VOTE phase right after the current one, with the options the
+         * facilitator names in {@code args.options}.
+         */
+        CALL_VOTE,
+        /**
+         * Recruit an existing deployed agent into the roster — the same validation path
+         * as I7's {@code recruitAgent} tool.
+         */
+        RECRUIT,
+        /**
+         * Pause the discussion for input from the configured {@code escalateTo}
+         * principal, carrying the facilitator's question (I6 pending-input machinery).
+         */
+        ESCALATE_HUMAN
+    }
+
+    /** When the facilitator is briefed (I12). */
+    public enum FacilitatorCheckpoint {
+        /** After each completed phase — the default. */
+        EACH_PHASE,
+        /**
+         * After each completed repeat within a phase. Required for
+         * {@code END_PHASE}/{@code EXTEND_PHASE}, which act mid-phase.
+         */
+        EACH_REPEAT
+    }
+
     // --- Discussion Style ---
 
     /**

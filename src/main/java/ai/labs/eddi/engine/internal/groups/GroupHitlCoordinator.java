@@ -727,7 +727,10 @@ public class GroupHitlCoordinator {
                     throw new IResourceStore.ResourceNotFoundException("Group not found.");
                 }
                 groupConfig = groupStore.read(groupId, currentGroupId.getVersion());
-                phases = groupConversationService.resolvePhases(groupConfig);
+                // I12: a facilitator-diverged runtime phase list wins over the
+                // config's — the bookmark below was taken against IT, and the
+                // drift guard must compare like with like.
+                phases = groupConversationService.effectivePhases(gc, groupConfig);
 
                 // Phase 5f: Config drift guard — verify the phase at the bookmark
                 // still matches what was paused. If the config was edited while the
@@ -995,6 +998,65 @@ public class GroupHitlCoordinator {
     }
 
     /**
+     * Commits an {@code AWAITING_HUMAN_INPUT} pause for a facilitator's
+     * ESCALATE_HUMAN move (I12), riding I6's pending-input machinery whole: the
+     * same state, the same submission endpoint and access guard (the configured
+     * principal or an admin), the same timeout schedule, the same inbox surface.
+     * <p>
+     * What differs is the bookmark's shape: an escalation is not a speaker's turn,
+     * so it points at where the discussion RESUMES — the next repeat (mid-phase
+     * checkpoint) or the next phase (boundary checkpoint) — with {@code
+     * speakerIdx = -1}, which the shared resolution path's {@code +1} advance turns
+     * into "start at speaker 0". The answer records as a peer-visible
+     * {@code FOLLOW_UP} entry: injected human guidance is meant to be read, unlike
+     * the peer-hidden FACILITATION bookkeeping around it.
+     *
+     * @param phaseList
+     *            the RUNTIME phase list the loop is executing — the resume phase's
+     *            name is read from it, never from the config, because the
+     *            facilitator may have just diverged the two (a CALL_VOTE then an
+     *            immediate escalation is the concrete case)
+     */
+    public void commitFacilitatorEscalationPause(GroupConversation gc, int resumePhaseIdx, int resumeRepeatIdx,
+                                                 List<DiscussionPhase> phaseList,
+                                                 FacilitatorEngine.FacilitatorAction.Escalation escalation,
+                                                 int turnCountIncludingThisTurn, GroupDiscussionEventListener listener,
+                                                 AgentGroupConfiguration config)
+            throws IResourceStore.ResourceStoreException {
+        var humanConfig = config != null && config.getHumanMemberConfig() != null
+                ? config.getHumanMemberConfig()
+                : new AgentGroupConfiguration.HumanMemberConfig();
+        DiscussionPhase resumePhase = phaseList.get(resumePhaseIdx);
+
+        gc.setResumePoint(new GroupConversation.ResumePoint(resumePhaseIdx, resumeRepeatIdx, -1,
+                GroupConversation.RESUME_KIND_HUMAN_TURN));
+        gc.setPendingHumanInput(new GroupConversation.PendingHumanInput(
+                escalation.principalId(), escalation.principalId(), resumePhaseIdx, resumeRepeatIdx, -1,
+                TranscriptEntryType.FOLLOW_UP.name(), escalation.question(), humanConfig.onTimeout().name(),
+                Instant.now()));
+        gc.setState(GroupConversationState.AWAITING_HUMAN_INPUT);
+        gc.setPausedAt(Instant.now());
+        gc.setPausedAtPhaseIndex(resumePhaseIdx);
+        gc.setPausedPhaseName(resumePhase.name());
+        gc.setPausedTurnCount(turnCountIncludingThisTurn);
+        gc.setHitlPauseType(HitlPauseType.HUMAN_TURN);
+        gc.setHitlPauseReason("Facilitator escalation — waiting for input from " + escalation.principalId());
+        gc.setHitlApprovalTimeout(humanConfig.turnTimeout());
+        gc.setHitlTimeoutPolicy(null);
+        conversationStore.update(gc);
+
+        scheduleHumanTurnTimeout(gc);
+        counterGroupHitlPause.increment();
+
+        if (listener != null) {
+            listener.onHumanInputRequested(new GroupConversationEventSink.HumanInputRequestedEvent(
+                    escalation.principalId(), escalation.principalId(), resumePhaseIdx, resumePhase.name()));
+        }
+        LOGGER.infof("Group discussion %s paused on a facilitator escalation to '%s' (resumes at phase %d)",
+                LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(escalation.principalId()), resumePhaseIdx);
+    }
+
+    /**
      * One-shot timeout schedule for a human turn. Same schedule NAME as the
      * approval timeout (one armed timeout per conversation, ever), but surface
      * {@code group-human} and a SKIP_TURN/ABORT policy string — the fire handler
@@ -1110,7 +1172,10 @@ public class GroupHitlCoordinator {
             throw new IResourceStore.ResourceNotFoundException("Group not found.");
         }
         AgentGroupConfiguration groupConfig = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
-        List<DiscussionPhase> phases = groupConversationService.resolvePhases(groupConfig);
+        // I12: prefer the runtime phase list — a facilitator escalation can pause
+        // into a phase the config does not contain (a just-inserted vote), and the
+        // drift check below would otherwise refuse every submission for it.
+        List<DiscussionPhase> phases = groupConversationService.effectivePhases(gc, groupConfig);
         GroupConversation.ResumePoint bookmark = gc.getResumePoint();
         if (bookmark == null || bookmark.phaseIdx() != pending.phaseIdx()) {
             throw new GroupDiscussionException(
