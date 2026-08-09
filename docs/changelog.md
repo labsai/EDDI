@@ -5,6 +5,24 @@
 
 ---
 
+## 📚 docs(groups): attachments, protocol defaults, context scopes, and a "not yet supported" section (2026-08-09)
+
+**Repo:** EDDI (`docs/group-agent-accuracy`)
+
+Wave E of the Agent / Group Agent review — the documentation drifts the review turned up, each one a place where the docs and the code disagreed.
+
+1. **Attachments × groups were entirely undocumented.** `docs/group-conversations.md` had zero mentions of attachments and `docs/attachments-guide.md` had zero mentions of groups, while `POST /groups/{groupId}/conversations` accepts them and `GroupAttachmentBinder` is a whole subsystem. Both files now carry a section: the three input shapes, the first-turn grant, how later phases keep access (history + the auto-enabled `readAttachment` tool), and the two group-specific bounds — the per-turn cap applies per MEMBER turn, and anything dropped is reported in that member's `attachments:errors`, not in the group transcript.
+2. **The protocol table did not say the defaults apply to an absent block.** Nothing backfills a stored config, so "no `protocol` block" is the common shape and runs on exactly the tabled values — which is what made the 60-vs-180 drift fixed in #648 invisible.
+3. **`maxCreatedAgentsPerDiscussion` read as ambiguous.** Now explicitly "counted across **all** members, not per member" — the behaviour #649 delivers.
+4. **`LAST_PHASE` was documented as "only the previous phase's entries"**, but the filter is `phaseIndex >= currentPhaseIdx - 1`, which includes the running phase. The code is right — in a sequential phase, that inclusion is what lets the second speaker react to the first — so the doc and the enum's Javadoc were corrected, not the filter.
+5. **New "Not yet supported" section**, so these are not discovered at runtime: member-level tool approval inside a group, nested pauses, groups over the OpenAI-compatible `/v1` adapter, groups over A2A, and the per-node scope of the live-discussion registry.
+
+Also: an FQN sweep of `CreateSubAgentTool` (11 inline fully-qualified names, against `AGENTS.md` §4.7) and the orphaned Javadoc block in `LiveDiscussionRegistry`, where the paragraph documenting `get()` sat above `getForMember()` so both attached to the latter and `get()` had none.
+
+**Scoping note:** the FQN violation is repo-wide (~130 sites). This PR sweeps only files no other open PR touches; doing all of them here would collide with #648–#651 for no benefit. The rest is a follow-up once those land.
+
+---
+
 ## 🔎 fix(groups): pre-merge deep review — facilitator HITL bypass, CALL_VOTE guards, metric cardinality, template honesty (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i10-templates`)

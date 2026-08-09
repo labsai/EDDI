@@ -536,6 +536,30 @@ roles fail loudly, naming the template's real roles.
 | `decision-board` | CUSTOM | Hybrid board with a HUMAN director (I6) deliberating and voting (I14); options distilled by the chair, ties to the chair |
 | `negotiation-table` | NEGOTIATION | Typed two-party bargaining with concession ledger (I11); the arbiter role may be a human principal |
 
+## Attachments
+
+A discussion can carry shared files. `POST /groups/{groupId}/conversations` (and the `/stream` variant) accepts an `attachments` array alongside `question`, in the same three shapes the single-agent API takes:
+
+```json
+{
+  "question": "Review the attached architecture proposal.",
+  "attachments": [
+    { "storageRef": "att_01J..." },
+    { "mimeType": "application/pdf", "url": "https://example.com/proposal.pdf" },
+    { "mimeType": "image/png", "fileName": "diagram.png", "base64Data": "iVBOR..." }
+  ]
+}
+```
+
+Inline `base64Data` is stored in the blob store owned by the group conversation, so it is granted to members and reaped with the conversation. Hosted `url` references and pre-uploaded `storageRef`s pass through as-is.
+
+**How members receive them.** On a member's **first** turn the orchestrator grants that member's private conversation access to the group's blobs and injects them as `attachment_*` context — from there the ordinary single-agent attachment path applies (multimodal forwarding for vision models, PDF/text extraction otherwise). On **later** turns the member's own conversation history carries them: `AttachmentForwarder` notes the earlier attachments and the `readAttachment` tool is auto-enabled for any conversation that has them, independently of `builtInToolsWhitelist`. A recruited member gets the same grant on its own first turn, and a nested `GROUP` member propagates the whole set down.
+
+**Bounds worth knowing:**
+
+- The per-turn forwarding cap (`eddi.attachments.max-per-turn`, default 5) applies to each member turn. A discussion sharing more than that will have the surplus dropped for that turn, reported in the member's `attachments:errors` — visible in that member's conversation, **not** in the group transcript.
+- `url`-only attachments are not blob-backed and are not re-hydrated after a HITL resume; blob-backed ones are.
+
 ## Nested Groups (Group-of-Groups)
 
 Members can be other groups. The sub-group runs its own discussion and its synthesized answer becomes the member's response.
@@ -612,7 +636,7 @@ For full control, define phases directly:
 |---|---|
 | `NONE` | Only the question (independent) |
 | `FULL` | All previous transcript entries |
-| `LAST_PHASE` | Only the previous phase's entries |
+| `LAST_PHASE` | The previous phase's entries **and the current phase's so far** — in a sequential phase, that is what lets the second speaker react to the first |
 | `ANONYMOUS` | Previous entries with speaker names removed |
 | `OWN_FEEDBACK` | Only feedback addressed to this agent |
 | `TASK_ONLY` | Only this agent's assigned task from the plan |
@@ -745,7 +769,7 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `allowCreation` | `false` | Allow creating new agents (vs. only recruiting existing) |
 | `allowRecruitment` | `false` | Allow recruiting already-deployed agents into the discussion |
 | `allowDelegation` | `true` | Allow delegating sub-tasks to other agents |
-| `maxCreatedAgentsPerDiscussion` | `5` | Cap on new agents created per discussion |
+| `maxCreatedAgentsPerDiscussion` | `5` | Cap on new agents created per discussion — counted across **all** members, not per member |
 | `maxRecruitedAgentsPerDiscussion` | `10` | Cap on recruited agents per discussion |
 | `delegationTimeoutSeconds` | `60` | How long a delegating agent waits for its delegate's turn. Non-positive falls back to the default |
 | `maxDelegationsPerTask` | `3` | Cap on delegations per task |
@@ -779,6 +803,8 @@ If tenant quotas are enabled, `QuotaExceededException` is propagated regardless 
 | `onAgentFailure` | `SKIP`, `RETRY`, `ABORT` | `SKIP` |
 | `maxRetries` | 0+ | 2 |
 | `onMemberUnavailable` | `SKIP`, `FAIL` | `SKIP` |
+
+> The defaults above apply when the `protocol` block is **omitted entirely**, not only when an individual setting is. Nothing backfills a stored config, so a group saved without a `protocol` block runs on exactly these values.
 
 > **Timeout guidance**: 180s covers thinking models (e.g. `claude-sonnet-5`) and synthesis phases comfortably. For tool-calling agents with multiple tool loops, consider `300`–`600`. The timeout is per agent turn, not per phase.
 
@@ -852,6 +878,18 @@ Configure trigger keywords in `ChannelIntegrationConfiguration` to route to spec
 ### Follow-up Conversations
 
 After a discussion, users can reply in any agent's thread to ask follow-up questions. The system injects the agent's discussion context (contribution + peer feedback received) into the prompt for a contextual response.
+
+## Not yet supported
+
+Known bounds, so they are not discovered at runtime:
+
+| Area | Behaviour today |
+|---|---|
+| **Member-level tool approval** | A member agent's `hitlConfig.toolApprovals` does not gate inside a group. The framework auto-rejects the gated call (`system:group`) and the member produces a tool-less contribution — see [hitl.md → Group members](hitl.md#group-members). `inGroupTurns: "INBOX"` is reserved and rejected at save time. |
+| **Nested pauses** | A sub-group that pauses for approval or a human turn is cancelled and its member turn recorded `SKIPPED`. Nested HITL is not supported. |
+| **Groups over the OpenAI-compatible API** | `/v1` exposes deployed *agents* as models. A group is not addressable there; use the REST or MCP surfaces. |
+| **Groups over A2A** | An A2A peer can invoke an agent, not a group. |
+| **Cross-node tool availability** | The task, artifact and recruit tools resolve the running discussion from an in-process registry. Member turns always run in the same JVM as their orchestrator, so this holds — but a discussion is only "live" on the node running it. |
 
 ## Configuration
 

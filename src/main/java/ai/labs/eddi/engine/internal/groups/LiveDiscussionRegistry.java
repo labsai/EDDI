@@ -85,13 +85,6 @@ public class LiveDiscussionRegistry {
     }
 
     /**
-     * The live instance for a running discussion, or empty if it is not currently
-     * running (paused, finished, or never started on this node — group control is
-     * per-node, like {@code activeTokens}). Callers resolve this via the
-     * {@code groupConversationId} context var and must turn an empty result into an
-     * actionable error string for the LLM, never an exception.
-     */
-    /**
      * The live discussion ONLY if {@code conversationId} is one of its member
      * conversations.
      * <p>
@@ -123,6 +116,16 @@ public class LiveDiscussionRegistry {
                         && gc.getMemberConversationIds().containsValue(conversationId));
     }
 
+    /**
+     * The live instance for a running discussion, or empty if it is not currently
+     * running (paused, finished, or never started on this node — group control is
+     * per-node, like {@code activeTokens}). Callers must turn an empty result into
+     * an actionable error string for the LLM, never an exception.
+     * <p>
+     * <b>Never use this to authorize a tool</b> — see
+     * {@link #getForMember(String, String)}, which explains why existence is not
+     * membership.
+     */
     public Optional<GroupConversation> get(String groupConversationId) {
         return Optional.ofNullable(live.get(groupConversationId));
     }

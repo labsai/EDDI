@@ -24,6 +24,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Objects;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 
 /**
  * LLM tool for dynamically creating sub-agents during group conversations.
@@ -62,8 +68,8 @@ public class CreateSubAgentTool {
         this.parentAgentId = parentAgentId;
         this.userId = userId;
         this.config = config != null ? config : new DynamicAgentConfig();
-        this.createdAgentIds = createdAgentIds != null ? createdAgentIds : new java.util.concurrent.CopyOnWriteArrayList<>();
-        this.retainedAgentIds = retainedAgentIds != null ? retainedAgentIds : java.util.concurrent.ConcurrentHashMap.newKeySet();
+        this.createdAgentIds = createdAgentIds != null ? createdAgentIds : new CopyOnWriteArrayList<>();
+        this.retainedAgentIds = retainedAgentIds != null ? retainedAgentIds : ConcurrentHashMap.newKeySet();
     }
 
     @Tool("Create a new sub-agent dynamically. The agent is set up, deployed, and optionally sent an initial message. "
@@ -102,7 +108,7 @@ public class CreateSubAgentTool {
                     && config.getAllowedProviders() != null
                     && !config.getAllowedProviders().isEmpty()) {
                 boolean providerAllowed = config.getAllowedProviders().stream()
-                        .filter(java.util.Objects::nonNull)
+                        .filter(Objects::nonNull)
                         .anyMatch(p -> p.equalsIgnoreCase(provider));
                 if (!providerAllowed) {
                     return "⚠️ Provider '%s' is not allowed. Allowed: %s"
@@ -120,7 +126,7 @@ public class CreateSubAgentTool {
                     List<String> allowedModels = config.getAllowedModels().entrySet().stream()
                             .filter(e -> e.getKey() != null && e.getKey().equalsIgnoreCase(provider))
                             .map(Map.Entry::getValue)
-                            .filter(java.util.Objects::nonNull)
+                            .filter(Objects::nonNull)
                             .findFirst().orElse(null);
                     if (allowedModels != null && !allowedModels.isEmpty()
                             && allowedModels.stream().noneMatch(m -> m.equalsIgnoreCase(model))) {
@@ -131,9 +137,9 @@ public class CreateSubAgentTool {
                     // No provider specified — model must appear in at least one provider's
                     // allow-list
                     boolean modelFoundInAnyProvider = config.getAllowedModels().values().stream()
-                            .filter(java.util.Objects::nonNull)
+                            .filter(Objects::nonNull)
                             .flatMap(List::stream)
-                            .filter(java.util.Objects::nonNull)
+                            .filter(Objects::nonNull)
                             .anyMatch(m -> m.equalsIgnoreCase(model));
                     if (!modelFoundInAnyProvider) {
                         return "⚠️ Model '%s' is not in any provider's allowed models list."
@@ -186,8 +192,8 @@ public class CreateSubAgentTool {
                     InputData inputData = new InputData();
                     inputData.setInput(initialMessage);
 
-                    CompletableFuture<ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
-                    final java.util.concurrent.atomic.AtomicBoolean skipped = new java.util.concurrent.atomic.AtomicBoolean();
+                    CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
+                    final AtomicBoolean skipped = new AtomicBoolean();
 
                     // Finding H7: a busy-skip (onSkipped, e.g. IN_PROGRESS) must NOT be
                     // treated as a fresh response — the default onSkipped→onComplete would
@@ -197,12 +203,12 @@ public class CreateSubAgentTool {
                             false, true, null, inputData, false,
                             new IConversationService.ConversationResponseHandler() {
                                 @Override
-                                public void onComplete(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
+                                public void onComplete(SimpleConversationMemorySnapshot snapshot) {
                                     responseFuture.complete(snapshot);
                                 }
 
                                 @Override
-                                public void onSkipped(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
+                                public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
                                     skipped.set(true);
                                     responseFuture.complete(snapshot);
                                 }
@@ -211,7 +217,7 @@ public class CreateSubAgentTool {
                     var snapshot = responseFuture.get(60, TimeUnit.SECONDS);
                     // Finding 25: a sub-agent that pauses for approval on its first
                     // message must report the pending approval, not "[no response]".
-                    if (snapshot != null && snapshot.getConversationState() == ai.labs.eddi.engine.memory.model.ConversationState.AWAITING_HUMAN) {
+                    if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
                         response = "PAUSED_FOR_APPROVAL: the sub-agent's conversation " + conversationId
                                 + " requires human approval before it can continue. A reviewer must decide via "
                                 + "POST /agents/" + conversationId + "/resume." + toolPauseSuffix(snapshot);
@@ -220,8 +226,8 @@ public class CreateSubAgentTool {
                         // processed (busy or no longer active) — report accurately
                         // instead of returning the stale previous-turn output.
                         var state = snapshot != null ? snapshot.getConversationState() : null;
-                        if (state == ai.labs.eddi.engine.memory.model.ConversationState.ENDED
-                                || state == ai.labs.eddi.engine.memory.model.ConversationState.EXECUTION_INTERRUPTED) {
+                        if (state == ConversationState.ENDED
+                                || state == ConversationState.EXECUTION_INTERRUPTED) {
                             response = "[Sub-agent conversation " + conversationId + " is no longer active (state: "
                                     + state + "); initial message not delivered]";
                         } else {
@@ -296,7 +302,7 @@ public class CreateSubAgentTool {
         if (batch != null && batch.getCalls() != null) {
             var toolNames = batch.getCalls().stream()
                     .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
-                    .filter(java.util.Objects::nonNull)
+                    .filter(Objects::nonNull)
                     .toList();
             if (!toolNames.isEmpty()) {
                 suffix.append(" Gated tools: ").append(String.join(", ", toolNames)).append('.');
