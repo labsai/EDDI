@@ -173,6 +173,18 @@ public class AgentFactory implements IAgentFactory {
         // therefore unreachable, and a lookup arriving mid-deployment got a bare
         // null instead of waiting for the deployment it could see was running.
         var progressDummyAgent = createInProgressDummyAgent(agentId, version);
+
+        // Registered BEFORE the marker is published, not after: between publishing an
+        // IN_PROGRESS marker and registering its future there is a window in which a
+        // concurrent getAgent sees IN_PROGRESS, finds no future to wait on, re-reads
+        // the still-IN_PROGRESS marker and returns null — the exact symptom this
+        // whole handshake exists to prevent. registerAgentDeployment is
+        // computeIfAbsent, so registering before we know whether we win the claim is
+        // harmless: a future already registered by an outer caller
+        // (RestImportService) or by the caller that does win is reused, not replaced,
+        // and whoever owns the deployment completes it.
+        deploymentListener.registerAgentDeployment(agentId, version);
+
         IAgent claimed = agentEnvironment.compute(id, (key, existingAgent) -> {
             if (existingAgent != null) {
                 if (existingAgent.getDeploymentStatus() == Deployment.Status.READY) {
@@ -200,11 +212,6 @@ public class AgentFactory implements IAgentFactory {
             return;
         }
 
-        // Register the completion future BEFORE the load, so a lookup that observes
-        // the IN_PROGRESS marker we just published always finds something to wait
-        // on. registerAgentDeployment is computeIfAbsent, so a future already
-        // registered by an outer caller (RestImportService) is reused, not replaced.
-        deploymentListener.registerAgentDeployment(agentId, version);
         logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.IN_PROGRESS);
 
         try {
