@@ -364,13 +364,18 @@ public class TeamCadenceService {
         if (AWAITING_STATES.contains(gc.getState())) {
             return false; // Legitimately waiting on a human — never expires.
         }
-        Instant lastProgress = gc.getLastModified();
-        if (lastProgress == null || lastProgress.isAfter(Instant.now().minus(abandonedRunLease))) {
+        // A missing progress stamp must NOT read as "active". Treating it that way
+        // reinstates exactly the deadlock this lease exists to break, for any record
+        // whose lastModified was never written. Fall back to the creation stamp,
+        // which the discussion-creation path always sets, and if neither exists there
+        // is no evidence of progress at all — which is the definition of abandoned.
+        Instant lastProgress = gc.getLastModified() != null ? gc.getLastModified() : gc.getCreated();
+        if (lastProgress != null && lastProgress.isAfter(Instant.now().minus(abandonedRunLease))) {
             return false; // Still advancing.
         }
 
         LOGGER.warnf("Cadence discussion %s for group %s has not advanced since %s (lease %s) — treating it as abandoned, "
-                + "releasing the claim and returning its tasks to the backlog",
+                + "releasing the claim and returning its tasks to the backlog (a null timestamp means no progress was ever recorded)",
                 LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(workspace.getGroupId()), lastProgress, abandonedRunLease);
         cadenceAbandonedRuns.increment();
         // Cancel before releasing: a zombie loop that somehow survives must not keep

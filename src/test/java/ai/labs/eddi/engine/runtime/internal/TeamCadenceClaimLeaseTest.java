@@ -107,6 +107,34 @@ class TeamCadenceClaimLeaseTest {
             verify(groupConversationService).cancelDiscussion("gc-1", null);
         }
 
+        /**
+         * A missing progress stamp is not evidence of activity. Reading it as "active"
+         * would reinstate the deadlock for any record whose lastModified was never
+         * written.
+         */
+        @Test
+        @DisplayName("a discussion with no progress timestamp at all is reclaimed, not treated as active")
+        void nullTimestampsAreReclaimed() throws Exception {
+            var gc = discussion(GroupConversationState.IN_PROGRESS, null);
+            gc.setCreated(null);
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            when(workspaceStore.casRunningDiscussion(any(), anyString())).thenReturn(true);
+
+            assertTrue(service.reconcile(claimedWorkspace()), "a null progress stamp must not wedge the cadence forever");
+        }
+
+        @Test
+        @DisplayName("a null lastModified falls back to the creation stamp before expiring")
+        void nullLastModifiedFallsBackToCreated() throws Exception {
+            var recentlyCreated = discussion(GroupConversationState.IN_PROGRESS, null);
+            recentlyCreated.setCreated(Instant.now().minus(3, ChronoUnit.MINUTES));
+            when(conversationStore.read("gc-1")).thenReturn(recentlyCreated);
+
+            assertFalse(service.reconcile(claimedWorkspace()),
+                    "a discussion created minutes ago has simply not persisted progress yet");
+            verify(groupConversationService, never()).cancelDiscussion(anyString(), any());
+        }
+
         @Test
         @DisplayName("CREATED counts too — a crash between the claim and the first turn")
         void staleCreatedIsReclaimed() throws Exception {
