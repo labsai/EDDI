@@ -27,7 +27,14 @@ public class Agent implements IAgent {
     private final Integer agentVersion;
     private final List<IExecutableWorkflow> executableWorkflows;
 
-    private Deployment.Status deploymentStatus;
+    /**
+     * Volatile: the deployment status is written by the thread that owns a
+     * deployment and read by conversation threads and the metrics scrape. The
+     * status transition to READY/ERROR is what releases a lookup blocked in
+     * {@code AgentFactory#waitForDeploymentCompletion}, so it must be visible
+     * without further synchronization.
+     */
+    private volatile Deployment.Status deploymentStatus;
     private AgentConfiguration.UserMemoryConfig userMemoryConfig;
     private AgentConfiguration.MemoryPolicy memoryPolicy;
     private ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovalsConfig;

@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.client.agents.IAgentStoreClientLibrary;
+import ai.labs.eddi.engine.runtime.model.DeploymentEvent;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
@@ -31,7 +32,14 @@ import java.util.concurrent.*;
 @ApplicationScoped
 public class AgentFactory implements IAgentFactory {
     private final Map<Deployment.Environment, ConcurrentHashMap<AgentId, IAgent>> environments;
-    private final List<AgentId> deployedAgents;
+    /**
+     * Concurrent, not a {@link LinkedList} under a partial lock. Additions used to
+     * be guarded by {@code synchronized (deployedAgents)} while {@code remove} was
+     * unguarded and the Micrometer gauge read {@code size()} from the scrape thread
+     * — three writers/readers on a structure that tolerates none, so a concurrent
+     * deploy/undeploy could corrupt the list or report a wrong count.
+     */
+    private final Set<AgentId> deployedAgents;
     private final IAgentStoreClientLibrary agentStoreClientLibrary;
     private final IDeploymentListener deploymentListener;
 
@@ -41,7 +49,7 @@ public class AgentFactory implements IAgentFactory {
     public AgentFactory(IAgentStoreClientLibrary agentStoreClientLibrary, IDeploymentListener deploymentListener, MeterRegistry meterRegistry) {
         this.agentStoreClientLibrary = agentStoreClientLibrary;
         this.deploymentListener = deploymentListener;
-        this.deployedAgents = new LinkedList<>();
+        this.deployedAgents = ConcurrentHashMap.newKeySet();
         meterRegistry.gaugeCollectionSize("eddi_agents_deployed", Tags.empty(), deployedAgents);
         this.environments = Collections.unmodifiableMap(createEmptyEnvironments());
     }
@@ -153,51 +161,100 @@ public class AgentFactory implements IAgentFactory {
         AgentId id = new AgentId(agentId, version);
         ConcurrentHashMap<AgentId, IAgent> agentEnvironment = getAgentEnvironment(environment);
 
-        agentEnvironment.compute(id, (key, existingAgent) -> {
+        // Claim the key by publishing an IN_PROGRESS marker ATOMICALLY, then run the
+        // store load OUTSIDE the mapping function.
+        //
+        // The load used to run inside compute(). That held a ConcurrentHashMap bin
+        // lock across blocking store I/O, and — because the marker was only ever a
+        // local variable, returned solely from the failure branch after being
+        // flipped to ERROR — no IN_PROGRESS value was ever observable in the map.
+        // getAgent()'s IN_PROGRESS branch and waitForDeploymentCompletion were
+        // therefore unreachable, and a lookup arriving mid-deployment got a bare
+        // null instead of waiting for the deployment it could see was running.
+        var progressDummyAgent = createInProgressDummyAgent(agentId, version);
+        IAgent claimed = agentEnvironment.compute(id, (key, existingAgent) -> {
             if (existingAgent != null) {
-                // If an agent already exists, ensure it is in a valid state
                 if (existingAgent.getDeploymentStatus() == Deployment.Status.READY) {
                     log.debug(String.format("Agent is already deployed: %s (environment=%s, version=%d)", agentId, environment, version));
-                    finalDeploymentProcess.completed(Deployment.Status.READY);
                     return existingAgent; // No need to redeploy
                 }
 
                 if (existingAgent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
                     log.debug(
                             String.format("Agent deployment is already in progress: %s (environment=%s, version=%d)", agentId, environment, version));
-                    return existingAgent; // Keep the IN_PROGRESS state
+                    return existingAgent; // Another caller owns this deployment
                 }
             }
 
-            // Begin deployment
-            logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.IN_PROGRESS);
-            var progressDummyAgent = createInProgressDummyAgent(agentId, version);
-
-            try {
-                IAgent agent = agentStoreClientLibrary.getAgent(agentId, version);
-                ((Agent) agent).setDeploymentStatus(Deployment.Status.READY);
-
-                finalDeploymentProcess.completed(Deployment.Status.READY);
-                logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.READY);
-
-                // Add the deployed agent to the deployedAgents list if it's not already there
-                synchronized (deployedAgents) {
-                    if (!deployedAgents.contains(id)) {
-                        deployedAgents.add(id);
-                    }
-                }
-
-                return agent; // Replace the dummy agent with the actual agent
-            } catch (ServiceException e) {
-                log.error("Agent deployment failed for " + agentId + " v" + version + ": " + e.getMessage(), e);
-                progressDummyAgent.setDeploymentStatus(Deployment.Status.ERROR);
-                finalDeploymentProcess.completed(Deployment.Status.ERROR);
-                logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
-                return progressDummyAgent;
-            } catch (IllegalAccessException e) {
-                throw new RuntimeException(e);
-            }
+            return progressDummyAgent; // We own this deployment
         });
+
+        if (claimed != progressDummyAgent) {
+            // Someone else owns this key. Report only the outcome we can actually
+            // observe: a READY agent is a completed deployment, an IN_PROGRESS one
+            // belongs to the caller that claimed it and will report its own result.
+            if (claimed.getDeploymentStatus() == Deployment.Status.READY) {
+                finalDeploymentProcess.completed(Deployment.Status.READY);
+            }
+            return;
+        }
+
+        // Register the completion future BEFORE the load, so a lookup that observes
+        // the IN_PROGRESS marker we just published always finds something to wait
+        // on. registerAgentDeployment is computeIfAbsent, so a future already
+        // registered by an outer caller (RestImportService) is reused, not replaced.
+        deploymentListener.registerAgentDeployment(agentId, version);
+        logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.IN_PROGRESS);
+
+        try {
+            IAgent agent = agentStoreClientLibrary.getAgent(agentId, version);
+            ((Agent) agent).setDeploymentStatus(Deployment.Status.READY);
+
+            // Conditional publish: only replace OUR marker. An undeployAgent racing
+            // this load has already removed it, and an unconditional put would
+            // resurrect an agent that was deliberately torn down.
+            if (agentEnvironment.replace(id, progressDummyAgent, agent)) {
+                deployedAgents.add(id);
+                logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.READY);
+            } else {
+                log.infof("Agent %s v%s was undeployed while its deployment was in flight — discarding the loaded agent", agentId, version);
+            }
+
+            finalDeploymentProcess.completed(Deployment.Status.READY);
+            deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, Deployment.Status.READY));
+        } catch (ServiceException e) {
+            log.error("Agent deployment failed for " + agentId + " v" + version + ": " + e.getMessage(), e);
+            failDeployment(progressDummyAgent, environment, agentId, version, finalDeploymentProcess);
+        } catch (RuntimeException e) {
+            // MUST NOT escape without clearing the claim: the IN_PROGRESS marker is
+            // published now, so an escaping throw would strand the key IN_PROGRESS
+            // forever and every later lookup would wait out the 60s timeout.
+            log.error("Agent deployment failed for " + agentId + " v" + version + ": " + e.getMessage(), e);
+            failDeployment(progressDummyAgent, environment, agentId, version, finalDeploymentProcess);
+            throw e;
+        } catch (IllegalAccessException e) {
+            failDeployment(progressDummyAgent, environment, agentId, version, finalDeploymentProcess);
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Publishes the ERROR outcome for a claimed deployment.
+     * <p>
+     * The marker object is mutated in place rather than re-put: it is already the
+     * mapped value, so flipping its status makes the failure observable to
+     * {@code checkDeploymentStatus} and releases anyone blocked in
+     * {@link #waitForDeploymentCompletion}. If an undeploy removed it while the
+     * load was in flight, the object is unreferenced and the mutation is correctly
+     * a no-op — a deliberate teardown must not be resurrected as an ERROR entry.
+     */
+    private void failDeployment(Agent progressDummyAgent, Deployment.Environment environment, String agentId, Integer version,
+                                DeploymentProcess deploymentProcess) {
+
+        progressDummyAgent.setDeploymentStatus(Deployment.Status.ERROR);
+        deploymentProcess.completed(Deployment.Status.ERROR);
+        logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
+        deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, Deployment.Status.ERROR));
     }
 
     private DeploymentProcess defaultIfNull(DeploymentProcess deploymentProcess) {
@@ -205,13 +262,47 @@ public class AgentFactory implements IAgentFactory {
         } : deploymentProcess;
     }
 
+    /**
+     * Removes a deployed agent from this environment.
+     * <p>
+     * A {@code null} version means EVERY version of {@code agentId}. That is not a
+     * convenience — it is the only reading that makes the two null-passing callers
+     * correct. {@code TeardownAgentTool} and {@code GroupLifecycleOps}' ephemeral
+     * cleanup both tear down a dynamically created agent they know only by id, and
+     * both passed {@code null}. Because {@link AgentId} equality compares the
+     * version, {@code remove(new AgentId(id, null))} matched nothing: the agent
+     * stayed in the map with its real version, so a "torn down" — and, when
+     * {@code delete} was requested, config-deleted — agent remained reachable
+     * through {@link #getLatestReadyAgent} and fully conversable until restart,
+     * while the {@code eddi_agents_deployed} gauge leaked monotonically.
+     *
+     * @param version
+     *            the exact version to undeploy, or {@code null} for all versions
+     * @return the number of deployed agent versions actually removed
+     */
     @Override
-    public void undeployAgent(Deployment.Environment environment, String agentId, Integer version) {
+    public int undeployAgent(Deployment.Environment environment, String agentId, Integer version) {
         Map<AgentId, IAgent> agentEnvironment = getAgentEnvironment(environment);
 
-        AgentId id = new AgentId(agentId, version);
-        agentEnvironment.remove(id);
-        deployedAgents.remove(id);
+        if (version != null) {
+            AgentId id = new AgentId(agentId, version);
+            boolean removed = agentEnvironment.remove(id) != null;
+            deployedAgents.remove(id);
+            return removed ? 1 : 0;
+        }
+
+        // Collect first, then remove: removing through the keySet iterator while
+        // another thread is deploying is safe on a ConcurrentHashMap, but taking the
+        // snapshot keeps the returned count honest.
+        List<AgentId> matching = agentEnvironment.keySet().stream().filter(key -> Objects.equals(key.getId(), agentId)).toList();
+        int removed = 0;
+        for (AgentId id : matching) {
+            if (agentEnvironment.remove(id) != null) {
+                removed++;
+            }
+            deployedAgents.remove(id);
+        }
+        return removed;
     }
 
     private ConcurrentHashMap<AgentId, IAgent> getAgentEnvironment(Deployment.Environment environment) {

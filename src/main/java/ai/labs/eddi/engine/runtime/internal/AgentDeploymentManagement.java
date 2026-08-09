@@ -23,6 +23,7 @@ import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.hitl.lint.ReservedActionLint;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -44,11 +45,12 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.Period;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
-import java.util.LinkedList;
+import java.util.Date;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
@@ -82,7 +84,19 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private final int maximumLifeTimeOfIdleConversationsInDays;
     private Instant lastDeploymentCheck = null;
     private static final Logger LOGGER = Logger.getLogger(AgentDeploymentManagement.class);
-    private final List<DeploymentInfo> deploymentInfos = new LinkedList<>();
+    /**
+     * The deployment records this instance has already handed to the factory.
+     * <p>
+     * Concurrent, not a plain {@code LinkedList}: {@link #checkDeployments()} runs
+     * both on the Quarkus scheduler (every 10s, and {@code @Scheduled} defaults to
+     * {@code ConcurrentExecution.PROCEED}, so a slow pass can overlap the next one)
+     * and on the runtime executor at startup via {@link #autoDeployAgents()}.
+     * <p>
+     * Rebuilt from each poll rather than appended to forever:
+     * {@link DeploymentInfo} equality ignores the status, so an entry left behind
+     * by an undeployed agent used to suppress its redeployment permanently.
+     */
+    private final Set<DeploymentInfo> deploymentInfos = ConcurrentHashMap.newKeySet();
 
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
@@ -150,50 +164,56 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     @Scheduled(every = "10s", delay = 10)
     public void checkDeployments() {
         try {
-            deploymentStore.readDeploymentInfos(deployed).stream()
-                    .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null)
-                    .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo)).forEach(deploymentInfo -> {
-                        try {
-                            // A deployment record can outlive its Agent. deployAgent reports that by
-                            // logging an ERROR and returning normally, so the catch blocks below never
-                            // see it and the record is retried on every startup. Catch it up front.
-                            if (isAgentConfigMissing(deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion())) {
-                                LOGGER.warn(format("Agent config no longer exists (id=%s, version=%d) — retiring stale deployment record",
-                                        deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion()));
-                                // Delete rather than mark undeployed: setDeploymentInfo upserts, so
-                                // if the Agent went away between reading this list and getting here,
-                                // marking it would resurrect the row the cascade just removed.
-                                // Scoped to this one record — the check above proves only that THIS
-                                // version is gone, and an agent-wide delete would take out sibling
-                                // records for versions nobody looked at.
-                                deploymentStore.deleteDeploymentInfo(deploymentInfo.getEnvironment().toString(), deploymentInfo.getAgentId(),
-                                        deploymentInfo.getAgentVersion());
-                                return;
-                            }
+            List<DeploymentInfo> currentlyDeployed = deploymentStore.readDeploymentInfos(deployed).stream()
+                    .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null).toList();
 
-                            agentFactory.deployAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(),
-                                    null);
+            // Drop records that are no longer deployed, so an agent that is undeployed
+            // and later redeployed is picked up again instead of being suppressed
+            // forever by a stale entry.
+            this.deploymentInfos.retainAll(currentlyDeployed);
 
-                            this.deploymentInfos.add(deploymentInfo);
+            currentlyDeployed.stream().filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo)).forEach(deploymentInfo -> {
+                try {
+                    // A deployment record can outlive its Agent. deployAgent reports that by
+                    // logging an ERROR and returning normally, so the catch blocks below never
+                    // see it and the record is retried on every startup. Catch it up front.
+                    if (isAgentConfigMissing(deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion())) {
+                        LOGGER.warn(format("Agent config no longer exists (id=%s, version=%d) — retiring stale deployment record",
+                                deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion()));
+                        // Delete rather than mark undeployed: setDeploymentInfo upserts, so
+                        // if the Agent went away between reading this list and getting here,
+                        // marking it would resurrect the row the cascade just removed.
+                        // Scoped to this one record — the check above proves only that THIS
+                        // version is gone, and an agent-wide delete would take out sibling
+                        // records for versions nobody looked at.
+                        deploymentStore.deleteDeploymentInfo(deploymentInfo.getEnvironment().toString(), deploymentInfo.getAgentId(),
+                                deploymentInfo.getAgentVersion());
+                        return;
+                    }
 
-                            lintInertHitlConfig(deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion());
-                        } catch (ServiceException | IllegalAccessException e) {
-                            LOGGER.error(e.getLocalizedMessage(), e);
-                        } catch (Exception e) {
-                            // Catch any other exception (e.g. IllegalStateException wrapping
-                            // ResourceNotFoundException) so one broken Agent doesn't block all others
-                            LOGGER.error(format("Failed to deploy Agent (id=%s, version=%d, environment=%s), skipping. Cause: %s",
-                                    deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(), deploymentInfo.getEnvironment(), e.getMessage()));
+                    agentFactory.deployAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(),
+                            null);
 
-                            // If the root cause is a missing resource, auto-clean the stale record
-                            if (isCausedByResourceNotFound(e)) {
-                                LOGGER.warn(format("Agent config not found for id=%s version=%d — marking deployment as undeployed",
-                                        deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion()));
-                                deploymentStore.setDeploymentInfo(deploymentInfo.getEnvironment().toString(), deploymentInfo.getAgentId(),
-                                        deploymentInfo.getAgentVersion(), undeployed);
-                            }
-                        }
-                    });
+                    this.deploymentInfos.add(deploymentInfo);
+
+                    lintInertHitlConfig(deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion());
+                } catch (ServiceException | IllegalAccessException e) {
+                    LOGGER.error(e.getLocalizedMessage(), e);
+                } catch (Exception e) {
+                    // Catch any other exception (e.g. IllegalStateException wrapping
+                    // ResourceNotFoundException) so one broken Agent doesn't block all others
+                    LOGGER.error(format("Failed to deploy Agent (id=%s, version=%d, environment=%s), skipping. Cause: %s",
+                            deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(), deploymentInfo.getEnvironment(), e.getMessage()));
+
+                    // If the root cause is a missing resource, auto-clean the stale record
+                    if (isCausedByResourceNotFound(e)) {
+                        LOGGER.warn(format("Agent config not found for id=%s version=%d — marking deployment as undeployed",
+                                deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion()));
+                        deploymentStore.setDeploymentInfo(deploymentInfo.getEnvironment().toString(), deploymentInfo.getAgentId(),
+                                deploymentInfo.getAgentVersion(), undeployed);
+                    }
+                }
+            });
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }
@@ -415,14 +435,26 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
             var documentDescriptor = documentDescriptorStore.readDescriptor(conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
 
-            // NOTE: age is derived from the AGENT document's lastModifiedOn, not the
-            // conversation's — a pre-existing heuristic that predates the HITL branch
-            // and is intentionally left unchanged here.
-            var timeOfLastInteractionInConversation = documentDescriptor.getLastModifiedOn();
+            // Age is derived from the CONVERSATION's own newest step timestamp.
+            //
+            // It used to come from the AGENT document's lastModifiedOn, which is not
+            // a property of the conversation at all: every conversation on a given
+            // agent version shared one age, so a conversation the user was talking in
+            // an hour ago was "idle" whenever its agent config happened to be old.
+            // That mis-signal was masked by the arithmetic bug in isOlderThanDays
+            // (below), which made the sweep effectively fire only past a year;
+            // fixing the arithmetic without fixing the signal would have started
+            // ENDing live conversations.
+            var lastInteraction = lastInteractionOf(conversationMemory);
+            if (lastInteraction == null) {
+                // No step ever carried a timestamp — nothing to age against. Fall back
+                // to the descriptor rather than guessing, and only for this
+                // conversation.
+                lastInteraction = documentDescriptor.getLastModifiedOn().toInstant();
+            }
 
             var isOlderThanMaximumAmountOfDays = isOlderThanDays(
-                    Instant.ofEpochMilli(timeOfLastInteractionInConversation.getTime()).atZone(ZoneId.systemDefault()).toLocalDate(),
-                    maximumLifeTimeOfIdleConversationsInDays);
+                    lastInteraction.atZone(ZoneId.systemDefault()).toLocalDate(), maximumLifeTimeOfIdleConversationsInDays);
 
             if (isOlderThanMaximumAmountOfDays) {
                 String conversationId = conversationMemory.getId();
@@ -430,8 +462,8 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 var message = format(
                         "Ended conversation (id: %s) with Agent (name: %s, id: %s, version: %d) "
                                 + "because it is %d days older than the maximum idle time of %d days",
-                        conversationId, documentDescriptor.getName(), agentId, agentVersion,
-                        DAYS.between(timeOfLastInteractionInConversation.toInstant(), Instant.now()), maximumLifeTimeOfIdleConversationsInDays);
+                        conversationId, documentDescriptor.getName(), agentId, agentVersion, DAYS.between(lastInteraction, Instant.now()),
+                        maximumLifeTimeOfIdleConversationsInDays);
 
                 LOGGER.info(message);
             }
@@ -445,23 +477,52 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
     }
 
-    private boolean isOlderThanDays(final LocalDate date, final int days) {
-        boolean result = false;
+    /**
+     * The newest timestamp any data item in the conversation carries, or
+     * {@code null} when nothing is timestamped. This is the conversation's own
+     * last-interaction time: every turn writes step data through
+     * {@code ConversationStep}, which stamps each entry.
+     */
+    static Instant lastInteractionOf(ConversationMemorySnapshot snapshot) {
+        if (snapshot == null || snapshot.getConversationSteps() == null) {
+            return null;
+        }
 
-        LocalDate now = LocalDate.now();
-        // period from now to date
-        Period period = Period.between(now, date);
-
-        if (period.getYears() < 0) {
-            // if year is negative, 100% older than 6 months
-            result = true;
-        } else if (period.getYears() == 0) {
-            if (period.getDays() <= -days) {
-                result = true;
+        Date newest = null;
+        for (var step : snapshot.getConversationSteps()) {
+            if (step == null || step.getWorkflows() == null) {
+                continue;
+            }
+            for (var workflow : step.getWorkflows()) {
+                if (workflow == null || workflow.getLifecycleTasks() == null) {
+                    continue;
+                }
+                for (var task : workflow.getLifecycleTasks()) {
+                    Date timestamp = task != null ? task.getTimestamp() : null;
+                    if (timestamp != null && (newest == null || timestamp.after(newest))) {
+                        newest = timestamp;
+                    }
+                }
             }
         }
 
-        return result;
+        return newest != null ? newest.toInstant() : null;
+    }
+
+    /**
+     * True when {@code date} is at least {@code days} days in the past.
+     * <p>
+     * This used to be written against {@link Period}, which normalizes into
+     * years/months/days — and the check only looked at the years and days
+     * components, never the months. For a 35-day-old date and a 30-day limit,
+     * {@code Period.between(now, date)} is {@code P-1M-4D}, so the test read
+     * {@code -4 <= -30} and answered "not old". Whole bands of ages between
+     * {@code days} and one year were therefore never reaped, and the ones that were
+     * passed only by coincidence of where the month boundary fell. Day arithmetic
+     * has no such components.
+     */
+    static boolean isOlderThanDays(final LocalDate date, final int days) {
+        return DAYS.between(date, LocalDate.now()) >= days;
     }
 
     private interface UndeploymentExecutor {

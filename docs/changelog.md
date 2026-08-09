@@ -5,6 +5,22 @@
 
 ---
 
+## 🔎 fix(runtime): agent deploy/undeploy lifecycle — silent no-op teardown, unreachable IN_PROGRESS handshake, idle-sweep age signal (2026-08-09)
+
+**Repo:** EDDI (`fix/agent-lifecycle-deployment`)
+
+Follow-up review of `engine/runtime/internal`, the pre-Wave-R deployment machinery everything else stands on. Five confirmed findings, all fixed. Plan independently adversarially reviewed before implementation; that pass disproved one candidate finding (a `Cadence` bounds check that the record's compact constructor already performs) and caught that one proposed fix was actively dangerous — see #4.
+
+1. **HIGH — `undeployAgent(env, id, null)` was a silent no-op.** `AgentId` equality compares the version, so `remove(new AgentId(id, null))` matched nothing. Both callers that tear down a *dynamically created* agent pass `null`, because they know the agent only by id: `TeardownAgentTool` (LLM-callable) and `GroupLifecycleOps#cleanupEphemeralAgents`. The agent therefore stayed in the factory with its real version — so a "torn down" agent, and with `delete=true` a **config-deleted** one, remained reachable through `getLatestReadyAgent` and fully conversable until restart, while `eddi_agents_deployed` leaked monotonically. A `null` version now means every version; `undeployAgent` returns the number actually removed so a caller cannot report a teardown that did not happen. `TeardownAgentTool` also retires the deployment records unconditionally, not only on the delete path — left at `deployed`, the 10s poll loaded the agent straight back in.
+2. **The IN_PROGRESS deployment handshake had no producer.** The marker agent was a local variable returned only from the failure branch, after being flipped to ERROR — no IN_PROGRESS value ever rested in the map, so `getAgent`'s IN_PROGRESS branch and `waitForDeploymentCompletion` were both unreachable and a lookup arriving mid-deployment got a bare `null`. The whole store load also ran inside `ConcurrentHashMap.compute`, holding a bin lock across blocking I/O. The key is now claimed by publishing the marker atomically, the load runs outside the mapping function, and the result is published with a **conditional** `replace` so an undeploy racing the load is not resurrected by the late write. The factory registers and completes the deployment future itself.
+3. **`deployedAgents` was a `LinkedList` with `add` under a lock, `remove` without, and a metrics gauge reading `size()` from the scrape thread.** Now `ConcurrentHashMap.newKeySet()`. `deploymentInfos` had the same shape and is also concurrent now — `checkDeployments` runs both on the 10s scheduler (`@Scheduled` defaults to `ConcurrentExecution.PROCEED`) and on the runtime executor at startup. It is rebuilt from each poll rather than appended to forever: `DeploymentInfo` equality ignores status, so a stale entry used to suppress an agent's redeployment permanently.
+4. **The idle-conversation sweep was wrong twice, and the two had to be fixed together.** `isOlderThanDays` was written against `Period`, which normalizes to years/months/days, and only read the years and days components — for a 35-day-old date and a 30-day limit the test read `-4 <= -30` and answered "not old", so whole bands of ages were never reaped. But that bug was *masking* a wrong age **signal**: the age came from the AGENT document's `lastModifiedOn`, which every conversation on that agent version shares. Correcting only the arithmetic would have started ENDing conversations a user was actively talking in, whenever the agent config happened to be old. The age now comes from the conversation's own newest step timestamp (descriptor only as a fallback for a conversation with no timestamps at all), and the arithmetic is plain day counting. Pinned by `recentConversationOnStaleAgentSurvives`.
+5. `Agent.deploymentStatus` is `volatile` — the transition to READY/ERROR is what releases a waiting lookup.
+
+Suites: AgentFactory/AgentDeploymentManagement/Agent/DeploymentListener 111 existing all green, +19 new (`AgentFactoryLifecycleTest`, `AgentDeploymentManagementIdleSweepTest`). Every new test mutation-checked: reverting its fix fails it.
+
+---
+
 ## 🔎 fix(groups): pre-merge deep review — facilitator HITL bypass, CALL_VOTE guards, metric cardinality, template honesty (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i10-templates`)

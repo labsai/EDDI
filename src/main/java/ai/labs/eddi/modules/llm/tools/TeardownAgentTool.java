@@ -84,20 +84,28 @@ public class TeardownAgentTool {
             }
 
             // --- Undeploy ---
+            // Every deployed version: a dynamically created agent is known here only
+            // by id, and leaving any version live would keep a "torn down" agent
+            // reachable through getLatestReadyAgent.
             try {
-                agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
-                LOGGER.infof("[TEARDOWN] Undeployed agent '%s'", agentId);
+                int undeployedVersions = agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
+                LOGGER.infof("[TEARDOWN] Undeployed agent '%s' (%d version(s))", agentId, undeployedVersions);
             } catch (Exception e) {
                 LOGGER.warnf("[TEARDOWN] Undeploy failed for agent '%s': %s", agentId, e.getMessage());
                 return "❌ Failed to undeploy agent '%s': %s".formatted(agentId, e.getMessage());
             }
+
+            // Retire the deployment records unconditionally, not only on the delete
+            // path. They are what the 10s redeploy poll and the 24h deployment
+            // manager read: leave them at 'deployed' and the agent this tool just
+            // undeployed is loaded straight back into the factory.
+            retireDeploymentRecords(agentId);
 
             // --- Optional: delete agent configuration ---
             createdAgentIds.remove(agentId);
             if (Boolean.TRUE.equals(delete)) {
                 try {
                     agentStore.deleteAllPermanently(agentId);
-                    retireDeploymentRecords(agentId);
                     LOGGER.infof("[TEARDOWN] Permanently deleted agent '%s'", agentId);
                     return "✅ Agent '%s' has been undeployed and permanently deleted.".formatted(agentId);
                 } catch (Exception e) {

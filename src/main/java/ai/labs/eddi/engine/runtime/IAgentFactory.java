@@ -24,7 +24,17 @@ public interface IAgentFactory {
     void deployAgent(Deployment.Environment environment, String agentId, Integer version, DeploymentProcess deploymentProcess)
             throws ServiceException, IllegalAccessException;
 
-    void undeployAgent(Deployment.Environment environment, String agentId, Integer version) throws ServiceException, IllegalAccessException;
+    /**
+     * Removes a deployed agent from {@code environment}. A {@code null}
+     * {@code version} undeploys EVERY deployed version of {@code agentId} — the
+     * contract the dynamic-agent teardown callers rely on, since they know an agent
+     * only by id.
+     *
+     * @return the number of deployed agent versions actually removed; {@code 0}
+     *         means nothing was deployed under that id, which callers reporting
+     *         success to a user or an LLM must not describe as a teardown
+     */
+    int undeployAgent(Deployment.Environment environment, String agentId, Integer version) throws ServiceException, IllegalAccessException;
 
     interface DeploymentProcess {
         void completed(Deployment.Status status);
