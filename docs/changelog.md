@@ -5,6 +5,28 @@
 
 ---
 
+## 🔒 feat(vault): allowedAgents is enforced instead of decorative (2026-08-09)
+
+**Repo:** EDDI (`feat/vault-allowed-agents-enforcement`)
+
+`SecretMetadata.allowedAgents` was documented as *"for visibility only — enforcement is via configuration authorship, not runtime resolution"*. That access model assumes a **human admin** authors agent configurations. `create_sub_agent` lets an LLM author one, so an operator who scoped a secret to a single agent got no enforcement at all — the field was decorative.
+
+**Enforced at deployment, deliberately not at resolution.** Resolution is the tempting place and the wrong one:
+- `SecretResolver` sees only a string. It has no agent identity, and its ~12 call sites include several that legitimately run outside any conversation (embedding-store construction, channel routing); `AgentSigningService` bypasses it entirely.
+- `ChatModelRegistry` caches the built model keyed on the **unresolved** parameters, so two agents sharing a config share a cache entry. A check behind that cache runs for whichever agent built the model first and is silently skipped for every other one — enforcement that looks real and is not. Making it sound would require the agent identity in `ModelCacheKey` plus plumbing through six call sites, several of them background services with no agent at all.
+
+The binding between an agent and a secret is established in the agent's **configuration**, so that is where it is checked: completely, once, and with no cache in the way. `VaultGrantChecker` walks the agent's workflows → llm/apicalls/mcpcalls configs, serializes each and scans for `${vault:...}` references, then verifies each against `allowedAgents`. The scan serializes rather than enumerating known credential fields — enumeration is how this kind of check rots when a new credential field is added.
+
+**Rollout is warn-first.** `eddi.vault.grant-enforcement` is `off` | `warn` (default) | `enforce`. Warn is deliberate: the field has never been enforced, so any non-wildcard value in an existing deployment is untested configuration, and blocking on it during an upgrade could take agents down for a policy nobody has had the chance to verify. Operators switch to `enforce` once the warnings are clean.
+
+**Uncertainty never becomes a violation.** Unreadable metadata, a disabled vault, an unreadable workflow, an absent/empty/wildcard grant — all allow. A deployment gate that fires on a transient store failure is worse than the hole it closes.
+
+**What it does not do:** an agent already deployed before its grant was narrowed keeps resolving until redeployed. This is a deploy-time gate, not a revocation mechanism.
+
++9 tests. One of them initially passed vacuously because the fixture used toy ids — `RestUtilities.extractResourceId` needs ≥18 hex characters and returns a null id otherwise, so the scanner found nothing; the fixture now uses ObjectId-shaped ids.
+
+---
+
 ## 🔎 fix(groups): pre-merge deep review — facilitator HITL bypass, CALL_VOTE guards, metric cardinality, template honesty (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i10-templates`)

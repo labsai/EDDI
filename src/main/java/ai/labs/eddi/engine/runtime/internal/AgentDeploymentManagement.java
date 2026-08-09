@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.readiness.IAgentsReadiness;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.secrets.VaultGrantChecker;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.utils.RestUtilities;
@@ -83,6 +84,29 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private Instant lastDeploymentCheck = null;
     private static final Logger LOGGER = Logger.getLogger(AgentDeploymentManagement.class);
     private final List<DeploymentInfo> deploymentInfos = new LinkedList<>();
+
+    /**
+     * Deploy-time vault-grant gate. Field-injected rather than a constructor
+     * parameter so a directly constructed instance (tests, non-CDI callers) simply
+     * sees {@code null} and skips the check — the same pattern the engine already
+     * uses for late-bound collaborators.
+     */
+    @Inject
+    VaultGrantChecker vaultGrantChecker;
+
+    /**
+     * What to do when an agent's config names a vault secret it is not granted:
+     * {@code off}, {@code warn} (default) or {@code enforce}.
+     * <p>
+     * Warn is the default deliberately. {@code allowedAgents} has never been
+     * enforced, so any non-wildcard value in an existing deployment is untested
+     * configuration — blocking on it during an upgrade could take agents down for a
+     * policy nobody has yet had the chance to verify. Operators turn on
+     * {@code enforce} once the warnings are clean.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.vault.grant-enforcement", defaultValue = "warn")
+    String vaultGrantEnforcement;
 
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
@@ -171,6 +195,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                                 return;
                             }
 
+                            if (!vaultGrantsSatisfied(deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion())) {
+                                // enforce mode only — the agent names a secret it is not
+                                // granted. Left un-added to deploymentInfos so a corrected
+                                // grant is picked up by the next poll.
+                                return;
+                            }
+
                             agentFactory.deployAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(),
                                     null);
 
@@ -222,6 +253,43 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             t = t.getCause();
         }
         return false;
+    }
+
+    /**
+     * Deploy-time check that every vault reference this agent's configuration names
+     * is granted to it.
+     *
+     * @return {@code true} when deployment may proceed — always true unless
+     *         {@code eddi.vault.grant-enforcement=enforce} and a provable violation
+     *         was found
+     */
+    private boolean vaultGrantsSatisfied(String agentId, Integer agentVersion) {
+        if (vaultGrantChecker == null || "off".equalsIgnoreCase(vaultGrantEnforcement)) {
+            return true;
+        }
+        List<String> ungranted;
+        try {
+            ungranted = vaultGrantChecker.findUngrantedReferences(agentStore.read(agentId, agentVersion), agentId);
+        } catch (Exception e) {
+            // A check that cannot run must never block a deployment.
+            LOGGER.warn(format("Skipping the vault-grant check for Agent (id=%s, version=%d): %s", agentId, agentVersion, e.getMessage()));
+            return true;
+        }
+        if (ungranted.isEmpty()) {
+            return true;
+        }
+
+        boolean enforce = "enforce".equalsIgnoreCase(vaultGrantEnforcement);
+        String message = format(
+                "Agent (id=%s, version=%d) references vault secret(s) it is not granted: %s. "
+                        + "SecretMetadata.allowedAgents lists which agents may use a secret; widen the grant or remove the reference.",
+                agentId, agentVersion, ungranted);
+        if (enforce) {
+            LOGGER.error(message + " Deployment BLOCKED (eddi.vault.grant-enforcement=enforce).");
+            return false;
+        }
+        LOGGER.warn(message + " Deployment allowed (eddi.vault.grant-enforcement=warn); set it to 'enforce' to block.");
+        return true;
     }
 
     /**
