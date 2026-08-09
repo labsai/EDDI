@@ -41,11 +41,26 @@ public class GroupConversation {
      * signed acceptances and concession ledger). No migration entry for either: v3
      * documents have neither field and Jackson defaults them correctly (identity
      * hop).
+     * <p>
+     * {@code tornDownAgentIds} also rides v4 rather than forcing a v5 — a
+     * DELIBERATE call against this comment's own "bump whenever a Wave adds a
+     * resume-consumed field" rule, recorded here so it reads as decided rather than
+     * missed. It is persisted and resume-consumed (the tracking merge consults it
+     * after a HITL resume), but it fails soft in every skew direction: a legacy
+     * document defaults to an empty set (identity hop, no migration), and an older
+     * pod re-saving a paused document drops the tombstones — after which the worst
+     * outcome is a torn-down agent re-occupying a
+     * {@code maxCreatedAgentsPerDiscussion} slot and terminal cleanup retrying a
+     * deletion that 404s harmlessly. Contrast {@code runtimePhases}, where the same
+     * skew mis-indexes resume bookmarks — corruption, not conservatism. A version
+     * bump signals "an old pod must not touch this document"; this field does not
+     * earn that.
      */
     // v4 (this release): the release shape — adds I11's negotiationState, I12's
-    // runtimePhases and I6's pausedRepeatSliceBase, all resume-consumed. No
-    // migration entries needed: Jackson defaults each on legacy documents to its
-    // pre-v4 behavior (null / null / -1).
+    // runtimePhases, I6's pausedRepeatSliceBase and the teardown tombstone set
+    // (tornDownAgentIds), all resume-consumed. No migration entries needed:
+    // Jackson defaults each on legacy documents to its pre-v4 behavior
+    // (null / null / -1 / empty set).
     public static final int CURRENT_SCHEMA_VERSION = 4;
     /**
      * The version a stored document claims when its JSON carries no
