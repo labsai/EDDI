@@ -41,6 +41,7 @@ import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
+import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -254,8 +255,8 @@ public class AgentSetupService {
         if (createdResources.isEmpty()) {
             return;
         }
-        LOGGER.warnf("Agent setup for '%s' failed (%s) — rolling back %d already-created resource(s)", agentName,
-                cause.getMessage(), createdResources.size());
+        LOGGER.warnf("Agent setup for '%s' failed (%s) — rolling back %d already-created resource(s)",
+                LogSanitizer.sanitize(agentName), cause.getMessage(), createdResources.size());
 
         var locations = new ArrayList<>(createdResources.values());
         Collections.reverse(locations);
@@ -266,7 +267,8 @@ public class AgentSetupService {
             try {
                 deleteCreatedResource(uri);
             } catch (Exception e) {
-                LOGGER.warnf("Rollback could not delete '%s': %s — it is orphaned and must be removed manually", uri, e.getMessage());
+                LOGGER.warnf("Rollback could not delete '%s': %s — it is orphaned and must be removed manually",
+                        LogSanitizer.sanitize(uri), e.getMessage());
             }
         }
     }
@@ -731,7 +733,8 @@ public class AgentSetupService {
                 return new ParentLlmProfile(task.getType(), model, credential);
             }
         } catch (Exception e) {
-            LOGGER.warnf("Could not resolve the LLM profile of parent agent '%s' for inheritance: %s", parentAgentId, e.getMessage());
+            LOGGER.warnf("Could not resolve the LLM profile of parent agent '%s' for inheritance: %s",
+                    LogSanitizer.sanitize(parentAgentId), e.getMessage());
         }
         return null;
     }
@@ -766,7 +769,8 @@ public class AgentSetupService {
                 }
             }
         } catch (Exception e) {
-            LOGGER.debugf("Could not read the LLM task of workflow '%s': %s", workflowUri, e.getMessage());
+            LOGGER.debugf("Could not read the LLM task of workflow '%s': %s", LogSanitizer.sanitize(String.valueOf(workflowUri)),
+                    e.getMessage());
         }
         return null;
     }
