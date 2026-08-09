@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.client.agents.IAgentStoreClientLibrary;
 import ai.labs.eddi.engine.runtime.model.DeploymentEvent;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -217,19 +218,20 @@ public class AgentFactory implements IAgentFactory {
                 deployedAgents.add(id);
                 logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.READY);
             } else {
-                log.infof("Agent %s v%s was undeployed while its deployment was in flight — discarding the loaded agent", agentId, version);
+                log.infof("Agent %s v%s was undeployed while its deployment was in flight — discarding the loaded agent",
+                        LogSanitizer.sanitize(agentId), version);
             }
 
             finalDeploymentProcess.completed(Deployment.Status.READY);
             deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, Deployment.Status.READY));
         } catch (ServiceException e) {
-            log.error("Agent deployment failed for " + agentId + " v" + version + ": " + e.getMessage(), e);
+            log.errorf(e, "Agent deployment failed for %s v%s: %s", LogSanitizer.sanitize(agentId), version, e.getMessage());
             failDeployment(progressDummyAgent, environment, agentId, version, finalDeploymentProcess);
         } catch (RuntimeException e) {
             // MUST NOT escape without clearing the claim: the IN_PROGRESS marker is
             // published now, so an escaping throw would strand the key IN_PROGRESS
             // forever and every later lookup would wait out the 60s timeout.
-            log.error("Agent deployment failed for " + agentId + " v" + version + ": " + e.getMessage(), e);
+            log.errorf(e, "Agent deployment failed for %s v%s: %s", LogSanitizer.sanitize(agentId), version, e.getMessage());
             failDeployment(progressDummyAgent, environment, agentId, version, finalDeploymentProcess);
             throw e;
         } catch (IllegalAccessException e) {
