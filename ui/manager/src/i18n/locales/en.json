@@ -3101,7 +3101,7 @@
       "saveSuccess": "Task force settings saved",
       "saveError": "Failed to save settings",
       "deleteAllSuccess": "Task force and all agents deleted",
-      "deleteError": "Failed to delete board",
+      "deleteError": "Failed to delete task force",
       "deleteSuccess": "Task force deleted",
       "duplicateMember": "This agent is already a member",
       "loadError": "Failed to load settings",
