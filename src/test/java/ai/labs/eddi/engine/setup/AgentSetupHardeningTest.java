@@ -37,6 +37,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -213,10 +214,37 @@ class AgentSetupHardeningTest {
             assertEquals("openai", profile.provider());
         }
 
+        /**
+         * RestVersionInfo.read does checkNotNull(version), so readAgent(id, null)
+         * always throws. Passing null made resolveParentLlmProfile swallow that and
+         * return null, leaving create_sub_agent failing with "API key is required" —
+         * the very defect inheritance was added to fix.
+         */
+        @Test
+        @DisplayName("reads the parent at its resolved current version, never at a null version")
+        void readsParentAtResolvedVersion() {
+            givenParentWithLlm("anthropic", Map.of("modelName", "claude-sonnet-4-6", "apiKey", "${vault:k}"));
+
+            assertNotNull(service.resolveParentLlmProfile("parent-1"));
+
+            verify(agentStore).getCurrentVersion("parent-1");
+            verify(agentStore).readAgent("parent-1", 4);
+            verify(agentStore, never()).readAgent(anyString(), isNull());
+        }
+
+        @Test
+        @DisplayName("a workflow whose LLM task carries nothing inheritable is skipped")
+        void emptyTaskIsNotAProfile() {
+            givenParentWithLlm(null, Map.of());
+
+            assertNull(service.resolveParentLlmProfile("parent-1"),
+                    "an all-null profile would make the caller treat inheritance as available");
+        }
+
         @Test
         @DisplayName("an unreadable parent yields no profile rather than throwing")
         void unreadableParentIsNull() {
-            when(agentStore.readAgent(anyString(), any())).thenThrow(new RuntimeException("store down"));
+            when(agentStore.getCurrentVersion(anyString())).thenThrow(new RuntimeException("store down"));
 
             assertNull(service.resolveParentLlmProfile("parent-1"));
         }
@@ -231,7 +259,11 @@ class AgentSetupHardeningTest {
         private void givenParentWithLlm(String provider, Map<String, String> parameters) {
             var agent = new AgentConfiguration();
             agent.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/w1?version=1")));
-            when(agentStore.readAgent(eq("parent-1"), any())).thenReturn(agent);
+            // Stubbed on the RESOLVED version, never any(): readAgent(id, null) throws
+            // checkNotNull inside RestVersionInfo, so a lenient any() stub hid the fact
+            // that the production call passed null and inheritance never worked.
+            when(agentStore.getCurrentVersion("parent-1")).thenReturn(4);
+            when(agentStore.readAgent("parent-1", 4)).thenReturn(agent);
 
             var step = new WorkflowConfiguration.WorkflowStep();
             step.setType(URI.create("eddi://ai.labs.llm"));

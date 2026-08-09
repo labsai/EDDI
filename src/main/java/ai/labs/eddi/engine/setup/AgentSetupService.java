@@ -256,7 +256,7 @@ public class AgentSetupService {
             return;
         }
         LOGGER.warnf("Agent setup for '%s' failed (%s) — rolling back %d already-created resource(s)",
-                LogSanitizer.sanitize(agentName), cause.getMessage(), createdResources.size());
+                LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(cause.getMessage()), createdResources.size());
 
         var locations = new ArrayList<>(createdResources.values());
         Collections.reverse(locations);
@@ -268,7 +268,7 @@ public class AgentSetupService {
                 deleteCreatedResource(uri);
             } catch (Exception e) {
                 LOGGER.warnf("Rollback could not delete '%s': %s — it is orphaned and must be removed manually",
-                        LogSanitizer.sanitize(uri), e.getMessage());
+                        LogSanitizer.sanitize(uri), LogSanitizer.sanitize(e.getMessage()));
             }
         }
     }
@@ -450,6 +450,7 @@ public class AgentSetupService {
         } catch (AgentSetupException e) {
             throw e;
         } catch (Exception e) {
+            rollbackCreatedResources(createdResources, request.agentName(), e);
             throw new AgentSetupException("Failed to create API agent: " + e.getMessage(), e);
         }
     }
@@ -653,6 +654,17 @@ public class AgentSetupService {
         return new LlmConfiguration(List.of(task));
     }
 
+    /**
+     * The provider an omitted {@code provider} resolves to. Public because a caller
+     * that must validate against its own allow-list has to know the value this
+     * service will actually use — guarding the raw argument instead let a caller
+     * skip the allow-list entirely by omitting the parameter.
+     */
+    public static final String DEFAULT_PROVIDER = "anthropic";
+
+    /** The model an omitted {@code model} resolves to. */
+    public static final String DEFAULT_MODEL = "claude-sonnet-4-6";
+
     /** Upper bound on a setup-supplied agent name. */
     public static final int MAX_AGENT_NAME_LENGTH = 200;
 
@@ -713,7 +725,17 @@ public class AgentSetupService {
             return null;
         }
         try {
-            AgentConfiguration parent = getRestStore(IRestAgentStore.class).readAgent(parentAgentId, null);
+            // The version must be resolved first. RestVersionInfo.read does
+            // checkNotNull(version), so readAgent(id, null) ALWAYS throws — which this
+            // method's catch swallowed, making inheritance silently return null and
+            // leaving create_sub_agent failing with "API key is required", i.e. the
+            // exact defect it was written to fix.
+            IRestAgentStore agentRestStore = getRestStore(IRestAgentStore.class);
+            Integer currentVersion = agentRestStore.getCurrentVersion(parentAgentId);
+            if (currentVersion == null) {
+                return null;
+            }
+            AgentConfiguration parent = agentRestStore.readAgent(parentAgentId, currentVersion);
             if (parent == null || parent.getWorkflows() == null) {
                 return null;
             }
@@ -730,6 +752,13 @@ public class AgentSetupService {
                 }
                 String model = firstNonBlank(parameters.get("modelName"), parameters.get("model"), parameters.get("modelId"),
                         parameters.get("deploymentName"));
+                if (task.getType() == null && model == null && credential == null) {
+                    // Nothing inheritable here. Returning an all-null profile would make
+                    // the caller's `parentProfile != null` mean "inheritance available"
+                    // and resolve provider and model to null, while also skipping every
+                    // remaining workflow.
+                    continue;
+                }
                 return new ParentLlmProfile(task.getType(), model, credential);
             }
         } catch (Exception e) {
@@ -1062,8 +1091,8 @@ public class AgentSetupService {
      *             if {@code environment} is neither blank nor a known environment
      */
     ResolvedParams resolveParams(String provider, String model, Boolean deploy, String environment) {
-        return new ResolvedParams(provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : "anthropic",
-                model != null && !model.isBlank() ? model.trim() : "claude-sonnet-4-6", deploy == null || deploy,
+        return new ResolvedParams(provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : DEFAULT_PROVIDER,
+                model != null && !model.isBlank() ? model.trim() : DEFAULT_MODEL, deploy == null || deploy,
                 Deployment.Environment.parseStrict(environment));
     }
 

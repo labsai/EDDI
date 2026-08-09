@@ -108,24 +108,40 @@ public class CreateSubAgentTool {
             // Only a vault REFERENCE is inherited, never a plaintext key — see
             // AgentSetupService#resolveParentLlmProfile.
             var parentProfile = agentSetupService.resolveParentLlmProfile(parentAgentId);
-            String inheritedApiKey = parentProfile != null ? parentProfile.apiKeyReference() : null;
             boolean inherit = config.isInheritParentModel() && parentProfile != null;
-            final String resolvedProvider = (provider == null || provider.isBlank()) && inherit
+            String requestedProvider = (provider == null || provider.isBlank()) && inherit
                     ? parentProfile.provider()
                     : provider;
             final String resolvedModel = (model == null || model.isBlank()) && inherit
                     ? parentProfile.model()
                     : model;
 
+            // The provider AgentSetupService will ACTUALLY use, defaults applied.
+            // Guarding the merely-requested value still left the bypass open: with
+            // inheritParentModel=false and no provider argument, nothing was inherited,
+            // the value stayed null, the allow-list check below skipped it, and
+            // resolveParams then substituted the default. Resolving the effective
+            // value here is what makes the guardrail unskippable.
+            final String resolvedProvider = requestedProvider == null || requestedProvider.isBlank()
+                    ? AgentSetupService.DEFAULT_PROVIDER
+                    : requestedProvider;
+
+            // A vault reference names ONE provider's secret. Handing the parent's
+            // anthropic reference to an openai sub-agent both breaks it at model load
+            // and writes a reference to the parent's secret into an unrelated config.
+            String inheritedApiKey = parentProfile != null
+                    && resolvedProvider.equalsIgnoreCase(parentProfile.provider())
+                            ? parentProfile.apiKeyReference()
+                            : null;
+
             // --- Guardrail: allowed providers ---
-            // Checked AFTER inheritance, against the value that will actually be used.
-            // Checking the raw argument let a caller bypass the allow-list entirely by
-            // simply omitting the parameter: a null provider skipped this branch and
-            // then resolved to the "anthropic" default inside AgentSetupService. That
-            // bypass was dead only because the missing API key failed first; making
-            // inheritance work would have armed it.
-            if (resolvedProvider != null && !resolvedProvider.isBlank()
-                    && config.getAllowedProviders() != null
+            // Checked against the EFFECTIVE provider, not the requested one. Guarding
+            // the requested value left the allow-list skippable: with
+            // inheritParentModel=false and no provider argument nothing was inherited,
+            // the value stayed null, this branch was skipped, and AgentSetupService
+            // then substituted its default — so a group restricting allowedProviders
+            // was bypassed by simply omitting the parameter.
+            if (config.getAllowedProviders() != null
                     && !config.getAllowedProviders().isEmpty()) {
                 boolean providerAllowed = config.getAllowedProviders().stream()
                         .filter(java.util.Objects::nonNull)
@@ -137,24 +153,36 @@ public class CreateSubAgentTool {
             }
 
             // --- Guardrail: allowed models ---
+            // Branches on the REQUESTED provider, deliberately unchanged. Its two
+            // documented behaviours are pinned by tests that state them outright — a
+            // provider key mapping to a null list means "no restriction for that
+            // provider", and an unnamed provider requires the model to appear in some
+            // provider's list. Rewriting either is a config-semantics change, not part
+            // of closing the allow-list bypass above, so it is left alone.
+            //
+            // Known residual: with no provider named, a model accepted from another
+            // provider's list is then paired with the DEFAULT provider, which can be an
+            // incoherent combination. Narrowing that is a deliberate behaviour change
+            // and belongs in its own commit.
             if (resolvedModel != null && !resolvedModel.isBlank()
                     && config.getAllowedModels() != null
                     && !config.getAllowedModels().isEmpty()) {
-                if (resolvedProvider != null && !resolvedProvider.isBlank()) {
-                    // Provider specified — check against that provider's model list
+                if (requestedProvider != null && !requestedProvider.isBlank()) {
+                    // Provider named or inherited — check that provider's model list
                     // (case-insensitive key match)
                     List<String> allowedModels = config.getAllowedModels().entrySet().stream()
-                            .filter(e -> e.getKey() != null && e.getKey().equalsIgnoreCase(resolvedProvider))
+                            .filter(e -> e.getKey() != null && e.getKey().equalsIgnoreCase(requestedProvider))
                             .map(Map.Entry::getValue)
                             .filter(java.util.Objects::nonNull)
                             .findFirst().orElse(null);
                     if (allowedModels != null && !allowedModels.isEmpty()
-                            && allowedModels.stream().noneMatch(m -> m.equalsIgnoreCase(resolvedModel))) {
+                            && allowedModels.stream().filter(java.util.Objects::nonNull)
+                                    .noneMatch(m -> m.equalsIgnoreCase(resolvedModel))) {
                         return "⚠️ Model '%s' is not allowed for provider '%s'. Allowed: %s"
-                                .formatted(resolvedModel, resolvedProvider, allowedModels);
+                                .formatted(resolvedModel, requestedProvider, allowedModels);
                     }
                 } else {
-                    // No provider specified — model must appear in at least one provider's
+                    // No provider named — model must appear in at least one provider's
                     // allow-list
                     boolean modelFoundInAnyProvider = config.getAllowedModels().values().stream()
                             .filter(java.util.Objects::nonNull)

@@ -145,6 +145,62 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        @DisplayName("allowedProviders is enforced against the EFFECTIVE provider, not the requested one")
+        void createSubAgent_allowedProvidersNotBypassableByOmittingIt() {
+            // With inheritParentModel off and no provider argument, nothing is
+            // inherited and the requested provider stays null. Guarding that value
+            // skipped the check entirely, and AgentSetupService then substituted its
+            // default — so a group restricting allowedProviders was bypassed by simply
+            // omitting the parameter.
+            config.setInheritParentModel(false);
+            config.setAllowedProviders(List.of("ollama"));
+
+            String result = tool.createSubAgent("Test", "prompt", null, null, null, null);
+
+            assertTrue(result.contains("⚠️"), result);
+            assertTrue(result.contains("not allowed"), result);
+            assertTrue(result.contains(AgentSetupService.DEFAULT_PROVIDER), result);
+        }
+
+        @Test
+        @DisplayName("the parent's vault reference is not handed to a different provider")
+        void createSubAgent_credentialDoesNotCrossProviders() throws Exception {
+            // A vault reference names ONE provider's secret. Passing the parent's
+            // anthropic reference into an openai config both breaks the sub-agent at
+            // model load and stores a reference to the parent's secret in an unrelated
+            // config.
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-1").build());
+
+            tool.createSubAgent("Test", "prompt", "openai", "gpt-4o", null, null);
+
+            var captor = org.mockito.ArgumentCaptor.forClass(SetupAgentRequest.class);
+            verify(agentSetupService).setupAgent(captor.capture());
+            assertNull(captor.getValue().apiKey(), "the parent's anthropic vault reference must not reach an openai config");
+            assertEquals("openai", captor.getValue().provider());
+        }
+
+        @Test
+        @DisplayName("the parent's vault reference IS inherited when the provider matches")
+        void createSubAgent_credentialInheritedForSameProvider() throws Exception {
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-1").build());
+
+            tool.createSubAgent("Test", "prompt", null, null, null, null);
+
+            var captor = org.mockito.ArgumentCaptor.forClass(SetupAgentRequest.class);
+            verify(agentSetupService).setupAgent(captor.capture());
+            assertEquals("${vault:parent.apiKey}", captor.getValue().apiKey(),
+                    "inheritance is the whole point — create_sub_agent failed outright without it");
+            assertEquals("anthropic", captor.getValue().provider());
+            assertEquals("claude-sonnet-4-6", captor.getValue().model());
+        }
+
+        @Test
         void createSubAgent_quotaEnforcedByConversationStart() throws Exception {
             // Quota is enforced by startConversation() internally, not by
             // CreateSubAgentTool.
