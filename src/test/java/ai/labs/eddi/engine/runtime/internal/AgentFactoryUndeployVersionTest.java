@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.agents.IAgentStoreClientLibrary;
+import ai.labs.eddi.engine.runtime.service.ServiceException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,9 +14,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 import static org.mockito.MockitoAnnotations.openMocks;
 
@@ -143,12 +148,67 @@ class AgentFactoryUndeployVersionTest {
     }
 
     @Test
-    @DisplayName("repeated deploys of the same version are tracked once")
-    void repeatedDeploysTrackedOnce() throws Exception {
+    @DisplayName("repeated deploys of the same version are counted once")
+    void repeatedDeploysCountedOnce() throws Exception {
         deploy("idempotent", 1);
         factory.deployAgent(ENV, "idempotent", 1, null);
         factory.deployAgent(ENV, "idempotent", 1, null);
 
-        assertEquals(1.0, deployedGauge(), "addIfAbsent must not let a redeploy inflate the gauge");
+        assertEquals(1.0, deployedGauge(), "a redeploy must not inflate the gauge");
+    }
+
+    /**
+     * An undeploy that lands while a deployment's store lookup is in flight.
+     * <p>
+     * The load deliberately runs outside the environment map (holding a
+     * {@code ConcurrentHashMap} bin lock across multi-second I/O is what the
+     * {@code putIfAbsent} claim replaced), which opens this window. An
+     * unconditional {@code put} of the loaded agent would resurrect an agent the
+     * caller had just torn down — the deployment silently winning a race it started
+     * before the undeploy was even requested — and would leave the deployed-agents
+     * metric describing a registry that no longer holds it.
+     */
+    @Test
+    @DisplayName("an undeploy during the store lookup wins — the finished deployment does not resurrect the agent")
+    void undeployDuringLoadIsNotOverwritten() throws Exception {
+        var lookupStarted = new CountDownLatch(1);
+        var releaseLookup = new CountDownLatch(1);
+        var agent = new Agent("racy", 1);
+
+        when(agentStoreClientLibrary.getAgent("racy", 1)).thenAnswer(invocation -> {
+            lookupStarted.countDown();
+            assertTrue(releaseLookup.await(10, TimeUnit.SECONDS), "the test never released the lookup");
+            return agent;
+        });
+
+        var deploying = Thread.ofVirtual().start(() -> {
+            try {
+                factory.deployAgent(ENV, "racy", 1, null);
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+
+        assertTrue(lookupStarted.await(10, TimeUnit.SECONDS), "the deployment never reached its store lookup");
+        factory.undeployAgent(ENV, "racy", null);
+        releaseLookup.countDown();
+        deploying.join();
+
+        assertNull(factory.getAgent(ENV, "racy", 1),
+                "the undeploy came second and must win — the deployment must not publish over it");
+        assertNull(factory.getLatestReadyAgent(ENV, "racy"));
+        assertEquals(0.0, deployedGauge(), "the metric must agree with the registry");
+    }
+
+    @Test
+    @DisplayName("the gauge counts READY agents only, not in-flight or failed ones")
+    void gaugeCountsReadyOnly() throws Exception {
+        when(agentStoreClientLibrary.getAgent("broken", 1)).thenThrow(new ServiceException("nope"));
+        factory.deployAgent(ENV, "broken", 1, null);
+
+        assertEquals(0.0, deployedGauge(), "a failed deployment leaves an ERROR entry, which is not a deployment");
+
+        deploy("healthy", 1);
+        assertEquals(1.0, deployedGauge());
     }
 }

@@ -913,7 +913,9 @@ public class AgentGroupConfiguration {
      * failure policies, and safety caps.
      *
      * @param agentTimeoutSeconds
-     *            per-agent timeout in seconds (default: 60)
+     *            per-agent timeout in seconds. Non-positive, or no {@code protocol}
+     *            block at all, falls back to {@link #DEFAULT_AGENT_TIMEOUT_SECONDS}
+     *            (180)
      * @param onAgentFailure
      *            policy when an agent fails (SKIP, RETRY, ABORT)
      * @param maxRetries

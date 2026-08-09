@@ -15,11 +15,13 @@ import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.client.agents.IAgentStoreClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Tags;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -31,10 +33,6 @@ import java.util.concurrent.*;
 @ApplicationScoped
 public class AgentFactory implements IAgentFactory {
     private final Map<Deployment.Environment, ConcurrentHashMap<AgentId, IAgent>> environments;
-    // Declared as the concrete type, not List: addIfAbsent() is the atomic
-    // "track this once" primitive this class needs and it exists only on
-    // CopyOnWriteArrayList.
-    private final CopyOnWriteArrayList<AgentId> deployedAgents;
     private final IAgentStoreClientLibrary agentStoreClientLibrary;
     private final IDeploymentListener deploymentListener;
 
@@ -44,15 +42,30 @@ public class AgentFactory implements IAgentFactory {
     public AgentFactory(IAgentStoreClientLibrary agentStoreClientLibrary, IDeploymentListener deploymentListener, MeterRegistry meterRegistry) {
         this.agentStoreClientLibrary = agentStoreClientLibrary;
         this.deploymentListener = deploymentListener;
-        // CopyOnWriteArrayList, not LinkedList: deployAgent appended under a
-        // synchronized block while undeployAgent removed with no lock at all, and the
-        // Micrometer gauge below reads size() from the metrics thread — three
-        // unordered accesses to a structure that tolerates none. addIfAbsent also
-        // makes the "already tracked?" check atomic, which the old
-        // contains()-then-add() was not.
-        this.deployedAgents = new CopyOnWriteArrayList<>();
-        meterRegistry.gaugeCollectionSize("eddi_agents_deployed", Tags.empty(), deployedAgents);
         this.environments = Collections.unmodifiableMap(createEmptyEnvironments());
+        // DERIVED from the environment maps, not a parallel List<AgentId>.
+        //
+        // The list it replaces was a second structure holding the same fact, and
+        // keeping the two in step was never actually possible: deployAgent appended
+        // under a synchronized block while undeployAgent removed with no lock at all,
+        // the gauge read size() from the metrics thread, and - once the store load
+        // moved out of the map's bin lock - a deployment finishing after a concurrent
+        // undeploy could re-add an entry the undeploy had just removed. Counting the
+        // maps makes the metric exactly consistent with the registry by construction,
+        // and leaves no second structure to linearize against.
+        //
+        // READY only, matching the old semantics: an IN_PROGRESS placeholder is not a
+        // deployment yet and an ERROR one never became one.
+        Gauge.builder("eddi_agents_deployed", environments, AgentFactory::countReadyAgents)
+                .description("Agents currently deployed and READY in this node's runtime registry")
+                .register(meterRegistry);
+    }
+
+    private static double countReadyAgents(Map<Deployment.Environment, ConcurrentHashMap<AgentId, IAgent>> environments) {
+        return environments.values().stream()
+                .flatMap(agents -> agents.values().stream())
+                .filter(agent -> agent.getDeploymentStatus() == Deployment.Status.READY)
+                .count();
     }
 
     private Map<Deployment.Environment, ConcurrentHashMap<AgentId, IAgent>> createEmptyEnvironments() {
@@ -190,18 +203,18 @@ public class AgentFactory implements IAgentFactory {
         IAgent existingAgent = agentEnvironment.putIfAbsent(id, placeholder);
         if (existingAgent != null) {
             if (existingAgent.getDeploymentStatus() == Deployment.Status.READY) {
-                log.debug(String.format("Agent is already deployed: %s (environment=%s, version=%d)", agentId, environment, version));
+                log.debugf("Agent is already deployed: %s (environment=%s, version=%s)", sanitize(agentId), environment, version);
                 finalDeploymentProcess.completed(Deployment.Status.READY);
                 return;
             }
             if (existingAgent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
-                log.debug(String.format("Agent deployment is already in progress: %s (environment=%s, version=%d)", agentId, environment, version));
+                log.debugf("Agent deployment is already in progress: %s (environment=%s, version=%s)", sanitize(agentId), environment, version);
                 return;
             }
             // ERROR — retry, but only if nobody else claimed the retry first.
             if (!agentEnvironment.replace(id, existingAgent, placeholder)) {
-                log.debug(String.format("Agent redeploy already claimed by another caller: %s (environment=%s, version=%d)", agentId, environment,
-                        version));
+                log.debugf("Agent redeploy already claimed by another caller: %s (environment=%s, version=%s)", sanitize(agentId), environment,
+                        version);
                 return;
             }
         }
@@ -210,14 +223,30 @@ public class AgentFactory implements IAgentFactory {
         try {
             IAgent agent = agentStoreClientLibrary.getAgent(agentId, version);
             ((Agent) agent).setDeploymentStatus(Deployment.Status.READY);
-            agentEnvironment.put(id, agent); // replace the placeholder with the real agent
+
+            // replace(key, OUR placeholder, agent), never put(key, agent).
+            //
+            // The load above deliberately runs outside the map, so an undeployAgent
+            // for the same id can land while it is in flight. An unconditional put
+            // would then resurrect an agent a caller had just torn down - the
+            // deployment silently winning a race it started before the undeploy was
+            // even requested. The CAS publishes only while our own placeholder is
+            // still the mapped value, so an interleaved undeploy (or a competing
+            // redeploy) keeps its outcome.
+            if (!agentEnvironment.replace(id, placeholder, agent)) {
+                log.infof("Agent %s v%s was undeployed or re-claimed while it was loading - not publishing this deployment",
+                        sanitize(agentId), version);
+                // The load itself succeeded, and the undeploy is a later, deliberate
+                // action that legitimately wins; report success to the caller that
+                // asked for the deployment rather than inventing a failure.
+                finalDeploymentProcess.completed(Deployment.Status.READY);
+                return;
+            }
 
             finalDeploymentProcess.completed(Deployment.Status.READY);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.READY);
-
-            deployedAgents.addIfAbsent(id);
         } catch (ServiceException e) {
-            log.error("Agent deployment failed for " + agentId + " v" + version + ": " + e.getMessage(), e);
+            log.error("Agent deployment failed for " + sanitize(agentId) + " v" + version + ": " + e.getMessage(), e);
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
@@ -255,16 +284,11 @@ public class AgentFactory implements IAgentFactory {
             List<AgentId> allVersions = agentEnvironment.keySet().stream()
                     .filter(key -> Objects.equals(key.getId(), agentId))
                     .toList();
-            for (AgentId key : allVersions) {
-                agentEnvironment.remove(key);
-                deployedAgents.remove(key);
-            }
+            allVersions.forEach(agentEnvironment::remove);
             return;
         }
 
-        AgentId id = new AgentId(agentId, version);
-        agentEnvironment.remove(id);
-        deployedAgents.remove(id);
+        agentEnvironment.remove(new AgentId(agentId, version));
     }
 
     private ConcurrentHashMap<AgentId, IAgent> getAgentEnvironment(Deployment.Environment environment) {

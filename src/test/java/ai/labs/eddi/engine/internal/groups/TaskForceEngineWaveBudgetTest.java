@@ -12,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -63,9 +64,10 @@ class TaskForceEngineWaveBudgetTest {
         long budget = TaskForceEngine.waveBudgetSeconds(retrying, 1);
 
         // 3 attempts x 30s = 90s of legitimate member time. The old formula produced
-        // exactly 30 and aborted the wave on the first retry.
+        // exactly agentTimeoutSeconds x maxTasksPerAgent = 30 and aborted the wave on
+        // the first retry.
         assertTrue(budget >= 90, "expected at least 3 attempts' worth of budget, got " + budget);
-        assertTrue(budget > 30L, "the old agentTimeoutSeconds x maxTasksPerAgent formula would have produced 30");
+        assertNotEquals(30L, budget, "this is the value the old agentTimeoutSeconds x maxTasksPerAgent formula produced");
     }
 
     @Test
