@@ -2227,7 +2227,7 @@
       "ERROR": "त्रुटि",
       "AWAITING_APPROVAL": "अनुमोदन की प्रतीक्षा",
       "CANCELLED": "रद्द",
-      "AWAITING_HUMAN_INPUT": "आपकी बारी की प्रतीक्षा",
+      "AWAITING_HUMAN_INPUT": "सदस्य की प्रतीक्षा",
       "CLOSED": "बंद"
     },
     "preConfiguredTasksCount": "पूर्व-कॉन्फ़िगर किए गए कार्य ({{count}})",
@@ -2444,7 +2444,7 @@
     "retroConfigLabel": "रेट्रो सबक",
     "retroConfigValue": "{{perRun}}/रन, अधिकतम {{stored}} संग्रहीत",
     "retroRecordedBadge": "{{phase}}: {{count}} सबक टीम मेमोरी में सहेजे गए",
-    "stateAwaitingHumanInput": "आपकी बारी की प्रतीक्षा",
+    "stateAwaitingHumanInput": "सदस्य की प्रतीक्षा",
     "summarized": "सारांशित",
     "transcriptWindowed": "बाद की बारियों के संदर्भ को सीमित रखने के लिए पहली {{count}} ट्रांसक्रिप्ट प्रविष्टियों को एक रोलिंग सारांश में समेट दिया गया है। सारांश देखने के लिए होवर करें।",
     "voteMethod": "तरीका",

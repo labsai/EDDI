@@ -2227,7 +2227,7 @@
       "ERROR": "エラー",
       "AWAITING_APPROVAL": "承認待ち",
       "CANCELLED": "キャンセル済み",
-      "AWAITING_HUMAN_INPUT": "あなたの番を待っています",
+      "AWAITING_HUMAN_INPUT": "メンバーの入力待ち",
       "CLOSED": "クローズ済み"
     },
     "preConfiguredTasksCount": "事前設定タスク ({{count}})",
@@ -2444,7 +2444,7 @@
     "retroConfigLabel": "振り返りの学び",
     "retroConfigValue": "1回あたり {{perRun}} 件、最大保存 {{stored}} 件",
     "retroRecordedBadge": "{{phase}}: {{count}} 件の学びをチームメモリに保存しました",
-    "stateAwaitingHumanInput": "あなたの番を待っています",
+    "stateAwaitingHumanInput": "メンバーの入力待ち",
     "summarized": "要約済み",
     "transcriptWindowed": "最初の {{count}} 件のトランスクリプトは、以降のターンのコンテキストを抑えるためにローリングサマリーに折りたたまれています。要約を見るにはホバーしてください。",
     "voteMethod": "方式",

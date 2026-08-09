@@ -39,7 +39,7 @@ const STATE_VARIANT: Record<
   FAILED: { label: "Failed", variant: "destructive" },
   CANCELLED: { label: "Cancelled", variant: "secondary" },
   AWAITING_APPROVAL: { label: "Awaiting Approval", variant: "warning" },
-  AWAITING_HUMAN_INPUT: { label: "Awaiting Your Turn", variant: "warning" },
+  AWAITING_HUMAN_INPUT: { label: "Awaiting Human Input", variant: "warning" },
   CLOSED: { label: "Closed", variant: "secondary" },
 };
 

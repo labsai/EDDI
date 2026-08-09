@@ -2227,7 +2227,7 @@
       "ERROR": "错误",
       "AWAITING_APPROVAL": "等待审批",
       "CANCELLED": "已取消",
-      "AWAITING_HUMAN_INPUT": "等待您的发言",
+      "AWAITING_HUMAN_INPUT": "等待成员发言",
       "CLOSED": "已关闭"
     },
     "preConfiguredTasksCount": "预配置任务 ({{count}})",
@@ -2444,7 +2444,7 @@
     "retroConfigLabel": "回顾经验",
     "retroConfigValue": "每次运行 {{perRun}} 条，最多存储 {{stored}} 条",
     "retroRecordedBadge": "{{phase}}：已将 {{count}} 条经验保存到团队记忆",
-    "stateAwaitingHumanInput": "等待您的发言",
+    "stateAwaitingHumanInput": "等待成员发言",
     "summarized": "已摘要",
     "transcriptWindowed": "前 {{count}} 条记录已折叠为滚动摘要，以限制后续发言的上下文长度。将鼠标悬停可查看摘要。",
     "voteMethod": "方式",

@@ -51,7 +51,7 @@ const STATE_CONFIG: Record<string, { label: string; color: string; dot: string }
   FAILED: { label: "Failed", color: "text-destructive", dot: "bg-destructive" },
   CREATED: DEFAULT_STATE,
   AWAITING_APPROVAL: { label: "Awaiting Approval", color: "text-orange-500", dot: "bg-orange-500" },
-  AWAITING_HUMAN_INPUT: { label: "Awaiting Your Turn", color: "text-primary", dot: "bg-primary" },
+  AWAITING_HUMAN_INPUT: { label: "Awaiting Human Input", color: "text-primary", dot: "bg-primary" },
   CANCELLED: { label: "Cancelled", color: "text-muted-foreground", dot: "bg-muted-foreground" },
   ERROR: { label: "Error", color: "text-destructive", dot: "bg-destructive" },
 };

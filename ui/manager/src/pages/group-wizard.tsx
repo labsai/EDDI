@@ -144,6 +144,24 @@ function createModeratorSlot(): MemberSlot {
   };
 }
 
+/**
+ * Whether a slot still needs an LLM agent provisioned before the group can be
+ * created.
+ *
+ * Only an AGENT member ever does. A GROUP member points at an existing nested
+ * group and a HUMAN member at a principal id; neither has a "create new" flow in
+ * the card UI, so `mode` is meaningless for them and merely whatever the last
+ * transition happened to leave behind. Keying purely on `mode === "new"` meant a
+ * GROUP member with no group picked got a real deployed agent created for it,
+ * whose id was then submitted as the nested group's config id.
+ *
+ * The `memberType` guard is the one that makes this safe: it holds no matter how
+ * `mode` was set, so no future transition can reintroduce the same bug.
+ */
+function needsAgentCreation(slot: MemberSlot): boolean {
+  return slot.memberType === "AGENT" && slot.mode === "new" && !slot.created && !slot.agentId;
+}
+
 const INITIAL_STATE: WizardState = {
   name: "",
   description: "",
@@ -222,13 +240,15 @@ export function GroupWizardPage() {
         return state.name.trim().length > 0 && isHitlConfigValid(state);
       case "members": {
         if (state.members.length < 2) return false;
-        // Every member must have a displayName. A HUMAN member needs its
-        // principal id (agentId) typed in directly — there is no 'new'/agent
-        // creation flow for it, unlike AGENT/GROUP members.
-        const membersValid = state.members.every((m) =>
-          m.displayName.trim() &&
-          (m.memberType === "HUMAN" ? !!m.agentId.trim() : m.agentId || m.mode === "new")
-        );
+        // Every member must have a displayName, plus an identity appropriate to
+        // its type. HUMAN needs a principal id and GROUP a nested group id, both
+        // typed or picked directly — only an AGENT may go without one, because
+        // only an AGENT can still be created on the way out (`needsAgentCreation`).
+        const membersValid = state.members.every((m) => {
+          if (!m.displayName.trim()) return false;
+          if (m.memberType === "HUMAN" || m.memberType === "GROUP") return !!m.agentId.trim();
+          return !!m.agentId || m.mode === "new";
+        });
         if (!membersValid) return false;
         // An explicitly-typed turn timeout must be a duration the backend can
         // parse — an unparseable one is silently treated as "wait indefinitely"
@@ -261,7 +281,7 @@ export function GroupWizardPage() {
     // --- Phase 1: Auto-create all uncreated "new" agents ---
     const uncreatedMembers = updatedMembers
       .map((m, i) => ({ slot: m, index: i }))
-      .filter(({ slot }) => slot.mode === "new" && !slot.created && !slot.agentId);
+      .filter(({ slot }) => needsAgentCreation(slot));
 
     for (const { slot, index } of uncreatedMembers) {
       setCreationProgress(t("groupWizard.creatingSlot", { name: slot.displayName }));
@@ -287,7 +307,7 @@ export function GroupWizardPage() {
     }
 
     // Auto-create moderator if needed
-    if (updatedModerator && updatedModerator.mode === "new" && !updatedModerator.created && !updatedModerator.agentId) {
+    if (updatedModerator && needsAgentCreation(updatedModerator)) {
       setCreationProgress(t("groupWizard.creatingModerator"));
       try {
         const result = await setupAgent({
@@ -1291,7 +1311,15 @@ function MemberCard({
    */
   const selectMemberType = (memberType: NonNullable<MemberSlot["memberType"]>) => {
     if (member.memberType === memberType) return;
-    onUpdate({ memberType, agentId: "", created: false, creating: false, mode: "new" });
+    onUpdate({
+      memberType,
+      agentId: "",
+      created: false,
+      creating: false,
+      // Only AGENT can be created from here; GROUP and HUMAN are always a
+      // reference to something that already exists. See `needsAgentCreation`.
+      mode: memberType === "AGENT" ? "new" : "existing",
+    });
   };
 
   return (
@@ -1736,9 +1764,14 @@ function ReviewStep({
   const styleInfo = STYLE_INFO[state.style];
   const colors = STYLE_COLORS[state.style];
 
-  const willCreateCount = state.members.filter((m) => m.mode === "new" && !m.created && !m.agentId).length
-    + (state.moderator && state.moderator.mode === "new" && !state.moderator.created && !state.moderator.agentId ? 1 : 0);
-  const unassignedExistingCount = state.members.filter((m) => m.mode === "existing" && !m.agentId).length;
+  const willCreateCount = state.members.filter(needsAgentCreation).length
+    + (state.moderator && needsAgentCreation(state.moderator) ? 1 : 0);
+  // Scoped to AGENT for the same reason as `needsAgentCreation`: this warns about
+  // an agent that was never picked, and a GROUP/HUMAN member carries `mode:
+  // "existing"` without one ever being relevant.
+  const unassignedExistingCount = state.members.filter(
+    (m) => m.memberType === "AGENT" && m.mode === "existing" && !m.agentId,
+  ).length;
   const newCount = state.members.filter((m) => m.created).length;
 
   return (

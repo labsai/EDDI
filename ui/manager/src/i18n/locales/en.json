@@ -2274,7 +2274,7 @@
       "ERROR": "Error",
       "AWAITING_APPROVAL": "Awaiting Approval",
       "CANCELLED": "Cancelled",
-      "AWAITING_HUMAN_INPUT": "Awaiting Your Turn",
+      "AWAITING_HUMAN_INPUT": "Awaiting Human Input",
       "CLOSED": "Closed"
     },
     "entryType": {
@@ -2458,7 +2458,7 @@
     "humanTurnResponsePlaceholder": "Your response",
     "humanTurnSubmitting": "Submitting…",
     "humanTurnSubmit": "Submit",
-    "stateAwaitingHumanInput": "Awaiting Your Turn",
+    "stateAwaitingHumanInput": "Awaiting Human Input",
     "memberTypeHuman": "Human",
     "advancedSection": "Advanced Collaboration",
     "humanMemberConfigLabel": "Human turn timeout",

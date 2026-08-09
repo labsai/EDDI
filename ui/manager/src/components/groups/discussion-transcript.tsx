@@ -378,7 +378,7 @@ export function DiscussionTranscript({
     COMPLETED: t("groups.stateCompleted", "Completed"),
     FAILED: t("groups.stateFailed", "Failed"),
     AWAITING_APPROVAL: t("groups.stateAwaitingApproval", "Awaiting Approval"),
-    AWAITING_HUMAN_INPUT: t("groups.stateAwaitingHumanInput", "Awaiting Your Turn"),
+    AWAITING_HUMAN_INPUT: t("groups.stateAwaitingHumanInput", "Awaiting Human Input"),
     CANCELLED: t("groups.stateCancelled", "Cancelled"),
   };
   const stateLabel = discussionStateLabels[effectiveState] ?? effectiveState;

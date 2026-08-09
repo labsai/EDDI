@@ -2247,7 +2247,7 @@
       "ERROR": "خطأ",
       "AWAITING_APPROVAL": "بانتظار الموافقة",
       "CANCELLED": "ملغى",
-      "AWAITING_HUMAN_INPUT": "في انتظار دورك",
+      "AWAITING_HUMAN_INPUT": "في انتظار أحد الأعضاء",
       "CLOSED": "مغلقة"
     },
     "preConfiguredTasksCount": "مهام مُعدّة مسبقاً ({{count}})",
@@ -2472,7 +2472,7 @@
     "retroConfigLabel": "دروس المراجعة الرجعية",
     "retroConfigValue": "{{perRun}}/تشغيل، بحد أقصى {{stored}} مخزّنة",
     "retroRecordedBadge": "{{phase}}: تم حفظ {{count}} درس (دروس) في ذاكرة الفريق",
-    "stateAwaitingHumanInput": "في انتظار دورك",
+    "stateAwaitingHumanInput": "في انتظار أحد الأعضاء",
     "summarized": "ملخّص",
     "transcriptWindowed": "تم دمج أول {{count}} إدخالات في النص المنقول ضمن ملخص متجدد للحفاظ على سياق محدود للأدوار اللاحقة. مرّر المؤشر لعرض الملخص.",
     "voteMethod": "الطريقة",

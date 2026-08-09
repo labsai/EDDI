@@ -2227,7 +2227,7 @@
       "ERROR": "Fehler",
       "AWAITING_APPROVAL": "Wartet auf Genehmigung",
       "CANCELLED": "Abgebrochen",
-      "AWAITING_HUMAN_INPUT": "Warte auf Ihren Zug",
+      "AWAITING_HUMAN_INPUT": "Warten auf Mitglied",
       "CLOSED": "Geschlossen"
     },
     "preConfiguredTasksCount": "Vorkonfigurierte Aufgaben ({{count}})",
@@ -2444,7 +2444,7 @@
     "retroConfigLabel": "Retro-Erkenntnisse",
     "retroConfigValue": "{{perRun}}/Lauf, max. {{stored}} gespeichert",
     "retroRecordedBadge": "{{phase}}: {{count}} Erkenntnis(se) im Team-Gedächtnis gespeichert",
-    "stateAwaitingHumanInput": "Warte auf Ihren Zug",
+    "stateAwaitingHumanInput": "Warten auf Mitglied",
     "summarized": "zusammengefasst",
     "transcriptWindowed": "Die ersten {{count}} Transkripteinträge wurden zu einer fortlaufenden Zusammenfassung zusammengefasst, um den Kontext späterer Züge zu begrenzen. Bewegen Sie den Mauszeiger für die Zusammenfassung.",
     "voteMethod": "Methode",

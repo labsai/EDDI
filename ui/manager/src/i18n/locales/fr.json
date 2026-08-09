@@ -2232,7 +2232,7 @@
       "ERROR": "Erreur",
       "AWAITING_APPROVAL": "En attente d'approbation",
       "CANCELLED": "Annulé",
-      "AWAITING_HUMAN_INPUT": "En attente de votre tour",
+      "AWAITING_HUMAN_INPUT": "En attente d'un membre",
       "CLOSED": "Fermée"
     },
     "preConfiguredTasksCount": "Tâches préconfigurées ({{count}})",
@@ -2451,7 +2451,7 @@
     "retroConfigLabel": "Enseignements de la rétrospective",
     "retroConfigValue": "{{perRun}}/exécution, {{stored}} max. stockées",
     "retroRecordedBadge": "{{phase}} : {{count}} enseignement(s) enregistré(s) dans la mémoire d'équipe",
-    "stateAwaitingHumanInput": "En attente de votre tour",
+    "stateAwaitingHumanInput": "En attente d'un membre",
     "summarized": "résumé",
     "transcriptWindowed": "Les {{count}} premières entrées de la transcription ont été condensées en un résumé glissant afin de limiter le contexte des tours suivants. Survolez pour voir le résumé.",
     "voteMethod": "Méthode",

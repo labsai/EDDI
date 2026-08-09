@@ -2232,7 +2232,7 @@
       "ERROR": "Error",
       "AWAITING_APPROVAL": "Pendiente de aprobación",
       "CANCELLED": "Cancelado",
-      "AWAITING_HUMAN_INPUT": "Esperando su turno",
+      "AWAITING_HUMAN_INPUT": "Esperando a un miembro",
       "CLOSED": "Cerrada"
     },
     "preConfiguredTasksCount": "Tareas preconfiguradas ({{count}})",
@@ -2451,7 +2451,7 @@
     "retroConfigLabel": "Lecciones de la retrospectiva",
     "retroConfigValue": "{{perRun}}/ejecución, {{stored}} máx. almacenadas",
     "retroRecordedBadge": "{{phase}}: {{count}} lección(es) guardadas en la memoria del equipo",
-    "stateAwaitingHumanInput": "Esperando su turno",
+    "stateAwaitingHumanInput": "Esperando a un miembro",
     "summarized": "resumido",
     "transcriptWindowed": "Las primeras {{count}} entradas de la transcripción se han condensado en un resumen continuo para limitar el contexto de los turnos posteriores. Pase el cursor para ver el resumen.",
     "voteMethod": "Método",

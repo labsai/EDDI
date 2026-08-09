@@ -2227,7 +2227,7 @@
       "ERROR": "ข้อผิดพลาด",
       "AWAITING_APPROVAL": "รอการอนุมัติ",
       "CANCELLED": "ยกเลิก",
-      "AWAITING_HUMAN_INPUT": "รอตาของคุณ",
+      "AWAITING_HUMAN_INPUT": "รอสมาชิก",
       "CLOSED": "ปิดแล้ว"
     },
     "preConfiguredTasksCount": "งานที่ตั้งค่าไว้ล่วงหน้า ({{count}})",
@@ -2444,7 +2444,7 @@
     "retroConfigLabel": "บทเรียนจากการทบทวน (Retro)",
     "retroConfigValue": "{{perRun}}/การรัน จัดเก็บสูงสุด {{stored}} รายการ",
     "retroRecordedBadge": "{{phase}}: บันทึก {{count}} บทเรียนลงในหน่วยความจำของทีม",
-    "stateAwaitingHumanInput": "รอตาของคุณ",
+    "stateAwaitingHumanInput": "รอสมาชิก",
     "summarized": "สรุปแล้ว",
     "transcriptWindowed": "รายการบันทึกการสนทนา {{count}} รายการแรกถูกรวมเป็นสรุปแบบต่อเนื่องเพื่อจำกัดบริบทของตาถัดไป วางเมาส์เพื่อดูสรุป",
     "voteMethod": "วิธีการ",

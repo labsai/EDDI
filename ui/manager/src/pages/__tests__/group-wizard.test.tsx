@@ -702,6 +702,81 @@ describe("GroupWizardPage", () => {
       expect(member.agentId).not.toBe("director@acme.com");
     });
 
+    // A GROUP member points at a nested group that already exists — there is no
+    // "create new" flow for it, so its `mode` is whatever the last type switch
+    // left behind. When that was "new", the members step accepted a GROUP seat
+    // with nothing selected and the create step then provisioned a real deployed
+    // LLM agent for it, submitting that agent's id as the nested group's config id.
+    it("blocks Next until a nested group is picked, and never invents an agent for it", async () => {
+      let setupCalls = 0;
+      let submitted: { members?: { agentId?: string; memberType?: string }[] } | null = null;
+      server.use(
+        http.post("*/administration/agents/setup", () => {
+          setupCalls += 1;
+          return HttpResponse.json({
+            agentId: `auto-agent-${setupCalls}`, agentName: "Auto Agent", provider: "anthropic",
+            model: "claude-sonnet-4-6", deployed: true, deploymentStatus: "deployed",
+          });
+        }),
+        http.post("*/groupstore/groups", async ({ request }) => {
+          submitted = (await request.json()) as typeof submitted;
+          return new HttpResponse(null, {
+            status: 201,
+            headers: { Location: "/groupstore/groups/new-grp?version=1" },
+          });
+        }),
+      );
+
+      const user = userEvent.setup();
+      await reachMembersStepWithTwo(user);
+      await user.type(screen.getByTestId("member-name-0"), "Research Pod");
+
+      const card = screen.getByTestId("member-card-0");
+      await user.click(within(card).getByText("Group"));
+
+      // Nothing selected yet — the seat is unfilled, so the step is not done.
+      expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+
+      const picker = await within(card).findByRole("combobox");
+      const option = within(picker).getAllByRole("option").find((o) => (o as HTMLOptionElement).value);
+      await user.selectOptions(picker, (option as HTMLOptionElement).value);
+      const pickedGroupId = (picker as HTMLSelectElement).value;
+      expect(pickedGroupId).not.toBe("");
+      expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
+
+      await user.click(screen.getByTestId("group-wizard-next"));
+      await user.click(screen.getByTestId("group-wizard-create"));
+
+      await waitFor(() => expect(submitted).not.toBeNull());
+      const groupMember = submitted!.members![0]!;
+      expect(groupMember.memberType).toBe("GROUP");
+      // The nested group's own id — not an agent conjured up to fill the slot.
+      expect(groupMember.agentId).toBe(pickedGroupId);
+      // Exactly one agent created: member 1, the only AGENT still in "new" mode.
+      expect(setupCalls).toBe(1);
+    });
+
+    // The likeliest way to hit the bug in practice: a first-time user with no
+    // groups yet picks "Group", gets an empty-state card with nothing to select,
+    // and previously could still walk straight through to create.
+    it("keeps Next blocked for a Group member when no groups exist to nest", async () => {
+      server.use(
+        http.get("*/groupstore/groups/descriptors", () => HttpResponse.json([])),
+        http.get("*/groupstore/groups", () => HttpResponse.json([])),
+      );
+
+      const user = userEvent.setup();
+      await reachMembersStepWithTwo(user);
+      await user.type(screen.getByTestId("member-name-0"), "Research Pod");
+
+      const card = screen.getByTestId("member-card-0");
+      await user.click(within(card).getByText("Group"));
+
+      await within(card).findByText("No groups available");
+      expect(within(card).queryByRole("combobox")).not.toBeInTheDocument();
+      expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+    });
+
     it("shows the human turn settings panel only once a member is Human, and validates the duration", async () => {
       const user = userEvent.setup();
       await reachMembersStepWithTwo(user);

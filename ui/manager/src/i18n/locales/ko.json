@@ -2227,7 +2227,7 @@
       "ERROR": "오류",
       "AWAITING_APPROVAL": "승인 대기 중",
       "CANCELLED": "취소됨",
-      "AWAITING_HUMAN_INPUT": "회원님의 차례를 기다리는 중",
+      "AWAITING_HUMAN_INPUT": "구성원 입력 대기 중",
       "CLOSED": "종료됨"
     },
     "preConfiguredTasksCount": "사전 구성된 작업 ({{count}})",
@@ -2444,7 +2444,7 @@
     "retroConfigLabel": "회고 교훈",
     "retroConfigValue": "실행당 {{perRun}}개, 최대 저장 {{stored}}개",
     "retroRecordedBadge": "{{phase}}: {{count}}개의 교훈이 팀 메모리에 저장됨",
-    "stateAwaitingHumanInput": "회원님의 차례를 기다리는 중",
+    "stateAwaitingHumanInput": "구성원 입력 대기 중",
     "summarized": "요약됨",
     "transcriptWindowed": "이후 차례의 컨텍스트를 제한하기 위해 처음 {{count}}개의 트랜스크립트 항목이 롤링 요약으로 압축되었습니다. 요약을 보려면 마우스를 올리세요.",
     "voteMethod": "방식",
