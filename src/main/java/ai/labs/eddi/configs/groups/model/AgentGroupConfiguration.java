@@ -941,6 +941,23 @@ public class AgentGroupConfiguration {
             MemberUnavailablePolicy onMemberUnavailable, int maxTurns, Double maxCostPerDiscussion, CostPolicy onCostExceeded) {
 
         /**
+         * Per-agent-turn timeout used when a group configures no {@code protocol}
+         * block, and when one supplies a non-positive {@code agentTimeoutSeconds}. 180s
+         * covers thinking models (e.g. claude-sonnet-5) and synthesis phases
+         * comfortably.
+         * <p>
+         * Lives here rather than only on the engine so every writer of a default
+         * protocol agrees: the MCP {@code create_group} tool used to hard-code 60 while
+         * the engine documented 180 and the templates shipped 180, which meant the
+         * published default was true of exactly one of the three ways a group gets
+         * created.
+         */
+        public static final int DEFAULT_AGENT_TIMEOUT_SECONDS = 180;
+
+        /** Retry attempts per member turn when {@code onAgentFailure=RETRY}. */
+        public static final int DEFAULT_MAX_RETRIES = 2;
+
+        /**
          * Canonical constructor — normalizes a {@code null} {@link #onCostExceeded} to
          * {@link CostPolicy#SYNTHESIZE_NOW} so every reader can treat the field as
          * non-null, the same way {@link #maxTurns}'s 0-or-negative-means-default is

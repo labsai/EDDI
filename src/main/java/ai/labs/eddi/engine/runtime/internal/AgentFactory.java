@@ -31,7 +31,10 @@ import java.util.concurrent.*;
 @ApplicationScoped
 public class AgentFactory implements IAgentFactory {
     private final Map<Deployment.Environment, ConcurrentHashMap<AgentId, IAgent>> environments;
-    private final List<AgentId> deployedAgents;
+    // Declared as the concrete type, not List: addIfAbsent() is the atomic
+    // "track this once" primitive this class needs and it exists only on
+    // CopyOnWriteArrayList.
+    private final CopyOnWriteArrayList<AgentId> deployedAgents;
     private final IAgentStoreClientLibrary agentStoreClientLibrary;
     private final IDeploymentListener deploymentListener;
 
@@ -41,7 +44,13 @@ public class AgentFactory implements IAgentFactory {
     public AgentFactory(IAgentStoreClientLibrary agentStoreClientLibrary, IDeploymentListener deploymentListener, MeterRegistry meterRegistry) {
         this.agentStoreClientLibrary = agentStoreClientLibrary;
         this.deploymentListener = deploymentListener;
-        this.deployedAgents = new LinkedList<>();
+        // CopyOnWriteArrayList, not LinkedList: deployAgent appended under a
+        // synchronized block while undeployAgent removed with no lock at all, and the
+        // Micrometer gauge below reads size() from the metrics thread — three
+        // unordered accesses to a structure that tolerates none. addIfAbsent also
+        // makes the "already tracked?" check atomic, which the old
+        // contains()-then-add() was not.
+        this.deployedAgents = new CopyOnWriteArrayList<>();
         meterRegistry.gaugeCollectionSize("eddi_agents_deployed", Tags.empty(), deployedAgents);
         this.environments = Collections.unmodifiableMap(createEmptyEnvironments());
     }
@@ -83,21 +92,18 @@ public class AgentFactory implements IAgentFactory {
         Map<String, IAgent> ret = new LinkedHashMap<>();
 
         for (AgentId agentIdObj : getAgentEnvironment(environment).keySet()) {
-            IAgent nextAgent = getLatestAgent(environment, agentIdObj.getId());
-            if (nextAgent == null) {
+            String agentId = agentIdObj.getId();
+            // One resolve per distinct agent id. getLatestAgent already returns the
+            // highest version, so the version comparison this loop used to do after
+            // calling it could never be true — both calls for one id returned the
+            // same instance.
+            if (ret.containsKey(agentId)) {
                 continue;
             }
-
-            String agentId = agentIdObj.getId();
-            IAgent currentAgent = ret.get(agentId);
-            if (ret.containsKey(agentId)) {
-                if (currentAgent.getAgentVersion() < nextAgent.getAgentVersion()) {
-                    ret.put(agentId, nextAgent);
-                }
-            } else {
-                ret.put(agentIdObj.getId(), nextAgent);
+            IAgent latest = getLatestAgent(environment, agentId);
+            if (latest != null) {
+                ret.put(agentId, latest);
             }
-
         }
 
         return new LinkedList<>(ret.values());
@@ -131,8 +137,20 @@ public class AgentFactory implements IAgentFactory {
 
             // Re-fetch the agent after deployment is complete
             IAgent agent = getAgentEnvironment(environment).get(agentIdObj);
-            if (agent == null || agent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
+            if (agent == null) {
                 log.error("Agent deployment did not complete successfully for agentId: " + agentIdObj);
+                return null;
+            }
+            if (agent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
+                // Still in flight. Only a caller that registered a deployment future
+                // can actually be waited for; without one there was nothing to await
+                // and "not ready yet" is an ordinary answer, not a failure worth an
+                // ERROR on every poll.
+                if (deploymentFuture == null) {
+                    log.debugf("Agent %s is still deploying and no deployment future was registered — reporting not ready", agentIdObj);
+                } else {
+                    log.error("Agent deployment did not complete successfully for agentId: " + agentIdObj);
+                }
                 return null;
             }
 
@@ -153,51 +171,63 @@ public class AgentFactory implements IAgentFactory {
         AgentId id = new AgentId(agentId, version);
         ConcurrentHashMap<AgentId, IAgent> agentEnvironment = getAgentEnvironment(environment);
 
-        agentEnvironment.compute(id, (key, existingAgent) -> {
-            if (existingAgent != null) {
-                // If an agent already exists, ensure it is in a valid state
-                if (existingAgent.getDeploymentStatus() == Deployment.Status.READY) {
-                    log.debug(String.format("Agent is already deployed: %s (environment=%s, version=%d)", agentId, environment, version));
-                    finalDeploymentProcess.completed(Deployment.Status.READY);
-                    return existingAgent; // No need to redeploy
-                }
-
-                if (existingAgent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
-                    log.debug(
-                            String.format("Agent deployment is already in progress: %s (environment=%s, version=%d)", agentId, environment, version));
-                    return existingAgent; // Keep the IN_PROGRESS state
-                }
-            }
-
-            // Begin deployment
-            logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.IN_PROGRESS);
-            var progressDummyAgent = createInProgressDummyAgent(agentId, version);
-
-            try {
-                IAgent agent = agentStoreClientLibrary.getAgent(agentId, version);
-                ((Agent) agent).setDeploymentStatus(Deployment.Status.READY);
-
+        // Claim the slot with an IN_PROGRESS placeholder, then load OUTSIDE the map.
+        //
+        // This whole body used to run inside agentEnvironment.compute(...), which
+        // holds the bin lock for the key while the mapping function runs — and the
+        // function's real work is agentStoreClientLibrary.getAgent(), a store read
+        // plus full workflow construction. ConcurrentHashMap documents that a
+        // mapping function must be short and must not touch other mappings of the
+        // same map; holding a bin lock across multi-second I/O blocks every other
+        // key that hashes to that bin, and any re-entrant agent resolution during
+        // construction would deadlock outright.
+        //
+        // putIfAbsent is the same atomic claim without the long hold. It also
+        // PUBLISHES the IN_PROGRESS placeholder, which compute never did (the dummy
+        // was only ever returned on the failure path) — so a concurrent getAgent()
+        // can now actually observe "deployment in progress" instead of a bare null.
+        var placeholder = createInProgressDummyAgent(agentId, version);
+        IAgent existingAgent = agentEnvironment.putIfAbsent(id, placeholder);
+        if (existingAgent != null) {
+            if (existingAgent.getDeploymentStatus() == Deployment.Status.READY) {
+                log.debug(String.format("Agent is already deployed: %s (environment=%s, version=%d)", agentId, environment, version));
                 finalDeploymentProcess.completed(Deployment.Status.READY);
-                logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.READY);
-
-                // Add the deployed agent to the deployedAgents list if it's not already there
-                synchronized (deployedAgents) {
-                    if (!deployedAgents.contains(id)) {
-                        deployedAgents.add(id);
-                    }
-                }
-
-                return agent; // Replace the dummy agent with the actual agent
-            } catch (ServiceException e) {
-                log.error("Agent deployment failed for " + agentId + " v" + version + ": " + e.getMessage(), e);
-                progressDummyAgent.setDeploymentStatus(Deployment.Status.ERROR);
-                finalDeploymentProcess.completed(Deployment.Status.ERROR);
-                logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
-                return progressDummyAgent;
-            } catch (IllegalAccessException e) {
-                throw new RuntimeException(e);
+                return;
             }
-        });
+            if (existingAgent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
+                log.debug(String.format("Agent deployment is already in progress: %s (environment=%s, version=%d)", agentId, environment, version));
+                return;
+            }
+            // ERROR — retry, but only if nobody else claimed the retry first.
+            if (!agentEnvironment.replace(id, existingAgent, placeholder)) {
+                log.debug(String.format("Agent redeploy already claimed by another caller: %s (environment=%s, version=%d)", agentId, environment,
+                        version));
+                return;
+            }
+        }
+
+        logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.IN_PROGRESS);
+        try {
+            IAgent agent = agentStoreClientLibrary.getAgent(agentId, version);
+            ((Agent) agent).setDeploymentStatus(Deployment.Status.READY);
+            agentEnvironment.put(id, agent); // replace the placeholder with the real agent
+
+            finalDeploymentProcess.completed(Deployment.Status.READY);
+            logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.READY);
+
+            deployedAgents.addIfAbsent(id);
+        } catch (ServiceException e) {
+            log.error("Agent deployment failed for " + agentId + " v" + version + ": " + e.getMessage(), e);
+            placeholder.setDeploymentStatus(Deployment.Status.ERROR);
+            finalDeploymentProcess.completed(Deployment.Status.ERROR);
+            logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
+        } catch (IllegalAccessException e) {
+            // The placeholder is still published; mark it ERROR so a retry is not
+            // mistaken for a deployment still in flight.
+            placeholder.setDeploymentStatus(Deployment.Status.ERROR);
+            finalDeploymentProcess.completed(Deployment.Status.ERROR);
+            throw new RuntimeException(e);
+        }
     }
 
     private DeploymentProcess defaultIfNull(DeploymentProcess deploymentProcess) {
@@ -205,9 +235,32 @@ public class AgentFactory implements IAgentFactory {
         } : deploymentProcess;
     }
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * A {@code null} version means every deployed version of {@code agentId}.
+     * {@link AgentId} keys on (id, version), so {@code new AgentId(id, null)}
+     * equals no key this map ever holds — the removal used to be a silent no-op on
+     * exactly the two call sites that pass null ({@code GroupLifecycleOps}'
+     * ephemeral cleanup and {@code TeardownAgentTool}), leaving the constructed
+     * agent resolvable in memory after its configuration had been deleted from the
+     * store, and leaving the {@code eddi_agents_deployed} gauge to grow for the
+     * lifetime of the process.
+     */
     @Override
     public void undeployAgent(Deployment.Environment environment, String agentId, Integer version) {
         Map<AgentId, IAgent> agentEnvironment = getAgentEnvironment(environment);
+
+        if (version == null) {
+            List<AgentId> allVersions = agentEnvironment.keySet().stream()
+                    .filter(key -> Objects.equals(key.getId(), agentId))
+                    .toList();
+            for (AgentId key : allVersions) {
+                agentEnvironment.remove(key);
+                deployedAgents.remove(key);
+            }
+            return;
+        }
 
         AgentId id = new AgentId(agentId, version);
         agentEnvironment.remove(id);
