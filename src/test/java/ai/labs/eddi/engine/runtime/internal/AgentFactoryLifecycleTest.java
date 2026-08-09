@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static ai.labs.eddi.engine.model.Deployment.Environment.test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -243,9 +244,10 @@ class AgentFactoryLifecycleTest {
                 return new Agent("racy-agent", 1);
             });
 
+            var reported = new AtomicReference<Deployment.Status>();
             ExecutorService pool = Executors.newSingleThreadExecutor();
             try {
-                var deployment = pool.submit(() -> factory.deployAgent(test, "racy-agent", 1, null));
+                var deployment = pool.submit(() -> factory.deployAgent(test, "racy-agent", 1, reported::set));
                 assertTrue(loadEntered.await(5, TimeUnit.SECONDS));
 
                 factory.undeployAgent(test, "racy-agent", null);
@@ -254,6 +256,11 @@ class AgentFactoryLifecycleTest {
 
                 assertNull(factory.getAgent(test, "racy-agent", 1), "the torn-down agent must not be resurrected by the in-flight deployment");
                 assertEquals(0.0, deployedGauge());
+                // Reporting READY here would be a lie with consequences: the deploy
+                // callback persists a 'deployed' record, which the redeploy sweep would
+                // use to resurrect the agent the teardown deliberately removed.
+                assertNotEquals(Deployment.Status.READY, reported.get(),
+                        "a deployment whose agent was undeployed mid-flight must not report READY");
             } finally {
                 pool.shutdownNow();
             }

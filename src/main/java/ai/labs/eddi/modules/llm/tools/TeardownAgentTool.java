@@ -87,8 +87,9 @@ public class TeardownAgentTool {
             // Every deployed version: a dynamically created agent is known here only
             // by id, and leaving any version live would keep a "torn down" agent
             // reachable through getLatestReadyAgent.
+            int undeployedVersions;
             try {
-                int undeployedVersions = agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
+                undeployedVersions = agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
                 LOGGER.infof("[TEARDOWN] Undeployed agent '%s' (%d version(s))", agentId, undeployedVersions);
             } catch (Exception e) {
                 LOGGER.warnf("[TEARDOWN] Undeploy failed for agent '%s': %s", agentId, e.getMessage());
@@ -110,7 +111,12 @@ public class TeardownAgentTool {
                 }
             }
 
-            return "✅ Agent '%s' has been undeployed successfully.".formatted(agentId);
+            // The count, not a fixed string: undeployAgent returning 0 means nothing
+            // was deployed under that id, and reporting that as a teardown is the
+            // whole defect this tool had.
+            return undeployedVersions > 0
+                    ? "✅ Agent '%s' has been undeployed successfully (%d version(s)).".formatted(agentId, undeployedVersions)
+                    : "ℹ️ Agent '%s' was not deployed — nothing to undeploy.".formatted(agentId);
 
         } catch (Exception e) {
             LOGGER.errorf("[TEARDOWN] Unexpected error tearing down agent '%s': %s",

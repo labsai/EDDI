@@ -946,12 +946,31 @@ class DynamicAgentToolsTest {
 
         @Test
         void teardownAgent_undeploy() throws Exception {
+            // Stubbed explicitly: undeployAgent returns how many versions it removed,
+            // and the tool's message now depends on it. Leaving the mock's default 0
+            // asserted success against a teardown that removed nothing.
+            when(agentFactory.undeployAgent(any(Environment.class), eq("created-1"), isNull())).thenReturn(2);
+
             String result = tool.teardownAgent("created-1", false);
 
             assertTrue(result.contains("✅"));
             assertTrue(result.contains("undeployed"));
+            assertTrue(result.contains("2 version"), result);
             verify(agentFactory).undeployAgent(any(Environment.class), eq("created-1"), isNull());
             verify(agentStore, never()).deleteAllPermanently(any());
+        }
+
+        @Test
+        void teardownAgent_nothingWasDeployed_doesNotClaimATeardown() throws Exception {
+            // undeployAgent returning 0 means nothing was deployed under that id.
+            // Reporting that to the LLM as a successful teardown is the defect this
+            // whole change exists to remove.
+            when(agentFactory.undeployAgent(any(Environment.class), eq("created-1"), isNull())).thenReturn(0);
+
+            String result = tool.teardownAgent("created-1", false);
+
+            assertFalse(result.contains("✅"), result);
+            assertTrue(result.contains("not deployed"), result);
         }
 
         @Test

@@ -450,7 +450,15 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 // No step ever carried a timestamp — nothing to age against. Fall back
                 // to the descriptor rather than guessing, and only for this
                 // conversation.
-                lastInteraction = documentDescriptor.getLastModifiedOn().toInstant();
+                var descriptorLastModified = documentDescriptor.getLastModifiedOn();
+                if (descriptorLastModified == null) {
+                    // No age signal at all. Skip: "cannot prove it is idle" must never
+                    // end a conversation, and dereferencing here would throw an NPE the
+                    // enclosing UndeploymentExecutor does not catch — aborting every
+                    // remaining undeploy attempt in this pass.
+                    continue;
+                }
+                lastInteraction = descriptorLastModified.toInstant();
             }
 
             var isOlderThanMaximumAmountOfDays = isOlderThanDays(

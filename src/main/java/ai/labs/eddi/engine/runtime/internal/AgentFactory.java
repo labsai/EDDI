@@ -221,14 +221,22 @@ public class AgentFactory implements IAgentFactory {
             // Conditional publish: only replace OUR marker. An undeployAgent racing
             // this load has already removed it, and an unconditional put would
             // resurrect an agent that was deliberately torn down.
-            if (agentEnvironment.replace(id, progressDummyAgent, agent)) {
-                deployedAgents.add(id);
-                logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.READY);
-            } else {
-                log.infof("Agent %s v%s was undeployed while its deployment was in flight — discarding the loaded agent",
-                        LogSanitizer.sanitize(agentId), version);
+            if (!agentEnvironment.replace(id, progressDummyAgent, agent)) {
+                // An undeploy landed between the claim and this publish, so the agent
+                // is NOT in the environment and getAgent will return null for this key.
+                // Reporting READY here would be a lie with consequences: the deploy
+                // callback persists a 'deployed' deployment record, which the
+                // redeploy sweep would later use to resurrect the agent a teardown
+                // deliberately removed. Report the non-READY outcome instead — it also
+                // completes the deployment future, so no lookup waits out the timeout.
+                log.infof("Agent %s v%s was undeployed while its deployment was in flight — discarding the loaded agent "
+                        + "and reporting a non-READY outcome", LogSanitizer.sanitize(agentId), version);
+                failDeployment(progressDummyAgent, environment, agentId, version, finalDeploymentProcess);
+                return;
             }
 
+            deployedAgents.add(id);
+            logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.READY);
             finalDeploymentProcess.completed(Deployment.Status.READY);
             deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, Deployment.Status.READY));
         } catch (ServiceException e) {
