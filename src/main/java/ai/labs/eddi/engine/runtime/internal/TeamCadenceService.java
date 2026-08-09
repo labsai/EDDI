@@ -147,10 +147,11 @@ public class TeamCadenceService {
             if (!parsed.isNegative() && !parsed.isZero()) {
                 return parsed;
             }
-            LOGGER.warnf("eddi.groups.cadence.abandoned-run-lease must be positive (was '%s') — using %s", value, DEFAULT_ABANDONED_RUN_LEASE);
+            LOGGER.warnf("eddi.groups.cadence.abandoned-run-lease must be positive (was '%s') — using %s",
+                    LogSanitizer.sanitize(value), DEFAULT_ABANDONED_RUN_LEASE);
         } catch (Exception e) {
-            LOGGER.warnf("eddi.groups.cadence.abandoned-run-lease is not an ISO-8601 duration ('%s') — using %s", value,
-                    DEFAULT_ABANDONED_RUN_LEASE);
+            LOGGER.warnf("eddi.groups.cadence.abandoned-run-lease is not an ISO-8601 duration ('%s') — using %s",
+                    LogSanitizer.sanitize(value), DEFAULT_ABANDONED_RUN_LEASE);
         }
         return Duration.parse(DEFAULT_ABANDONED_RUN_LEASE);
     }
@@ -306,7 +307,7 @@ public class TeamCadenceService {
             // the workspace hostage to a deleted discussion would stall every future
             // fire.
             LOGGER.warnf("Cadence discussion %s for group %s no longer exists — releasing the claim",
-                    runningId, LogSanitizer.sanitize(workspace.getGroupId()));
+                    LogSanitizer.sanitize(runningId), LogSanitizer.sanitize(workspace.getGroupId()));
             return writebackFailure(workspace, null);
         } catch (Exception e) {
             // NOT proof of absence. This used to catch everything and release the
@@ -316,7 +317,7 @@ public class TeamCadenceService {
             // AgentDeploymentManagement#isAgentConfigMissing already makes: skip this
             // fire and leave the claim for the next one.
             LOGGER.warnf("Could not read cadence discussion %s for group %s (%s) — skipping this fire and keeping the claim",
-                    runningId, LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName());
+                    LogSanitizer.sanitize(runningId), LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName());
             return false;
         }
         return switch (gc.getState()) {
@@ -370,7 +371,7 @@ public class TeamCadenceService {
 
         LOGGER.warnf("Cadence discussion %s for group %s has not advanced since %s (lease %s) — treating it as abandoned, "
                 + "releasing the claim and returning its tasks to the backlog",
-                gc.getId(), LogSanitizer.sanitize(workspace.getGroupId()), lastProgress, abandonedRunLease);
+                LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(workspace.getGroupId()), lastProgress, abandonedRunLease);
         cadenceAbandonedRuns.increment();
         // Cancel before releasing: a zombie loop that somehow survives must not keep
         // spending the cadence's budget on work nobody will collect.
