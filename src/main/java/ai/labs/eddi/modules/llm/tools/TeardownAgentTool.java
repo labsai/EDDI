@@ -95,17 +95,12 @@ public class TeardownAgentTool {
                 return "❌ Failed to undeploy agent '%s': %s".formatted(agentId, e.getMessage());
             }
 
-            // Retire the deployment records unconditionally, not only on the delete
-            // path. They are what the 10s redeploy poll and the 24h deployment
-            // manager read: leave them at 'deployed' and the agent this tool just
-            // undeployed is loaded straight back into the factory.
-            retireDeploymentRecords(agentId);
-
             // --- Optional: delete agent configuration ---
             createdAgentIds.remove(agentId);
             if (Boolean.TRUE.equals(delete)) {
                 try {
                     agentStore.deleteAllPermanently(agentId);
+                    retireDeploymentRecords(agentId);
                     LOGGER.infof("[TEARDOWN] Permanently deleted agent '%s'", agentId);
                     return "✅ Agent '%s' has been undeployed and permanently deleted.".formatted(agentId);
                 } catch (Exception e) {
