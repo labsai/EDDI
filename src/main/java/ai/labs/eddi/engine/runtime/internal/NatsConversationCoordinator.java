@@ -333,6 +333,15 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             });
         } catch (IOException | JetStreamApiException e) {
             log.warnf(e, "Failed to publish to NATS for conversation %s, executing locally", sanitize(conversationId));
+        } catch (RuntimeException e) {
+            // The publish is an ORDERING marker, never the work itself, so no publish
+            // failure may cost a conversation its turn. Catching only the two checked
+            // types left every unchecked one — the NATS client throws
+            // IllegalStateException on a closed or draining connection — to escape
+            // this method, skipping the submitCallable below entirely: the turn was
+            // then silently dropped, with no execution, no callback and no
+            // dead-letter, while this very block promised "executing locally".
+            log.warnf(e, "NATS publish failed unexpectedly for conversation %s, executing locally", sanitize(conversationId));
         }
 
         // Execute the callable via the runtime thread pool

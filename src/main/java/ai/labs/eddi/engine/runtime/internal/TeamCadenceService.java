@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationStat
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.Cadence;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.MemberStats;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
@@ -23,13 +24,17 @@ import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Executes team cadences (I13): scheduled pulls from a {@link GroupWorkspace}'s
@@ -55,8 +60,22 @@ import java.util.Map;
  * </ol>
  * Writeback therefore happens on the fire AFTER the discussion ends (or on a
  * workspace read — see the REST layer's read-repair), never from inside the
- * discussion thread: a pod crash mid-discussion loses nothing, because the next
- * fire finds the terminal state and reconciles it.
+ * discussion thread.
+ * <p>
+ * <b>Crash recovery rests on the lease, not on the terminal state.</b> This
+ * used to claim that "a pod crash mid-discussion loses nothing, because the
+ * next fire finds the terminal state and reconciles it". It does not: on a pod
+ * crash nothing moves the discussion to a terminal state — no startup sweep
+ * touches an IN_PROGRESS {@code GroupConversation}, and
+ * {@code HitlCrashRecoveryObserver} handles only the AWAITING_* states — so
+ * {@code reconcile} answered "still running" on every subsequent fire and the
+ * cadence stayed wedged until a human cancelled the discussion by hand. A
+ * non-terminal, non-paused discussion whose own progress heartbeat
+ * ({@code lastModified}) has not advanced within
+ * {@code eddi.groups.cadence.abandoned-run-lease} is now treated as abandoned:
+ * cancelled, its tasks returned to the backlog, and the claim released. See
+ * {@code reclaimIfAbandoned} for why the lease is measured on progress rather
+ * than on claim age, and why AWAITING_* never expires.
  *
  * @author ginccc
  */
@@ -79,25 +98,61 @@ public class TeamCadenceService {
     /** Fallback identity when a cadence predates {@code createdBy}. */
     public static final String FALLBACK_USER_ID = "system:team-cadence";
 
+    /**
+     * States in which a discussion is legitimately waiting on a human and must
+     * never be treated as abandoned, however old the claim is.
+     */
+    private static final Set<GroupConversationState> AWAITING_STATES = EnumSet.of(GroupConversationState.AWAITING_APPROVAL,
+            GroupConversationState.AWAITING_HUMAN_INPUT);
+
+    /**
+     * Default lease for a non-terminal, non-paused cadence discussion that has
+     * stopped advancing. Generous on purpose — it is measured against the
+     * discussion's own progress heartbeat, so it only has to outlast the slowest
+     * legitimate gap between two phase boundaries, not a whole discussion.
+     */
+    static final String DEFAULT_ABANDONED_RUN_LEASE = "PT6H";
+
     private final IGroupWorkspaceStore workspaceStore;
     private final IGroupConversationStore conversationStore;
     private final GroupConversationService groupConversationService;
     private final ITemplatingEngine templatingEngine;
     private final MeterRegistry meterRegistry;
+    private final Duration abandonedRunLease;
 
     private Counter cadenceRunsStarted;
     private Counter cadenceRunsSkipped;
     private Counter cadenceWritebacks;
+    private Counter cadenceAbandonedRuns;
 
     @Inject
     public TeamCadenceService(IGroupWorkspaceStore workspaceStore, IGroupConversationStore conversationStore,
             GroupConversationService groupConversationService, ITemplatingEngine templatingEngine,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry,
+            @ConfigProperty(name = "eddi.groups.cadence.abandoned-run-lease", defaultValue = DEFAULT_ABANDONED_RUN_LEASE) String abandonedRunLease) {
         this.workspaceStore = workspaceStore;
         this.conversationStore = conversationStore;
         this.groupConversationService = groupConversationService;
         this.templatingEngine = templatingEngine;
         this.meterRegistry = meterRegistry;
+        this.abandonedRunLease = parseLease(abandonedRunLease);
+    }
+
+    /**
+     * An unparseable lease falls back to the default rather than failing startup.
+     */
+    private static Duration parseLease(String value) {
+        try {
+            Duration parsed = Duration.parse(value);
+            if (!parsed.isNegative() && !parsed.isZero()) {
+                return parsed;
+            }
+            LOGGER.warnf("eddi.groups.cadence.abandoned-run-lease must be positive (was '%s') — using %s", value, DEFAULT_ABANDONED_RUN_LEASE);
+        } catch (Exception e) {
+            LOGGER.warnf("eddi.groups.cadence.abandoned-run-lease is not an ISO-8601 duration ('%s') — using %s", value,
+                    DEFAULT_ABANDONED_RUN_LEASE);
+        }
+        return Duration.parse(DEFAULT_ABANDONED_RUN_LEASE);
     }
 
     @PostConstruct
@@ -105,6 +160,7 @@ public class TeamCadenceService {
         cadenceRunsStarted = meterRegistry.counter("eddi_team_cadence_runs_started_total");
         cadenceRunsSkipped = meterRegistry.counter("eddi_team_cadence_runs_skipped_total");
         cadenceWritebacks = meterRegistry.counter("eddi_team_cadence_writebacks_total");
+        cadenceAbandonedRuns = meterRegistry.counter("eddi_team_cadence_abandoned_runs_total");
     }
 
     /** True if the given schedule metadata marks a team-cadence schedule. */
@@ -245,13 +301,23 @@ public class TeamCadenceService {
         GroupConversation gc;
         try {
             gc = conversationStore.read(runningId);
-        } catch (Exception e) {
-            // Deleted or unreadable — release the claim and return the pulled
-            // tasks; holding the workspace hostage to a vanished discussion would
-            // stall every future fire.
-            LOGGER.warnf("Cadence discussion %s for group %s is gone (%s) — releasing the claim",
-                    runningId, LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // PROVABLY gone — release the claim and return the pulled tasks; holding
+            // the workspace hostage to a deleted discussion would stall every future
+            // fire.
+            LOGGER.warnf("Cadence discussion %s for group %s no longer exists — releasing the claim",
+                    runningId, LogSanitizer.sanitize(workspace.getGroupId()));
             return writebackFailure(workspace, null);
+        } catch (Exception e) {
+            // NOT proof of absence. This used to catch everything and release the
+            // claim, so a read failure while the discussion was genuinely running
+            // returned its tasks to PENDING and let the next fire start a SECOND
+            // discussion on the same backlog. Same distinction
+            // AgentDeploymentManagement#isAgentConfigMissing already makes: skip this
+            // fire and leave the claim for the next one.
+            LOGGER.warnf("Could not read cadence discussion %s for group %s (%s) — skipping this fire and keeping the claim",
+                    runningId, LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName());
+            return false;
         }
         return switch (gc.getState()) {
             // A lost settle race means another reconciler (or a fresh claim) got
@@ -259,8 +325,57 @@ public class TeamCadenceService {
             // the next fire read fresh state.
             case COMPLETED -> writebackCompleted(workspace, gc);
             case FAILED, CANCELLED -> writebackFailure(workspace, gc);
-            default -> false; // IN_PROGRESS, SYNTHESIZING, AWAITING_* — still running
+            // Non-terminal. Still running — unless nothing has touched it for longer
+            // than the lease, in which case the pod that owned it is gone.
+            default -> reclaimIfAbandoned(workspace, gc);
         };
+    }
+
+    /**
+     * Releases the claim of a non-terminal discussion that has stopped making
+     * progress, or reports "still running" if it has not.
+     * <p>
+     * <b>Why a lease is needed at all.</b> This class's protocol was documented as
+     * crash-proof — "a pod crash mid-discussion loses nothing, because the next
+     * fire finds the terminal state and reconciles it". That only holds if
+     * something moves the discussion to a terminal state, and on a pod crash
+     * nothing does: no startup sweep touches an IN_PROGRESS
+     * {@code GroupConversation} ({@code HitlCrashRecoveryObserver} handles only the
+     * AWAITING_* states). {@code reconcile} then read IN_PROGRESS and answered
+     * "still running" on every future fire, forever. The cadence was wedged until a
+     * human cancelled the discussion by hand.
+     * <p>
+     * <b>Why the lease is measured on {@code lastModified}, not on claim time.</b>
+     * A claim-age lease cannot tell a dead pod from a healthy long-running
+     * discussion, and reclaiming a live one would orphan its outcomes AND
+     * double-schedule its tasks — recreating, by design, the bug fixed above. The
+     * discussion loop persists the conversation at every phase boundary, so
+     * {@code lastModified} is a free liveness heartbeat: only a discussion that has
+     * genuinely stopped advancing expires.
+     * <p>
+     * <b>AWAITING_* is never reclaimed, at any age.</b> A discussion may
+     * legitimately wait on a human for days, and every surface that resolves one —
+     * resume, cancel, the timeout policies re-armed at startup — works cross-pod,
+     * so a paused discussion on a dead pod still progresses. Only the states that
+     * require a live in-process loop can go stale.
+     */
+    private boolean reclaimIfAbandoned(GroupWorkspace workspace, GroupConversation gc) {
+        if (AWAITING_STATES.contains(gc.getState())) {
+            return false; // Legitimately waiting on a human — never expires.
+        }
+        Instant lastProgress = gc.getLastModified();
+        if (lastProgress == null || lastProgress.isAfter(Instant.now().minus(abandonedRunLease))) {
+            return false; // Still advancing.
+        }
+
+        LOGGER.warnf("Cadence discussion %s for group %s has not advanced since %s (lease %s) — treating it as abandoned, "
+                + "releasing the claim and returning its tasks to the backlog",
+                gc.getId(), LogSanitizer.sanitize(workspace.getGroupId()), lastProgress, abandonedRunLease);
+        cadenceAbandonedRuns.increment();
+        // Cancel before releasing: a zombie loop that somehow survives must not keep
+        // spending the cadence's budget on work nobody will collect.
+        cancelQuietly(gc.getId());
+        return writebackFailure(workspace, gc);
     }
 
     /**

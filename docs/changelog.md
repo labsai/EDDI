@@ -5,6 +5,26 @@
 
 ---
 
+## 🔎 fix(groups): cadence claim had no expiry; NATS publish could drop a turn (2026-08-09)
+
+**Repo:** EDDI (`fix/team-cadence-claim-lease`)
+
+1. **A crashed pod wedged the cadence permanently.** `TeamCadenceService`'s Javadoc promised the run protocol was "crash-proof by construction: a pod crash mid-discussion loses nothing, because the next fire finds the terminal state and reconciles it". That only holds if something moves the discussion to a terminal state, and on a pod crash nothing does — no startup sweep touches an IN_PROGRESS `GroupConversation`, and `HitlCrashRecoveryObserver` handles only the AWAITING_* states. `reconcile` read IN_PROGRESS, answered "still running", and did so on every subsequent fire forever; `casRunningDiscussion` was never released. The cadence stayed wedged until a human cancelled the discussion by hand. A non-terminal, non-paused discussion whose progress heartbeat has not advanced within `eddi.groups.cadence.abandoned-run-lease` (default 6h) is now cancelled, its tasks returned to the backlog, and the claim released.
+   - **The lease is measured on `gc.getLastModified()`, not on claim age.** A claim-age lease cannot tell a dead pod from a healthy long-running discussion, and reclaiming a live one would orphan its outcomes *and* double-schedule its tasks — recreating, by design, the bug fixed in #2. The discussion loop persists the conversation at every phase boundary, so `lastModified` is a free liveness heartbeat.
+   - **AWAITING_* never expires, at any age.** A discussion may legitimately wait on a human for days, and every surface that resolves one (resume, the cross-pod cancel CAS, the timeout policies re-armed at startup) works cross-pod — so a paused discussion on a dead pod still progresses. `CREATED` *is* reclaimable: it is the crash window between the claim CAS and the executor starting.
+2. **A transient read error released the claim.** `reconcile` caught every exception from `conversationStore.read` and treated it as "discussion gone", returning the pulled tasks to PENDING — so a read failure while the discussion was genuinely running let the next fire start a **second** discussion on the same backlog. Narrowed to `ResourceNotFoundException` (provable absence), which is the distinction `AgentDeploymentManagement.isAgentConfigMissing` already makes one package over; anything else skips the fire and keeps the claim.
+3. **A NATS publish failure could silently drop a conversation turn.** `publishAndExecute` caught only `IOException | JetStreamApiException`, so any unchecked failure — the NATS client throws `IllegalStateException` on a closed or draining connection — escaped the method and skipped the `submitCallable` below it entirely. The turn was dropped with no execution, no callback and no dead-letter, while that very catch block promised "executing locally". The publish is an ordering marker, never the work, so no publish failure may cost a turn.
+
+**Two invariants pinned that previously rested on prose:**
+- `NatsCoordinatorInProcessInvariantTest` asserts the NATS coordinator hands the callable to the local `IRuntime` rather than serializing it onto the stream. `LiveDiscussionRegistry` is per-node, and if a member turn could ever run off-node the group task/artifact/recruit tools would not fail — they would silently not be assembled. That invariant was documented as verified in this changelog; it is now enforced.
+- `StoreIfFieldEqualsContractTest` pins that neither backend inherits the throwing default and that both declare both CAS outcomes. Every CAS-based safety property in `executeDiscussion` and the cadence claim protocol is implemented once over `IResourceStorage.storeIfFieldEquals`, so it is exactly as good as that method is on the active backend. (Reviewed in full: the Mongo and Postgres implementations do agree — conditional update, `rows == 0` → existence probe → 404-vs-409 — and the `long` overload correctly degrades to text on Postgres, where `data->>` renders a JSON number canonically, while Mongo needs typed BSON equality. Nothing tested it.)
+
+**Disproved during review, not changed:** `Cadence.maxBacklogTasksPerRun` was flagged as an unvalidated `.limit()` argument. It is not — the record's compact constructor clamps any non-positive value to the default, so `.limit()` can never receive a negative.
+
+Suites: 151 across TeamCadence / NATS / GroupWorkspace, all green, +14 new.
+
+---
+
 ## 🔎 fix(groups): pre-merge deep review — facilitator HITL bypass, CALL_VOTE guards, metric cardinality, template honesty (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i10-templates`)
