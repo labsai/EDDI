@@ -240,5 +240,44 @@ describe("GroupConfigPanel", () => {
       expect(screen.getByTestId("group-phase-editor")).toBeInTheDocument();
       expect(screen.queryByTestId("group-hitl-editor")).not.toBeInTheDocument();
     });
+
+    /**
+     * The advanced block used to render only once one of its features was
+     * already set — which no group reaches through the UI, because setting them
+     * IS what this section is for. It stayed hidden on every group, so the five
+     * features behind it were invisible and unreachable at once.
+     */
+    it("offers the advanced section on a group that has none of it configured", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="g1" groupVersion={2} />);
+
+      expect(screen.getByTestId("group-advanced-none")).toBeInTheDocument();
+      await user.click(screen.getByTestId("group-advanced-edit"));
+      expect(screen.getByTestId("group-advanced-editor")).toBeInTheDocument();
+    });
+
+    it("shows the advanced summary instead of the empty state once something is on", () => {
+      renderWithProviders(
+        <GroupConfigPanel
+          config={{ ...mockConfig, contextWindow: { enabled: true, maxRecentEntries: 12 } }}
+          groupId="g1"
+          groupVersion={2}
+        />,
+      );
+
+      expect(screen.queryByTestId("group-advanced-none")).not.toBeInTheDocument();
+      expect(screen.getByText("Transcript window")).toBeInTheDocument();
+    });
+
+    it("closes the advanced editor when another editor is opened", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="g1" groupVersion={2} />);
+
+      await user.click(screen.getByTestId("group-advanced-edit"));
+      expect(screen.getByTestId("group-advanced-editor")).toBeInTheDocument();
+
+      await user.click(screen.getByTestId("group-hitl-edit"));
+      expect(screen.queryByTestId("group-advanced-editor")).not.toBeInTheDocument();
+    });
   });
 });

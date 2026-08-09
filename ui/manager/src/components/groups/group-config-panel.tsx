@@ -15,6 +15,7 @@ import { timeoutPolicyLabel, granularityLabel, rejectionPolicyLabel } from "@/li
 import { formatIsoDuration } from "@/lib/hitl-config";
 import { toast } from "sonner";
 import { useDeleteGroup, useDeleteGroupWithMembers } from "@/hooks/use-groups";
+import { GroupAdvancedEditor } from "./group-advanced-editor";
 import { GroupHitlEditor } from "./group-hitl-editor";
 import { GroupPhaseEditor } from "./group-phase-editor";
 import { useNavigate } from "react-router-dom";
@@ -61,6 +62,20 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
   // worth letting a user assemble.
   const [editingHitl, setEditingHitl] = useState(false);
   const [editingPhases, setEditingPhases] = useState(false);
+  const [editingAdvanced, setEditingAdvanced] = useState(false);
+
+  /**
+   * Whether the advanced block has anything to summarize. Kept separate from
+   * whether the SECTION renders — the section shows regardless (so the features
+   * are discoverable), this only picks summary vs empty state.
+   */
+  const hasAdvanced =
+    !!config.humanMemberConfig ||
+    !!config.retroConfig ||
+    !!config.contextWindow?.enabled ||
+    !!config.facilitator?.enabled ||
+    !!config.artifactConfig?.allowArtifactTools ||
+    config.taskListConfig?.assignmentMode === "BID";
   const canEditHitl = !!groupId && groupVersion != null;
   const deleteGroupMutation = useDeleteGroup();
   const deleteWithMembersMutation = useDeleteGroupWithMembers();
@@ -262,7 +277,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             {!editingPhases && (
               <button
                 type="button"
-                onClick={() => { setEditingHitl(false); setEditingPhases(true); }}
+                onClick={() => { setEditingHitl(false); setEditingAdvanced(false); setEditingPhases(true); }}
                 className="ms-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case text-primary transition-colors hover:bg-primary/10"
                 data-testid="group-phase-edit"
               >
@@ -358,7 +373,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             {canEditHitl && !editingHitl && (
               <button
                 type="button"
-                onClick={() => { setEditingPhases(false); setEditingHitl(true); }}
+                onClick={() => { setEditingPhases(false); setEditingAdvanced(false); setEditingHitl(true); }}
                 className="ms-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case text-primary transition-colors hover:bg-primary/10"
                 data-testid="group-hitl-edit"
               >
@@ -524,21 +539,49 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
         </div>
       )}
 
-      {/* Advanced collaboration features (I6/I8/I9/I12/I17) — read-only summary.
-          No inline editor yet (unlike Phases/HITL above); each is configured at
-          group-creation time or via the JSON schema editor. Shown only when at
-          least one is actually set, same "don't show a page of offs" rule as
-          the Deliberation section above. */}
-      {(config.humanMemberConfig ||
-        config.retroConfig ||
-        config.contextWindow?.enabled ||
-        config.facilitator?.enabled ||
-        config.artifactConfig?.allowArtifactTools) && (
+      {/* Advanced collaboration features (I6/I8/I9/I12/I17/I18) — summary plus
+          inline editor, same shape as Phases/HITL above.
+          Rendered whenever it is editable, NOT only when something is already
+          set: hiding it on an unconfigured group meant hiding it on every group,
+          so these features were unreachable and invisible at the same time. The
+          "don't show a page of offs" rule still applies INSIDE the summary —
+          each row appears only when its feature is on — but the section itself
+          keeps an empty state and an Edit affordance, like Human Approval. */}
+      {(hasAdvanced || canEditHitl) && (
         <div>
-          <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <h4 className="mb-1.5 flex items-center text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             <Gavel className="inline h-3 w-3 me-1" />
             {t("groups.advancedSection", "Advanced Collaboration")}
+            {canEditHitl && !editingAdvanced && (
+              <button
+                type="button"
+                onClick={() => { setEditingPhases(false); setEditingHitl(false); setEditingAdvanced(true); }}
+                className="ms-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case text-primary transition-colors hover:bg-primary/10"
+                data-testid="group-advanced-edit"
+              >
+                <Pencil className="h-2.5 w-2.5" />
+                {t("groups.hitlEdit", "Edit")}
+              </button>
+            )}
           </h4>
+          {editingAdvanced && groupId && groupVersion != null ? (
+            <GroupAdvancedEditor
+              config={config}
+              groupId={groupId}
+              groupVersion={groupVersion}
+              onDone={() => setEditingAdvanced(false)}
+            />
+          ) : !hasAdvanced ? (
+            <p
+              className="rounded-lg border border-border bg-secondary/30 p-2.5 text-[11px] text-muted-foreground"
+              data-testid="group-advanced-none"
+            >
+              {t(
+                "groups.advancedNotConfigured",
+                "No transcript window, retro memory, shared artifacts or facilitator configured — click Edit to turn them on.",
+              )}
+            </p>
+          ) : (
           <div className="space-y-1 rounded-lg border border-border bg-secondary/30 p-2.5">
             {config.humanMemberConfig && (
               <InfoRow
@@ -595,7 +638,15 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                 })}
               />
             )}
+            {/* Only BID is worth a row — ROLE is the default every group already has. */}
+            {config.taskListConfig?.assignmentMode === "BID" && (
+              <InfoRow
+                label={t("groups.assignmentModeLabel", "Task assignment")}
+                value={t("groups.assignmentModeBidShort", "By bid")}
+              />
+            )}
           </div>
+          )}
         </div>
       )}
 
