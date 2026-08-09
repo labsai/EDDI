@@ -5,6 +5,26 @@
 
 ---
 
+## ⏱️ fix(groups): a paused cadence discussion no longer wedges a standing team forever (2026-08-09)
+
+**Repo:** EDDI (`fix/cadence-claim-expiry`)
+
+Wave C of the Agent / Group Agent review — a liveness defect in I13 Standing Teams, the newest part of the group subsystem.
+
+`TeamCadenceService.reconcile` releases a workspace's `runningDiscussionId` claim when its discussion reaches a terminal state. `AWAITING_APPROVAL` and `AWAITING_HUMAN_INPUT` are not terminal, so they fell into the `default -> false` ("still running") arm — correctly, for a discussion that will be approved. But the default group HITL timeout policy is `WAIT_INDEFINITELY`, so a pause that nobody resolves never becomes terminal either, and the claim was held **forever**: every subsequent cadence fire for that group was skipped as "still running", and the backlog tasks that run had pulled stayed `IN_PROGRESS`. There was no claim TTL and no reaper anywhere — out of character for a subsystem whose task-force half carries an explicit no-progress fingerprint guard precisely to guarantee termination.
+
+- `GroupWorkspace` gains a nullable `claimedAt` stamp, written next to `runningDiscussionId` and cleared next to it in `settle()` — the two are one fact. Nullable on purpose: documents written before the field existed have no stamp, and reclaiming those on a missing timestamp would be a guess, so they simply get one on their next claim.
+- `reconcile`'s non-terminal arm now routes through `reclaimIfStale`, which cancels the stranded discussion and runs the **ordinary failure writeback** — pulled tasks back to `PENDING`, claim cleared — rather than a bespoke path. Cancel before release, so a reclaimed run cannot keep spending against a budget nobody is tracking.
+- TTL is `eddi.groups.cadence.claim-ttl`, default `PT24H`. Deliberately generous: an approval arriving the next business morning must land on the discussion it belongs to, not on a reclaimed corpse. Non-positive disables reclaiming, for an operator who would rather wedge than risk abandoning a pause.
+- New counter `eddi_team_cadence_claims_reclaimed_total`, and a WARN naming the stranded discussion and how long the claim was held.
+- `POST /groupstore/groups/{id}/workspace/cadences` now warns when a group combines `requiresApproval` phases with `WAIT_INDEFINITELY` — that combination is what makes the backstop reachable, and the operator almost certainly wanted a finite `timeoutPolicy`. A warning, not a rejection: the combination is legitimate for a team whose approver really is always available, and rejecting it would break existing configs.
+
+Also: `cancelQuietly` now passes `ControlSignal.CANCEL_GRACEFUL` explicitly. `null` already resolved to graceful (only `CANCEL_IMMEDIATE` takes the other branch), but the method has a second caller now and "which cancel is this?" should not require reading `GroupHitlCoordinator`.
+
+Suites: 585 tests green across `TeamCadence*`, `GroupWorkspace*`, `RestGroupWorkspace*`, `GroupConversationService*`; 9 new.
+
+---
+
 ## 🔎 fix(groups): pre-merge deep review — facilitator HITL bypass, CALL_VOTE guards, metric cardinality, template honesty (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i10-templates`)
