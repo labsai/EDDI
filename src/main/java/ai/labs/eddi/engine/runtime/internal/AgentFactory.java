@@ -54,8 +54,12 @@ public class AgentFactory implements IAgentFactory {
         // maps makes the metric exactly consistent with the registry by construction,
         // and leaves no second structure to linearize against.
         //
-        // READY only, matching the old semantics: an IN_PROGRESS placeholder is not a
-        // deployment yet and an ERROR one never became one.
+        // READY only: an IN_PROGRESS placeholder is not a deployment yet and an
+        // ERROR one never became one — matching which deploys the old list recorded.
+        // One DELIBERATE semantic delta: the old list keyed on (id, version) with no
+        // environment, so an agent deployed to both production and test counted
+        // once; counting map entries counts it per environment, i.e. per actual
+        // deployment. The new reading is the truthful one.
         Gauge.builder("eddi_agents_deployed", environments, AgentFactory::countReadyAgents)
                 .description("Agents currently deployed and READY in this node's runtime registry")
                 .register(meterRegistry);
@@ -140,12 +144,24 @@ public class AgentFactory implements IAgentFactory {
         return null;
     }
 
+    /** How long one {@code getAgent} caller waits on an in-flight deployment. */
+    private static final long DEPLOYMENT_WAIT_SECONDS = 60;
+
     private IAgent waitForDeploymentCompletion(AgentId agentIdObj, Deployment.Environment environment) {
         var deploymentFuture = deploymentListener.getRegisteredDeploymentEvent(agentIdObj.getId(), agentIdObj.getVersion());
 
         try {
             if (deploymentFuture != null) {
-                deploymentFuture.orTimeout(60, TimeUnit.SECONDS).join();
+                // A timed get(), NOT orTimeout(...).join(). orTimeout mutates the
+                // future it is called on, and this future is SHARED: DeploymentListener
+                // hands the same instance to every waiter and to whoever registered the
+                // deployment. One impatient caller arming orTimeout here would, at its
+                // own 60s deadline, complete the shared future exceptionally for every
+                // other consumer — failing waiters whose deployment was still
+                // legitimately in flight, and evicting the registration from the
+                // listener's map (its completion hook removes on ANY completion) before
+                // the real deployment event arrives. get() waits without writing.
+                deploymentFuture.get(DEPLOYMENT_WAIT_SECONDS, TimeUnit.SECONDS);
             }
 
             // Re-fetch the agent after deployment is complete
@@ -168,8 +184,16 @@ public class AgentFactory implements IAgentFactory {
             }
 
             return agent;
-        } catch (CancellationException e) {
-            log.error("Waited too long for agent deployment to complete (timeout reached at 60s).", e);
+        } catch (TimeoutException e) {
+            // This caller's own patience ran out — the deployment itself may still
+            // finish, and the shared future stays pending for everyone else.
+            log.warnf("Agent %s was still deploying after %ds — reporting not ready to this caller", agentIdObj, DEPLOYMENT_WAIT_SECONDS);
+            return null;
+        } catch (InterruptedException e) {
+            // Newly reachable through the timed get() (join() threw unchecked).
+            // Restore the flag so the interrupt is not silently swallowed.
+            Thread.currentThread().interrupt();
+            log.warnf("Interrupted while waiting for agent %s to deploy — reporting not ready", agentIdObj);
             return null;
         } catch (Exception e) {
             log.error("Error while waiting for agent deployment: " + e.getMessage(), e);
