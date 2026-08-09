@@ -7,11 +7,15 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -24,6 +28,7 @@ import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -31,9 +36,11 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -53,24 +60,40 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * populated when that class's own constructor runs, so this provider must read
  * its current value at call time rather than capture it once eagerly.
  * <p>
- * <b>V7 note (unchanged by this move):</b> these tools are added only when a
- * {@code builtInToolsWhitelist} is configured. An agent with
- * {@code enableBuiltInTools=true}, no whitelist, and {@code
- * dynamicAgents.enabled=true} gets none of them — the no-whitelist branch of
- * {@code collectAllBuiltInTools} never calls this provider. That asymmetry is
- * preserved verbatim here and is tracked as verify-task V7 in
- * {@code planning/group-collaboration-improvements-plan.md} §2; fixing it is a
- * deliberate behavior change belonging in its own labeled commit, with a
- * deliberate update to {@code AgentOrchestratorBuiltInToolWiringTest}, not in a
- * pure-move refactor.
+ * <b>V7 — RESOLVED.</b> These tools used to be added only when a
+ * {@code builtInToolsWhitelist} was configured, so an agent with
+ * {@code enableBuiltInTools=true}, no whitelist and {@code
+ * dynamicAgents.enabled=true} got none of them — the no-whitelist branch of
+ * {@code collectAllBuiltInTools} never called this provider, while
+ * {@code docs/langchain.md} states twice that omitting the whitelist enables
+ * all built-in tools. {@code collectAllBuiltInTools} now calls this provider
+ * unconditionally, and {@link #addDynamicAgentTools} honours an omitted
+ * whitelist <em>only under a governing group policy</em> — see the reasoning
+ * there for why a standalone conversation still requires the explicit entry.
  */
 class DynamicAgentToolsProvider implements ToolSourceProvider {
 
     private static final Logger LOGGER = Logger.getLogger(DynamicAgentToolsProvider.class);
 
+    /**
+     * Converts a stored context map back into a typed {@link DynamicAgentConfig}. A
+     * bare {@link ObjectMapper}: this reads a config POJO the engine itself wrote,
+     * so it needs no module registration, and a static instance is thread-safe for
+     * {@code convertValue}.
+     */
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     /** Well-known data keys for dynamic agent lifecycle tracking. */
-    static final String KEY_DYNAMIC_CREATED_AGENT_IDS = "dynamic:created_agent_ids";
-    static final String KEY_DYNAMIC_RETAINED_AGENT_IDS = "dynamic:retained_agent_ids";
+    static final String KEY_DYNAMIC_CREATED_AGENT_IDS = MemoryKeys.DYNAMIC_CREATED_AGENT_IDS;
+    static final String KEY_DYNAMIC_RETAINED_AGENT_IDS = MemoryKeys.DYNAMIC_RETAINED_AGENT_IDS;
+    /**
+     * Agents torn down during this conversation. Subtracted by
+     * {@link #seedCreatedAgentIds} so a teardown frees a
+     * {@code maxCreatedAgentsPerDiscussion} slot, and read by
+     * {@code GroupLifecycleOps#propagateDynamicAgentTracking} so the group stops
+     * tracking them too.
+     */
+    static final String KEY_DYNAMIC_TORN_DOWN_AGENT_IDS = MemoryKeys.DYNAMIC_TORN_DOWN_AGENT_IDS;
 
     private final AgentSetupService agentSetupService;
     private final CapabilityRegistryService capabilityRegistryService;
@@ -79,10 +102,12 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     private final IAgentStore agentStore;
     private final IDeploymentStore deploymentStore;
     private final LiveDiscussionRegistry liveDiscussionRegistry;
+    private final IAgentGroupStore agentGroupStore;
 
     DynamicAgentToolsProvider(AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
-            IDeploymentStore deploymentStore, LiveDiscussionRegistry liveDiscussionRegistry) {
+            IDeploymentStore deploymentStore, LiveDiscussionRegistry liveDiscussionRegistry,
+            IAgentGroupStore agentGroupStore) {
         this.agentSetupService = agentSetupService;
         this.capabilityRegistryService = capabilityRegistryService;
         this.conversationService = conversationService;
@@ -90,6 +115,42 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         this.agentStore = agentStore;
         this.deploymentStore = deploymentStore;
         this.liveDiscussionRegistry = liveDiscussionRegistry;
+        this.agentGroupStore = agentGroupStore;
+    }
+
+    /**
+     * The agent ids on a running discussion's CONFIGURED roster, for
+     * {@link RecruitAgentTool}'s duplicate check.
+     * <p>
+     * Read from the group config, the same way {@code ArtifactToolsProvider}
+     * resolves its artifact policy — the {@link GroupConversation} itself does not
+     * carry the roster. An unreadable config yields an empty set: the recruit tool
+     * still has its other duplicate checks, and withholding recruitment entirely
+     * over a transient store hiccup would be a worse failure than allowing a
+     * duplicate the roster union already de-duplicates.
+     */
+    private Set<String> configuredMemberIds(GroupConversation gc) {
+        if (agentGroupStore == null || gc == null || gc.getGroupId() == null) {
+            return Set.of();
+        }
+        try {
+            var resourceId = agentGroupStore.getCurrentResourceId(gc.getGroupId());
+            if (resourceId == null) {
+                return Set.of();
+            }
+            var groupConfiguration = agentGroupStore.read(gc.getGroupId(), resourceId.getVersion());
+            if (groupConfiguration == null || groupConfiguration.getMembers() == null) {
+                return Set.of();
+            }
+            return groupConfiguration.getMembers().stream()
+                    .map(GroupMember::agentId)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+        } catch (Exception e) {
+            LOGGER.warnf("[DYNAMIC] Could not read the configured roster of group '%s' for the recruit duplicate check: %s",
+                    sanitize(gc.getGroupId()), e.getMessage());
+            return Set.of();
+        }
     }
 
     @Override
@@ -141,7 +202,25 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     }
 
     void addDynamicAgentTools(List<Object> tools, List<String> whitelist, IConversationMemory memory, String groupConversationId) {
-        if (whitelist == null || whitelist.isEmpty()) {
+        // V7. An omitted whitelist means "all built-in tools" everywhere else —
+        // docs/langchain.md states it twice ("(all if not specified)", "Omitting
+        // builtInToolsWhitelist enables all available built-in tools") and
+        // BuiltinToolsProvider implements exactly that for the nine plain beans.
+        // This method alone returned early, so an agent with enableBuiltInTools=true,
+        // no whitelist and dynamicAgents.enabled=true silently got none of them.
+        //
+        // The omitted case is honoured ONLY when a group policy governs this turn.
+        // dynamicAgents is a field on AgentGroupConfiguration, so a standalone
+        // conversation has no configuration surface on which an operator could have
+        // said "no" to sub-agent creation — resolveDynamicAgentConfig invents a
+        // fully-permissive default for it. Handing unconfigurable, production-
+        // deploying capabilities to an agent because it omitted a list would be a
+        // worse defect than the asymmetry it fixes. Under a group policy the
+        // operator HAS an explicit surface (enabled / allowCreation /
+        // allowRecruitment / allowDelegation), which is what makes "all" safe to
+        // mean all.
+        boolean whitelistOmitted = whitelist == null || whitelist.isEmpty();
+        if (whitelistOmitted && !hasGroupPolicy(memory)) {
             return;
         }
         // Finding F17: this list used to start EMPTY on every buildToolList call,
@@ -152,12 +231,17 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // the discussion.
         List<String> sharedCreatedIds = new CopyOnWriteArrayList<>(seedCreatedAgentIds(memory));
         Set<String> sharedRetainedIds = ConcurrentHashMap.newKeySet();
+        // Seeded like sharedCreatedIds so a teardown recorded on an earlier turn is
+        // still known on this one — otherwise a torn-down id would be subtracted from
+        // the seed once and then re-appear the turn after.
+        Set<String> sharedTornDownIds = ConcurrentHashMap.newKeySet();
+        sharedTornDownIds.addAll(collectFromAllSteps(memory, KEY_DYNAMIC_TORN_DOWN_AGENT_IDS));
         String parentAgentId = memory.getAgentId();
         String userId = memory.getUserId();
         DynamicAgentConfig dynamicConfig = resolveDynamicAgentConfig(memory);
 
         boolean anyDynamicToolAdded = false;
-        if (whitelist.contains("create_sub_agent") && agentSetupService != null && conversationService != null) {
+        if (allows(whitelist, whitelistOmitted, "create_sub_agent") && agentSetupService != null && conversationService != null) {
             tools.add(new CreateSubAgentTool(agentSetupService,
                     conversationService, parentAgentId, userId, dynamicConfig,
                     sharedCreatedIds, sharedRetainedIds));
@@ -165,7 +249,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
                     sanitize(parentAgentId), sharedCreatedIds.size());
             anyDynamicToolAdded = true;
         }
-        if (whitelist.contains("converse_with_agent") && conversationService != null) {
+        if (allows(whitelist, whitelistOmitted, "converse_with_agent") && conversationService != null) {
             // Findings F18/I4: the tool used to take only (service, userId) and
             // consult no guardrails at all — allowDelegation was never read and
             // nothing bounded delegation depth or target.
@@ -177,7 +261,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // Finding I4: allowRecruitment was documented as an enforced cap but was
         // never read. Capability lookup is the recruitment entry point, so it is
         // gated here.
-        if (whitelist.contains("find_agents_by_capability") && capabilityRegistryService != null) {
+        if (allows(whitelist, whitelistOmitted, "find_agents_by_capability") && capabilityRegistryService != null) {
             if (dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()) {
                 tools.add(new FindAgentsByCapabilityTool(capabilityRegistryService));
                 LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool enabled for agent='%s'", sanitize(parentAgentId));
@@ -201,16 +285,19 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // method does not honour, which reads as though one path were safe and the
         // others overlooked.
         String callerConversationId = memory.getConversationId();
-        if (whitelist.contains("recruit_agent") && dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()
-                && groupConversationId != null && liveDiscussionRegistry != null
-                && liveDiscussionRegistry.getForMember(groupConversationId, callerConversationId).isPresent()) {
-            tools.add(new RecruitAgentTool(liveDiscussionRegistry, groupConversationId, parentAgentId,
-                    dynamicConfig, deploymentStore));
-            LOGGER.debugf("[DYNAMIC] RecruitAgentTool enabled for agent='%s'", sanitize(parentAgentId));
-            anyDynamicToolAdded = true;
+        if (allows(whitelist, whitelistOmitted, "recruit_agent") && dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()
+                && groupConversationId != null && liveDiscussionRegistry != null) {
+            var liveDiscussion = liveDiscussionRegistry.getForMember(groupConversationId, callerConversationId);
+            if (liveDiscussion.isPresent()) {
+                tools.add(new RecruitAgentTool(liveDiscussionRegistry, groupConversationId, parentAgentId,
+                        dynamicConfig, deploymentStore, configuredMemberIds(liveDiscussion.get())));
+                LOGGER.debugf("[DYNAMIC] RecruitAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+                anyDynamicToolAdded = true;
+            }
         }
-        if (whitelist.contains("teardown_agent") && agentFactory != null && agentStore != null) {
-            tools.add(new TeardownAgentTool(agentFactory, agentStore, deploymentStore, sharedCreatedIds, sharedRetainedIds));
+        if (allows(whitelist, whitelistOmitted, "teardown_agent") && agentFactory != null && agentStore != null) {
+            tools.add(new TeardownAgentTool(agentFactory, agentStore, deploymentStore, sharedCreatedIds, sharedRetainedIds,
+                    sharedTornDownIds));
             LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
             anyDynamicToolAdded = true;
         }
@@ -227,36 +314,146 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         if (anyDynamicToolAdded && currentStep != null) {
             currentStep.storeData(new Data<>(KEY_DYNAMIC_CREATED_AGENT_IDS, sharedCreatedIds));
             currentStep.storeData(new Data<>(KEY_DYNAMIC_RETAINED_AGENT_IDS, sharedRetainedIds));
+            currentStep.storeData(new Data<>(KEY_DYNAMIC_TORN_DOWN_AGENT_IDS, sharedTornDownIds));
         }
     }
 
     /**
-     * Resolves the DynamicAgentConfig for the current conversation. If the agent is
-     * participating in a group discussion, the group's {@link DynamicAgentConfig}
-     * is passed via context variable {@code dynamicAgentConfig} by
-     * {@code GroupConversationService}. If no group config is present (standalone
-     * agent), a permissive default is used.
+     * Every String id stored under {@code key} across this conversation's steps,
+     * de-duplicated. The cumulative read the tracking keys need — a per-turn
+     * collection only ever holds what that turn produced.
+     */
+    private static Set<String> collectFromAllSteps(IConversationMemory memory, String key) {
+        Set<String> collected = new LinkedHashSet<>();
+        var allSteps = memory.getAllSteps();
+        if (allSteps == null) {
+            return collected;
+        }
+        List<IData<Object>> entries = allSteps.getAllLatestData(key);
+        if (entries == null) {
+            return collected;
+        }
+        for (IData<Object> entry : entries) {
+            if (entry != null) {
+                collectAgentIds(entry.getResult(), collected);
+            }
+        }
+        return collected;
+    }
+
+    /** Context key {@code MemberTurnExecutor} injects the group's policy under. */
+    static final String CONTEXT_DYNAMIC_AGENT_CONFIG = "context:dynamicAgentConfig";
+
+    /**
+     * Whether {@code toolName} is enabled for this turn.
+     * <p>
+     * An omitted whitelist means every tool, matching {@code BuiltinToolsProvider}
+     * and the documented contract; a present whitelist is an exact allow-list. The
+     * caller decides whether the omitted case is admissible at all (see
+     * {@link #addDynamicAgentTools}) — this only answers the membership question.
+     */
+    private static boolean allows(List<String> whitelist, boolean whitelistOmitted, String toolName) {
+        return whitelistOmitted || whitelist.contains(toolName);
+    }
+
+    /**
+     * Whether a group's {@link DynamicAgentConfig} governs this turn — i.e. the
+     * conversation carries the context key {@code MemberTurnExecutor} injects on
+     * every member turn.
+     * <p>
+     * Presence, not readability: an unreadable policy still means "a group is in
+     * charge here", and {@link #resolveDynamicAgentConfig} independently resolves
+     * that case to a fully-disabled config. Treating unreadable as "no group" would
+     * hand the turn back to the permissive standalone path, which is precisely the
+     * inversion both guards exist to prevent.
+     */
+    static boolean hasGroupPolicy(IConversationMemory memory) {
+        var currentStep = memory.getCurrentStep();
+        if (currentStep == null) {
+            return false;
+        }
+        var contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
+        return contextData != null && contextData.getResult() instanceof Context ctx && ctx.getValue() != null;
+    }
+
+    /**
+     * Resolves the DynamicAgentConfig for the current conversation.
+     * <p>
+     * A member turn inside a group carries the group's {@link DynamicAgentConfig}
+     * as the {@code dynamicAgentConfig} context variable — injected by
+     * {@code MemberTurnExecutor} on EVERY turn, including an explicitly disabled
+     * one when the group configured none, precisely so a group can never inherit
+     * the permissive standalone default. Only a conversation with no such context
+     * at all is a standalone agent.
+     * <p>
+     * <b>Three-state, and the middle state is the point.</b> The key is absent →
+     * standalone → permissive default. The key is present and readable → the
+     * group's policy. The key is present but <em>unreadable</em> → the group said
+     * something about this and we could not parse it, which must fail CLOSED.
+     * <p>
+     * That middle state is reachable, and was a live guardrail bypass. A
+     * {@link Context} whose value round-trips through the conversation store comes
+     * back as a raw {@code LinkedHashMap}, not a typed {@code DynamicAgentConfig} —
+     * {@code ConversationMemoryStore} rebuilds it as
+     * {@code new Context(type, map.get("value"))}. Any turn that runs against a
+     * RELOADED step therefore missed the old {@code instanceof} and fell through to
+     * the fully-permissive default: creation, recruitment and delegation all on,
+     * for a group that may have disabled every one of them. The reachable trigger
+     * is a member's gated tool call inside a group —
+     * {@code MemberTurnExecutor#tryResolveMemberToolPause} auto-rejects it and
+     * resumes the member conversation, and {@code Conversation#resume} re-enters
+     * the same LlmTask at the same index against memory freshly loaded from the
+     * store. The orchestrator is still blocked in that call, so the discussion is
+     * still live in {@code LiveDiscussionRegistry} and the group-gated tools are
+     * available too.
      *
      * @param memory
      *            the conversation memory to check for group context
-     * @return the resolved DynamicAgentConfig — group-level if available,
-     *         permissive default otherwise
+     * @return the group's policy when one is present and readable, a fully-disabled
+     *         policy when one is present but unreadable, and the permissive
+     *         standalone default only when none is present at all
      */
     static DynamicAgentConfig resolveDynamicAgentConfig(IConversationMemory memory) {
-        // Check if GroupConversationService injected a DynamicAgentConfig via context
         var currentStep = memory.getCurrentStep();
-        if (currentStep != null) {
-            var contextData = currentStep.getLatestData("context:dynamicAgentConfig");
-            if (contextData != null) {
-                Object value = contextData.getResult();
-                if (value instanceof Context ctx && ctx.getValue() instanceof DynamicAgentConfig groupConfig) {
-                    LOGGER.debugf("[DYNAMIC] Using group-level DynamicAgentConfig for agent='%s'", sanitize(memory.getAgentId()));
-                    return groupConfig;
-                }
+        if (currentStep == null) {
+            return createDefaultDynamicConfig();
+        }
+        var contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
+        if (contextData == null || !(contextData.getResult() instanceof Context ctx) || ctx.getValue() == null) {
+            // No group context — a standalone agent whose operator whitelisted these
+            // tools deliberately.
+            return createDefaultDynamicConfig();
+        }
+
+        Object value = ctx.getValue();
+        if (value instanceof DynamicAgentConfig groupConfig) {
+            LOGGER.debugf("[DYNAMIC] Using group-level DynamicAgentConfig for agent='%s'", sanitize(memory.getAgentId()));
+            return groupConfig;
+        }
+        if (value instanceof Map<?, ?> serialized) {
+            // The store round-trip shape. Convert rather than give up: giving up here
+            // would be indistinguishable from "no group context" and would hand back
+            // the permissive default.
+            try {
+                DynamicAgentConfig converted = MAPPER.convertValue(serialized, DynamicAgentConfig.class);
+                LOGGER.debugf("[DYNAMIC] Recovered group-level DynamicAgentConfig from a stored context map for agent='%s'",
+                        sanitize(memory.getAgentId()));
+                return converted;
+            } catch (IllegalArgumentException e) {
+                // A map that is not this config (an unknown field, a type mismatch, a
+                // document written by a newer version). Fall through to fail closed —
+                // never let a conversion failure widen the policy.
+                LOGGER.warnf("[DYNAMIC] A stored group DynamicAgentConfig for agent='%s' could not be converted (%s) — "
+                        + "disabling dynamic agent capabilities for this turn", sanitize(memory.getAgentId()), e.getMessage());
+                return disabledDynamicConfig();
             }
         }
-        // Fallback: standalone agent — use permissive defaults
-        return createDefaultDynamicConfig();
+
+        // Present but unreadable. Fail closed — see the Javadoc.
+        LOGGER.warnf("[DYNAMIC] A group DynamicAgentConfig was present for agent='%s' but could not be read (type=%s) — "
+                + "disabling dynamic agent capabilities for this turn rather than falling back to the permissive default",
+                sanitize(memory.getAgentId()), value.getClass().getName());
+        return disabledDynamicConfig();
     }
 
     /**
@@ -274,6 +471,27 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     }
 
     /**
+     * The fail-closed policy: every capability off. Used when a group policy is
+     * present but unreadable — "the operator said something we cannot parse" must
+     * never resolve to "the operator said yes to everything".
+     */
+    static DynamicAgentConfig disabledDynamicConfig() {
+        var config = new DynamicAgentConfig();
+        config.setEnabled(false);
+        config.setAllowCreation(false);
+        config.setAllowRecruitment(false);
+        config.setAllowDelegation(false);
+        return config;
+    }
+
+    /**
+     * Context key carrying the discussion-wide created-agent total into a member
+     * turn. Written by {@code MemberTurnExecutor}, read by
+     * {@link #seedCreatedAgentIds}.
+     */
+    static final String CONTEXT_DYNAMIC_CREATED_AGENT_IDS = "context:dynamicCreatedAgentIds";
+
+    /**
      * Finding F17: the agent IDs already created in this conversation, so
      * {@code maxCreatedAgentsPerDiscussion} bounds every turn of a conversation
      * rather than a single turn. The list used to start EMPTY on every
@@ -282,17 +500,18 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * <p>
      * Two sources are consulted, in order:
      * <ol>
-     * <li>a {@code dynamicCreatedAgentIds} context variable — an injection point
-     * for an orchestrator that owns the true discussion-wide total. <b>Nothing in
-     * {@code src/main} writes it today</b>: {@code GroupConversationService}
-     * propagates member → group ({@code propagateDynamicAgentTracking}) but does
-     * not inject the running total back into the per-turn member context alongside
-     * {@code groupId}/{@code groupDepth}. Until it does, the cap bounds each MEMBER
-     * conversation across the whole discussion, not the discussion total across
-     * members;</li>
+     * <li>the {@code dynamicCreatedAgentIds} context variable — the discussion-wide
+     * total, injected per member turn by {@code MemberTurnExecutor} from
+     * {@code GroupConversation#getCreatedAgentIds()}, which
+     * {@code propagateDynamicAgentTracking} keeps current after every member turn.
+     * This is what makes {@code maxCreatedAgentsPerDiscussion} mean what its name
+     * (and {@code docs/group-conversations.md}) says. Until it was injected, the
+     * cap bounded each MEMBER conversation independently, so a 5-member group with
+     * the default cap of 5 could deploy 25 agents to production per
+     * discussion;</li>
      * <li>every {@code dynamic:created_agent_ids} entry already written to this
-     * conversation's memory by an earlier turn — the source that actually carries
-     * the count today.</li>
+     * conversation's memory by an earlier turn — the per-conversation half, which
+     * still matters for a standalone agent with no group around it.</li>
      * </ol>
      * Returns a de-duplicated list, never null.
      */
@@ -301,23 +520,19 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
 
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
-            IData<Object> contextData = currentStep.getLatestData("context:dynamicCreatedAgentIds");
+            IData<Object> contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_CREATED_AGENT_IDS);
             if (contextData != null && contextData.getResult() instanceof Context ctx) {
                 collectAgentIds(ctx.getValue(), seeded);
             }
         }
 
-        var allSteps = memory.getAllSteps();
-        if (allSteps != null) {
-            List<IData<Object>> priorEntries = allSteps.getAllLatestData(KEY_DYNAMIC_CREATED_AGENT_IDS);
-            if (priorEntries != null) {
-                for (IData<Object> entry : priorEntries) {
-                    if (entry != null) {
-                        collectAgentIds(entry.getResult(), seeded);
-                    }
-                }
-            }
-        }
+        seeded.addAll(collectFromAllSteps(memory, KEY_DYNAMIC_CREATED_AGENT_IDS));
+
+        // An agent that was torn down no longer exists and must not keep occupying a
+        // maxCreatedAgentsPerDiscussion slot. Subtracted last so it wins over both
+        // sources: the group-wide context total and this conversation's own history
+        // can each still name an id whose teardown they have not observed yet.
+        seeded.removeAll(collectFromAllSteps(memory, KEY_DYNAMIC_TORN_DOWN_AGENT_IDS));
 
         return new ArrayList<>(seeded);
     }

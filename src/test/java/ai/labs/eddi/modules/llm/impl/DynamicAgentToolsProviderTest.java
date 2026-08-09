@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -51,7 +52,7 @@ class DynamicAgentToolsProviderTest {
     private DynamicAgentToolsProvider providerWith(LiveDiscussionRegistry registry) {
         return new DynamicAgentToolsProvider(mock(AgentSetupService.class), mock(CapabilityRegistryService.class),
                 mock(IConversationService.class), mock(IAgentFactory.class), mock(IAgentStore.class),
-                mock(IDeploymentStore.class), registry);
+                mock(IDeploymentStore.class), registry, mock(IAgentGroupStore.class));
     }
 
     private IConversationMemory memory() {

@@ -1202,6 +1202,20 @@ public class GroupConversation {
     }
 
     /**
+     * Records a display name only if the agent has none yet.
+     * <p>
+     * The seeding pass at the top of {@code executeDiscussion} fills this map from
+     * the CONFIGURED roster, where the names are operator-chosen. A later writer
+     * that only knows an agent id — {@code RecruitAgentTool}, which passes the id
+     * as the name — must not overwrite one of those; doing so replaced a member's
+     * real name with a raw id everywhere it is rendered, including the "which
+     * member did you mean?" list {@code followUpWithMember} produces.
+     */
+    public void addMemberDisplayNameIfAbsent(String agentId, String displayName) {
+        this.memberDisplayNames.putIfAbsent(agentId, displayName);
+    }
+
+    /**
      * Computed property derived from {@link #state} — tells clients which
      * operations are available. It is serialized (so REST/MCP clients see it, and
      * it therefore also lands in the stored document), but {@code READ_ONLY} access

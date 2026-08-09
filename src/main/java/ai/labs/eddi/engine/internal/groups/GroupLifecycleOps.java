@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupMemberNotFoundExce
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupTimeoutException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -38,8 +39,10 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -727,26 +730,45 @@ public class GroupLifecycleOps {
         if (lastStep == null || lastStep.getConversationStep() == null) {
             return;
         }
+        // Teardowns are applied AFTER the additions below, not interleaved with them:
+        // the same step carries both the cumulative created list (which still names an
+        // agent torn down this turn) and the teardown record, and iteration order over
+        // step data is not something this should depend on.
+        Set<String> tornDown = new LinkedHashSet<>();
         for (var stepData : lastStep.getConversationStep()) {
             if (stepData == null || stepData.getKey() == null) {
                 continue;
             }
-            if ("dynamic:created_agent_ids"
-                    .equals(stepData.getKey()) && stepData.getValue() instanceof java.util.Collection<?> ids) {
+            if (MemoryKeys.DYNAMIC_CREATED_AGENT_IDS.equals(stepData.getKey()) && stepData.getValue() instanceof Collection<?> ids) {
                 for (Object id : ids) {
                     if (id instanceof String agentId && !gc.getCreatedAgentIds().contains(agentId)) {
                         gc.getCreatedAgentIds().add(agentId);
                         LOGGER.debugf("[DYNAMIC] Propagated created agent '%s' to group conversation", agentId);
                     }
                 }
-            } else if ("dynamic:retained_agent_ids"
-                    .equals(stepData.getKey()) && stepData.getValue() instanceof java.util.Collection<?> ids) {
+            } else if (MemoryKeys.DYNAMIC_RETAINED_AGENT_IDS.equals(stepData.getKey()) && stepData.getValue() instanceof Collection<?> ids) {
                 for (Object id : ids) {
                     if (id instanceof String agentId) {
                         gc.getRetainedAgentIds().add(agentId);
                     }
                 }
+            } else if (MemoryKeys.DYNAMIC_TORN_DOWN_AGENT_IDS.equals(stepData.getKey()) && stepData.getValue() instanceof Collection<?> ids) {
+                for (Object id : ids) {
+                    if (id instanceof String agentId) {
+                        tornDown.add(agentId);
+                    }
+                }
             }
+        }
+        // A torn-down agent is gone: drop it from the group's tracking so the
+        // discussion-wide created total injected into the NEXT member turn does not
+        // keep it occupying a maxCreatedAgentsPerDiscussion slot, and so ephemeral
+        // cleanup does not try to undeploy and delete something already deleted.
+        for (String agentId : tornDown) {
+            if (gc.getCreatedAgentIds().remove(agentId)) {
+                LOGGER.debugf("[DYNAMIC] Dropped torn-down agent '%s' from group conversation tracking", agentId);
+            }
+            gc.getRetainedAgentIds().remove(agentId);
         }
     }
 }
