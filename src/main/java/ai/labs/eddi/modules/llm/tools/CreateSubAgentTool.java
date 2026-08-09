@@ -66,6 +66,24 @@ public class CreateSubAgentTool {
         this.retainedAgentIds = retainedAgentIds != null ? retainedAgentIds : java.util.concurrent.ConcurrentHashMap.newKeySet();
     }
 
+    /**
+     * The models permitted for {@code provider}, or {@code null} when the policy
+     * has no entry for it. Null elements are filtered — a hand-written config can
+     * carry them, and they must neither crash the check nor widen the list.
+     */
+    private List<String> allowedModelsFor(String provider) {
+        if (config.getAllowedModels() == null || provider == null) {
+            return null;
+        }
+        return config.getAllowedModels().entrySet().stream()
+                .filter(e -> e.getKey() != null && e.getKey().equalsIgnoreCase(provider))
+                .map(Map.Entry::getValue)
+                .filter(java.util.Objects::nonNull)
+                .findFirst()
+                .map(models -> models.stream().filter(java.util.Objects::nonNull).toList())
+                .orElse(null);
+    }
+
     @Tool("Create a new sub-agent dynamically. The agent is set up, deployed, and optionally sent an initial message. "
             + "Use this when the current discussion requires a specialist that doesn't exist yet. "
             + "The created agent's name will be auto-prefixed with the parent agent's ID.")
@@ -153,46 +171,40 @@ public class CreateSubAgentTool {
             }
 
             // --- Guardrail: allowed models ---
-            // Branches on the REQUESTED provider, deliberately unchanged. Its two
-            // documented behaviours are pinned by tests that state them outright — a
-            // provider key mapping to a null list means "no restriction for that
-            // provider", and an unnamed provider requires the model to appear in some
-            // provider's list. Rewriting either is a config-semantics change, not part
-            // of closing the allow-list bypass above, so it is left alone.
-            //
-            // Known residual: with no provider named, a model accepted from another
-            // provider's list is then paired with the DEFAULT provider, which can be an
-            // incoherent combination. Narrowing that is a deliberate behaviour change
-            // and belongs in its own commit.
+            // allowedModels maps a provider to the models permitted FOR THAT PROVIDER,
+            // so a model may only be judged against the provider it will be paired
+            // with. The two branches differ in what an absent entry means, and
+            // deliberately so.
             if (resolvedModel != null && !resolvedModel.isBlank()
                     && config.getAllowedModels() != null
                     && !config.getAllowedModels().isEmpty()) {
+                List<String> allowedForProvider = allowedModelsFor(resolvedProvider);
+
                 if (requestedProvider != null && !requestedProvider.isBlank()) {
-                    // Provider named or inherited — check that provider's model list
-                    // (case-insensitive key match)
-                    List<String> allowedModels = config.getAllowedModels().entrySet().stream()
-                            .filter(e -> e.getKey() != null && e.getKey().equalsIgnoreCase(requestedProvider))
-                            .map(Map.Entry::getValue)
-                            .filter(java.util.Objects::nonNull)
-                            .findFirst().orElse(null);
-                    if (allowedModels != null && !allowedModels.isEmpty()
-                            && allowedModels.stream().filter(java.util.Objects::nonNull)
-                                    .noneMatch(m -> m.equalsIgnoreCase(resolvedModel))) {
+                    // A provider was named (or inherited from the parent). An absent or
+                    // empty list means "no restriction for that provider" — a documented
+                    // behaviour, and a defensible one: the operator made a deliberate
+                    // per-provider statement and said nothing about this one.
+                    if (allowedForProvider != null && !allowedForProvider.isEmpty()
+                            && allowedForProvider.stream().noneMatch(m -> m.equalsIgnoreCase(resolvedModel))) {
                         return "⚠️ Model '%s' is not allowed for provider '%s'. Allowed: %s"
-                                .formatted(resolvedModel, requestedProvider, allowedModels);
+                                .formatted(resolvedModel, resolvedProvider, allowedForProvider);
                     }
-                } else {
-                    // No provider named — model must appear in at least one provider's
-                    // allow-list
-                    boolean modelFoundInAnyProvider = config.getAllowedModels().values().stream()
-                            .filter(java.util.Objects::nonNull)
-                            .flatMap(List::stream)
-                            .filter(java.util.Objects::nonNull)
-                            .anyMatch(m -> m.equalsIgnoreCase(resolvedModel));
-                    if (!modelFoundInAnyProvider) {
-                        return "⚠️ Model '%s' is not in any provider's allowed models list."
-                                .formatted(resolvedModel);
-                    }
+                } else if (allowedForProvider == null || allowedForProvider.isEmpty()) {
+                    // No provider named, so the model is about to be paired with the
+                    // DEFAULT provider — one the caller never chose and the policy never
+                    // mentions. The previous rule accepted any model appearing in ANY
+                    // provider's list, which meant a config restricting openai to
+                    // "gpt-4o-mini" would happily build an ANTHROPIC agent running
+                    // "gpt-4o-mini": a combination that fails at model load and that the
+                    // operator plainly did not authorise. An unnamed provider must land
+                    // on a provider the policy actually covers.
+                    return ("⚠️ Model '%s' cannot be used without naming a provider: the default provider '%s' has no "
+                            + "allowed models configured. Name one of: %s")
+                            .formatted(resolvedModel, resolvedProvider, config.getAllowedModels().keySet());
+                } else if (allowedForProvider.stream().noneMatch(m -> m.equalsIgnoreCase(resolvedModel))) {
+                    return "⚠️ Model '%s' is not allowed for provider '%s'. Allowed: %s"
+                            .formatted(resolvedModel, resolvedProvider, allowedForProvider);
                 }
             }
 

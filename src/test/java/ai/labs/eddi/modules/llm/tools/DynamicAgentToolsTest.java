@@ -141,7 +141,9 @@ class DynamicAgentToolsTest {
             String result = tool.createSubAgent("Test", "prompt", null, "unknown-model", null, null);
 
             assertTrue(result.contains("⚠️"));
-            assertTrue(result.contains("not in any provider"));
+            // Message changed with the semantics: the model is no longer judged against
+            // "any provider's list", because it can only ever be paired with one.
+            assertTrue(result.contains("without naming a provider"), result);
         }
 
         @Test
@@ -270,16 +272,48 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_modelAllowed_providerOmitted_positiveCase() throws Exception {
-            // Model exists in one of the provider lists — should be allowed
+            // BEHAVIOUR CHANGE (deliberate). This used to pass: a model appearing in ANY
+            // provider's list was accepted with no provider named, and then paired with
+            // the DEFAULT provider. Here that produced an *anthropic* agent running
+            // openai's "gpt-4o-mini" — a combination that fails at model load and that
+            // the operator, who restricted only openai, never authorised.
+            //
+            // allowedModels maps a provider to the models allowed FOR THAT PROVIDER, so
+            // a model can only be judged against the provider it will actually be paired
+            // with. Naming the provider is now required when the default is not covered.
+            config.setAllowedModels(Map.of("openai", List.of("gpt-4o-mini")));
+
+            String result = tool.createSubAgent("Test", "prompt", null, "gpt-4o-mini", null, null);
+
+            assertTrue(result.contains("⚠️"), result);
+            assertTrue(result.contains("without naming a provider"), result);
+        }
+
+        @Test
+        @DisplayName("naming the provider makes the same model/provider pair succeed")
+        void createSubAgent_modelAllowed_providerNamed() throws Exception {
             config.setAllowedModels(Map.of("openai", List.of("gpt-4o-mini")));
 
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             null, "gpt-4o-mini", true, "ready", null, null, null, null, null));
 
-            String result = tool.createSubAgent("Test", "prompt", null, "gpt-4o-mini", null, null);
+            String result = tool.createSubAgent("Test", "prompt", "openai", "gpt-4o-mini", null, null);
 
-            assertTrue(result.contains("✅"));
+            assertTrue(result.contains("✅"), result);
+        }
+
+        @Test
+        @DisplayName("the model is judged against the provider it will actually be paired with")
+        void createSubAgent_modelFromAnotherProviderIsRejected() {
+            // "gpt-4o-mini" is openai's. Asking for it on anthropic must be refused
+            // rather than silently built into a config that cannot load.
+            config.setAllowedModels(Map.of("openai", List.of("gpt-4o-mini"), "anthropic", List.of("claude-sonnet-4-6")));
+
+            String result = tool.createSubAgent("Test", "prompt", "anthropic", "gpt-4o-mini", null, null);
+
+            assertTrue(result.contains("⚠️"), result);
+            assertTrue(result.contains("not allowed for provider"), result);
         }
 
         @Test

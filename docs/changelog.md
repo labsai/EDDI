@@ -5,6 +5,22 @@
 
 ---
 
+## 🔎 fix(setup): a sub-agent's model is judged against the provider it will actually run on (2026-08-09)
+
+**Repo:** EDDI (`fix/sub-agent-model-provider-pairing`, stacked on `fix/agent-setup-hardening`)
+
+The residual left documented by #656's review round, now closed.
+
+`allowedModels` maps a provider to the models permitted **for that provider**, but with no provider named the check accepted a model appearing in *any* provider's list — and `AgentSetupService` then paired it with the DEFAULT provider. A config restricting openai to `gpt-4o-mini` therefore built an **anthropic** agent running `gpt-4o-mini`: a combination that fails at model load, and one the operator never authorised.
+
+A model can only ever be paired with one provider, so it is now judged against that provider:
+- **Provider named or inherited** — unchanged, including the documented "absent or empty list means no restriction for that provider". An explicit per-provider statement that says nothing about this provider is a deliberate silence.
+- **Provider omitted** — the model is about to land on the default provider, one the caller never chose. If the policy has no entry for it, the call is refused with a message naming the providers that *are* covered, rather than silently building an unloadable agent.
+
+`createSubAgent_modelAllowed_providerOmitted_positiveCase` changes meaning as a result; it is retained with the reasoning inline rather than deleted, and joined by two new tests (naming the provider still succeeds; a model from another provider's list is refused).
+
+---
+
 ## 🔎 fix(setup): create_sub_agent could never work, and a failed setup left orphans (2026-08-09)
 
 **Repo:** EDDI (`fix/agent-setup-hardening`)
