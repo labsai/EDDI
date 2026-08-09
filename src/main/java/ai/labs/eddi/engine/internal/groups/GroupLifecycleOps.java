@@ -775,12 +775,20 @@ public class GroupLifecycleOps {
             }
         }
 
-        // One synchronized region over the created list: CopyOnWriteArrayList makes
+        // One synchronized region, on the SAME monitor recordTeardown takes, covering
+        // both the created and the retained merge.
+        //
+        // Two races, and the monitor is what closes both. CopyOnWriteArrayList makes
         // each add atomic but NOT contains()-then-add(), and these callbacks run on
-        // coordinator threads, one per member turn. Two of them observing the same id
-        // as absent would both append it, after which a single remove() on teardown
-        // leaves a duplicate behind.
-        synchronized (gc.getCreatedAgentIds()) {
+        // coordinator threads, one per member turn — two observing the same id as
+        // absent would both append it, after which the single remove() a teardown
+        // performs leaves a duplicate behind. And the tombstone check is itself a
+        // check-then-act against a teardown: a merge could read the set, find the id
+        // absent, be descheduled while a teardown records it, and then complete its
+        // add — putting back an agent that no longer exists. Ordering the writes
+        // inside recordTeardown does not help with that one; only mutual exclusion
+        // does.
+        synchronized (gc.dynamicTrackingMutex()) {
             for (String agentId : created) {
                 if (gc.getTornDownAgentIds().contains(agentId) || gc.getCreatedAgentIds().contains(agentId)) {
                     continue;
@@ -788,10 +796,10 @@ public class GroupLifecycleOps {
                 gc.getCreatedAgentIds().add(agentId);
                 LOGGER.debugf("[DYNAMIC] Propagated created agent '%s' to group conversation", agentId);
             }
-        }
-        for (String agentId : retained) {
-            if (!gc.getTornDownAgentIds().contains(agentId)) {
-                gc.getRetainedAgentIds().add(agentId);
+            for (String agentId : retained) {
+                if (!gc.getTornDownAgentIds().contains(agentId)) {
+                    gc.getRetainedAgentIds().add(agentId);
+                }
             }
         }
     }

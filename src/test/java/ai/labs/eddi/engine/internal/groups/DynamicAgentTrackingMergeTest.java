@@ -166,4 +166,83 @@ class DynamicAgentTrackingMergeTest {
                 "putIfAbsent must be atomic here, and must not overwrite an operator-chosen name");
         assertEquals("agent-2", gc.getMemberDisplayNames().get("agent-2"));
     }
+
+    @Test
+    @DisplayName("a teardown racing a merge still wins — the merge cannot re-add after it")
+    void teardownRacingAMergeStillWins() throws Exception {
+        // Ordering the writes inside recordTeardown is not enough on its own: a merge
+        // can read the tombstone set, find the id absent, be descheduled while the
+        // teardown records it, and then complete its own add. Only mutual exclusion
+        // on a shared monitor closes that window, so this hammers the interleaving.
+        for (int round = 0; round < 200; round++) {
+            var gc = conversation();
+            gc.getCreatedAgentIds().add("agent-1");
+            var start = new CountDownLatch(1);
+            var done = new CountDownLatch(2);
+
+            Thread.ofVirtual().start(() -> {
+                try {
+                    start.await();
+                    gc.recordTeardown("agent-1");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+            });
+            Thread.ofVirtual().start(() -> {
+                try {
+                    start.await();
+                    GroupLifecycleOps.propagateDynamicAgentTracking(
+                            snapshotWith(Map.of(MemoryKeys.DYNAMIC_CREATED_AGENT_IDS, List.of("agent-1"))), gc);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+            });
+
+            start.countDown();
+            assertTrue(done.await(10, TimeUnit.SECONDS), "round " + round + " deadlocked");
+            assertFalse(gc.getCreatedAgentIds().contains("agent-1"),
+                    "round " + round + ": a recorded teardown must be final, whatever the interleaving");
+        }
+    }
+
+    @Test
+    @DisplayName("a retained-agent merge is guarded by the same monitor")
+    void retainedMergeIsGuardedToo() throws Exception {
+        for (int round = 0; round < 200; round++) {
+            var gc = conversation();
+            gc.getRetainedAgentIds().add("agent-1");
+            var start = new CountDownLatch(1);
+            var done = new CountDownLatch(2);
+
+            Thread.ofVirtual().start(() -> {
+                try {
+                    start.await();
+                    gc.recordTeardown("agent-1");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+            });
+            Thread.ofVirtual().start(() -> {
+                try {
+                    start.await();
+                    GroupLifecycleOps.propagateDynamicAgentTracking(
+                            snapshotWith(Map.of(MemoryKeys.DYNAMIC_RETAINED_AGENT_IDS, List.of("agent-1"))), gc);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+            });
+
+            start.countDown();
+            assertTrue(done.await(10, TimeUnit.SECONDS), "round " + round + " deadlocked");
+            assertFalse(gc.getRetainedAgentIds().contains("agent-1"), "round " + round);
+        }
+    }
 }

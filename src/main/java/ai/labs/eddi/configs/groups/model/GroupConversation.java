@@ -1199,13 +1199,41 @@ public class GroupConversation {
     }
 
     /**
-     * Records a teardown and drops the agent from every live tracking list, as one
-     * operation.
+     * The monitor that serializes dynamic-agent tracking changes — teardowns
+     * against merges.
      * <p>
-     * The tombstone is written FIRST. A concurrent
-     * {@code propagateDynamicAgentTracking} merging a stale snapshot would
-     * otherwise be able to re-add the id between the removals and the tombstone,
-     * and the merge consults the tombstone precisely to refuse that.
+     * Ordering the writes inside {@link #recordTeardown} is NOT sufficient on its
+     * own, and the gap is easy to miss: a merge can read the tombstone set, find
+     * the id absent, be descheduled, have a concurrent teardown record the
+     * tombstone and remove the id, and then complete its own {@code add} — putting
+     * back an agent that no longer exists. Check-tombstone-then-add and
+     * record-teardown must therefore be mutually exclusive, not merely internally
+     * ordered.
+     * <p>
+     * Transient and {@link JsonIgnore}d like {@link #artifactAnnounceMutex}: it is
+     * runtime coordination state, and the field initialiser runs on Jackson's
+     * no-arg constructor so a deserialized document has one too.
+     */
+    @JsonIgnore
+    private final transient Object dynamicTrackingMutex = new Object();
+
+    /**
+     * The monitor {@code GroupLifecycleOps#propagateDynamicAgentTracking} holds
+     * while it merges a member turn's tracking snapshot.
+     */
+    @JsonIgnore
+    public Object dynamicTrackingMutex() {
+        return dynamicTrackingMutex;
+    }
+
+    /**
+     * Records a teardown and drops the agent from every live tracking list, as one
+     * atomic operation.
+     * <p>
+     * The tombstone is written first AND under {@link #dynamicTrackingMutex}, so a
+     * concurrent merge cannot interleave between the check it makes and the add it
+     * performs. The merge consults the tombstone precisely to refuse a stale
+     * snapshot, and it can only do that reliably if the two never overlap.
      *
      * @return {@code true} if this call was the one that recorded the teardown
      */
@@ -1213,10 +1241,12 @@ public class GroupConversation {
         if (agentId == null) {
             return false;
         }
-        boolean first = tornDownAgentIds.add(agentId);
-        createdAgentIds.remove(agentId);
-        retainedAgentIds.remove(agentId);
-        return first;
+        synchronized (dynamicTrackingMutex) {
+            boolean first = tornDownAgentIds.add(agentId);
+            createdAgentIds.remove(agentId);
+            retainedAgentIds.remove(agentId);
+            return first;
+        }
     }
 
     @JsonIgnore
