@@ -75,6 +75,14 @@ class GroupTaskToolsProvider implements ToolSourceProvider {
         String callerConversationId = ctx.memory() != null ? ctx.memory().getConversationId() : null;
         var live = liveDiscussionRegistry.getForMember(groupConversationId, callerConversationId);
         if (live.isEmpty()) {
+            // Logged, not silent. Withholding is the correct answer for a forged or
+            // finished discussion id, but it is also what happens if the discussion is
+            // running on ANOTHER node — the registry is per-node and correctness rests
+            // on member turns always executing in-process. Without this line that
+            // failure looks like "the model just lost its tools", with nothing to
+            // diagnose it from.
+            LOGGER.debugf("Withholding group task tools for agent='%s': conversation '%s' is not a member of a discussion "
+                    + "'%s' running on this node", ctx.agentId(), callerConversationId, groupConversationId);
             return ToolContribution.empty();
         }
         AgentGroupConfiguration groupConfiguration = resolveGroup(live.get().getGroupId());

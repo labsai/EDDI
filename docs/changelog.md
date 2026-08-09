@@ -5,6 +5,24 @@
 
 ---
 
+## 🔎 fix(llm): dynamicAgentConfig context boundary — guardrails failed open on every turn that did not re-inject them (2026-08-09)
+
+**Repo:** EDDI (`fix/dynamic-agent-context-boundary`)
+
+Systematic sweep of the Context serialization boundary: for every context the system injects, what type does it hold (a) on the injecting turn, (b) after a store reload, (c) after crash recovery, (d) on another node? Nine context keys; eight are strings, lists or maps and survive unchanged. **`dynamicAgentConfig` is the only typed POJO the system injects — and it is the one that gates the tools that deploy real agents to production.**
+
+1. **`resolveDynamicAgentConfig` failed open in two independent ways.** `MemberTurnExecutor` injects the group's guardrails on every member turn, and deliberately injects an explicitly *disabled* config when the group configured none — its comment says exactly why: a member turn that finds no config falls back to the STANDALONE default, which is fully permissive (creation, recruitment and delegation all on). The resolver defeated that defense twice: it read the **current step only**, so any turn that re-enters without a fresh injection (HITL tool-approval resume, crash recovery, the group follow-up path) saw nothing; and it required a live `DynamicAgentConfig` instance, but `ConversationMemoryStore`/`PostgresConversationMemoryStore` rebuild a stored context as `new Context(type, map)` — so after **any** reload the value is a `Map` and the `instanceof` failed even when the key was present. Both paths landed on the permissive default. Fixed: earlier steps are consulted as a fallback (the shape `ContextualToolsProvider#resolveGroupIds` and `resolveDelegationDepth` already use for exactly the resume case — this was the only sibling that did not), and the map form is coerced back whole-object via Jackson rather than field-by-field, so a guardrail added later cannot silently read back as its permissive Java default.
+2. **Unresolvable guardrails on a group turn now fail CLOSED.** A conversation that demonstrably belongs to a group but whose config cannot be resolved returns a disabled config instead of the permissive default — the discipline `GroupTaskToolsProvider` and `ArtifactToolsProvider` already state. The group probe requires a context entry that actually *carries a value*, not merely a key: "the key exists" is too weak a claim to strip a standalone agent of tools its designer explicitly whitelisted.
+3. **`GroupLifecycleOps.followUp` never injected the guardrails at all.** It injects `groupTranscript`/`groupId`/`groupConversationId` but not `dynamicAgentConfig`, so the defense `MemberTurnExecutor` documents was bypassed on the entire follow-up path — no crash or resume needed. Now injected identically.
+4. **Two disagreeing defaults, and a Javadoc that was not true.** `ToolAssemblyContext`'s compact constructor normalizes a null config to a *disabled* one; `DynamicAgentToolsProvider` used a *permissive* one — and `contribute()` ignored `ctx.dynamicAgentConfig()` entirely and re-resolved from memory, despite `AgentOrchestrator#toolAssemblyContext` documenting that the value is resolved once "so two providers resolving it independently could [not] disagree". The provider now consumes the resolved value.
+5. **Withheld group tools are logged.** `GroupTaskToolsProvider`/`ArtifactToolsProvider` returned an empty contribution silently. Withholding is correct for a forged or finished discussion id — but it is also what happens if the discussion runs on another node, and that failure looked like "the model just lost its tools" with nothing to diagnose from.
+
+**Verified, not changed:** the node-affinity invariant `LiveDiscussionRegistry` rests on. Re-checked against the implementation rather than the note: `NatsConversationCoordinator.publishAndExecute` publishes only `conversationId.getBytes()` as an ordering marker and then runs the callable through `runtime.submitCallable` **locally**; no JetStream consumer deserializes or executes callables, and the payload could not carry one. A member turn cannot be routed off-node.
+
+Suites: 377 across DynamicAgentToolsProvider / AgentOrchestrator / GroupLifecycleOps / MemberTurnExecutor, all green, +7 new (`DynamicAgentConfigContextBoundaryTest`, one nest per observation point a–d).
+
+---
+
 ## 🔎 fix(groups): pre-merge deep review — facilitator HITL bypass, CALL_VOTE guards, metric cardinality, template honesty (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i10-templates`)

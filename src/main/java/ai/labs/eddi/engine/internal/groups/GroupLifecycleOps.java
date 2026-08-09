@@ -253,6 +253,16 @@ public class GroupLifecycleOps {
                 context.put("groupTranscript", new Context(Context.ContextType.object, followUpTranscript));
                 context.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
                 context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
+                // Same injection, and for the same reason, as MemberTurnExecutor: a member
+                // turn that finds no dynamicAgentConfig falls back to the STANDALONE
+                // default, which is fully permissive. This path omitted it, so a follow-up
+                // question to a member of a group that never opted into dynamic agents
+                // handed that member creation/recruitment/delegation tools. An absent
+                // group config means "not opted in" — send an explicitly disabled one.
+                var dynamicAgentConfig = gc.getDynamicAgentConfig() != null
+                        ? gc.getDynamicAgentConfig()
+                        : new AgentGroupConfiguration.DynamicAgentConfig();
+                context.put("dynamicAgentConfig", new Context(Context.ContextType.object, dynamicAgentConfig));
                 inputData.setContext(context);
 
                 CompletableFuture<String> responseFuture = new CompletableFuture<>();

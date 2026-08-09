@@ -67,6 +67,11 @@ class ArtifactToolsProvider implements ToolSourceProvider {
         String callerConversationId = ctx.memory() != null ? ctx.memory().getConversationId() : null;
         var live = liveDiscussionRegistry.getForMember(groupConversationId, callerConversationId);
         if (live.isEmpty()) {
+            // See GroupTaskToolsProvider: withholding is correct, but silent
+            // withholding makes an off-node discussion indistinguishable from a forged
+            // id when the tools simply vanish mid-discussion.
+            LOGGER.debugf("Withholding artifact tools for agent='%s': conversation '%s' is not a member of a discussion "
+                    + "'%s' running on this node", ctx.agentId(), callerConversationId, groupConversationId);
             return ToolContribution.empty();
         }
         AgentGroupConfiguration groupConfiguration = resolveGroup(live.get().getGroupId());

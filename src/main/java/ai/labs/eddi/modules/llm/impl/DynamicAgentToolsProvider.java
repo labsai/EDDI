@@ -24,6 +24,9 @@ import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -117,7 +120,12 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             return ToolContribution.empty();
         }
         List<Object> tools = new ArrayList<>();
-        addDynamicAgentTools(tools, ctx.builtInToolsWhitelist(), ctx.memory(), ctx.groupConversationId());
+        // The turn's already-resolved guardrails, not a second independent resolve.
+        // AgentOrchestrator#toolAssemblyContext documents that dynamicAgentConfig is
+        // resolved once "so two providers resolving it independently could [not]
+        // disagree" — but this provider re-resolved from memory and ignored the
+        // context, so the inconsistency the Javadoc warns about was in the code.
+        addDynamicAgentTools(tools, ctx.builtInToolsWhitelist(), ctx.memory(), ctx.groupConversationId(), ctx.dynamicAgentConfig());
         if (tools.isEmpty()) {
             return ToolContribution.empty();
         }
@@ -141,6 +149,17 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     }
 
     void addDynamicAgentTools(List<Object> tools, List<String> whitelist, IConversationMemory memory, String groupConversationId) {
+        addDynamicAgentTools(tools, whitelist, memory, groupConversationId, null);
+    }
+
+    /**
+     * @param resolvedConfig
+     *            the turn's guardrails as resolved once by the assembly context, or
+     *            {@code null} to resolve them here (the direct-call entry points
+     *            that have no assembly context)
+     */
+    void addDynamicAgentTools(List<Object> tools, List<String> whitelist, IConversationMemory memory, String groupConversationId,
+                              DynamicAgentConfig resolvedConfig) {
         if (whitelist == null || whitelist.isEmpty()) {
             return;
         }
@@ -154,7 +173,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         Set<String> sharedRetainedIds = ConcurrentHashMap.newKeySet();
         String parentAgentId = memory.getAgentId();
         String userId = memory.getUserId();
-        DynamicAgentConfig dynamicConfig = resolveDynamicAgentConfig(memory);
+        DynamicAgentConfig dynamicConfig = resolvedConfig != null ? resolvedConfig : resolveDynamicAgentConfig(memory);
 
         boolean anyDynamicToolAdded = false;
         if (whitelist.contains("create_sub_agent") && agentSetupService != null && conversationService != null) {
@@ -230,39 +249,190 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         }
     }
 
+    /** Context key carrying the group's dynamic-agent guardrails. */
+    static final String CONTEXT_DYNAMIC_AGENT_CONFIG = "context:dynamicAgentConfig";
+
+    /** Context key proving the conversation belongs to a group discussion. */
+    private static final String CONTEXT_GROUP_CONVERSATION_ID = "context:groupConversationId";
+
     /**
-     * Resolves the DynamicAgentConfig for the current conversation. If the agent is
-     * participating in a group discussion, the group's {@link DynamicAgentConfig}
-     * is passed via context variable {@code dynamicAgentConfig} by
-     * {@code GroupConversationService}. If no group config is present (standalone
-     * agent), a permissive default is used.
+     * Tolerant reader for the guardrails, which arrive as a live POJO on the turn
+     * that injects them and as a plain {@code Map} on every turn read back from the
+     * store. Configured to ignore unknown properties so an older stored document
+     * cannot make the whole read fail — a failed read here means "no guardrails",
+     * which is the outcome this class exists to prevent.
+     */
+    private static final ObjectMapper CONFIG_MAPPER = JsonMapper.builder()
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .build();
+
+    /**
+     * Resolves the {@link DynamicAgentConfig} governing this turn.
+     * <p>
+     * <b>Why this is more than one {@code instanceof}.</b> The guardrails reach a
+     * member turn as a context variable that {@code MemberTurnExecutor} injects —
+     * deliberately, and with an explicitly <em>disabled</em> config when the group
+     * configured none, precisely so a group can never inherit the permissive
+     * standalone default. This method used to defeat that in two independent ways,
+     * both landing on {@link #createDefaultDynamicConfig()}:
+     * <ol>
+     * <li>It read the CURRENT step only. Any turn that re-enters a member
+     * conversation without a fresh injection — an HITL tool-approval resume, crash
+     * recovery, the group follow-up path — has no such context on its current
+     * step.</li>
+     * <li>It required a live {@link DynamicAgentConfig} instance. Conversation
+     * memory rebuilds a stored context as {@code new Context(type, map)}, so after
+     * any reload the value is a {@code Map} and the {@code instanceof} fails even
+     * when the key IS present.</li>
+     * </ol>
+     * Both are fixed here: earlier steps are consulted as a fallback (the same
+     * shape as {@code ContextualToolsProvider#resolveGroupIds} and
+     * {@link #resolveDelegationDepth}, which already do this for exactly the resume
+     * case), and a {@code Map} is coerced back into the config.
+     * <p>
+     * The remaining case — a conversation that demonstrably belongs to a group but
+     * whose guardrails cannot be resolved at all — now fails CLOSED. Substituting
+     * the permissive default there would hand roster-mutating, agent-deploying
+     * tools to a member of a discussion whose operator never opted in, which is the
+     * discipline every sibling provider in this package already applies.
      *
      * @param memory
      *            the conversation memory to check for group context
-     * @return the resolved DynamicAgentConfig — group-level if available,
-     *         permissive default otherwise
+     * @return the group's guardrails; a disabled config when the turn is part of a
+     *         group but they cannot be resolved; the permissive standalone default
+     *         only for a conversation with no group context at all
      */
     static DynamicAgentConfig resolveDynamicAgentConfig(IConversationMemory memory) {
-        // Check if GroupConversationService injected a DynamicAgentConfig via context
+        DynamicAgentConfig resolved = readDynamicAgentConfig(memory);
+        if (resolved != null) {
+            LOGGER.debugf("[DYNAMIC] Using group-level DynamicAgentConfig for agent='%s'", sanitize(memory.getAgentId()));
+            return resolved;
+        }
+
+        if (hasGroupContext(memory)) {
+            LOGGER.warnf("[DYNAMIC] Conversation of agent='%s' carries group context but no resolvable dynamicAgentConfig — "
+                    + "withholding dynamic-agent capabilities rather than falling back to the permissive standalone default",
+                    sanitize(memory.getAgentId()));
+            return new DynamicAgentConfig();
+        }
+
+        // Genuinely standalone agent — the permissive default it was written for.
+        return createDefaultDynamicConfig();
+    }
+
+    /**
+     * The injected guardrails from the current step, else the most recent earlier
+     * step that carries them, else {@code null}.
+     */
+    private static DynamicAgentConfig readDynamicAgentConfig(IConversationMemory memory) {
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
-            var contextData = currentStep.getLatestData("context:dynamicAgentConfig");
-            if (contextData != null) {
-                Object value = contextData.getResult();
-                if (value instanceof Context ctx && ctx.getValue() instanceof DynamicAgentConfig groupConfig) {
-                    LOGGER.debugf("[DYNAMIC] Using group-level DynamicAgentConfig for agent='%s'", sanitize(memory.getAgentId()));
-                    return groupConfig;
+            DynamicAgentConfig fromCurrent = asDynamicAgentConfig(currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG));
+            if (fromCurrent != null) {
+                return fromCurrent;
+            }
+        }
+
+        var allSteps = memory.getAllSteps();
+        if (allSteps != null) {
+            List<IData<Object>> priorEntries = allSteps.getAllLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
+            if (priorEntries != null) {
+                for (IData<Object> entry : priorEntries) {
+                    DynamicAgentConfig fromPrior = asDynamicAgentConfig(entry);
+                    if (fromPrior != null) {
+                        return fromPrior;
+                    }
                 }
             }
         }
-        // Fallback: standalone agent — use permissive defaults
-        return createDefaultDynamicConfig();
+        return null;
+    }
+
+    /**
+     * Unwraps a {@code context:*} entry into guardrails, accepting both the live
+     * POJO and the map form read back from the store. Mirrors
+     * {@code AttachmentContextExtractor#asAttachment}, the existing precedent for
+     * this dual read.
+     */
+    private static DynamicAgentConfig asDynamicAgentConfig(IData<?> data) {
+        if (data == null || !(data.getResult() instanceof Context ctx)) {
+            return null;
+        }
+        Object value = ctx.getValue();
+        if (value instanceof DynamicAgentConfig config) {
+            return config;
+        }
+        if (!(value instanceof Map<?, ?> map) || map.isEmpty()) {
+            return null;
+        }
+        try {
+            // Whole-object conversion, not field-by-field: a guardrail added to
+            // DynamicAgentConfig later must not silently read back as its permissive
+            // Java default just because nobody remembered to map it here.
+            return CONFIG_MAPPER.convertValue(map, DynamicAgentConfig.class);
+        } catch (IllegalArgumentException e) {
+            LOGGER.warnf("[DYNAMIC] Stored dynamicAgentConfig context could not be read back (%s) — treating it as unresolvable",
+                    e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Whether this conversation demonstrably belongs to a group discussion — what
+     * tells "standalone agent, use the permissive default" apart from "group member
+     * whose guardrails went missing".
+     * <p>
+     * A group-conversation id that actually carries a value is required, not merely
+     * an entry under the key. "The key exists" is too weak a claim to disable an
+     * agent's configured tools on: a blank or unreadable entry proves nothing, and
+     * treating it as proof would let any malformed step data silently strip a
+     * standalone agent of capabilities its designer explicitly whitelisted.
+     */
+    private static boolean hasGroupContext(IConversationMemory memory) {
+        var currentStep = memory.getCurrentStep();
+        if (currentStep != null && (carriesValue(currentStep.getLatestData(CONTEXT_GROUP_CONVERSATION_ID))
+                || carriesValue(currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG)))) {
+            return true;
+        }
+        var allSteps = memory.getAllSteps();
+        if (allSteps == null) {
+            return false;
+        }
+        return anyCarriesValue(allSteps.getAllLatestData(CONTEXT_GROUP_CONVERSATION_ID))
+                || anyCarriesValue(allSteps.getAllLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG));
+    }
+
+    /** True when the entry is a {@link Context} holding a non-blank value. */
+    private static boolean carriesValue(IData<?> data) {
+        if (data == null || !(data.getResult() instanceof Context ctx) || ctx.getValue() == null) {
+            return false;
+        }
+        return !(ctx.getValue() instanceof String s) || !s.isBlank();
+    }
+
+    private static boolean anyCarriesValue(List<IData<Object>> entries) {
+        if (entries == null) {
+            return false;
+        }
+        for (IData<Object> entry : entries) {
+            if (carriesValue(entry)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
      * Creates a default DynamicAgentConfig for agents without explicit group
      * config. Used when individual agents have dynamic agent tools in their
      * whitelist.
+     * <p>
+     * Permissive by design, and safe ONLY for a genuinely standalone conversation:
+     * the tools it governs are still gated by the agent's own
+     * {@code enableBuiltInTools} switch and built-in tool whitelist, so reaching
+     * this default means an agent designer explicitly asked for these tools outside
+     * any group. {@link #resolveDynamicAgentConfig} must never return it for a turn
+     * that belongs to a group.
      */
     static DynamicAgentConfig createDefaultDynamicConfig() {
         var config = new DynamicAgentConfig();
