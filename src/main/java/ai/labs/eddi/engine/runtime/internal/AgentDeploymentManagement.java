@@ -35,6 +35,7 @@ import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.runtime.Startup;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -195,15 +196,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                                 return;
                             }
 
-                            if (!vaultGrantsSatisfied(deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion())) {
+                            if (!deployIfGranted(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(),
+                                    deploymentInfo.getAgentVersion())) {
                                 // enforce mode only — the agent names a secret it is not
                                 // granted. Left un-added to deploymentInfos so a corrected
                                 // grant is picked up by the next poll.
                                 return;
                             }
-
-                            agentFactory.deployAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(),
-                                    null);
 
                             this.deploymentInfos.add(deploymentInfo);
 
@@ -263,8 +262,67 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      *         {@code eddi.vault.grant-enforcement=enforce} and a provable violation
      *         was found
      */
+    /**
+     * The ONLY way this class deploys an agent.
+     * <p>
+     * The gate previously guarded {@link #checkDeployments()} alone, while
+     * {@code manageAgentDeployments}' latest-version redeploy and
+     * {@link #manageDeploymentOfOldAgent} called the factory directly — so in
+     * {@code enforce} mode an agent with ungranted vault references was blocked by
+     * one path and deployed by another a day later. A gate with a way round it is
+     * not a gate, so there is now a single entry point rather than three call sites
+     * that each have to remember.
+     *
+     * @return {@code true} if the agent was deployed
+     */
+    private boolean deployIfGranted(Environment environment, String agentId, Integer agentVersion)
+            throws ServiceException, IllegalAccessException {
+
+        if (!vaultGrantsSatisfied(agentId, agentVersion)) {
+            return false;
+        }
+        agentFactory.deployAgent(environment, agentId, agentVersion, null);
+        return true;
+    }
+
+    /** Enforcement modes for {@code eddi.vault.grant-enforcement}. */
+    enum GrantEnforcement {
+        OFF, WARN, ENFORCE;
+
+        /**
+         * Strict parse — an unrecognised value is rejected, never defaulted.
+         * {@code grant-enforcement=enforced} silently behaving as {@code warn} would
+         * turn one typo into a security control that is off while appearing on.
+         */
+        static GrantEnforcement parseStrict(String value) {
+            if (value == null || value.isBlank()) {
+                return WARN;
+            }
+            for (GrantEnforcement mode : values()) {
+                if (mode.name().equalsIgnoreCase(value.trim())) {
+                    return mode;
+                }
+            }
+            throw new IllegalArgumentException("Unknown eddi.vault.grant-enforcement value '" + value
+                    + "'. Valid values: off, warn, enforce");
+        }
+    }
+
+    /**
+     * Fails startup on an unusable enforcement mode rather than degrading to warn.
+     * This bean is {@code @Startup}, so the error surfaces at boot with the valid
+     * values named — the same discipline {@code Deployment.Environment.parseStrict}
+     * applies where an environment is acted on.
+     */
+    @PostConstruct
+    void validateGrantEnforcement() {
+        grantEnforcement = GrantEnforcement.parseStrict(vaultGrantEnforcement);
+    }
+
+    private GrantEnforcement grantEnforcement = GrantEnforcement.WARN;
+
     private boolean vaultGrantsSatisfied(String agentId, Integer agentVersion) {
-        if (vaultGrantChecker == null || "off".equalsIgnoreCase(vaultGrantEnforcement)) {
+        if (vaultGrantChecker == null || grantEnforcement == GrantEnforcement.OFF) {
             return true;
         }
         List<String> ungranted;
@@ -279,7 +337,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             return true;
         }
 
-        boolean enforce = "enforce".equalsIgnoreCase(vaultGrantEnforcement);
+        boolean enforce = grantEnforcement == GrantEnforcement.ENFORCE;
         String message = format(
                 "Agent (id=%s, version=%d) references vault secret(s) it is not granted: %s. "
                         + "SecretMetadata.allowedAgents lists which agents may use a secret; widen the grant or remove the reference.",
@@ -410,7 +468,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
                                 if (latestAgent != null && latestAgent.getVersion() <= agentVersion) {
                                     // we attempt to deploy a Agent if it is the latest
-                                    agentFactory.deployAgent(environment, agentId, agentVersion, null);
+                                    deployIfGranted(environment, agentId, agentVersion);
                                 } else {
                                     manageDeploymentOfOldAgent(environment, agentId, agentVersion);
 
@@ -459,7 +517,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         } else {
             // not the latest agent, but still has active conversations connected to it,
             // therefore we deploy it as well to make sure we don't interrupt UX
-            agentFactory.deployAgent(environment, agentId, agentVersion, null);
+            deployIfGranted(environment, agentId, agentVersion);
         }
     }
 

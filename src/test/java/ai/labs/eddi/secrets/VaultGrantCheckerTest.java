@@ -6,8 +6,10 @@ package ai.labs.eddi.secrets;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
+import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -51,6 +53,8 @@ class VaultGrantCheckerTest {
     private ISecretProvider secretProvider;
     private IWorkflowStore workflowStore;
     private ILlmStore llmStore;
+    private IApiCallsStore apiCallsStore;
+    private IMcpCallsStore mcpCallsStore;
     private VaultGrantChecker checker;
 
     @BeforeEach
@@ -60,7 +64,10 @@ class VaultGrantCheckerTest {
         llmStore = mock(ILlmStore.class);
         when(secretProvider.isAvailable()).thenReturn(true);
 
-        checker = new VaultGrantChecker(secretProvider, workflowStore, llmStore, mock(IApiCallsStore.class), mock(IMcpCallsStore.class));
+        apiCallsStore = mock(IApiCallsStore.class);
+        mcpCallsStore = mock(IMcpCallsStore.class);
+
+        checker = new VaultGrantChecker(secretProvider, workflowStore, llmStore, apiCallsStore, mcpCallsStore);
     }
 
     /**
@@ -85,6 +92,26 @@ class VaultGrantCheckerTest {
         task.setParameters(new LinkedHashMap<>(Map.of("apiKey", VAULT_REF, "modelName", "claude-sonnet-4-6")));
         when(llmStore.read(eq(LLM_ID), anyInt())).thenReturn(new LlmConfiguration(List.of(task)));
 
+        return agent;
+    }
+
+    /**
+     * An agent with one workflow step of {@code stepType} pointing at
+     * {@code configId}.
+     */
+    private AgentConfiguration agentWithStep(String stepType, String configId) throws Exception {
+        var agent = new AgentConfiguration();
+        agent.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=1")));
+
+        var step = new WorkflowConfiguration.WorkflowStep();
+        step.setType(URI.create("eddi://" + stepType));
+        var stepConfig = new LinkedHashMap<String, Object>();
+        stepConfig.put("uri", "eddi://" + stepType + "/store/things/" + configId + "?version=1");
+        step.setConfig(stepConfig);
+
+        var workflow = new WorkflowConfiguration();
+        workflow.setWorkflowSteps(List.of(step));
+        when(workflowStore.read(eq(WORKFLOW_ID), anyInt())).thenReturn(workflow);
         return agent;
     }
 
@@ -180,6 +207,56 @@ class VaultGrantCheckerTest {
         void nothingToCheck() {
             assertTrue(checker.findUngrantedReferences(new AgentConfiguration(), "a").isEmpty());
             assertTrue(checker.findUngrantedReferences(null, "a").isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("every extension type is scanned, not just LLM configs")
+    class AllExtensionTypes {
+
+        /**
+         * The LLM-only suite could not tell a working scanner from one that had
+         * silently stopped covering httpcalls or MCP: both stores were mocked and never
+         * reached.
+         */
+        @Test
+        @DisplayName("an httpcall config's vault reference is found")
+        void apiCallsAreScanned() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+
+            var apiCalls = new ApiCallsConfiguration();
+            apiCalls.setTargetServerUrl("https://api.example.com/" + VAULT_REF);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(apiCalls);
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+        }
+
+        @Test
+        @DisplayName("an MCP config's vault reference is found")
+        void mcpCallsAreScanned() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.mcpcalls", LLM_ID);
+
+            var mcpCalls = new McpCallsConfiguration();
+            mcpCalls.setMcpServerUrl("https://mcp.example.com");
+            mcpCalls.setApiKey(VAULT_REF);
+            when(mcpCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(mcpCalls);
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+        }
+
+        @Test
+        @DisplayName("a granted agent passes on those types too")
+        void grantedAgentPassesForEveryType() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.mcpcalls", LLM_ID);
+
+            var mcpCalls = new McpCallsConfiguration();
+            mcpCalls.setApiKey(VAULT_REF);
+            when(mcpCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(mcpCalls);
+
+            assertTrue(checker.findUngrantedReferences(agent, "agent-owner").isEmpty());
         }
     }
 
