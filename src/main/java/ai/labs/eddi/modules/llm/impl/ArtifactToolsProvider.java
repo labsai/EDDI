@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.llm.tools.impl.ArtifactTools;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
+import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
 import java.util.List;
@@ -71,7 +72,8 @@ class ArtifactToolsProvider implements ToolSourceProvider {
             // withholding makes an off-node discussion indistinguishable from a forged
             // id when the tools simply vanish mid-discussion.
             LOGGER.debugf("Withholding artifact tools for agent='%s': conversation '%s' is not a member of a discussion "
-                    + "'%s' running on this node", ctx.agentId(), callerConversationId, groupConversationId);
+                    + "'%s' running on this node", LogSanitizer.sanitize(ctx.agentId()), LogSanitizer.sanitize(callerConversationId),
+                    LogSanitizer.sanitize(groupConversationId));
             return ToolContribution.empty();
         }
         AgentGroupConfiguration groupConfiguration = resolveGroup(live.get().getGroupId());
