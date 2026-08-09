@@ -53,7 +53,8 @@ export function UpdateUsageDialog({
         <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
           {t("editor.usedInAgents", {
             count: usages.length,
-            defaultValue: "Used in {{count}} agent(s)",
+            defaultValue: "Used in {{count}} agent",
+            defaultValue_other: "Used in {{count}} agents",
           })}
         </h3>
       </div>

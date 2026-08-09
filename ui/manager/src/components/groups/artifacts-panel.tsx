@@ -73,7 +73,11 @@ export function ArtifactsPanel({ artifacts, className }: ArtifactsPanelProps) {
                 {revisionCount > 0 && (
                   <span
                     className="flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground"
-                    title={t("groups.artifactRevisions", "{{count}} prior revision(s)", { count: revisionCount })}
+                    title={t("groups.artifactRevisions", {
+                      defaultValue: "{{count}} prior revision",
+                      defaultValue_other: "{{count}} prior revisions",
+                      count: revisionCount,
+                    })}
                   >
                     <History className="h-2.5 w-2.5" aria-hidden="true" />
                     {revisionCount}

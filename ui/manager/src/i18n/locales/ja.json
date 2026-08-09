@@ -69,7 +69,10 @@
     "modeManager": "マネージャー",
     "modeWorkforce": "ワークフォース",
     "switchMode": "ワークスペースを切替",
-    "operator": "プラットフォームオペレーター"
+    "operator": "プラットフォームオペレーター",
+    "workforce": "ワークフォース",
+    "monitoring": "会話モニタリング",
+    "analytics": "分析"
   },
   "theme": {
     "light": "ライト",
@@ -193,7 +196,9 @@
     "previous": "前へ",
     "next": "次へ",
     "dismiss": "破棄",
-    "refreshFailed": "更新できませんでした — 最後に読み込んだデータを表示しています。"
+    "refreshFailed": "更新できませんでした — 最後に読み込んだデータを表示しています。",
+    "settings": "設定",
+    "history": "履歴"
   },
   "agents": {
     "confirmDeleteDescription": "この操作は元に戻せません。エージェントとそのすべてのデータが完全に削除されます。",
@@ -559,12 +564,9 @@
   },
   "conversations": {
     "confirmDeleteSoft": "デフォルトではソフト削除です。会話は一覧から非表示になりますが、保存データはサーバーに残ります。",
-    "confirmEndDesc": "{{count}} 件の会話が ENDED に設定されます。一時停止中（人間待ち）の会話は、承認を考慮したパスを通じて安全に終了されます。",
-    "confirmPurgeDesc": "これにより、{{days}} 日以上前に終了（ENDED）した会話を、保存されたメモリと添付ファイルを含めて完全に削除します。元に戻せません。",
     "deletePermanentLabel": "完全に削除 — 添付ファイル、メモリスナップショット、承認履歴も消去します。元に戻せません。",
     "monitorSubtitle": "エージェントごとに進行中の会話を監視し、一括管理します。",
     "noActiveDesc": "このエージェントバージョンには現在進行中の会話がありません。",
-    "pausedNote": "選択した会話のうち {{count}} 件は人間待ちの状態で、保留中の承認がキャンセルされます。",
     "purgeDesc": "最終アクティビティが指定日数より前の終了（ENDED）した会話を完全に削除します。",
     "selectAgentPromptDesc": "アクティブな会話はエージェントとバージョンごとに一覧表示されます。",
     "searchPlaceholder": "会話 ID で検索...",
@@ -597,8 +599,6 @@
     "pageNumber": "{{page}} ページ",
     "deletePermanentAction": "完全に削除",
     "step": "ステップ",
-    "endSuccess": "{{count}} 件の会話を終了しました",
-    "purgeSuccess": "終了した会話 {{count}} 件を消去しました",
     "monitorTitle": "アクティブな会話",
     "backToList": "会話一覧に戻る",
     "selectAgentToMonitor": "エージェントを選択",
@@ -612,7 +612,17 @@
     "olderThanDays": "経過日数（日）",
     "purgeAction": "消去",
     "confirmEndTitle": "選択した会話を終了しますか？",
-    "confirmPurgeTitle": "終了した会話を消去しますか？"
+    "confirmPurgeTitle": "終了した会話を消去しますか？",
+    "confirmEndDesc_other": "{{count}} 件の会話が ENDED に設定されます。一時停止中（人間待ち）の会話は、承認を考慮したパスを通じて安全に終了されます。",
+    "confirmEndDesc_one": "{{count}} 件の会話が ENDED に設定されます。一時停止中（人間待ち）の会話は、承認を考慮したパスを通じて安全に終了されます。",
+    "confirmPurgeDesc_other": "これにより、{{days}} 日以上前に終了（ENDED）した会話を、保存されたメモリと添付ファイルを含めて完全に削除します。元に戻せません。",
+    "confirmPurgeDesc_one": "これにより、{{days}} 日以上前に終了（ENDED）した会話を、保存されたメモリと添付ファイルを含めて完全に削除します。元に戻せません。",
+    "pausedNote_other": "選択した会話のうち {{count}} 件は人間待ちの状態で、保留中の承認がキャンセルされます。",
+    "pausedNote_one": "選択した会話のうち {{count}} 件は人間待ちの状態で、保留中の承認がキャンセルされます。",
+    "endSuccess_other": "{{count}} 件の会話を終了しました",
+    "endSuccess_one": "{{count}} 件の会話を終了しました",
+    "purgeSuccess_other": "終了した会話 {{count}} 件を消去しました",
+    "purgeSuccess_one": "終了した会話 {{count}} 件を消去しました"
   },
   "conversationDetail": {
     "backToConversations": "会話一覧に戻る",
@@ -755,7 +765,6 @@
     "emptyDescription": "最初の {{type}} を作成してワークフローで使用しましょう。"
   },
   "editor": {
-    "cascadePartialFailure": "{{count}} 件のカスケード更新が失敗しました",
     "compare": "比較",
     "compareVersions": "バージョンを比較",
     "deployFailed": "デプロイに失敗しました",
@@ -784,13 +793,16 @@
     "formPlaceholder": "ビジュアルエディタは近日公開予定です。JSONタブで編集してください。",
     "jsonSchema": "スキーマ検証が有効",
     "cascadeMode": "変更は親 Workflow と Agent に反映されます",
-    "usedInAgents": "{{count}} 個の Agent で使用中",
     "updateUsageHint": "選択した Workflows と Agents を新バージョンに更新しますか？",
     "updateUsage": "選択を更新",
     "skipUpdate": "スキップ",
     "cascading": "更新中...",
     "cascadeSuccess": "カスケード更新完了",
-    "invalidJson": "JSON が無効です — JSON タブに切り替えて修正してください。"
+    "invalidJson": "JSON が無効です — JSON タブに切り替えて修正してください。",
+    "cascadePartialFailure_other": "{{count}} 件のカスケード更新が失敗しました",
+    "cascadePartialFailure_one": "{{count}} 件のカスケード更新が失敗しました",
+    "usedInAgents_other": "{{count}} 個の Agent で使用中",
+    "usedInAgents_one": "{{count}} 個の Agent で使用中"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1513,16 +1525,13 @@
     "vaultNotConfigured": "シークレットボルトが未設定です",
     "viewDocs": "ドキュメントを表示",
     "selectAgentFirst": "まずはエージェントを選択",
-    "tableTitle": "テナント「{{tenant}}」のシークレット（{{count}}件）",
     "dangerZoneTitle": "暗号化キーのライフサイクル",
     "dangerZoneDesc": "Vault の暗号鍵に対する運用復旧アクションです。これらを使用して鍵をローテーションしたり、マスターキーの変更後にアクセスを復旧したりします。上部にある個々の Secret の値のローテーションとは異なります。",
     "rotateDekTitle": "暗号化キー (DEK) をローテーション",
     "rotateDekBlurb": "安全 — 再起動不要。テナントごとの新しいデータ暗号化キーを生成し、このテナントのすべての Secret を再暗号化します。",
     "rotateDekAction": "DEK をローテーション",
     "rotateDekConfirmTitle": "暗号化キー (DEK) をローテーションしますか？",
-    "rotateDekConfirmDesc": "これにより、テナント「{{tenant}}」の新しいデータ暗号化キーが生成され、その {{count}} 件の Secret が再暗号化されます。安全であり、再起動なしで直ちに反映されます。",
     "rotateDekConfirm": "今すぐ DEK をローテーション",
-    "rotateDekSuccess": "暗号化キーをローテーションしました — {{count}} 件の Secret を再暗号化しました",
     "rotateKekTitle": "マスターキー (KEK) をローテーション",
     "rotateKekBlurb": "すべてのテナントの DEK を新しいマスターキーで再暗号化します。EDDI_VAULT_MASTER_KEY の更新と、その後の再起動が必要です。",
     "rotateKekAction": "マスターキーをローテーション",
@@ -1536,18 +1545,29 @@
     "kekNewKeyPlaceholder": "新しいキー — 8 文字以上",
     "kekNewKeyTooShort": "新しいマスターキーは 8 文字以上である必要があります。",
     "kekRestartHint": "ローテーション後、EDDI_VAULT_MASTER_KEY を新しいキーに更新し、EDDI を再起動する必要があります。",
-    "kekResultTitle": "マスターキーをローテーションしました — {{count}} 件の DEK を再暗号化しました",
     "kekResultInstruction": "対応が必要です: 環境変数 EDDI_VAULT_MASTER_KEY を新しいマスターキーに設定し、EDDI を再起動してください。それまで、稼働中のインスタンスはメモリ内で古いキーを使い続けます。",
-    "rotateKekSuccess": "マスターキーをローテーションしました — {{count}} 件の DEK を再暗号化しました。EDDI_VAULT_MASTER_KEY を更新して再起動してください。",
     "resetTenantTitle": "このテナントの Vault をリセット",
     "resetTenantBlurb": "破壊的な最終手段です。すべての Secret と DEK を完全に削除し、Vault を新規の状態から開始できるようにします — マスターキーを紛失または変更した後に使用します。",
     "resetTenantAction": "Vault をリセット",
     "resetTenantConfirmTitle": "このテナントの Vault をリセットしますか？",
-    "resetTenantConfirmDesc": "これにより、テナント「{{tenant}}」のすべての {{count}} 件の Secret とデータ暗号化キーが完全に削除されます。マスターキーを紛失または変更し、古いキーが利用できない場合の復旧手順として使用してください。この操作は元に戻せません。",
     "resetTenantConfirm": "Vault を完全にリセット",
-    "resetSecretCount": "{{count}} 件の Secret が完全に失われます",
     "resetConfirmLabel": "確認するにはテナント名「{{tenant}}」を入力してください",
-    "resetTenantSuccess": "「{{tenant}}」の Vault をリセットしました — {{count}} 件の Secret を完全に削除しました"
+    "tableTitle_other": "テナント「{{tenant}}」のシークレット（{{count}}件）",
+    "tableTitle_one": "テナント「{{tenant}}」のシークレット（{{count}}件）",
+    "rotateDekConfirmDesc_other": "これにより、テナント「{{tenant}}」の新しいデータ暗号化キーが生成され、その {{count}} 件の Secret が再暗号化されます。安全であり、再起動なしで直ちに反映されます。",
+    "rotateDekConfirmDesc_one": "これにより、テナント「{{tenant}}」の新しいデータ暗号化キーが生成され、その {{count}} 件の Secret が再暗号化されます。安全であり、再起動なしで直ちに反映されます。",
+    "rotateDekSuccess_other": "暗号化キーをローテーションしました — {{count}} 件の Secret を再暗号化しました",
+    "rotateDekSuccess_one": "暗号化キーをローテーションしました — {{count}} 件の Secret を再暗号化しました",
+    "kekResultTitle_other": "マスターキーをローテーションしました — {{count}} 件の DEK を再暗号化しました",
+    "kekResultTitle_one": "マスターキーをローテーションしました — {{count}} 件の DEK を再暗号化しました",
+    "rotateKekSuccess_other": "マスターキーをローテーションしました — {{count}} 件の DEK を再暗号化しました。EDDI_VAULT_MASTER_KEY を更新して再起動してください。",
+    "rotateKekSuccess_one": "マスターキーをローテーションしました — {{count}} 件の DEK を再暗号化しました。EDDI_VAULT_MASTER_KEY を更新して再起動してください。",
+    "resetTenantConfirmDesc_other": "これにより、テナント「{{tenant}}」のすべての {{count}} 件の Secret とデータ暗号化キーが完全に削除されます。マスターキーを紛失または変更し、古いキーが利用できない場合の復旧手順として使用してください。この操作は元に戻せません。",
+    "resetTenantConfirmDesc_one": "これにより、テナント「{{tenant}}」のすべての {{count}} 件の Secret とデータ暗号化キーが完全に削除されます。マスターキーを紛失または変更し、古いキーが利用できない場合の復旧手順として使用してください。この操作は元に戻せません。",
+    "resetSecretCount_other": "{{count}} 件の Secret が完全に失われます",
+    "resetSecretCount_one": "{{count}} 件の Secret が完全に失われます",
+    "resetTenantSuccess_other": "「{{tenant}}」の Vault をリセットしました — {{count}} 件の Secret を完全に削除しました",
+    "resetTenantSuccess_one": "「{{tenant}}」の Vault をリセットしました — {{count}} 件の Secret を完全に削除しました"
   },
   "audit": {
     "title": "監査ログ",
@@ -2161,7 +2181,6 @@
     "reviewTimeout": "エージェントタイムアウト",
     "reviewUnassigned": "未割り当て",
     "reviewUnassignedHint": "作成前に戻ってエージェントを割り当ててください。",
-    "reviewUnassignedWarning": "{{count}} 名のメンバーが未割り当て",
     "selectAgent": "エージェントを選択…",
     "selectOrStart": "履歴から過去のディスカッションを選択するか、下に質問を入力して新しいディスカッションを開始します。",
     "shiftEnter": "改行",
@@ -2403,7 +2422,6 @@
     "abstainedBody": "このラウンドでは新たな発言を控えました。",
     "convergenceSkipped_other": "· 以降の {{count}} ラウンドをスキップ",
     "convergenceSkipped_one": "· 以降の {{count}} ラウンドをスキップ",
-    "convergenceSkipped": "· 以降の {{skipped}} ラウンドをスキップ",
     "attachmentTotalTooLarge": "添付ファイルの合計サイズが上限を超えています",
     "convergenceInert": "設定されていますが、このフェーズは 1 回しか実行されないためジャッジは動きません。設定を解除するか、フェーズの反復を 2 回以上にしてください。",
     "questionTooLong": "質問は最大 {{max}} 文字です",
@@ -2415,7 +2433,6 @@
     "artifactDraft": "下書き",
     "artifactFinal": "確定版",
     "artifactLastEdited": "最終編集者: {{agent}}",
-    "artifactRevisions": "以前のリビジョン {{count}} 件",
     "artifactUpdatedBadge": "{{name}} を更新しました（v{{version}}）",
     "artifactsTitle": "共有アーティファクト（{{count}}）",
     "concessionLedgerTitle": "譲歩の記録",
@@ -2443,7 +2460,6 @@
     "notSet": "未設定",
     "retroConfigLabel": "振り返りの学び",
     "retroConfigValue": "1回あたり {{perRun}} 件、最大保存 {{stored}} 件",
-    "retroRecordedBadge": "{{phase}}: {{count}} 件の学びをチームメモリに保存しました",
     "stateAwaitingHumanInput": "メンバーの入力待ち",
     "summarized": "要約済み",
     "transcriptWindowed": "最初の {{count}} 件のトランスクリプトは、以降のターンのコンテキストを抑えるためにローリングサマリーに折りたたまれています。要約を見るにはホバーしてください。",
@@ -2499,7 +2515,19 @@
     "assignmentModeBid": "入札制（メンバーが入札し、確信度が最も高い者が獲得）",
     "assignmentModeBidShort": "入札制",
     "assignmentModeRoleHint": "プランナーまたは設定が各タスクを割り当てるか、ラウンドロビンで配分します。",
-    "assignmentModeBidHint": "オークションが割に合わない場合はロール割り当てに戻ります。入札者または未割り当てタスクが 2 未満、あるいはターン予算が不足しているときです。"
+    "assignmentModeBidHint": "オークションが割に合わない場合はロール割り当てに戻ります。入札者または未割り当てタスクが 2 未満、あるいはターン予算が不足しているときです。",
+    "contextWindowSummarizer": "要約モデル",
+    "contextWindowNoSummarizer": "なし",
+    "contextWindowModel": "要約モデル",
+    "contextWindowModelPlaceholder": "モデル",
+    "contextWindowSummarizerMissing": "要約モデルがない場合、あふれた分は何も告げずに単純な省略表示に戻ります。",
+    "facilitatorMaxMovesCeiling": "最大 {{max}} 回です。ファシリテーターは限定的な介入であり、オーケストレーターではありません。",
+    "reviewUnassignedWarning_other": "{{count}} 名のメンバーが未割り当て",
+    "reviewUnassignedWarning_one": "{{count}} 名のメンバーが未割り当て",
+    "retroRecordedBadge_other": "{{phase}}: {{count}} 件の学びをチームメモリに保存しました",
+    "retroRecordedBadge_one": "{{phase}}: {{count}} 件の学びをチームメモリに保存しました",
+    "artifactRevisions_other": "以前のリビジョン {{count}} 件",
+    "artifactRevisions_one": "以前のリビジョン {{count}} 件"
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -2866,10 +2894,13 @@
     "createButton": "グループを作成",
     "created": "テンプレートからグループを作成しました",
     "nameLabel": "グループ名",
-    "roleCount": "割り当てが必要な役割: {{count}} 件",
     "selectAgent": "エージェントを選択…",
     "subtitle": "パッケージ化され、あらかじめ調整済みのディスカッションから始めましょう — 名前付きの役割にエージェントを割り当てるだけです。",
-    "title": "グループテンプレート"
+    "title": "グループテンプレート",
+    "roleCount_other": "割り当てが必要な役割: {{count}} 件",
+    "roleCount_one": "割り当てが必要な役割: {{count}} 件",
+    "empty": "利用できるテンプレートがありません",
+    "emptyDescription": "このサーバーにはグループテンプレートが同梱されていません。ウィザードで一から作成できます。"
   },
   "channels": {
     "agentIdPlaceholder": "メッセージを処理するエージェント ID",
@@ -3110,7 +3141,6 @@
     "deleteSelected": "選択した {{count}} 件を削除",
     "description": "どのエージェントやパッケージからも参照されていないリソースを検出してクリーンアップします。",
     "deselectAll": "すべて選択解除",
-    "found": "{{count}} 件の孤立項目が見つかりました",
     "includeDeleted": "ソフト削除済みを含む",
     "lastScanned": "最終スキャン",
     "noOrphans": "孤立項目は見つかりません",
@@ -3123,7 +3153,9 @@
     "scanning": "リソースをスキャン中…",
     "selectAll": "すべて選択",
     "softDeleted": "削除済み",
-    "title": "孤立検出"
+    "title": "孤立検出",
+    "found_other": "{{count}} 件の孤立項目が見つかりました",
+    "found_one": "{{count}} 件の孤立項目が見つかりました"
   },
   "quotas": {
     "apiCallsMinute": "API 呼び出し / 分",
@@ -3193,7 +3225,9 @@
   },
   "variables": {
     "deleteKey": "{{key}} を削除",
-    "editKey": "{{key}} を編集"
+    "editKey": "{{key}} を編集",
+    "tableTitle_other": "{{count}} 件の変数",
+    "tableTitle_one": "{{count}} 件の変数"
   },
   "workflowEditor": {
     "endpoints": "エンドポイント",
@@ -3472,7 +3506,6 @@
     "cadenceAdded": "ケイデンスを追加しました",
     "cadenceDeleted": "ケイデンスを削除しました",
     "cadenceRunning": "現在、ケイデンスによって開始されたディスカッションが進行中です。",
-    "cadenceSummary": "1回の実行につき最大 {{max}} タスク",
     "cadencesEmpty": "定期実行されるケイデンスはまだ設定されていません。",
     "cadencesTitle": "ケイデンス（{{count}}）",
     "confirmDeleteCadenceDesc": "これによりスケジュールされた実行が停止します。すでに実行済みのディスカッションには影響しません。",
@@ -3501,6 +3534,11 @@
     "title": "常設チームワークスペース",
     "totalCost": "合計コスト",
     "verified": "検証済み",
-    "maxCostInvalid": "1回あたりの最大コストは 0 以上の数値である必要があります。"
+    "maxCostInvalid": "1回あたりの最大コストは 0 以上の数値である必要があります。",
+    "cadenceSummary_other": "1回の実行につき最大 {{max}} タスク",
+    "cadenceSummary_one": "1回の実行につき最大 {{max}} タスク"
+  },
+  "workforceWizard": {
+    "title": "新しいチーム"
   }
 }

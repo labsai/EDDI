@@ -69,7 +69,10 @@
     "modeManager": "Gerenciador",
     "modeWorkforce": "Equipe",
     "switchMode": "Alternar espaço",
-    "operator": "Operador da plataforma"
+    "operator": "Operador da plataforma",
+    "workforce": "Equipa",
+    "monitoring": "Monitorização de conversas",
+    "analytics": "Análises"
   },
   "theme": {
     "light": "Claro",
@@ -193,7 +196,9 @@
     "previous": "Anterior",
     "next": "Próximo",
     "dismiss": "Dispensar",
-    "refreshFailed": "Não foi possível atualizar — a mostrar os últimos dados carregados."
+    "refreshFailed": "Não foi possível atualizar — a mostrar os últimos dados carregados.",
+    "settings": "Definições",
+    "history": "Histórico"
   },
   "agents": {
     "confirmDeleteDescription": "Esta ação não pode ser desfeita. O agente e todos os seus dados serão removidos permanentemente.",
@@ -561,12 +566,9 @@
   },
   "conversations": {
     "confirmDeleteSoft": "Por padrão, esta é uma exclusão reversível — a conversa é ocultada das listas, mas seus dados são mantidos no servidor.",
-    "confirmEndDesc": "{{count}} conversa(s) serão marcadas como ENCERRADAS. As conversas pausadas (Aguardando humano) são encerradas com segurança através do fluxo compatível com aprovações.",
-    "confirmPurgeDesc": "Isto exclui permanentemente as conversas ENCERRADAS com mais de {{days}} dia(s), incluindo a memória armazenada e os anexos. Não pode ser desfeito.",
     "deletePermanentLabel": "Excluir permanentemente — também apaga anexos, o snapshot de memória e o histórico de aprovações. Não pode ser desfeito.",
     "monitorSubtitle": "Monitore e gerencie em massa as conversas em andamento por agente.",
     "noActiveDesc": "Esta versão do agente não tem conversas em andamento no momento.",
-    "pausedNote": "{{count}} das conversas selecionadas estão Aguardando humano e terão sua aprovação pendente cancelada.",
     "purgeDesc": "Exclua permanentemente as conversas ENCERRADAS cuja última atividade seja anterior ao número de dias informado.",
     "selectAgentPromptDesc": "As conversas ativas são listadas por agente e versão.",
     "searchPlaceholder": "Pesquisar por ID da conversa...",
@@ -599,8 +601,6 @@
     "pageNumber": "Página {{page}}",
     "deletePermanentAction": "Excluir permanentemente",
     "step": "etapa",
-    "endSuccess": "{{count}} conversa(s) encerrada(s)",
-    "purgeSuccess": "{{count}} conversa(s) encerrada(s) removida(s)",
     "monitorTitle": "Conversas ativas",
     "backToList": "Voltar às conversas",
     "selectAgentToMonitor": "Selecionar um agente",
@@ -615,7 +615,22 @@
     "purgeAction": "Remover",
     "confirmEndTitle": "Encerrar as conversas selecionadas?",
     "confirmPurgeTitle": "Remover conversas encerradas?",
-    "count_many": "{{count}} conversas"
+    "count_many": "{{count}} conversas",
+    "confirmEndDesc_many": "{{count}} conversas serão marcadas como ENCERRADAS. As conversas pausadas (Aguardando humano) são encerradas com segurança através do fluxo compatível com aprovações.",
+    "confirmEndDesc_one": "{{count}} conversa serão marcadas como ENCERRADAS. As conversas pausadas (Aguardando humano) são encerradas com segurança através do fluxo compatível com aprovações.",
+    "confirmEndDesc_other": "{{count}} conversas serão marcadas como ENCERRADAS. As conversas pausadas (Aguardando humano) são encerradas com segurança através do fluxo compatível com aprovações.",
+    "confirmPurgeDesc_many": "Isto exclui permanentemente as conversas ENCERRADAS com mais de {{days}} dias, incluindo a memória armazenada e os anexos. Não pode ser desfeito.",
+    "confirmPurgeDesc_one": "Isto exclui permanentemente as conversas ENCERRADAS com mais de {{days}} dia, incluindo a memória armazenada e os anexos. Não pode ser desfeito.",
+    "confirmPurgeDesc_other": "Isto exclui permanentemente as conversas ENCERRADAS com mais de {{days}} dias, incluindo a memória armazenada e os anexos. Não pode ser desfeito.",
+    "pausedNote_many": "{{count}} das conversas selecionadas estão Aguardando humano e terão a sua aprovação pendente cancelada.",
+    "pausedNote_one": "{{count}} das conversas selecionadas está Aguardando humano e terá a sua aprovação pendente cancelada.",
+    "pausedNote_other": "{{count}} das conversas selecionadas estão Aguardando humano e terão a sua aprovação pendente cancelada.",
+    "endSuccess_many": "{{count}} conversas encerradas",
+    "endSuccess_one": "{{count}} conversa encerrada",
+    "endSuccess_other": "{{count}} conversas encerradas",
+    "purgeSuccess_many": "{{count}} conversas encerradas removidas",
+    "purgeSuccess_one": "{{count}} conversa encerrada removida",
+    "purgeSuccess_other": "{{count}} conversas encerradas removidas"
   },
   "conversationDetail": {
     "backToConversations": "Voltar às conversas",
@@ -760,7 +775,6 @@
     "count_many": "{{count}} recursos"
   },
   "editor": {
-    "cascadePartialFailure": "{{count}} atualização(ões) em cascata falharam",
     "compare": "Comparar",
     "compareVersions": "Comparar versões",
     "deployFailed": "Falha na implantação",
@@ -789,13 +803,18 @@
     "formPlaceholder": "Editor visual em breve. Use a aba JSON para editar.",
     "jsonSchema": "Validação de esquema ativa",
     "cascadeMode": "Alterações serão propagadas ao workflow e agent pai",
-    "usedInAgents": "Usado em {{count}} agent(s)",
     "updateUsageHint": "Atualizar os workflows e agents selecionados para a nova versão?",
     "updateUsage": "Atualizar selecionados",
     "skipUpdate": "Pular",
     "cascading": "Atualizando...",
     "cascadeSuccess": "Atualização em cascata concluída",
-    "invalidJson": "JSON inválido — mude para a aba JSON para corrigir."
+    "invalidJson": "JSON inválido — mude para a aba JSON para corrigir.",
+    "cascadePartialFailure_many": "{{count}} atualizaçãoões em cascata falharam",
+    "cascadePartialFailure_one": "{{count}} atualização em cascata falharam",
+    "cascadePartialFailure_other": "{{count}} atualizaçãoões em cascata falharam",
+    "usedInAgents_many": "Usado em {{count}} agents",
+    "usedInAgents_one": "Usado em {{count}} agent",
+    "usedInAgents_other": "Usado em {{count}} agents"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1518,16 +1537,13 @@
     "vaultNotConfigured": "Cofre de segredos não configurado",
     "viewDocs": "Ver documentação",
     "selectAgentFirst": "Selecione um agente primeiro",
-    "tableTitle": "{{count}} segredo(s) no locatário \"{{tenant}}\"",
     "dangerZoneTitle": "Ciclo de vida da chave de criptografia",
     "dangerZoneDesc": "Ações de recuperação operacional para as chaves criptográficas do Vault. Use-as para rotacionar chaves ou recuperar o acesso após a alteração da chave mestra. Diferente de rotacionar o valor de um segredo individual acima.",
     "rotateDekTitle": "Rotacionar a chave de criptografia (DEK)",
     "rotateDekBlurb": "Seguro — sem reinício. Gera uma nova chave de criptografia de dados por locatário e recriptografa todos os segredos deste locatário.",
     "rotateDekAction": "Rotacionar DEK",
     "rotateDekConfirmTitle": "Rotacionar a chave de criptografia (DEK)?",
-    "rotateDekConfirmDesc": "Isto gera uma nova chave de criptografia de dados para o locatário \"{{tenant}}\" e recriptografa seus {{count}} segredo(s). É seguro e entra em vigor imediatamente — nenhum reinício é necessário.",
     "rotateDekConfirm": "Rotacionar DEK agora",
-    "rotateDekSuccess": "Chave de criptografia rotacionada — {{count}} segredo(s) recriptografado(s)",
     "rotateKekTitle": "Rotacionar a chave mestra (KEK)",
     "rotateKekBlurb": "Recriptografa todos os DEKs dos locatários com uma nova chave mestra. Requer atualizar EDDI_VAULT_MASTER_KEY e reiniciar em seguida.",
     "rotateKekAction": "Rotacionar chave mestra",
@@ -1541,18 +1557,37 @@
     "kekNewKeyPlaceholder": "Nova chave — pelo menos 8 caracteres",
     "kekNewKeyTooShort": "A nova chave mestra deve ter pelo menos 8 caracteres.",
     "kekRestartHint": "Após a rotação, você deve atualizar EDDI_VAULT_MASTER_KEY com a nova chave e reiniciar o EDDI.",
-    "kekResultTitle": "Chave mestra rotacionada — {{count}} DEK(s) recriptografado(s)",
     "kekResultInstruction": "Ação necessária: defina a variável de ambiente EDDI_VAULT_MASTER_KEY com a NOVA chave mestra e reinicie o EDDI. Até que você faça isso, a instância em execução ainda usa a chave antiga na memória.",
-    "rotateKekSuccess": "Chave mestra rotacionada — {{count}} DEK(s) recriptografado(s). Atualize EDDI_VAULT_MASTER_KEY e reinicie.",
     "resetTenantTitle": "Redefinir o Vault para este locatário",
     "resetTenantBlurb": "Último recurso destrutivo. Exclui permanentemente todos os segredos e o DEK para que o Vault possa recomeçar — use após uma chave mestra perdida ou alterada.",
     "resetTenantAction": "Redefinir Vault",
     "resetTenantConfirmTitle": "Redefinir o Vault para este locatário?",
-    "resetTenantConfirmDesc": "Isto exclui permanentemente todos os {{count}} segredo(s) e a chave de criptografia de dados do locatário \"{{tenant}}\". Use isto como etapa de recuperação quando a chave mestra foi perdida ou alterada e a chave antiga não está disponível. Isto não pode ser desfeito.",
     "resetTenantConfirm": "Redefinir o Vault permanentemente",
-    "resetSecretCount": "{{count}} segredo(s) serão permanentemente perdidos",
     "resetConfirmLabel": "Digite o nome do locatário \"{{tenant}}\" para confirmar",
-    "resetTenantSuccess": "Vault redefinido para \"{{tenant}}\" — {{count}} segredo(s) excluídos permanentemente"
+    "tableTitle_many": "{{count}} segredos no locatário \"{{tenant}}\"",
+    "tableTitle_one": "{{count}} segredo no locatário \"{{tenant}}\"",
+    "tableTitle_other": "{{count}} segredos no locatário \"{{tenant}}\"",
+    "rotateDekConfirmDesc_many": "Isto gera uma nova chave de criptografia de dados para o locatário \"{{tenant}}\" e recriptografa seus {{count}} segredos. É seguro e entra em vigor imediatamente — nenhum reinício é necessário.",
+    "rotateDekConfirmDesc_one": "Isto gera uma nova chave de criptografia de dados para o locatário \"{{tenant}}\" e recriptografa seus {{count}} segredo. É seguro e entra em vigor imediatamente — nenhum reinício é necessário.",
+    "rotateDekConfirmDesc_other": "Isto gera uma nova chave de criptografia de dados para o locatário \"{{tenant}}\" e recriptografa seus {{count}} segredos. É seguro e entra em vigor imediatamente — nenhum reinício é necessário.",
+    "rotateDekSuccess_many": "Chave de criptografia rotacionada — {{count}} segredos recriptografados",
+    "rotateDekSuccess_one": "Chave de criptografia rotacionada — {{count}} segredo recriptografado",
+    "rotateDekSuccess_other": "Chave de criptografia rotacionada — {{count}} segredos recriptografados",
+    "kekResultTitle_many": "Chave mestra rotacionada — {{count}} DEKs recriptografados",
+    "kekResultTitle_one": "Chave mestra rotacionada — {{count}} DEK recriptografado",
+    "kekResultTitle_other": "Chave mestra rotacionada — {{count}} DEKs recriptografados",
+    "rotateKekSuccess_many": "Chave mestra rotacionada — {{count}} DEKs recriptografados. Atualize EDDI_VAULT_MASTER_KEY e reinicie.",
+    "rotateKekSuccess_one": "Chave mestra rotacionada — {{count}} DEK recriptografado. Atualize EDDI_VAULT_MASTER_KEY e reinicie.",
+    "rotateKekSuccess_other": "Chave mestra rotacionada — {{count}} DEKs recriptografados. Atualize EDDI_VAULT_MASTER_KEY e reinicie.",
+    "resetTenantConfirmDesc_many": "Isto exclui permanentemente todos os {{count}} segredos e a chave de criptografia de dados do locatário \"{{tenant}}\". Use isto como etapa de recuperação quando a chave mestra foi perdida ou alterada e a chave antiga não está disponível. Isto não pode ser desfeito.",
+    "resetTenantConfirmDesc_one": "Isto exclui permanentemente todos os {{count}} segredo e a chave de criptografia de dados do locatário \"{{tenant}}\". Use isto como etapa de recuperação quando a chave mestra foi perdida ou alterada e a chave antiga não está disponível. Isto não pode ser desfeito.",
+    "resetTenantConfirmDesc_other": "Isto exclui permanentemente todos os {{count}} segredos e a chave de criptografia de dados do locatário \"{{tenant}}\". Use isto como etapa de recuperação quando a chave mestra foi perdida ou alterada e a chave antiga não está disponível. Isto não pode ser desfeito.",
+    "resetSecretCount_many": "{{count}} segredos serão permanentemente perdidos",
+    "resetSecretCount_one": "{{count}} segredo serão permanentemente perdidos",
+    "resetSecretCount_other": "{{count}} segredos serão permanentemente perdidos",
+    "resetTenantSuccess_many": "Vault redefinido para \"{{tenant}}\" — {{count}} segredos excluídos permanentemente",
+    "resetTenantSuccess_one": "Vault redefinido para \"{{tenant}}\" — {{count}} segredo excluídos permanentemente",
+    "resetTenantSuccess_other": "Vault redefinido para \"{{tenant}}\" — {{count}} segredos excluídos permanentemente"
   },
   "audit": {
     "title": "Registo de auditoria",
@@ -2166,7 +2201,6 @@
     "reviewTimeout": "Tempo limite do agente",
     "reviewUnassigned": "Não atribuído",
     "reviewUnassignedHint": "Volte para atribuir agentes antes de criar.",
-    "reviewUnassignedWarning": "{{count}} membro(s) não atribuído(s)",
     "selectAgent": "Selecionar agente…",
     "selectOrStart": "Selecione uma discussão anterior no histórico ou digite uma pergunta abaixo para iniciar uma nova.",
     "shiftEnter": "nova linha",
@@ -2408,9 +2442,8 @@
     },
     "abstainedBody": "Não acrescentou nada de novo nesta ronda.",
     "convergenceSkipped_one": "· {{count}} ronda adicional ignorada",
-    "convergenceSkipped_many": "· {{count}} rondas adicionais ignoradas",
-    "convergenceSkipped_other": "· {{count}} rondas adicionais ignoradas",
-    "convergenceSkipped": "· {{skipped}} ronda(s) adicional(is) ignorada(s)",
+    "convergenceSkipped_many": "· {{count}} rondas adicionalis ignoradas",
+    "convergenceSkipped_other": "· {{count}} rondas adicionalis ignoradas",
     "attachmentTotalTooLarge": "Os anexos excedem o limite de tamanho total",
     "convergenceInert": "Configurado, mas esta fase corre uma só vez — o juiz nunca poderá actuar. Remova-o, ou dê à fase mais do que uma repetição.",
     "questionTooLong": "Uma pergunta pode ter no máximo {{max}} caracteres",
@@ -2422,7 +2455,6 @@
     "artifactDraft": "Rascunho",
     "artifactFinal": "Final",
     "artifactLastEdited": "Última edição por {{agent}}",
-    "artifactRevisions": "{{count}} revisão(ões) anterior(es)",
     "artifactUpdatedBadge": "{{name}} atualizado (v{{version}})",
     "artifactsTitle": "Artefactos partilhados ({{count}})",
     "concessionLedgerTitle": "Registo de concessões",
@@ -2450,7 +2482,6 @@
     "notSet": "não definido",
     "retroConfigLabel": "Lições da retrospetiva",
     "retroConfigValue": "{{perRun}}/execução, {{stored}} máx. armazenadas",
-    "retroRecordedBadge": "{{phase}}: {{count}} lição(ões) guardada(s) na memória da equipa",
     "stateAwaitingHumanInput": "A aguardar um membro",
     "summarized": "resumido",
     "transcriptWindowed": "As primeiras {{count}} entradas da transcrição foram condensadas num resumo contínuo para limitar o contexto das intervenções seguintes. Passe o rato para ver o resumo.",
@@ -2506,7 +2537,22 @@
     "assignmentModeBid": "Por licitação (os membros licitam, vence a maior confiança)",
     "assignmentModeBidShort": "Por licitação",
     "assignmentModeRoleHint": "O planeador ou a configuração atribui cada tarefa, ou à vez.",
-    "assignmentModeBidHint": "Regressa à atribuição por papel quando um leilão não se paga — menos de dois licitantes ou duas tarefas abertas, ou orçamento de vezes insuficiente."
+    "assignmentModeBidHint": "Regressa à atribuição por papel quando um leilão não se paga — menos de dois licitantes ou duas tarefas abertas, ou orçamento de vezes insuficiente.",
+    "contextWindowSummarizer": "Resumidor",
+    "contextWindowNoSummarizer": "Nenhum",
+    "contextWindowModel": "Modelo de resumo",
+    "contextWindowModelPlaceholder": "modelo",
+    "contextWindowSummarizerMissing": "Sem modelo de resumo, o excedente recai silenciosamente na marca simples de truncagem.",
+    "facilitatorMaxMovesCeiling": "No máximo {{max}} — o facilitador é uma intervenção limitada, não um orquestrador.",
+    "reviewUnassignedWarning_many": "{{count}} membros não atribuídos",
+    "reviewUnassignedWarning_one": "{{count}} membro não atribuído",
+    "reviewUnassignedWarning_other": "{{count}} membros não atribuídos",
+    "retroRecordedBadge_many": "{{phase}}: {{count}} liçãoões guardadas na memória da equipa",
+    "retroRecordedBadge_one": "{{phase}}: {{count}} lição guardada na memória da equipa",
+    "retroRecordedBadge_other": "{{phase}}: {{count}} liçãoões guardadas na memória da equipa",
+    "artifactRevisions_many": "{{count}} revisãoões anteriores",
+    "artifactRevisions_one": "{{count}} revisão anterior",
+    "artifactRevisions_other": "{{count}} revisãoões anteriores"
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
@@ -2873,10 +2919,14 @@
     "createButton": "Criar grupo",
     "created": "Grupo criado a partir do modelo",
     "nameLabel": "Nome do grupo",
-    "roleCount": "{{count}} função(ões) a atribuir",
     "selectAgent": "Selecionar um agente…",
     "subtitle": "Comece a partir de uma discussão empacotada e pré-ajustada — basta atribuir agentes às suas funções nomeadas.",
-    "title": "Modelos de grupo"
+    "title": "Modelos de grupo",
+    "roleCount_many": "{{count}} funçãoões a atribuir",
+    "roleCount_one": "{{count}} função a atribuir",
+    "roleCount_other": "{{count}} funçãoões a atribuir",
+    "empty": "Nenhum modelo disponível",
+    "emptyDescription": "Este servidor não inclui modelos de grupo. Ainda pode criar um grupo de raiz com o assistente."
   },
   "channels": {
     "agentIdPlaceholder": "ID do agente para processar mensagens",
@@ -3117,7 +3167,6 @@
     "deleteSelected": "Excluir {{count}} selecionado(s)",
     "description": "Encontre e limpe recursos não referenciados por nenhum agente ou workflow.",
     "deselectAll": "Desmarcar tudo",
-    "found": "{{count}} órfão(s) encontrado(s)",
     "includeDeleted": "Incluir excluídos de forma reversível",
     "lastScanned": "Última verificação",
     "noOrphans": "Nenhum órfão encontrado",
@@ -3130,7 +3179,10 @@
     "scanning": "Verificando recursos…",
     "selectAll": "Selecionar tudo",
     "softDeleted": "Excluído",
-    "title": "Detecção de órfãos"
+    "title": "Detecção de órfãos",
+    "found_many": "{{count}} órfãos encontrados",
+    "found_one": "{{count}} órfão encontrado",
+    "found_other": "{{count}} órfãos encontrados"
   },
   "quotas": {
     "apiCallsMinute": "Chamadas de API / minuto",
@@ -3200,7 +3252,10 @@
   },
   "variables": {
     "deleteKey": "Excluir {{key}}",
-    "editKey": "Editar {{key}}"
+    "editKey": "Editar {{key}}",
+    "tableTitle_many": "{{count}} variávelis",
+    "tableTitle_one": "{{count}} variável",
+    "tableTitle_other": "{{count}} variávelis"
   },
   "workflowEditor": {
     "endpoints": "endpoints",
@@ -3479,7 +3534,6 @@
     "cadenceAdded": "Cadência adicionada",
     "cadenceDeleted": "Cadência eliminada",
     "cadenceRunning": "Está atualmente em curso uma discussão iniciada pela cadência.",
-    "cadenceSummary": "até {{max}} tarefa(s)/execução",
     "cadencesEmpty": "Ainda não há cadências recorrentes configuradas.",
     "cadencesTitle": "Cadências ({{count}})",
     "confirmDeleteCadenceDesc": "Isto interrompe as execuções agendadas. As discussões já executadas não são afetadas.",
@@ -3508,6 +3562,12 @@
     "title": "Espaço de trabalho da equipa permanente",
     "totalCost": "Custo total",
     "verified": "Verificado",
-    "maxCostInvalid": "O custo máximo por execução deve ser um número igual ou superior a 0."
+    "maxCostInvalid": "O custo máximo por execução deve ser um número igual ou superior a 0.",
+    "cadenceSummary_many": "até {{max}} tarefas/execução",
+    "cadenceSummary_one": "até {{max}} tarefa/execução",
+    "cadenceSummary_other": "até {{max}} tarefas/execução"
+  },
+  "workforceWizard": {
+    "title": "Nova equipa"
   }
 }

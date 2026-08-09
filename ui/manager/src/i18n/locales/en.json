@@ -69,7 +69,10 @@
     "modeManager": "Manager",
     "modeWorkforce": "Workforce",
     "switchMode": "Switch workspace",
-    "operator": "Platform Operator"
+    "operator": "Platform Operator",
+    "workforce": "Workforce",
+    "monitoring": "Conversation Monitoring",
+    "analytics": "Analytics"
   },
   "theme": {
     "light": "Light",
@@ -193,7 +196,9 @@
     "previous": "Previous",
     "next": "Next",
     "dismiss": "Dismiss",
-    "refreshFailed": "Could not refresh — showing the last data loaded."
+    "refreshFailed": "Could not refresh — showing the last data loaded.",
+    "settings": "Settings",
+    "history": "History"
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -586,12 +591,9 @@
   },
   "conversations": {
     "confirmDeleteSoft": "By default this is a soft delete — the conversation is hidden from listings but its stored data is kept on the server.",
-    "confirmEndDesc": "{{count}} conversation(s) will be set to ENDED. Paused (Awaiting Human) conversations are ended safely through the approval-aware path.",
-    "confirmPurgeDesc": "This permanently deletes ENDED conversations older than {{days}} day(s), including their stored memory and attachments. This cannot be undone.",
     "deletePermanentLabel": "Permanently delete — also erases attachments, the memory snapshot and approval history. This cannot be undone.",
     "monitorSubtitle": "Monitor and bulk-manage in-flight conversations per agent.",
     "noActiveDesc": "This agent version has no in-flight conversations right now.",
-    "pausedNote": "{{count}} of the selected conversation(s) are Awaiting Human and will have their pending approval cancelled.",
     "purgeDesc": "Permanently delete ENDED conversations whose last activity is older than the given number of days.",
     "selectAgentPromptDesc": "Active conversations are listed per agent and version.",
     "searchPlaceholder": "Search by conversation ID...",
@@ -624,8 +626,6 @@
     "pageNumber": "Page {{page}}",
     "deletePermanentAction": "Delete permanently",
     "step": "step",
-    "endSuccess": "Ended {{count}} conversation(s)",
-    "purgeSuccess": "Purged {{count}} ended conversation(s)",
     "monitorTitle": "Active Conversations",
     "backToList": "Back to conversations",
     "selectAgentToMonitor": "Select an agent",
@@ -639,7 +639,17 @@
     "olderThanDays": "Older than (days)",
     "purgeAction": "Purge",
     "confirmEndTitle": "End selected conversations?",
-    "confirmPurgeTitle": "Purge ended conversations?"
+    "confirmPurgeTitle": "Purge ended conversations?",
+    "confirmEndDesc_one": "{{count}} conversation will be set to ENDED. Paused (Awaiting Human) conversations are ended safely through the approval-aware path.",
+    "confirmEndDesc_other": "{{count}} conversations will be set to ENDED. Paused (Awaiting Human) conversations are ended safely through the approval-aware path.",
+    "confirmPurgeDesc_one": "This permanently deletes ENDED conversations older than {{days}} day, including their stored memory and attachments. This cannot be undone.",
+    "confirmPurgeDesc_other": "This permanently deletes ENDED conversations older than {{days}} days, including their stored memory and attachments. This cannot be undone.",
+    "pausedNote_one": "{{count}} of the selected conversations is Awaiting Human and will have its pending approval cancelled.",
+    "pausedNote_other": "{{count}} of the selected conversations are Awaiting Human and will have their pending approval cancelled.",
+    "endSuccess_one": "Ended {{count}} conversation",
+    "endSuccess_other": "Ended {{count}} conversations",
+    "purgeSuccess_one": "Purged {{count}} ended conversation",
+    "purgeSuccess_other": "Purged {{count}} ended conversations"
   },
   "conversationDetail": {
     "backToConversations": "Back to Conversations",
@@ -791,7 +801,6 @@
     }
   },
   "editor": {
-    "cascadePartialFailure": "{{count}} cascade update(s) failed",
     "compare": "Compare",
     "compareVersions": "Compare Versions",
     "deployFailed": "Deployment failed",
@@ -820,13 +829,16 @@
     "formPlaceholder": "Visual editor coming soon. Use the JSON tab to edit.",
     "jsonSchema": "Schema validation active",
     "cascadeMode": "Changes will cascade to parent workflow and agent",
-    "usedInAgents": "Used in {{count}} agent(s)",
     "updateUsageHint": "Update the selected workflows and agents to use the new version?",
     "updateUsage": "Update Selected",
     "skipUpdate": "Skip",
     "cascading": "Updating...",
     "cascadeSuccess": "Cascade update complete",
-    "invalidJson": "Invalid JSON — switch to the JSON tab to fix."
+    "invalidJson": "Invalid JSON — switch to the JSON tab to fix.",
+    "cascadePartialFailure_one": "{{count}} cascade update failed",
+    "cascadePartialFailure_other": "{{count}} cascade updates failed",
+    "usedInAgents_one": "Used in {{count}} agent",
+    "usedInAgents_other": "Used in {{count}} agents"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1549,16 +1561,13 @@
     "vaultNotConfigured": "Secrets Vault is not configured",
     "viewDocs": "View documentation",
     "selectAgentFirst": "Select an agent first",
-    "tableTitle": "{{count}} secret(s) in tenant \"{{tenant}}\"",
     "dangerZoneTitle": "Encryption key lifecycle",
     "dangerZoneDesc": "Operational recovery actions for the vault's cryptographic keys. Use these to rotate keys or recover access after the master key changed. Distinct from rotating an individual secret's value above.",
     "rotateDekTitle": "Rotate encryption key (DEK)",
     "rotateDekBlurb": "Safe — no restart. Generates a new per-tenant data encryption key and re-encrypts every secret for this tenant.",
     "rotateDekAction": "Rotate DEK",
     "rotateDekConfirmTitle": "Rotate encryption key (DEK)?",
-    "rotateDekConfirmDesc": "This generates a new data encryption key for tenant \"{{tenant}}\" and re-encrypts its {{count}} secret(s). This is safe and takes effect immediately — no restart is required.",
     "rotateDekConfirm": "Rotate DEK now",
-    "rotateDekSuccess": "Encryption key rotated — {{count}} secret(s) re-encrypted",
     "rotateKekTitle": "Rotate master key (KEK)",
     "rotateKekBlurb": "Re-encrypts all tenant DEKs with a new master key. Requires updating EDDI_VAULT_MASTER_KEY and restarting afterwards.",
     "rotateKekAction": "Rotate master key",
@@ -1572,18 +1581,29 @@
     "kekNewKeyPlaceholder": "New key — at least 8 characters",
     "kekNewKeyTooShort": "New master key must be at least 8 characters.",
     "kekRestartHint": "After rotation you must update EDDI_VAULT_MASTER_KEY to the new key and restart EDDI.",
-    "kekResultTitle": "Master key rotated — {{count}} DEK(s) re-encrypted",
     "kekResultInstruction": "Action required: set the EDDI_VAULT_MASTER_KEY environment variable to the NEW master key and restart EDDI. Until you do, the running instance still uses the old key in memory.",
-    "rotateKekSuccess": "Master key rotated — {{count}} DEK(s) re-encrypted. Update EDDI_VAULT_MASTER_KEY and restart.",
     "resetTenantTitle": "Reset vault for this tenant",
     "resetTenantBlurb": "Destructive last resort. Permanently deletes all secrets and the DEK so the vault can start fresh — use after a lost or changed master key.",
     "resetTenantAction": "Reset vault",
     "resetTenantConfirmTitle": "Reset vault for this tenant?",
-    "resetTenantConfirmDesc": "This permanently deletes all {{count}} secret(s) and the data encryption key for tenant \"{{tenant}}\". Use this as the recovery step when the master key was lost or changed and the old key is unavailable. This cannot be undone.",
     "resetTenantConfirm": "Reset vault permanently",
-    "resetSecretCount": "{{count}} secret(s) will be permanently lost",
     "resetConfirmLabel": "Type the tenant name \"{{tenant}}\" to confirm",
-    "resetTenantSuccess": "Vault reset for \"{{tenant}}\" — {{count}} secret(s) permanently deleted"
+    "tableTitle_one": "{{count}} secret in tenant \"{{tenant}}\"",
+    "tableTitle_other": "{{count}} secrets in tenant \"{{tenant}}\"",
+    "rotateDekConfirmDesc_one": "This generates a new data encryption key for tenant \"{{tenant}}\" and re-encrypts its {{count}} secret. This is safe and takes effect immediately — no restart is required.",
+    "rotateDekConfirmDesc_other": "This generates a new data encryption key for tenant \"{{tenant}}\" and re-encrypts its {{count}} secrets. This is safe and takes effect immediately — no restart is required.",
+    "rotateDekSuccess_one": "Encryption key rotated — {{count}} secret re-encrypted",
+    "rotateDekSuccess_other": "Encryption key rotated — {{count}} secrets re-encrypted",
+    "kekResultTitle_one": "Master key rotated — {{count}} DEK re-encrypted",
+    "kekResultTitle_other": "Master key rotated — {{count}} DEKs re-encrypted",
+    "rotateKekSuccess_one": "Master key rotated — {{count}} DEK re-encrypted. Update EDDI_VAULT_MASTER_KEY and restart.",
+    "rotateKekSuccess_other": "Master key rotated — {{count}} DEKs re-encrypted. Update EDDI_VAULT_MASTER_KEY and restart.",
+    "resetTenantConfirmDesc_one": "This permanently deletes all {{count}} secret and the data encryption key for tenant \"{{tenant}}\". Use this as the recovery step when the master key was lost or changed and the old key is unavailable. This cannot be undone.",
+    "resetTenantConfirmDesc_other": "This permanently deletes all {{count}} secrets and the data encryption key for tenant \"{{tenant}}\". Use this as the recovery step when the master key was lost or changed and the old key is unavailable. This cannot be undone.",
+    "resetSecretCount_one": "{{count}} secret will be permanently lost",
+    "resetSecretCount_other": "{{count}} secrets will be permanently lost",
+    "resetTenantSuccess_one": "Vault reset for \"{{tenant}}\" — {{count}} secret permanently deleted",
+    "resetTenantSuccess_other": "Vault reset for \"{{tenant}}\" — {{count}} secrets permanently deleted"
   },
   "variables": {
     "deleteKey": "Delete {{key}}",
@@ -1610,7 +1630,6 @@
     "empty": "No global variables defined",
     "emptyHint": "Click \"Add Variable\" to create your first deployment-wide configuration value.",
     "searchPlaceholder": "Filter variables…",
-    "tableTitle": "{{count}} variable(s)",
     "colKey": "Key",
     "colValue": "Value",
     "colDescription": "Description",
@@ -1622,7 +1641,9 @@
     "copyVars": "Copy ${vars:…} reference",
     "refCopied": "Copied: {{ref}}",
     "infoLine1": "Use {{vars.<key>}} in system prompts or ${vars:<key>} anywhere in agent configurations.",
-    "infoLine2": "Changes take effect within 2 minutes (cache TTL). For sensitive values, use the Secrets Vault instead."
+    "infoLine2": "Changes take effect within 2 minutes (cache TTL). For sensitive values, use the Secrets Vault instead.",
+    "tableTitle_one": "{{count}} variable",
+    "tableTitle_other": "{{count}} variables"
   },
   "audit": {
     "title": "Audit Trail",
@@ -2205,7 +2226,6 @@
     "reviewTimeout": "Agent Timeout",
     "reviewUnassigned": "Unassigned",
     "reviewUnassignedHint": "Go back to assign agents before creating.",
-    "reviewUnassignedWarning": "{{count}} member(s) unassigned",
     "selectAgent": "Select agent…",
     "selectOrStart": "Select a past discussion from the history, or type a question below to start a new one.",
     "shiftEnter": "new line",
@@ -2447,7 +2467,6 @@
     "abstainedBody": "Declined to add anything new this round.",
     "convergenceSkipped_one": "· {{count}} further round skipped",
     "convergenceSkipped_other": "· {{count}} further rounds skipped",
-    "convergenceSkipped": "· {{skipped}} further round(s) skipped",
     "attachmentTotalTooLarge": "Attachments exceed the total size limit",
     "convergenceInert": "Configured, but this phase runs once — the judge can never run. Clear it, or give the phase more than one repeat.",
     "questionTooLong": "A question can be at most {{max}} characters",
@@ -2488,7 +2507,6 @@
     "voteTieModerator": "Moderator decides",
     "voteTieHuman": "Human decides (not yet available)",
     "voteWeightByConfidence": "Weight by confidence",
-    "retroRecordedBadge": "{{phase}}: {{count}} lesson(s) saved to team memory",
     "transcriptWindowed": "The first {{count}} transcript entries were folded into a rolling summary to keep later turns' context bounded. Hover for the summary.",
     "negotiationTableTitle": "Negotiation Table",
     "negotiationOpen": "Open",
@@ -2501,7 +2519,6 @@
     "artifactsTitle": "Shared Artifacts ({{count}})",
     "artifactFinal": "Final",
     "artifactDraft": "Draft",
-    "artifactRevisions": "{{count}} prior revision(s)",
     "artifactLastEdited": "Last edited by {{agent}}",
     "artifactCreatedBadge": "{{name}} created (v{{version}})",
     "artifactUpdatedBadge": "{{name}} updated (v{{version}})",
@@ -2543,7 +2560,19 @@
     "assignmentModeBid": "By bid (members bid, highest confidence wins)",
     "assignmentModeBidShort": "By bid",
     "assignmentModeRoleHint": "The planner or config assigns each task, or round-robin.",
-    "assignmentModeBidHint": "Falls back to role assignment when an auction cannot pay for itself — fewer than two bidders or two open tasks, or too little turn budget."
+    "assignmentModeBidHint": "Falls back to role assignment when an auction cannot pay for itself — fewer than two bidders or two open tasks, or too little turn budget.",
+    "contextWindowSummarizer": "Summarizer",
+    "contextWindowNoSummarizer": "None",
+    "contextWindowModel": "Summarizer model",
+    "contextWindowModelPlaceholder": "model",
+    "contextWindowSummarizerMissing": "Without a summarizer model, overflow silently falls back to the plain truncation marker.",
+    "facilitatorMaxMovesCeiling": "At most {{max}} — the facilitator is a bounded intervention, not an orchestrator.",
+    "reviewUnassignedWarning_one": "{{count}} member unassigned",
+    "reviewUnassignedWarning_other": "{{count}} members unassigned",
+    "retroRecordedBadge_one": "{{phase}}: {{count}} lesson saved to team memory",
+    "retroRecordedBadge_other": "{{phase}}: {{count}} lessons saved to team memory",
+    "artifactRevisions_one": "{{count}} prior revision",
+    "artifactRevisions_other": "{{count}} prior revisions"
   },
   "taskBoard": {
     "title": "Task Board",
@@ -2714,14 +2743,17 @@
     },
     "title": "Group Templates",
     "subtitle": "Start from a packaged, pre-tuned discussion — just assign agents to its named roles.",
-    "roleCount": "{{count}} role(s) to assign",
     "created": "Group created from template",
     "backToGallery": "Back to templates",
     "nameLabel": "Group name",
     "assignRoles": "Assign roles",
     "selectAgent": "Select an agent…",
     "createButton": "Create Group",
-    "browseButton": "From Template"
+    "browseButton": "From Template",
+    "roleCount_one": "{{count}} role to assign",
+    "roleCount_other": "{{count}} roles to assign",
+    "empty": "No templates available",
+    "emptyDescription": "This server ships no group templates. You can still build a group from scratch with the wizard."
   },
   "memories": {
     "title": "User Memory",
@@ -3141,7 +3173,6 @@
     "deleteSelected": "Delete {{count}} selected",
     "description": "Find and clean up resources not referenced by any agent or package.",
     "deselectAll": "Deselect All",
-    "found": "{{count}} orphan(s) found",
     "includeDeleted": "Include soft-deleted",
     "lastScanned": "Last scanned",
     "noOrphans": "No orphans found",
@@ -3154,7 +3185,9 @@
     "scanning": "Scanning resources…",
     "selectAll": "Select All",
     "softDeleted": "Deleted",
-    "title": "Orphan Detection"
+    "title": "Orphan Detection",
+    "found_one": "{{count}} orphan found",
+    "found_other": "{{count}} orphans found"
   },
   "quotas": {
     "apiCallsMinute": "API Calls / Minute",
@@ -3514,7 +3547,6 @@
     "addTask": "Add Task",
     "cadencesTitle": "Cadences ({{count}})",
     "cadencesEmpty": "No recurring cadences configured yet.",
-    "cadenceSummary": "up to {{max}} task(s)/run",
     "createdBy": "by {{who}}",
     "cronLabel": "Cron expression",
     "cronPlaceholder": "e.g. 0 9 * * MON",
@@ -3528,6 +3560,11 @@
     "confirmDeleteCadenceDesc": "This stops its scheduled runs. Already-run discussions are not affected.",
     "cadenceDeleted": "Cadence deleted",
     "navLabel": "Workspace",
-    "maxCostInvalid": "Max cost per run must be a number of 0 or more."
+    "maxCostInvalid": "Max cost per run must be a number of 0 or more.",
+    "cadenceSummary_one": "up to {{max}} task/run",
+    "cadenceSummary_other": "up to {{max}} tasks/run"
+  },
+  "workforceWizard": {
+    "title": "New Team"
   }
 }

@@ -111,7 +111,9 @@ export function DiscussionInsights({
               className="inline-flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-violet-500/5 px-2.5 py-1 text-xs text-violet-600 dark:text-violet-400"
             >
               🪞{" "}
-              {t("groups.retroRecordedBadge", "{{phase}}: {{count}} lesson(s) saved to team memory", {
+              {t("groups.retroRecordedBadge", {
+                defaultValue: "{{phase}}: {{count}} lesson saved to team memory",
+                defaultValue_other: "{{phase}}: {{count}} lessons saved to team memory",
                 phase: r.phaseName,
                 count: r.lessonsStored,
               })}

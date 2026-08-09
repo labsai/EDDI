@@ -300,7 +300,13 @@ export function GroupWorkspacePage() {
                 <div className="min-w-0 flex-1 text-xs">
                   <p className="font-mono text-foreground">{cadence.cadenceId}</p>
                   <p className="text-muted-foreground">
-                    {t("groupWorkspace.cadenceSummary", "up to {{max}} task(s)/run", { max: cadence.maxBacklogTasksPerRun })}
+                    {t("groupWorkspace.cadenceSummary", {
+                      defaultValue: "up to {{max}} task/run",
+                      defaultValue_other: "up to {{max}} tasks/run",
+                      // `count` picks the form, `max` fills the placeholder.
+                      count: cadence.maxBacklogTasksPerRun,
+                      max: cadence.maxBacklogTasksPerRun,
+                    })}
                     {cadence.maxCostPerRun != null && ` · ${formatUsd(cadence.maxCostPerRun)}/run`}
                     {` · ${t("groupWorkspace.createdBy", "by {{who}}", { who: cadence.createdBy })}`}
                   </p>

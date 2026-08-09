@@ -69,7 +69,10 @@
     "modeManager": "Gestor",
     "modeWorkforce": "Equipo",
     "switchMode": "Cambiar espacio",
-    "operator": "Operador de plataforma"
+    "operator": "Operador de plataforma",
+    "workforce": "Plantilla",
+    "monitoring": "Supervisión de conversaciones",
+    "analytics": "Analíticas"
   },
   "theme": {
     "light": "Claro",
@@ -193,7 +196,9 @@
     "previous": "Anterior",
     "next": "Siguiente",
     "dismiss": "Descartar",
-    "refreshFailed": "No se pudo actualizar: se muestran los últimos datos cargados."
+    "refreshFailed": "No se pudo actualizar: se muestran los últimos datos cargados.",
+    "settings": "Ajustes",
+    "history": "Historial"
   },
   "agents": {
     "confirmDeleteDescription": "Esta acción no se puede deshacer. El agente y todos sus datos se eliminarán permanentemente.",
@@ -561,12 +566,9 @@
   },
   "conversations": {
     "confirmDeleteSoft": "De forma predeterminada, es un borrado lógico: la conversación se oculta de las listas, pero sus datos se conservan en el servidor.",
-    "confirmEndDesc": "{{count}} conversación(es) se marcarán como FINALIZADAS. Las conversaciones en pausa (Esperando humano) se finalizan de forma segura a través de la ruta con reconocimiento de aprobaciones.",
-    "confirmPurgeDesc": "Esto elimina permanentemente las conversaciones FINALIZADAS de más de {{days}} día(s), incluida su memoria almacenada y sus adjuntos. No se puede deshacer.",
     "deletePermanentLabel": "Eliminar permanentemente — también borra los adjuntos, la instantánea de memoria y el historial de aprobaciones. No se puede deshacer.",
     "monitorSubtitle": "Supervise y gestione en masa las conversaciones en curso por agente.",
     "noActiveDesc": "Esta versión del agente no tiene conversaciones en curso en este momento.",
-    "pausedNote": "{{count}} de las conversaciones seleccionadas están Esperando humano y se cancelará su aprobación pendiente.",
     "purgeDesc": "Eliminar permanentemente las conversaciones FINALIZADAS cuya última actividad sea anterior al número de días indicado.",
     "selectAgentPromptDesc": "Las conversaciones activas se listan por agente y versión.",
     "searchPlaceholder": "Buscar por ID de conversación...",
@@ -599,8 +601,6 @@
     "pageNumber": "Página {{page}}",
     "deletePermanentAction": "Eliminar permanentemente",
     "step": "paso",
-    "endSuccess": "{{count}} conversación(es) finalizada(s)",
-    "purgeSuccess": "{{count}} conversación(es) finalizada(s) purgada(s)",
     "monitorTitle": "Conversaciones activas",
     "backToList": "Volver a conversaciones",
     "selectAgentToMonitor": "Seleccionar un agente",
@@ -615,7 +615,22 @@
     "purgeAction": "Purgar",
     "confirmEndTitle": "¿Finalizar las conversaciones seleccionadas?",
     "confirmPurgeTitle": "¿Purgar conversaciones finalizadas?",
-    "count_many": "{{count}} conversaciones"
+    "count_many": "{{count}} conversaciones",
+    "confirmEndDesc_many": "{{count}} conversaciónes se marcarán como FINALIZADAS. Las conversaciones en pausa (Esperando humano) se finalizan de forma segura a través de la ruta con reconocimiento de aprobaciones.",
+    "confirmEndDesc_one": "{{count}} conversación se marcarán como FINALIZADAS. Las conversaciones en pausa (Esperando humano) se finalizan de forma segura a través de la ruta con reconocimiento de aprobaciones.",
+    "confirmEndDesc_other": "{{count}} conversaciónes se marcarán como FINALIZADAS. Las conversaciones en pausa (Esperando humano) se finalizan de forma segura a través de la ruta con reconocimiento de aprobaciones.",
+    "confirmPurgeDesc_many": "Esto elimina permanentemente las conversaciones FINALIZADAS de más de {{days}} días, incluida su memoria almacenada y sus adjuntos. No se puede deshacer.",
+    "confirmPurgeDesc_one": "Esto elimina permanentemente las conversaciones FINALIZADAS de más de {{days}} día, incluida su memoria almacenada y sus adjuntos. No se puede deshacer.",
+    "confirmPurgeDesc_other": "Esto elimina permanentemente las conversaciones FINALIZADAS de más de {{days}} días, incluida su memoria almacenada y sus adjuntos. No se puede deshacer.",
+    "pausedNote_many": "{{count}} de las conversaciones seleccionadas están Esperando humano y se cancelará su aprobación pendiente.",
+    "pausedNote_one": "{{count}} de las conversaciones seleccionadas está Esperando humano y se cancelará su aprobación pendiente.",
+    "pausedNote_other": "{{count}} de las conversaciones seleccionadas están Esperando humano y se cancelará su aprobación pendiente.",
+    "endSuccess_many": "{{count}} conversaciónes finalizadas",
+    "endSuccess_one": "{{count}} conversación finalizada",
+    "endSuccess_other": "{{count}} conversaciónes finalizadas",
+    "purgeSuccess_many": "{{count}} conversaciónes finalizadas purgadas",
+    "purgeSuccess_one": "{{count}} conversación finalizada purgada",
+    "purgeSuccess_other": "{{count}} conversaciónes finalizadas purgadas"
   },
   "conversationDetail": {
     "backToConversations": "Volver a conversaciones",
@@ -760,7 +775,6 @@
     "count_many": "{{count}} recursos"
   },
   "editor": {
-    "cascadePartialFailure": "{{count}} actualización(es) en cascada fallaron",
     "compare": "Comparar",
     "compareVersions": "Comparar versiones",
     "deployFailed": "Error en el despliegue",
@@ -789,13 +803,18 @@
     "formPlaceholder": "Editor visual próximamente. Use la pestaña JSON para editar.",
     "jsonSchema": "Validación de esquema activa",
     "cascadeMode": "Los cambios se propagarán al workflow y agent padre",
-    "usedInAgents": "Usado en {{count}} agent(s)",
     "updateUsageHint": "¿Actualizar los workflows y agents seleccionados a la nueva versión?",
     "updateUsage": "Actualizar seleccionados",
     "skipUpdate": "Omitir",
     "cascading": "Actualizando...",
     "cascadeSuccess": "Actualización en cascada completada",
-    "invalidJson": "JSON no válido — cambie a la pestaña JSON para corregir."
+    "invalidJson": "JSON no válido — cambie a la pestaña JSON para corregir.",
+    "cascadePartialFailure_many": "{{count}} actualizaciónes en cascada fallaron",
+    "cascadePartialFailure_one": "{{count}} actualización en cascada fallaron",
+    "cascadePartialFailure_other": "{{count}} actualizaciónes en cascada fallaron",
+    "usedInAgents_many": "Usado en {{count}} agents",
+    "usedInAgents_one": "Usado en {{count}} agent",
+    "usedInAgents_other": "Usado en {{count}} agents"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1518,16 +1537,13 @@
     "vaultNotConfigured": "El cofre de secretos no está configurado",
     "viewDocs": "Ver documentación",
     "selectAgentFirst": "Seleccione primero un agente",
-    "tableTitle": "{{count}} secreto(s) en el inquilino \"{{tenant}}\"",
     "dangerZoneTitle": "Ciclo de vida de la clave de cifrado",
     "dangerZoneDesc": "Acciones de recuperación operativa para las claves criptográficas del Vault. Úselas para rotar claves o recuperar el acceso después de que cambie la clave maestra. Distinto de rotar el valor de un secreto individual más arriba.",
     "rotateDekTitle": "Rotar la clave de cifrado (DEK)",
     "rotateDekBlurb": "Seguro — sin reinicio. Genera una nueva clave de cifrado de datos por inquilino y vuelve a cifrar todos los secretos de este inquilino.",
     "rotateDekAction": "Rotar DEK",
     "rotateDekConfirmTitle": "¿Rotar la clave de cifrado (DEK)?",
-    "rotateDekConfirmDesc": "Esto genera una nueva clave de cifrado de datos para el inquilino \"{{tenant}}\" y vuelve a cifrar sus {{count}} secreto(s). Es seguro y surte efecto de inmediato — no se requiere reinicio.",
     "rotateDekConfirm": "Rotar DEK ahora",
-    "rotateDekSuccess": "Clave de cifrado rotada — {{count}} secreto(s) vuelto(s) a cifrar",
     "rotateKekTitle": "Rotar la clave maestra (KEK)",
     "rotateKekBlurb": "Vuelve a cifrar todos los DEK de los inquilinos con una nueva clave maestra. Requiere actualizar EDDI_VAULT_MASTER_KEY y reiniciar después.",
     "rotateKekAction": "Rotar clave maestra",
@@ -1541,18 +1557,37 @@
     "kekNewKeyPlaceholder": "Nueva clave — al menos 8 caracteres",
     "kekNewKeyTooShort": "La nueva clave maestra debe tener al menos 8 caracteres.",
     "kekRestartHint": "Después de la rotación, debe actualizar EDDI_VAULT_MASTER_KEY con la nueva clave y reiniciar EDDI.",
-    "kekResultTitle": "Clave maestra rotada — {{count}} DEK vuelto(s) a cifrar",
     "kekResultInstruction": "Acción requerida: establezca la variable de entorno EDDI_VAULT_MASTER_KEY con la NUEVA clave maestra y reinicie EDDI. Hasta que lo haga, la instancia en ejecución seguirá usando la clave anterior en memoria.",
-    "rotateKekSuccess": "Clave maestra rotada — {{count}} DEK vuelto(s) a cifrar. Actualice EDDI_VAULT_MASTER_KEY y reinicie.",
     "resetTenantTitle": "Restablecer el Vault para este inquilino",
     "resetTenantBlurb": "Último recurso destructivo. Elimina permanentemente todos los secretos y el DEK para que el Vault pueda empezar de cero — úselo después de perder o cambiar la clave maestra.",
     "resetTenantAction": "Restablecer Vault",
     "resetTenantConfirmTitle": "¿Restablecer el Vault para este inquilino?",
-    "resetTenantConfirmDesc": "Esto elimina permanentemente todos los {{count}} secreto(s) y la clave de cifrado de datos del inquilino \"{{tenant}}\". Use esto como paso de recuperación cuando la clave maestra se perdió o cambió y la clave anterior no está disponible. Esto no se puede deshacer.",
     "resetTenantConfirm": "Restablecer el Vault permanentemente",
-    "resetSecretCount": "{{count}} secreto(s) se perderán permanentemente",
     "resetConfirmLabel": "Escriba el nombre del inquilino \"{{tenant}}\" para confirmar",
-    "resetTenantSuccess": "Vault restablecido para \"{{tenant}}\" — {{count}} secreto(s) eliminados permanentemente"
+    "tableTitle_many": "{{count}} secretos en el inquilino \"{{tenant}}\"",
+    "tableTitle_one": "{{count}} secreto en el inquilino \"{{tenant}}\"",
+    "tableTitle_other": "{{count}} secretos en el inquilino \"{{tenant}}\"",
+    "rotateDekConfirmDesc_many": "Esto genera una nueva clave de cifrado de datos para el inquilino \"{{tenant}}\" y vuelve a cifrar sus {{count}} secretos. Es seguro y surte efecto de inmediato — no se requiere reinicio.",
+    "rotateDekConfirmDesc_one": "Esto genera una nueva clave de cifrado de datos para el inquilino \"{{tenant}}\" y vuelve a cifrar sus {{count}} secreto. Es seguro y surte efecto de inmediato — no se requiere reinicio.",
+    "rotateDekConfirmDesc_other": "Esto genera una nueva clave de cifrado de datos para el inquilino \"{{tenant}}\" y vuelve a cifrar sus {{count}} secretos. Es seguro y surte efecto de inmediato — no se requiere reinicio.",
+    "rotateDekSuccess_many": "Clave de cifrado rotada — {{count}} secretos vueltos a cifrar",
+    "rotateDekSuccess_one": "Clave de cifrado rotada — {{count}} secreto vuelto a cifrar",
+    "rotateDekSuccess_other": "Clave de cifrado rotada — {{count}} secretos vueltos a cifrar",
+    "kekResultTitle_many": "Clave maestra rotada — {{count}} DEK vueltos a cifrar",
+    "kekResultTitle_one": "Clave maestra rotada — {{count}} DEK vuelto a cifrar",
+    "kekResultTitle_other": "Clave maestra rotada — {{count}} DEK vueltos a cifrar",
+    "rotateKekSuccess_many": "Clave maestra rotada — {{count}} DEK vueltos a cifrar. Actualice EDDI_VAULT_MASTER_KEY y reinicie.",
+    "rotateKekSuccess_one": "Clave maestra rotada — {{count}} DEK vuelto a cifrar. Actualice EDDI_VAULT_MASTER_KEY y reinicie.",
+    "rotateKekSuccess_other": "Clave maestra rotada — {{count}} DEK vueltos a cifrar. Actualice EDDI_VAULT_MASTER_KEY y reinicie.",
+    "resetTenantConfirmDesc_many": "Esto elimina permanentemente todos los {{count}} secretos y la clave de cifrado de datos del inquilino \"{{tenant}}\". Use esto como paso de recuperación cuando la clave maestra se perdió o cambió y la clave anterior no está disponible. Esto no se puede deshacer.",
+    "resetTenantConfirmDesc_one": "Esto elimina permanentemente todos los {{count}} secreto y la clave de cifrado de datos del inquilino \"{{tenant}}\". Use esto como paso de recuperación cuando la clave maestra se perdió o cambió y la clave anterior no está disponible. Esto no se puede deshacer.",
+    "resetTenantConfirmDesc_other": "Esto elimina permanentemente todos los {{count}} secretos y la clave de cifrado de datos del inquilino \"{{tenant}}\". Use esto como paso de recuperación cuando la clave maestra se perdió o cambió y la clave anterior no está disponible. Esto no se puede deshacer.",
+    "resetSecretCount_many": "{{count}} secretos se perderán permanentemente",
+    "resetSecretCount_one": "{{count}} secreto se perderán permanentemente",
+    "resetSecretCount_other": "{{count}} secretos se perderán permanentemente",
+    "resetTenantSuccess_many": "Vault restablecido para \"{{tenant}}\" — {{count}} secretos eliminados permanentemente",
+    "resetTenantSuccess_one": "Vault restablecido para \"{{tenant}}\" — {{count}} secreto eliminados permanentemente",
+    "resetTenantSuccess_other": "Vault restablecido para \"{{tenant}}\" — {{count}} secretos eliminados permanentemente"
   },
   "audit": {
     "title": "Registro de auditoría",
@@ -2166,7 +2201,6 @@
     "reviewTimeout": "Tiempo de espera del agente",
     "reviewUnassigned": "Sin asignar",
     "reviewUnassignedHint": "Vuelva atrás para asignar agentes antes de crear.",
-    "reviewUnassignedWarning": "{{count}} miembro(s) sin asignar",
     "selectAgent": "Seleccionar agente…",
     "selectOrStart": "Seleccione una discusión anterior del historial o escriba una pregunta abajo para iniciar una nueva.",
     "shiftEnter": "nueva línea",
@@ -2410,7 +2444,6 @@
     "convergenceSkipped_one": "· {{count}} ronda adicional omitida",
     "convergenceSkipped_many": "· {{count}} rondas adicionales omitidas",
     "convergenceSkipped_other": "· {{count}} rondas adicionales omitidas",
-    "convergenceSkipped": "· {{skipped}} ronda(s) adicional(es) omitida(s)",
     "attachmentTotalTooLarge": "Los adjuntos superan el límite de tamaño total",
     "convergenceInert": "Configurado, pero esta fase se ejecuta una sola vez: el juez nunca podrá actuar. Quítalo, o da a la fase más de una repetición.",
     "questionTooLong": "Una pregunta puede tener como máximo {{max}} caracteres",
@@ -2422,7 +2455,6 @@
     "artifactDraft": "Borrador",
     "artifactFinal": "Final",
     "artifactLastEdited": "Última edición de {{agent}}",
-    "artifactRevisions": "{{count}} revisión(es) anterior(es)",
     "artifactUpdatedBadge": "{{name}} actualizado (v{{version}})",
     "artifactsTitle": "Artefactos compartidos ({{count}})",
     "concessionLedgerTitle": "Registro de concesiones",
@@ -2450,7 +2482,6 @@
     "notSet": "no establecido",
     "retroConfigLabel": "Lecciones de la retrospectiva",
     "retroConfigValue": "{{perRun}}/ejecución, {{stored}} máx. almacenadas",
-    "retroRecordedBadge": "{{phase}}: {{count}} lección(es) guardadas en la memoria del equipo",
     "stateAwaitingHumanInput": "Esperando a un miembro",
     "summarized": "resumido",
     "transcriptWindowed": "Las primeras {{count}} entradas de la transcripción se han condensado en un resumen continuo para limitar el contexto de los turnos posteriores. Pase el cursor para ver el resumen.",
@@ -2506,7 +2537,22 @@
     "assignmentModeBid": "Por puja (los miembros pujan, gana la mayor confianza)",
     "assignmentModeBidShort": "Por puja",
     "assignmentModeRoleHint": "El planificador o la configuración asigna cada tarea, o por turnos rotativos.",
-    "assignmentModeBidHint": "Vuelve a la asignación por rol cuando una subasta no se amortiza: menos de dos pujadores o dos tareas abiertas, o presupuesto de turnos insuficiente."
+    "assignmentModeBidHint": "Vuelve a la asignación por rol cuando una subasta no se amortiza: menos de dos pujadores o dos tareas abiertas, o presupuesto de turnos insuficiente.",
+    "contextWindowSummarizer": "Resumidor",
+    "contextWindowNoSummarizer": "Ninguno",
+    "contextWindowModel": "Modelo de resumen",
+    "contextWindowModelPlaceholder": "modelo",
+    "contextWindowSummarizerMissing": "Sin modelo de resumen, el desbordamiento recae silenciosamente en la marca simple de truncado.",
+    "facilitatorMaxMovesCeiling": "Como máximo {{max}}: el facilitador es una intervención acotada, no un orquestador.",
+    "reviewUnassignedWarning_many": "{{count}} miembros sin asignar",
+    "reviewUnassignedWarning_one": "{{count}} miembro sin asignar",
+    "reviewUnassignedWarning_other": "{{count}} miembros sin asignar",
+    "retroRecordedBadge_many": "{{phase}}: {{count}} lecciónes guardadas en la memoria del equipo",
+    "retroRecordedBadge_one": "{{phase}}: {{count}} lección guardadas en la memoria del equipo",
+    "retroRecordedBadge_other": "{{phase}}: {{count}} lecciónes guardadas en la memoria del equipo",
+    "artifactRevisions_many": "{{count}} revisiónes anteriores",
+    "artifactRevisions_one": "{{count}} revisión anterior",
+    "artifactRevisions_other": "{{count}} revisiónes anteriores"
   },
   "taskBoard": {
     "title": "Tablero de tareas",
@@ -2873,10 +2919,14 @@
     "createButton": "Crear grupo",
     "created": "Grupo creado a partir de la plantilla",
     "nameLabel": "Nombre del grupo",
-    "roleCount": "{{count}} rol(es) por asignar",
     "selectAgent": "Seleccionar un agente…",
     "subtitle": "Comience con una discusión empaquetada y preajustada — solo asigne agentes a sus roles con nombre.",
-    "title": "Plantillas de grupo"
+    "title": "Plantillas de grupo",
+    "roleCount_many": "{{count}} roles por asignar",
+    "roleCount_one": "{{count}} rol por asignar",
+    "roleCount_other": "{{count}} roles por asignar",
+    "empty": "No hay plantillas disponibles",
+    "emptyDescription": "Este servidor no incluye plantillas de grupo. Aún puede crear un grupo desde cero con el asistente."
   },
   "channels": {
     "agentIdPlaceholder": "ID del agente para gestionar mensajes",
@@ -3117,7 +3167,6 @@
     "deleteSelected": "Eliminar {{count}} seleccionados",
     "description": "Encuentre y limpie los recursos no referenciados por ningún agente o paquete.",
     "deselectAll": "Deseleccionar todo",
-    "found": "{{count}} huérfano(s) encontrado(s)",
     "includeDeleted": "Incluir eliminados temporalmente",
     "lastScanned": "Último escaneo",
     "noOrphans": "No se encontraron huérfanos",
@@ -3130,7 +3179,10 @@
     "scanning": "Escaneando recursos…",
     "selectAll": "Seleccionar todo",
     "softDeleted": "Eliminado",
-    "title": "Detección de huérfanos"
+    "title": "Detección de huérfanos",
+    "found_many": "{{count}} huérfanos encontrados",
+    "found_one": "{{count}} huérfano encontrado",
+    "found_other": "{{count}} huérfanos encontrados"
   },
   "quotas": {
     "apiCallsMinute": "Llamadas API / minuto",
@@ -3200,7 +3252,10 @@
   },
   "variables": {
     "deleteKey": "Eliminar {{key}}",
-    "editKey": "Editar {{key}}"
+    "editKey": "Editar {{key}}",
+    "tableTitle_many": "{{count}} variables definidas",
+    "tableTitle_one": "{{count}} variable definida",
+    "tableTitle_other": "{{count}} variables definidas"
   },
   "workflowEditor": {
     "endpoints": "endpoints",
@@ -3479,7 +3534,6 @@
     "cadenceAdded": "Cadencia añadida",
     "cadenceDeleted": "Cadencia eliminada",
     "cadenceRunning": "Actualmente hay una discusión iniciada por la cadencia en curso.",
-    "cadenceSummary": "hasta {{max}} tarea(s)/ejecución",
     "cadencesEmpty": "Aún no hay cadencias recurrentes configuradas.",
     "cadencesTitle": "Cadencias ({{count}})",
     "confirmDeleteCadenceDesc": "Esto detiene sus ejecuciones programadas. Las discusiones ya realizadas no se ven afectadas.",
@@ -3508,6 +3562,12 @@
     "title": "Espacio de trabajo del equipo permanente",
     "totalCost": "Coste total",
     "verified": "Verificado",
-    "maxCostInvalid": "El coste máximo por ejecución debe ser un número igual o mayor que 0."
+    "maxCostInvalid": "El coste máximo por ejecución debe ser un número igual o mayor que 0.",
+    "cadenceSummary_many": "hasta {{max}} tareas/ejecución",
+    "cadenceSummary_one": "hasta {{max}} tarea/ejecución",
+    "cadenceSummary_other": "hasta {{max}} tareas/ejecución"
+  },
+  "workforceWizard": {
+    "title": "Equipo nuevo"
   }
 }

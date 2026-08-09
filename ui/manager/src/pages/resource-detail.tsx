@@ -325,7 +325,8 @@ export function ResourceDetailPage() {
           toast.error(
             t("editor.cascadePartialFailure", {
               count: failCount,
-              defaultValue: "{{count}} cascade update(s) failed",
+              defaultValue: "{{count}} cascade update failed",
+              defaultValue_other: "{{count}} cascade updates failed",
             })
           );
         } else if (selected.length > 0) {

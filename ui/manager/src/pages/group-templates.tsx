@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
+import { EmptyState } from "@/components/shared/empty-state";
 import { BackLink } from "@/components/shared/back-link";
 import { getErrorMessage } from "@/lib/api-client";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
@@ -103,7 +104,20 @@ function TemplateGalleryView({
         <ErrorState message={t("common.error")} onRetry={() => refetch()} retryLabel={t("common.retry")} />
       )}
 
-      {!isLoading && !isError && (
+      {/* The list is packaged with the backend, so an empty one means the server
+          shipped none — rare, but it rendered as a heading above blank space. */}
+      {!isLoading && !isError && (templates ?? []).length === 0 && (
+        <EmptyState
+          icon={LayoutTemplate}
+          title={t("groupTemplates.empty", "No templates available")}
+          description={t(
+            "groupTemplates.emptyDescription",
+            "This server ships no group templates. You can still build a group from scratch with the wizard.",
+          )}
+        />
+      )}
+
+      {!isLoading && !isError && (templates ?? []).length > 0 && (
         <div className="cq-card-grid" data-testid="template-gallery">
           {(templates ?? []).map((tmpl: TemplateManifest) => (
             <button
@@ -120,7 +134,9 @@ function TemplateGalleryView({
               <p className="text-sm text-muted-foreground line-clamp-3">{tmpl.description}</p>
               <span className="mt-auto flex items-center gap-1 pt-2 text-xs text-muted-foreground">
                 <Users className="h-3 w-3" aria-hidden="true" />
-                {t("groupTemplates.roleCount", "{{count}} role(s) to assign", {
+                {t("groupTemplates.roleCount", {
+                  defaultValue: "{{count}} role to assign",
+                  defaultValue_other: "{{count}} roles to assign",
                   count: tmpl.requiredRoles.length,
                 })}
               </span>

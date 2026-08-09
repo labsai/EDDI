@@ -69,7 +69,10 @@
     "modeManager": "प्रबंधक",
     "modeWorkforce": "कार्यबल",
     "switchMode": "कार्यक्षेत्र बदलें",
-    "operator": "प्लेटफ़ॉर्म ऑपरेटर"
+    "operator": "प्लेटफ़ॉर्म ऑपरेटर",
+    "workforce": "कार्यबल",
+    "monitoring": "वार्तालाप निगरानी",
+    "analytics": "विश्लेषण"
   },
   "theme": {
     "light": "लाइट",
@@ -193,7 +196,9 @@
     "previous": "पिछला",
     "next": "अगला",
     "dismiss": "खारिज करें",
-    "refreshFailed": "रीफ़्रेश नहीं हो सका — अंतिम लोड किया गया डेटा दिखाया जा रहा है।"
+    "refreshFailed": "रीफ़्रेश नहीं हो सका — अंतिम लोड किया गया डेटा दिखाया जा रहा है।",
+    "settings": "सेटिंग्स",
+    "history": "इतिहास"
   },
   "agents": {
     "confirmDeleteDescription": "इस क्रिया को पूर्ववत नहीं किया जा सकता। एजेंट और इसका सारा डेटा स्थायी रूप से हटा दिया जाएगा।",
@@ -559,12 +564,9 @@
   },
   "conversations": {
     "confirmDeleteSoft": "डिफ़ॉल्ट रूप से यह सॉफ्ट डिलीट है — बातचीत सूचियों से छिप जाती है लेकिन इसका डेटा सर्वर पर बना रहता है।",
-    "confirmEndDesc": "{{count}} बातचीत को ENDED पर सेट किया जाएगा। रुकी हुई (मानव की प्रतीक्षा) बातचीत अनुमोदन-जागरूक पथ के माध्यम से सुरक्षित रूप से समाप्त की जाती हैं।",
-    "confirmPurgeDesc": "यह {{days}} दिन से पुरानी ENDED बातचीत को स्थायी रूप से हटा देता है, जिसमें उनकी संग्रहित मेमोरी और अनुलग्नक शामिल हैं। इसे पूर्ववत नहीं किया जा सकता।",
     "deletePermanentLabel": "स्थायी रूप से हटाएँ — अनुलग्नक, मेमोरी स्नैपशॉट और अनुमोदन इतिहास भी मिटा देता है। इसे पूर्ववत नहीं किया जा सकता।",
     "monitorSubtitle": "प्रति एजेंट चल रही बातचीत की निगरानी और थोक-प्रबंधन करें।",
     "noActiveDesc": "इस एजेंट संस्करण की अभी कोई चल रही बातचीत नहीं है।",
-    "pausedNote": "चयनित बातचीत में से {{count}} मानव की प्रतीक्षा में हैं और उनका लंबित अनुमोदन रद्द कर दिया जाएगा।",
     "purgeDesc": "उन ENDED बातचीत को स्थायी रूप से हटाएं जिनकी अंतिम गतिविधि दिए गए दिनों की संख्या से पुरानी है।",
     "selectAgentPromptDesc": "सक्रिय बातचीत प्रति एजेंट और संस्करण के अनुसार सूचीबद्ध हैं।",
     "searchPlaceholder": "वार्तालाप ID से खोजें...",
@@ -597,8 +599,6 @@
     "pageNumber": "पृष्ठ {{page}}",
     "deletePermanentAction": "स्थायी रूप से हटाएं",
     "step": "चरण",
-    "endSuccess": "{{count}} बातचीत समाप्त की गई",
-    "purgeSuccess": "{{count}} समाप्त बातचीत साफ़ की गईं",
     "monitorTitle": "सक्रिय बातचीत",
     "backToList": "बातचीत पर वापस",
     "selectAgentToMonitor": "एक एजेंट चुनें",
@@ -612,7 +612,17 @@
     "olderThanDays": "इससे पुराना (दिन)",
     "purgeAction": "साफ़ करें",
     "confirmEndTitle": "चयनित बातचीत समाप्त करें?",
-    "confirmPurgeTitle": "समाप्त बातचीत साफ़ करें?"
+    "confirmPurgeTitle": "समाप्त बातचीत साफ़ करें?",
+    "confirmEndDesc_one": "{{count}} बातचीत को ENDED पर सेट किया जाएगा। रुकी हुई (मानव की प्रतीक्षा) बातचीत अनुमोदन-जागरूक पथ के माध्यम से सुरक्षित रूप से समाप्त की जाती हैं।",
+    "confirmEndDesc_other": "{{count}} बातचीत को ENDED पर सेट किया जाएगा। रुकी हुई (मानव की प्रतीक्षा) बातचीत अनुमोदन-जागरूक पथ के माध्यम से सुरक्षित रूप से समाप्त की जाती हैं।",
+    "confirmPurgeDesc_one": "यह {{days}} दिन से पुरानी ENDED बातचीत को स्थायी रूप से हटा देता है, जिसमें उनकी संग्रहित मेमोरी और अनुलग्नक शामिल हैं। इसे पूर्ववत नहीं किया जा सकता।",
+    "confirmPurgeDesc_other": "यह {{days}} दिन से पुरानी ENDED बातचीत को स्थायी रूप से हटा देता है, जिसमें उनकी संग्रहित मेमोरी और अनुलग्नक शामिल हैं। इसे पूर्ववत नहीं किया जा सकता।",
+    "pausedNote_one": "चयनित बातचीत में से {{count}} मानव की प्रतीक्षा में हैं और उनका लंबित अनुमोदन रद्द कर दिया जाएगा।",
+    "pausedNote_other": "चयनित बातचीत में से {{count}} मानव की प्रतीक्षा में हैं और उनका लंबित अनुमोदन रद्द कर दिया जाएगा।",
+    "endSuccess_one": "{{count}} बातचीत समाप्त की गई",
+    "endSuccess_other": "{{count}} बातचीत समाप्त की गई",
+    "purgeSuccess_one": "{{count}} समाप्त बातचीत साफ़ की गईं",
+    "purgeSuccess_other": "{{count}} समाप्त बातचीत साफ़ की गईं"
   },
   "conversationDetail": {
     "backToConversations": "बातचीत पर वापस जाएं",
@@ -755,7 +765,6 @@
     "emptyDescription": "Workflow में उपयोग करने के लिए अपना पहला {{type}} बनाएं।"
   },
   "editor": {
-    "cascadePartialFailure": "{{count}} कैस्केड अपडेट विफल हुए",
     "compare": "तुलना करें",
     "compareVersions": "संस्करणों की तुलना करें",
     "deployFailed": "परिनियोजन विफल",
@@ -784,13 +793,16 @@
     "formPlaceholder": "विज़ुअल संपादक जल्द आ रहा है। संपादन के लिए JSON टैब का उपयोग करें।",
     "jsonSchema": "Schema सत्यापन सक्रिय",
     "cascadeMode": "परिवर्तन मूल Workflow और Agent तक प्रसारित होंगे",
-    "usedInAgents": "{{count}} Agent(s) में उपयोग किया गया",
     "updateUsageHint": "चयनित Workflows और Agents को नए संस्करण में अपडेट करें?",
     "updateUsage": "चयनित अपडेट करें",
     "skipUpdate": "छोड़ें",
     "cascading": "अपडेट हो रहा है...",
     "cascadeSuccess": "कैस्केड अपडेट पूर्ण",
-    "invalidJson": "अमान्य JSON — ठीक करने के लिए JSON टैब पर जाएं।"
+    "invalidJson": "अमान्य JSON — ठीक करने के लिए JSON टैब पर जाएं।",
+    "cascadePartialFailure_one": "{{count}} कैस्केड अपडेट विफल हुए",
+    "cascadePartialFailure_other": "{{count}} कैस्केड अपडेट विफल हुए",
+    "usedInAgents_one": "{{count}} Agent में उपयोग किया गया",
+    "usedInAgents_other": "{{count}} Agents में उपयोग किया गया"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1513,16 +1525,13 @@
     "vaultNotConfigured": "सीक्रेट्स विन्यास नहीं हो सका",
     "viewDocs": "दस्तावेज़ देखें",
     "selectAgentFirst": "पहले एक एजेंट चुनें",
-    "tableTitle": "{{count}} सीक्रेट टेनेंट \"{{tenant}}\" में",
     "dangerZoneTitle": "एन्क्रिप्शन कुंजी जीवनचक्र",
     "dangerZoneDesc": "Vault की क्रिप्टोग्राफ़िक कुंजियों के लिए परिचालन पुनर्प्राप्ति क्रियाएं। इनका उपयोग कुंजियों को घुमाने या मास्टर कुंजी बदलने के बाद पहुंच पुनर्प्राप्त करने के लिए करें। यह ऊपर किसी व्यक्तिगत Secret के मान को घुमाने से अलग है।",
     "rotateDekTitle": "एन्क्रिप्शन कुंजी (DEK) घुमाएं",
     "rotateDekBlurb": "सुरक्षित — कोई रीस्टार्ट नहीं। प्रत्येक टेनेंट के लिए एक नई डेटा एन्क्रिप्शन कुंजी बनाता है और इस टेनेंट के सभी Secret को फिर से एन्क्रिप्ट करता है।",
     "rotateDekAction": "DEK घुमाएं",
     "rotateDekConfirmTitle": "एन्क्रिप्शन कुंजी (DEK) घुमाएं?",
-    "rotateDekConfirmDesc": "यह टेनेंट \"{{tenant}}\" के लिए एक नई डेटा एन्क्रिप्शन कुंजी बनाता है और उसके {{count}} Secret को फिर से एन्क्रिप्ट करता है। यह सुरक्षित है और तुरंत प्रभावी होता है — किसी रीस्टार्ट की आवश्यकता नहीं है।",
     "rotateDekConfirm": "अभी DEK घुमाएं",
-    "rotateDekSuccess": "एन्क्रिप्शन कुंजी घुमाई गई — {{count}} Secret फिर से एन्क्रिप्ट किए गए",
     "rotateKekTitle": "मास्टर कुंजी (KEK) घुमाएं",
     "rotateKekBlurb": "सभी टेनेंट DEK को एक नई मास्टर कुंजी से फिर से एन्क्रिप्ट करता है। इसके लिए EDDI_VAULT_MASTER_KEY अपडेट करना और उसके बाद रीस्टार्ट करना आवश्यक है।",
     "rotateKekAction": "मास्टर कुंजी घुमाएं",
@@ -1536,18 +1545,29 @@
     "kekNewKeyPlaceholder": "नई कुंजी — कम से कम 8 वर्ण",
     "kekNewKeyTooShort": "नई मास्टर कुंजी कम से कम 8 वर्ण की होनी चाहिए।",
     "kekRestartHint": "घुमाने के बाद आपको EDDI_VAULT_MASTER_KEY को नई कुंजी में अपडेट करना होगा और EDDI को रीस्टार्ट करना होगा।",
-    "kekResultTitle": "मास्टर कुंजी घुमाई गई — {{count}} DEK फिर से एन्क्रिप्ट किए गए",
     "kekResultInstruction": "कार्रवाई आवश्यक: पर्यावरण चर EDDI_VAULT_MASTER_KEY को नई मास्टर कुंजी पर सेट करें और EDDI को रीस्टार्ट करें। जब तक आप ऐसा नहीं करते, चल रहा इंस्टेंस अभी भी मेमोरी में पुरानी कुंजी का उपयोग करता है।",
-    "rotateKekSuccess": "मास्टर कुंजी घुमाई गई — {{count}} DEK फिर से एन्क्रिप्ट किए गए। EDDI_VAULT_MASTER_KEY अपडेट करें और रीस्टार्ट करें।",
     "resetTenantTitle": "इस टेनेंट के लिए Vault रीसेट करें",
     "resetTenantBlurb": "विनाशकारी अंतिम उपाय। सभी Secret और DEK को स्थायी रूप से हटा देता है ताकि Vault नए सिरे से शुरू हो सके — मास्टर कुंजी खोने या बदलने के बाद उपयोग करें।",
     "resetTenantAction": "Vault रीसेट करें",
     "resetTenantConfirmTitle": "इस टेनेंट के लिए Vault रीसेट करें?",
-    "resetTenantConfirmDesc": "यह टेनेंट \"{{tenant}}\" के सभी {{count}} Secret और डेटा एन्क्रिप्शन कुंजी को स्थायी रूप से हटा देता है। जब मास्टर कुंजी खो गई हो या बदल गई हो और पुरानी कुंजी उपलब्ध न हो, तो इसे पुनर्प्राप्ति चरण के रूप में उपयोग करें। इसे पूर्ववत नहीं किया जा सकता।",
     "resetTenantConfirm": "Vault को स्थायी रूप से रीसेट करें",
-    "resetSecretCount": "{{count}} Secret स्थायी रूप से खो जाएंगे",
     "resetConfirmLabel": "पुष्टि करने के लिए टेनेंट नाम \"{{tenant}}\" टाइप करें",
-    "resetTenantSuccess": "\"{{tenant}}\" के लिए Vault रीसेट किया गया — {{count}} Secret स्थायी रूप से हटाए गए"
+    "tableTitle_one": "{{count}} सीक्रेट टेनेंट \"{{tenant}}\" में",
+    "tableTitle_other": "{{count}} सीक्रेट टेनेंट \"{{tenant}}\" में",
+    "rotateDekConfirmDesc_one": "यह टेनेंट \"{{tenant}}\" के लिए एक नई डेटा एन्क्रिप्शन कुंजी बनाता है और उसके {{count}} Secret को फिर से एन्क्रिप्ट करता है। यह सुरक्षित है और तुरंत प्रभावी होता है — किसी रीस्टार्ट की आवश्यकता नहीं है।",
+    "rotateDekConfirmDesc_other": "यह टेनेंट \"{{tenant}}\" के लिए एक नई डेटा एन्क्रिप्शन कुंजी बनाता है और उसके {{count}} Secret को फिर से एन्क्रिप्ट करता है। यह सुरक्षित है और तुरंत प्रभावी होता है — किसी रीस्टार्ट की आवश्यकता नहीं है।",
+    "rotateDekSuccess_one": "एन्क्रिप्शन कुंजी घुमाई गई — {{count}} Secret फिर से एन्क्रिप्ट किए गए",
+    "rotateDekSuccess_other": "एन्क्रिप्शन कुंजी घुमाई गई — {{count}} Secret फिर से एन्क्रिप्ट किए गए",
+    "kekResultTitle_one": "मास्टर कुंजी घुमाई गई — {{count}} DEK फिर से एन्क्रिप्ट किए गए",
+    "kekResultTitle_other": "मास्टर कुंजी घुमाई गई — {{count}} DEK फिर से एन्क्रिप्ट किए गए",
+    "rotateKekSuccess_one": "मास्टर कुंजी घुमाई गई — {{count}} DEK फिर से एन्क्रिप्ट किए गए। EDDI_VAULT_MASTER_KEY अपडेट करें और रीस्टार्ट करें।",
+    "rotateKekSuccess_other": "मास्टर कुंजी घुमाई गई — {{count}} DEK फिर से एन्क्रिप्ट किए गए। EDDI_VAULT_MASTER_KEY अपडेट करें और रीस्टार्ट करें।",
+    "resetTenantConfirmDesc_one": "यह टेनेंट \"{{tenant}}\" के सभी {{count}} Secret और डेटा एन्क्रिप्शन कुंजी को स्थायी रूप से हटा देता है। जब मास्टर कुंजी खो गई हो या बदल गई हो और पुरानी कुंजी उपलब्ध न हो, तो इसे पुनर्प्राप्ति चरण के रूप में उपयोग करें। इसे पूर्ववत नहीं किया जा सकता।",
+    "resetTenantConfirmDesc_other": "यह टेनेंट \"{{tenant}}\" के सभी {{count}} Secret और डेटा एन्क्रिप्शन कुंजी को स्थायी रूप से हटा देता है। जब मास्टर कुंजी खो गई हो या बदल गई हो और पुरानी कुंजी उपलब्ध न हो, तो इसे पुनर्प्राप्ति चरण के रूप में उपयोग करें। इसे पूर्ववत नहीं किया जा सकता।",
+    "resetSecretCount_one": "{{count}} Secret स्थायी रूप से खो जाएंगे",
+    "resetSecretCount_other": "{{count}} Secret स्थायी रूप से खो जाएंगे",
+    "resetTenantSuccess_one": "\"{{tenant}}\" के लिए Vault रीसेट किया गया — {{count}} Secret स्थायी रूप से हटाए गए",
+    "resetTenantSuccess_other": "\"{{tenant}}\" के लिए Vault रीसेट किया गया — {{count}} Secret स्थायी रूप से हटाए गए"
   },
   "audit": {
     "title": "ऑडिट लॉग",
@@ -2161,7 +2181,6 @@
     "reviewTimeout": "एजेंट टाइमआउट",
     "reviewUnassigned": "असाइन नहीं किया गया",
     "reviewUnassignedHint": "बनाने से पहले एजेंट सौंपने के लिए वापस जाएं।",
-    "reviewUnassignedWarning": "{{count}} सदस्य असाइन नहीं किए गए",
     "selectAgent": "एजेंट चुनें…",
     "selectOrStart": "इतिहास से एक पिछली चर्चा चुनें, या नई शुरू करने के लिए नीचे एक प्रश्न टाइप करें।",
     "shiftEnter": "नई पंक्ति",
@@ -2401,9 +2420,8 @@
       "NONE": "कोई संरचित निर्णय नहीं"
     },
     "abstainedBody": "इस दौर में कुछ नया नहीं जोड़ा।",
-    "convergenceSkipped_one": "· आगे का {{count}} दौर छोड़ा गया",
+    "convergenceSkipped_one": "· आगे के {{count}} दौर छोड़े गए",
     "convergenceSkipped_other": "· आगे के {{count}} दौर छोड़े गए",
-    "convergenceSkipped": "· आगे के {{skipped}} दौर छोड़े गए",
     "attachmentTotalTooLarge": "संलग्नक कुल आकार सीमा से अधिक हैं",
     "convergenceInert": "कॉन्फ़िगर है, पर यह चरण एक ही बार चलता है — निर्णायक कभी नहीं चल पाएगा। इसे हटाएँ, या चरण को एक से अधिक दोहराव दें।",
     "questionTooLong": "प्रश्न अधिकतम {{max}} अक्षरों का हो सकता है",
@@ -2415,7 +2433,6 @@
     "artifactDraft": "प्रारूप",
     "artifactFinal": "अंतिम",
     "artifactLastEdited": "अंतिम बार {{agent}} द्वारा संपादित",
-    "artifactRevisions": "{{count}} पूर्व संशोधन",
     "artifactUpdatedBadge": "{{name}} अपडेट किया गया (v{{version}})",
     "artifactsTitle": "साझा आर्टिफ़ैक्ट ({{count}})",
     "concessionLedgerTitle": "रियायत लेजर",
@@ -2443,7 +2460,6 @@
     "notSet": "सेट नहीं",
     "retroConfigLabel": "रेट्रो सबक",
     "retroConfigValue": "{{perRun}}/रन, अधिकतम {{stored}} संग्रहीत",
-    "retroRecordedBadge": "{{phase}}: {{count}} सबक टीम मेमोरी में सहेजे गए",
     "stateAwaitingHumanInput": "सदस्य की प्रतीक्षा",
     "summarized": "सारांशित",
     "transcriptWindowed": "बाद की बारियों के संदर्भ को सीमित रखने के लिए पहली {{count}} ट्रांसक्रिप्ट प्रविष्टियों को एक रोलिंग सारांश में समेट दिया गया है। सारांश देखने के लिए होवर करें।",
@@ -2499,7 +2515,19 @@
     "assignmentModeBid": "बोली द्वारा (सदस्य बोली लगाते हैं, सर्वोच्च आत्मविश्वास जीतता है)",
     "assignmentModeBidShort": "बोली द्वारा",
     "assignmentModeRoleHint": "योजनाकार या कॉन्फ़िगरेशन हर कार्य आवंटित करता है, या बारी-बारी से।",
-    "assignmentModeBidHint": "जब नीलामी अपनी लागत वसूल न कर सके तो भूमिका-आधारित आवंटन पर लौट आता है — दो से कम बोलीदाता या खुले कार्य, या अपर्याप्त टर्न बजट।"
+    "assignmentModeBidHint": "जब नीलामी अपनी लागत वसूल न कर सके तो भूमिका-आधारित आवंटन पर लौट आता है — दो से कम बोलीदाता या खुले कार्य, या अपर्याप्त टर्न बजट।",
+    "contextWindowSummarizer": "सारांशकर्ता",
+    "contextWindowNoSummarizer": "कोई नहीं",
+    "contextWindowModel": "सारांश मॉडल",
+    "contextWindowModelPlaceholder": "मॉडल",
+    "contextWindowSummarizerMissing": "सारांश मॉडल के बिना, अतिरिक्त सामग्री चुपचाप सादे कटौती चिह्न पर लौट आती है।",
+    "facilitatorMaxMovesCeiling": "अधिकतम {{max}} — फ़ैसिलिटेटर एक सीमित हस्तक्षेप है, ऑर्केस्ट्रेटर नहीं।",
+    "reviewUnassignedWarning_one": "{{count}} सदस्य असाइन नहीं किए गए",
+    "reviewUnassignedWarning_other": "{{count}} सदस्य असाइन नहीं किए गए",
+    "retroRecordedBadge_one": "{{phase}}: {{count}} सबक टीम मेमोरी में सहेजे गए",
+    "retroRecordedBadge_other": "{{phase}}: {{count}} सबक टीम मेमोरी में सहेजे गए",
+    "artifactRevisions_one": "{{count}} पूर्व संशोधन",
+    "artifactRevisions_other": "{{count}} पूर्व संशोधन"
   },
   "taskBoard": {
     "title": "कार्य बोर्ड",
@@ -2866,10 +2894,13 @@
     "createButton": "समूह बनाएँ",
     "created": "टेम्पलेट से समूह बनाया गया",
     "nameLabel": "समूह का नाम",
-    "roleCount": "असाइन करने के लिए {{count}} भूमिका(एँ)",
     "selectAgent": "एक एजेंट चुनें…",
     "subtitle": "एक पैकेज्ड, पहले से ट्यून की गई चर्चा से शुरू करें — बस उसकी नामित भूमिकाओं में एजेंट असाइन करें।",
-    "title": "समूह टेम्पलेट"
+    "title": "समूह टेम्पलेट",
+    "roleCount_one": "असाइन करने के लिए {{count}} भूमिका",
+    "roleCount_other": "असाइन करने के लिए {{count}} भूमिकाएँ",
+    "empty": "कोई टेम्पलेट उपलब्ध नहीं",
+    "emptyDescription": "इस सर्वर में कोई ग्रुप टेम्पलेट नहीं है। आप विज़ार्ड से शुरुआत से ग्रुप बना सकते हैं।"
   },
   "channels": {
     "agentIdPlaceholder": "संदेश संभालने के लिए एजेंट ID",
@@ -3110,7 +3141,6 @@
     "deleteSelected": "{{count}} चयनित हटाएं",
     "description": "किसी भी एजेंट या पैकेज द्वारा संदर्भित न किए गए संसाधनों को खोजें और साफ़ करें।",
     "deselectAll": "सभी अचयनित करें",
-    "found": "{{count}} अनाथ मिले",
     "includeDeleted": "सॉफ्ट-डिलीट किए गए शामिल करें",
     "lastScanned": "अंतिम स्कैन",
     "noOrphans": "कोई अनाथ नहीं मिला",
@@ -3123,7 +3153,9 @@
     "scanning": "संसाधन स्कैन हो रहे हैं…",
     "selectAll": "सभी चुनें",
     "softDeleted": "हटाया गया",
-    "title": "अनाथ पहचान"
+    "title": "अनाथ पहचान",
+    "found_one": "{{count}} अनाथ मिले",
+    "found_other": "{{count}} अनाथ मिले"
   },
   "quotas": {
     "apiCallsMinute": "API कॉल / मिनट",
@@ -3193,7 +3225,9 @@
   },
   "variables": {
     "deleteKey": "{{key}} हटाएं",
-    "editKey": "{{key}} संपादित करें"
+    "editKey": "{{key}} संपादित करें",
+    "tableTitle_one": "{{count}} वेरिएबल",
+    "tableTitle_other": "{{count}} वेरिएबल"
   },
   "workflowEditor": {
     "endpoints": "एंडपॉइंट",
@@ -3472,7 +3506,6 @@
     "cadenceAdded": "कैडेंस जोड़ा गया",
     "cadenceDeleted": "कैडेंस हटाया गया",
     "cadenceRunning": "वर्तमान में एक कैडेंस-रन चर्चा प्रगति पर है।",
-    "cadenceSummary": "प्रति रन अधिकतम {{max}} कार्य",
     "cadencesEmpty": "अभी तक कोई आवर्ती कैडेंस कॉन्फ़िगर नहीं किया गया है।",
     "cadencesTitle": "कैडेंस ({{count}})",
     "confirmDeleteCadenceDesc": "इससे इसके निर्धारित रन रुक जाते हैं। पहले से चल चुकी चर्चाएँ प्रभावित नहीं होतीं।",
@@ -3501,6 +3534,11 @@
     "title": "स्थायी टीम वर्कस्पेस",
     "totalCost": "कुल लागत",
     "verified": "सत्यापित",
-    "maxCostInvalid": "प्रति रन अधिकतम लागत 0 या उससे अधिक संख्या होनी चाहिए।"
+    "maxCostInvalid": "प्रति रन अधिकतम लागत 0 या उससे अधिक संख्या होनी चाहिए।",
+    "cadenceSummary_one": "प्रति रन अधिकतम {{max}} कार्य",
+    "cadenceSummary_other": "प्रति रन अधिकतम {{max}} कार्य"
+  },
+  "workforceWizard": {
+    "title": "नई टीम"
   }
 }

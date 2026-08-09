@@ -5,10 +5,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useUpdateGroup } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
 import {
   ARTIFACT_DEFAULT_MAX_PER_DISCUSSION,
   CONTEXT_WINDOW_DEFAULT_MAX_RECENT_ENTRIES,
   FACILITATOR_DEFAULT_MAX_MOVES,
+  FACILITATOR_MAX_MOVES_CEILING,
   RETRO_CEILING_MAX_PER_RUN,
   RETRO_CEILING_MAX_STORED,
   RETRO_DEFAULT_MAX_PER_RUN,
@@ -102,6 +104,8 @@ export function GroupAdvancedEditor({
   const [summarizeOverflow, setSummarizeOverflow] = useState(
     config.contextWindow?.summarizeOverflow !== false,
   );
+  const [summarizerProvider, setSummarizerProvider] = useState(config.contextWindow?.llmProvider ?? "");
+  const [summarizerModel, setSummarizerModel] = useState(config.contextWindow?.llmModel ?? "");
 
   // --- I8 retro lessons ---
   const [retroEnabled, setRetroEnabled] = useState(!!config.retroConfig);
@@ -161,9 +165,28 @@ export function GroupAdvancedEditor({
     checkAfter === "EACH_PHASE" &&
     MID_PHASE_MOVES.some((m) => allowedMoves.has(m));
   const noMoveSelected = facilitatorEnabled && allowedMoves.size === 0;
+  // `AgentGroupStore.validateFacilitator` REJECTS anything over 100 outright —
+  // "a bounded intervention mechanism, not an orchestrator". Catch it here rather
+  // than letting the save round-trip into a 400.
+  const tooManyMoves = facilitatorEnabled && maxMoves > FACILITATOR_MAX_MOVES_CEILING;
+
+  /**
+   * Summarization needs a model. Without `llmProvider`/`llmModel` the engine
+   * falls back to the plain truncation marker and only says so in a server log —
+   * the author sees a window that claims to summarize and silently does not.
+   * The backend warns about exactly this at save time (`warnOnSummarizerlessWindow`),
+   * so surface it here, where it can still be fixed. A warning, not a block:
+   * truncation is well-defined behaviour someone may genuinely want.
+   */
+  const summarizerIncomplete =
+    windowEnabled && summarizeOverflow && (!summarizerProvider.trim() || !summarizerModel.trim());
 
   const blocked =
-    facilitatorAgentMissing || escalateTargetMissing || midPhaseMovesUnreachable || noMoveSelected;
+    facilitatorAgentMissing ||
+    escalateTargetMissing ||
+    midPhaseMovesUnreachable ||
+    noMoveSelected ||
+    tooManyMoves;
 
   const save = () => {
     if (blocked) return;
@@ -179,6 +202,11 @@ export function GroupAdvancedEditor({
               CONTEXT_WINDOW_DEFAULT_MAX_RECENT_ENTRIES,
             ),
             summarizeOverflow,
+            // The backend coalesces blank identifiers to null anyway ("blank
+            // identifiers ARE absent"); send null so the saved document says the
+            // same thing the engine will read.
+            llmProvider: summarizerProvider.trim() || null,
+            llmModel: summarizerModel.trim() || null,
           }
         : undefined,
       retroConfig: retroEnabled
@@ -300,6 +328,52 @@ export function GroupAdvancedEditor({
                   "Older entries are replaced with a plain \"N earlier entries omitted\" marker instead.",
                 )}
               </p>
+            )}
+            {summarizeOverflow && (
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label htmlFor={`${uid}-sum-provider`} className="text-[10px] text-muted-foreground">
+                    {t("groups.contextWindowSummarizer", "Summarizer")}
+                  </label>
+                  <select
+                    id={`${uid}-sum-provider`}
+                    value={summarizerProvider}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setSummarizerProvider(next);
+                      // Seed the provider's default model so picking a provider is
+                      // enough to make summarization actually run.
+                      const preset = LLM_PROVIDERS.find((p) => p.id === next);
+                      if (preset && !summarizerModel.trim()) setSummarizerModel(preset.defaultModel);
+                    }}
+                    className={`${inputCls} w-40`}
+                    data-testid="adv-window-provider"
+                  >
+                    <option value="">{t("groups.contextWindowNoSummarizer", "None")}</option>
+                    {LLM_PROVIDERS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={summarizerModel}
+                    onChange={(e) => setSummarizerModel(e.target.value)}
+                    placeholder={t("groups.contextWindowModelPlaceholder", "model")}
+                    aria-label={t("groups.contextWindowModel", "Summarizer model")}
+                    className={`${inputCls} w-44`}
+                    data-testid="adv-window-model"
+                  />
+                </div>
+                {summarizerIncomplete && (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400" data-testid="adv-window-summarizer-warning">
+                    {t(
+                      "groups.contextWindowSummarizerMissing",
+                      "Without a summarizer model, overflow silently falls back to the plain truncation marker.",
+                    )}
+                  </p>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -515,19 +589,31 @@ export function GroupAdvancedEditor({
               </div>
             )}
 
-            <div className="flex items-center gap-2">
-              <label htmlFor={`${uid}-max-moves`} className="text-[10px] text-muted-foreground">
-                {t("groups.facilitatorMaxMoves", "Max moves per discussion")}
-              </label>
-              <input
-                id={`${uid}-max-moves`}
-                type="number"
-                min={1}
-                value={maxMoves}
-                onChange={(e) => setMaxMoves(Number(e.target.value))}
-                className={numCls}
-                data-testid="adv-facilitator-max-moves"
-              />
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <label htmlFor={`${uid}-max-moves`} className="text-[10px] text-muted-foreground">
+                  {t("groups.facilitatorMaxMoves", "Max moves per discussion")}
+                </label>
+                <input
+                  id={`${uid}-max-moves`}
+                  type="number"
+                  min={1}
+                  max={FACILITATOR_MAX_MOVES_CEILING}
+                  value={maxMoves}
+                  onChange={(e) => setMaxMoves(Number(e.target.value))}
+                  className={numCls}
+                  data-testid="adv-facilitator-max-moves"
+                />
+              </div>
+              {tooManyMoves && (
+                <p className="text-[10px] text-destructive" data-testid="adv-facilitator-max-moves-error">
+                  {t("groups.facilitatorMaxMovesCeiling", {
+                    defaultValue:
+                      "At most {{max}} — the facilitator is a bounded intervention, not an orchestrator.",
+                    max: FACILITATOR_MAX_MOVES_CEILING,
+                  })}
+                </p>
+              )}
             </div>
           </div>
         )}

@@ -232,7 +232,7 @@ describe("CreateGroupDialog", () => {
     await user.click(screen.getByRole("button", { name: /Next/i }));
 
     // Review step should show warning
-    expect(screen.getByText(/2 member\(s\) unassigned/)).toBeInTheDocument();
+    expect(screen.getByText(/2 members unassigned/)).toBeInTheDocument();
     expect(screen.getAllByText("Unassigned")).toHaveLength(2);
 
     // Clicking Back should return to members step

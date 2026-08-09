@@ -69,7 +69,10 @@
     "modeManager": "ผู้จัดการ",
     "modeWorkforce": "ทีมงาน",
     "switchMode": "สลับพื้นที่ทำงาน",
-    "operator": "ผู้ดูแลแพลตฟอร์ม"
+    "operator": "ผู้ดูแลแพลตฟอร์ม",
+    "workforce": "ทีมงาน",
+    "monitoring": "การติดตามการสนทนา",
+    "analytics": "การวิเคราะห์"
   },
   "theme": {
     "light": "สว่าง",
@@ -193,7 +196,9 @@
     "previous": "ก่อนหน้า",
     "next": "ถัดไป",
     "dismiss": "ปิด",
-    "refreshFailed": "ไม่สามารถรีเฟรชได้ — กำลังแสดงข้อมูลที่โหลดล่าสุด"
+    "refreshFailed": "ไม่สามารถรีเฟรชได้ — กำลังแสดงข้อมูลที่โหลดล่าสุด",
+    "settings": "การตั้งค่า",
+    "history": "ประวัติ"
   },
   "agents": {
     "confirmDeleteDescription": "การดำเนินการนี้ไม่สามารถย้อนกลับได้ เอเจนต์และข้อมูลทั้งหมดจะถูกลบอย่างถาวร",
@@ -559,12 +564,9 @@
   },
   "conversations": {
     "confirmDeleteSoft": "โดยค่าเริ่มต้นนี่เป็นการลบแบบชั่วคราว — การสนทนาจะถูกซ่อนจากรายการแต่ข้อมูลยังคงอยู่บนเซิร์ฟเวอร์",
-    "confirmEndDesc": "การสนทนา {{count}} รายการจะถูกตั้งเป็น ENDED การสนทนาที่หยุดชั่วคราว (รอมนุษย์) จะถูกสิ้นสุดอย่างปลอดภัยผ่านเส้นทางที่รับรู้การอนุมัติ",
-    "confirmPurgeDesc": "การดำเนินการนี้จะลบการสนทนาที่ ENDED ที่เก่ากว่า {{days}} วันอย่างถาวร รวมถึงหน่วยความจำและไฟล์แนบที่จัดเก็บไว้ ไม่สามารถย้อนกลับได้",
     "deletePermanentLabel": "ลบถาวร — จะลบไฟล์แนบ สแนปช็อตหน่วยความจำ และประวัติการอนุมัติด้วย ไม่สามารถย้อนกลับได้",
     "monitorSubtitle": "ตรวจสอบและจัดการการสนทนาที่กำลังดำเนินอยู่จำนวนมากต่อเอเจนต์",
     "noActiveDesc": "เวอร์ชันเอเจนต์นี้ไม่มีการสนทนาที่กำลังดำเนินอยู่ในขณะนี้",
-    "pausedNote": "การสนทนาที่เลือก {{count}} รายการกำลังรอมนุษย์ และการอนุมัติที่รอดำเนินการจะถูกยกเลิก",
     "purgeDesc": "ลบการสนทนาที่ ENDED ที่มีกิจกรรมล่าสุดเก่ากว่าจำนวนวันที่กำหนดอย่างถาวร",
     "selectAgentPromptDesc": "การสนทนาที่ใช้งานอยู่จะแสดงตามเอเจนต์และเวอร์ชัน",
     "searchPlaceholder": "ค้นหาด้วย ID การสนทนา...",
@@ -597,8 +599,6 @@
     "pageNumber": "หน้า {{page}}",
     "deletePermanentAction": "ลบถาวร",
     "step": "ขั้นตอน",
-    "endSuccess": "สิ้นสุด {{count}} บทสนทนา",
-    "purgeSuccess": "ล้าง {{count}} บทสนทนาที่สิ้นสุดแล้ว",
     "monitorTitle": "บทสนทนาที่ใช้งานอยู่",
     "backToList": "กลับไปที่บทสนทนา",
     "selectAgentToMonitor": "เลือกเอเจนต์",
@@ -612,7 +612,17 @@
     "olderThanDays": "เก่ากว่า (วัน)",
     "purgeAction": "ล้าง",
     "confirmEndTitle": "สิ้นสุดบทสนทนาที่เลือกหรือไม่?",
-    "confirmPurgeTitle": "ล้างบทสนทนาที่สิ้นสุดแล้วหรือไม่?"
+    "confirmPurgeTitle": "ล้างบทสนทนาที่สิ้นสุดแล้วหรือไม่?",
+    "confirmEndDesc_other": "การสนทนา {{count}} รายการจะถูกตั้งเป็น ENDED การสนทนาที่หยุดชั่วคราว (รอมนุษย์) จะถูกสิ้นสุดอย่างปลอดภัยผ่านเส้นทางที่รับรู้การอนุมัติ",
+    "confirmEndDesc_one": "การสนทนา {{count}} รายการจะถูกตั้งเป็น ENDED การสนทนาที่หยุดชั่วคราว (รอมนุษย์) จะถูกสิ้นสุดอย่างปลอดภัยผ่านเส้นทางที่รับรู้การอนุมัติ",
+    "confirmPurgeDesc_other": "การดำเนินการนี้จะลบการสนทนาที่ ENDED ที่เก่ากว่า {{days}} วันอย่างถาวร รวมถึงหน่วยความจำและไฟล์แนบที่จัดเก็บไว้ ไม่สามารถย้อนกลับได้",
+    "confirmPurgeDesc_one": "การดำเนินการนี้จะลบการสนทนาที่ ENDED ที่เก่ากว่า {{days}} วันอย่างถาวร รวมถึงหน่วยความจำและไฟล์แนบที่จัดเก็บไว้ ไม่สามารถย้อนกลับได้",
+    "pausedNote_other": "การสนทนาที่เลือก {{count}} รายการกำลังรอมนุษย์ และการอนุมัติที่รอดำเนินการจะถูกยกเลิก",
+    "pausedNote_one": "การสนทนาที่เลือก {{count}} รายการกำลังรอมนุษย์ และการอนุมัติที่รอดำเนินการจะถูกยกเลิก",
+    "endSuccess_other": "สิ้นสุด {{count}} บทสนทนา",
+    "endSuccess_one": "สิ้นสุด {{count}} บทสนทนา",
+    "purgeSuccess_other": "ล้าง {{count}} บทสนทนาที่สิ้นสุดแล้ว",
+    "purgeSuccess_one": "ล้าง {{count}} บทสนทนาที่สิ้นสุดแล้ว"
   },
   "conversationDetail": {
     "backToConversations": "กลับไปยังบทสนทนา",
@@ -755,7 +765,6 @@
     "emptyDescription": "สร้าง {{type}} แรกของคุณเพื่อใช้ใน Workflow"
   },
   "editor": {
-    "cascadePartialFailure": "การอัปเดตแบบต่อเนื่อง {{count}} รายการล้มเหลว",
     "compare": "เปรียบเทียบ",
     "compareVersions": "เปรียบเทียบเวอร์ชัน",
     "deployFailed": "การปรับใช้ล้มเหลว",
@@ -784,13 +793,16 @@
     "formPlaceholder": "ตัวแก้ไขแบบภาพจะมาเร็วๆ นี้ ใช้แท็บ JSON เพื่อแก้ไข",
     "jsonSchema": "การตรวจสอบ Schema ทำงานอยู่",
     "cascadeMode": "การเปลี่ยนแปลงจะถูกส่งต่อไปยัง Workflow และ Agent แม่",
-    "usedInAgents": "ใช้ใน {{count}} Agent(s)",
     "updateUsageHint": "อัปเดต Workflows และ Agents ที่เลือกเป็นเวอร์ชันใหม่?",
     "updateUsage": "อัปเดตที่เลือก",
     "skipUpdate": "ข้าม",
     "cascading": "กำลังอัปเดต...",
     "cascadeSuccess": "การอัปเดตแบบต่อเนื่องเสร็จสมบูรณ์",
-    "invalidJson": "JSON ไม่ถูกต้อง — เปลี่ยนไปแท็บ JSON เพื่อแก้ไข"
+    "invalidJson": "JSON ไม่ถูกต้อง — เปลี่ยนไปแท็บ JSON เพื่อแก้ไข",
+    "cascadePartialFailure_other": "การอัปเดตแบบต่อเนื่อง {{count}} รายการล้มเหลว",
+    "cascadePartialFailure_one": "การอัปเดตแบบต่อเนื่อง {{count}} รายการล้มเหลว",
+    "usedInAgents_other": "ใช้ใน {{count}} Agents",
+    "usedInAgents_one": "ใช้ใน {{count}} Agent"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1513,16 +1525,13 @@
     "vaultNotConfigured": "ไม่ได้กำหนดค่าศูนย์ลับ",
     "viewDocs": "ดูเอกสารประกอบ",
     "selectAgentFirst": "กรุณาเลือกเอเจนต์ตัวหนึ่ง",
-    "tableTitle": "{{count}} ข้อมูลลับของ \"{{tenant}}\"",
     "dangerZoneTitle": "วงจรชีวิตของคีย์เข้ารหัส",
     "dangerZoneDesc": "การดำเนินการกู้คืนเชิงปฏิบัติการสำหรับคีย์เข้ารหัสของ Vault ใช้เพื่อหมุนเวียนคีย์หรือกู้คืนการเข้าถึงหลังจากมีการเปลี่ยนคีย์หลัก แตกต่างจากการหมุนเวียนค่าของ Secret แต่ละรายการด้านบน",
     "rotateDekTitle": "หมุนเวียนคีย์เข้ารหัส (DEK)",
     "rotateDekBlurb": "ปลอดภัย — ไม่ต้องรีสตาร์ท สร้างคีย์เข้ารหัสข้อมูลใหม่สำหรับผู้เช่าแต่ละราย และเข้ารหัส Secret ทั้งหมดของผู้เช่านี้ใหม่",
     "rotateDekAction": "หมุนเวียน DEK",
     "rotateDekConfirmTitle": "หมุนเวียนคีย์เข้ารหัส (DEK)?",
-    "rotateDekConfirmDesc": "การดำเนินการนี้จะสร้างคีย์เข้ารหัสข้อมูลใหม่สำหรับผู้เช่า \"{{tenant}}\" และเข้ารหัส Secret จำนวน {{count}} รายการใหม่ ปลอดภัยและมีผลทันที — ไม่ต้องรีสตาร์ท",
     "rotateDekConfirm": "หมุนเวียน DEK ทันที",
-    "rotateDekSuccess": "หมุนเวียนคีย์เข้ารหัสแล้ว — เข้ารหัส Secret จำนวน {{count}} รายการใหม่แล้ว",
     "rotateKekTitle": "หมุนเวียนคีย์หลัก (KEK)",
     "rotateKekBlurb": "เข้ารหัส DEK ของผู้เช่าทั้งหมดใหม่ด้วยคีย์หลักใหม่ ต้องอัปเดต EDDI_VAULT_MASTER_KEY และรีสตาร์ทหลังจากนั้น",
     "rotateKekAction": "หมุนเวียนคีย์หลัก",
@@ -1536,18 +1545,29 @@
     "kekNewKeyPlaceholder": "คีย์ใหม่ — อย่างน้อย 8 อักขระ",
     "kekNewKeyTooShort": "คีย์หลักใหม่ต้องมีอย่างน้อย 8 อักขระ",
     "kekRestartHint": "หลังจากหมุนเวียน คุณต้องอัปเดต EDDI_VAULT_MASTER_KEY เป็นคีย์ใหม่และรีสตาร์ท EDDI",
-    "kekResultTitle": "หมุนเวียนคีย์หลักแล้ว — เข้ารหัส DEK จำนวน {{count}} รายการใหม่แล้ว",
     "kekResultInstruction": "ต้องดำเนินการ: ตั้งค่าตัวแปรสภาพแวดล้อม EDDI_VAULT_MASTER_KEY เป็นคีย์หลักใหม่และรีสตาร์ท EDDI จนกว่าจะทำ อินสแตนซ์ที่กำลังทำงานยังคงใช้คีย์เดิมในหน่วยความจำ",
-    "rotateKekSuccess": "หมุนเวียนคีย์หลักแล้ว — เข้ารหัส DEK จำนวน {{count}} รายการใหม่แล้ว อัปเดต EDDI_VAULT_MASTER_KEY และรีสตาร์ท",
     "resetTenantTitle": "รีเซ็ต Vault สำหรับผู้เช่านี้",
     "resetTenantBlurb": "ทางเลือกสุดท้ายที่ทำลายข้อมูล ลบ Secret ทั้งหมดและ DEK อย่างถาวรเพื่อให้ Vault เริ่มต้นใหม่ได้ — ใช้หลังจากคีย์หลักสูญหายหรือถูกเปลี่ยน",
     "resetTenantAction": "รีเซ็ต Vault",
     "resetTenantConfirmTitle": "รีเซ็ต Vault สำหรับผู้เช่านี้?",
-    "resetTenantConfirmDesc": "การดำเนินการนี้จะลบ Secret ทั้งหมด {{count}} รายการและคีย์เข้ารหัสข้อมูลของผู้เช่า \"{{tenant}}\" อย่างถาวร ใช้ขั้นตอนกู้คืนนี้เมื่อคีย์หลักสูญหายหรือถูกเปลี่ยนและไม่มีคีย์เดิม ไม่สามารถยกเลิกได้",
     "resetTenantConfirm": "รีเซ็ต Vault อย่างถาวร",
-    "resetSecretCount": "Secret จำนวน {{count}} รายการจะสูญหายอย่างถาวร",
     "resetConfirmLabel": "พิมพ์ชื่อผู้เช่า \"{{tenant}}\" เพื่อยืนยัน",
-    "resetTenantSuccess": "รีเซ็ต Vault สำหรับ \"{{tenant}}\" แล้ว — ลบ Secret จำนวน {{count}} รายการอย่างถาวรแล้ว"
+    "tableTitle_other": "{{count}} ข้อมูลลับของ \"{{tenant}}\"",
+    "tableTitle_one": "{{count}} ข้อมูลลับของ \"{{tenant}}\"",
+    "rotateDekConfirmDesc_other": "การดำเนินการนี้จะสร้างคีย์เข้ารหัสข้อมูลใหม่สำหรับผู้เช่า \"{{tenant}}\" และเข้ารหัส Secret จำนวน {{count}} รายการใหม่ ปลอดภัยและมีผลทันที — ไม่ต้องรีสตาร์ท",
+    "rotateDekConfirmDesc_one": "การดำเนินการนี้จะสร้างคีย์เข้ารหัสข้อมูลใหม่สำหรับผู้เช่า \"{{tenant}}\" และเข้ารหัส Secret จำนวน {{count}} รายการใหม่ ปลอดภัยและมีผลทันที — ไม่ต้องรีสตาร์ท",
+    "rotateDekSuccess_other": "หมุนเวียนคีย์เข้ารหัสแล้ว — เข้ารหัส Secret จำนวน {{count}} รายการใหม่แล้ว",
+    "rotateDekSuccess_one": "หมุนเวียนคีย์เข้ารหัสแล้ว — เข้ารหัส Secret จำนวน {{count}} รายการใหม่แล้ว",
+    "kekResultTitle_other": "หมุนเวียนคีย์หลักแล้ว — เข้ารหัส DEK จำนวน {{count}} รายการใหม่แล้ว",
+    "kekResultTitle_one": "หมุนเวียนคีย์หลักแล้ว — เข้ารหัส DEK จำนวน {{count}} รายการใหม่แล้ว",
+    "rotateKekSuccess_other": "หมุนเวียนคีย์หลักแล้ว — เข้ารหัส DEK จำนวน {{count}} รายการใหม่แล้ว อัปเดต EDDI_VAULT_MASTER_KEY และรีสตาร์ท",
+    "rotateKekSuccess_one": "หมุนเวียนคีย์หลักแล้ว — เข้ารหัส DEK จำนวน {{count}} รายการใหม่แล้ว อัปเดต EDDI_VAULT_MASTER_KEY และรีสตาร์ท",
+    "resetTenantConfirmDesc_other": "การดำเนินการนี้จะลบ Secret ทั้งหมด {{count}} รายการและคีย์เข้ารหัสข้อมูลของผู้เช่า \"{{tenant}}\" อย่างถาวร ใช้ขั้นตอนกู้คืนนี้เมื่อคีย์หลักสูญหายหรือถูกเปลี่ยนและไม่มีคีย์เดิม ไม่สามารถยกเลิกได้",
+    "resetTenantConfirmDesc_one": "การดำเนินการนี้จะลบ Secret ทั้งหมด {{count}} รายการและคีย์เข้ารหัสข้อมูลของผู้เช่า \"{{tenant}}\" อย่างถาวร ใช้ขั้นตอนกู้คืนนี้เมื่อคีย์หลักสูญหายหรือถูกเปลี่ยนและไม่มีคีย์เดิม ไม่สามารถยกเลิกได้",
+    "resetSecretCount_other": "Secret จำนวน {{count}} รายการจะสูญหายอย่างถาวร",
+    "resetSecretCount_one": "Secret จำนวน {{count}} รายการจะสูญหายอย่างถาวร",
+    "resetTenantSuccess_other": "รีเซ็ต Vault สำหรับ \"{{tenant}}\" แล้ว — ลบ Secret จำนวน {{count}} รายการอย่างถาวรแล้ว",
+    "resetTenantSuccess_one": "รีเซ็ต Vault สำหรับ \"{{tenant}}\" แล้ว — ลบ Secret จำนวน {{count}} รายการอย่างถาวรแล้ว"
   },
   "audit": {
     "title": "บันทึกการตรวจสอบ",
@@ -2161,7 +2181,6 @@
     "reviewTimeout": "หมดเวลาเอเจนต์",
     "reviewUnassigned": "ยังไม่มอบหมาย",
     "reviewUnassignedHint": "ย้อนกลับเพื่อมอบหมายเอเจนต์ก่อนสร้าง",
-    "reviewUnassignedWarning": "สมาชิก {{count}} รายยังไม่ได้มอบหมาย",
     "selectAgent": "เลือกเอเจนต์…",
     "selectOrStart": "เลือกการอภิปรายที่ผ่านมาจากประวัติ หรือพิมพ์คำถามด้านล่างเพื่อเริ่มการอภิปรายใหม่",
     "shiftEnter": "ขึ้นบรรทัดใหม่",
@@ -2403,7 +2422,6 @@
     "abstainedBody": "ไม่ได้เพิ่มเนื้อหาใหม่ในรอบนี้",
     "convergenceSkipped_other": "· ข้ามอีก {{count}} รอบ",
     "convergenceSkipped_one": "· ข้ามอีก {{count}} รอบ",
-    "convergenceSkipped": "· ข้ามอีก {{skipped}} รอบ",
     "attachmentTotalTooLarge": "ไฟล์แนบเกินขีดจำกัดขนาดรวม",
     "convergenceInert": "ตั้งค่าไว้แล้ว แต่เฟสนี้ทำงานเพียงรอบเดียว ผู้ตัดสินจึงไม่มีโอกาสทำงาน ล้างการตั้งค่านี้ หรือกำหนดให้เฟสวนซ้ำมากกว่าหนึ่งรอบ",
     "questionTooLong": "คำถามมีความยาวได้ไม่เกิน {{max}} อักขระ",
@@ -2415,7 +2433,6 @@
     "artifactDraft": "ฉบับร่าง",
     "artifactFinal": "ฉบับสมบูรณ์",
     "artifactLastEdited": "แก้ไขล่าสุดโดย {{agent}}",
-    "artifactRevisions": "{{count}} ฉบับก่อนหน้า",
     "artifactUpdatedBadge": "อัปเดต {{name}} แล้ว (v{{version}})",
     "artifactsTitle": "อาร์ติแฟกต์ที่ใช้ร่วมกัน ({{count}})",
     "concessionLedgerTitle": "บัญชีการยอมความ",
@@ -2443,7 +2460,6 @@
     "notSet": "ยังไม่ได้ตั้งค่า",
     "retroConfigLabel": "บทเรียนจากการทบทวน (Retro)",
     "retroConfigValue": "{{perRun}}/การรัน จัดเก็บสูงสุด {{stored}} รายการ",
-    "retroRecordedBadge": "{{phase}}: บันทึก {{count}} บทเรียนลงในหน่วยความจำของทีม",
     "stateAwaitingHumanInput": "รอสมาชิก",
     "summarized": "สรุปแล้ว",
     "transcriptWindowed": "รายการบันทึกการสนทนา {{count}} รายการแรกถูกรวมเป็นสรุปแบบต่อเนื่องเพื่อจำกัดบริบทของตาถัดไป วางเมาส์เพื่อดูสรุป",
@@ -2499,7 +2515,19 @@
     "assignmentModeBid": "ตามการเสนอ (สมาชิกเสนอ ผู้มีความมั่นใจสูงสุดชนะ)",
     "assignmentModeBidShort": "ตามการเสนอ",
     "assignmentModeRoleHint": "ตัววางแผนหรือการตั้งค่าเป็นผู้มอบหมายแต่ละงาน หรือวนตามลำดับ",
-    "assignmentModeBidHint": "จะกลับไปใช้การมอบหมายตามบทบาทเมื่อการประมูลไม่คุ้ม — มีผู้เสนอหรืองานค้างน้อยกว่าสองราย หรืองบรอบไม่พอ"
+    "assignmentModeBidHint": "จะกลับไปใช้การมอบหมายตามบทบาทเมื่อการประมูลไม่คุ้ม — มีผู้เสนอหรืองานค้างน้อยกว่าสองราย หรืองบรอบไม่พอ",
+    "contextWindowSummarizer": "ตัวสรุป",
+    "contextWindowNoSummarizer": "ไม่มี",
+    "contextWindowModel": "โมเดลสรุป",
+    "contextWindowModelPlaceholder": "โมเดล",
+    "contextWindowSummarizerMissing": "หากไม่มีโมเดลสรุป ส่วนที่ล้นจะย้อนกลับไปใช้ข้อความตัดทอนแบบธรรมดาโดยไม่แจ้งเตือน",
+    "facilitatorMaxMovesCeiling": "ไม่เกิน {{max}} — ผู้ดำเนินรายการเป็นการแทรกแซงแบบจำกัด ไม่ใช่ตัวจัดการ",
+    "reviewUnassignedWarning_other": "สมาชิก {{count}} รายยังไม่ได้มอบหมาย",
+    "reviewUnassignedWarning_one": "สมาชิก {{count}} รายยังไม่ได้มอบหมาย",
+    "retroRecordedBadge_other": "{{phase}}: บันทึก {{count}} บทเรียนลงในหน่วยความจำของทีม",
+    "retroRecordedBadge_one": "{{phase}}: บันทึก {{count}} บทเรียนลงในหน่วยความจำของทีม",
+    "artifactRevisions_other": "{{count}} ฉบับก่อนหน้า",
+    "artifactRevisions_one": "{{count}} ฉบับก่อนหน้า"
   },
   "taskBoard": {
     "title": "บอร์ดงาน",
@@ -2866,10 +2894,13 @@
     "createButton": "สร้างกลุ่ม",
     "created": "สร้างกลุ่มจากเทมเพลตแล้ว",
     "nameLabel": "ชื่อกลุ่ม",
-    "roleCount": "{{count}} บทบาทที่ต้องกำหนด",
     "selectAgent": "เลือกเอเจนต์…",
     "subtitle": "เริ่มต้นจากบทสนทนาที่จัดเตรียมและปรับแต่งไว้ล่วงหน้า — เพียงกำหนดเอเจนต์ให้กับบทบาทที่ระบุชื่อไว้",
-    "title": "เทมเพลตกลุ่ม"
+    "title": "เทมเพลตกลุ่ม",
+    "roleCount_other": "{{count}} บทบาทที่ต้องกำหนด",
+    "roleCount_one": "{{count}} บทบาทที่ต้องกำหนด",
+    "empty": "ไม่มีเทมเพลตที่ใช้ได้",
+    "emptyDescription": "เซิร์ฟเวอร์นี้ไม่มีเทมเพลตกลุ่มมาให้ คุณยังสร้างกลุ่มใหม่เองได้ผ่านตัวช่วยสร้าง"
   },
   "channels": {
     "agentIdPlaceholder": "ID เอเจนต์สำหรับจัดการข้อความ",
@@ -3110,7 +3141,6 @@
     "deleteSelected": "ลบ {{count}} รายการที่เลือก",
     "description": "ค้นหาและล้างทรัพยากรที่ไม่ได้ถูกอ้างอิงโดยเอเจนต์หรือแพ็กเกจใด",
     "deselectAll": "ยกเลิกการเลือกทั้งหมด",
-    "found": "พบรายการกำพร้า {{count}} รายการ",
     "includeDeleted": "รวมรายการที่ลบแบบชั่วคราว",
     "lastScanned": "สแกนล่าสุด",
     "noOrphans": "ไม่พบรายการกำพร้า",
@@ -3123,7 +3153,9 @@
     "scanning": "กำลังสแกนทรัพยากร…",
     "selectAll": "เลือกทั้งหมด",
     "softDeleted": "ลบแล้ว",
-    "title": "การตรวจจับรายการกำพร้า"
+    "title": "การตรวจจับรายการกำพร้า",
+    "found_other": "พบรายการกำพร้า {{count}} รายการ",
+    "found_one": "พบรายการกำพร้า {{count}} รายการ"
   },
   "quotas": {
     "apiCallsMinute": "การเรียก API / นาที",
@@ -3193,7 +3225,9 @@
   },
   "variables": {
     "deleteKey": "ลบ {{key}}",
-    "editKey": "แก้ไข {{key}}"
+    "editKey": "แก้ไข {{key}}",
+    "tableTitle_other": "{{count}} ตัวแปร",
+    "tableTitle_one": "{{count}} ตัวแปร"
   },
   "workflowEditor": {
     "endpoints": "เอนด์พอยต์",
@@ -3472,7 +3506,6 @@
     "cadenceAdded": "เพิ่มรอบดำเนินการแล้ว",
     "cadenceDeleted": "ลบรอบดำเนินการแล้ว",
     "cadenceRunning": "ขณะนี้มีบทสนทนาที่เริ่มจากรอบดำเนินการกำลังดำเนินอยู่",
-    "cadenceSummary": "สูงสุด {{max}} งานต่อการรัน",
     "cadencesEmpty": "ยังไม่มีการตั้งค่ารอบดำเนินการที่เกิดซ้ำ",
     "cadencesTitle": "รอบดำเนินการ ({{count}})",
     "confirmDeleteCadenceDesc": "การดำเนินการนี้จะหยุดการรันตามกำหนดเวลา บทสนทนาที่รันไปแล้วจะไม่ได้รับผลกระทบ",
@@ -3501,6 +3534,11 @@
     "title": "พื้นที่ทำงานทีมประจำ",
     "totalCost": "ต้นทุนรวม",
     "verified": "ตรวจสอบแล้ว",
-    "maxCostInvalid": "ต้นทุนสูงสุดต่อการรันต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป"
+    "maxCostInvalid": "ต้นทุนสูงสุดต่อการรันต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป",
+    "cadenceSummary_other": "สูงสุด {{max}} งานต่อการรัน",
+    "cadenceSummary_one": "สูงสุด {{max}} งานต่อการรัน"
+  },
+  "workforceWizard": {
+    "title": "ทีมใหม่"
   }
 }

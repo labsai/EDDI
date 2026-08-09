@@ -69,7 +69,10 @@
     "modeManager": "管理器",
     "modeWorkforce": "团队",
     "switchMode": "切换工作区",
-    "operator": "平台操作员"
+    "operator": "平台操作员",
+    "workforce": "团队",
+    "monitoring": "对话监控",
+    "analytics": "分析"
   },
   "theme": {
     "light": "浅色",
@@ -193,7 +196,9 @@
     "previous": "上一页",
     "next": "下一页",
     "dismiss": "忽略",
-    "refreshFailed": "无法刷新 — 显示上次加载的数据。"
+    "refreshFailed": "无法刷新 — 显示上次加载的数据。",
+    "settings": "设置",
+    "history": "历史记录"
   },
   "agents": {
     "confirmDeleteDescription": "此操作无法撤销。该智能体及其所有数据将被永久删除。",
@@ -559,12 +564,9 @@
   },
   "conversations": {
     "confirmDeleteSoft": "默认情况下这是软删除——对话会从列表中隐藏，但其数据仍保留在服务器上。",
-    "confirmEndDesc": "{{count}} 个对话将被设置为 ENDED。已暂停（等待人工）的对话将通过审批感知路径安全结束。",
-    "confirmPurgeDesc": "这将永久删除早于 {{days}} 天的 ENDED 对话，包括其存储的记忆和附件。此操作无法撤销。",
     "deletePermanentLabel": "永久删除——同时清除附件、记忆快照和审批历史。此操作无法撤销。",
     "monitorSubtitle": "按智能体监控和批量管理进行中的对话。",
     "noActiveDesc": "此智能体版本当前没有进行中的对话。",
-    "pausedNote": "所选对话中有 {{count}} 个正在等待人工，其待处理审批将被取消。",
     "purgeDesc": "永久删除最近活动早于指定天数的 ENDED 对话。",
     "selectAgentPromptDesc": "活跃对话按智能体和版本列出。",
     "searchPlaceholder": "按会话 ID 搜索...",
@@ -597,8 +599,6 @@
     "pageNumber": "第 {{page}} 页",
     "deletePermanentAction": "永久删除",
     "step": "步骤",
-    "endSuccess": "已结束 {{count}} 个对话",
-    "purgeSuccess": "已清除 {{count}} 个已结束对话",
     "monitorTitle": "活跃对话",
     "backToList": "返回对话列表",
     "selectAgentToMonitor": "选择 Agent",
@@ -612,7 +612,17 @@
     "olderThanDays": "早于（天）",
     "purgeAction": "清除",
     "confirmEndTitle": "结束所选对话？",
-    "confirmPurgeTitle": "清除已结束对话？"
+    "confirmPurgeTitle": "清除已结束对话？",
+    "confirmEndDesc_other": "{{count}} 个对话将被设置为 ENDED。已暂停（等待人工）的对话将通过审批感知路径安全结束。",
+    "confirmEndDesc_one": "{{count}} 个对话将被设置为 ENDED。已暂停（等待人工）的对话将通过审批感知路径安全结束。",
+    "confirmPurgeDesc_other": "这将永久删除早于 {{days}} 天的 ENDED 对话，包括其存储的记忆和附件。此操作无法撤销。",
+    "confirmPurgeDesc_one": "这将永久删除早于 {{days}} 天的 ENDED 对话，包括其存储的记忆和附件。此操作无法撤销。",
+    "pausedNote_other": "所选对话中有 {{count}} 个正在等待人工，其待处理审批将被取消。",
+    "pausedNote_one": "所选对话中有 {{count}} 个正在等待人工，其待处理审批将被取消。",
+    "endSuccess_other": "已结束 {{count}} 个对话",
+    "endSuccess_one": "已结束 {{count}} 个对话",
+    "purgeSuccess_other": "已清除 {{count}} 个已结束对话",
+    "purgeSuccess_one": "已清除 {{count}} 个已结束对话"
   },
   "conversationDetail": {
     "backToConversations": "返回对话列表",
@@ -755,7 +765,6 @@
     "emptyDescription": "创建您的第一个 {{type}} 以在 Workflow 中使用。"
   },
   "editor": {
-    "cascadePartialFailure": "{{count}} 个级联更新失败",
     "compare": "比较",
     "compareVersions": "比较版本",
     "deployFailed": "部署失败",
@@ -784,13 +793,16 @@
     "formPlaceholder": "可视化编辑器即将推出。请使用 JSON 标签页编辑。",
     "jsonSchema": "Schema 验证已启用",
     "cascadeMode": "更改将级联到父 Workflow 和 Agent",
-    "usedInAgents": "在 {{count}} 个 Agent 中使用",
     "updateUsageHint": "将选中的 Workflows 和 Agents 更新到新版本？",
     "updateUsage": "更新所选",
     "skipUpdate": "跳过",
     "cascading": "更新中...",
     "cascadeSuccess": "级联更新完成",
-    "invalidJson": "JSON 无效 — 切换到 JSON 标签页修复。"
+    "invalidJson": "JSON 无效 — 切换到 JSON 标签页修复。",
+    "cascadePartialFailure_other": "{{count}} 个级联更新失败",
+    "cascadePartialFailure_one": "{{count}} 个级联更新失败",
+    "usedInAgents_other": "在 {{count}} 个 Agent 中使用",
+    "usedInAgents_one": "在 {{count}} 个 Agent 中使用"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1513,16 +1525,13 @@
     "vaultNotConfigured": "密钥保险库尚未配置",
     "viewDocs": "查看文档",
     "selectAgentFirst": "请先选定一个智能体",
-    "tableTitle": "租户“{{tenant}}”内有 {{count}} 个密钥",
     "dangerZoneTitle": "加密密钥生命周期",
     "dangerZoneDesc": "针对 Vault 加密密钥的运维恢复操作。使用这些操作可轮换密钥，或在主密钥更改后恢复访问权限。这与上方轮换单个 Secret 的值不同。",
     "rotateDekTitle": "轮换加密密钥 (DEK)",
     "rotateDekBlurb": "安全 — 无需重启。为每个租户生成新的数据加密密钥，并为该租户重新加密所有 Secret。",
     "rotateDekAction": "轮换 DEK",
     "rotateDekConfirmTitle": "轮换加密密钥 (DEK)？",
-    "rotateDekConfirmDesc": "这将为租户“{{tenant}}”生成新的数据加密密钥，并重新加密其 {{count}} 个 Secret。此操作安全且立即生效 — 无需重启。",
     "rotateDekConfirm": "立即轮换 DEK",
-    "rotateDekSuccess": "加密密钥已轮换 — 已重新加密 {{count}} 个 Secret",
     "rotateKekTitle": "轮换主密钥 (KEK)",
     "rotateKekBlurb": "使用新的主密钥重新加密所有租户的 DEK。需要更新 EDDI_VAULT_MASTER_KEY 并在之后重启。",
     "rotateKekAction": "轮换主密钥",
@@ -1536,18 +1545,29 @@
     "kekNewKeyPlaceholder": "新密钥 — 至少 8 个字符",
     "kekNewKeyTooShort": "新主密钥必须至少包含 8 个字符。",
     "kekRestartHint": "轮换后，您必须将 EDDI_VAULT_MASTER_KEY 更新为新密钥并重启 EDDI。",
-    "kekResultTitle": "主密钥已轮换 — 已重新加密 {{count}} 个 DEK",
     "kekResultInstruction": "需要操作：将环境变量 EDDI_VAULT_MASTER_KEY 设置为新的主密钥并重启 EDDI。在此之前，正在运行的实例仍在内存中使用旧密钥。",
-    "rotateKekSuccess": "主密钥已轮换 — 已重新加密 {{count}} 个 DEK。请更新 EDDI_VAULT_MASTER_KEY 并重启。",
     "resetTenantTitle": "重置此租户的 Vault",
     "resetTenantBlurb": "破坏性的最后手段。永久删除所有 Secret 和 DEK，使 Vault 可以重新开始 — 在主密钥丢失或更改后使用。",
     "resetTenantAction": "重置 Vault",
     "resetTenantConfirmTitle": "重置此租户的 Vault？",
-    "resetTenantConfirmDesc": "这将永久删除租户“{{tenant}}”的所有 {{count}} 个 Secret 和数据加密密钥。当主密钥丢失或更改且旧密钥不可用时，将此作为恢复步骤。此操作无法撤销。",
     "resetTenantConfirm": "永久重置 Vault",
-    "resetSecretCount": "{{count}} 个 Secret 将永久丢失",
     "resetConfirmLabel": "输入租户名称“{{tenant}}”以确认",
-    "resetTenantSuccess": "已重置“{{tenant}}”的 Vault — 已永久删除 {{count}} 个 Secret"
+    "tableTitle_other": "租户“{{tenant}}”内有 {{count}} 个密钥",
+    "tableTitle_one": "租户“{{tenant}}”内有 {{count}} 个密钥",
+    "rotateDekConfirmDesc_other": "这将为租户“{{tenant}}”生成新的数据加密密钥，并重新加密其 {{count}} 个 Secret。此操作安全且立即生效 — 无需重启。",
+    "rotateDekConfirmDesc_one": "这将为租户“{{tenant}}”生成新的数据加密密钥，并重新加密其 {{count}} 个 Secret。此操作安全且立即生效 — 无需重启。",
+    "rotateDekSuccess_other": "加密密钥已轮换 — 已重新加密 {{count}} 个 Secret",
+    "rotateDekSuccess_one": "加密密钥已轮换 — 已重新加密 {{count}} 个 Secret",
+    "kekResultTitle_other": "主密钥已轮换 — 已重新加密 {{count}} 个 DEK",
+    "kekResultTitle_one": "主密钥已轮换 — 已重新加密 {{count}} 个 DEK",
+    "rotateKekSuccess_other": "主密钥已轮换 — 已重新加密 {{count}} 个 DEK。请更新 EDDI_VAULT_MASTER_KEY 并重启。",
+    "rotateKekSuccess_one": "主密钥已轮换 — 已重新加密 {{count}} 个 DEK。请更新 EDDI_VAULT_MASTER_KEY 并重启。",
+    "resetTenantConfirmDesc_other": "这将永久删除租户“{{tenant}}”的所有 {{count}} 个 Secret 和数据加密密钥。当主密钥丢失或更改且旧密钥不可用时，将此作为恢复步骤。此操作无法撤销。",
+    "resetTenantConfirmDesc_one": "这将永久删除租户“{{tenant}}”的所有 {{count}} 个 Secret 和数据加密密钥。当主密钥丢失或更改且旧密钥不可用时，将此作为恢复步骤。此操作无法撤销。",
+    "resetSecretCount_other": "{{count}} 个 Secret 将永久丢失",
+    "resetSecretCount_one": "{{count}} 个 Secret 将永久丢失",
+    "resetTenantSuccess_other": "已重置“{{tenant}}”的 Vault — 已永久删除 {{count}} 个 Secret",
+    "resetTenantSuccess_one": "已重置“{{tenant}}”的 Vault — 已永久删除 {{count}} 个 Secret"
   },
   "audit": {
     "title": "审计日志",
@@ -2161,7 +2181,6 @@
     "reviewTimeout": "智能体超时",
     "reviewUnassigned": "未分配",
     "reviewUnassignedHint": "创建前请返回分配智能体。",
-    "reviewUnassignedWarning": "{{count}} 位成员未分配",
     "selectAgent": "选择智能体…",
     "selectOrStart": "从历史记录中选择过去的讨论，或在下方输入问题以开始新的讨论。",
     "shiftEnter": "换行",
@@ -2403,7 +2422,6 @@
     "abstainedBody": "本轮未补充新内容。",
     "convergenceSkipped_other": "· 已跳过 {{count}} 个后续轮次",
     "convergenceSkipped_one": "· 已跳过 {{count}} 个后续轮次",
-    "convergenceSkipped": "· 已跳过 {{skipped}} 个后续轮次",
     "attachmentTotalTooLarge": "附件超出总大小限制",
     "convergenceInert": "已配置，但该阶段只执行一次 — 评审永远不会运行。请清除该设置，或给该阶段多于一次的重复。",
     "questionTooLong": "问题最多 {{max}} 个字符",
@@ -2415,7 +2433,6 @@
     "artifactDraft": "草稿",
     "artifactFinal": "定稿",
     "artifactLastEdited": "最后编辑者：{{agent}}",
-    "artifactRevisions": "{{count}} 个先前版本",
     "artifactUpdatedBadge": "{{name}} 已更新（v{{version}}）",
     "artifactsTitle": "共享工件（{{count}}）",
     "concessionLedgerTitle": "让步记录",
@@ -2443,7 +2460,6 @@
     "notSet": "未设置",
     "retroConfigLabel": "回顾经验",
     "retroConfigValue": "每次运行 {{perRun}} 条，最多存储 {{stored}} 条",
-    "retroRecordedBadge": "{{phase}}：已将 {{count}} 条经验保存到团队记忆",
     "stateAwaitingHumanInput": "等待成员发言",
     "summarized": "已摘要",
     "transcriptWindowed": "前 {{count}} 条记录已折叠为滚动摘要，以限制后续发言的上下文长度。将鼠标悬停可查看摘要。",
@@ -2499,7 +2515,19 @@
     "assignmentModeBid": "按竞标（成员出价，置信度最高者胜出）",
     "assignmentModeBidShort": "按竞标",
     "assignmentModeRoleHint": "由规划器或配置分配每项任务，或轮流分配。",
-    "assignmentModeBidHint": "当竞标不划算时回退为按角色分配——竞标者或待办任务少于两个，或轮次预算不足。"
+    "assignmentModeBidHint": "当竞标不划算时回退为按角色分配——竞标者或待办任务少于两个，或轮次预算不足。",
+    "contextWindowSummarizer": "摘要模型",
+    "contextWindowNoSummarizer": "无",
+    "contextWindowModel": "摘要模型",
+    "contextWindowModelPlaceholder": "模型",
+    "contextWindowSummarizerMissing": "若不指定摘要模型，溢出内容会静默退回为简单的截断标记。",
+    "facilitatorMaxMovesCeiling": "最多 {{max}} 次——引导者是有界的干预机制，而非编排器。",
+    "reviewUnassignedWarning_other": "{{count}} 位成员未分配",
+    "reviewUnassignedWarning_one": "{{count}} 位成员未分配",
+    "retroRecordedBadge_other": "{{phase}}：已将 {{count}} 条经验保存到团队记忆",
+    "retroRecordedBadge_one": "{{phase}}：已将 {{count}} 条经验保存到团队记忆",
+    "artifactRevisions_other": "{{count}} 个先前版本",
+    "artifactRevisions_one": "{{count}} 个先前版本"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -2866,10 +2894,13 @@
     "createButton": "创建群组",
     "created": "已根据模板创建群组",
     "nameLabel": "群组名称",
-    "roleCount": "{{count}} 个待分配角色",
     "selectAgent": "选择一个智能体…",
     "subtitle": "从打包好的、已调优的讨论开始——只需为其命名角色分配智能体即可。",
-    "title": "群组模板"
+    "title": "群组模板",
+    "roleCount_other": "{{count}} 个待分配角色",
+    "roleCount_one": "{{count}} 个待分配角色",
+    "empty": "没有可用的模板",
+    "emptyDescription": "此服务器未附带群组模板。你仍可使用向导从零创建群组。"
   },
   "channels": {
     "agentIdPlaceholder": "处理消息的代理 ID",
@@ -3110,7 +3141,6 @@
     "deleteSelected": "删除所选的 {{count}} 项",
     "description": "查找并清理未被任何智能体或工作流引用的资源。",
     "deselectAll": "取消全选",
-    "found": "找到 {{count}} 个孤立项",
     "includeDeleted": "包含软删除项",
     "lastScanned": "上次扫描",
     "noOrphans": "未找到孤立项",
@@ -3123,7 +3153,9 @@
     "scanning": "正在扫描资源…",
     "selectAll": "全选",
     "softDeleted": "已删除",
-    "title": "孤立项检测"
+    "title": "孤立项检测",
+    "found_other": "找到 {{count}} 个孤立项",
+    "found_one": "找到 {{count}} 个孤立项"
   },
   "quotas": {
     "apiCallsMinute": "API 调用 / 分钟",
@@ -3193,7 +3225,9 @@
   },
   "variables": {
     "deleteKey": "删除 {{key}}",
-    "editKey": "编辑 {{key}}"
+    "editKey": "编辑 {{key}}",
+    "tableTitle_other": "{{count}} 个变量",
+    "tableTitle_one": "{{count}} 个变量"
   },
   "workflowEditor": {
     "endpoints": "端点",
@@ -3472,7 +3506,6 @@
     "cadenceAdded": "已添加节奏",
     "cadenceDeleted": "已删除节奏",
     "cadenceRunning": "当前有一个由节奏触发的讨论正在进行中。",
-    "cadenceSummary": "每次运行最多 {{max}} 个任务",
     "cadencesEmpty": "尚未配置任何周期性节奏。",
     "cadencesTitle": "节奏（{{count}}）",
     "confirmDeleteCadenceDesc": "这将停止其计划中的运行。已经运行过的讨论不受影响。",
@@ -3501,6 +3534,11 @@
     "title": "常设团队工作区",
     "totalCost": "总费用",
     "verified": "已验证",
-    "maxCostInvalid": "每次运行的最高费用必须是大于或等于 0 的数字。"
+    "maxCostInvalid": "每次运行的最高费用必须是大于或等于 0 的数字。",
+    "cadenceSummary_other": "每次运行最多 {{max}} 个任务",
+    "cadenceSummary_one": "每次运行最多 {{max}} 个任务"
+  },
+  "workforceWizard": {
+    "title": "新建团队"
   }
 }

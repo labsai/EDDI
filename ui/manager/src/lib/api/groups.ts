@@ -627,6 +627,12 @@ export interface FacilitatorConfig {
   escalateTo: string | null;
 }
 export const FACILITATOR_DEFAULT_MAX_MOVES = 10;
+/**
+ * Hard ceiling, not a suggestion: `AgentGroupStore.validateFacilitator` throws on
+ * anything above this — "the facilitator is a bounded intervention mechanism, not
+ * an orchestrator". Mirrored here so the editor can block before the round-trip.
+ */
+export const FACILITATOR_MAX_MOVES_CEILING = 100;
 
 /**
  * Coerce a config as it arrives from the backend into the canonical shapes this
