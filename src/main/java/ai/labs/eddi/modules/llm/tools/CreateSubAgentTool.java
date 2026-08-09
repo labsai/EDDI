@@ -97,35 +97,61 @@ public class CreateSubAgentTool {
                 return "⚠️ System prompt is required.";
             }
 
+            // --- Inherit the parent's LLM identity where the caller omitted it ---
+            // The @P docs above promised this and nothing implemented it: apiKey was
+            // passed as null with a comment claiming vault inheritance, so
+            // AgentSetupService's required-API-key check rejected every provider that
+            // needs one — including the default (anthropic) that an omitted provider
+            // resolves to. Sub-agent creation only ever worked for ollama/jlama/
+            // bedrock/oracle-genai.
+            //
+            // Only a vault REFERENCE is inherited, never a plaintext key — see
+            // AgentSetupService#resolveParentLlmProfile.
+            var parentProfile = agentSetupService.resolveParentLlmProfile(parentAgentId);
+            String inheritedApiKey = parentProfile != null ? parentProfile.apiKeyReference() : null;
+            boolean inherit = config.isInheritParentModel() && parentProfile != null;
+            final String resolvedProvider = (provider == null || provider.isBlank()) && inherit
+                    ? parentProfile.provider()
+                    : provider;
+            final String resolvedModel = (model == null || model.isBlank()) && inherit
+                    ? parentProfile.model()
+                    : model;
+
             // --- Guardrail: allowed providers ---
-            if (provider != null && !provider.isBlank()
+            // Checked AFTER inheritance, against the value that will actually be used.
+            // Checking the raw argument let a caller bypass the allow-list entirely by
+            // simply omitting the parameter: a null provider skipped this branch and
+            // then resolved to the "anthropic" default inside AgentSetupService. That
+            // bypass was dead only because the missing API key failed first; making
+            // inheritance work would have armed it.
+            if (resolvedProvider != null && !resolvedProvider.isBlank()
                     && config.getAllowedProviders() != null
                     && !config.getAllowedProviders().isEmpty()) {
                 boolean providerAllowed = config.getAllowedProviders().stream()
                         .filter(java.util.Objects::nonNull)
-                        .anyMatch(p -> p.equalsIgnoreCase(provider));
+                        .anyMatch(p -> p.equalsIgnoreCase(resolvedProvider));
                 if (!providerAllowed) {
                     return "⚠️ Provider '%s' is not allowed. Allowed: %s"
-                            .formatted(provider, config.getAllowedProviders());
+                            .formatted(resolvedProvider, config.getAllowedProviders());
                 }
             }
 
             // --- Guardrail: allowed models ---
-            if (model != null && !model.isBlank()
+            if (resolvedModel != null && !resolvedModel.isBlank()
                     && config.getAllowedModels() != null
                     && !config.getAllowedModels().isEmpty()) {
-                if (provider != null && !provider.isBlank()) {
+                if (resolvedProvider != null && !resolvedProvider.isBlank()) {
                     // Provider specified — check against that provider's model list
                     // (case-insensitive key match)
                     List<String> allowedModels = config.getAllowedModels().entrySet().stream()
-                            .filter(e -> e.getKey() != null && e.getKey().equalsIgnoreCase(provider))
+                            .filter(e -> e.getKey() != null && e.getKey().equalsIgnoreCase(resolvedProvider))
                             .map(Map.Entry::getValue)
                             .filter(java.util.Objects::nonNull)
                             .findFirst().orElse(null);
                     if (allowedModels != null && !allowedModels.isEmpty()
-                            && allowedModels.stream().noneMatch(m -> m.equalsIgnoreCase(model))) {
+                            && allowedModels.stream().noneMatch(m -> m.equalsIgnoreCase(resolvedModel))) {
                         return "⚠️ Model '%s' is not allowed for provider '%s'. Allowed: %s"
-                                .formatted(model, provider, allowedModels);
+                                .formatted(resolvedModel, resolvedProvider, allowedModels);
                     }
                 } else {
                     // No provider specified — model must appear in at least one provider's
@@ -134,10 +160,10 @@ public class CreateSubAgentTool {
                             .filter(java.util.Objects::nonNull)
                             .flatMap(List::stream)
                             .filter(java.util.Objects::nonNull)
-                            .anyMatch(m -> m.equalsIgnoreCase(model));
+                            .anyMatch(m -> m.equalsIgnoreCase(resolvedModel));
                     if (!modelFoundInAnyProvider) {
                         return "⚠️ Model '%s' is not in any provider's allowed models list."
-                                .formatted(model);
+                                .formatted(resolvedModel);
                     }
                 }
             }
@@ -147,9 +173,9 @@ public class CreateSubAgentTool {
             SetupAgentRequest request = new SetupAgentRequest(
                     prefixedName,
                     systemPrompt,
-                    provider,
-                    model,
-                    null, // apiKey — inherited from vault
+                    resolvedProvider,
+                    resolvedModel,
+                    inheritedApiKey, // the parent's vault reference, or null if it has none
                     null, // baseUrl
                     null, // introMessage (handled separately below)
                     null, // enableBuiltInTools

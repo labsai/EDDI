@@ -5,6 +5,23 @@
 
 ---
 
+## 🔎 fix(setup): create_sub_agent could never work, and a failed setup left orphans (2026-08-09)
+
+**Repo:** EDDI (`fix/agent-setup-hardening`)
+
+`AgentSetupService` is what `create_sub_agent` calls, and it deploys to production from an LLM-controlled path. Four findings:
+
+1. **`create_sub_agent` failed outright for every provider that needs an API key — including the default.** The tool passed `apiKey = null` with the comment "inherited from vault", and its own `@P` documentation promised "inherits parent if omitted". Nothing implemented either. `setupAgent` rejects a null key for any non-local provider, and an omitted provider resolves to `anthropic` inside `resolveParams`, so sub-agent creation only ever worked when the model explicitly named `ollama`/`jlama`/`bedrock`/`oracle-genai`. Implemented for real: `resolveParentLlmProfile` walks the parent agent → workflow → LLM task and returns its provider, model and credential. **Only a vault REFERENCE is inherited, never a plaintext key** — `vaultApiKey` falls back to plaintext when the vault is unconfigured, and copying such a value into a second config would multiply the blast radius of that fallback instead of referencing one secret twice. `DynamicAgentConfig.inheritParentModel` (a config field nothing read) now drives provider/model inheritance.
+2. **The allow-lists were checked against the raw argument, not the resolved value.** `allowedProviders`/`allowedModels` were skipped entirely when the caller omitted `provider`/`model` — and omitting them then resolved to the `anthropic` default. A group restricting `allowedProviders: ["ollama"]` was bypassable by simply not passing the parameter. That bypass was dead only because the missing API key failed first; fixing #1 would have armed it. Both guards now run after inheritance, against the value that will actually be used.
+3. **A failed setup orphaned every document created before the failing step.** Setup creates six to eight documents across as many stores with no transaction, and the failure path wrapped-and-rethrew. On an LLM-reachable, retryable path that is unbounded storage growth. Added a best-effort compensating delete in reverse creation order — permanent (a soft delete would leave the debris) and never cascading (a cascade could reach resources it does not own), with every individual delete isolated so a compensating action can never mask the original failure.
+4. **No length bounds on `agentName`/`systemPrompt`.** Both were checked only for blankness, both are LLM-supplied, and both are persisted — the name into descriptors and the vault key namespace, the prompt verbatim into the LLM config. Bounded at 200 and 100 000 characters, rejected before any resource exists.
+
+**Investigated and deliberately NOT changed:** every auto-vaulted setup key is stored with `allowedAgents = ["*"]`. That looks like a wide grant, but `VaultSecretProvider` documents that the field is "stored for visibility/documentation but NOT enforced at resolution time" — the vault's access model is "the admin who writes the agent config decides which references to include". Narrowing the list here would imply an enforcement that does not exist. Worth recording rather than papering over: that access model assumes a *human* admin authors the config, and `create_sub_agent` lets an LLM author one. Making `allowedAgents` enforceable is a vault-level feature, not a one-line change at this call site.
+
+Suites: 319 across AgentSetup / SetupWizard / DynamicAgentTools, all green, +9 new (`AgentSetupHardeningTest`).
+
+---
+
 ## 🔎 fix(groups): pre-merge deep review — facilitator HITL bypass, CALL_VOTE guards, metric cardinality, template honesty (2026-08-08)
 
 **Repo:** EDDI (`feat/group-i10-templates`)
