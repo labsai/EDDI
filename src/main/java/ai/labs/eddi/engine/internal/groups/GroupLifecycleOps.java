@@ -730,10 +730,12 @@ public class GroupLifecycleOps {
         if (lastStep == null || lastStep.getConversationStep() == null) {
             return;
         }
-        // Teardowns are applied AFTER the additions below, not interleaved with them:
-        // the same step carries both the cumulative created list (which still names an
-        // agent torn down this turn) and the teardown record, and iteration order over
-        // step data is not something this should depend on.
+        // Collected first, applied after the scan: the same step carries both the
+        // cumulative created list (which still names an agent torn down this turn) and
+        // the teardown record, and iteration order over step data is not something
+        // this should depend on.
+        Set<String> created = new LinkedHashSet<>();
+        Set<String> retained = new LinkedHashSet<>();
         Set<String> tornDown = new LinkedHashSet<>();
         for (var stepData : lastStep.getConversationStep()) {
             if (stepData == null || stepData.getKey() == null) {
@@ -741,15 +743,14 @@ public class GroupLifecycleOps {
             }
             if (MemoryKeys.DYNAMIC_CREATED_AGENT_IDS.equals(stepData.getKey()) && stepData.getValue() instanceof Collection<?> ids) {
                 for (Object id : ids) {
-                    if (id instanceof String agentId && !gc.getCreatedAgentIds().contains(agentId)) {
-                        gc.getCreatedAgentIds().add(agentId);
-                        LOGGER.debugf("[DYNAMIC] Propagated created agent '%s' to group conversation", agentId);
+                    if (id instanceof String agentId) {
+                        created.add(agentId);
                     }
                 }
             } else if (MemoryKeys.DYNAMIC_RETAINED_AGENT_IDS.equals(stepData.getKey()) && stepData.getValue() instanceof Collection<?> ids) {
                 for (Object id : ids) {
                     if (id instanceof String agentId) {
-                        gc.getRetainedAgentIds().add(agentId);
+                        retained.add(agentId);
                     }
                 }
             } else if (MemoryKeys.DYNAMIC_TORN_DOWN_AGENT_IDS.equals(stepData.getKey()) && stepData.getValue() instanceof Collection<?> ids) {
@@ -760,15 +761,38 @@ public class GroupLifecycleOps {
                 }
             }
         }
-        // A torn-down agent is gone: drop it from the group's tracking so the
-        // discussion-wide created total injected into the NEXT member turn does not
-        // keep it occupying a maxCreatedAgentsPerDiscussion slot, and so ephemeral
-        // cleanup does not try to undeploy and delete something already deleted.
+
+        // Teardowns first, and as tombstones. This snapshot is one member's view and
+        // can be stale: member B's turn may still name an agent member A tore down
+        // between the two. Recording the teardown before the merge, and having the
+        // merge consult the tombstone, makes a teardown final regardless of the order
+        // snapshots arrive in — otherwise the id is re-added, keeps occupying a
+        // maxCreatedAgentsPerDiscussion slot, and terminal cleanup keeps retrying a
+        // deletion that already happened.
         for (String agentId : tornDown) {
-            if (gc.getCreatedAgentIds().remove(agentId)) {
-                LOGGER.debugf("[DYNAMIC] Dropped torn-down agent '%s' from group conversation tracking", agentId);
+            if (gc.recordTeardown(agentId)) {
+                LOGGER.debugf("[DYNAMIC] Recorded teardown of agent '%s' in group conversation tracking", agentId);
             }
-            gc.getRetainedAgentIds().remove(agentId);
+        }
+
+        // One synchronized region over the created list: CopyOnWriteArrayList makes
+        // each add atomic but NOT contains()-then-add(), and these callbacks run on
+        // coordinator threads, one per member turn. Two of them observing the same id
+        // as absent would both append it, after which a single remove() on teardown
+        // leaves a duplicate behind.
+        synchronized (gc.getCreatedAgentIds()) {
+            for (String agentId : created) {
+                if (gc.getTornDownAgentIds().contains(agentId) || gc.getCreatedAgentIds().contains(agentId)) {
+                    continue;
+                }
+                gc.getCreatedAgentIds().add(agentId);
+                LOGGER.debugf("[DYNAMIC] Propagated created agent '%s' to group conversation", agentId);
+            }
+        }
+        for (String agentId : retained) {
+            if (!gc.getTornDownAgentIds().contains(agentId)) {
+                gc.getRetainedAgentIds().add(agentId);
+            }
         }
     }
 }

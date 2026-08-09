@@ -37,6 +37,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -124,32 +125,41 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * <p>
      * Read from the group config, the same way {@code ArtifactToolsProvider}
      * resolves its artifact policy — the {@link GroupConversation} itself does not
-     * carry the roster. An unreadable config yields an empty set: the recruit tool
-     * still has its other duplicate checks, and withholding recruitment entirely
-     * over a transient store hiccup would be a worse failure than allowing a
-     * duplicate the roster union already de-duplicates.
+     * carry the roster.
+     * <p>
+     * {@link Optional#empty()} means <b>unavailable</b>, which is not the same as a
+     * group that genuinely has no members, and the caller must not conflate the
+     * two: the duplicate check is the entire reason the tool receives this set, so
+     * handing it an empty set on a store failure would silently restore exactly the
+     * defect it exists to prevent. An unavailable roster withholds
+     * {@code recruit_agent} for that turn instead — gate by absence, the same
+     * fail-closed discipline the artifact and group-task providers use.
      */
-    private Set<String> configuredMemberIds(GroupConversation gc) {
+    private Optional<Set<String>> configuredMemberIds(GroupConversation gc) {
         if (agentGroupStore == null || gc == null || gc.getGroupId() == null) {
-            return Set.of();
+            return Optional.empty();
         }
         try {
             var resourceId = agentGroupStore.getCurrentResourceId(gc.getGroupId());
             if (resourceId == null) {
-                return Set.of();
+                return Optional.empty();
             }
             var groupConfiguration = agentGroupStore.read(gc.getGroupId(), resourceId.getVersion());
-            if (groupConfiguration == null || groupConfiguration.getMembers() == null) {
-                return Set.of();
+            if (groupConfiguration == null) {
+                return Optional.empty();
             }
-            return groupConfiguration.getMembers().stream()
+            if (groupConfiguration.getMembers() == null) {
+                // Read successfully, and it has no roster. Distinct from unavailable.
+                return Optional.of(Set.of());
+            }
+            return Optional.of(groupConfiguration.getMembers().stream()
                     .map(GroupMember::agentId)
                     .filter(Objects::nonNull)
-                    .collect(Collectors.toSet());
+                    .collect(Collectors.toSet()));
         } catch (Exception e) {
-            LOGGER.warnf("[DYNAMIC] Could not read the configured roster of group '%s' for the recruit duplicate check: %s",
+            LOGGER.warnf("[DYNAMIC] Could not read the configured roster of group '%s' — withholding recruit_agent for this turn: %s",
                     sanitize(gc.getGroupId()), e.getMessage());
-            return Set.of();
+            return Optional.empty();
         }
     }
 
@@ -288,14 +298,27 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         if (allows(whitelist, whitelistOmitted, "recruit_agent") && dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()
                 && groupConversationId != null && liveDiscussionRegistry != null) {
             var liveDiscussion = liveDiscussionRegistry.getForMember(groupConversationId, callerConversationId);
-            if (liveDiscussion.isPresent()) {
+            // The roster must be READ, not merely attempted: without it the tool
+            // cannot tell a configured member from an outsider, which is the whole
+            // point of the duplicate check.
+            var roster = liveDiscussion.flatMap(this::configuredMemberIds);
+            if (liveDiscussion.isPresent() && roster.isPresent()) {
                 tools.add(new RecruitAgentTool(liveDiscussionRegistry, groupConversationId, parentAgentId,
-                        dynamicConfig, deploymentStore, configuredMemberIds(liveDiscussion.get())));
+                        dynamicConfig, deploymentStore, roster.get()));
                 LOGGER.debugf("[DYNAMIC] RecruitAgentTool enabled for agent='%s'", sanitize(parentAgentId));
                 anyDynamicToolAdded = true;
+            } else if (liveDiscussion.isPresent()) {
+                LOGGER.warnf("[DYNAMIC] RecruitAgentTool suppressed for agent='%s': the group's configured roster could not be read",
+                        sanitize(parentAgentId));
             }
         }
-        if (allows(whitelist, whitelistOmitted, "teardown_agent") && agentFactory != null && agentStore != null) {
+        // dynamicConfig.isEnabled(): TeardownAgentTool takes no DynamicAgentConfig and
+        // performs no policy check of its own, so without this gate a group whose
+        // policy is disabled — or unreadable, which resolves fail-closed — could still
+        // undeploy and PERMANENTLY DELETE a tracked agent. Every other dynamic tool is
+        // either gated here or refuses internally; this one was neither.
+        if (allows(whitelist, whitelistOmitted, "teardown_agent") && dynamicConfig.isEnabled()
+                && agentFactory != null && agentStore != null) {
             tools.add(new TeardownAgentTool(agentFactory, agentStore, deploymentStore, sharedCreatedIds, sharedRetainedIds,
                     sharedTornDownIds));
             LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));

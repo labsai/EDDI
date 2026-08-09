@@ -332,6 +332,19 @@ public class GroupConversation {
     private List<String> recruitedAgentIds = new CopyOnWriteArrayList<>();
     /** Agent IDs explicitly retained by the creating agent (skip cleanup). */
     private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
+    /**
+     * Agent IDs torn down during this discussion — a tombstone, not a log.
+     * <p>
+     * {@code propagateDynamicAgentTracking} folds each member turn's
+     * {@code dynamic:created_agent_ids} snapshot into {@link #createdAgentIds}, and
+     * those snapshots are per-member and can arrive stale: member B's turn can
+     * carry a created list that still names an agent member A tore down between the
+     * two. Without a tombstone the id is simply re-added, so it keeps occupying a
+     * {@code maxCreatedAgentsPerDiscussion} slot and terminal cleanup keeps
+     * retrying its deletion. This set is consulted on every merge, so a teardown is
+     * final regardless of which order the snapshots land in.
+     */
+    private Set<String> tornDownAgentIds = ConcurrentHashMap.newKeySet();
     private int pausedAtPhaseIndex = -1;
     private int pausedTurnCount = 0;
     /**
@@ -1173,6 +1186,39 @@ public class GroupConversation {
         this.retainedAgentIds = newSet;
     }
 
+    public Set<String> getTornDownAgentIds() {
+        return tornDownAgentIds;
+    }
+
+    public void setTornDownAgentIds(Set<String> tornDownAgentIds) {
+        Set<String> newSet = ConcurrentHashMap.newKeySet();
+        if (tornDownAgentIds != null) {
+            newSet.addAll(tornDownAgentIds);
+        }
+        this.tornDownAgentIds = newSet;
+    }
+
+    /**
+     * Records a teardown and drops the agent from every live tracking list, as one
+     * operation.
+     * <p>
+     * The tombstone is written FIRST. A concurrent
+     * {@code propagateDynamicAgentTracking} merging a stale snapshot would
+     * otherwise be able to re-add the id between the removals and the tombstone,
+     * and the merge consults the tombstone precisely to refuse that.
+     *
+     * @return {@code true} if this call was the one that recorded the teardown
+     */
+    public boolean recordTeardown(String agentId) {
+        if (agentId == null) {
+            return false;
+        }
+        boolean first = tornDownAgentIds.add(agentId);
+        createdAgentIds.remove(agentId);
+        retainedAgentIds.remove(agentId);
+        return first;
+    }
+
     @JsonIgnore
     public AgentGroupConfiguration.DynamicAgentConfig getDynamicAgentConfig() {
         return dynamicAgentConfig;
@@ -1186,10 +1232,20 @@ public class GroupConversation {
         return Collections.unmodifiableMap(memberDisplayNames);
     }
 
+    /**
+     * ConcurrentHashMap on BOTH branches, matching the field initialiser.
+     * <p>
+     * The setter installed a {@link LinkedHashMap}, so a conversation loaded from
+     * the store — every resume, every read-repair — silently lost the concurrency
+     * guarantee the field declares. That map is written from member-turn threads
+     * ({@code RecruitAgentTool}) and iterated by serialization, and
+     * {@link #addMemberDisplayNameIfAbsent} depends on {@code putIfAbsent} being
+     * atomic, which on a LinkedHashMap it is not.
+     */
     public void setMemberDisplayNames(Map<String, String> memberDisplayNames) {
         this.memberDisplayNames = memberDisplayNames != null
-                ? new LinkedHashMap<>(memberDisplayNames)
-                : new LinkedHashMap<>();
+                ? new ConcurrentHashMap<>(memberDisplayNames)
+                : new ConcurrentHashMap<>();
     }
 
     /**

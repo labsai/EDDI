@@ -147,9 +147,12 @@ public class TeardownAgentTool {
      * group's own tracking too.
      */
     private void forget(String agentId) {
+        // Tombstone first: DynamicAgentToolsProvider persists this set into step data
+        // and GroupLifecycleOps applies it to the group's tracking, where it must win
+        // over any created-list snapshot that has not observed the teardown yet.
+        tornDownAgentIds.add(agentId);
         createdAgentIds.remove(agentId);
         retainedAgentIds.remove(agentId);
-        tornDownAgentIds.add(agentId);
     }
 
     /**
