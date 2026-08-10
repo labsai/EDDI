@@ -21,6 +21,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -100,7 +102,8 @@ public class VaultGrantChecker {
         try {
             return findUngrantedReferences(agentStore.read(agentId, agentVersion), agentId);
         } catch (Exception e) {
-            LOGGER.debugf("Could not read agent '%s' v%s for the vault-grant check: %s", agentId, agentVersion, e.getMessage());
+            LOGGER.debugf("Could not read agent '%s' v%s for the vault-grant check: %s", sanitize(agentId), agentVersion,
+                    sanitize(e.getMessage()));
             return List.of();
         }
     }
@@ -141,7 +144,7 @@ public class VaultGrantChecker {
             metadata = secretProvider.getMetadata(SecretReference.parse(reference));
         } catch (Exception e) {
             LOGGER.debugf("Could not read grant metadata for %s (%s) — not treating it as a violation",
-                    reference, e.getClass().getSimpleName());
+                    sanitize(reference), e.getClass().getSimpleName());
             return true;
         }
         if (metadata == null || metadata.allowedAgents() == null || metadata.allowedAgents().isEmpty()) {
@@ -197,7 +200,8 @@ public class VaultGrantChecker {
             IResourceId id = RestUtilities.extractResourceId(workflowUri);
             return id == null ? null : workflowStore.read(id.getId(), id.getVersion());
         } catch (Exception e) {
-            LOGGER.debugf("Could not read workflow %s while checking vault grants: %s", workflowUri, e.getMessage());
+            LOGGER.debugf("Could not read workflow %s while checking vault grants: %s", sanitize(String.valueOf(workflowUri)),
+                    sanitize(e.getMessage()));
             return null;
         }
     }
@@ -224,7 +228,8 @@ public class VaultGrantChecker {
                 return ragStore.read(id.getId(), id.getVersion());
             }
         } catch (Exception e) {
-            LOGGER.debugf("Could not read %s config %s while checking vault grants: %s", stepType, configUri, e.getMessage());
+            LOGGER.debugf("Could not read %s config %s while checking vault grants: %s", sanitize(stepType), sanitize(configUri),
+                    sanitize(e.getMessage()));
         }
         return null;
     }

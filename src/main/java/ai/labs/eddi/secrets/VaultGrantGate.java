@@ -9,6 +9,8 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.util.List;
 
 /**
@@ -81,7 +83,8 @@ public class VaultGrantGate {
             ungranted = checker.findUngrantedReferences(agentId, agentVersion);
         } catch (Exception e) {
             // A check that cannot run must never block a deployment.
-            LOGGER.warnf("Skipping the vault-grant check for agent '%s' v%s: %s", agentId, agentVersion, e.getMessage());
+            LOGGER.warnf("Skipping the vault-grant check for agent '%s' v%s: %s", sanitize(agentId), agentVersion,
+                    sanitize(e.getMessage()));
             return true;
         }
         if (ungranted.isEmpty()) {
@@ -91,7 +94,7 @@ public class VaultGrantGate {
         String message = String.format(
                 "Agent '%s' v%s references vault secret(s) it is not granted: %s. SecretMetadata.allowedAgents lists "
                         + "which agents may use a secret; widen the grant or remove the reference.",
-                agentId, agentVersion, ungranted);
+                sanitize(agentId), agentVersion, sanitize(String.valueOf(ungranted)));
         if (mode == Mode.ENFORCE) {
             LOGGER.error(message + " Deployment BLOCKED (eddi.vault.grant-enforcement=enforce).");
             return false;
