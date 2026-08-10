@@ -5,6 +5,22 @@
 
 ---
 
+## 📦 docs(planning): monorepo migration plan — fold EDDI-Manager and EDDI-Chat-UI into this repo (2026-08-10)
+
+**Repo:** EDDI (`chore/monorepo-migration-plan`)
+
+Plan only — no code moved yet. Adds `docs/planning/monorepo-migration-plan.md`.
+
+The trigger was an E2E coverage audit. Full-stack browser tests live in `EDDI-Manager/.github/workflows/e2e.yml` and are the only place where frontend and backend are verified together — but they pull `labsai/eddi:latest` from Docker Hub, so they run against the last *published* backend, never the commit under test. A backend PR that breaks a Manager contract is therefore caught after publish and attributed to the wrong repo. The Manager's own PRs run only the MSW-mocked tier, so mock drift is silent by construction. Neither gap is fixable while the repos are split, because no single PR can build both sides.
+
+The audit then found the split is already fictional. `EDDI-Chat-UI`'s `vite.config.ts` sets `outDir` to `../EDDI/src/main/resources/META-INF/resources` — it has no `dist/` and cannot be built without a sibling backend checkout. `EDDI-Manager` builds to its own `dist/`, then a shell script `sed`-patches three production HTML shells (`manage.html`, `welcome.html`, `workforce.html`) that exist **only in this repo** and have no source-of-truth relationship to the Manager source. 562 files of generated output are committed under `META-INF/resources/assets/`, updated by hand with commit messages that are hand-rolled submodule pointers (`chore: update Manager UI assets (Manager@44a0e684)`). Neither frontend has an independent version, release, deployment or consumer; `eddi-manager` is `"private": true` at version `6.2.0`, identical to `pom.xml`.
+
+Plan decisions worth recording: Maven stays at the repo root (moving Java to `backend/` would churn the Dockerfile, every CI path and ~40 docs files for no benefit); `git subtree` **without** `--squash`, so blame survives, at a cost of ~90 MiB of pack; no npm workspaces initially, since hoisting can break Vite/Tailwind resolution and a migration should not change two things at once; the three orphaned HTML shells become proper Vite multi-page inputs, which deletes the `sed` script outright; and the CI restructure builds the image **once**, runs the full-stack E2E against that artifact on both MongoDB and PostgreSQL, then publishes the same bytes — so the published digest is the digest that was tested.
+
+Two risks are called out as blocking pre-work rather than discoveries-after-merge. (1) `ci.yml`'s `trivy-scan` is `scan-ref: .` with `exit-code: 1`, so committing `package-lock.json` makes npm dependencies a release-blocking gate on the backend; the plan requires a scratch scan before the subtree merge. (2) `EDDI-Manager` has 30+ live branches that the migration orphans, so a freeze plus a `git am --directory=ui/manager` port recipe comes first.
+
+Explicitly deferred, each as its own change: Node 20→22, npm workspaces, the 13 backend ITs with no PostgreSQL twin, an authenticated E2E path (everything today runs `quarkus.oidc.tenant-enabled=false`), and re-adding DAST.
+
 ## 📚🔀🛡️ feat(docs+mcp+hitl): docs for agents on every surface, an MCP resource bridge, and strict task-level toolApprovals (2026-08-11)
 
 **Repo:** EDDI (`feat/agent-docs-and-hitl-strict`, branched from `main` @ 8dda2dab5). Four items, driven by the EDDI-Manager Platform Operator work (write-by-default + llmstore writes behind the Manager's gate-guard) and a critical rethink of each before building.
