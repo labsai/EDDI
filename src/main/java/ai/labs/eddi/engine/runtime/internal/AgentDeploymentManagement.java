@@ -28,12 +28,14 @@ import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.readiness.IAgentsReadiness;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.secrets.VaultGrantChecker;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.runtime.Startup;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -83,6 +85,31 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private Instant lastDeploymentCheck = null;
     private static final Logger LOGGER = Logger.getLogger(AgentDeploymentManagement.class);
     private final List<DeploymentInfo> deploymentInfos = new LinkedList<>();
+
+    /**
+     * Deploy-time vault-grant gate. Field-injected rather than a constructor
+     * parameter so a directly constructed instance (tests, non-CDI callers) simply
+     * sees {@code null} and skips the check — the same pattern the engine already
+     * uses for late-bound collaborators.
+     */
+    @Inject
+    VaultGrantChecker vaultGrantChecker;
+
+    /**
+     * What to do when an agent's config names a vault secret it is not granted:
+     * {@code off}, {@code warn} (default) or {@code enforce}.
+     * <p>
+     * Warn is the default deliberately. {@code allowedAgents} has never been
+     * enforced, so any non-wildcard value in an existing deployment is untested
+     * configuration — blocking on it during an upgrade could take agents down for a
+     * policy nobody has yet had the chance to verify. Operators turn on
+     * {@code enforce} once the warnings are clean.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.vault.grant-enforcement", defaultValue = "warn")
+    String vaultGrantEnforcement;
+
+    private GrantEnforcement grantEnforcement = GrantEnforcement.WARN;
 
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
@@ -171,8 +198,12 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                                 return;
                             }
 
-                            agentFactory.deployAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(),
-                                    null);
+                            if (!deployIfGranted(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(),
+                                    deploymentInfo.getAgentVersion())) {
+                                // enforce mode only — left un-added to deploymentInfos so a
+                                // corrected grant is picked up by the next poll.
+                                return;
+                            }
 
                             this.deploymentInfos.add(deploymentInfo);
 
@@ -342,7 +373,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
                                 if (latestAgent != null && latestAgent.getVersion() <= agentVersion) {
                                     // we attempt to deploy a Agent if it is the latest
-                                    agentFactory.deployAgent(environment, agentId, agentVersion, null);
+                                    deployIfGranted(environment, agentId, agentVersion);
                                 } else {
                                     manageDeploymentOfOldAgent(environment, agentId, agentVersion);
 
@@ -391,7 +422,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         } else {
             // not the latest agent, but still has active conversations connected to it,
             // therefore we deploy it as well to make sure we don't interrupt UX
-            agentFactory.deployAgent(environment, agentId, agentVersion, null);
+            deployIfGranted(environment, agentId, agentVersion);
         }
     }
 
@@ -462,6 +493,94 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
 
         return result;
+    }
+
+    /**
+     * The ONLY way this class deploys an agent.
+     * <p>
+     * Guarding {@code checkDeployments} alone left {@code manageAgentDeployments}'
+     * latest-version redeploy and {@link #manageDeploymentOfOldAgent} calling the
+     * factory directly — so in {@code enforce} mode an agent with ungranted vault
+     * references was blocked by one path and deployed by another a day later. A
+     * gate with a way round it is not a gate.
+     *
+     * @return {@code true} if the agent was deployed
+     */
+    private boolean deployIfGranted(Environment environment, String agentId, Integer agentVersion)
+            throws ServiceException, IllegalAccessException {
+
+        if (!vaultGrantsSatisfied(agentId, agentVersion)) {
+            return false;
+        }
+        agentFactory.deployAgent(environment, agentId, agentVersion, null);
+        return true;
+    }
+
+    /** Enforcement modes for {@code eddi.vault.grant-enforcement}. */
+    enum GrantEnforcement {
+        OFF, WARN, ENFORCE;
+
+        /**
+         * Strict parse — an unrecognised value is rejected, never defaulted.
+         * {@code grant-enforcement=enforced} silently behaving as {@code warn} would
+         * turn one typo into a security control that is off while appearing on.
+         */
+        static GrantEnforcement parseStrict(String value) {
+            if (value == null || value.isBlank()) {
+                return WARN;
+            }
+            for (GrantEnforcement mode : values()) {
+                if (mode.name().equalsIgnoreCase(value.trim())) {
+                    return mode;
+                }
+            }
+            throw new IllegalArgumentException("Unknown eddi.vault.grant-enforcement value '" + value
+                    + "'. Valid values: off, warn, enforce");
+        }
+    }
+
+    /**
+     * Fails startup on an unusable enforcement mode rather than degrading to warn.
+     * This bean is {@code @Startup}, so the error surfaces at boot with the valid
+     * values named.
+     */
+    @PostConstruct
+    void validateGrantEnforcement() {
+        grantEnforcement = GrantEnforcement.parseStrict(vaultGrantEnforcement);
+    }
+
+    /**
+     * Deploy-time check that every vault reference this agent's configuration names
+     * is granted to it.
+     *
+     * @return {@code true} when deployment may proceed
+     */
+    private boolean vaultGrantsSatisfied(String agentId, Integer agentVersion) {
+        if (vaultGrantChecker == null || grantEnforcement == GrantEnforcement.OFF) {
+            return true;
+        }
+        List<String> ungranted;
+        try {
+            ungranted = vaultGrantChecker.findUngrantedReferences(agentStore.read(agentId, agentVersion), agentId);
+        } catch (Exception e) {
+            // A check that cannot run must never block a deployment.
+            LOGGER.warn(format("Skipping the vault-grant check for Agent (id=%s, version=%d): %s", agentId, agentVersion, e.getMessage()));
+            return true;
+        }
+        if (ungranted.isEmpty()) {
+            return true;
+        }
+
+        String message = format(
+                "Agent (id=%s, version=%d) references vault secret(s) it is not granted: %s. "
+                        + "SecretMetadata.allowedAgents lists which agents may use a secret; widen the grant or remove the reference.",
+                agentId, agentVersion, ungranted);
+        if (grantEnforcement == GrantEnforcement.ENFORCE) {
+            LOGGER.error(message + " Deployment BLOCKED (eddi.vault.grant-enforcement=enforce).");
+            return false;
+        }
+        LOGGER.warn(message + " Deployment allowed (eddi.vault.grant-enforcement=warn); set it to 'enforce' to block.");
+        return true;
     }
 
     private interface UndeploymentExecutor {

@@ -5,6 +5,26 @@
 
 ---
 
+## 🔒 feat(vault): allowedAgents is enforced instead of decorative (2026-08-10)
+
+**Repo:** EDDI (`feat/vault-grant-enforcement`)
+
+`SecretMetadata.allowedAgents` was documented as *"for visibility only — enforcement is via configuration authorship, not runtime resolution"*. That access model assumes a **human admin** authors agent configurations; `create_sub_agent` lets an LLM author one, so an operator who scoped a secret to a single agent got no enforcement at all.
+
+**Enforced at deployment, deliberately not at resolution.** `SecretResolver` sees only a string — no agent identity — and several of its ~12 call sites legitimately run outside any conversation, while `AgentSigningService` bypasses it entirely. Worse, `ChatModelRegistry` caches the built model keyed on the **unresolved** parameters, so two agents sharing a config share a cache entry: a check behind that cache runs for whichever agent built the model first and is silently skipped for every other one — enforcement that looks real and is not. The agent/secret binding is established in the agent's **configuration**, so that is where it is checked: completely, once, with no cache in the way, beside the existing deploy-time `lintInertHitlConfig`.
+
+`VaultGrantChecker` walks the agent's workflows → llm/apicalls/mcpcalls configs, serializes each and scans for `${vault:...}` references, then verifies each against `allowedAgents`. The scan **serializes rather than enumerating** known credential fields — enumeration is how this kind of check rots when a new credential field appears.
+
+`deployIfGranted` is the single deployment entry point: guarding `checkDeployments` alone left `manageAgentDeployments` and `manageDeploymentOfOldAgent` calling the factory directly, so `enforce` would have been bypassed a day later by the 24h sweep.
+
+`eddi.vault.grant-enforcement` = `off` | `warn` (default) | `enforce`, parsed strictly — `enforced` silently meaning `warn` would turn one typo into a control that is off while appearing on, so an unusable value fails startup with the valid values named.
+
+**Uncertainty never becomes a violation:** unreadable metadata, a disabled vault, an unreadable workflow, and absent/empty/wildcard grants all allow. Every wizard-vaulted key carries `["*"]`, so stock deployments see no change. **Not a revocation mechanism** — an agent deployed before its grant was narrowed keeps resolving until redeployed.
+
++15 tests, covering all three extension types. 109 green.
+
+---
+
 ## 🔗 fix(agents): wire the deployment-wait machinery that only the ZIP importer ever used (2026-08-09)
 
 **Repo:** EDDI (`fix/deployment-wait-machinery`)
