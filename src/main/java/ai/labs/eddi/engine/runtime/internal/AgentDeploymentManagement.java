@@ -23,6 +23,7 @@ import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.hitl.lint.ReservedActionLint;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -44,9 +45,9 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.Period;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -415,14 +416,32 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
             var documentDescriptor = documentDescriptorStore.readDescriptor(conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
 
-            // NOTE: age is derived from the AGENT document's lastModifiedOn, not the
-            // conversation's — a pre-existing heuristic that predates the HITL branch
-            // and is intentionally left unchanged here.
-            var timeOfLastInteractionInConversation = documentDescriptor.getLastModifiedOn();
+            // Age comes from the CONVERSATION's own newest step timestamp.
+            //
+            // It used to come from the AGENT document's lastModifiedOn, which is not a
+            // property of the conversation at all: every conversation on a given agent
+            // version shared one age, so a conversation the user was talking in an hour
+            // ago counted as idle whenever its agent config happened to be old. That
+            // mis-signal was masked by the arithmetic bug in isOlderThanDays below —
+            // fixing the arithmetic alone would have started ENDing live conversations,
+            // which is why both are corrected together.
+            var lastInteraction = lastInteractionOf(conversationMemory);
+            if (lastInteraction == null) {
+                // No step ever carried a timestamp. Fall back to the descriptor, and
+                // skip entirely when even that is absent: "cannot prove it is idle" must
+                // never end a conversation, and dereferencing here would throw an NPE
+                // the enclosing UndeploymentExecutor does not catch — aborting every
+                // remaining undeploy attempt in this pass.
+                var descriptorLastModified = documentDescriptor.getLastModifiedOn();
+                if (descriptorLastModified == null) {
+                    continue;
+                }
+                lastInteraction = descriptorLastModified.toInstant();
+            }
+            var timeOfLastInteractionInConversation = Date.from(lastInteraction);
 
             var isOlderThanMaximumAmountOfDays = isOlderThanDays(
-                    Instant.ofEpochMilli(timeOfLastInteractionInConversation.getTime()).atZone(ZoneId.systemDefault()).toLocalDate(),
-                    maximumLifeTimeOfIdleConversationsInDays);
+                    lastInteraction.atZone(ZoneId.systemDefault()).toLocalDate(), maximumLifeTimeOfIdleConversationsInDays);
 
             if (isOlderThanMaximumAmountOfDays) {
                 String conversationId = conversationMemory.getId();
@@ -445,23 +464,52 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
     }
 
-    private boolean isOlderThanDays(final LocalDate date, final int days) {
-        boolean result = false;
+    /**
+     * The newest timestamp any data item in the conversation carries, or
+     * {@code null} when nothing is timestamped. This is the conversation's own
+     * last-interaction time: every turn writes step data through
+     * {@code ConversationStep}, and {@code Data} stamps each entry at construction.
+     */
+    static Instant lastInteractionOf(ConversationMemorySnapshot snapshot) {
+        if (snapshot == null || snapshot.getConversationSteps() == null) {
+            return null;
+        }
 
-        LocalDate now = LocalDate.now();
-        // period from now to date
-        Period period = Period.between(now, date);
-
-        if (period.getYears() < 0) {
-            // if year is negative, 100% older than 6 months
-            result = true;
-        } else if (period.getYears() == 0) {
-            if (period.getDays() <= -days) {
-                result = true;
+        Date newest = null;
+        for (var step : snapshot.getConversationSteps()) {
+            if (step == null || step.getWorkflows() == null) {
+                continue;
+            }
+            for (var workflow : step.getWorkflows()) {
+                if (workflow == null || workflow.getLifecycleTasks() == null) {
+                    continue;
+                }
+                for (var task : workflow.getLifecycleTasks()) {
+                    Date timestamp = task != null ? task.getTimestamp() : null;
+                    if (timestamp != null && (newest == null || timestamp.after(newest))) {
+                        newest = timestamp;
+                    }
+                }
             }
         }
 
-        return result;
+        return newest != null ? newest.toInstant() : null;
+    }
+
+    /**
+     * True when {@code date} is at least {@code days} days in the past.
+     * <p>
+     * This was written against {@link Period}, which normalizes into
+     * years/months/days — and the check only ever looked at the years and days
+     * components, never the months. For a 35-day-old date and a 30-day limit,
+     * {@code Period.between(now, date)} is {@code P-1M-4D}, so the test read
+     * {@code -4 <= -30} and answered "not old". Whole bands of ages between
+     * {@code days} and one year were therefore never reaped, and the ones that were
+     * passed only by coincidence of where the month boundary fell. Day arithmetic
+     * has no such components.
+     */
+    static boolean isOlderThanDays(final LocalDate date, final int days) {
+        return DAYS.between(date, LocalDate.now()) >= days;
     }
 
     private interface UndeploymentExecutor {

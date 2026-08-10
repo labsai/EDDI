@@ -5,6 +5,21 @@
 
 ---
 
+## 🔎 fix(runtime): the idle-conversation sweep aged conversations by the wrong clock (2026-08-10)
+
+**Repo:** EDDI (`fix/idle-conversation-sweep-age`)
+
+Two defects in `endOldConversationsWithOldAgents`, fixed together because fixing either alone is worse than fixing neither.
+
+1. **`isOlderThanDays` ignored `Period`'s months component.** It read only `getYears()` and `getDays()`, so for a 35-day-old date against a 30-day limit `Period.between(now, date)` is `P-1M-4D` and the test became `-4 <= -30` → "not old". Whole bands of ages between the limit and one year were never reaped; the ones that were passed by coincidence of where the month boundary fell.
+2. **The age came from the AGENT document's `lastModifiedOn`.** That is not a property of the conversation: every conversation on a given agent version shared one age, so a conversation the user was talking in an hour ago counted as idle whenever the agent config happened to be old.
+
+The second was masked by the first. Correcting only the arithmetic would have converted a mostly-inert sweep into an eager one that ENDs live conversations — so the age signal now comes from the conversation's own newest step timestamp (`Data` stamps every entry at construction), with the descriptor kept only as a fallback and the conversation skipped entirely when no age signal exists at all. "Cannot prove it is idle" must never end a conversation.
+
+Pinned by `recentConversationOnStaleAgentSurvives` (an hour-old conversation on a two-year-stale agent survives) and `noGapsAcrossMonthBoundaries` (every offset 30→400 days). +9 tests.
+
+---
+
 ## 🔗 fix(agents): wire the deployment-wait machinery that only the ZIP importer ever used (2026-08-09)
 
 **Repo:** EDDI (`fix/deployment-wait-machinery`)
