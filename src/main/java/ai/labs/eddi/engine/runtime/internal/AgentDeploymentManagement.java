@@ -438,10 +438,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 }
                 lastInteraction = descriptorLastModified.toInstant();
             }
-            var timeOfLastInteractionInConversation = Date.from(lastInteraction);
+            // ONE calendar date drives both the decision and the message. The sweep
+            // expires by LocalDate, so reporting elapsed 24-hour periods could end a
+            // conversation on its 30th calendar day while the log said 29 — the
+            // explanation contradicting the decision it explains.
+            var lastInteractionDate = lastInteraction.atZone(ZoneId.systemDefault()).toLocalDate();
 
-            var isOlderThanMaximumAmountOfDays = isOlderThanDays(
-                    lastInteraction.atZone(ZoneId.systemDefault()).toLocalDate(), maximumLifeTimeOfIdleConversationsInDays);
+            var isOlderThanMaximumAmountOfDays = isOlderThanDays(lastInteractionDate, maximumLifeTimeOfIdleConversationsInDays);
 
             if (isOlderThanMaximumAmountOfDays) {
                 String conversationId = conversationMemory.getId();
@@ -450,7 +453,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                         "Ended conversation (id: %s) with Agent (name: %s, id: %s, version: %d) "
                                 + "because it is %d days older than the maximum idle time of %d days",
                         conversationId, documentDescriptor.getName(), agentId, agentVersion,
-                        DAYS.between(timeOfLastInteractionInConversation.toInstant(), Instant.now()), maximumLifeTimeOfIdleConversationsInDays);
+                        DAYS.between(lastInteractionDate, LocalDate.now()), maximumLifeTimeOfIdleConversationsInDays);
 
                 LOGGER.info(message);
             }

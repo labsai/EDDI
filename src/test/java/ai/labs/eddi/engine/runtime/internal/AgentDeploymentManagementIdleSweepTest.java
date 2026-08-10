@@ -200,6 +200,48 @@ class AgentDeploymentManagementIdleSweepTest {
             verify(conversationMemoryStore, never()).setConversationState(any(), eq(ConversationState.ENDED));
         }
 
+        /**
+         * The descriptor fallback, which only fires for a conversation whose steps
+         * carry no timestamp at all. Untested until now: the fixture always supplied a
+         * descriptor timestamp AND a step timestamp, so neither new branch was reached.
+         */
+        @Test
+        @DisplayName("an untimestamped conversation falls back to the descriptor and is ended when that is old")
+        void untimestampedConversationUsesDescriptorFallback() throws Exception {
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(), Instant.now().minus(400, ChronoUnit.DAYS));
+
+            management.manageAgentDeployments();
+
+            verify(conversationMemoryStore).setConversationState("conv-1", ConversationState.ENDED);
+        }
+
+        @Test
+        @DisplayName("an untimestamped conversation on a recently-edited agent is NOT ended")
+        void untimestampedConversationWithRecentDescriptorSurvives() throws Exception {
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(), Instant.now());
+
+            management.manageAgentDeployments();
+
+            verify(conversationMemoryStore, never()).setConversationState(any(), eq(ConversationState.ENDED));
+        }
+
+        /**
+         * With neither an age signal on the conversation nor one on the descriptor,
+         * there is nothing to age against — and "cannot prove it is idle" must never
+         * end a conversation. Dereferencing the absent descriptor stamp would also
+         * throw an NPE the enclosing UndeploymentExecutor does not catch, aborting
+         * every remaining undeploy in the pass.
+         */
+        @Test
+        @DisplayName("no age signal anywhere — the conversation is preserved, not ended")
+        void noAgeSignalAtAllPreservesTheConversation() throws Exception {
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(), null);
+
+            management.manageAgentDeployments();
+
+            verify(conversationMemoryStore, never()).setConversationState(any(), eq(ConversationState.ENDED));
+        }
+
         private void givenOldAgentVersionWithConversation(ConversationMemorySnapshot snapshot, Instant agentLastModified) throws Exception {
             var info = new DeploymentInfo();
             info.setEnvironment(Environment.production);
@@ -218,7 +260,7 @@ class AgentDeploymentManagementIdleSweepTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setName("Test Agent");
-            descriptor.setLastModifiedOn(Date.from(agentLastModified));
+            descriptor.setLastModifiedOn(agentLastModified != null ? Date.from(agentLastModified) : null);
             when(documentDescriptorStore.readDescriptor("agent-1", 1)).thenReturn(descriptor);
         }
     }
