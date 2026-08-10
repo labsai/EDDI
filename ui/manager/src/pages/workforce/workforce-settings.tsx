@@ -471,7 +471,7 @@ function WorkforceSettings() {
           },
           onError: () => {
             toast.error(
-              t("Workforce.settings.deleteError", "Failed to delete board")
+              t("Workforce.settings.deleteError", "Failed to delete task force")
             );
           },
         }
@@ -488,7 +488,7 @@ function WorkforceSettings() {
           },
           onError: () => {
             toast.error(
-              t("Workforce.settings.deleteError", "Failed to delete board")
+              t("Workforce.settings.deleteError", "Failed to delete task force")
             );
           },
         }
