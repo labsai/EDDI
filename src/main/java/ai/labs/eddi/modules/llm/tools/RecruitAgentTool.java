@@ -21,6 +21,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Brings an existing deployed agent into a running discussion (I7).
@@ -79,14 +80,22 @@ public class RecruitAgentTool {
     private final String recruiterAgentId;
     private final DynamicAgentConfig config;
     private final IDeploymentStore deploymentStore;
+    /**
+     * The ids on the group's CONFIGURED roster. Supplied at construction because
+     * the tool sees only the {@link DynamicAgentConfig}, never the group config —
+     * which is why {@link #isAlreadyMember} could not check the roster and this
+     * field exists.
+     */
+    private final Set<String> configuredMemberIds;
 
     public RecruitAgentTool(LiveDiscussionRegistry registry, String groupConversationId, String recruiterAgentId,
-            DynamicAgentConfig config, IDeploymentStore deploymentStore) {
+            DynamicAgentConfig config, IDeploymentStore deploymentStore, Set<String> configuredMemberIds) {
         this.registry = registry;
         this.groupConversationId = groupConversationId;
         this.recruiterAgentId = recruiterAgentId;
         this.config = config;
         this.deploymentStore = deploymentStore;
+        this.configuredMemberIds = configuredMemberIds != null ? Set.copyOf(configuredMemberIds) : Set.of();
     }
 
     @Tool("Bring an existing deployed agent into this discussion as a new member. Use findAgentsByCapability first "
@@ -143,7 +152,13 @@ public class RecruitAgentTool {
         // "which member did you mean?" error lists — so without this, a recruit the
         // user just watched join could not be addressed by name and rendered as a
         // raw agent id.
-        gc.addMemberDisplayName(wanted, recruit.displayName());
+        //
+        // IfAbsent: a recruit's "display name" is its own agent id (the tool has no
+        // better name to offer), so an unconditional put would replace an
+        // operator-chosen roster name with a raw id. The roster guard above should
+        // already have refused such a recruit, but the two must not disagree about
+        // the outcome if it ever does.
+        gc.addMemberDisplayNameIfAbsent(wanted, recruit.displayName());
 
         String note = "%s recruited %s as %s: %s".formatted(
                 recruiterAgentId != null ? recruiterAgentId : "A member", wanted,
@@ -161,9 +176,19 @@ public class RecruitAgentTool {
     /**
      * Configured roster and prior recruits both count — neither can be joined
      * twice.
+     * <p>
+     * The {@link #configuredMemberIds} check is what makes the first half of that
+     * sentence true. Without it the only evidence of a configured member was
+     * {@code memberConversationIds}, which holds an agent only once it has SPOKEN —
+     * so a member whose first turn had not come up yet (any member, during the
+     * opening phase) could be "recruited" as a duplicate. The roster de-duplicates
+     * in {@code rosterWithRecruits}, so nobody spoke twice, but the recruitment cap
+     * was consumed, a misleading FACILITATION entry was written, and
+     * {@code addMemberDisplayName} overwrote that member's configured display name
+     * with its raw agent id.
      */
     private boolean isAlreadyMember(GroupConversation gc, String agentId) {
-        if (gc.getRecruitedAgentIds().contains(agentId)) {
+        if (configuredMemberIds.contains(agentId) || gc.getRecruitedAgentIds().contains(agentId)) {
             return true;
         }
         List<GroupMember> dynamic = gc.getDynamicMembers();
