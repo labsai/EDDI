@@ -327,7 +327,6 @@ public class TaskForceEngine {
         // not transcript context.
 
         List<GroupDiscussionException> errors = Collections.synchronizedList(new ArrayList<>());
-        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : defaultAgentTimeoutSeconds;
         int maxWaves = 100; // safety cap to prevent infinite loops
         final SharedTaskList taskList = gc.getTaskList();
 
@@ -508,8 +507,23 @@ public class TaskForceEngine {
                 futures.add(future);
             }
 
-            // Wait for this wave — timeout based on max tasks per agent (H2 fix)
+            // Wait for this wave. The budget is per-member-turn × the longest task
+            // chain one agent holds, and the per-turn figure comes from
+            // parallelBatchBudgetSeconds — NOT from a bare agentTimeoutSeconds.
+            //
+            // A bare timeout was wrong in both directions. It ignored retries, so
+            // under onAgentFailure=RETRY a member legitimately consuming
+            // timeout × (maxRetries + 1) blew a deadline sized for one attempt and
+            // the wave aborted mid-flight; and it carried no setup grace, so even
+            // with one task and no retries the orchestrator's clock (armed at
+            // dispatch) could expire while the member was still inside its own
+            // budget, because a member turn reaches responseFuture.get() only after
+            // agent lookup, conversation start and attachment grants. That is the
+            // exact defect PARALLEL_BATCH_GRACE_FLOOR_SECONDS exists to prevent, and
+            // both the debate batch (PhaseExecutionEngine) and the bid round below
+            // already size themselves this way.
             int maxTasksPerAgent = tasksByAgent.values().stream().mapToInt(List::size).max().orElse(1);
+            long waveBudgetSeconds = waveBudgetSeconds(protocol, maxTasksPerAgent);
             try {
                 var allOf = CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new));
                 // NEW-3: Register the blocking future so IMMEDIATE cancel can interrupt.
@@ -523,7 +537,7 @@ public class TaskForceEngine {
                         allOf.cancel(true);
                     }
                 }
-                allOf.get(timeout * (long) maxTasksPerAgent, TimeUnit.SECONDS);
+                allOf.get(waveBudgetSeconds, TimeUnit.SECONDS);
             } catch (TimeoutException e) {
                 LOGGER.warnf("Task execution timed out for group %s (wave %d)",
                         LogSanitizer.sanitize(gc.getGroupId()), wave + 1);
@@ -568,6 +582,29 @@ public class TaskForceEngine {
         if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT && !errors.isEmpty()) {
             throw errors.getFirst();
         }
+    }
+
+    /**
+     * Wall-clock budget one EXECUTE wave gets before the orchestrator gives up on
+     * the agents still running.
+     * <p>
+     * Derived from {@link GroupConversationService#parallelBatchBudgetSeconds} —
+     * the per-member-turn figure that already accounts for retries and setup grace
+     * — multiplied by the longest task chain any single agent holds, since one
+     * agent runs its own tasks sequentially.
+     * <p>
+     * Extracted so the derivation is assertable without timing a real wave. It was
+     * previously an inline {@code agentTimeoutSeconds × maxTasksPerAgent}, which
+     * under-budgeted a RETRY wave by a factor of {@code maxRetries + 1} and carried
+     * no setup grace at all.
+     *
+     * @param maxTasksPerAgent
+     *            the largest number of tasks assigned to one agent in this wave;
+     *            values below 1 are treated as 1
+     */
+    static long waveBudgetSeconds(ProtocolConfig protocol, int maxTasksPerAgent) {
+        long perTurn = GroupConversationService.parallelBatchBudgetSeconds(protocol);
+        return perTurn * Math.max(1, maxTasksPerAgent);
     }
 
     /**
