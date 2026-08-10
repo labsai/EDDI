@@ -15,13 +15,13 @@
 
 `VaultGrantChecker` walks the agent's workflows → llm/apicalls/mcpcalls configs, serializes each and scans for `${vault:...}` references, then verifies each against `allowedAgents`. The scan **serializes rather than enumerating** known credential fields — enumeration is how this kind of check rots when a new credential field appears.
 
-`deployIfGranted` is the single deployment entry point: guarding `checkDeployments` alone left `manageAgentDeployments` and `manageDeploymentOfOldAgent` calling the factory directly, so `enforce` would have been bypassed a day later by the 24h sweep.
+The gate lives in **`AgentFactory.deployAgent`**, the one place every deployment funnels through — the scheduled poll, `RestAgentAdministration`'s explicit deploy (which is how `create_sub_agent` reaches production) and `ConversationService`'s deploy-on-demand. An earlier revision gated only the scheduled manager, which left the REST path — the one an LLM actually uses — completely unchecked.
 
 `eddi.vault.grant-enforcement` = `off` | `warn` (default) | `enforce`, parsed strictly — `enforced` silently meaning `warn` would turn one typo into a control that is off while appearing on, so an unusable value fails startup with the valid values named.
 
 **Uncertainty never becomes a violation:** unreadable metadata, a disabled vault, an unreadable workflow, and absent/empty/wildcard grants all allow. Every wizard-vaulted key carries `["*"]`, so stock deployments see no change. **Not a revocation mechanism** — an agent deployed before its grant was narrowed keeps resolving until redeployed.
 
-+15 tests, covering all three extension types. 109 green.
++21 tests, covering the agent document itself, all four extension types (llm / apicalls / mcpcalls / rag) and every enforcement mode. 121 green.
 
 ---
 

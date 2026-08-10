@@ -55,6 +55,7 @@ class VaultGrantCheckerTest {
     private ILlmStore llmStore;
     private IApiCallsStore apiCallsStore;
     private IMcpCallsStore mcpCallsStore;
+    private ai.labs.eddi.configs.agents.IAgentStore agentStore;
     private VaultGrantChecker checker;
 
     @BeforeEach
@@ -67,7 +68,9 @@ class VaultGrantCheckerTest {
         apiCallsStore = mock(IApiCallsStore.class);
         mcpCallsStore = mock(IMcpCallsStore.class);
 
-        checker = new VaultGrantChecker(secretProvider, workflowStore, llmStore, apiCallsStore, mcpCallsStore);
+        agentStore = mock(ai.labs.eddi.configs.agents.IAgentStore.class);
+        checker = new VaultGrantChecker(secretProvider, agentStore, workflowStore, llmStore, apiCallsStore, mcpCallsStore,
+                mock(ai.labs.eddi.configs.rag.IRagStore.class));
     }
 
     /**
@@ -257,6 +260,51 @@ class VaultGrantCheckerTest {
             when(mcpCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(mcpCalls);
 
             assertTrue(checker.findUngrantedReferences(agent, "agent-owner").isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("surfaces outside the workflow resources")
+    class BeyondWorkflows {
+
+        /**
+         * AgentConfiguration.DreamConfig.parameters explicitly supports vault
+         * references and is handed to ChatModelRegistry by DreamService, so a Dream
+         * credential lives outside every workflow resource and a workflow-only
+         * traversal could not see it.
+         */
+        @Test
+        @DisplayName("a reference on the agent document itself is found")
+        void agentDocumentIsScanned() throws Exception {
+            givenGrant(List.of("agent-owner"));
+
+            var agent = new AgentConfiguration();
+            agent.setWorkflows(List.of());
+            var userMemory = new AgentConfiguration.UserMemoryConfig();
+            userMemory.getDream().setParameters(new LinkedHashMap<>(Map.of("apiKey", VAULT_REF)));
+            agent.setUserMemoryConfig(userMemory);
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+        }
+
+        @Test
+        @DisplayName("the id/version overload reads the agent and reports the same violation")
+        void idVersionOverloadReadsTheAgent() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            // Built BEFORE the stub: agentReferencingTheVault() itself stubs, and a
+            // when(...) inside a when(...) is an UnfinishedStubbing error.
+            var agent = agentReferencingTheVault();
+            when(agentStore.read("agent-x", 3)).thenReturn(agent);
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences("agent-x", 3));
+        }
+
+        @Test
+        @DisplayName("an unreadable agent yields no violations rather than throwing")
+        void unreadableAgentIsSafe() throws Exception {
+            when(agentStore.read(anyString(), anyInt())).thenThrow(new RuntimeException("store down"));
+
+            assertTrue(checker.findUngrantedReferences("agent-x", 3).isEmpty());
         }
     }
 

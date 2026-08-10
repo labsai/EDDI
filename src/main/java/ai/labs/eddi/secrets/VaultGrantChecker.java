@@ -5,9 +5,11 @@
 package ai.labs.eddi.secrets;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
+import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -70,19 +72,37 @@ public class VaultGrantChecker {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final ISecretProvider secretProvider;
+    private final IAgentStore agentStore;
     private final IWorkflowStore workflowStore;
     private final ILlmStore llmStore;
     private final IApiCallsStore apiCallsStore;
     private final IMcpCallsStore mcpCallsStore;
+    private final IRagStore ragStore;
 
     @Inject
-    public VaultGrantChecker(ISecretProvider secretProvider, IWorkflowStore workflowStore, ILlmStore llmStore,
-            IApiCallsStore apiCallsStore, IMcpCallsStore mcpCallsStore) {
+    public VaultGrantChecker(ISecretProvider secretProvider, IAgentStore agentStore, IWorkflowStore workflowStore, ILlmStore llmStore,
+            IApiCallsStore apiCallsStore, IMcpCallsStore mcpCallsStore, IRagStore ragStore) {
         this.secretProvider = secretProvider;
+        this.agentStore = agentStore;
         this.workflowStore = workflowStore;
         this.llmStore = llmStore;
         this.apiCallsStore = apiCallsStore;
         this.mcpCallsStore = mcpCallsStore;
+        this.ragStore = ragStore;
+    }
+
+    /**
+     * Convenience overload that reads the agent configuration itself, so callers on
+     * the deployment path need only the id and version. A configuration that cannot
+     * be read yields no violations — see the class contract on uncertainty.
+     */
+    public List<String> findUngrantedReferences(String agentId, Integer agentVersion) {
+        try {
+            return findUngrantedReferences(agentStore.read(agentId, agentVersion), agentId);
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read agent '%s' v%s for the vault-grant check: %s", agentId, agentVersion, e.getMessage());
+            return List.of();
+        }
     }
 
     /**
@@ -142,6 +162,13 @@ public class VaultGrantChecker {
      */
     private Set<String> collectVaultReferences(AgentConfiguration agentConfiguration) {
         Set<String> references = new LinkedHashSet<>();
+
+        // The agent document FIRST. AgentConfiguration.DreamConfig.parameters
+        // explicitly supports vault references and is handed to ChatModelRegistry by
+        // DreamService, so a Dream credential lives outside every workflow resource
+        // and was invisible to a workflow-only traversal.
+        scanForVaultReferences(agentConfiguration, references);
+
         if (agentConfiguration.getWorkflows() == null) {
             return references;
         }
@@ -190,6 +217,11 @@ public class VaultGrantChecker {
             }
             if (stepType.contains("ai.labs.mcpcalls")) {
                 return mcpCallsStore.read(id.getId(), id.getVersion());
+            }
+            if (stepType.contains("ai.labs.rag")) {
+                // RagConfiguration carries embedding-model and vector-store
+                // credentials, both resolved through SecretResolver at runtime.
+                return ragStore.read(id.getId(), id.getVersion());
             }
         } catch (Exception e) {
             LOGGER.debugf("Could not read %s config %s while checking vault grants: %s", stepType, configUri, e.getMessage());
