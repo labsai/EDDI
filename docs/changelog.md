@@ -5,6 +5,17 @@
 
 ---
 
+## 🔗 fix(agents): wire the deployment-wait machinery that only the ZIP importer ever used (2026-08-09)
+
+**Repo:** EDDI (`fix/deployment-wait-machinery`)
+
+Wave F of the Agent / Group Agent review. `AgentFactory.getAgent` has always had a branch for "the agent is deploying right now" — `waitForDeploymentCompletion`, which awaits a future from `DeploymentListener`. That future was only ever registered by **one** caller in all of `src/main`: `RestImportService`, the startup ZIP importer. Every ordinary deploy fired `onDeploymentEvent` but never registered, so `getRegisteredDeploymentEvent` returned `null`, the wait had nothing to await, and a caller racing a deployment simply got a null agent. The machinery was dead outside one flow while reading as live.
+
+- `RestAgentAdministration.deploy` now registers **before** starting the deployment. Ordering matters: `agentFactory.deployAgent` is what publishes the IN_PROGRESS placeholder a waiter can observe, so registering afterwards would leave exactly the window this closes.
+- `DeploymentListener.registerAgentDeployment` self-expires. The map was pruned only by an arriving `DeploymentEvent`, so a registration whose event never came — a rejected deployment callable, a process that died mid-deploy — stayed for the lifetime of the JVM. Registrations now carry a `REGISTRATION_TTL` (5 minutes, a leak bound rather than a deployment SLA) and remove themselves on *any* completion. Removal is `remove(key, future)`, not `remove(key)`, so a stale completion cannot evict a live registration for the same agent.
+- `RestImportService`'s `allOf(...).join()` is now tolerant. It could previously only block forever; with self-expiring registrations it can complete exceptionally, and one initial agent that never reports must not hang startup — it logs and continues with the agents that did deploy.
+
+Suites: 347 tests green across `DeploymentListener*`, `RestAgentAdministration*`, `AgentFactory*`, `RestImportService*`; 12 new.
 ## 📚 docs(groups): attachments, protocol defaults, context scopes, and a "not yet supported" section (2026-08-09)
 
 **Repo:** EDDI (`docs/group-agent-accuracy`)
