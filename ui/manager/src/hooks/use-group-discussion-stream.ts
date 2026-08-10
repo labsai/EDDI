@@ -15,10 +15,37 @@ import {
   type GroupCompletePayload,
   type TaskPlanCreatedPayload,
   type TaskVerifiedPayload,
+  type ConvergenceCheckedPayload,
+  type ConvergenceReachedPayload,
+  type DecisionReachedPayload,
+  type DecisionRecord,
+  type GroupAttachmentRef,
+  type HumanInputRequestedPayload,
+  type RetroRecordedPayload,
+  type ArtifactUpdatedPayload,
 } from "@/lib/api/groups";
 import type { GroupApprovalRequest } from "@/lib/api/hitl";
 
 // ─── Streaming State ────────────────────────────────────────────
+
+/**
+ * What the convergence events (I2) told us about one phase. `convergence_checked`
+ * fires on every check whether or not it converged, so a phase approaching
+ * agreement is visible before it stops rather than only afterwards;
+ * `convergence_reached` then adds how many repeats were skipped.
+ */
+export interface ConvergenceProgress {
+  phaseIndex: number;
+  phaseName: string;
+  /** 0-based index of the most recently checked repeat. */
+  repeat: number;
+  /** The judge's 0..1 agreement score, or `null` when no judge ran (-1 on the wire). */
+  agreementScore: number | null;
+  converged: boolean;
+  /** Repeats the phase was configured for but will not run. Only known once converged. */
+  repeatsSkipped: number | null;
+  reason: string;
+}
 
 export interface GroupStreamState {
   /** Whether the SSE stream is actively connected */
@@ -35,6 +62,19 @@ export interface GroupStreamState {
   activeSpeakers: Set<string>;
   /** Final synthesized answer (set on group_complete) */
   synthesizedAnswer: string | null;
+  /**
+   * Structured conclusion from `decision_reached` (EDDI F3) — a debate verdict
+   * today. Null until a decision-producing phase runs; a discussion that ends in
+   * prose alone never sets it.
+   */
+  decision: DecisionRecord | null;
+  /**
+   * The most recent convergence check per phase index (I2). Keyed by phase so a
+   * later phase's check does not overwrite the record of an earlier one, and so
+   * the display can show "this phase stopped after 2 of 4 repeats" next to the
+   * phase it belongs to.
+   */
+  convergence: Map<number, ConvergenceProgress>;
   /** Error message if the discussion failed */
   error: string | null;
   /** Classifies a failure so the UI can offer recovery guidance.
@@ -69,6 +109,31 @@ export interface GroupStreamState {
     reason?: string;
     cancelledBy?: string;
   } | null;
+  /**
+   * A HUMAN group member's turn is up (I6, `human_input_requested`). Terminal —
+   * closes the stream, same as `hitlPause`. Only carries identifiers; the
+   * rendered prompt lives on the persisted conversation's `pendingHumanInput`,
+   * which the settle effect in `group-detail.tsx` switches to (same pattern
+   * `hitlPause` already uses).
+   */
+  humanInputRequest: {
+    memberId: string;
+    displayName: string;
+    phaseIndex: number;
+    phaseName: string;
+  } | null;
+  /**
+   * Every `retro_recorded` event this stream has seen (I8) — NOT terminal, a
+   * discussion can run more than one RETRO phase across rounds, so this
+   * accumulates rather than holding only the latest.
+   */
+  retroRecorded: RetroRecordedPayload[];
+  /**
+   * Every `artifact_updated` event this stream has seen (I17) — metadata only,
+   * never content (a full read requires re-fetching the conversation). NOT
+   * terminal; a discussion can write several artifacts across its run.
+   */
+  artifactUpdates: ArtifactUpdatedPayload[];
 }
 
 /** Shared empty state handed to consumers that have no stream yet. Never mutated. */
@@ -80,6 +145,8 @@ const initialState: GroupStreamState = {
   currentPhase: null,
   activeSpeakers: new Set(),
   synthesizedAnswer: null,
+  decision: null,
+  convergence: new Map(),
   error: null,
   errorKind: null,
   startedAt: null,
@@ -90,6 +157,9 @@ const initialState: GroupStreamState = {
   hitlPause: null,
   hitlResume: null,
   cancelInfo: null,
+  humanInputRequest: null,
+  retroRecorded: [],
+  artifactUpdates: [],
 };
 
 /** A clean state with its own collection instances (the shared `initialState`
@@ -101,6 +171,9 @@ function freshState(): GroupStreamState {
     tasksInProgress: new Set(),
     tasksCompleted: new Set(),
     taskVerifications: new Map(),
+    convergence: new Map(),
+    retroRecorded: [],
+    artifactUpdates: [],
   };
 }
 
@@ -118,7 +191,7 @@ interface GroupStreamStore {
   /** Live stream state per group id. */
   streams: Record<string, GroupStreamState>;
   update: (groupId: string, updater: (s: GroupStreamState) => GroupStreamState) => void;
-  startStream: (groupId: string, question: string) => Promise<void>;
+  startStream: (groupId: string, question: string, attachments?: GroupAttachmentRef[]) => Promise<void>;
   continueStream: (groupId: string, gcId: string, question: string) => Promise<void>;
   approveAndStream: (groupId: string, gcId: string, request: GroupApprovalRequest) => Promise<void>;
   abortStream: (groupId: string) => void;
@@ -147,7 +220,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       },
     })),
 
-  startStream: async (groupId, question) => {
+  startStream: async (groupId, question, attachments) => {
     const abort = swapController(groupId);
     const update = get().update;
 
@@ -160,7 +233,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
 
     await consumeStream(
       groupId,
-      streamGroupDiscussion(groupId, question, undefined, abort.signal),
+      streamGroupDiscussion(groupId, question, undefined, abort.signal, attachments),
       abort,
       update,
     );
@@ -182,6 +255,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       conversationId: gcId,
       hitlPause: null,
       hitlResume: null,
+      humanInputRequest: null,
       error: null,
       startedAt: s.startedAt ?? new Date().toISOString(),
       activeSpeakers: new Set(),
@@ -215,6 +289,10 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       // Keep transcript (appended by group_start handler), but reset
       // per-round derived fields so stale data doesn't leak into the UI.
       synthesizedAnswer: null,
+      // `continueDiscussion` clears both of these server-side — a round that
+      // produces no verdict of its own must not display the previous round's.
+      decision: null,
+      convergence: new Map(),
       currentPhase: null,
       taskPlan: null,
       taskVerifications: new Map(),
@@ -224,6 +302,9 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       hitlPause: null,
       hitlResume: null,
       cancelInfo: null,
+      humanInputRequest: null,
+      retroRecorded: [],
+      artifactUpdates: [],
     }));
 
     await consumeStream(
@@ -354,10 +435,13 @@ export function useGroupDiscussionStream(groupId?: string) {
   const streamState =
     useGroupStreamStore((store) => (key ? store.streams[key] : undefined)) ?? initialState;
 
-  const startStream = useCallback(async (gid: string, question: string) => {
-    setStartedGroupId(gid);
-    await useGroupStreamStore.getState().startStream(gid, question);
-  }, []);
+  const startStream = useCallback(
+    async (gid: string, question: string, attachments?: GroupAttachmentRef[]) => {
+      setStartedGroupId(gid);
+      await useGroupStreamStore.getState().startStream(gid, question, attachments);
+    },
+    [],
+  );
 
   const continueStream = useCallback(
     async (gid: string, gcId: string, question: string) => {
@@ -602,6 +686,83 @@ function handleSSEEvent(
       return false;
     }
 
+    case "convergence_checked": {
+      try {
+        const payload: ConvergenceCheckedPayload = JSON.parse(event.data);
+        setState((s) => {
+          const next = new Map(s.convergence);
+          const prev = next.get(payload.phaseIndex);
+          next.set(payload.phaseIndex, {
+            phaseIndex: payload.phaseIndex,
+            phaseName: payload.phaseName,
+            repeat: payload.repeat,
+            // -1 is the backend's "no judge ran" sentinel (everyone abstained, or
+            // the judge's answer could not be parsed). Surfacing it as a score
+            // would render "-1.00 agreement". A non-number is treated the same
+            // way rather than stored, so the field's `number | null` holds.
+            agreementScore:
+              typeof payload.agreementScore === "number" && payload.agreementScore >= 0
+                ? payload.agreementScore
+                : null,
+            converged: payload.converged,
+            // Only convergence_reached knows the skipped count, and it is
+            // terminal for the phase — so anything already here belongs to this
+            // phase and is worth carrying rather than resetting.
+            repeatsSkipped: prev?.repeatsSkipped ?? null,
+            reason: payload.reason,
+          });
+          return { ...s, convergence: next };
+        });
+      } catch (e) {
+        console.warn('[SSE] Failed to parse convergence_checked event:', e);
+      }
+      return false;
+    }
+
+    case "convergence_reached": {
+      try {
+        const payload: ConvergenceReachedPayload = JSON.parse(event.data);
+        setState((s) => {
+          const next = new Map(s.convergence);
+          const prev = next.get(payload.phaseIndex);
+          next.set(payload.phaseIndex, {
+            phaseIndex: payload.phaseIndex,
+            phaseName: payload.phaseName,
+            repeat: payload.repeat,
+            agreementScore: prev?.agreementScore ?? null,
+            converged: true,
+            repeatsSkipped: payload.repeatsSkipped,
+            reason: payload.reason,
+          });
+          return { ...s, convergence: next };
+        });
+      } catch (e) {
+        console.warn('[SSE] Failed to parse convergence_reached event:', e);
+      }
+      return false;
+    }
+
+    case "decision_reached": {
+      try {
+        const payload: DecisionReachedPayload = JSON.parse(event.data);
+        // Guard the shape: this drives a card that reads `.dissents.length` and
+        // `.tally`, and a malformed payload should cost the card, not the stream.
+        const decision = payload?.decision;
+        if (!decision || typeof decision !== "object") {
+          console.warn('[SSE] decision_reached carried no decision');
+          return false;
+        }
+        const normalized: DecisionRecord = {
+          ...decision,
+          dissents: Array.isArray(decision.dissents) ? decision.dissents : [],
+        };
+        setState((s) => ({ ...s, decision: normalized }));
+      } catch (e) {
+        console.warn('[SSE] Failed to parse decision_reached event:', e);
+      }
+      return false;
+    }
+
     case "phase_complete": {
       try {
         JSON.parse(event.data); // validate payload
@@ -698,6 +859,26 @@ function handleSSEEvent(
       return true;
     }
 
+    case "human_input_requested": {
+      try {
+        const payload: HumanInputRequestedPayload = JSON.parse(event.data);
+        setState((s) => ({
+          ...s,
+          state: "AWAITING_HUMAN_INPUT" as GroupConversationState,
+          humanInputRequest: {
+            memberId: payload.memberId,
+            displayName: payload.displayName,
+            phaseIndex: payload.phaseIndex,
+            phaseName: payload.phaseName,
+          },
+          isStreaming: false,
+        }));
+      } catch (e) {
+        console.warn('[SSE] Failed to parse human_input_requested event:', e);
+      }
+      return true;
+    }
+
     case "hitl_resume": {
       try {
         const payload = JSON.parse(event.data) as {
@@ -777,6 +958,26 @@ function handleSSEEvent(
         });
       } catch (e) {
         console.warn('[SSE] Failed to parse member_pause_skipped event:', e);
+      }
+      return false;
+    }
+
+    case "retro_recorded": {
+      try {
+        const payload: RetroRecordedPayload = JSON.parse(event.data);
+        setState((s) => ({ ...s, retroRecorded: [...s.retroRecorded, payload] }));
+      } catch (e) {
+        console.warn('[SSE] Failed to parse retro_recorded event:', e);
+      }
+      return false;
+    }
+
+    case "artifact_updated": {
+      try {
+        const payload: ArtifactUpdatedPayload = JSON.parse(event.data);
+        setState((s) => ({ ...s, artifactUpdates: [...s.artifactUpdates, payload] }));
+      } catch (e) {
+        console.warn('[SSE] Failed to parse artifact_updated event:', e);
       }
       return false;
     }

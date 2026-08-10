@@ -141,6 +141,7 @@ const ALL_OUTCOMES: GroupConversationState[] = [
   "CREATED",
   "CANCELLED",
   "AWAITING_APPROVAL",
+  "AWAITING_HUMAN_INPUT",
   "CLOSED",
 ];
 
@@ -152,7 +153,8 @@ const OUTCOME_LABELS: Record<GroupConversationState, string> = {
   CREATED: "Created",
   CANCELLED: "Cancelled",
   AWAITING_APPROVAL: "Pending",
-CLOSED: "Closed",
+  AWAITING_HUMAN_INPUT: "Awaiting your turn",
+  CLOSED: "Closed",
 };
 
 interface AnalyticsFilterBarProps {
@@ -191,7 +193,7 @@ function AnalyticsFilterBar({
     { value: null, label: t("analyticsPage.allOutcomes", "All outcomes") },
     ...ALL_OUTCOMES.map((s) => ({
       value: s,
-      label: OUTCOME_LABELS[s],
+      label: t(`groups.state.${s}`, OUTCOME_LABELS[s]),
       count: (outcomeCounts ?? {})[s] ?? 0,
     })),
   ];

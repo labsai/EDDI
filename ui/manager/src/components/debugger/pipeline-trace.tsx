@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useDebugStore, buildCascadeSteps, type PipelineTurn, type PipelineEvent } from "@/hooks/use-debug-events";
 import { useQuery } from "@tanstack/react-query";
 import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
-import { cn, formatDuration } from "@/lib/utils";
+import { cn, formatDuration, formatUsd } from "@/lib/utils";
 import { CascadeStepTrace } from "@/components/cascade-step-trace";
 import { Clock, Zap, ChevronDown, AlertTriangle, ArrowUp, ArrowDown } from "lucide-react";
 
@@ -37,8 +37,7 @@ function getTaskLabel(taskType: string): string {
 
 function fmtCost(n: number | undefined): string | null {
   if (n === undefined || n === null || n === 0) return null;
-  if (n < 0.01) return `$${n.toFixed(4)}`;
-  return `$${n.toFixed(2)}`;
+  return formatUsd(n);
 }
 
 // ==================== Component ====================

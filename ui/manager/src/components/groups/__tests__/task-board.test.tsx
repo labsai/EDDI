@@ -618,4 +618,28 @@ describe("TaskBoard", () => {
     // Empty string is falsy → falls back to t("taskBoard.verified", "Verified")
     expect(within(card).getByText("Verified")).toBeInTheDocument();
   });
+
+  // I18 — bid-award badge.
+  it("shows a bid-award badge with confidence and complexity when a task carries one", () => {
+    const tasks = [
+      {
+        ...makeTask("t1", "Migrate the database", "Agent A", 1),
+        awardedBid: { agentId: "agent-a", confidence: 0.87, estimatedComplexity: "L", rationale: "I've done this before" },
+      },
+    ];
+    renderWithProviders(<TaskBoard {...defaultProps()} taskPlan={tasks} />);
+
+    const pendingCol = screen.getByTestId("task-column-pending");
+    const badge = within(pendingCol).getByTestId("task-award-t1");
+    expect(badge).toHaveTextContent("87%");
+    expect(badge).toHaveTextContent("L");
+    expect(badge).toHaveAttribute("title", "I've done this before");
+  });
+
+  it("shows no bid-award badge for a task that was assigned by role", () => {
+    const tasks = [makeTask("t1", "Ordinary task", "Agent A", 1)];
+    renderWithProviders(<TaskBoard {...defaultProps()} taskPlan={tasks} />);
+
+    expect(screen.queryByTestId("task-award-t1")).not.toBeInTheDocument();
+  });
 });

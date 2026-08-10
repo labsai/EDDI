@@ -100,3 +100,46 @@ export function formatDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   return `${(ms / 1000).toFixed(2)}s`;
 }
+
+/**
+ * Format a USD amount for display.
+ *
+ * Locale-aware on purpose: the app ships 11 locales, and `de`, `fr`, `ar` and
+ * `hi` disagree with en-US about both the decimal separator and where the
+ * currency symbol goes — so a hardcoded `` `$${n.toFixed(2)}` `` is wrong in
+ * eight of them.
+ *
+ * The locale is read off `<html lang>` rather than by importing the i18next
+ * instance. `i18n/config` sets that attribute on init and on every
+ * `languageChanged`, so this still follows an in-app language switch — but this
+ * module stays a leaf. Importing `@/i18n/config` here would make every consumer
+ * of `cn()` run the i18n bootstrap, which touches `document` at module scope,
+ * and would invert the dependency direction of the app's most-imported utility.
+ *
+ * Sub-cent amounts get four digits: model-call costs are routinely $0.0003, and
+ * two digits would render every one of them as "$0.00".
+ *
+ * This is the single formatter for every cost surface — the debugger's cost
+ * dashboard, the pipeline trace, the audit page and the group transcript each
+ * had their own copy, identical apart from how they handled zero (which is a
+ * call-site concern, so it stays at the call sites).
+ */
+export function formatUsd(value: number): string {
+  const digits = value !== 0 && Math.abs(value) < 0.01 ? 4 : 2;
+  return new Intl.NumberFormat(activeLocale(), {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
+/**
+ * The app's current language, or `undefined` to let `Intl` fall back to the
+ * runtime default. Guarded for a non-DOM environment so this module keeps
+ * working outside the browser.
+ */
+function activeLocale(): string | undefined {
+  if (typeof document === "undefined") return undefined;
+  return document.documentElement.lang || undefined;
+}

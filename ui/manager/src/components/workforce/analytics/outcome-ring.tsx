@@ -19,7 +19,8 @@ const OUTCOME_COLORS: Record<GroupConversationState, string> = {
   CREATED: "color-mix(in srgb, currentColor 20%, transparent)",
   CANCELLED: "color-mix(in srgb, currentColor 30%, transparent)",
   AWAITING_APPROVAL: "color-mix(in srgb, var(--color-primary) 25%, transparent)",
-CLOSED: "Closed",
+  AWAITING_HUMAN_INPUT: "color-mix(in srgb, var(--color-primary) 70%, transparent)",
+  CLOSED: "color-mix(in srgb, currentColor 15%, transparent)",
 };
 
 const OUTCOME_DOT_CLASSES: Record<GroupConversationState, string> = {
@@ -30,7 +31,8 @@ const OUTCOME_DOT_CLASSES: Record<GroupConversationState, string> = {
   CREATED: "bg-muted-foreground/20",
   CANCELLED: "bg-muted-foreground/30",
   AWAITING_APPROVAL: "bg-primary/25",
-CLOSED: "Closed",
+  AWAITING_HUMAN_INPUT: "bg-primary/70",
+  CLOSED: "bg-muted-foreground/15",
 };
 
 const STATE_LABELS: Record<GroupConversationState, string> = {
@@ -41,7 +43,8 @@ const STATE_LABELS: Record<GroupConversationState, string> = {
   CREATED: "Created",
   CANCELLED: "Cancelled",
   AWAITING_APPROVAL: "Pending",
-CLOSED: "Closed",
+  AWAITING_HUMAN_INPUT: "Awaiting your turn",
+  CLOSED: "Closed",
 };
 
 function OutcomeRing({ data, total, selected, onSelect }: OutcomeRingProps) {
@@ -112,7 +115,7 @@ function OutcomeRing({ data, total, selected, onSelect }: OutcomeRingProps) {
                   )}
                 />
                 <span className="text-xs text-muted-foreground">
-                  {STATE_LABELS[item.state] ?? item.state} ({item.count})
+                  {t(`groups.state.${item.state}`, STATE_LABELS[item.state] ?? item.state)} ({item.count})
                 </span>
               </button>
             );

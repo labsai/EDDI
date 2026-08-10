@@ -24,6 +24,7 @@ function phase(
   contextScope: DiscussionPhase["contextScope"],
   targetEachPeer: boolean,
   repeats: number,
+  skipIf: DiscussionPhase["skipIf"] = null,
 ): DiscussionPhase {
   return {
     name,
@@ -35,6 +36,12 @@ function phase(
     inputTemplate: null,
     repeats,
     requiresApproval: false,
+    // No preset enables either: the backend builds its presets with the
+    // constructor that predates I2/I4, and `DiscussionStylePresets` documents
+    // DELPHI's recommended convergence config rather than baking it in.
+    convergence: null,
+    allowAbstention: false,
+    skipIf,
   };
 }
 
@@ -85,6 +92,17 @@ export function getStylePhases(style: DiscussionStyle, maxRounds: number): Discu
         phase("Task Execution", "EXECUTE", "ALL", "PARALLEL", "TASK_ONLY", false, 1),
         phase("Result Verification", "VERIFY", "MODERATOR", "SEQUENTIAL", "FULL", false, 1),
         phase("Final Synthesis", "SYNTHESIS", "MODERATOR", "SEQUENTIAL", "FULL", false, 1),
+      ];
+    case "NEGOTIATION":
+      // Mirrors DiscussionStylePresets.negotiation(rounds) (I11). Unlike every
+      // other preset, `rounds` here drives Bargaining's `repeats` directly, not
+      // a count of extra phases.
+      return [
+        phase("Positions & Interests", "OPINION", "ALL", "PARALLEL", "NONE", false, 1),
+        phase("Opening Proposals", "PROPOSAL", "ALL", "SEQUENTIAL", "FULL", false, 1),
+        phase("Bargaining", "BARGAIN", "ALL", "SEQUENTIAL", "FULL", false, rounds),
+        phase("Arbitration", "SYNTHESIS", "MODERATOR", "SEQUENTIAL", "FULL", false, 1, "AGREEMENT_REACHED"),
+        phase("Synthesis", "SYNTHESIS", "MODERATOR", "SEQUENTIAL", "FULL", false, 1),
       ];
     case "CUSTOM":
     default:

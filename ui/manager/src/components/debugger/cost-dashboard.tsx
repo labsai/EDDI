@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
 import { useConversationCosts } from "@/hooks/use-tool-metrics";
-import { cn, formatDuration } from "@/lib/utils";
+import { cn, formatDuration, formatUsd } from "@/lib/utils";
 import { Coins, Clock, Activity, Database, ArrowUp, ArrowDown } from "lucide-react";
 import { useMemo } from "react";
 
@@ -255,7 +255,5 @@ function fmtNum(n: number): string {
 }
 
 function fmtCost(n: number): string {
-  if (n === 0) return "$0.00";
-  if (n < 0.01) return `$${n.toFixed(4)}`;
-  return `$${n.toFixed(2)}`;
+  return formatUsd(n);
 }

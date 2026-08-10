@@ -80,7 +80,13 @@ restore them from the last lockfile CI accepted rather than regenerating.
 Every commit is validated by the pre-commit hook (`husky` + `lint-staged`):
 
 1. **ESLint** — `eslint --max-warnings 0` on staged `.ts/.tsx` files
-2. **TypeScript** — `npx tsc --noEmit` (full project type-check)
+2. **TypeScript** — `npm run typecheck` (`tsc -b`, full project type-check)
+
+> ⚠️ **`npx tsc --noEmit` checks nothing in this repo.** `tsconfig.json` is a
+> solution file — `"files": []` plus references to `tsconfig.app.json` and
+> `tsconfig.node.json` — so `--noEmit` resolves zero input files and exits 0.
+> Always use `npm run typecheck` (what CI runs). The pre-commit hook ran the
+> no-op form until it let a syntax error through to CI.
 
 Before pushing or completing a phase, also verify:
 

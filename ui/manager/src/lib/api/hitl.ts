@@ -21,8 +21,15 @@ export type HitlOnNoProgress = "WAIT_FOR_HUMAN" | "AUTO_REJECT" | "ABORT";
  *  Only REJECT is accepted in v1; INBOX is reserved (backend rejects it 400). */
 export type HitlInGroupTurns = "REJECT";
 
-/** Distinguishes a behavior-rule pause from a gated-tool-call pause. */
-export type HitlPauseType = "RULE" | "TOOL_CALL";
+/**
+ * Distinguishes a behavior-rule pause from a gated-tool-call pause, or (group
+ * surface only) a HUMAN group member's turn (I6) — rides the SAME
+ * `PendingApprovalSummary`/pending-approvals endpoints as RULE/TOOL_CALL,
+ * discriminated by this field, rather than a dedicated "my pending turns"
+ * endpoint. A HUMAN_TURN pause is "you're up", not "approve/reject" — resume it
+ * via `groups.ts`'s `submitHumanInput`, never the HITL approve endpoints.
+ */
+export type HitlPauseType = "RULE" | "TOOL_CALL" | "HUMAN_TURN";
 
 /** Tool source qualifiers recognized by the backend pattern engine
  *  (ToolApprovalPatterns.KNOWN_SOURCES). */
@@ -84,11 +91,14 @@ export interface PendingApprovalSummary {
   timeoutPolicy?: HitlTimeoutPolicy | string | null;
   /** ISO-8601 duration of the configured approval timeout. */
   approvalTimeout?: string | null;
-  /** "RULE" (or null/legacy) = behavior-rule pause; "TOOL_CALL" = gated tool pause. */
+  /** "RULE" (or null/legacy) = behavior-rule pause; "TOOL_CALL" = gated tool
+   *  pause; "HUMAN_TURN" (group surface only, I6) = a HUMAN member's turn is up. */
   pauseType?: HitlPauseType | string | null;
   /** Names only (no arguments) of the gated tool calls — badges tool-call pauses
    *  in the inbox without a second round trip. */
   toolNames?: string[] | null;
+  /** Set only when `pauseType === "HUMAN_TURN"` (I6) — the member whose turn is pending. */
+  pendingMemberId?: string | null;
 }
 
 /** Group discussion approval request body. */

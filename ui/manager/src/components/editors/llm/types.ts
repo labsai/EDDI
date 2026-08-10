@@ -165,6 +165,18 @@ export interface LlmTask {
    * agent-level `hitlConfig.toolApprovals` for this task — no field merge.
    */
   toolApprovals?: ToolApprovalsConfig | null;
+
+  /**
+   * Token pricing (USD per 1M tokens) for this task's ORDINARY (non-cascade)
+   * model calls (N1). `null`/absent = unpriced, contributes $0 to tracked cost.
+   * Distinct from `modelCascade`'s own pricing pair — a cascade run is priced by
+   * its steps alone; these apply only when the cascade is off (or a call simply
+   * isn't cascaded), since cascade steps may target different models than this
+   * task's own. Must be ≥ 0 (validated at agent DEPLOY time, not at LLM-config
+   * save time — a negative value can be saved and only rejected later).
+   */
+  inputPricePer1M?: number | null;
+  outputPricePer1M?: number | null;
 }
 
 /**

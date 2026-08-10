@@ -6,7 +6,7 @@ import { ChevronDown, ChevronUp, Copy, CheckCircle2 } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { AdvisorResponseCard } from "@/components/workforce/advisor-response-card";
 import type { TranscriptEntry, TranscriptEntryType } from "@/lib/api/groups";
-import { ENTRY_TYPE_INFO } from "@/lib/api/groups";
+import { entryTypeInfo } from "@/lib/api/groups";
 import { formatMarkdownText } from "@/components/groups/group-utils";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -18,6 +18,13 @@ interface BoardTranscriptProps {
   /** The discussion is still running — keeps a visible "working" row pinned to
    *  the bottom so the transcript never looks finished while it isn't. */
   isLive?: boolean;
+  /**
+   * Rendered above the first entry, INSIDE the scroll box — this component owns
+   * the scroll container, so anything the caller wants to scroll with the
+   * transcript (rather than sit pinned above it) has to come through here.
+   * Used for the shared discussion-insights panels.
+   */
+  header?: React.ReactNode;
 
   className?: string;
 }
@@ -36,6 +43,14 @@ const PHASE_ICONS: Record<string, string> = {
   ARGUE: "📢",
   REBUTTAL: "↩️",
   PLAN: "📝",
+  // Wave-3 phase/entry types (I14/I11/I8/I18). Keyed by both the PhaseType and
+  // the TranscriptEntryType name where they differ, since `inferPhaseType`
+  // looks entries up here directly.
+  VOTE: "🗳️",
+  PROPOSAL: "🤝",
+  BARGAIN: "🔄",
+  RETRO: "🪞",
+  BID: "💰",
 };
 
 // ─── Entry-type badge variants (borrowed from manager) ──────────
@@ -60,6 +75,10 @@ function badgeVariant(
     case "DEFENSE":
     case "TASK_RESULT":
       return "success";
+    case "DISSENT":
+      return "destructive";
+    case "ABSTAINED":
+      return "secondary";
     default:
       return "outline";
   }
@@ -287,7 +306,11 @@ function EnhancedResponseEntry({
   delay: number;
 }) {
   const { t } = useTranslation();
-  const info = ENTRY_TYPE_INFO[entry.type];
+  // `entryTypeInfo`, not a raw ENTRY_TYPE_INFO lookup: the backend's entry-type
+  // enum grows every collaboration wave, and the previous `info && …` guard meant
+  // a DISSENT rendered as an unlabelled contribution — indistinguishable from an
+  // ordinary opinion, which is the one thing a minority report must not be.
+  const info = entryTypeInfo(entry.type);
   const variant = badgeVariant(entry.type);
   const time = formatTime(entry.timestamp);
 
@@ -298,11 +321,7 @@ function EnhancedResponseEntry({
       <AdvisorResponseCard
         displayName={entry.speakerDisplayName}
         agentId={entry.speakerAgentId}
-        role={
-          info
-            ? t(`groups.entryType.${entry.type}`, info.label)
-            : null
-        }
+        role={t(`groups.entryType.${entry.type}`, info.label)}
         roleBadgeVariant={variant}
         content={entry.content}
         boardId={boardId}
@@ -340,6 +359,7 @@ function BoardTranscript({
   boardId,
   synthesizedAnswer,
   isLive = false,
+  header,
   className,
 }: BoardTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -357,13 +377,17 @@ function BoardTranscript({
   // placeholder turning into a real answer scrolls too, not just new entries.
   // Layout effect, not effect: scrolling after paint shows one frame at the old
   // offset before snapping down, which reads as a jump on every streamed turn.
+  // `header` is in the deps because it renders INSIDE the scroll box: an
+  // insight panel appearing mid-discussion changes scrollHeight without
+  // touching any transcript field, so without it a user pinned to the bottom
+  // silently drifts up by the panel's height and misses new turns.
   const lastContent = transcript[transcript.length - 1]?.content ?? null;
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && isNearBottomRef.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [transcript.length, lastContent, synthesizedAnswer, isLive]);
+  }, [transcript.length, lastContent, synthesizedAnswer, isLive, header]);
 
   // Check if transcript already contains a SYNTHESIS entry
   const hasSynthesisEntry = transcript.some((e) => e.type === "SYNTHESIS");
@@ -386,6 +410,8 @@ function BoardTranscript({
 
   return (
     <div ref={scrollRef} onScroll={handleScroll} aria-live="polite" aria-relevant="additions" className={cn("flex flex-col gap-2 overflow-y-auto", className)}>
+      {header}
+
       {processedEntries.map(({ entry, showPhaseHeader }, idx) => {
         const delay = Math.min(idx * 60, 600);
 

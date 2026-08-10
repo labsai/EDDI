@@ -16,6 +16,60 @@ export function isApiError(error: unknown): error is ApiError {
   );
 }
 
+/**
+ * Longest error message worth surfacing. Backend validator messages are one
+ * sentence; anything past this is a stack trace or an HTML page, and pasting
+ * either into a toast tells the user nothing.
+ */
+const MAX_ERROR_MESSAGE_CHARS = 400;
+
+/**
+ * Pull a displayable message out of an error response body.
+ *
+ * Two body shapes are real here. JSON errors come keyed `message`,
+ * `errorMessage`, `detail` or `error` — the last is what the group template and
+ * workspace endpoints use, and reading only the first three is why every
+ * "Missing role assignment(s): …" used to reach the user as a bare
+ * "Bad Request". Plain-text errors come from the global exception mappers
+ * (save-time validator 400s, version-conflict 409s, store-failure 500s), where
+ * the body IS the message.
+ *
+ * Returns null when the body carries nothing worth showing, so the caller keeps
+ * the HTTP status phrase — notably for a reverse proxy's HTML error page, which
+ * is markup rather than a message and must not be dumped into a toast.
+ */
+function extractErrorMessage(body: string): string | null {
+  const text = body.trim();
+  if (!text) return null;
+
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object") {
+      const candidate =
+        (parsed as Record<string, unknown>).message ??
+        (parsed as Record<string, unknown>).errorMessage ??
+        (parsed as Record<string, unknown>).detail ??
+        (parsed as Record<string, unknown>).error;
+      if (typeof candidate === "string" && candidate.trim()) {
+        return truncateMessage(candidate.trim());
+      }
+    }
+    // Valid JSON, but no recognizable message field (or a bare literal like
+    // `null`/`123`) — the status phrase is more informative than the raw body.
+    return null;
+  } catch {
+    // Not JSON. Markup is never a message.
+    if (text.startsWith("<")) return null;
+    return truncateMessage(text);
+  }
+}
+
+function truncateMessage(message: string): string {
+  return message.length > MAX_ERROR_MESSAGE_CHARS
+    ? `${message.slice(0, MAX_ERROR_MESSAGE_CHARS)}…`
+    : message;
+}
+
 /** Extract a human-readable message from any caught error */
 export function getErrorMessage(error: unknown): string {
   if (isApiError(error)) {
@@ -93,15 +147,10 @@ class ApiClient {
         url,
       };
       try {
-        const errorBody = await response.json();
-        // Backend may use `message`, `errorMessage`, or `detail`
-        error.message =
-          errorBody.message ||
-          errorBody.errorMessage ||
-          errorBody.detail ||
-          response.statusText;
+        const extracted = extractErrorMessage(await response.text());
+        if (extracted) error.message = extracted;
       } catch {
-        // Non-JSON error body — keep statusText
+        // Body unreadable — keep statusText.
       }
       throw error;
     }

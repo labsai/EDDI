@@ -696,7 +696,11 @@ function ReviewStep({
           <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
           <p className="text-xs">
             <span className="font-semibold text-amber-500">
-              {t("groups.reviewUnassignedWarning", "{{count}} member(s) unassigned", { count: unassignedCount })}
+              {t("groups.reviewUnassignedWarning", {
+                defaultValue: "{{count}} member unassigned",
+                defaultValue_other: "{{count}} members unassigned",
+                count: unassignedCount,
+              })}
             </span>
             <span className="text-muted-foreground ms-1">
               — {t("groups.reviewUnassignedHint", "Go back to assign agents before creating.")}

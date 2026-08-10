@@ -60,7 +60,7 @@ describe("OrphansPage", () => {
     await user.click(screen.getByTestId("scan-button"));
 
     await waitFor(() => {
-      expect(screen.getByText("5 orphan(s) found")).toBeInTheDocument();
+      expect(screen.getByText("5 orphans found")).toBeInTheDocument();
     });
 
     // Should show orphan names from mock data
@@ -237,7 +237,7 @@ describe("OrphansPage", () => {
     await user.click(screen.getByTestId("pre-scan-button"));
 
     await waitFor(() => {
-      expect(screen.getByText("5 orphan(s) found")).toBeInTheDocument();
+      expect(screen.getByText("5 orphans found")).toBeInTheDocument();
     });
   });
 

@@ -595,4 +595,208 @@ describe("GroupWizardPage", () => {
     // Advisory board is one template, there should be more
     expect(screen.getByTestId("template-advisory-board")).toBeInTheDocument();
   });
+
+  // I6 — HUMAN group members.
+  describe("HUMAN members", () => {
+    async function reachMembersStepWithTwo(user: ReturnType<typeof userEvent.setup>) {
+      renderWithProviders(<GroupWizardPage />, { initialRoute: "/manage/groups/wizard" });
+      await user.click(screen.getByTestId("template-blank"));
+      await user.type(screen.getByTestId("gw-name"), "Human Test Group");
+      await user.click(screen.getByTestId("group-wizard-next"));
+      await user.click(screen.getByTestId("gw-add-member"));
+      await user.click(screen.getByTestId("gw-add-member"));
+      await waitFor(() => {
+        expect(screen.getByTestId("member-card-1")).toBeInTheDocument();
+      });
+      // Second member is a plain agent in "new" mode — enough by itself to pass
+      // the members-step gate, so any Next-disabling below is attributable to
+      // the first (HUMAN) member specifically.
+      await user.type(screen.getByTestId("member-name-1"), "Agent Two");
+    }
+
+    it("switching a member to Human blocks Next until a principal id is entered", async () => {
+      const user = userEvent.setup();
+      await reachMembersStepWithTwo(user);
+      await user.type(screen.getByTestId("member-name-0"), "Director");
+
+      await user.click(screen.getByTestId("member-type-human-0"));
+      expect(screen.getByTestId("human-principal-id-0")).toBeInTheDocument();
+      // No agent-creation UI (mode toggle / provider picker) within THIS card —
+      // member 1 (an AGENT) legitimately still has its own "Use Existing" toggle.
+      expect(
+        within(screen.getByTestId("member-card-0")).queryByText("Use Existing"),
+      ).not.toBeInTheDocument();
+
+      expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+
+      await user.type(screen.getByTestId("human-principal-id-0"), "director@acme.com");
+      expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
+    });
+
+    // `agentId` means a different thing per member type — a deployed agent, a
+    // nested group config, or a human's principal id. Carrying it across a
+    // switch would submit an agent id as somebody's login.
+    it("clears a selected agent when switching that member to Human", async () => {
+      const user = userEvent.setup();
+      await reachMembersStepWithTwo(user);
+      await user.type(screen.getByTestId("member-name-0"), "Director");
+
+      // Genuinely assign a real agent first — the reset is only meaningful if
+      // there IS an agentId to carry over.
+      const card = screen.getByTestId("member-card-0");
+      await user.click(within(card).getByText("Use Existing"));
+      const picker = within(card).getByRole("combobox");
+      const option = within(picker).getAllByRole("option").find((o) => (o as HTMLOptionElement).value);
+      await user.selectOptions(picker, (option as HTMLOptionElement).value);
+      expect((picker as HTMLSelectElement).value).not.toBe("");
+      // With an agent assigned, the members step is satisfied.
+      expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
+
+      // Switching to HUMAN must surface an EMPTY principal-id field, never one
+      // pre-filled with the agent id — and Next must go back to blocked,
+      // because that agent id is not a valid human principal.
+      await user.click(screen.getByTestId("member-type-human-0"));
+      expect(screen.getByTestId("human-principal-id-0")).toHaveValue("");
+      expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+    });
+
+    // Switching HUMAN back to AGENT leaves no visible trace of the stale id —
+    // the card just shows the create-agent form again. Its only observable
+    // effect is the SUBMITTED payload, where a principal id masquerading as an
+    // agentId would create a group pointing at an agent that does not exist.
+    it("never submits a former principal id as a member's agentId", async () => {
+      let submitted: { members?: { agentId?: string; memberType?: string }[] } | null = null;
+      server.use(
+        http.post("*/administration/agents/setup", () =>
+          HttpResponse.json({
+            agentId: "auto-agent-1", agentName: "Auto Agent", provider: "anthropic",
+            model: "claude-sonnet-4-6", deployed: true, deploymentStatus: "deployed",
+          }),
+        ),
+        http.post("*/groupstore/groups", async ({ request }) => {
+          submitted = (await request.json()) as typeof submitted;
+          return new HttpResponse(null, {
+            status: 201,
+            headers: { Location: "/groupstore/groups/new-grp?version=1" },
+          });
+        }),
+      );
+
+      const user = userEvent.setup();
+      await reachMembersStepWithTwo(user);
+      await user.type(screen.getByTestId("member-name-0"), "Director");
+
+      await user.click(screen.getByTestId("member-type-human-0"));
+      await user.type(screen.getByTestId("human-principal-id-0"), "director@acme.com");
+
+      // Change of mind: this seat should be an agent after all.
+      await user.click(within(screen.getByTestId("member-card-0")).getByText("Agent"));
+      expect(screen.queryByTestId("human-turn-settings")).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId("group-wizard-next"));
+      await user.click(screen.getByTestId("group-wizard-create"));
+
+      await waitFor(() => expect(submitted).not.toBeNull());
+      const member = submitted!.members![0]!;
+      expect(member.memberType).toBe("AGENT");
+      expect(member.agentId).not.toBe("director@acme.com");
+    });
+
+    // A GROUP member points at a nested group that already exists — there is no
+    // "create new" flow for it, so its `mode` is whatever the last type switch
+    // left behind. When that was "new", the members step accepted a GROUP seat
+    // with nothing selected and the create step then provisioned a real deployed
+    // LLM agent for it, submitting that agent's id as the nested group's config id.
+    it("blocks Next until a nested group is picked, and never invents an agent for it", async () => {
+      let setupCalls = 0;
+      let submitted: { members?: { agentId?: string; memberType?: string }[] } | null = null;
+      server.use(
+        http.post("*/administration/agents/setup", () => {
+          setupCalls += 1;
+          return HttpResponse.json({
+            agentId: `auto-agent-${setupCalls}`, agentName: "Auto Agent", provider: "anthropic",
+            model: "claude-sonnet-4-6", deployed: true, deploymentStatus: "deployed",
+          });
+        }),
+        http.post("*/groupstore/groups", async ({ request }) => {
+          submitted = (await request.json()) as typeof submitted;
+          return new HttpResponse(null, {
+            status: 201,
+            headers: { Location: "/groupstore/groups/new-grp?version=1" },
+          });
+        }),
+      );
+
+      const user = userEvent.setup();
+      await reachMembersStepWithTwo(user);
+      await user.type(screen.getByTestId("member-name-0"), "Research Pod");
+
+      const card = screen.getByTestId("member-card-0");
+      await user.click(within(card).getByText("Group"));
+
+      // Nothing selected yet — the seat is unfilled, so the step is not done.
+      expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+
+      const picker = await within(card).findByRole("combobox");
+      const option = within(picker).getAllByRole("option").find((o) => (o as HTMLOptionElement).value);
+      await user.selectOptions(picker, (option as HTMLOptionElement).value);
+      const pickedGroupId = (picker as HTMLSelectElement).value;
+      expect(pickedGroupId).not.toBe("");
+      expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
+
+      await user.click(screen.getByTestId("group-wizard-next"));
+      await user.click(screen.getByTestId("group-wizard-create"));
+
+      await waitFor(() => expect(submitted).not.toBeNull());
+      const groupMember = submitted!.members![0]!;
+      expect(groupMember.memberType).toBe("GROUP");
+      // The nested group's own id — not an agent conjured up to fill the slot.
+      expect(groupMember.agentId).toBe(pickedGroupId);
+      // Exactly one agent created: member 1, the only AGENT still in "new" mode.
+      expect(setupCalls).toBe(1);
+    });
+
+    // The likeliest way to hit the bug in practice: a first-time user with no
+    // groups yet picks "Group", gets an empty-state card with nothing to select,
+    // and previously could still walk straight through to create.
+    it("keeps Next blocked for a Group member when no groups exist to nest", async () => {
+      server.use(
+        http.get("*/groupstore/groups/descriptors", () => HttpResponse.json([])),
+        http.get("*/groupstore/groups", () => HttpResponse.json([])),
+      );
+
+      const user = userEvent.setup();
+      await reachMembersStepWithTwo(user);
+      await user.type(screen.getByTestId("member-name-0"), "Research Pod");
+
+      const card = screen.getByTestId("member-card-0");
+      await user.click(within(card).getByText("Group"));
+
+      await within(card).findByText("No groups available");
+      expect(within(card).queryByRole("combobox")).not.toBeInTheDocument();
+      expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+    });
+
+    it("shows the human turn settings panel only once a member is Human, and validates the duration", async () => {
+      const user = userEvent.setup();
+      await reachMembersStepWithTwo(user);
+      await user.type(screen.getByTestId("member-name-0"), "Director");
+
+      expect(screen.queryByTestId("human-turn-settings")).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId("member-type-human-0"));
+      await user.type(screen.getByTestId("human-principal-id-0"), "director@acme.com");
+      expect(screen.getByTestId("human-turn-settings")).toBeInTheDocument();
+
+      // Blank timeout ("wait indefinitely") is valid — Next stays enabled.
+      expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
+
+      await user.type(screen.getByTestId("human-turn-timeout-input"), "not-a-duration");
+      expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+
+      await user.clear(screen.getByTestId("human-turn-timeout-input"));
+      await user.type(screen.getByTestId("human-turn-timeout-input"), "PT24H");
+      expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
+    });
+  });
 });

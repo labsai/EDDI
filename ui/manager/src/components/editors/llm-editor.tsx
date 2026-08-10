@@ -37,6 +37,7 @@ import {
 import { EditorSection } from "./editor-section";
 import { cn } from "@/lib/utils";
 import { TaskCascadeSection } from "./llm/task-cascade-section";
+import { TaskPricingSection } from "./llm/task-pricing-section";
 import { TaskMemorySection } from "./llm/task-memory-section";
 import { TaskRagSection } from "./llm/task-rag-section";
 import { TaskResponseValidationSection } from "./llm/task-response-validation-section";
@@ -1749,6 +1750,9 @@ function TaskEditor({
               </div>
             </div>
           </EditorSection>
+
+          <TaskPricingSection task={task} onChange={onChange} readOnly={readOnly} />
+
 
           <TaskCascadeSection task={task} onChange={onChange} readOnly={readOnly} />
 

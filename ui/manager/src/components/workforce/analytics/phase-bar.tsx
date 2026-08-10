@@ -2,15 +2,23 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { PhaseCount } from "@/hooks/use-workforce-analytics";
-import { ENTRY_TYPE_INFO } from "@/lib/api/groups";
+import { entryTypeInfo } from "@/lib/api/groups";
 import type { TranscriptEntryType } from "@/lib/api/groups";
 
 interface PhaseBarProps {
   data: PhaseCount[];
 }
 
-/** Opacity classes cycling through primary at various strengths */
-const PHASE_CLASSES: Record<TranscriptEntryType, string> = {
+/**
+ * Opacity classes cycling through primary at various strengths.
+ *
+ * Deliberately PARTIAL. The backend's entry-type enum grows with each
+ * collaboration wave, and a chart shade is not a contract worth breaking the
+ * build over — the unmapped ones fall through to `bg-muted` below, which reads
+ * correctly for the procedural entries (abstentions, convergence checks,
+ * facilitation) that make up most of the additions.
+ */
+const PHASE_CLASSES: Partial<Record<TranscriptEntryType, string>> = {
   QUESTION: "bg-primary/20",
   OPINION: "bg-primary/40",
   CRITIQUE: "bg-primary/55",
@@ -64,7 +72,7 @@ function PhaseBar({ data }: PhaseBarProps) {
                     PHASE_CLASSES[item.type] ?? "bg-muted",
                   )}
                   style={{ width: `${pct}%` }}
-                  title={`${ENTRY_TYPE_INFO[item.type]?.label ?? item.type}: ${item.count}`}
+                  title={`${entryTypeInfo(item.type).label}: ${item.count}`}
                 />
               );
             })}
@@ -81,7 +89,7 @@ function PhaseBar({ data }: PhaseBarProps) {
                   )}
                 />
                 <span className="text-xs text-muted-foreground">
-                  {ENTRY_TYPE_INFO[item.type]?.label ?? item.type} ({item.count})
+                  {entryTypeInfo(item.type).label} ({item.count})
                 </span>
               </div>
             ))}

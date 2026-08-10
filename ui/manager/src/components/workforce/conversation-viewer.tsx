@@ -10,8 +10,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { parseTranscriptContent, truncateContent } from "@/components/groups/group-utils";
+import { DiscussionInsights } from "@/components/groups/discussion-insights";
 import {
-  ENTRY_TYPE_INFO,
+  entryTypeInfo,
   type TranscriptEntry,
   type GroupConversationState,
 } from "@/lib/api/groups";
@@ -38,7 +39,8 @@ const STATE_VARIANT: Record<
   FAILED: { label: "Failed", variant: "destructive" },
   CANCELLED: { label: "Cancelled", variant: "secondary" },
   AWAITING_APPROVAL: { label: "Awaiting Approval", variant: "warning" },
-CLOSED: { label: "Closed", variant: "secondary" },
+  AWAITING_HUMAN_INPUT: { label: "Awaiting Human Input", variant: "warning" },
+  CLOSED: { label: "Closed", variant: "secondary" },
 };
 
 function stateI18nKey(state: GroupConversationState): string {
@@ -50,7 +52,8 @@ function stateI18nKey(state: GroupConversationState): string {
     FAILED: "Workforce.history.failed",
     CANCELLED: "Workforce.history.cancelled",
     AWAITING_APPROVAL: "Workforce.history.awaitingApproval",
-  CLOSED: "Closed",
+    AWAITING_HUMAN_INPUT: "Workforce.history.awaitingHumanInput",
+    CLOSED: "Workforce.history.closed",
   };
   return map[state] ?? "Workforce.history.created";
 }
@@ -94,6 +97,12 @@ const PHASE_ICONS: Record<string, string> = {
   PLAN: "📝",
   TASK_RESULT: "📦",
   VERIFICATION: "☑️",
+  // Wave-3 entry types (I14/I11/I8/I18) — looked up by TranscriptEntryType.
+  VOTE: "🗳️",
+  PROPOSAL: "🤝",
+  BARGAIN: "🔄",
+  RETRO: "🪞",
+  BID: "💰",
 };
 
 // ─── Constants ───────────────────────────────────────────────────
@@ -131,7 +140,10 @@ function PhaseSeparator({
 }) {
   const { t } = useTranslation();
   const icon = PHASE_ICONS[phaseType] ?? "📌";
-  const typeInfo = ENTRY_TYPE_INFO[phaseType as keyof typeof ENTRY_TYPE_INFO];
+  // Never undefined — see entryTypeInfo. The `as keyof typeof` cast this
+  // replaced satisfied the compiler while the runtime value could still be
+  // absent, which is how eleven entry types ended up unlabelled here.
+  const typeInfo = entryTypeInfo(phaseType);
 
   return (
     <div
@@ -153,11 +165,9 @@ function PhaseSeparator({
         <span>
           {phaseName ?? t("Workforce.history.phase", "Phase")}
         </span>
-        {typeInfo && (
-          <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
-            {typeInfo.label}
-          </Badge>
-        )}
+        <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+          {typeInfo.label}
+        </Badge>
       </div>
       <div className="flex-1 h-px bg-muted" />
     </div>
@@ -197,7 +207,7 @@ function AgentEntryCard({
   index: number;
 }) {
   const { t } = useTranslation();
-  const typeInfo = ENTRY_TYPE_INFO[entry.type as keyof typeof ENTRY_TYPE_INFO];
+  const typeInfo = entryTypeInfo(entry.type);
   const borderClass = agentBorderClass(entry.speakerAgentId);
   const parsedContent = parseTranscriptContent(entry.content ?? "");
   const hasContent = parsedContent.trim().length > 0;
@@ -225,11 +235,9 @@ function AgentEntryCard({
         <span className="font-medium text-sm text-foreground">
           {entry.speakerDisplayName}
         </span>
-        {typeInfo && (
-          <Badge variant="secondary" className="text-[10px]">
-            {typeInfo.label}
-          </Badge>
-        )}
+        <Badge variant="secondary" className="text-[10px]">
+          {typeInfo.label}
+        </Badge>
         {entry.targetAgentId && (
           <span className="text-xs text-muted-foreground">
             → {entry.targetAgentId}
@@ -748,6 +756,13 @@ function ConversationViewer({
         aria-label={t("Workforce.history.transcript", "Conversation transcript")}
         className="flex-1 overflow-y-auto ps-5 pe-5 py-4 space-y-3"
       >
+        {/* Shared artifacts, negotiation ledger and windowing summary
+            (I17/I11/I9) — the same component the Manager transcript and the
+            live board render, so every surface showing a group discussion
+            shows the same state. This viewer reads the single-conversation
+            GET, which is the only response that carries `artifacts`. */}
+        <DiscussionInsights conversation={conversation} />
+
         {processedEntries.map(({ entry, showPhaseHeader }, idx) => {
           const phaseHeader = showPhaseHeader ? (
             <PhaseSeparator

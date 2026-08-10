@@ -17,7 +17,8 @@ const BADGE_CLASSES: Record<GroupConversationState, string> = {
   CREATED: "bg-muted text-muted-foreground",
   CANCELLED: "bg-muted text-muted-foreground",
   AWAITING_APPROVAL: "bg-muted text-muted-foreground",
-CLOSED: "Closed",
+  AWAITING_HUMAN_INPUT: "bg-primary/10 text-primary",
+  CLOSED: "bg-muted text-muted-foreground",
 };
 
 const STATE_LABELS: Record<GroupConversationState, string> = {
@@ -28,7 +29,8 @@ const STATE_LABELS: Record<GroupConversationState, string> = {
   CREATED: "Created",
   CANCELLED: "Cancelled",
   AWAITING_APPROVAL: "Pending",
-CLOSED: "Closed",
+  AWAITING_HUMAN_INPUT: "Awaiting your turn",
+  CLOSED: "Closed",
 };
 
 function formatRelative(dateStr: string, t: (key: string, fallback: string, opts?: Record<string, unknown>) => string): string {
@@ -85,7 +87,7 @@ function TopDiscussions({ discussions, emptyMessage }: TopDiscussionsProps) {
                   BADGE_CLASSES[d.state] ?? "bg-muted text-muted-foreground",
                 )}
               >
-                {STATE_LABELS[d.state] ?? d.state}
+                {t(`groups.state.${d.state}`, STATE_LABELS[d.state] ?? d.state)}
               </span>
             </Link>
           ))}

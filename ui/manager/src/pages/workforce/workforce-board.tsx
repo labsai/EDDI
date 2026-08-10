@@ -20,6 +20,8 @@ import { SessionHistory } from "@/components/workforce/session-history";
 import { MembersSheet } from "@/components/workforce/members-sheet";
 import { ExportMenu } from "@/components/workforce/export-menu";
 import { DiscussionActions } from "@/components/groups/discussion-actions";
+import { DiscussionInsights } from "@/components/groups/discussion-insights";
+import { HumanTurnBanner } from "@/components/groups/human-turn-banner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GroupConfigPanel } from "@/components/groups/group-config-panel";
@@ -27,6 +29,7 @@ import {
   followupGroupMember,
   closeGroupConversation,
 } from "@/lib/api/groups";
+import { useSubmitHumanInput } from "@/hooks/use-hitl";
 import { getErrorMessage } from "@/lib/api-client";
 
 // ─── Icons ───────────────────────────────────────────────────────
@@ -297,6 +300,7 @@ function WorkforceBoard() {
     if (state === "CLOSED") return t("groups.inputDisabledClosed", "This discussion is closed");
     if (state === "FAILED" || state === "CANCELLED") return t("groups.inputDisabledEnded", "This discussion has ended");
     if (state === "AWAITING_APPROVAL") return t("groups.inputDisabledApproval", "Awaiting approval…");
+    if (state === "AWAITING_HUMAN_INPUT") return t("groups.inputDisabledHumanTurn", "Awaiting a member's turn…");
     if (state === "IN_PROGRESS" || state === "SYNTHESIZING") return t("groups.inputDisabledInProgress", "Discussion in progress…");
     if (state === "COMPLETED") return t("groups.inputDisabledCompleted", "Discussion completed");
     return undefined;
@@ -376,6 +380,25 @@ function WorkforceBoard() {
     if (!boardId || !selectedConvId) return;
     closeMutation.mutate({ gcId: selectedConvId });
   }, [boardId, selectedConvId, closeMutation]);
+
+  // I6 — a HUMAN member's turn. Unlike the approval pause below (which is a
+  // governance decision and deliberately lives only on the Manager page), this
+  // is a member SPEAKING: the board is where participants are, so the submit
+  // form belongs here rather than behind a link to another surface.
+  const submitHumanInputMutation = useSubmitHumanInput();
+  const handleSubmitHumanInput = useCallback(
+    (memberId: string, content: string) => {
+      if (!boardId || !selectedConvId) return;
+      submitHumanInputMutation.mutate(
+        { groupId: boardId, gcId: selectedConvId, memberId, content },
+        {
+          onSuccess: () => toast.success(t("groups.humanTurnSubmitted", "Your response was recorded")),
+          onError: (err) => toast.error(getErrorMessage(err)),
+        },
+      );
+    },
+    [boardId, selectedConvId, submitHumanInputMutation, t],
+  );
 
   const actionPending =
     followupMutation.isPending ||
@@ -576,6 +599,17 @@ function WorkforceBoard() {
               synthesizedAnswer={displaySynthesis}
               isLive={isOngoing}
               className="flex-1 min-h-0 ps-4 pe-4 pt-4 pb-4"
+              // Artifacts / negotiation ledger / windowing summary, plus the
+              // live retro + artifact-write badges. Same shared component the
+              // Manager transcript and history viewer use. Passed as a header
+              // so it scrolls with the transcript rather than sitting pinned.
+              header={
+                <DiscussionInsights
+                  conversation={selectedConversation}
+                  retroRecorded={isStreaming ? streamState.retroRecorded : undefined}
+                  artifactUpdates={isStreaming ? streamState.artifactUpdates : undefined}
+                />
+              }
             />
           ) : (
             <div className="flex flex-1 min-h-0 items-center justify-center ps-4 pe-4">
@@ -643,6 +677,27 @@ function WorkforceBoard() {
             onFollowup={handleFollowupMember}
             onCloseDiscussion={handleCloseConversation}
           />
+        )}
+
+      {/* A HUMAN member's turn is up (I6). Contrast with the approval pause
+          below, which is routed to the Manager: this one is answerable right
+          here, because it is the member's own contribution rather than a
+          decision about someone else's. */}
+      {selectedConversation?.state === "AWAITING_HUMAN_INPUT" &&
+        selectedConversation.pendingHumanInput && (
+          <div className="mx-4 mb-2">
+            <HumanTurnBanner
+              displayName={selectedConversation.pendingHumanInput.displayName}
+              renderedPrompt={selectedConversation.pendingHumanInput.renderedPrompt}
+              pausedPhaseName={selectedConversation.pausedPhaseName}
+              requestedAt={selectedConversation.pendingHumanInput.requestedAt}
+              turnTimeout={groupConfig?.humanMemberConfig?.turnTimeout}
+              isSubmitting={submitHumanInputMutation.isPending}
+              onSubmit={(content) =>
+                handleSubmitHumanInput(selectedConversation.pendingHumanInput!.memberId, content)
+              }
+            />
+          </div>
         )}
 
       {/* A discussion paused for approval cannot be advanced from this surface:

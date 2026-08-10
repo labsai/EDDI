@@ -2029,7 +2029,24 @@ export const handlers = [
           { name: "Critique", type: "CRITIQUE", participants: "*", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: true, inputTemplate: null, repeats: 1 },
           { name: "Synthesis", type: "SYNTHESIS", participants: "moderator", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: false, inputTemplate: null, repeats: 1 },
         ],
-        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+        protocol: {
+          agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP",
+          // EDDI I1 — a dollar ceiling on the whole discussion.
+          maxCostPerDiscussion: 2.5, onCostExceeded: "SYNTHESIZE_NOW",
+        },
+        dynamicAgents: {
+          enabled: false, allowCreation: false, allowRecruitment: false, allowDelegation: true,
+          maxCreatedAgentsPerDiscussion: 5, maxRecruitedAgentsPerDiscussion: 10,
+          maxDelegationsPerTask: 3, maxDelegationDepth: 3, delegationTimeoutSeconds: 120,
+          allowedDelegationTargets: [], allowedProviders: [], allowedModels: {},
+          inheritParentModel: true,
+          // Hyphenated and lower-case, exactly as Jackson's @JsonValue writes it
+          // on AgentGroupConfiguration.LifecyclePolicy. A mock that returned the
+          // canonical constant would hide the mismatch this format caused.
+          lifecyclePolicy: "keep-deployed",
+        },
+        recordDissents: true,
+        taskListConfig: { allowAgentTaskCreation: true, maxAgentAddedTasksPerDiscussion: 20, maxPerTurn: 3 },
       },
       grp2: {
         name: "Strategy Debate",
@@ -2159,6 +2176,153 @@ export const handlers = [
       status: 200,
       headers: {
         Location: `eddi://ai.labs.group/groupstore/groups/${params.id}?version=${currentVersion + 1}`,
+      },
+    });
+  }),
+
+  // ── I13 — standing-team workspace ──
+
+  http.get("*/groupstore/groups/:groupId/workspace", ({ params }) => {
+    return HttpResponse.json({
+      id: `ws-${params.groupId}`, schemaVersion: 1, groupId: params.groupId,
+      // awardedBids is a Record<taskId, AwardedBid>, not an array — an empty
+      // object is the real empty shape.
+      backlog: { tasks: [], awardedBids: {} },
+      metrics: { discussions: 0, tasksVerified: 0, totalCost: 0, lastRunAt: null, perMemberStats: {} },
+      cadences: [],
+      runningDiscussionId: "",
+      pulledTaskIds: [],
+      created: "2026-06-01T00:00:00Z", lastModified: "2026-06-01T00:00:00Z", revision: "0",
+    });
+  }),
+
+  http.post("*/groupstore/groups/:groupId/workspace/backlog", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { subject?: string; description?: string; priority?: number };
+    if (!body?.subject?.trim()) {
+      return HttpResponse.json({ error: "subject is required" }, { status: 400 });
+    }
+    return HttpResponse.json({
+      id: `task-${Date.now()}`, subject: body.subject, description: body.description ?? "",
+      status: "PENDING", assignedAgentId: null, assignedDisplayName: null, dependsOnIds: [],
+      result: null, verificationNote: null, verified: false, priority: body.priority ?? 0,
+      createdAt: new Date().toISOString(), completedAt: null,
+    }, { status: 201 });
+  }),
+
+  http.post("*/groupstore/groups/:groupId/workspace/cadences", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { cronExpression?: string };
+    if (!body?.cronExpression?.trim()) {
+      return HttpResponse.json({ error: "cronExpression is required" }, { status: 400 });
+    }
+    return HttpResponse.json({
+      cadenceId: `cad-${Date.now()}`, scheduleRef: `sched-${Date.now()}`,
+      inputTemplate: null, maxBacklogTasksPerRun: 5, maxCostPerRun: null, createdBy: "manager-user",
+    }, { status: 201 });
+  }),
+
+  http.delete("*/groupstore/groups/:groupId/workspace/cadences/:cadenceId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // ── I10 — packaged group templates ──
+
+  http.get("*/groupstore/templates", () => {
+    return HttpResponse.json([
+      {
+        templateId: "research-pod", title: "Research Pod",
+        description: "Three independent researchers converge on findings, synthesized by a moderator.",
+        requiredRoles: [
+          { role: "researcher1", description: "First independent researcher" },
+          { role: "researcher2", description: "Second independent researcher" },
+          { role: "researcher3", description: "Third independent researcher" },
+          { role: "moderator", description: "Synthesizes the pod's findings and judges convergence" },
+        ],
+      },
+      {
+        templateId: "decision-board", title: "Decision Board",
+        description: "A board with a human director votes on options a chair distills.",
+        requiredRoles: [
+          { role: "advisor1", description: "First board advisor" },
+          { role: "advisor2", description: "Second board advisor" },
+          { role: "humanDirector", description: "Human board member — their principal id" },
+          { role: "chair", description: "Chairs the board" },
+        ],
+      },
+    ]);
+  }),
+
+  http.get("*/groupstore/templates/:templateId", ({ params }) => {
+    if (params.templateId === "research-pod") {
+      return HttpResponse.json({
+        manifest: {
+          templateId: "research-pod", title: "Research Pod",
+          description: "Three independent researchers converge on findings, synthesized by a moderator.",
+          requiredRoles: [
+            { role: "researcher1", description: "First independent researcher" },
+            { role: "researcher2", description: "Second independent researcher" },
+            { role: "researcher3", description: "Third independent researcher" },
+            { role: "moderator", description: "Synthesizes the pod's findings and judges convergence" },
+          ],
+        },
+        config: {
+          style: "CUSTOM", moderatorAgentId: "$moderator",
+          members: [
+            { agentId: "$researcher1", displayName: "Researcher 1", speakingOrder: 1 },
+            { agentId: "$researcher2", displayName: "Researcher 2", speakingOrder: 2 },
+            { agentId: "$researcher3", displayName: "Researcher 3", speakingOrder: 3 },
+          ],
+        },
+      });
+    }
+    if (params.templateId === "decision-board") {
+      return HttpResponse.json({
+        manifest: {
+          templateId: "decision-board", title: "Decision Board",
+          description: "A board with a human director votes on options a chair distills.",
+          requiredRoles: [
+            { role: "advisor1", description: "First board advisor" },
+            { role: "advisor2", description: "Second board advisor" },
+            { role: "humanDirector", description: "Human board member — their principal id" },
+            { role: "chair", description: "Chairs the board" },
+          ],
+        },
+        config: {
+          style: "CUSTOM", moderatorAgentId: "$chair",
+          members: [
+            { agentId: "$advisor1", displayName: "Advisor 1", speakingOrder: 1 },
+            { agentId: "$advisor2", displayName: "Advisor 2", speakingOrder: 2 },
+            { agentId: "$humanDirector", displayName: "Director", speakingOrder: 3, memberType: "HUMAN" },
+          ],
+        },
+      });
+    }
+    return HttpResponse.json({ error: `No such template: ${params.templateId}` }, { status: 404 });
+  }),
+
+  http.post("*/groupstore/templates/:templateId/instantiate", async ({ request, params }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      name?: string; roleAssignments?: Record<string, string>;
+    };
+    const assignments = body?.roleAssignments ?? {};
+    const knownRoles: Record<string, string[]> = {
+      "research-pod": ["researcher1", "researcher2", "researcher3", "moderator"],
+      "decision-board": ["advisor1", "advisor2", "humanDirector", "chair"],
+    };
+    const required = knownRoles[String(params.templateId)];
+    if (!required) {
+      return HttpResponse.json({ error: `No such template: ${params.templateId}` }, { status: 400 });
+    }
+    const missing = required.filter((r) => !assignments[r]?.trim());
+    if (missing.length > 0) {
+      return HttpResponse.json(
+        { error: `Missing role assignment(s): ${missing.join(", ")}` },
+        { status: 400 },
+      );
+    }
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `eddi://ai.labs.group/groupstore/groups/grp-from-tmpl?version=1`,
       },
     });
   }),
@@ -3712,6 +3876,57 @@ export const scheduleHandlers = [
       retainedAgentIds: [],
       created: new Date(now.getTime() - 600000).toISOString(),
       lastModified: new Date(now.getTime() - 120000).toISOString(),
+      // Wave-3 read-side state (I17/I11/I9). Only the SINGLE-conversation GET
+      // carries `artifacts` — the list/stream responses deliberately do not, so
+      // demo mode mirrors the real backend's shape rather than showing the
+      // panel everywhere.
+      artifacts: [
+        {
+          id: "art-1",
+          groupConversationId: "gconv1",
+          ownerUserId: "manager-user",
+          name: "eu-expansion-brief.md",
+          type: "MARKDOWN",
+          content:
+            "# EU Expansion Brief\n\n## Target markets\n- Germany (existing partners)\n- France (strong pipeline)\n\n## Blockers\n1. GDPR compliance — DPO appointment outstanding\n2. Product localization — ~3 months engineering\n",
+          version: 3,
+          lastEditorAgentId: "agent3",
+          status: "DRAFT",
+          history: [
+            { content: "# EU Expansion Brief\n\nDraft.", editorAgentId: "agent1", version: 1, at: new Date(now.getTime() - 500000).toISOString() },
+            { content: "# EU Expansion Brief\n\n## Target markets\n- Germany\n", editorAgentId: "agent2", version: 2, at: new Date(now.getTime() - 400000).toISOString() },
+          ],
+          createdAt: new Date(now.getTime() - 520000).toISOString(),
+          updatedAt: new Date(now.getTime() - 200000).toISOString(),
+        },
+        {
+          id: "art-2",
+          groupConversationId: "gconv1",
+          ownerUserId: "manager-user",
+          name: "cost-model.json",
+          type: "JSON",
+          content: '{"infrastructureMonthlyUsd":50000,"localizationOneOffUsd":180000,"targetLaunch":"Q3"}',
+          version: 1,
+          lastEditorAgentId: "agent4",
+          status: "FINAL",
+          history: [],
+          createdAt: new Date(now.getTime() - 300000).toISOString(),
+          updatedAt: new Date(now.getTime() - 300000).toISOString(),
+        },
+      ],
+      negotiation: {
+        proposals: [
+          { id: "p1", byAgentId: "agent2", round: 1, terms: "Launch in Q2 across DACH + France simultaneously.", status: "SUPERSEDED", acceptedBy: [], acceptanceEntryIndices: {} },
+          { id: "p2", byAgentId: "agent2", round: 2, terms: "Q3 soft launch, Germany first, France 6 weeks later.", status: "OPEN", acceptedBy: ["agent2", "agent5"], acceptanceEntryIndices: { agent2: 6, agent5: 8 } },
+        ],
+        concessions: [
+          { byAgentId: "agent2", round: 2, gaveUp: "a simultaneous two-market launch", inReturnFor: "Legal dropping its objection to a Q3 date", refProposalId: "p2" },
+          { byAgentId: "agent5", round: 2, gaveUp: "the demand for a full DPIA before any launch", inReturnFor: "a staged rollout with a DPO appointed up front", refProposalId: "p2" },
+        ],
+      },
+      summaryUpToIndex: 4,
+      transcriptSummary:
+        "The panel opened with independent positions: Marketing saw brand opportunity but flagged GDPR; Sales pointed to demand in Germany and France; Product estimated three months of localization; Tech priced EU hosting at ~$50k/month; Legal warned against rushing compliance.",
     });
   }),
 
@@ -4856,6 +5071,36 @@ export const backupSyncHandlers = [
     return HttpResponse.json({
       state: "AWAITING_APPROVAL",
       pausedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+  }),
+
+  // I6 — submit a HUMAN group member's pending turn. Synchronous (no
+  // streaming variant exists on the backend): resolves to the settled
+  // GroupConversation directly.
+  http.post("*/groups/:groupId/conversations/:gcId/human-input", async ({ request, params }) => {
+    const body = (await request.json().catch(() => ({}))) as { memberId?: string; content?: string };
+    if (!body?.memberId?.trim() || !body?.content?.trim()) {
+      return HttpResponse.json({ error: "'memberId' and 'content' must not be blank" }, { status: 400 });
+    }
+    return HttpResponse.json({
+      id: params.gcId,
+      groupId: params.groupId,
+      userId: "manager-user",
+      state: "COMPLETED",
+      originalQuestion: "q",
+      transcript: [],
+      memberConversationIds: {},
+      currentPhaseIndex: 0,
+      currentPhaseName: null,
+      synthesizedAnswer: "Resumed after the human turn.",
+      depth: 0,
+      taskList: null,
+      dynamicMembers: [],
+      createdAgentIds: [],
+      retainedAgentIds: [],
+      created: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+      availableActions: ["followup", "continue", "close"],
     });
   }),
 ];

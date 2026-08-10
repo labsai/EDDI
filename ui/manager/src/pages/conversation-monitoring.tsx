@@ -137,7 +137,9 @@ export function ConversationMonitoringPage() {
     endMutation.mutate(statuses, {
       onSuccess: () => {
         toast.success(
-          t("conversations.endSuccess", "Ended {{count}} conversation(s)", {
+          t("conversations.endSuccess", {
+            defaultValue: "Ended {{count}} conversation",
+            defaultValue_other: "Ended {{count}} conversations",
             count: statuses.length,
           })
         );
@@ -152,7 +154,9 @@ export function ConversationMonitoringPage() {
     purgeMutation.mutate(purgeDays, {
       onSuccess: (count) => {
         toast.success(
-          t("conversations.purgeSuccess", "Purged {{count}} ended conversation(s)", {
+          t("conversations.purgeSuccess", {
+            defaultValue: "Purged {{count}} ended conversation",
+            defaultValue_other: "Purged {{count}} ended conversations",
             count: count ?? 0,
           })
         );
@@ -432,8 +436,13 @@ export function ConversationMonitoringPage() {
         title={t("conversations.confirmEndTitle", "End selected conversations?")}
         description={t(
           "conversations.confirmEndDesc",
-          "{{count}} conversation(s) will be set to ENDED. Paused (Awaiting Human) conversations are ended safely through the approval-aware path.",
-          { count: selected.size }
+          {
+            defaultValue:
+              "{{count}} conversation will be set to ENDED. Paused (Awaiting Human) conversations are ended safely through the approval-aware path.",
+            defaultValue_other:
+              "{{count}} conversations will be set to ENDED. Paused (Awaiting Human) conversations are ended safely through the approval-aware path.",
+            count: selected.size,
+          }
         )}
         confirmLabel={t("conversations.endSelected", "End selected")}
         cancelLabel={t("common.cancel")}
@@ -444,8 +453,13 @@ export function ConversationMonitoringPage() {
           <p className="rounded-lg border border-orange-500/30 bg-orange-500/10 p-3 text-sm text-foreground">
             {t(
               "conversations.pausedNote",
-              "{{count}} of the selected conversation(s) are Awaiting Human and will have their pending approval cancelled.",
-              { count: pausedSelectedCount }
+              {
+                defaultValue:
+                  "{{count}} of the selected conversations is Awaiting Human and will have its pending approval cancelled.",
+                defaultValue_other:
+                  "{{count}} of the selected conversations are Awaiting Human and will have their pending approval cancelled.",
+                count: pausedSelectedCount,
+              }
             )}
           </p>
         )}
@@ -458,8 +472,16 @@ export function ConversationMonitoringPage() {
         title={t("conversations.confirmPurgeTitle", "Purge ended conversations?")}
         description={t(
           "conversations.confirmPurgeDesc",
-          "This permanently deletes ENDED conversations older than {{days}} day(s), including their stored memory and attachments. This cannot be undone.",
-          { days: purgeDays }
+          {
+            defaultValue:
+              "This permanently deletes ENDED conversations older than {{days}} day, including their stored memory and attachments. This cannot be undone.",
+            defaultValue_other:
+              "This permanently deletes ENDED conversations older than {{days}} days, including their stored memory and attachments. This cannot be undone.",
+            // `count` selects the plural form, `days` fills the placeholder. Both
+            // are the same number; i18next only ever pluralizes on `count`.
+            count: purgeDays,
+            days: purgeDays,
+          }
         )}
         confirmLabel={t("conversations.purgeAction", "Purge")}
         cancelLabel={t("common.cancel")}

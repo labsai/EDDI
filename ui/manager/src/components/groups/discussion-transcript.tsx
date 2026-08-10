@@ -5,13 +5,17 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { PhaseHeader } from "./phase-header";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
+import { HumanTurnBanner } from "./human-turn-banner";
+import { DiscussionInsights } from "./discussion-insights";
 import { AgentResponseCard } from "./agent-response-card";
 import { TaskBoard } from "./task-board";
+import { DecisionRecordCard } from "./decision-record-card";
+import { hasDisplayableDecision } from "@/lib/group-config";
 import { parseTranscriptContent, safeFormatDate } from "./group-utils";
 import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, SharedTaskList, TaskDefinition } from "@/lib/api/groups";
 import type { HitlVerdict } from "@/lib/api/hitl";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
-import { cn } from "@/lib/utils";
+import { cn, formatUsd } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { STYLE_INFO } from "@/lib/api/groups";
@@ -39,6 +43,12 @@ interface DiscussionTranscriptProps {
   onCancelDiscussion?: (gcId: string) => void;
   /** Whether an approve/reject/cancel decision is currently in-flight. */
   isDeciding?: boolean;
+  /** Submit a HUMAN group member's turn (I6). Receives the group conversation id, the pending member id, and their response. */
+  onSubmitHumanInput?: (gcId: string, memberId: string, content: string) => void;
+  /** Whether a human-turn submission is currently in-flight. */
+  isSubmittingHumanInput?: boolean;
+  /** The group's `humanMemberConfig.turnTimeout` (I6), for the pending-turn countdown. */
+  humanTurnTimeout?: string | null;
 }
 
 interface PhaseGroup {
@@ -126,6 +136,17 @@ const STYLE_THEME: Record<DiscussionStyle, {
     progressText: "text-orange-600 dark:text-orange-400",
     progressBorder: "border-orange-500/20",
   },
+  NEGOTIATION: {
+    accent: "text-emerald-500",
+    dotColor: "bg-emerald-500",
+    phaseAccent: "border-emerald-500/30 bg-emerald-500/5",
+    questionBg: "bg-emerald-500/5 border-b-emerald-500/20",
+    flowBg: "bg-emerald-500/10",
+    flowText: "text-emerald-600 dark:text-emerald-400",
+    progressBg: "bg-emerald-500/5",
+    progressText: "text-emerald-600 dark:text-emerald-400",
+    progressBorder: "border-emerald-500/20",
+  },
   CUSTOM: {
     accent: "text-primary",
     dotColor: "bg-primary",
@@ -139,7 +160,21 @@ const STYLE_THEME: Record<DiscussionStyle, {
   },
 };
 
-/** Infer PhaseType from TranscriptEntryType */
+/**
+ * Infer PhaseType from TranscriptEntryType — used only to pick the phase
+ * header's icon, from whichever entry opens the group.
+ *
+ * Several entry types have no PhaseType of their own because they are recorded
+ * *inside* another phase rather than by one: DISSENT and ABSTAINED belong to the
+ * SYNTHESIS phase that provoked them, CONVERGENCE to the repeating phase it
+ * judged, BID to the EXECUTE phase its auction runs inside. They are mapped to
+ * the phase they live in so a group that happens to open with one is not
+ * mislabelled. The remaining unmapped types (FOLLOW_UP, and HUMAN_INPUT, which
+ * is declared but never actually produced — a HUMAN member's turn is recorded
+ * under the phase's own natural type instead) fall back to OPINION, and carry
+ * their own `phaseName` from the backend — "Follow-up" for the follow-up
+ * exchange — which is what the header actually shows.
+ */
 function entryTypeToPhaseType(type: TranscriptEntryType): PhaseType {
   const map: Partial<Record<TranscriptEntryType, PhaseType>> = {
     OPINION: "OPINION",
@@ -150,9 +185,17 @@ function entryTypeToPhaseType(type: TranscriptEntryType): PhaseType {
     ARGUMENT: "ARGUE",
     REBUTTAL: "REBUTTAL",
     SYNTHESIS: "SYNTHESIS",
+    DISSENT: "SYNTHESIS",
+    ABSTAINED: "SYNTHESIS",
+    CONVERGENCE: "OPINION",
     PLAN: "PLAN",
     TASK_RESULT: "EXECUTE",
     VERIFICATION: "VERIFY",
+    VOTE: "VOTE",
+    PROPOSAL: "PROPOSAL",
+    BARGAIN: "BARGAIN",
+    RETRO: "RETRO",
+    BID: "EXECUTE",
   };
   return map[type] || "OPINION";
 }
@@ -190,6 +233,7 @@ const STATE_VARIANTS: Record<string, { variant: "default" | "success" | "warning
   COMPLETED: { variant: "success" },
   FAILED: { variant: "destructive" },
   AWAITING_APPROVAL: { variant: "warning" },
+  AWAITING_HUMAN_INPUT: { variant: "warning" },
   CANCELLED: { variant: "destructive" },
 };
 
@@ -205,6 +249,9 @@ export function DiscussionTranscript({
   onApprove,
   onCancelDiscussion,
   isDeciding,
+  onSubmitHumanInput,
+  isSubmittingHumanInput,
+  humanTurnTimeout,
 }: DiscussionTranscriptProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
@@ -231,6 +278,9 @@ export function DiscussionTranscript({
   const effectiveCurrentPhase = isStreaming ? streamState!.currentPhase?.name : conversation?.currentPhaseName;
   const currentPhaseIndex = isStreaming ? streamState!.currentPhase?.index : conversation?.currentPhaseIndex;
   const effectiveSynthesis = isStreaming ? streamState!.synthesizedAnswer : conversation?.synthesizedAnswer;
+  // A live stream learns the decision from `decision_reached`; a reloaded
+  // conversation carries it on the document.
+  const effectiveDecision = isStreaming ? streamState!.decision : conversation?.decision;
   // S3 fix: memoize question extraction to avoid scanning transcript on every render
   const effectiveQuestion = useMemo(
     () => isStreaming
@@ -328,6 +378,7 @@ export function DiscussionTranscript({
     COMPLETED: t("groups.stateCompleted", "Completed"),
     FAILED: t("groups.stateFailed", "Failed"),
     AWAITING_APPROVAL: t("groups.stateAwaitingApproval", "Awaiting Approval"),
+    AWAITING_HUMAN_INPUT: t("groups.stateAwaitingHumanInput", "Awaiting Human Input"),
     CANCELLED: t("groups.stateCancelled", "Cancelled"),
   };
   const stateLabel = discussionStateLabels[effectiveState] ?? effectiveState;
@@ -346,6 +397,10 @@ export function DiscussionTranscript({
 
   // Phase flow steps for breadcrumb
   const flowSteps = STYLE_INFO_FLOW[style] || [];
+
+  // The cost ledger lives on the persisted conversation; no SSE event carries a
+  // running total, so a live stream shows nothing until the document is reloaded.
+  const costTotal = conversation?.totalCost;
 
   return (
     <div className="flex flex-col h-full">
@@ -366,6 +421,23 @@ export function DiscussionTranscript({
               {isStreaming && (
                 <Badge variant="outline" className={cn("text-[10px] animate-pulse border-current", theme.accent)}>
                   {t("groups.liveIndicator", "● LIVE")}
+                </Badge>
+              )}
+              {/* Accumulated cost (EDDI F5 cost ledger) — what a configured cost
+                  ceiling is measured against.
+
+                  Rendered ONLY when positive, and deliberately so: the ledger
+                  currently accrues cascade and priced-tool spend, so a discussion
+                  of ordinary model calls totals exactly 0. Showing "$0.00" would
+                  read as "this was free" rather than "this was not priced". */}
+              {costTotal != null && costTotal > 0 && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] tabular-nums"
+                  title={formatMemberCostBreakdown(conversation?.memberCosts, conversation?.memberDisplayNames)}
+                  data-testid="discussion-cost"
+                >
+                  {formatUsd(costTotal)}
                 </Badge>
               )}
               {/* Allow HTML toggle — opt-in for trusted content */}
@@ -449,8 +521,17 @@ export function DiscussionTranscript({
         )}
         {/* Also show task board for completed TASK_FORCE conversations loaded from API */}
         {style === "TASK_FORCE" && !isStreaming && conversation?.taskList && (
-          <MemoizedApiTaskBoard taskList={conversation.taskList} t={t} />
+          <MemoizedApiTaskBoard
+            taskList={conversation.taskList}
+            memberDisplayNames={conversation.memberDisplayNames}
+            t={t}
+          />
         )}
+
+        {/* Artifacts, negotiation ledger and the windowing indicator (I17/I11/I9)
+            — shared with the Workforce board and history viewer so all three
+            transcript surfaces stay in step. Renders nothing when empty. */}
+        <DiscussionInsights conversation={conversation} />
 
         {phases.map((phase, idx) => (
           <PhaseHeader
@@ -463,6 +544,11 @@ export function DiscussionTranscript({
               phase.phaseIndex === (isStreaming ? streamState!.currentPhase?.index : conversation?.currentPhaseIndex)
             }
             defaultExpanded={true}
+            // `?.` on the map as well as on streamState: a stream state created
+            // before convergence tracking existed (a rehydrated store, a partial
+            // test double) has no map, and reading `.get` off it would take down
+            // the whole transcript rather than drop one badge.
+            convergence={streamState?.convergence?.get(phase.phaseIndex)}
           >
             {phase.entries.map((entry, entryIdx) => (
               <AgentResponseCard
@@ -476,6 +562,13 @@ export function DiscussionTranscript({
             ))}
           </PhaseHeader>
         ))}
+
+        {/* Structured decision (verdict / tally / minority report). Rendered
+            ABOVE the prose synthesis: for a DEBATE the synthesis body IS the
+            judge's reasoning, so the finding it argues for has to come first. */}
+        {hasDisplayableDecision(effectiveDecision) && (
+          <DecisionRecordCard decision={effectiveDecision} />
+        )}
 
         {/* Synthesized answer highlight */}
         {parsedSynthesis && (
@@ -598,6 +691,42 @@ export function DiscussionTranscript({
           </div>
         )}
 
+        {/* Live-stream badges for retro harvests and artifact writes (I8/I17) —
+            the same shared component as the persisted panels above, passed only
+            the live payloads since neither count survives a reload. */}
+        {isStreaming && (
+          <DiscussionInsights
+            className="px-6"
+            retroRecorded={streamState?.retroRecorded}
+            artifactUpdates={streamState?.artifactUpdates}
+          />
+        )}
+
+        {/* Human-turn banner (I6) — "you're up", not "approve/reject" */}
+        {effectiveState === "AWAITING_HUMAN_INPUT" && (() => {
+          const pending = streamState?.humanInputRequest;
+          const persisted = conversation?.pendingHumanInput;
+          const displayName = pending?.displayName ?? persisted?.displayName;
+          const phaseName = pending?.phaseName ?? conversation?.pausedPhaseName ?? undefined;
+          if (!displayName) return null;
+          return (
+            <div className="px-6 py-4">
+              <HumanTurnBanner
+                displayName={displayName}
+                renderedPrompt={persisted?.renderedPrompt ?? ""}
+                pausedPhaseName={phaseName}
+                requestedAt={persisted?.requestedAt}
+                turnTimeout={humanTurnTimeout}
+                isSubmitting={isSubmittingHumanInput}
+                onSubmit={(content) => {
+                  const memberId = persisted?.memberId ?? pending?.memberId;
+                  if (gcId && memberId) onSubmitHumanInput?.(gcId, memberId, content);
+                }}
+              />
+            </div>
+          );
+        })()}
+
         {/* Error state */}
         {streamError && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/5 border border-destructive/20">
@@ -609,16 +738,49 @@ export function DiscussionTranscript({
   );
 }
 
+/**
+ * Per-member spend, as the tooltip on the total. Only members that actually
+ * accrued cost appear — a zero row says nothing the absence of a row does not.
+ */
+function formatMemberCostBreakdown(
+  memberCosts: Record<string, number> | undefined,
+  memberDisplayNames: Record<string, string> | undefined,
+): string | undefined {
+  if (!memberCosts) return undefined;
+  const rows = Object.entries(memberCosts)
+    .filter(([, cost]) => typeof cost === "number" && cost > 0)
+    .sort(([, a], [, b]) => b - a)
+    .map(([agentId, cost]) => `${memberDisplayNames?.[agentId] ?? agentId}: ${formatUsd(cost)}`);
+  return rows.length ? rows.join("\n") : undefined;
+}
+
 /** Memoized wrapper for API-loaded task boards to avoid re-creating Set/Map on every render */
-function MemoizedApiTaskBoard({ taskList, t }: { taskList: SharedTaskList; t: (key: string, fallback: string) => string }) {
+function MemoizedApiTaskBoard({
+  taskList,
+  memberDisplayNames,
+  t,
+}: {
+  taskList: SharedTaskList;
+  /** agentId → display name, so a filed-by attribution is a name and not a hex id. */
+  memberDisplayNames?: Record<string, string>;
+  t: (key: string, fallback: string) => string;
+}) {
   const taskPlan = useMemo(
     () => taskList.tasks.map(task => ({
       id: task.id,
       subject: task.subject,
       assignedTo: task.assignedDisplayName || task.assignedAgentId || t("taskBoard.unassigned", "Unassigned"),
       priority: task.priority,
+      // Only the persisted task list carries this; the live `task_plan_created`
+      // event predates agent-filed tasks and describes the PLAN phase's output,
+      // which by definition has no filer.
+      filedBy: memberDisplayNames?.[task.createdByAgentId ?? ""] ?? task.createdByAgentId ?? null,
+      // Only present for a BID-mode task that received at least one bid — a
+      // BID-mode task nobody bid on falls back to ROLE assignment and is
+      // indistinguishable here from one configured as ROLE from the start.
+      awardedBid: taskList.awardedBids?.[task.id] ?? null,
     })),
-    [taskList, t],
+    [taskList, t, memberDisplayNames],
   );
   const tasksInProgress = useMemo(
     () => new Set(taskList.tasks.filter(task => task.status === "IN_PROGRESS").map(task => task.id)),
