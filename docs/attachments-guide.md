@@ -286,6 +286,14 @@ This can be useful for logging, debugging, or constructing custom prompts that r
 
 ---
 
+## Group Conversations
+
+Group discussions accept the same three input shapes on `POST /groups/{groupId}/conversations`. Inline `base64Data` is stored in the blob store owned by the group conversation; hosted `url` references and pre-uploaded `storageRef`s pass through.
+
+Each member's private conversation is granted access on its **first** turn and receives the files as `attachment_*` context; from there everything on this page applies unchanged. Later turns rely on the member's own history plus the auto-enabled `readAttachment` tool, so a member does not lose the file after phase one.
+
+Two group-specific bounds: the per-turn cap (`eddi.attachments.max-per-turn`) applies per **member turn**, and anything dropped is reported in that member's `attachments:errors`, not in the group transcript. See [group-conversations.md → Attachments](group-conversations.md#attachments).
+
 ## Architecture Notes
 
 - **No inline storage**: Attachment payloads are never stored inline in conversation memory documents. Only metadata references are persisted.

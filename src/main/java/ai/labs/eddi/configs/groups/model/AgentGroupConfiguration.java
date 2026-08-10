@@ -894,7 +894,14 @@ public class AgentGroupConfiguration {
         NONE,
         /** Agent sees entire transcript so far. */
         FULL,
-        /** Agent sees only the immediately preceding phase. */
+        /**
+         * Agent sees the immediately preceding phase and the current one.
+         * <p>
+         * The current phase is included deliberately, and the doc used to omit it: in a
+         * sequential phase the second speaker's whole purpose is to react to the first,
+         * and excluding the running phase would leave every speaker after the first
+         * talking past their peers.
+         */
         LAST_PHASE,
         /** Agent sees content from prior phases but not who said it. */
         ANONYMOUS,
