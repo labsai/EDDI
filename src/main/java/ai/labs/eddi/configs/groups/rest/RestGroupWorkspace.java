@@ -7,10 +7,12 @@ package ai.labs.eddi.configs.groups.rest;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestGroupWorkspace;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.Cadence;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
@@ -188,6 +190,11 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
                         .entity(Map.of("error", "inputTemplate exceeds " + MAX_INPUT_TEMPLATE_LENGTH + " characters"))
                         .build();
             }
+            String indefinitePause = indefinitePauseWarning(groupId);
+            if (indefinitePause != null) {
+                LOG.warnf("Cadence added to group %s which pauses for approval under WAIT_INDEFINITELY: %s",
+                        sanitize(groupId), indefinitePause);
+            }
             String cadenceId = UUID.randomUUID().toString();
             String principal = identity != null && identity.getPrincipal() != null
                     && identity.getPrincipal().getName() != null && !identity.getPrincipal().getName().isBlank()
@@ -281,6 +288,51 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
             IResourceStore.ResourceStoreException {
         if (groupStore.getCurrentResourceId(groupId) == null) {
             throw new IResourceStore.ResourceNotFoundException("Group not found.");
+        }
+    }
+
+    /**
+     * Warns when a group combines automated cadences with an approval gate that
+     * never times out.
+     * <p>
+     * A cadence discussion that pauses for an approval nobody gives is not a
+     * terminal state, so writeback never releases the workspace claim. The claim
+     * TTL in {@code TeamCadenceService} reclaims it eventually, but "eventually,
+     * after a day, by abandoning the run" is a backstop — the operator almost
+     * certainly wanted either a finite {@code hitlConfig.timeoutPolicy} or no
+     * approval gate on an unattended recurring run. Warn rather than reject: the
+     * combination is legitimate for a team whose approver genuinely is always
+     * available, and refusing it would break existing configs.
+     *
+     * @return a human-readable reason, or {@code null} when the combination is not
+     *         present (or the config cannot be read — never fail an otherwise valid
+     *         cadence over a diagnostic)
+     */
+    private String indefinitePauseWarning(String groupId) {
+        try {
+            var resourceId = groupStore.getCurrentResourceId(groupId);
+            if (resourceId == null) {
+                return null;
+            }
+            var config = groupStore.read(groupId, resourceId.getVersion());
+            if (config == null || config.getPhases() == null) {
+                return null;
+            }
+            boolean gatesForApproval = config.getPhases().stream().anyMatch(DiscussionPhase::requiresApproval);
+            if (!gatesForApproval) {
+                return null;
+            }
+            var hitl = config.getHitlConfig();
+            boolean waitsForever = hitl == null || hitl.getTimeoutPolicy() == null
+                    || hitl.getTimeoutPolicy() == HitlTimeoutPolicy.WAIT_INDEFINITELY;
+            if (!waitsForever) {
+                return null;
+            }
+            return "the group has requiresApproval phase(s) and hitlConfig.timeoutPolicy=WAIT_INDEFINITELY, so an "
+                    + "unapproved run holds this team's cadence claim until the claim TTL reclaims it; set a finite "
+                    + "timeoutPolicy to resolve such pauses properly";
+        } catch (Exception e) {
+            return null;
         }
     }
 }
