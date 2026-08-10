@@ -442,13 +442,15 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 }
                 lastInteraction = descriptorLastModified;
             }
-            // ONE calendar date drives both the decision and the message. The sweep
-            // expires by LocalDate, so reporting elapsed 24-hour periods could end a
-            // conversation on its 30th calendar day while the log said 29 — the
-            // explanation contradicting the decision it explains.
+            // ONE calendar date drives both the decision and the message, and ONE
+            // reference "today" drives both this check and the age it reports. The
+            // sweep expires by LocalDate, so reporting elapsed 24-hour periods could
+            // end a conversation on its 30th calendar day while the log said 29 — and
+            // evaluating LocalDate.now() twice could disagree across midnight.
             var lastInteractionDate = lastInteraction.atZone(ZoneId.systemDefault()).toLocalDate();
+            var today = LocalDate.now();
 
-            var isOlderThanMaximumAmountOfDays = isOlderThanDays(lastInteractionDate, maximumLifeTimeOfIdleConversationsInDays);
+            var isOlderThanMaximumAmountOfDays = isOlderThanDays(lastInteractionDate, maximumLifeTimeOfIdleConversationsInDays, today);
 
             if (isOlderThanMaximumAmountOfDays) {
                 String conversationId = conversationMemory.getId();
@@ -459,6 +461,26 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 // would destroy a live turn or a pending approval. This was a latent
                 // check-then-act race while the arithmetic bug kept the sweep mostly
                 // inert; correcting the arithmetic is exactly what makes it fire.
+                // Re-read immediately before the write. The snapshots were loaded at
+                // the top of the sweep, so without this the window in which a user can
+                // send a turn spans the entire scan.
+                //
+                // The state CAS alone is not enough: a turn that starts AND completes
+                // inside the window returns the state to the value we observed, so the
+                // CAS succeeds against a conversation that is demonstrably active. The
+                // age is the ABA-resistant part — a completed turn moves the newest
+                // step timestamp, so re-checking it here catches exactly that case.
+                //
+                // What remains is a turn completing entirely between this re-read and
+                // the CAS below. Closing that needs a revision-conditional update in
+                // IConversationMemoryStore (and in both backends) rather than a
+                // state-only CAS; that is a store-contract change, deliberately not
+                // bundled here.
+                if (!stillIdle(conversationId, maximumLifeTimeOfIdleConversationsInDays, today)) {
+                    LOGGER.info(format("Skipped ending conversation (id: %s): it became active while the sweep was running",
+                            conversationId));
+                    continue;
+                }
                 ConversationState observedState = conversationMemory.getConversationState();
                 if (!conversationMemoryStore.compareAndSetState(conversationId, observedState, ConversationState.ENDED)) {
                     LOGGER.info(format("Skipped ending conversation (id: %s): its state changed from %s since the sweep read it",
@@ -469,7 +491,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                         "Ended conversation (id: %s) with Agent (name: %s, id: %s, version: %d) "
                                 + "because it is %d days older than the maximum idle time of %d days",
                         conversationId, descriptorNameOf(conversationMemory), agentId, agentVersion,
-                        DAYS.between(lastInteractionDate, LocalDate.now()), maximumLifeTimeOfIdleConversationsInDays);
+                        DAYS.between(lastInteractionDate, today), maximumLifeTimeOfIdleConversationsInDays);
 
                 LOGGER.info(message);
             }
@@ -480,6 +502,33 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                     "Spared %d paused (AWAITING_HUMAN) conversation(s) of Agent (id: %s, version: %d) from the idle sweep — "
                             + "their pending approvals are preserved",
                     sparedPausedConversations, agentId, agentVersion));
+        }
+    }
+
+    /**
+     * Re-reads the conversation and re-checks its age against the same limit and
+     * reference date the sweep used.
+     * <p>
+     * A store failure answers {@code false}: unable to confirm it is still idle is
+     * not permission to end it.
+     */
+    private boolean stillIdle(String conversationId, int maxIdleDays, LocalDate today) {
+        try {
+            var fresh = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (fresh == null) {
+                return false;
+            }
+            Instant freshLastInteraction = lastInteractionOf(fresh);
+            if (freshLastInteraction == null) {
+                // No conversation-side signal on the re-read; the original decision
+                // already used the descriptor fallback, so nothing new to check.
+                return true;
+            }
+            return isOlderThanDays(freshLastInteraction.atZone(ZoneId.systemDefault()).toLocalDate(), maxIdleDays, today);
+        } catch (Exception e) {
+            LOGGER.warn(format("Could not re-check conversation (id: %s) before ending it (%s) — leaving it alone",
+                    conversationId, e.getMessage()));
+            return false;
         }
     }
 

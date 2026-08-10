@@ -282,6 +282,38 @@ class AgentDeploymentManagementIdleSweepTest {
             verify(conversationMemoryStore, never()).setConversationState(any(), any());
         }
 
+        /**
+         * The ABA case the state CAS alone cannot see: a turn that starts AND completes
+         * inside the window returns the state to the value the snapshot carried, so the
+         * CAS would succeed against a demonstrably active conversation. The age is the
+         * ABA-resistant signal — a completed turn moves the newest step timestamp.
+         */
+        @Test
+        @DisplayName("a conversation that became active during the sweep is not ended")
+        void conversationActiveSinceSnapshotIsNotEnded() throws Exception {
+            var stale = snapshotWithTimestamps(Instant.now().minus(400, ChronoUnit.DAYS));
+            givenOldAgentVersionWithConversation(stale, Instant.now().minus(400, ChronoUnit.DAYS));
+            // The re-read sees a turn that landed after the sweep loaded its snapshots.
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1"))
+                    .thenReturn(snapshotWithTimestamps(Instant.now()));
+
+            management.manageAgentDeployments();
+
+            verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), eq(ConversationState.ENDED));
+        }
+
+        @Test
+        @DisplayName("a re-read failure leaves the conversation alone rather than ending it")
+        void reReadFailurePreservesTheConversation() throws Exception {
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(400, ChronoUnit.DAYS)),
+                    Instant.now().minus(400, ChronoUnit.DAYS));
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenThrow(new RuntimeException("store down"));
+
+            management.manageAgentDeployments();
+
+            verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), eq(ConversationState.ENDED));
+        }
+
         private void givenOldAgentVersionWithConversation(ConversationMemorySnapshot snapshot, Instant agentLastModified) throws Exception {
             var info = new DeploymentInfo();
             info.setEnvironment(Environment.production);
@@ -298,6 +330,8 @@ class AgentDeploymentManagementIdleSweepTest {
             when(conversationMemoryStore.getActiveConversationCount("agent-1", 1)).thenReturn(1L);
             when(conversationMemoryStore.compareAndSetState(any(), any(), any())).thenReturn(true);
             when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent-1", 1)).thenReturn(List.of(snapshot));
+            // The sweep re-reads the conversation immediately before ending it.
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshot);
 
             var descriptor = new DocumentDescriptor();
             descriptor.setName("Test Agent");
