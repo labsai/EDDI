@@ -913,7 +913,9 @@ public class AgentGroupConfiguration {
      * failure policies, and safety caps.
      *
      * @param agentTimeoutSeconds
-     *            per-agent timeout in seconds (default: 60)
+     *            per-agent timeout in seconds. Non-positive, or no {@code protocol}
+     *            block at all, falls back to {@link #DEFAULT_AGENT_TIMEOUT_SECONDS}
+     *            (180)
      * @param onAgentFailure
      *            policy when an agent fails (SKIP, RETRY, ABORT)
      * @param maxRetries
@@ -939,6 +941,23 @@ public class AgentGroupConfiguration {
      */
     public record ProtocolConfig(int agentTimeoutSeconds, MemberFailurePolicy onAgentFailure, int maxRetries,
             MemberUnavailablePolicy onMemberUnavailable, int maxTurns, Double maxCostPerDiscussion, CostPolicy onCostExceeded) {
+
+        /**
+         * Per-agent-turn timeout used when a group configures no {@code protocol}
+         * block, and when one supplies a non-positive {@code agentTimeoutSeconds}. 180s
+         * covers thinking models (e.g. claude-sonnet-5) and synthesis phases
+         * comfortably.
+         * <p>
+         * Lives here rather than only on the engine so every writer of a default
+         * protocol agrees: the MCP {@code create_group} tool used to hard-code 60 while
+         * the engine documented 180 and the templates shipped 180, which meant the
+         * published default was true of exactly one of the three ways a group gets
+         * created.
+         */
+        public static final int DEFAULT_AGENT_TIMEOUT_SECONDS = 180;
+
+        /** Retry attempts per member turn when {@code onAgentFailure=RETRY}. */
+        public static final int DEFAULT_MAX_RETRIES = 2;
 
         /**
          * Canonical constructor — normalizes a {@code null} {@link #onCostExceeded} to

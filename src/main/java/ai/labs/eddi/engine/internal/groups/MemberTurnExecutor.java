@@ -315,6 +315,22 @@ public class MemberTurnExecutor {
                 : new AgentGroupConfiguration.DynamicAgentConfig();
         context.put("dynamicAgentConfig", new Context(Context.ContextType.object, dynamicAgentConfig));
 
+        // The discussion-wide created-agent total, so maxCreatedAgentsPerDiscussion
+        // bounds the DISCUSSION rather than each member conversation independently.
+        //
+        // DynamicAgentToolsProvider.seedCreatedAgentIds has always read this context
+        // key, but nothing wrote it: it could only see the ids in the member's OWN
+        // conversation memory, so a 5-member group with the default cap of 5 could
+        // deploy 25 agents to production per discussion while both the field name and
+        // docs/group-conversations.md promised 5. gc.getCreatedAgentIds() is the real
+        // total — propagateDynamicAgentTracking folds every member's creations into it
+        // at the end of each turn.
+        //
+        // Snapshot, not the live CopyOnWriteArrayList: this rides into another
+        // conversation's memory and gets serialised there.
+        context.put("dynamicCreatedAgentIds",
+                new Context(Context.ContextType.object, List.copyOf(gc.getCreatedAgentIds())));
+
         // Share discussion attachments with this member on its first turn: grant the
         // member conversation access to group-owned blobs and inject attachment_*.
         // Later phases rely on extraction-in-history and the readAttachment tool.
