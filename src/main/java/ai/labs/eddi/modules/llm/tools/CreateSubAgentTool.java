@@ -72,6 +72,24 @@ public class CreateSubAgentTool {
         this.retainedAgentIds = retainedAgentIds != null ? retainedAgentIds : ConcurrentHashMap.newKeySet();
     }
 
+    /**
+     * The models permitted for {@code provider}, or {@code null} when the policy
+     * has no entry for it. Null elements are filtered — a hand-written config can
+     * carry them, and they must neither crash the check nor widen the list.
+     */
+    private List<String> allowedModelsFor(String provider) {
+        if (config.getAllowedModels() == null || provider == null) {
+            return null;
+        }
+        return config.getAllowedModels().entrySet().stream()
+                .filter(e -> e.getKey() != null && e.getKey().equalsIgnoreCase(provider))
+                .map(Map.Entry::getValue)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .map(models -> models.stream().filter(Objects::nonNull).toList())
+                .orElse(null);
+    }
+
     @Tool("Create a new sub-agent dynamically. The agent is set up, deployed, and optionally sent an initial message. "
             + "Use this when the current discussion requires a specialist that doesn't exist yet. "
             + "The created agent's name will be auto-prefixed with the parent agent's ID.")
@@ -103,48 +121,96 @@ public class CreateSubAgentTool {
                 return "⚠️ System prompt is required.";
             }
 
+            // --- Inherit the parent's LLM identity where the caller omitted it ---
+            // The @P docs above promised this and nothing implemented it: apiKey was
+            // passed as null with a comment claiming vault inheritance, so
+            // AgentSetupService's required-API-key check rejected every provider that
+            // needs one — including the default (anthropic) that an omitted provider
+            // resolves to. Sub-agent creation only ever worked for ollama/jlama/
+            // bedrock/oracle-genai.
+            //
+            // Only a vault REFERENCE is inherited, never a plaintext key — see
+            // AgentSetupService#resolveParentLlmProfile.
+            var parentProfile = agentSetupService.resolveParentLlmProfile(parentAgentId);
+            boolean inherit = config.isInheritParentModel() && parentProfile != null;
+            String requestedProvider = (provider == null || provider.isBlank()) && inherit
+                    ? parentProfile.provider()
+                    : provider;
+            final String resolvedModel = (model == null || model.isBlank()) && inherit
+                    ? parentProfile.model()
+                    : model;
+
+            // The provider AgentSetupService will ACTUALLY use, defaults applied.
+            // Guarding the merely-requested value still left the bypass open: with
+            // inheritParentModel=false and no provider argument, nothing was inherited,
+            // the value stayed null, the allow-list check below skipped it, and
+            // resolveParams then substituted the default. Resolving the effective
+            // value here is what makes the guardrail unskippable.
+            final String resolvedProvider = requestedProvider == null || requestedProvider.isBlank()
+                    ? AgentSetupService.DEFAULT_PROVIDER
+                    : requestedProvider;
+
+            // A vault reference names ONE provider's secret. Handing the parent's
+            // anthropic reference to an openai sub-agent both breaks it at model load
+            // and writes a reference to the parent's secret into an unrelated config.
+            String inheritedApiKey = parentProfile != null
+                    && resolvedProvider.equalsIgnoreCase(parentProfile.provider())
+                            ? parentProfile.apiKeyReference()
+                            : null;
+
             // --- Guardrail: allowed providers ---
-            if (provider != null && !provider.isBlank()
-                    && config.getAllowedProviders() != null
+            // Checked against the EFFECTIVE provider, not the requested one. Guarding
+            // the requested value left the allow-list skippable: with
+            // inheritParentModel=false and no provider argument nothing was inherited,
+            // the value stayed null, this branch was skipped, and AgentSetupService
+            // then substituted its default — so a group restricting allowedProviders
+            // was bypassed by simply omitting the parameter.
+            if (config.getAllowedProviders() != null
                     && !config.getAllowedProviders().isEmpty()) {
                 boolean providerAllowed = config.getAllowedProviders().stream()
                         .filter(Objects::nonNull)
-                        .anyMatch(p -> p.equalsIgnoreCase(provider));
+                        .anyMatch(p -> p.equalsIgnoreCase(resolvedProvider));
                 if (!providerAllowed) {
                     return "⚠️ Provider '%s' is not allowed. Allowed: %s"
-                            .formatted(provider, config.getAllowedProviders());
+                            .formatted(resolvedProvider, config.getAllowedProviders());
                 }
             }
 
             // --- Guardrail: allowed models ---
-            if (model != null && !model.isBlank()
+            // allowedModels maps a provider to the models permitted FOR THAT PROVIDER,
+            // so a model may only be judged against the provider it will be paired
+            // with. The two branches differ in what an absent entry means, and
+            // deliberately so.
+            if (resolvedModel != null && !resolvedModel.isBlank()
                     && config.getAllowedModels() != null
                     && !config.getAllowedModels().isEmpty()) {
-                if (provider != null && !provider.isBlank()) {
-                    // Provider specified — check against that provider's model list
-                    // (case-insensitive key match)
-                    List<String> allowedModels = config.getAllowedModels().entrySet().stream()
-                            .filter(e -> e.getKey() != null && e.getKey().equalsIgnoreCase(provider))
-                            .map(Map.Entry::getValue)
-                            .filter(Objects::nonNull)
-                            .findFirst().orElse(null);
-                    if (allowedModels != null && !allowedModels.isEmpty()
-                            && allowedModels.stream().noneMatch(m -> m.equalsIgnoreCase(model))) {
+                List<String> allowedForProvider = allowedModelsFor(resolvedProvider);
+
+                if (requestedProvider != null && !requestedProvider.isBlank()) {
+                    // A provider was named (or inherited from the parent). An absent or
+                    // empty list means "no restriction for that provider" — a documented
+                    // behaviour, and a defensible one: the operator made a deliberate
+                    // per-provider statement and said nothing about this one.
+                    if (allowedForProvider != null && !allowedForProvider.isEmpty()
+                            && allowedForProvider.stream().noneMatch(m -> m.equalsIgnoreCase(resolvedModel))) {
                         return "⚠️ Model '%s' is not allowed for provider '%s'. Allowed: %s"
-                                .formatted(model, provider, allowedModels);
+                                .formatted(resolvedModel, resolvedProvider, allowedForProvider);
                     }
-                } else {
-                    // No provider specified — model must appear in at least one provider's
-                    // allow-list
-                    boolean modelFoundInAnyProvider = config.getAllowedModels().values().stream()
-                            .filter(Objects::nonNull)
-                            .flatMap(List::stream)
-                            .filter(Objects::nonNull)
-                            .anyMatch(m -> m.equalsIgnoreCase(model));
-                    if (!modelFoundInAnyProvider) {
-                        return "⚠️ Model '%s' is not in any provider's allowed models list."
-                                .formatted(model);
-                    }
+                } else if (allowedForProvider == null || allowedForProvider.isEmpty()) {
+                    // No provider named, so the model is about to be paired with the
+                    // DEFAULT provider — one the caller never chose and the policy never
+                    // mentions. The previous rule accepted any model appearing in ANY
+                    // provider's list, which meant a config restricting openai to
+                    // "gpt-4o-mini" would happily build an ANTHROPIC agent running
+                    // "gpt-4o-mini": a combination that fails at model load and that the
+                    // operator plainly did not authorise. An unnamed provider must land
+                    // on a provider the policy actually covers.
+                    return ("⚠️ Model '%s' cannot be used without naming a provider: the default provider '%s' has no "
+                            + "allowed models configured. Name one of: %s")
+                            .formatted(resolvedModel, resolvedProvider, config.getAllowedModels().keySet());
+                } else if (allowedForProvider.stream().noneMatch(m -> m.equalsIgnoreCase(resolvedModel))) {
+                    return "⚠️ Model '%s' is not allowed for provider '%s'. Allowed: %s"
+                            .formatted(resolvedModel, resolvedProvider, allowedForProvider);
                 }
             }
 
@@ -153,9 +219,9 @@ public class CreateSubAgentTool {
             SetupAgentRequest request = new SetupAgentRequest(
                     prefixedName,
                     systemPrompt,
-                    provider,
-                    model,
-                    null, // apiKey — inherited from vault
+                    resolvedProvider,
+                    resolvedModel,
+                    inheritedApiKey, // the parent's vault reference, or null if it has none
                     null, // baseUrl
                     null, // introMessage (handled separately below)
                     null, // enableBuiltInTools

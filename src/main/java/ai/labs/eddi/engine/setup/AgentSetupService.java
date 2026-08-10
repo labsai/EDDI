@@ -41,6 +41,7 @@ import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
+import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -114,12 +115,7 @@ public class AgentSetupService {
      */
     public SetupResult setupAgent(SetupAgentRequest request) throws AgentSetupException {
         // Validate required params
-        if (request.agentName() == null || request.agentName().isBlank()) {
-            throw new AgentSetupException("Agent name is required");
-        }
-        if (request.systemPrompt() == null || request.systemPrompt().isBlank()) {
-            throw new AgentSetupException("System prompt is required");
-        }
+        validateNameAndPrompt(request.agentName(), request.systemPrompt());
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
         if (!isLocalLLM && (request.apiKey() == null || request.apiKey().isBlank())) {
             throw new AgentSetupException("API key is required for cloud LLM providers (anthropic, openai, gemini)");
@@ -235,7 +231,77 @@ public class AgentSetupService {
             return resultBuilder.build();
 
         } catch (Exception e) {
+            rollbackCreatedResources(createdResources, request.agentName(), e);
             throw new AgentSetupException("Failed to set up agent: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Best-effort compensating delete for a setup that failed part-way.
+     * <p>
+     * Setup creates six to eight documents across as many stores and has no
+     * transaction. The failure path used to wrap-and-rethrow, leaving every
+     * document created before the failing step orphaned — a parser, a ruleset, an
+     * LLM config, MCP calls, an output set and a workflow, with nothing referencing
+     * them and nothing to find them by. This path is LLM-reachable through
+     * {@code create_sub_agent} and retryable, so a failure loop was unbounded
+     * storage growth.
+     * <p>
+     * Reverse creation order, and every individual delete is isolated: a
+     * compensating action must never mask the original failure, which is what the
+     * caller actually needs to see.
+     */
+    private void rollbackCreatedResources(Map<String, Object> createdResources, String agentName, Exception cause) {
+        if (createdResources.isEmpty()) {
+            return;
+        }
+        LOGGER.warnf("Agent setup for '%s' failed (%s) — rolling back %d already-created resource(s)",
+                LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(cause.getMessage()), createdResources.size());
+
+        var locations = new ArrayList<>(createdResources.values());
+        Collections.reverse(locations);
+        for (Object location : locations) {
+            if (!(location instanceof String uri) || uri.isBlank()) {
+                continue;
+            }
+            try {
+                deleteCreatedResource(uri);
+            } catch (Exception e) {
+                LOGGER.warnf("Rollback could not delete '%s': %s — it is orphaned and must be removed manually",
+                        LogSanitizer.sanitize(uri), LogSanitizer.sanitize(e.getMessage()));
+            }
+        }
+    }
+
+    /**
+     * Deletes one resource created during setup, dispatched by its Location URI.
+     */
+    private void deleteCreatedResource(String location) {
+        String id = extractIdFromLocation(location);
+        if (id == null) {
+            return;
+        }
+        // Permanent, never cascading: these documents were created moments ago by
+        // this very call and nothing else references them, so a soft delete would
+        // leave the debris this rollback exists to remove — while a cascade could
+        // reach resources it does not own.
+        Integer version = extractVersionFromLocation(location);
+        if (location.contains("/agentstore/")) {
+            getRestStore(IRestAgentStore.class).deleteAgent(id, version, true, false);
+        } else if (location.contains("/workflowstore/")) {
+            getRestStore(IRestWorkflowStore.class).deleteWorkflow(id, version, true, false);
+        } else if (location.contains("/llmstore/")) {
+            getRestStore(IRestLlmStore.class).deleteLlm(id, version, true);
+        } else if (location.contains("/mcpcallsstore/")) {
+            getRestStore(IRestMcpCallsStore.class).deleteMcpCalls(id, version, true);
+        } else if (location.contains("/outputstore/")) {
+            getRestStore(IRestOutputStore.class).deleteOutputSet(id, version, true);
+        } else if (location.contains("/rulestore/")) {
+            getRestStore(IRestRuleSetStore.class).deleteRuleSet(id, version, true);
+        } else if (location.contains("/parserstore/")) {
+            getRestStore(IRestParserStore.class).deleteParser(id, version, true);
+        } else if (location.contains("/apicallstore/")) {
+            getRestStore(IRestApiCallsStore.class).deleteApiCalls(id, version, true);
         }
     }
 
@@ -251,12 +317,7 @@ public class AgentSetupService {
      */
     public SetupResult createApiAgent(CreateApiAgentRequest request) throws AgentSetupException {
         // Validate required params
-        if (request.agentName() == null || request.agentName().isBlank()) {
-            throw new AgentSetupException("Agent name is required");
-        }
-        if (request.systemPrompt() == null || request.systemPrompt().isBlank()) {
-            throw new AgentSetupException("System prompt is required");
-        }
+        validateNameAndPrompt(request.agentName(), request.systemPrompt());
         if (request.openApiSpec() == null || request.openApiSpec().isBlank()) {
             throw new AgentSetupException("OpenAPI spec is required");
         }
@@ -389,6 +450,7 @@ public class AgentSetupService {
         } catch (AgentSetupException e) {
             throw e;
         } catch (Exception e) {
+            rollbackCreatedResources(createdResources, request.agentName(), e);
             throw new AgentSetupException("Failed to create API agent: " + e.getMessage(), e);
         }
     }
@@ -593,6 +655,175 @@ public class AgentSetupService {
     }
 
     /**
+     * The provider an omitted {@code provider} resolves to. Public because a caller
+     * that must validate against its own allow-list has to know the value this
+     * service will actually use — guarding the raw argument instead let a caller
+     * skip the allow-list entirely by omitting the parameter.
+     */
+    public static final String DEFAULT_PROVIDER = "anthropic";
+
+    /** The model an omitted {@code model} resolves to. */
+    public static final String DEFAULT_MODEL = "claude-sonnet-4-6";
+
+    /** Upper bound on a setup-supplied agent name. */
+    public static final int MAX_AGENT_NAME_LENGTH = 200;
+
+    /**
+     * Upper bound on a setup-supplied system prompt. Generous — a real system
+     * prompt can be long — but bounded: this input reaches the service from
+     * {@code create_sub_agent}, i.e. it is LLM-authored and retryable.
+     */
+    public static final int MAX_SYSTEM_PROMPT_LENGTH = 100_000;
+
+    /**
+     * Validates the two free-text fields every setup flow requires.
+     * <p>
+     * Both were checked only for blankness. They are LLM-supplied on the
+     * {@code create_sub_agent} path, where a failure is retryable, and they are
+     * persisted — the name into descriptors and into the vault key namespace, the
+     * prompt verbatim into the LLM config. An unbounded value is a storage-growth
+     * and log-noise vector with no legitimate use.
+     */
+    private void validateNameAndPrompt(String agentName, String systemPrompt) throws AgentSetupException {
+        if (agentName == null || agentName.isBlank()) {
+            throw new AgentSetupException("Agent name is required");
+        }
+        if (agentName.length() > MAX_AGENT_NAME_LENGTH) {
+            throw new AgentSetupException(
+                    "Agent name is too long (" + agentName.length() + " characters, maximum " + MAX_AGENT_NAME_LENGTH + ")");
+        }
+        if (systemPrompt == null || systemPrompt.isBlank()) {
+            throw new AgentSetupException("System prompt is required");
+        }
+        if (systemPrompt.length() > MAX_SYSTEM_PROMPT_LENGTH) {
+            throw new AgentSetupException(
+                    "System prompt is too long (" + systemPrompt.length() + " characters, maximum " + MAX_SYSTEM_PROMPT_LENGTH + ")");
+        }
+    }
+
+    /**
+     * The LLM credential a sub-agent should inherit from its parent, or
+     * {@code null} when there is nothing safe to inherit.
+     * <p>
+     * {@code create_sub_agent} passed {@code null} for {@code apiKey} with the
+     * comment "inherited from vault", and nothing implemented that inheritance — so
+     * every sub-agent creation for a provider that needs a key (which includes the
+     * default, {@code anthropic}) failed outright on the required-API-key check.
+     * The tool's own parameter documentation promised the same behaviour.
+     * <p>
+     * <b>Only a vault REFERENCE is inherited, never a plaintext key.</b> When the
+     * vault is unavailable {@code vaultApiKey} falls back to storing the key in
+     * clear, and copying such a value into a second config would multiply the blast
+     * radius of that fallback instead of referencing one secret from two places. A
+     * parent whose key is plaintext therefore inherits nothing, and the caller gets
+     * the ordinary "API key is required" error.
+     *
+     * @return the parent's {@code ${vault:...}} reference, or {@code null}
+     */
+    public ParentLlmProfile resolveParentLlmProfile(String parentAgentId) {
+        if (parentAgentId == null || parentAgentId.isBlank()) {
+            return null;
+        }
+        try {
+            // The version must be resolved first. RestVersionInfo.read does
+            // checkNotNull(version), so readAgent(id, null) ALWAYS throws — which this
+            // method's catch swallowed, making inheritance silently return null and
+            // leaving create_sub_agent failing with "API key is required", i.e. the
+            // exact defect it was written to fix.
+            IRestAgentStore agentRestStore = getRestStore(IRestAgentStore.class);
+            Integer currentVersion = agentRestStore.getCurrentVersion(parentAgentId);
+            if (currentVersion == null) {
+                return null;
+            }
+            AgentConfiguration parent = agentRestStore.readAgent(parentAgentId, currentVersion);
+            if (parent == null || parent.getWorkflows() == null) {
+                return null;
+            }
+            for (URI workflowUri : parent.getWorkflows()) {
+                LlmConfiguration.Task task = firstLlmTaskOf(workflowUri);
+                if (task == null) {
+                    continue;
+                }
+                Map<String, String> parameters = task.getParameters() != null ? task.getParameters() : Map.of();
+                String credential = firstNonBlank(parameters.get("apiKey"), parameters.get("authToken"));
+                // A reference, not a secret — see the method Javadoc.
+                if (credential != null && !SecretReference.isVaultReference(credential)) {
+                    credential = null;
+                }
+                String model = firstNonBlank(parameters.get("modelName"), parameters.get("model"), parameters.get("modelId"),
+                        parameters.get("deploymentName"));
+                if (task.getType() == null && model == null && credential == null) {
+                    // Nothing inheritable here. Returning an all-null profile would make
+                    // the caller's `parentProfile != null` mean "inheritance available"
+                    // and resolve provider and model to null, while also skipping every
+                    // remaining workflow.
+                    continue;
+                }
+                return new ParentLlmProfile(task.getType(), model, credential);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Could not resolve the LLM profile of parent agent '%s' for inheritance: %s",
+                    LogSanitizer.sanitize(parentAgentId), e.getMessage());
+        }
+        return null;
+    }
+
+    /** The first LLM task reachable from a workflow, or {@code null}. */
+    private LlmConfiguration.Task firstLlmTaskOf(URI workflowUri) {
+        try {
+            String workflowId = extractIdFromLocation(workflowUri.toString());
+            if (workflowId == null) {
+                return null;
+            }
+            WorkflowConfiguration workflow = getRestStore(IRestWorkflowStore.class).readWorkflow(workflowId,
+                    extractVersionFromLocation(workflowUri.toString()));
+            if (workflow == null || workflow.getWorkflowSteps() == null) {
+                return null;
+            }
+            for (WorkflowConfiguration.WorkflowStep step : workflow.getWorkflowSteps()) {
+                if (step.getType() == null || !step.getType().toString().contains("ai.labs.llm")) {
+                    continue;
+                }
+                Object uri = step.getConfig() != null ? step.getConfig().get("uri") : null;
+                if (uri == null) {
+                    continue;
+                }
+                String llmId = extractIdFromLocation(uri.toString());
+                if (llmId == null) {
+                    continue;
+                }
+                LlmConfiguration llm = getRestStore(IRestLlmStore.class).readLlm(llmId, extractVersionFromLocation(uri.toString()));
+                if (llm != null && llm.tasks() != null && !llm.tasks().isEmpty()) {
+                    return llm.tasks().getFirst();
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read the LLM task of workflow '%s': %s", LogSanitizer.sanitize(String.valueOf(workflowUri)),
+                    e.getMessage());
+        }
+        return null;
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A parent agent's LLM identity, as far as it can be inherited.
+     *
+     * @param apiKeyReference
+     *            always a {@code ${vault:...}} reference or {@code null} — never a
+     *            plaintext secret
+     */
+    public record ParentLlmProfile(String provider, String model, String apiKeyReference) {
+    }
+
+    /**
      * Auto-vault an API key if the vault is available. When the vault is active,
      * the plaintext key is stored encrypted and a vault reference string
      * ({@code ${vault:keyName}}) is returned. Downstream consumers
@@ -636,6 +867,17 @@ public class AgentSetupService {
             String sanitizedName = agentName.toLowerCase().replaceAll("[^a-z0-9]", "-");
             String keyName = "setup." + sanitizedName + "." + System.currentTimeMillis() + ".apiKey";
             var ref = new SecretReference(SecretReference.DEFAULT_TENANT, keyName);
+            // "*" is deliberate and is NOT an access-control decision made here:
+            // VaultSecretProvider documents that allowedAgents is "stored for
+            // visibility/documentation but NOT enforced at resolution time". The
+            // vault's access model is "the admin who writes the agent config decides
+            // which references to include". Narrowing this list would imply an
+            // enforcement that does not exist.
+            //
+            // Worth flagging rather than silently narrowing: that access model assumes
+            // a human admin authors the config, and create_sub_agent lets an LLM author
+            // one. Making allowedAgents enforceable is a vault-level feature, not a
+            // one-line change at this call site.
             secretProvider.store(ref, apiKey, "Auto-vaulted by AgentSetupService for agent: " + agentName,
                     List.of("*"));
             LOGGER.infof("API key vaulted for agent '%s' (key: %s)", agentName, keyName);
@@ -849,8 +1091,8 @@ public class AgentSetupService {
      *             if {@code environment} is neither blank nor a known environment
      */
     ResolvedParams resolveParams(String provider, String model, Boolean deploy, String environment) {
-        return new ResolvedParams(provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : "anthropic",
-                model != null && !model.isBlank() ? model.trim() : "claude-sonnet-4-6", deploy == null || deploy,
+        return new ResolvedParams(provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : DEFAULT_PROVIDER,
+                model != null && !model.isBlank() ? model.trim() : DEFAULT_MODEL, deploy == null || deploy,
                 Deployment.Environment.parseStrict(environment));
     }
 
