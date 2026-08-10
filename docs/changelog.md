@@ -16,6 +16,22 @@ Wave F of the Agent / Group Agent review. `AgentFactory.getAgent` has always had
 - `RestImportService`'s `allOf(...).join()` is now tolerant. It could previously only block forever; with self-expiring registrations it can complete exceptionally, and one initial agent that never reports must not hang startup — it logs and continues with the agents that did deploy.
 
 Suites: 347 tests green across `DeploymentListener*`, `RestAgentAdministration*`, `AgentFactory*`, `RestImportService*`; 12 new.
+## 🧪 chore(groups): retarget the TASK_FORCE characterization tests at the engine that owns them (2026-08-09)
+
+**Repo:** EDDI (`chore/retarget-group-characterization-tests`)
+
+Wave D of the Agent / Group Agent review, first slice. `GroupConversationService` carries ~27 private methods with **zero production callers** — pure delegators kept alive because ~34 `getDeclaredMethod` call sites across seven test classes resolve against them. That inverts the dependency: the tests pin a shim, not the path the engines actually take, so `PhaseExecutionEngine` or `TaskForceEngine` could change how they call the real method and every assertion would still pass.
+
+This slice retargets the TASK_FORCE surface — `GroupConversationServiceTaskForceTest` (all 20 tests) plus the two `recordTaskFailure` tests in `GroupConversationServiceHitlCoverage3Test` — at `TaskForceEngine` and `MemberTurnExecutor` directly, and deletes the `recordTaskFailure` delegator that pinning kept alive.
+
+Two things the retarget surfaced, both illustrating the point:
+
+- **Three assertions described the reflection wrapper, not the code.** They asserted `InvocationTargetException` and unwrapped one `getCause()` layer to reach the real exception. Called directly, the quota tests now assert `GroupDiscussionException` with a `QuotaExceededException` cause — the actual contract, which the reflective form had obscured.
+- **A grep for `recordTaskFailure(` finds one test file; there were two.** The second builds the name as a **string literal** for a file-local `method(name, params)` helper. `GroupConversationService`'s own comments warn about exactly this ("a plain grep for one calling convention isn't enough when sweeping for these") — and the sweep hit it. Deleting the delegator on the first grep's evidence broke the build; the string-literal site is now retargeted too.
+
+**Scope.** Deliberately one surface, not all seven test classes. The remaining reflection (the HITL cluster in `HitlCoverage`/`HitlCoverage2`/`HitlCoverage3`, the context-builder methods in `UncoveredBranchTest`, `resolveParticipants`/`extractResponse`/`failConversation` in `GroupConversationServiceTest`) is entangled with file-local helper indirection that a mechanical pass cannot safely rewrite — an attempt to regex through it produced a broken intermediate and was reverted. Each remaining class is its own follow-up, and the pattern established here (construct the real collaborator in `setUp`, keep the test bodies untouched) is what they should follow.
+
+Suites: 562 tests green across `GroupConversationService*` and `TaskForceEngine*`.
 ## ⏱️ fix(groups): a paused cadence discussion no longer wedges a standing team forever (2026-08-09)
 
 **Repo:** EDDI (`fix/cadence-claim-expiry`)

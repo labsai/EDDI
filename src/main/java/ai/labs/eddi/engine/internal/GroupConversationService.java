@@ -2053,12 +2053,6 @@ public class GroupConversationService implements IGroupConversationService {
         return taskForceEngine.resolveTaskAssignment(assignToRole, members, moderatorAgentId, taskIndex);
     }
 
-    private void recordTaskFailure(GroupConversation gc, TaskItem task, GroupMember member,
-                                   String errorMessage, int phaseIdx, DiscussionPhase phase,
-                                   List<GroupDiscussionException> errors, GroupDiscussionException ex) {
-        taskForceEngine.recordTaskFailure(gc, task, member, errorMessage, phaseIdx, phase, errors, ex);
-    }
-
     private GroupMember findMember(List<GroupMember> members, String agentId) {
         return taskForceEngine.findMember(members, agentId);
     }
