@@ -133,22 +133,44 @@ public class CreateSubAgentTool {
             // AgentSetupService#resolveParentLlmProfile.
             var parentProfile = agentSetupService.resolveParentLlmProfile(parentAgentId);
             boolean inherit = config.isInheritParentModel() && parentProfile != null;
+
+            // TRIMMED before anything compares it. AgentSetupService.resolveParams
+            // trims, so " openai " is accepted downstream as openai while an untrimmed
+            // guardrail here would reject it against allowedProviders=["openai"] and
+            // fail to match the parent for credential inheritance — the policy and the
+            // deployment disagreeing about the same string.
             String requestedProvider = (provider == null || provider.isBlank()) && inherit
                     ? parentProfile.provider()
                     : provider;
-            final String resolvedModel = (model == null || model.isBlank()) && inherit
-                    ? parentProfile.model()
-                    : model;
+            requestedProvider = requestedProvider != null ? requestedProvider.trim() : null;
 
             // The provider AgentSetupService will ACTUALLY use, defaults applied.
-            // Guarding the merely-requested value still left the bypass open: with
-            // inheritParentModel=false and no provider argument, nothing was inherited,
+            // Guarding the merely-requested value left the bypass open: with
+            // inheritParentModel=false and no provider argument nothing was inherited,
             // the value stayed null, the allow-list check below skipped it, and
-            // resolveParams then substituted the default. Resolving the effective
-            // value here is what makes the guardrail unskippable.
+            // resolveParams then substituted the default.
             final String resolvedProvider = requestedProvider == null || requestedProvider.isBlank()
                     ? AgentSetupService.DEFAULT_PROVIDER
                     : requestedProvider;
+
+            // Model inheritance is gated on the provider STILL being the parent's.
+            // The two are independent inputs, so an anthropic parent creating a
+            // sub-agent with provider="ollama" and no model would otherwise pair Ollama
+            // with the parent's Claude model — and because Ollama needs no key, nothing
+            // downstream rejects it and the failure surfaces only at model load.
+            String requestedModel = model;
+            if ((requestedModel == null || requestedModel.isBlank()) && inherit
+                    && resolvedProvider.equalsIgnoreCase(parentProfile.provider())) {
+                requestedModel = parentProfile.model();
+            }
+            requestedModel = requestedModel != null ? requestedModel.trim() : null;
+
+            // Same reasoning as the provider: the model allow-list was skippable by
+            // omission, because a null model skipped the guard and AgentSetupService
+            // then substituted DEFAULT_MODEL — deploying a model the policy never saw.
+            final String resolvedModel = requestedModel == null || requestedModel.isBlank()
+                    ? AgentSetupService.DEFAULT_MODEL
+                    : requestedModel;
 
             // A vault reference names ONE provider's secret. Handing the parent's
             // anthropic reference to an openai sub-agent both breaks it at model load
@@ -181,9 +203,10 @@ public class CreateSubAgentTool {
             // so a model may only be judged against the provider it will be paired
             // with. The two branches differ in what an absent entry means, and
             // deliberately so.
-            if (resolvedModel != null && !resolvedModel.isBlank()
-                    && config.getAllowedModels() != null
-                    && !config.getAllowedModels().isEmpty()) {
+            // resolvedModel always carries a value now (the effective default when the
+            // caller named none), so there is no "no model requested" escape from this
+            // guard any more.
+            if (config.getAllowedModels() != null && !config.getAllowedModels().isEmpty()) {
                 List<String> allowedForProvider = allowedModelsFor(resolvedProvider);
 
                 if (requestedProvider != null && !requestedProvider.isBlank()) {

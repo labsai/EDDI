@@ -162,7 +162,7 @@ public class AgentSetupService {
             // --- Step 3: Create LLM Configuration ---
             // Auto-vault the API key: store encrypted in vault, use vault reference in
             // config
-            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName());
+            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), createdResources);
             var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, request.systemPrompt(), toolsEnabled,
                     request.builtInToolsWhitelist(), request.baseUrl(), promptResponseJson, quickReplies, sentiment, null);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
@@ -258,10 +258,20 @@ public class AgentSetupService {
         LOGGER.warnf("Agent setup for '%s' failed (%s) — rolling back %d already-created resource(s)",
                 LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(cause.getMessage()), createdResources.size());
 
-        var locations = new ArrayList<>(createdResources.values());
+        // Flattened, because not every recorded value is a scalar: createApiAgent
+        // records its generated api-call locations as a List, and a String-only loop
+        // silently left every one of those documents behind.
+        var locations = new ArrayList<String>();
+        for (Object value : createdResources.values()) {
+            if (value instanceof String uri) {
+                locations.add(uri);
+            } else if (value instanceof Collection<?> many) {
+                many.stream().filter(String.class::isInstance).map(String.class::cast).forEach(locations::add);
+            }
+        }
         Collections.reverse(locations);
-        for (Object location : locations) {
-            if (!(location instanceof String uri) || uri.isBlank()) {
+        for (String uri : locations) {
+            if (uri.isBlank()) {
                 continue;
             }
             try {
@@ -271,7 +281,27 @@ public class AgentSetupService {
                         LogSanitizer.sanitize(uri), LogSanitizer.sanitize(e.getMessage()));
             }
         }
+
+        // The auto-vaulted secret is created BEFORE the LLM document, so a later
+        // failure would leave a unique setup.<name>.<timestamp>.apiKey behind and a
+        // retry loop would grow the vault without bound.
+        Object vaultedKey = createdResources.get(VAULTED_SECRET_KEY);
+        if (vaultedKey instanceof String keyName) {
+            try {
+                secretProvider.delete(new SecretReference(SecretReference.DEFAULT_TENANT, keyName));
+            } catch (Exception e) {
+                LOGGER.warnf("Rollback could not remove the auto-vaulted secret '%s': %s",
+                        LogSanitizer.sanitize(keyName), LogSanitizer.sanitize(e.getMessage()));
+            }
+        }
     }
+
+    /**
+     * {@code createdResources} key under which a secret vaulted by THIS invocation
+     * is recorded, so rollback can remove it. Not a resource location, so
+     * {@link #deleteCreatedResource} skips it — it is handled explicitly.
+     */
+    static final String VAULTED_SECRET_KEY = "vaultedSecretKeyName";
 
     /**
      * Deletes one resource created during setup, dispatched by its Location URI.
@@ -395,7 +425,7 @@ public class AgentSetupService {
             boolean sentiment = request.enableSentimentAnalysis() != null && request.enableSentimentAnalysis();
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
             // Auto-vault the API key before storing in LLM config
-            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName());
+            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), createdResources);
             // 7th slot is the LLM's own base URL — not apiBaseUrl, which is the target
             // server of the generated tools. Passing null here left local providers
             // (Ollama, Jlama) with no endpoint to reach.
@@ -747,7 +777,11 @@ public class AgentSetupService {
                 Map<String, String> parameters = task.getParameters() != null ? task.getParameters() : Map.of();
                 String credential = firstNonBlank(parameters.get("apiKey"), parameters.get("authToken"));
                 // A reference, not a secret — see the method Javadoc.
-                if (credential != null && !SecretReference.isVaultReference(credential)) {
+                // Full-pattern match, not isVaultReference: that only asks whether the
+                // value CONTAINS "${vault:", so "plaintext${vault:key}" would be
+                // treated as a safe reference and the plaintext half copied into the
+                // child's config — the exact thing this method promises never to do.
+                if (credential != null && !SecretReference.compiledPattern().matcher(credential).matches()) {
                     credential = null;
                 }
                 String model = firstNonBlank(parameters.get("modelName"), parameters.get("model"), parameters.get("modelId"),
@@ -843,6 +877,15 @@ public class AgentSetupService {
      *         unavailable
      */
     private String vaultApiKey(String apiKey, String agentName) {
+        return vaultApiKey(apiKey, agentName, null);
+    }
+
+    /**
+     * @param createdResources
+     *            when non-null, the key name of a secret vaulted by this call is
+     *            recorded here so a failed setup can remove it again
+     */
+    private String vaultApiKey(String apiKey, String agentName, Map<String, Object> createdResources) {
         if (apiKey == null || apiKey.isBlank()) {
             return apiKey;
         }
@@ -866,6 +909,9 @@ public class AgentSetupService {
             // Timestamp suffix prevents collision when two agents share the same name
             String sanitizedName = agentName.toLowerCase().replaceAll("[^a-z0-9]", "-");
             String keyName = "setup." + sanitizedName + "." + System.currentTimeMillis() + ".apiKey";
+            if (createdResources != null) {
+                createdResources.put(VAULTED_SECRET_KEY, keyName);
+            }
             var ref = new SecretReference(SecretReference.DEFAULT_TENANT, keyName);
             // "*" is deliberate and is NOT an access-control decision made here:
             // VaultSecretProvider documents that allowedAgents is "stored for
