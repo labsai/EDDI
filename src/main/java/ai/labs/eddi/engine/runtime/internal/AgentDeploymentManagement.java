@@ -414,8 +414,6 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 continue;
             }
 
-            var documentDescriptor = documentDescriptorStore.readDescriptor(conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
-
             // Age comes from the CONVERSATION's own newest step timestamp.
             //
             // It used to come from the AGENT document's lastModifiedOn, which is not a
@@ -427,16 +425,22 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             // which is why both are corrected together.
             var lastInteraction = lastInteractionOf(conversationMemory);
             if (lastInteraction == null) {
-                // No step ever carried a timestamp. Fall back to the descriptor, and
-                // skip entirely when even that is absent: "cannot prove it is idle" must
-                // never end a conversation, and dereferencing here would throw an NPE
-                // the enclosing UndeploymentExecutor does not catch — aborting every
-                // remaining undeploy attempt in this pass.
-                var descriptorLastModified = documentDescriptor.getLastModifiedOn();
+                // No step ever carried a timestamp. Fall back to the agent descriptor,
+                // and skip entirely when even that is unavailable: "cannot prove it is
+                // idle" must never end a conversation.
+                //
+                // Read LAZILY, and never fatally. This lookup used to run
+                // unconditionally at the top of the loop, but readDescriptor THROWS for
+                // a deleted agent — and manageAgentDeployments deliberately routes
+                // deleted agents down this very path (getCurrentResourceId throwing is
+                // how it decides the agent is gone). One deleted agent therefore
+                // aborted the whole sweep, including conversations that carry a
+                // perfectly good timestamp of their own and never needed the descriptor.
+                Instant descriptorLastModified = descriptorLastModifiedOf(conversationMemory);
                 if (descriptorLastModified == null) {
                     continue;
                 }
-                lastInteraction = descriptorLastModified.toInstant();
+                lastInteraction = descriptorLastModified;
             }
             // ONE calendar date drives both the decision and the message. The sweep
             // expires by LocalDate, so reporting elapsed 24-hour periods could end a
@@ -448,11 +452,23 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
             if (isOlderThanMaximumAmountOfDays) {
                 String conversationId = conversationMemory.getId();
-                conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
+                // Conditional on the state this snapshot was loaded with, NOT an
+                // unconditional write. The snapshots were read at the top of the sweep,
+                // so between that read and this write a user can send a turn, or the
+                // conversation can pause at an HITL gate — and an unconditional ENDED
+                // would destroy a live turn or a pending approval. This was a latent
+                // check-then-act race while the arithmetic bug kept the sweep mostly
+                // inert; correcting the arithmetic is exactly what makes it fire.
+                ConversationState observedState = conversationMemory.getConversationState();
+                if (!conversationMemoryStore.compareAndSetState(conversationId, observedState, ConversationState.ENDED)) {
+                    LOGGER.info(format("Skipped ending conversation (id: %s): its state changed from %s since the sweep read it",
+                            conversationId, observedState));
+                    continue;
+                }
                 var message = format(
                         "Ended conversation (id: %s) with Agent (name: %s, id: %s, version: %d) "
                                 + "because it is %d days older than the maximum idle time of %d days",
-                        conversationId, documentDescriptor.getName(), agentId, agentVersion,
+                        conversationId, descriptorNameOf(conversationMemory), agentId, agentVersion,
                         DAYS.between(lastInteractionDate, LocalDate.now()), maximumLifeTimeOfIdleConversationsInDays);
 
                 LOGGER.info(message);
@@ -464,6 +480,31 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                     "Spared %d paused (AWAITING_HUMAN) conversation(s) of Agent (id: %s, version: %d) from the idle sweep — "
                             + "their pending approvals are preserved",
                     sparedPausedConversations, agentId, agentVersion));
+        }
+    }
+
+    /**
+     * The agent descriptor's {@code lastModifiedOn}, or {@code null} when it cannot
+     * be read. Never throws: the descriptor is a fallback age signal and a
+     * best-effort display name, and a deleted agent — which this sweep is
+     * specifically reached for — makes {@code readDescriptor} throw.
+     */
+    private Instant descriptorLastModifiedOf(ConversationMemorySnapshot conversationMemory) {
+        try {
+            var descriptor = documentDescriptorStore.readDescriptor(conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
+            return descriptor != null && descriptor.getLastModifiedOn() != null ? descriptor.getLastModifiedOn().toInstant() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** The agent's display name for the log line, or its id when unavailable. */
+    private String descriptorNameOf(ConversationMemorySnapshot conversationMemory) {
+        try {
+            var descriptor = documentDescriptorStore.readDescriptor(conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
+            return descriptor != null && descriptor.getName() != null ? descriptor.getName() : conversationMemory.getAgentId();
+        } catch (Exception e) {
+            return conversationMemory.getAgentId();
         }
     }
 
@@ -512,7 +553,18 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      * has no such components.
      */
     static boolean isOlderThanDays(final LocalDate date, final int days) {
-        return DAYS.between(date, LocalDate.now()) >= days;
+        return isOlderThanDays(date, days, LocalDate.now());
+    }
+
+    /**
+     * Reference-date overload. {@code today} is a parameter so a test can pin both
+     * sides of the comparison: with {@code LocalDate.now()} evaluated independently
+     * in the test and in this method, a case built at 23:59:59.999 and evaluated at
+     * 00:00:00.001 shifts by a day, which is exactly the kind of once-a-day flake
+     * that gets a boundary test deleted rather than fixed.
+     */
+    static boolean isOlderThanDays(final LocalDate date, final int days, final LocalDate today) {
+        return DAYS.between(date, today) >= days;
     }
 
     private interface UndeploymentExecutor {

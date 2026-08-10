@@ -101,14 +101,16 @@ class AgentDeploymentManagementIdleSweepTest {
         @Test
         @DisplayName("35 days old with a 30-day limit is old (the months-component bug)")
         void thirtyFiveDaysIsOlderThanThirty() {
-            assertTrue(AgentDeploymentManagement.isOlderThanDays(LocalDate.now().minusDays(35), 30));
+            LocalDate today = LocalDate.of(2026, 8, 10);
+            assertTrue(AgentDeploymentManagement.isOlderThanDays(today.minusDays(35), 30, today));
         }
 
         @Test
         @DisplayName("boundaries: exactly N days is old, N-1 is not")
         void boundaries() {
-            assertTrue(AgentDeploymentManagement.isOlderThanDays(LocalDate.now().minusDays(30), 30));
-            assertFalse(AgentDeploymentManagement.isOlderThanDays(LocalDate.now().minusDays(29), 30));
+            LocalDate today = LocalDate.of(2026, 8, 10);
+            assertTrue(AgentDeploymentManagement.isOlderThanDays(today.minusDays(30), 30, today));
+            assertFalse(AgentDeploymentManagement.isOlderThanDays(today.minusDays(29), 30, today));
         }
 
         /**
@@ -118,8 +120,9 @@ class AgentDeploymentManagementIdleSweepTest {
         @Test
         @DisplayName("every age past the limit is old, with no gaps")
         void noGapsAcrossMonthBoundaries() {
+            LocalDate today = LocalDate.of(2026, 8, 10);
             for (int daysAgo = 30; daysAgo <= 400; daysAgo++) {
-                assertTrue(AgentDeploymentManagement.isOlderThanDays(LocalDate.now().minusDays(daysAgo), 30),
+                assertTrue(AgentDeploymentManagement.isOlderThanDays(today.minusDays(daysAgo), 30, today),
                         daysAgo + " days ago must count as older than 30 days");
             }
         }
@@ -127,8 +130,9 @@ class AgentDeploymentManagementIdleSweepTest {
         @Test
         @DisplayName("no age below the limit is old")
         void noFalsePositives() {
+            LocalDate today = LocalDate.of(2026, 8, 10);
             for (int daysAgo = 0; daysAgo < 30; daysAgo++) {
-                assertFalse(AgentDeploymentManagement.isOlderThanDays(LocalDate.now().minusDays(daysAgo), 30),
+                assertFalse(AgentDeploymentManagement.isOlderThanDays(today.minusDays(daysAgo), 30, today),
                         daysAgo + " days ago must not count as older than 30 days");
             }
         }
@@ -175,7 +179,7 @@ class AgentDeploymentManagementIdleSweepTest {
 
             management.manageAgentDeployments();
 
-            verify(conversationMemoryStore, never()).setConversationState(any(), eq(ConversationState.ENDED));
+            verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), eq(ConversationState.ENDED));
         }
 
         @Test
@@ -185,7 +189,7 @@ class AgentDeploymentManagementIdleSweepTest {
 
             management.manageAgentDeployments();
 
-            verify(conversationMemoryStore).setConversationState("conv-1", ConversationState.ENDED);
+            verify(conversationMemoryStore).compareAndSetState(eq("conv-1"), any(), eq(ConversationState.ENDED));
         }
 
         @Test
@@ -197,7 +201,7 @@ class AgentDeploymentManagementIdleSweepTest {
 
             management.manageAgentDeployments();
 
-            verify(conversationMemoryStore, never()).setConversationState(any(), eq(ConversationState.ENDED));
+            verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), eq(ConversationState.ENDED));
         }
 
         /**
@@ -212,7 +216,7 @@ class AgentDeploymentManagementIdleSweepTest {
 
             management.manageAgentDeployments();
 
-            verify(conversationMemoryStore).setConversationState("conv-1", ConversationState.ENDED);
+            verify(conversationMemoryStore).compareAndSetState(eq("conv-1"), any(), eq(ConversationState.ENDED));
         }
 
         @Test
@@ -222,7 +226,7 @@ class AgentDeploymentManagementIdleSweepTest {
 
             management.manageAgentDeployments();
 
-            verify(conversationMemoryStore, never()).setConversationState(any(), eq(ConversationState.ENDED));
+            verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), eq(ConversationState.ENDED));
         }
 
         /**
@@ -239,7 +243,43 @@ class AgentDeploymentManagementIdleSweepTest {
 
             management.manageAgentDeployments();
 
-            verify(conversationMemoryStore, never()).setConversationState(any(), eq(ConversationState.ENDED));
+            verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), eq(ConversationState.ENDED));
+        }
+
+        /**
+         * readDescriptor throws for a deleted agent, and manageAgentDeployments
+         * deliberately routes deleted agents down this path. Reading it eagerly meant
+         * one deleted agent aborted the entire sweep — including conversations that
+         * carry a perfectly good timestamp and never needed the descriptor.
+         */
+        @Test
+        @DisplayName("a conversation with its own timestamp is still swept when the agent descriptor is gone")
+        void deletedDescriptorDoesNotAbortTheSweep() throws Exception {
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(400, ChronoUnit.DAYS)), null);
+            when(documentDescriptorStore.readDescriptor(any(), any())).thenThrow(new RuntimeException("descriptor deleted"));
+
+            management.manageAgentDeployments();
+
+            verify(conversationMemoryStore).compareAndSetState(eq("conv-1"), any(), eq(ConversationState.ENDED));
+        }
+
+        /**
+         * The snapshots were read at the top of the sweep. Between that read and the
+         * write, a user can send a turn or the conversation can pause at an HITL gate —
+         * an unconditional ENDED would destroy a live turn or a pending approval.
+         */
+        @Test
+        @DisplayName("a conversation whose state changed since the snapshot is not ended")
+        void stateChangedSinceSnapshotIsNotEnded() throws Exception {
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(400, ChronoUnit.DAYS)),
+                    Instant.now().minus(400, ChronoUnit.DAYS));
+            // The CAS loses: something else moved the conversation on.
+            when(conversationMemoryStore.compareAndSetState(any(), any(), any())).thenReturn(false);
+
+            management.manageAgentDeployments();
+
+            verify(conversationMemoryStore).compareAndSetState(eq("conv-1"), any(), eq(ConversationState.ENDED));
+            verify(conversationMemoryStore, never()).setConversationState(any(), any());
         }
 
         private void givenOldAgentVersionWithConversation(ConversationMemorySnapshot snapshot, Instant agentLastModified) throws Exception {
@@ -256,6 +296,7 @@ class AgentDeploymentManagementIdleSweepTest {
             when(agentStore.getCurrentResourceId("agent-1")).thenReturn(latest);
 
             when(conversationMemoryStore.getActiveConversationCount("agent-1", 1)).thenReturn(1L);
+            when(conversationMemoryStore.compareAndSetState(any(), any(), any())).thenReturn(true);
             when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent-1", 1)).thenReturn(List.of(snapshot));
 
             var descriptor = new DocumentDescriptor();
