@@ -64,7 +64,7 @@ class TeamCadenceServiceTest {
         groupConversationService = mock(GroupConversationService.class);
         templatingEngine = mock(ITemplatingEngine.class);
         service = new TeamCadenceService(workspaceStore, conversationStore, groupConversationService,
-                templatingEngine, new SimpleMeterRegistry());
+                templatingEngine, new SimpleMeterRegistry(), TeamCadenceService.DEFAULT_CLAIM_TTL);
         service.initMetrics();
     }
 

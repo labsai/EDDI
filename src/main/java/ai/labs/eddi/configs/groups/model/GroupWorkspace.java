@@ -75,6 +75,23 @@ public class GroupWorkspace {
      */
     private String runningDiscussionId = NO_RUNNING_DISCUSSION;
     /**
+     * When {@link #runningDiscussionId} was claimed, or {@code null} when idle.
+     * <p>
+     * A claim is held until the discussion reaches a terminal state, and an
+     * {@code AWAITING_APPROVAL} / {@code AWAITING_HUMAN_INPUT} pause is not one.
+     * With the default {@code WAIT_INDEFINITELY} timeout policy such a pause never
+     * resolves on its own, so a single unapproved cadence discussion used to hold
+     * the claim forever: every subsequent fire for that group was skipped as "still
+     * running" and the tasks it pulled stayed IN_PROGRESS on the backlog with no
+     * reaper anywhere. This stamp is what lets {@code TeamCadenceService#reconcile}
+     * decide a claim has gone stale and reclaim it.
+     * <p>
+     * Nullable on purpose: workspaces written before this field existed have no
+     * stamp, and reclaiming those on a missing timestamp would be a guess. They are
+     * stamped on their next claim.
+     */
+    private Instant claimedAt;
+    /**
      * Backlog task ids the running discussion pulled — what writeback returns to
      * PENDING if the discussion fails, and matches outcomes against when it
      * completes.
@@ -273,6 +290,14 @@ public class GroupWorkspace {
 
     public String getRunningDiscussionId() {
         return runningDiscussionId;
+    }
+
+    public Instant getClaimedAt() {
+        return claimedAt;
+    }
+
+    public void setClaimedAt(Instant claimedAt) {
+        this.claimedAt = claimedAt;
     }
 
     public void setRunningDiscussionId(String runningDiscussionId) {
