@@ -41,11 +41,26 @@ public class GroupConversation {
      * signed acceptances and concession ledger). No migration entry for either: v3
      * documents have neither field and Jackson defaults them correctly (identity
      * hop).
+     * <p>
+     * {@code tornDownAgentIds} also rides v4 rather than forcing a v5 — a
+     * DELIBERATE call against this comment's own "bump whenever a Wave adds a
+     * resume-consumed field" rule, recorded here so it reads as decided rather than
+     * missed. It is persisted and resume-consumed (the tracking merge consults it
+     * after a HITL resume), but it fails soft in every skew direction: a legacy
+     * document defaults to an empty set (identity hop, no migration), and an older
+     * pod re-saving a paused document drops the tombstones — after which the worst
+     * outcome is a torn-down agent re-occupying a
+     * {@code maxCreatedAgentsPerDiscussion} slot and terminal cleanup retrying a
+     * deletion that 404s harmlessly. Contrast {@code runtimePhases}, where the same
+     * skew mis-indexes resume bookmarks — corruption, not conservatism. A version
+     * bump signals "an old pod must not touch this document"; this field does not
+     * earn that.
      */
     // v4 (this release): the release shape — adds I11's negotiationState, I12's
-    // runtimePhases and I6's pausedRepeatSliceBase, all resume-consumed. No
-    // migration entries needed: Jackson defaults each on legacy documents to its
-    // pre-v4 behavior (null / null / -1).
+    // runtimePhases, I6's pausedRepeatSliceBase and the teardown tombstone set
+    // (tornDownAgentIds), all resume-consumed. No migration entries needed:
+    // Jackson defaults each on legacy documents to its pre-v4 behavior
+    // (null / null / -1 / empty set).
     public static final int CURRENT_SCHEMA_VERSION = 4;
     /**
      * The version a stored document claims when its JSON carries no
@@ -332,6 +347,19 @@ public class GroupConversation {
     private List<String> recruitedAgentIds = new CopyOnWriteArrayList<>();
     /** Agent IDs explicitly retained by the creating agent (skip cleanup). */
     private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
+    /**
+     * Agent IDs torn down during this discussion — a tombstone, not a log.
+     * <p>
+     * {@code propagateDynamicAgentTracking} folds each member turn's
+     * {@code dynamic:created_agent_ids} snapshot into {@link #createdAgentIds}, and
+     * those snapshots are per-member and can arrive stale: member B's turn can
+     * carry a created list that still names an agent member A tore down between the
+     * two. Without a tombstone the id is simply re-added, so it keeps occupying a
+     * {@code maxCreatedAgentsPerDiscussion} slot and terminal cleanup keeps
+     * retrying its deletion. This set is consulted on every merge, so a teardown is
+     * final regardless of which order the snapshots land in.
+     */
+    private Set<String> tornDownAgentIds = ConcurrentHashMap.newKeySet();
     private int pausedAtPhaseIndex = -1;
     private int pausedTurnCount = 0;
     /**
@@ -1173,6 +1201,69 @@ public class GroupConversation {
         this.retainedAgentIds = newSet;
     }
 
+    public Set<String> getTornDownAgentIds() {
+        return tornDownAgentIds;
+    }
+
+    public void setTornDownAgentIds(Set<String> tornDownAgentIds) {
+        Set<String> newSet = ConcurrentHashMap.newKeySet();
+        if (tornDownAgentIds != null) {
+            newSet.addAll(tornDownAgentIds);
+        }
+        this.tornDownAgentIds = newSet;
+    }
+
+    /**
+     * The monitor that serializes dynamic-agent tracking changes — teardowns
+     * against merges.
+     * <p>
+     * Ordering the writes inside {@link #recordTeardown} is NOT sufficient on its
+     * own, and the gap is easy to miss: a merge can read the tombstone set, find
+     * the id absent, be descheduled, have a concurrent teardown record the
+     * tombstone and remove the id, and then complete its own {@code add} — putting
+     * back an agent that no longer exists. Check-tombstone-then-add and
+     * record-teardown must therefore be mutually exclusive, not merely internally
+     * ordered.
+     * <p>
+     * Transient and {@link JsonIgnore}d like {@link #artifactAnnounceMutex}: it is
+     * runtime coordination state, and the field initialiser runs on Jackson's
+     * no-arg constructor so a deserialized document has one too.
+     */
+    @JsonIgnore
+    private final transient Object dynamicTrackingMutex = new Object();
+
+    /**
+     * The monitor {@code GroupLifecycleOps#propagateDynamicAgentTracking} holds
+     * while it merges a member turn's tracking snapshot.
+     */
+    @JsonIgnore
+    public Object dynamicTrackingMutex() {
+        return dynamicTrackingMutex;
+    }
+
+    /**
+     * Records a teardown and drops the agent from every live tracking list, as one
+     * atomic operation.
+     * <p>
+     * The tombstone is written first AND under {@link #dynamicTrackingMutex}, so a
+     * concurrent merge cannot interleave between the check it makes and the add it
+     * performs. The merge consults the tombstone precisely to refuse a stale
+     * snapshot, and it can only do that reliably if the two never overlap.
+     *
+     * @return {@code true} if this call was the one that recorded the teardown
+     */
+    public boolean recordTeardown(String agentId) {
+        if (agentId == null) {
+            return false;
+        }
+        synchronized (dynamicTrackingMutex) {
+            boolean first = tornDownAgentIds.add(agentId);
+            createdAgentIds.remove(agentId);
+            retainedAgentIds.remove(agentId);
+            return first;
+        }
+    }
+
     @JsonIgnore
     public AgentGroupConfiguration.DynamicAgentConfig getDynamicAgentConfig() {
         return dynamicAgentConfig;
@@ -1186,10 +1277,20 @@ public class GroupConversation {
         return Collections.unmodifiableMap(memberDisplayNames);
     }
 
+    /**
+     * ConcurrentHashMap on BOTH branches, matching the field initialiser.
+     * <p>
+     * The setter installed a {@link LinkedHashMap}, so a conversation loaded from
+     * the store — every resume, every read-repair — silently lost the concurrency
+     * guarantee the field declares. That map is written from member-turn threads
+     * ({@code RecruitAgentTool}) and iterated by serialization, and
+     * {@link #addMemberDisplayNameIfAbsent} depends on {@code putIfAbsent} being
+     * atomic, which on a LinkedHashMap it is not.
+     */
     public void setMemberDisplayNames(Map<String, String> memberDisplayNames) {
         this.memberDisplayNames = memberDisplayNames != null
-                ? new LinkedHashMap<>(memberDisplayNames)
-                : new LinkedHashMap<>();
+                ? new ConcurrentHashMap<>(memberDisplayNames)
+                : new ConcurrentHashMap<>();
     }
 
     /**
@@ -1199,6 +1300,20 @@ public class GroupConversation {
      */
     public void addMemberDisplayName(String agentId, String displayName) {
         this.memberDisplayNames.put(agentId, displayName);
+    }
+
+    /**
+     * Records a display name only if the agent has none yet.
+     * <p>
+     * The seeding pass at the top of {@code executeDiscussion} fills this map from
+     * the CONFIGURED roster, where the names are operator-chosen. A later writer
+     * that only knows an agent id — {@code RecruitAgentTool}, which passes the id
+     * as the name — must not overwrite one of those; doing so replaced a member's
+     * real name with a raw id everywhere it is rendered, including the "which
+     * member did you mean?" list {@code followUpWithMember} produces.
+     */
+    public void addMemberDisplayNameIfAbsent(String agentId, String displayName) {
+        this.memberDisplayNames.putIfAbsent(agentId, displayName);
     }
 
     /**

@@ -16,6 +16,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.engine.internal.GroupConversationService;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.Counter;
@@ -23,8 +24,10 @@ import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -79,25 +82,52 @@ public class TeamCadenceService {
     /** Fallback identity when a cadence predates {@code createdBy}. */
     public static final String FALLBACK_USER_ID = "system:team-cadence";
 
+    /**
+     * How long a cadence run may hold its workspace claim before {@link #reconcile}
+     * treats it as stale and reclaims it.
+     * <p>
+     * A claim is released by writeback when its discussion reaches a terminal
+     * state, and an {@code AWAITING_APPROVAL} / {@code AWAITING_HUMAN_INPUT} pause
+     * is not one. The default group HITL timeout policy is
+     * {@code WAIT_INDEFINITELY}, so one unapproved cadence discussion held the
+     * claim forever: every later fire for that group was skipped as "still
+     * running", and the tasks it pulled stayed IN_PROGRESS on the backlog. Nothing
+     * anywhere reaped it.
+     * <p>
+     * 24 hours is deliberately generous — an approval that arrives the next
+     * business morning must still land on the discussion it belongs to, not on a
+     * reclaimed corpse. This is a liveness backstop for a wedged team, not an SLA;
+     * an operator who wants a tighter bound should set a finite
+     * {@code hitlConfig.timeoutPolicy} on the group, which resolves the pause
+     * properly instead of abandoning it.
+     */
+    static final Duration DEFAULT_CLAIM_TTL = Duration.ofHours(24);
+
     private final IGroupWorkspaceStore workspaceStore;
     private final IGroupConversationStore conversationStore;
     private final GroupConversationService groupConversationService;
     private final ITemplatingEngine templatingEngine;
     private final MeterRegistry meterRegistry;
+    private final Duration claimTtl;
 
     private Counter cadenceRunsStarted;
     private Counter cadenceRunsSkipped;
     private Counter cadenceWritebacks;
+    private Counter cadenceClaimsReclaimed;
 
     @Inject
     public TeamCadenceService(IGroupWorkspaceStore workspaceStore, IGroupConversationStore conversationStore,
             GroupConversationService groupConversationService, ITemplatingEngine templatingEngine,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry,
+            @ConfigProperty(name = "eddi.groups.cadence.claim-ttl", defaultValue = "PT24H") Duration claimTtl) {
         this.workspaceStore = workspaceStore;
         this.conversationStore = conversationStore;
         this.groupConversationService = groupConversationService;
         this.templatingEngine = templatingEngine;
         this.meterRegistry = meterRegistry;
+        // Non-positive disables reclaiming entirely, for an operator who would rather
+        // wedge than risk abandoning a pause.
+        this.claimTtl = claimTtl != null ? claimTtl : DEFAULT_CLAIM_TTL;
     }
 
     @PostConstruct
@@ -105,6 +135,7 @@ public class TeamCadenceService {
         cadenceRunsStarted = meterRegistry.counter("eddi_team_cadence_runs_started_total");
         cadenceRunsSkipped = meterRegistry.counter("eddi_team_cadence_runs_skipped_total");
         cadenceWritebacks = meterRegistry.counter("eddi_team_cadence_writebacks_total");
+        cadenceClaimsReclaimed = meterRegistry.counter("eddi_team_cadence_claims_reclaimed_total");
     }
 
     /** True if the given schedule metadata marks a team-cadence schedule. */
@@ -193,6 +224,10 @@ public class TeamCadenceService {
             // 4. Claim: conditional on the persisted idle marker.
             String before = workspace.getRunningDiscussionId();
             workspace.setRunningDiscussionId(gc.getId());
+            // Stamped with the claim so reconcile can tell a long-running discussion
+            // from a wedged one. Set here, next to the id it belongs to, and cleared
+            // in settle() alongside it — the two are one fact.
+            workspace.setClaimedAt(Instant.now());
             workspace.setPulledTaskIds(pulled.stream().map(TaskItem::id).toList());
             for (TaskItem task : pulled) {
                 workspace.getBacklog().updateTask(withStatus(task, TaskStatus.IN_PROGRESS));
@@ -259,8 +294,53 @@ public class TeamCadenceService {
             // the next fire read fresh state.
             case COMPLETED -> writebackCompleted(workspace, gc);
             case FAILED, CANCELLED -> writebackFailure(workspace, gc);
-            default -> false; // IN_PROGRESS, SYNTHESIZING, AWAITING_* — still running
+            // IN_PROGRESS, SYNTHESIZING, AWAITING_* — still running, unless the claim
+            // has been held past its TTL. See reclaimIfStale.
+            default -> reclaimIfStale(workspace, gc);
         };
+    }
+
+    /**
+     * Releases a claim held past {@link #claimTtl}, cancelling the discussion that
+     * held it.
+     * <p>
+     * Without this a cadence discussion that pauses for an approval nobody gives
+     * wedges its team permanently: the pause is not a terminal state, so writeback
+     * never runs; the claim is never released; every subsequent fire is skipped as
+     * "still running"; and the tasks that run pulled stay IN_PROGRESS on the
+     * backlog. The default group HITL policy is {@code WAIT_INDEFINITELY}, so this
+     * needs no unusual configuration to happen — one unapproved run is enough.
+     * <p>
+     * The discussion is cancelled before the claim is released, so a run cannot
+     * keep spending against a budget nobody is tracking any more, and its tasks go
+     * back to PENDING through the ordinary failure writeback rather than a bespoke
+     * path.
+     *
+     * @return {@code true} when the claim was released and the workspace is idle
+     *         again, {@code false} while the run is still legitimately in flight
+     */
+    private boolean reclaimIfStale(GroupWorkspace workspace, GroupConversation gc) {
+        if (claimTtl == null || claimTtl.isZero() || claimTtl.isNegative()) {
+            return false;
+        }
+        Instant claimedAt = workspace.getClaimedAt();
+        if (claimedAt == null) {
+            // A workspace written before the stamp existed. Reclaiming on a missing
+            // timestamp would be a guess; it gets a stamp on its next claim.
+            return false;
+        }
+        if (Instant.now().isBefore(claimedAt.plus(claimTtl))) {
+            return false;
+        }
+
+        LOGGER.warnf("Cadence claim on group %s has been held since %s (past the %s TTL) by discussion %s in state %s — "
+                + "cancelling it and releasing the claim so the team's cadences can fire again",
+                LogSanitizer.sanitize(workspace.getGroupId()), claimedAt, claimTtl, gc.getId(), gc.getState());
+        cancelQuietly(gc.getId());
+        cadenceClaimsReclaimed.increment();
+        // The ordinary failure writeback: returns the pulled tasks to PENDING and
+        // clears the claim, exactly as a FAILED/CANCELLED discussion would.
+        return writebackFailure(workspace, gc);
     }
 
     /**
@@ -343,6 +423,7 @@ public class TeamCadenceService {
             metrics.setTotalCost(metrics.getTotalCost() + gc.getTotalCost());
         }
         workspace.setRunningDiscussionId(GroupWorkspace.NO_RUNNING_DISCUSSION);
+        workspace.setClaimedAt(null);
         workspace.setPulledTaskIds(List.of());
         try {
             if (!workspaceStore.casRunningDiscussion(workspace, settledDiscussionId)) {
@@ -435,9 +516,14 @@ public class TeamCadenceService {
 
     private void cancelQuietly(String discussionId) {
         try {
-            groupConversationService.cancelDiscussion(discussionId, null);
+            // Explicitly graceful. A null mode already resolved to CANCEL_GRACEFUL —
+            // only CANCEL_IMMEDIATE takes the other branch — but this method now has a
+            // second caller (the stale-claim reclaim), and "which cancel is this?" is
+            // not a question either call site should have to answer by reading
+            // GroupHitlCoordinator.
+            groupConversationService.cancelDiscussion(discussionId, ControlSignal.CANCEL_GRACEFUL);
         } catch (Exception e) {
-            LOGGER.warnf("Could not cancel discussion %s after a lost cadence claim: %s", discussionId, e.getMessage());
+            LOGGER.warnf("Could not cancel discussion %s after a lost or expired cadence claim: %s", discussionId, e.getMessage());
         }
     }
 }

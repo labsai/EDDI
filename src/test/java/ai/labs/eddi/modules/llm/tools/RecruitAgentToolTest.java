@@ -16,7 +16,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -42,9 +44,16 @@ class RecruitAgentToolTest {
     private LiveDiscussionRegistry registry;
     private GroupConversation gc;
     private IDeploymentStore deploymentStore;
+    /**
+     * The group's CONFIGURED roster, which the tool now consults so a member that
+     * has not spoken yet cannot be "recruited" as a duplicate. Empty by default —
+     * the tests that care set it explicitly.
+     */
+    private Set<String> configuredMemberIds;
 
     @BeforeEach
     void setUp() throws Exception {
+        configuredMemberIds = new LinkedHashSet<>();
         registry = new LiveDiscussionRegistry();
         gc = new GroupConversation();
         gc.setId(GC_ID);
@@ -79,7 +88,7 @@ class RecruitAgentToolTest {
     }
 
     private RecruitAgentTool tool(DynamicAgentConfig config) {
-        return new RecruitAgentTool(registry, GC_ID, RECRUITER, config, deploymentStore);
+        return new RecruitAgentTool(registry, GC_ID, RECRUITER, config, deploymentStore, configuredMemberIds);
     }
 
     // =================================================================
@@ -262,5 +271,46 @@ class RecruitAgentToolTest {
         // lock would let several callers pass it together and overshoot.
         assertEquals(3, gc.getDynamicMembers().size(), "the cap must hold under concurrent recruiters");
         assertEquals(3, gc.getRecruitedAgentIds().size());
+    }
+
+    // =================================================================
+    // Configured-roster duplicate guard
+    // =================================================================
+
+    @Test
+    void recruit_aConfiguredMemberThatHasNotSpokenYet_isRefused() {
+        // memberConversationIds only gains an agent once it has TAKEN a turn, so it
+        // was the sole evidence of a configured member and any member whose first
+        // turn had not come up yet could be "recruited" as a duplicate.
+        configuredMemberIds.add(TARGET);
+
+        String result = tool().recruitAgent(TARGET, "SecurityReviewer", "we need review");
+
+        assertTrue(result.contains("already a member"), "expected a duplicate rejection, got: " + result);
+        assertTrue(gc.getDynamicMembers().isEmpty(), "the roster must not gain a duplicate entry");
+        assertTrue(gc.getRecruitedAgentIds().isEmpty(), "a duplicate must not consume a recruitment slot");
+    }
+
+    @Test
+    void recruit_aConfiguredMember_doesNotClobberItsDisplayName() {
+        configuredMemberIds.add(TARGET);
+        gc.addMemberDisplayName(TARGET, "Alice");
+
+        tool().recruitAgent(TARGET, "SecurityReviewer", "we need review");
+
+        assertEquals("Alice", gc.getMemberDisplayNames().get(TARGET),
+                "an operator-chosen roster name must never be replaced by a raw agent id");
+    }
+
+    @Test
+    void recruit_aGenuineOutsider_stillJoins() {
+        configuredMemberIds.add("some-other-configured-member");
+
+        String result = tool().recruitAgent(TARGET, "SecurityReviewer", "we need review");
+
+        assertTrue(result.startsWith("Recruited"), "expected success, got: " + result);
+        assertEquals(1, gc.getDynamicMembers().size());
+        assertEquals(TARGET, gc.getMemberDisplayNames().get(TARGET),
+                "a real recruit has no configured name, so its id is the best available label");
     }
 }
