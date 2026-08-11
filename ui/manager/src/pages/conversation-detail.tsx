@@ -41,7 +41,7 @@ import { extractInput, extractOutput, extractActions } from "@/lib/api/conversat
 import { useNavigate } from "react-router-dom";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { RequestPreview } from "@/components/operator/request-preview";
-import { findSelfTargetedCalls } from "@/lib/operator/self-guard";
+import { findBlockedCalls } from "@/lib/operator/blocked-calls";
 import {
   useResumeConversation,
   useCancelConversation,
@@ -107,15 +107,8 @@ export function ConversationDetailPage() {
     const pending = details?.type === "TOOL_CALL" ? details.calls : undefined;
     // The conversation's OWN agent, not the separately-fetched operator id: the
     // operator-config read is admin/editor-only, so keying on it would leave
-    // this guard silently inert for an eddi-approver. See `self-guard.ts`.
-    return findSelfTargetedCalls(pending, conversation?.agentId).map((hit) => ({
-      callId: hit.callId,
-      reason: t(
-        "operator.approval.blockedSelfTarget",
-        "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page.",
-        { agentId: hit.agentId },
-      ),
-    }));
+    // this guard silently inert for an eddi-approver. See `blocked-calls.ts`.
+    return findBlockedCalls(pending, conversation?.agentId, t);
   }, [approvalStatus, conversation?.agentId, t]);
 
   function handleDelete() {

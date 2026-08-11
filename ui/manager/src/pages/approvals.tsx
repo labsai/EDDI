@@ -19,7 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
-import { findSelfTargetedCalls } from "@/lib/operator/self-guard";
+import { findBlockedCalls } from "@/lib/operator/blocked-calls";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { RequestPreview } from "@/components/operator/request-preview";
@@ -112,19 +112,12 @@ function ApprovalQueueRow({
   // first-class user of this page) that fetch 403s, the id is undefined, and
   // the guard silently evaluates to "nothing blocked" while the UI still looks
   // guarded. The acting agent id rides on the pause itself, so every role that
-  // can see the pause can evaluate the guard. See `self-guard.ts`.
+  // can see the pause can evaluate the guard. See `blocked-calls.ts`.
   const blockedCalls = useMemo(() => {
     const details = approvalStatus.data?.pauseDetails;
     // Narrowed on the discriminator: a RULE pause carries no per-call requests.
     const pending = details?.type === "TOOL_CALL" ? details.calls : undefined;
-    return findSelfTargetedCalls(pending, item.agentId).map((hit) => ({
-      callId: hit.callId,
-      reason: t(
-        "operator.approval.blockedSelfTarget",
-        "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page.",
-        { agentId: hit.agentId },
-      ),
-    }));
+    return findBlockedCalls(pending, item.agentId, t);
   }, [approvalStatus.data, item.agentId, t]);
 
   return (

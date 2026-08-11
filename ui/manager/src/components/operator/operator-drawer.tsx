@@ -12,34 +12,28 @@ import { useApprovalStatus, usePendingApprovals } from "@/hooks/use-hitl";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 
-export interface OperatorDrawerProps {
-  /**
-   * Raises the launcher clear of the Workforce mobile shell's own bottom
-   * furniture: `WorkforceBottomTabs` (`fixed bottom-0 h-16`, plus a
-   * safe-area inset) AND `workforce-dashboard`'s `MobileFab`
-   * (`fixed bottom-24 z-40 sm:hidden`, so 96–152px up).
-   *
-   * That second one is why this is not merely cosmetic. At the old `bottom-20`
-   * the two launchers overlapped by 40 vertical points over most of their
-   * width, and `MobileFab` is z-40 against this component's z-30 — so it won
-   * the hit test and tapping the operator launcher navigated to
-   * `/workforce/new` instead. `bottom-40` (160px) clears MobileFab's top edge.
-   */
-  clearsBottomTabBar?: boolean;
-}
-
 /**
- * Floating launcher for the Platform Operator, mounted once in `AppLayout`
- * and once in each of `WorkforceLayout`'s three viewport branches — a
- * self-positioned `fixed` panel sidesteps the fact that those four layouts
- * share no common chrome slot the way `ChatDrawer` shares `AppLayout`'s.
+ * Header launcher for the Platform Operator, rendered inside `TopBar` (Manager)
+ * and `WorkforceTopbar` (all three Workforce viewport branches) — the one piece
+ * of chrome both shells genuinely share.
+ *
+ * It used to be a `fixed` bottom-right FAB, mounted separately in `AppLayout`
+ * and in each of `WorkforceLayout`'s three branches. That position was pure
+ * collision avoidance rather than design: the bottom-right corner already holds
+ * sonner's toast viewport (z-999999999, which covered the launcher outright
+ * while any toast was up), `ChatDrawer`'s composer, `WorkforceBottomTabs`, and
+ * `workforce-dashboard`'s own `MobileFab` — the last of which won the hit test
+ * and navigated to `/workforce/new` when tapped. Each dodge bought a hardcoded
+ * offset (`bottom-24`, `bottom-40`) that only held until the next thing landed
+ * in that corner. The header has a real slot for a persistent control, so the
+ * whole class of collision goes away rather than being re-measured.
  *
  * Reuses `useOperatorChat` and `useOperatorConfig` directly — the SAME
  * react-query cache and the SAME shared conversation store the full
  * `/manage/operator` page reads, not a second copy of either. A gated write
  * started here and a gated write approved there are the same pause.
  */
-export function OperatorDrawer({ clearsBottomTabBar = false }: OperatorDrawerProps) {
+export function OperatorDrawer() {
   const { t } = useTranslation();
   const location = useLocation();
   const isOpen = useOperatorDrawerStore((s) => s.isOpen);
@@ -83,13 +77,14 @@ export function OperatorDrawer({ clearsBottomTabBar = false }: OperatorDrawerPro
   /**
    * Escape closes, focus moves in on open and back to the launcher on close.
    *
-   * The panel is rendered BEFORE the launcher in the DOM (the flex column puts
-   * it visually above), so without moving focus deliberately a keyboard user
-   * who activates the launcher tabs *past* the drawer into the rest of the
-   * page and has to shift-tab backwards to reach what they just opened. Not a
-   * focus trap: this panel is non-modal by design — the page behind it stays
-   * usable — so trapping would be wrong. `WorkforceLayout`'s nav drawer IS
-   * modal and does trap; the difference is deliberate.
+   * The panel now follows the launcher in the DOM, so tab order already reaches
+   * it — but the move-in is kept regardless: the panel opens beneath a header
+   * that still has controls after it (theme, language, user menu), so without
+   * it a keyboard user tabs through the rest of the header before reaching what
+   * they just opened. Not a focus trap: this panel is non-modal by design — the
+   * page behind it stays usable — so trapping would be wrong.
+   * `WorkforceLayout`'s nav drawer IS modal and does trap; the difference is
+   * deliberate.
    */
   const panelRef = useRef<HTMLDivElement>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
@@ -156,27 +151,47 @@ export function OperatorDrawer({ clearsBottomTabBar = false }: OperatorDrawerPro
   const isActive = Boolean(config?.enabled && config?.agentId);
 
   return (
-    <div
-      className={cn(
-        // z-30, not z-40: both shells render their mobile/tablet nav backdrop
-        // at z-40 and this component AFTER them, so at equal z-index the later
-        // DOM node wins and the launcher painted over an open nav overlay —
-        // clickable, and in Workforce's tablet branch that overlay is
-        // `aria-modal="true"`, so it opened a second panel on top of a modal.
-        "fixed end-6 z-30 flex flex-col items-end gap-3",
-        // Not `bottom-6`: that corner is already occupied on the Manager side
-        // by sonner's toast viewport (bottom-right, z-999999999 — it covered
-        // the launcher outright while any toast was up) and by `ChatDrawer`'s
-        // composer, whose Send button this `fixed` element painted over by
-        // roughly half. 96px clears both.
-        clearsBottomTabBar ? "bottom-40" : "bottom-24",
-      )}
-    >
+    <div className="relative">
+      <button
+        ref={fabRef}
+        onClick={toggle}
+        className={cn(
+          "relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+          isOpen
+            ? "bg-secondary text-foreground"
+            : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+        )}
+        title={t("operator.drawer.title", "Platform Operator")}
+        aria-label={
+          operatorHasPendingApproval
+            ? t("operator.drawer.titleAwaiting", "Platform Operator — a decision is waiting on you")
+            : t("operator.drawer.title", "Platform Operator")
+        }
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? "operator-drawer-panel" : undefined}
+        data-testid="operator-drawer-fab"
+      >
+        {/* The pause is silent otherwise: the conversation simply stops and
+            waits, with nothing anywhere saying so. */}
+        {operatorHasPendingApproval && !isOpen && (
+          <span
+            className="absolute end-1 top-1 h-2.5 w-2.5 rounded-full border-2 border-card bg-amber-500"
+            data-testid="operator-drawer-pending-dot"
+            aria-hidden="true"
+          />
+        )}
+        <Sparkles className="h-4 w-4" aria-hidden="true" />
+      </button>
+
       {isOpen && (
         <div
           ref={panelRef}
           id="operator-drawer-panel"
-          className="flex h-[32rem] w-96 max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl"
+          // Anchored to the launcher rather than the viewport, so it follows
+          // the header instead of needing its own hardcoded offsets. The
+          // height is capped against the viewport because the Workforce mobile
+          // branch has far less room below the header than the desktop one.
+          className="absolute end-0 top-full z-50 mt-2 flex h-[32rem] max-h-[calc(100vh-6rem)] w-96 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl"
           role="complementary"
           aria-label={t("operator.drawer.title", "Platform Operator")}
           data-testid="operator-drawer-panel"
@@ -237,32 +252,6 @@ export function OperatorDrawer({ clearsBottomTabBar = false }: OperatorDrawerPro
           </div>
         </div>
       )}
-
-      <button
-        ref={fabRef}
-        onClick={toggle}
-        className="relative flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105"
-        title={t("operator.drawer.title", "Platform Operator")}
-        aria-label={
-          operatorHasPendingApproval
-            ? t("operator.drawer.titleAwaiting", "Platform Operator — a decision is waiting on you")
-            : t("operator.drawer.title", "Platform Operator")
-        }
-        aria-expanded={isOpen}
-        aria-controls={isOpen ? "operator-drawer-panel" : undefined}
-        data-testid="operator-drawer-fab"
-      >
-        {/* The pause is silent otherwise: the conversation simply stops and
-            waits, with nothing anywhere saying so. */}
-        {operatorHasPendingApproval && !isOpen && (
-          <span
-            className="absolute -top-0.5 -end-0.5 h-3.5 w-3.5 rounded-full border-2 border-background bg-amber-500"
-            data-testid="operator-drawer-pending-dot"
-            aria-hidden="true"
-          />
-        )}
-        {isOpen ? <X className="h-5 w-5" aria-hidden="true" /> : <Sparkles className="h-5 w-5" aria-hidden="true" />}
-      </button>
     </div>
   );
 }

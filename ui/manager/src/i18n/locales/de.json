@@ -1126,7 +1126,7 @@
     "cascadeInAgent": "Kaskade auch im Agentenmodus (mit Werkzeugen) verwenden",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "z. B. claude-sonnet-4-6",
+    "cascadeModelName": "z. B. claude-sonnet-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "leer = immer akzeptieren",
     "cascadeTimeout": "Zeitlimit (ms)",
@@ -3480,12 +3480,12 @@
     "configError": "Die Operator-Konfiguration konnte nicht geladen werden",
     "empty": {
       "title": "Der Plattform-Operator ist deaktiviert",
-      "description": "Aktivieren Sie ihn, um mit einem Agenten zu chatten, der Ihre Agenten, Workflows, Konversationen, Deployments und Logs einsehen und erklären kann. Er hat ausschließlich Lesezugriff und kann nichts verändern.",
+      "description": "Aktivieren Sie ihn, um mit einem Agenten zu chatten, der Ihre Agenten, Workflows, Konversationen, Deployments und Logs inspiziert — und sie, mit Ihrer Freigabe jeder Änderung, für Sie bedient.",
       "action": "Plattform-Operator aktivieren"
     },
     "discovery": {
       "title": "Ihr Plattform-Operator",
-      "description": "Ein Assistent, der diese Installation untersucht und erklärt. Standardmäßig deaktiviert, nur Lesezugriff, ein Klick zum Aktivieren.",
+      "description": "Ein Assistent, der dieses Deployment inspiziert und bedient. Standardmäßig aus; jede Änderung wartet auf Ihre Freigabe.",
       "action": "Aktivieren"
     },
     "activation": {
@@ -3506,6 +3506,7 @@
       "authNoneBlocked": "Für diese Installation ist die Authentifizierung aktiviert, daher würden nicht authentifizierte Tool-Aufrufe abgelehnt. Der Operator würde erfolgreich deployt und danach bei jeder Abfrage scheitern. Wählen Sie stattdessen „Ihre Identität“.",
       "scope": {
         "label": "Berechtigung",
+        "default": "Standard",
         "hint": "Was der Operator tun darf. Jede Änderung wartet weiterhin auf Ihre Genehmigung — siehe die Sicherheitsregeln unten.",
         "readOnly": {
           "label": "Nur Lesezugriff",
@@ -3515,8 +3516,6 @@
           "label": "Lese- und Schreibzugriff",
           "description": "Kann außerdem Agenten und Agentengruppen erstellen und ändern, bereitstellen, die Bereitstellung aufheben, einen außer Kontrolle geratenen Zeitplan deaktivieren und die Beschreibung eines Agenten bearbeiten — jeweils erst nach Ihrer Genehmigung."
         },
-        "unavailableNotVerified": "Noch nicht verfügbar — das Genehmigungsgate dieses Operators wurde nicht als sicher verifiziert. Prüfen Sie die Verbindung im Statusbereich, oder wählen Sie unten „Ihre Identität“ und konfigurieren Sie danach neu.",
-        "unavailableFirstActivation": "Bei der ersten Aktivierung nicht verfügbar. Aktivieren Sie zunächst mit Nur-Lesezugriff, um zu belegen, dass das Genehmigungsgate zuverlässig funktioniert, und konfigurieren Sie dann neu, um Schreibzugriff zu gewähren.",
         "writeWarning": "Beim Aktivieren wird ein Schreib-Kanarientest ausgeführt: ein echter, harmloser Testschreibvorgang, der vor Abschluss dieses Deployments auf Ihre Genehmigung warten muss. Pausiert er nicht, wird die Aktivierung verweigert und der Operator entfernt, statt mit einem ungeprüften Schreib-Gate bereitgestellt zu bleiben."
       },
       "safetyPreamble": "Sicherheitsregeln (nicht bearbeitbar)",
@@ -3620,7 +3619,10 @@
         "agentCreatedWithExternalTools": "Dieser Agent wird mit sämtlichen Tools erstellt, die ein externer MCP-Server anbietet. Welche das sind, entscheidet dieser Server, und er kann sie später ändern.",
         "unchecked": "Der Body war zu lang, um ihn auf Berechtigungserweiterungen zu prüfen — lesen Sie ihn vor der Freigabe vollständig."
       },
-      "blockedSelfTarget": "Ein Agent darf seine eigene Definition nicht ändern, und diese Anfrage betrifft den eigenen Agenten des Operators ({{agentId}}). Solange sie enthalten ist, kann der gesamte Stapel nicht genehmigt werden — lehnen Sie ab und nehmen Sie diese Änderung auf der Seite dieses Agenten vor."
+      "blockedSelfTarget": "Ein Agent darf seine eigene Definition nicht ändern, und diese Anfrage betrifft den eigenen Agenten des Operators ({{agentId}}). Solange sie enthalten ist, kann der gesamte Stapel nicht genehmigt werden — lehnen Sie ab und nehmen Sie diese Änderung auf der Seite dieses Agenten vor.",
+      "blockedGateCarrying": "Diese Anfrage schreibt eine LLM-Konfiguration, die ihr eigenes Freigabe-Gate (toolApprovals) setzt und damit das prüfende Gate ersetzen würde. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und ändern Sie das Gate auf der Seite des Agenten.",
+      "blockedGateUnverifiable": "Diese Anfrage schreibt eine LLM-Konfiguration, deren Inhalt nicht vollständig lesbar ist — zu groß für die Anzeige oder kein gültiges JSON —, daher lässt sich nicht bestätigen, dass sie kein Freigabe-Gate überschreibt. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und nehmen Sie die Änderung auf der Seite des Agenten vor.",
+      "blockedGateUnpinned": "Diese Anfrage schreibt eine LLM-Konfiguration, ist aber nicht fixiert; was tatsächlich ausgeführt wird, kann daher vom hier Gezeigten abweichen und es lässt sich nicht bestätigen, dass kein Freigabe-Gate überschrieben wird. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und nehmen Sie die Änderung auf der Seite des Agenten vor."
     },
     "starters": {
       "whatsDeployed": "Was ist derzeit deployt?",

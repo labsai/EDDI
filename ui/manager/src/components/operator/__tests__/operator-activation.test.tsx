@@ -128,9 +128,9 @@ describe("OperatorActivation", () => {
     });
   });
 
-  it("states plainly that the operator is read-only", () => {
+  it("shows the write-gated posture up front — the default scope chip reads Read & write", () => {
     renderActivation();
-    expect(screen.getAllByText(/read-only/i).length).toBeGreaterThan(0);
+    expect(screen.getByTestId("operator-scope-chip")).toHaveTextContent(/read & write/i);
   });
 
   it("blocks the next step until a model key is supplied", async () => {
@@ -208,7 +208,7 @@ describe("OperatorActivation", () => {
       expect(onActivate).toHaveBeenCalledTimes(1);
       expect(onActivate.mock.calls[0]![0]).toMatchObject({
         authMode: "caller-identity",
-        scope: "read_only",
+        scope: "read_write",
       });
     });
 
@@ -220,167 +220,90 @@ describe("OperatorActivation", () => {
   });
 
   describe("write scope selection", () => {
-    const verifiedGate = { verified: true, checkedVersions: [1] };
-    const unverifiedGate = { verified: false, reason: "toolApprovals.requireApproval is empty", checkedVersions: [1] };
-
-    /** Gets to the review step with caller-identity auth (the other precondition). */
-    async function toReviewStepWithCallerIdentity(overrides: Parameters<typeof renderActivation>[0] = {}) {
+    /** Gets to the review step, where the scope choice lives. */
+    async function toReviewStep(overrides: Parameters<typeof renderActivation>[0] = {}) {
       const rendered = renderActivation(overrides);
       await userEvent.type(screen.getByTestId("operator-api-key-input"), "sk-test-key");
-      await userEvent.click(screen.getByTestId("operator-auth-caller-identity"));
       await userEvent.click(screen.getByTestId("operator-next"));
       await screen.findByTestId("operator-activate");
       return rendered;
     }
 
-    it("is disabled on first activation — nothing has verified the gate yet", async () => {
-      await toReviewStepWithCallerIdentity();
-      expect(screen.getByTestId("operator-scope-read_write")).toBeDisabled();
-      expect(await screen.findByTestId("operator-scope-unavailable")).toHaveTextContent(/first activation/i);
-    });
-
-    it("is disabled when reconfiguring an operator whose gate is not verified", async () => {
-      await toReviewStepWithCallerIdentity({
-        initial: { ...defaultOperatorConfig("Body."), agentId: "op-1", version: 1 },
-        gate: unverifiedGate,
-      });
-      expect(screen.getByTestId("operator-scope-read_write")).toBeDisabled();
-      expect(await screen.findByTestId("operator-scope-unavailable")).toHaveTextContent(/not been verified/i);
-    });
-
-    it("is disabled without caller-identity auth, even with a verified gate", async () => {
-      renderActivation({
-        initial: { ...defaultOperatorConfig("Body."), agentId: "op-1", version: 1 },
-        gate: verifiedGate,
-      });
-      await userEvent.type(screen.getByTestId("operator-api-key-input"), "sk-test-key");
-      // authMode defaults to "none" — deliberately not switching it here.
-      await userEvent.click(screen.getByTestId("operator-next"));
-      await screen.findByTestId("operator-activate");
-      expect(screen.getByTestId("operator-scope-read_write")).toBeDisabled();
-    });
-
-    it("is selectable once the gate is verified AND auth is caller-identity — both preconditions together", async () => {
-      const { onActivate } = await toReviewStepWithCallerIdentity({
-        initial: { ...defaultOperatorConfig("Body."), agentId: "op-1", version: 1 },
-        gate: verifiedGate,
-      });
-      expect(screen.getByTestId("operator-scope-read_write")).not.toBeDisabled();
-      expect(screen.queryByTestId("operator-scope-unavailable")).not.toBeInTheDocument();
-
-      await userEvent.click(screen.getByTestId("operator-scope-read_write"));
-      expect(await screen.findByTestId("operator-scope-write-warning")).toHaveTextContent(/write canary/i);
+    it("defaults to read & write on FIRST activation — no bootstrap, no prior verification demanded", async () => {
+      // The old two-step ("activate read-only first, reconfigure later") gated
+      // the OFFER on facts activation now proves about the agent it actually
+      // creates: the gate is read back from the new document and the write
+      // canary refuses to leave a write-capable operator deployed unless a
+      // real write provably paused. So the choice is the admin's, up front.
+      const { onActivate } = await toReviewStep();
+      const readWrite = screen.getByTestId("operator-scope-read_write");
+      expect(readWrite).not.toBeDisabled();
+      expect(readWrite).toBeChecked();
 
       await userEvent.click(screen.getByTestId("operator-activate"));
       expect(onActivate.mock.calls[0]![0]).toMatchObject({ scope: "read_write" });
     });
 
-    it("switches the safety rules and the tool count when scope changes", async () => {
-      await toReviewStepWithCallerIdentity({
-        initial: { ...defaultOperatorConfig("Body."), agentId: "op-1", version: 1 },
-        gate: verifiedGate,
-      });
-      const toolsLabelBefore = screen.getByText(/tools it will be given/i).textContent;
-
-      await userEvent.click(screen.getByTestId("operator-scope-read_write"));
-
-      expect(screen.getByText(/tools it will be given/i).textContent).not.toBe(toolsLabelBefore);
-      // The write-gated preamble replaces "You are read-only" with the
-      // approval-bound rules — see system-prompt.ts.
-      expect(screen.queryByText(/you are read-only/i)).not.toBeInTheDocument();
+    it("explains the write canary while read & write is selected", async () => {
+      await toReviewStep();
+      expect(await screen.findByTestId("operator-scope-write-warning")).toHaveTextContent(/write canary/i);
     });
 
-    it("swaps the default prompt body to match scope, but preserves a custom edit", async () => {
-      // No arg: promptBody seeds to the REAL read_only default, not a fixed
-      // "Body." literal — the "untouched, so swap it" comparison this test
-      // exercises only ever matches a real default, never a fixture stub.
-      await toReviewStepWithCallerIdentity({
-        initial: { ...defaultOperatorConfig(), agentId: "op-1", version: 1 },
-        gate: verifiedGate,
-      });
-
-      const promptBody = () => (screen.getByTestId("operator-prompt-body") as HTMLTextAreaElement).value;
-
-      await userEvent.click(screen.getByTestId("operator-scope-read_write"));
-      expect(promptBody()).toContain("When you change something");
-
-      // Flip back — untouched, so it reverts to read_only's own default.
+    it("can be opted down to read-only, and submits that choice", async () => {
+      const { onActivate } = await toReviewStep();
       await userEvent.click(screen.getByTestId("operator-scope-read_only"));
-      expect(promptBody()).not.toContain("When you change something");
+      expect(screen.getByTestId("operator-scope-read_only")).toBeChecked();
+      expect(screen.queryByTestId("operator-scope-write-warning")).not.toBeInTheDocument();
 
-      // Now customize while on read_only, then flip to read_write — the
-      // customization must survive, not be silently discarded.
-      await userEvent.clear(screen.getByTestId("operator-prompt-body"));
-      await userEvent.type(screen.getByTestId("operator-prompt-body"), "Custom instructions.");
-      await userEvent.click(screen.getByTestId("operator-scope-read_write"));
-      expect(screen.getByTestId("operator-prompt-body")).toHaveValue("Custom instructions.");
+      await userEvent.click(screen.getByTestId("operator-activate"));
+      expect(onActivate.mock.calls[0]![0]).toMatchObject({ scope: "read_only" });
     });
 
-    it("reverts to read_only when auth mode is changed away from caller-identity after read_write was chosen", async () => {
-      const { onActivate } = await toReviewStepWithCallerIdentity({
-        initial: { ...defaultOperatorConfig("Body."), agentId: "op-1", version: 1 },
-        gate: verifiedGate,
+    it("keeps a stored read_only choice when reconfiguring — opting down is remembered, not reset", async () => {
+      const { onActivate } = await toReviewStep({
+        initial: { ...defaultOperatorConfig("Body."), scope: "read_only", agentId: "op-1", version: 1 },
       });
-      await userEvent.click(screen.getByTestId("operator-scope-read_write"));
-      expect(screen.getByTestId("operator-scope-read_write")).toBeChecked();
-
-      await userEvent.click(screen.getByRole("button", { name: /^back$/i }));
-      await userEvent.click(screen.getByTestId("operator-auth-none"));
-      await userEvent.click(screen.getByTestId("operator-next"));
-
-      // effectiveScope has silently reverted — the radio must visibly show
-      // it (not just be disabled while still drawn as checked), and
-      // activating now must not submit a write grant the precondition no
-      // longer holds for.
-      const readWriteRadio = screen.getByTestId("operator-scope-read_write");
-      expect(readWriteRadio).toBeDisabled();
-      expect(readWriteRadio).not.toBeChecked();
       expect(screen.getByTestId("operator-scope-read_only")).toBeChecked();
       await userEvent.click(screen.getByTestId("operator-activate"));
       expect(onActivate.mock.calls[0]![0]).toMatchObject({ scope: "read_only" });
     });
 
-    it("re-syncs the prompt body when scope reverts indirectly, not only on an explicit pick", async () => {
-      // handleScopeChange fires only when the radio is clicked. effectiveScope
-      // also moves on its own when authMode stops being caller-identity — and
-      // without the effect, the submitted config pairs read_only endpoints with
-      // a body telling the agent it can create groups and change things.
-      const { onActivate } = await toReviewStepWithCallerIdentity({
-        initial: { ...defaultOperatorConfig(), agentId: "op-1", version: 1 },
-        gate: verifiedGate,
-      });
-      const promptBody = () => (screen.getByTestId("operator-prompt-body") as HTMLTextAreaElement).value;
+    it("switches the safety rules and the tool count when scope changes", async () => {
+      await toReviewStep();
+      const toolsLabelBefore = screen.getByText(/tools it will be given/i).textContent;
+      // Write default: the preamble carries the approval-bound rules.
+      expect(screen.queryByText(/you are read-only/i)).not.toBeInTheDocument();
 
-      await userEvent.click(screen.getByTestId("operator-scope-read_write"));
-      expect(promptBody()).toContain("When you change something");
+      await userEvent.click(screen.getByTestId("operator-scope-read_only"));
 
-      await userEvent.click(screen.getByRole("button", { name: /^back$/i }));
-      await userEvent.click(screen.getByTestId("operator-auth-none"));
-      await userEvent.click(screen.getByTestId("operator-next"));
-
-      expect(promptBody()).not.toContain("When you change something");
-      await userEvent.click(screen.getByTestId("operator-activate"));
-      const submitted = onActivate.mock.calls[0]![0];
-      expect(submitted).toMatchObject({ scope: "read_only" });
-      expect(submitted.promptBody).not.toContain("You can create an agent GROUP");
+      expect(screen.getByText(/tools it will be given/i).textContent).not.toBe(toolsLabelBefore);
+      // Read-only restores the read-only preamble — see system-prompt.ts.
+      expect(screen.getByText(/you are read-only/i)).toBeInTheDocument();
     });
 
-    it("does not overwrite a customized prompt body when scope reverts indirectly", async () => {
-      // The other half of the contract: an admin who edited the text keeps it,
-      // exactly as an explicit scope flip already guarantees.
-      await toReviewStepWithCallerIdentity({
+    it("swaps the default prompt body to match scope, but preserves a custom edit", async () => {
+      // No arg: promptBody seeds to the REAL scope default, not a fixed
+      // "Body." literal — the "untouched, so swap it" comparison this test
+      // exercises only ever matches a real default, never a fixture stub.
+      await toReviewStep({
         initial: { ...defaultOperatorConfig(), agentId: "op-1", version: 1 },
-        gate: verifiedGate,
       });
-      await userEvent.click(screen.getByTestId("operator-scope-read_write"));
+
+      const promptBody = () => (screen.getByTestId("operator-prompt-body") as HTMLTextAreaElement).value;
+
+      // Default scope is read_write, so the write guidance is present.
+      expect(promptBody()).toContain("When you change something");
+
+      // Flip down — untouched, so it swaps to read_only's own default.
+      await userEvent.click(screen.getByTestId("operator-scope-read_only"));
+      expect(promptBody()).not.toContain("When you change something");
+
+      // Now customize while on read_only, then flip back to read_write — the
+      // customization must survive, not be silently discarded.
       await userEvent.clear(screen.getByTestId("operator-prompt-body"));
-      await userEvent.type(screen.getByTestId("operator-prompt-body"), "My own wording.");
-
-      await userEvent.click(screen.getByRole("button", { name: /^back$/i }));
-      await userEvent.click(screen.getByTestId("operator-auth-none"));
-      await userEvent.click(screen.getByTestId("operator-next"));
-
-      expect(screen.getByTestId("operator-prompt-body")).toHaveValue("My own wording.");
+      await userEvent.type(screen.getByTestId("operator-prompt-body"), "Custom instructions.");
+      await userEvent.click(screen.getByTestId("operator-scope-read_write"));
+      expect(screen.getByTestId("operator-prompt-body")).toHaveValue("Custom instructions.");
     });
   });
 

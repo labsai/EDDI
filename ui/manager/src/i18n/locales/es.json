@@ -1138,7 +1138,7 @@
     "cascadeInAgent": "Usar cascada también en modo agente (con herramientas)",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "p. ej. claude-sonnet-4-6",
+    "cascadeModelName": "p. ej. claude-sonnet-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "vacío = aceptar siempre",
     "cascadeTimeout": "Tiempo límite (ms)",
@@ -3508,12 +3508,12 @@
     "configError": "No se pudo cargar la configuración del operador",
     "empty": {
       "title": "El operador de plataforma está desactivado",
-      "description": "Actívalo para chatear con un agente que puede inspeccionar tus agentes, flujos de trabajo, conversaciones, despliegues y registros, y explicarte lo que encuentra. Es de solo lectura y no puede modificar nada.",
+      "description": "Actívelo para chatear con un agente que puede inspeccionar sus agentes, flujos de trabajo, conversaciones, despliegues y registros — y, con su aprobación de cada cambio, operarlos por usted.",
       "action": "Activar el operador de plataforma"
     },
     "discovery": {
       "title": "Tu operador de plataforma",
-      "description": "Un asistente que inspecciona y explica esta instalación. Desactivado por defecto, de solo lectura, un clic para activarlo.",
+      "description": "Un asistente que inspecciona y opera este despliegue. Desactivado por defecto; cada cambio espera su aprobación.",
       "action": "Activar"
     },
     "activation": {
@@ -3534,6 +3534,7 @@
       "authNoneBlocked": "Esta instalación tiene la autenticación activada, por lo que las llamadas de herramientas sin autenticar serían rechazadas. El operador se desplegaría correctamente y luego fallaría en cada consulta. Elige «Tu identidad» en su lugar.",
       "scope": {
         "label": "Capacidad",
+        "default": "Predeterminada",
         "hint": "Lo que el operador puede hacer. Cada escritura sigue esperando tu aprobación — consulta las reglas de seguridad más abajo.",
         "readOnly": {
           "label": "Solo lectura",
@@ -3543,8 +3544,6 @@
           "label": "Lectura y escritura",
           "description": "También le permite crear y modificar agentes y grupos de agentes, desplegar, retirar el despliegue, deshabilitar una programación descontrolada y editar el descriptor de un agente — cada una a la espera de tu aprobación."
         },
-        "unavailableNotVerified": "Aún no disponible — la puerta de aprobación de este operador no se ha verificado como fiable. Comprueba la conexión en el panel de estado, o elige «Tu identidad» abajo y luego vuelve a configurar.",
-        "unavailableFirstActivation": "No disponible en la primera activación. Activa primero en modo de solo lectura para demostrar que la puerta de aprobación es fiable, y luego vuelve a configurar para conceder acceso de escritura.",
         "writeWarning": "Al activar se ejecutará una prueba canario de escritura: una escritura de prueba real e inofensiva que debe quedar a la espera de aprobación antes de que termine este despliegue. Si no se pausa, la activación se rechaza y el operador se elimina en lugar de dejarlo desplegado con una puerta de escritura sin verificar."
       },
       "safetyPreamble": "Reglas de seguridad (no editables)",
@@ -3648,7 +3647,10 @@
         "agentCreatedWithExternalTools": "Este agente se está creando con todas las herramientas que ofrece un servidor MCP externo. Ese servidor decide cuáles son y puede cambiarlas más adelante.",
         "unchecked": "El cuerpo era demasiado largo para analizarlo en busca de concesiones de capacidad — léalo completo antes de aprobar."
       },
-      "blockedSelfTarget": "Un agente no puede modificar su propia definición, y esta solicitud apunta al propio agente del operador ({{agentId}}). Mientras esté presente, no se puede aprobar todo el lote: recházala y haz este cambio desde la página de ese agente."
+      "blockedSelfTarget": "Un agente no puede modificar su propia definición, y esta solicitud apunta al propio agente del operador ({{agentId}}). Mientras esté presente, no se puede aprobar todo el lote: recházala y haz este cambio desde la página de ese agente.",
+      "blockedGateCarrying": "Esta solicitud escribe una configuración de LLM que establece su propia puerta de aprobación (toolApprovals), lo que reemplazaría la puerta que la está revisando. La aprobación no está disponible para todo el lote mientras esté presente — rechace y cambie la puerta desde la página del agente.",
+      "blockedGateUnverifiable": "Esta solicitud escribe una configuración de LLM cuyo cuerpo no se puede leer por completo — es demasiado grande para mostrarse o no es JSON válido —, por lo que no se puede confirmar que no anule la puerta de aprobación. La aprobación no está disponible para todo el lote mientras esté presente — rechace y realice este cambio desde la página del agente.",
+      "blockedGateUnpinned": "Esta solicitud escribe una configuración de LLM pero no está fijada, por lo que lo que realmente se ejecuta puede diferir de lo que se muestra aquí y no se puede confirmar que no anule la puerta de aprobación. La aprobación no está disponible para todo el lote mientras esté presente — rechace y realice este cambio desde la página del agente."
     },
     "starters": {
       "whatsDeployed": "¿Qué hay desplegado ahora mismo?",

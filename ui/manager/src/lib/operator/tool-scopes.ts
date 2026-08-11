@@ -42,40 +42,42 @@ const WORKFLOW_EXTENSION_STORES = [
 /**
  * The subset of {@link WORKFLOW_EXTENSION_STORES} that is safe to WRITE.
  *
- * **`llmstore/llms` is deliberately absent, and this is the load-bearing
- * exclusion in this file.** An LLM document is not just a prompt and a model:
+ * Currently all of them — but `llmstore/llms` is only here because a second,
+ * separate control exists, and it must not be separated from that control.
+ *
+ * **Why it needed one.** An LLM document is not just a prompt and a model:
  * `LlmConfiguration.Task.toolApprovals` is a per-task approval-gate override
  * that, when present, **fully replaces the agent-level
  * `hitlConfig.toolApprovals`** for that task — `LlmTask.java` resolves
  * `task.getToolApprovals() != null ? task.getToolApprovals() : <agent default>`,
  * and the backend deliberately honours an explicit task-level policy as a
- * designer opt-in.
+ * designer opt-in. So a bare `PUT` grant would let the operator propose a
+ * document in which one nested field among forty silently disables every future
+ * approval — reviewed, technically, but not reviewably.
  *
- * So an operator able to `PUT` an llmstore document could propose a write to
- * **its own** config setting `toolApprovals.requireApproval: []`. That write is
- * gated and a human sees it — but what they see is a large LLM config document
- * in which one nested field silently disables every future approval. One
- * approved, near-unreviewable write and the operator is permanently ungated.
- * That is precisely the self-gate-stripping risk `PUT /agentstore/agents/{id}`
- * and `PUT /groupstore/groups/{id}` are excluded for; the rule is simply
- * applied consistently: **no document that can carry a gate is writable.**
+ * **What makes it safe.** `gate-guard.ts` refuses, as a hard control rather
+ * than a warning label, any llmstore write whose body carries a
+ * `toolApprovals` key at all (and any whose body cannot be read in full to
+ * prove it does not). A body with no task-level `toolApprovals` resolves to
+ * `null`, so the agent-level gate applies — the operator can therefore change
+ * what an agent *says and runs*, and cannot change what *gates* it. Removing a
+ * gate that was protecting something is not reachable: falling back to the
+ * agent-level gate can only leave a task as protected as its own agent already
+ * was.
  *
- * An escalation flag is not sufficient here. `escalation-flags.ts` is an
- * attention aid by its own explicit design ("not a security control"), and a
+ * The residual, stated plainly: an agent whose task-level override was
+ * *stricter* than its agent-level gate loses that extra strictness if the
+ * operator rewrites the document without it. That is a narrowing of one task's
+ * special protection, never an ungated agent, and the write is still approved
+ * by a human who can see the whole document.
+ *
+ * An escalation flag would NOT have been sufficient — `escalation-flags.ts` is
+ * an attention aid by its own explicit design ("not a security control"), and a
  * complete bypass of the approval mechanism is not something to defend with a
- * warning label an approver can skim past.
- *
- * The cost is real and should not be papered over: the system prompt lives in
- * this document (`parameters.systemMessage`), so the operator cannot edit an
- * agent's prompt or model — only its rules, outputs, slot-filling, dictionary
- * and tool wiring. Restoring that safely needs a backend change (a task-level
- * `toolApprovals` must not be able to WEAKEN an inherited agent-level gate —
- * the same defensive demotion the backend already applies to an inherited
- * `AUTO_APPROVE` timeout policy). Until that exists, this stays out.
+ * warning an approver can skim past. That is exactly why the guard blocks
+ * Approve instead of annotating it.
  */
-const WRITABLE_EXTENSION_STORES = WORKFLOW_EXTENSION_STORES.filter(
-  (store) => store !== "llmstore/llms",
-);
+const WRITABLE_EXTENSION_STORES = WORKFLOW_EXTENSION_STORES;
 
 /**
  * Read endpoints the operator is allowed to call.
@@ -119,6 +121,24 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /administration/coordinator/status",
   "GET /administration/logs",
   "GET /administration/quotas",
+  // EDDI's own documentation, served read-only over REST since EDDI 6.2.0
+  // precisely so an OpenAPI-generated agent picks it up as ordinary tools
+  // (`DocsService`; see `docs/mcp-server.md` → "The same docs over REST" in the
+  // EDDI backend repo). The `eddi://docs/*` MCP *resources* covering the same
+  // files do NOT reach an agent — EDDI's own MCP client consumes tools and
+  // never calls `resources/read` — so these two endpoints are the only way the
+  // operator can read the platform's documentation. The runtime doc set is
+  // smaller than the repository's, so the index has to be read rather than
+  // assumed: hence both entries, not just the by-name one.
+  //
+  // These two entries also set the Manager's backend floor: findMissingEndpoints
+  // hard-refuses activation when the deployment's spec lacks an allow-listed
+  // path, so operator activation now requires EDDI >= 6.2.0 unconditionally
+  // (previously only caller-identity auth did). Deliberate — accepted over an
+  // optional-endpoints validation tier, which would let the prompt promise a
+  // docs capability the agent was silently never granted.
+  "GET /administration/docs",
+  "GET /administration/docs/{name}",
   // Schedules — added alongside WRITE_ENDPOINTS' schedule disable: without this
   // the operator could stop a runaway job but never see it to know to.
   "GET /schedulestore/schedules",
@@ -173,10 +193,13 @@ export const READ_ENDPOINTS: readonly string[] = [
  *   field that gates a write** — verified field-by-field against the backend
  *   models, not assumed. A bad edit here is reviewable and reversible exactly
  *   like any other config change; it cannot touch the gate that is reviewing
- *   it. `llmstore` is the one workflow-extension store that FAILS that test
- *   and is therefore writable only for reads — see
- *   {@link WRITABLE_EXTENSION_STORES} for the full reasoning and the
- *   capability cost.
+ *   it.
+ * - `POST`/`PUT` on `llmstore` — the agent's prompt, model and tool switches.
+ *   This is the ONE writable store whose document CAN carry a gate
+ *   (`Task.toolApprovals`), so it is bound only in combination with
+ *   `gate-guard.ts`, which hard-refuses any llmstore write carrying that field.
+ *   See {@link WRITABLE_EXTENSION_STORES} for the full reasoning and the
+ *   residual. Do not grant this without that guard.
  * - `POST /administration/agents/setup` and `.../setup-api` — build a whole
  *   new agent (standard, and OpenAPI-spec-backed) in one call. Unlike an
  *   update, a create has no prior version to diff against, so "does this body
@@ -195,15 +218,21 @@ export const READ_ENDPOINTS: readonly string[] = [
  *   diffing one they cannot see.
  *
  * Deliberately NOT here, regardless of how safe the request would look:
- * `PUT /agentstore/agents/{id}`, `PUT /groupstore/groups/{id}`, and every
- * `llmstore` write — the documents that carry a gate of their own
+ * `PUT /agentstore/agents/{id}` and `PUT /groupstore/groups/{id}` — the
+ * full-document updates that carry a gate of their own
  * (`AgentConfiguration.hitlConfig.toolApprovals`; `AgentGroupConfiguration
- * .hitlConfig` plus each `DiscussionPhase.requiresApproval`;
- * `LlmConfiguration.Task.toolApprovals`, which fully replaces the agent-level
- * gate). A create can be checked in isolation — "does this new document have a
- * gate" needs no prior state — but a full-document *update* cannot: "was the
- * gate just weakened" is a diff question, and nothing here has a prior version
- * to diff against.
+ * .hitlConfig` plus each `DiscussionPhase.requiresApproval`). A create can be
+ * checked in isolation — "does this new document have a gate" needs no prior
+ * state — but a full-document *update* cannot: "was the gate just weakened" is
+ * a diff question, and nothing here has a prior version to diff against.
+ *
+ * `llmstore` writes ARE granted, and are the one exception to that rule: its
+ * `Task.toolApprovals` carries a gate too, but the exception is bought by a
+ * separate control rather than by an argument. `gate-guard.ts` refuses any
+ * llmstore write that carries the field, or that cannot be shown not to —
+ * which converts "was the gate weakened" from an unanswerable diff question
+ * into an answerable property of the body alone. Do not grant `llmstore`
+ * without that guard, and do not weaken the guard while this stays granted.
  * `escalation-flags.ts` deliberately stays a pure function of the resolved
  * body alone (see its own doc comment), so it cannot answer that question
  * either — extending it to try would mean fetching and comparing prior state
@@ -287,44 +316,38 @@ export function buildToolApprovals(): import("@/lib/api/hitl").ToolApprovalsConf
 }
 
 /**
- * Verified facts `isWriteScopeAvailable` requires — never an optimistic flag a
- * caller can set to unblock the UI. Each fact names the specific thing that has
- * to be independently true; a caller that cannot honestly assert one leaves it
- * `false` rather than approximating.
- */
-export interface WriteScopeFacts {
-  /** setup-api accepted a `hitlConfig` and it round-trips on read-back — not
-   *  merely that the request didn't 400. */
-  backendAcceptsHitlConfig: boolean;
-  /** Every version of the agent document was read back and the gate verified
-   *  present and sane on each — not just the version most recently deployed. */
-  gateVerifiedOnEveryVersion: boolean;
-  /** Tool calls must run as the real caller. `"none"` cannot support attributed
-   *  approval decisions or self-approval prevention. */
-  authMode: "none" | "caller-identity";
-  /** An approval surface capable of actually resolving a pause is mounted —
-   *  otherwise a gated write pauses forever with no way to unblock it. */
-  approvalSurfaceMounted: boolean;
-}
-
-/**
  * Whether the `read_write` scope can be offered.
  *
- * This is the approval seam. It is a function, not a constant, so the
- * invariant "no writes without a verified gate" is enforced at the one place
- * scope is chosen, rather than restated in the UI. Every fact must hold, and
- * `WRITE_ENDPOINTS` must be non-empty — so this returns `false` unconditionally
- * until a future change deliberately populates the write allow-list, whatever
- * the caller passes in.
+ * This used to be a four-fact precondition (backend accepts `hitlConfig`, gate
+ * verified on every version of the PREVIOUS operator, caller-identity auth, a
+ * mounted approval surface) — which made write access a two-step bootstrap:
+ * activate read-only, come back, reconfigure. That gated the OFFER on facts the
+ * activation pipeline now proves about the operator it is actually creating,
+ * which is strictly stronger evidence than a verification remembered from a
+ * predecessor agent:
+ *
+ * - `useActivateOperator` reads the gate back from the just-provisioned
+ *   document (`verifyGateInstalled`) — the old "backend accepts hitlConfig" and
+ *   "gate verified" facts, proven about the right agent.
+ * - `enforceWriteCanaryGate` then proves EMPIRICALLY that a real gated write
+ *   pauses, and rolls the whole activation back (undeploy, delete, clear the
+ *   config variable) on anything but a clean pause. A first-activation write
+ *   grant therefore cannot survive a broken gate — it is refused, not risked.
+ * - The approval surface is unconditionally mounted (`ApprovalBanner` renders
+ *   whenever a conversation pauses, for every active operator).
+ * - Caller-identity is no longer demanded here: on an OIDC deployment,
+ *   `authMode: "none"` cannot activate at all (the form blocks it — tool calls
+ *   would 401), so every write-capable operator there runs as the caller
+ *   anyway; on a no-auth deployment there are no identities to attribute
+ *   approvals to in the first place, and refusing writes because of that would
+ *   make the scope permanently unreachable exactly where EDDI is being
+ *   evaluated.
+ *
+ * What remains is the one fact activation cannot establish: there must be
+ * something to grant. `false` only while `WRITE_ENDPOINTS` is empty.
  */
-export function isWriteScopeAvailable(facts: WriteScopeFacts): boolean {
-  return (
-    WRITE_ENDPOINTS.length > 0 &&
-    facts.backendAcceptsHitlConfig &&
-    facts.gateVerifiedOnEveryVersion &&
-    facts.authMode === "caller-identity" &&
-    facts.approvalSurfaceMounted
-  );
+export function isWriteScopeAvailable(): boolean {
+  return WRITE_ENDPOINTS.length > 0;
 }
 
 /** Resolve the endpoint list for a scope. */

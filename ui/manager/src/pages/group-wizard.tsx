@@ -297,7 +297,7 @@ export function GroupWizardPage() {
           name: `${state.name} — ${slot.displayName}`.trim(),
           systemPrompt: slot.systemPrompt || `You are ${slot.displayName}${slot.role ? `, a ${slot.role} expert` : ""}. Provide clear, actionable insights.`,
           provider: slot.provider || "anthropic",
-          model: slot.model || (LLM_PROVIDERS.find(p => p.id === (slot.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-4-6"),
+          model: slot.model || (LLM_PROVIDERS.find(p => p.id === (slot.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-5"),
           apiKey: slot.apiKey || undefined,
           deploy: true,
         });
@@ -321,7 +321,7 @@ export function GroupWizardPage() {
           name: `${state.name} — Moderator`.trim(),
           systemPrompt: updatedModerator.systemPrompt || "You are a skilled moderator. Synthesize the discussion into a clear, balanced summary.",
           provider: updatedModerator.provider || "anthropic",
-          model: updatedModerator.model || (LLM_PROVIDERS.find(p => p.id === (updatedModerator!.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-4-6"),
+          model: updatedModerator.model || (LLM_PROVIDERS.find(p => p.id === (updatedModerator!.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-5"),
           apiKey: updatedModerator.apiKey || undefined,
           deploy: true,
         });
@@ -1100,7 +1100,7 @@ function MembersStep({
       name: `${state.name} — ${slot.displayName}`.trim(),
       systemPrompt: slot.systemPrompt || `You are ${slot.displayName}${slot.role ? `, a ${slot.role} expert` : ""}. Provide clear, actionable insights from your domain perspective.`,
       provider: slot.provider || "anthropic",
-      model: slot.model || (LLM_PROVIDERS.find(p => p.id === (slot.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-4-6"),
+      model: slot.model || (LLM_PROVIDERS.find(p => p.id === (slot.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-5"),
       apiKey: slot.apiKey || undefined,
       deploy: true,
     };
@@ -1131,7 +1131,7 @@ function MembersStep({
       name: `${state.name} — Moderator`.trim(),
       systemPrompt: mod.systemPrompt || "You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary that captures key insights, areas of agreement, and remaining disagreements.",
       provider: mod.provider || "anthropic",
-      model: mod.model || (LLM_PROVIDERS.find(p => p.id === (mod.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-4-6"),
+      model: mod.model || (LLM_PROVIDERS.find(p => p.id === (mod.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-5"),
       apiKey: mod.apiKey || undefined,
       deploy: true,
     };

@@ -1126,7 +1126,7 @@
     "cascadeInAgent": "在代理模式（含工具）中也使用级联",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "例如 claude-sonnet-4-6",
+    "cascadeModelName": "例如 claude-sonnet-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "空 = 始终接受",
     "cascadeTimeout": "超时 (毫秒)",
@@ -3480,12 +3480,12 @@
     "configError": "无法加载操作员配置",
     "empty": {
       "title": "平台操作员已关闭",
-      "description": "开启后，你可以与一个智能体对话，它能查看你的智能体、工作流、会话、部署和日志，并解释所发现的内容。它是只读的，无法做任何修改。",
+      "description": "开启后即可与一个代理对话，它可以检查您的代理、工作流、会话、部署和日志——并在您批准每项更改后为您执行操作。",
       "action": "启用平台操作员"
     },
     "discovery": {
       "title": "认识你的平台操作员",
-      "description": "一个能查看并解释本部署的助手。默认关闭，只读，一键启用。",
+      "description": "一个可检查并操作此部署的助手。默认关闭；它做出的每项更改都会暂停等待您的批准。",
       "action": "启用"
     },
     "activation": {
@@ -3506,6 +3506,7 @@
       "authNoneBlocked": "本部署已启用身份验证，未经身份验证的工具调用会被拒绝。操作员虽能成功部署，但随后每次查询都会失败。请改选「你的身份」。",
       "scope": {
         "label": "权限范围",
+        "default": "默认",
         "hint": "操作员被允许执行的操作。每次写入仍会等待你的批准——请参阅下方的安全规则。",
         "readOnly": {
           "label": "只读",
@@ -3515,8 +3516,6 @@
           "label": "读写",
           "description": "还可以创建和修改智能体与智能体群组、部署、取消部署、禁用失控的计划任务，以及编辑智能体的描述——每一项都会先等待你的批准。"
         },
-        "unavailableNotVerified": "暂不可用——尚未验证此操作员的审批关卡是否可靠。请在状态面板中检查连接，或在下方选择“你的身份”，然后重新配置。",
-        "unavailableFirstActivation": "首次激活时不可用。请先以只读方式激活，以证明审批关卡可靠，然后重新配置以授予写入权限。",
         "writeWarning": "激活将运行一次写入金丝雀测试：一次真实、无害的测试写入，必须在此部署完成前等待批准。如果它没有暂停，激活将被拒绝，操作员将被移除，而不是带着未经验证的写入关卡继续部署。"
       },
       "safetyPreamble": "安全规则（不可编辑）",
@@ -3620,7 +3619,10 @@
         "agentCreatedWithExternalTools": "该智能体正在创建时被授予外部 MCP 服务器提供的全部工具。具体有哪些工具由该服务器决定，并且它之后可以更改。",
         "unchecked": "正文过长,无法扫描是否存在权限授予——请在批准前完整阅读。"
       },
-      "blockedSelfTarget": "智能体不能修改自身定义，而此请求指向操作员自己的智能体（{{agentId}}）。只要它存在，整批请求都无法批准——请拒绝，并在该智能体自己的页面上进行此更改。"
+      "blockedSelfTarget": "智能体不能修改自身定义，而此请求指向操作员自己的智能体（{{agentId}}）。只要它存在，整批请求都无法批准——请拒绝，并在该智能体自己的页面上进行此更改。",
+      "blockedGateCarrying": "此请求写入的 LLM 配置会设置它自己的审批门（toolApprovals），从而取代正在审核它的审批门。只要它存在，整批请求都无法批准——请拒绝，并在该代理自己的页面上修改审批门。",
+      "blockedGateUnverifiable": "此请求写入的 LLM 配置内容无法完整读取——过大而无法显示，或不是有效的 JSON——因此无法确认其中不含审批门覆盖设置。只要它存在，整批请求都无法批准——请拒绝，并在该代理自己的页面上进行此更改。",
+      "blockedGateUnpinned": "此请求写入 LLM 配置，但未被固定，因此实际执行的内容可能与此处显示的不同，无法确认其中不含审批门覆盖设置。只要它存在，整批请求都无法批准——请拒绝，并在该代理自己的页面上进行此更改。"
     },
     "starters": {
       "whatsDeployed": "现在部署了哪些内容？",

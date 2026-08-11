@@ -97,7 +97,7 @@ export function CascadeStepCard({
           value={params.model ?? ""}
           onChange={(e) => setParam("model", e.target.value)}
           readOnly={readOnly}
-          placeholder={t("llmEditor.cascadeModelName", "e.g. claude-sonnet-4-6")}
+          placeholder={t("llmEditor.cascadeModelName", "e.g. claude-sonnet-5")}
           className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
         {!readOnly && (

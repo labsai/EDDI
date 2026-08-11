@@ -1138,7 +1138,7 @@
     "cascadeInAgent": "Utiliser aussi la cascade en mode agent (avec outils)",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "ex. claude-sonnet-4-6",
+    "cascadeModelName": "ex. claude-sonnet-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "vide = toujours accepter",
     "cascadeTimeout": "Délai max. (ms)",
@@ -3508,12 +3508,12 @@
     "configError": "Impossible de charger la configuration de l'opérateur",
     "empty": {
       "title": "L'opérateur de plateforme est désactivé",
-      "description": "Activez-le pour discuter avec un agent capable d'inspecter vos agents, workflows, conversations, déploiements et journaux, et d'expliquer ce qu'il trouve. Il est en lecture seule et ne peut rien modifier.",
+      "description": "Activez-le pour discuter avec un agent capable d'inspecter vos agents, workflows, conversations, déploiements et journaux — et, avec votre approbation de chaque modification, de les piloter pour vous.",
       "action": "Activer l'opérateur de plateforme"
     },
     "discovery": {
       "title": "Découvrez votre opérateur de plateforme",
-      "description": "Un assistant qui inspecte et explique ce déploiement. Désactivé par défaut, en lecture seule, un clic pour l'activer.",
+      "description": "Un assistant qui inspecte et pilote ce déploiement. Désactivé par défaut ; chaque modification attend votre approbation.",
       "action": "Activer"
     },
     "activation": {
@@ -3534,6 +3534,7 @@
       "authNoneBlocked": "L'authentification est activée sur ce déploiement : les appels d'outils non authentifiés seraient rejetés. L'opérateur se déploierait correctement puis échouerait à chaque recherche. Choisissez plutôt « Votre identité ».",
       "scope": {
         "label": "Capacité",
+        "default": "Par défaut",
         "hint": "Ce que l'opérateur est autorisé à faire. Chaque écriture reste en attente de votre approbation — voir les règles de sécurité ci-dessous.",
         "readOnly": {
           "label": "Lecture seule",
@@ -3543,8 +3544,6 @@
           "label": "Lecture et écriture",
           "description": "Peut aussi créer et modifier des agents et des groupes d'agents, déployer, annuler le déploiement, désactiver une planification incontrôlée et modifier le descripteur d'un agent — chacune de ces actions étant d'abord soumise à votre approbation."
         },
-        "unavailableNotVerified": "Pas encore disponible — la passerelle d'approbation de cet opérateur n'a pas été vérifiée comme fiable. Vérifiez la connexion depuis le panneau d'état, ou choisissez « Votre identité » ci-dessous, puis reconfigurez.",
-        "unavailableFirstActivation": "Non disponible lors de la première activation. Activez d'abord en lecture seule pour prouver que la passerelle d'approbation est fiable, puis reconfigurez pour accorder l'accès en écriture.",
         "writeWarning": "L'activation exécutera un test canari d'écriture : une écriture de test réelle et inoffensive qui doit rester en attente d'approbation avant la fin de ce déploiement. Si elle ne se met pas en pause, l'activation est refusée et l'opérateur est supprimé plutôt que laissé déployé avec une passerelle d'écriture non vérifiée."
       },
       "safetyPreamble": "Règles de sécurité (non modifiables)",
@@ -3648,7 +3647,10 @@
         "agentCreatedWithExternalTools": "Cet agent est créé avec l'ensemble des outils qu'un serveur MCP externe propose. C'est ce serveur qui décide lesquels, et il peut les modifier par la suite.",
         "unchecked": "Le corps était trop long pour être analysé à la recherche d'octrois de capacités — lisez-le en entier avant d'approuver."
       },
-      "blockedSelfTarget": "Un agent ne peut pas modifier sa propre définition, et cette requête vise l'agent de l'opérateur lui-même ({{agentId}}). Tant qu'elle est présente, l'ensemble du lot ne peut pas être approuvé — rejetez-la et effectuez cette modification depuis la page de cet agent."
+      "blockedSelfTarget": "Un agent ne peut pas modifier sa propre définition, et cette requête vise l'agent de l'opérateur lui-même ({{agentId}}). Tant qu'elle est présente, l'ensemble du lot ne peut pas être approuvé — rejetez-la et effectuez cette modification depuis la page de cet agent.",
+      "blockedGateCarrying": "Cette requête écrit une configuration LLM qui définit sa propre barrière d'approbation (toolApprovals), ce qui remplacerait la barrière qui l'examine. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et modifiez la barrière depuis la page de l'agent.",
+      "blockedGateUnverifiable": "Cette requête écrit une configuration LLM dont le corps ne peut être lu intégralement — trop volumineux ou JSON invalide — ; on ne peut donc pas confirmer l'absence de remplacement de la barrière d'approbation. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et effectuez cette modification depuis la page de l'agent.",
+      "blockedGateUnpinned": "Cette requête écrit une configuration LLM mais n'est pas épinglée : ce qui s'exécute réellement peut différer de ce qui est affiché ici, et l'absence de remplacement de la barrière d'approbation ne peut être confirmée. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et effectuez cette modification depuis la page de l'agent."
     },
     "starters": {
       "whatsDeployed": "Qu'est-ce qui est déployé actuellement ?",

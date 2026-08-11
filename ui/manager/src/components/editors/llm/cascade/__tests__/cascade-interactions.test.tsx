@@ -50,7 +50,7 @@ describe("cascade editor — interactions drive the handlers", () => {
 
     // Step 0 — model, confidence, timeout
     const step0 = screen.getByTestId("cascade-step-0");
-    fireEvent.change(within(step0).getByPlaceholderText("e.g. claude-sonnet-4-6"), { target: { value: "gpt-4o-nano" } });
+    fireEvent.change(within(step0).getByPlaceholderText("e.g. claude-sonnet-5"), { target: { value: "gpt-4o-nano" } });
     fireEvent.change(within(step0).getByPlaceholderText("empty = always accept"), { target: { value: "0.85" } });
     fireEvent.change(within(step0).getByPlaceholderText("30000"), { target: { value: "8000" } });
     // Provider select (first select inside the step card)

@@ -95,7 +95,7 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
                     ...task.conversationSummary,
                     enabled: e.target.checked,
                     llmProvider: task.conversationSummary?.llmProvider ?? "anthropic",
-                    llmModel: task.conversationSummary?.llmModel ?? "claude-sonnet-4-6",
+                    llmModel: task.conversationSummary?.llmModel ?? "claude-sonnet-5",
                     maxSummaryTokens: task.conversationSummary?.maxSummaryTokens ?? 800,
                     recentWindowSteps: task.conversationSummary?.recentWindowSteps ?? 5,
                     maxRecallTurns: task.conversationSummary?.maxRecallTurns ?? 20,
@@ -151,7 +151,7 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
                       })
                     }
                     readOnly={readOnly}
-                    placeholder="claude-sonnet-4-6"
+                    placeholder="claude-sonnet-5"
                     className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                   />
                 </div>

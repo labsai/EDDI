@@ -14,6 +14,7 @@ import { useTheme } from "./theme-provider";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { PlatformStatus } from "./platform-status";
+import { OperatorDrawer } from "@/components/operator/operator-drawer";
 
 interface TopBarProps {
   onMenuClick: () => void;
@@ -200,23 +201,28 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
       {/* Center: Platform Status */}
       <PlatformStatus />
 
-      {/* Right: Controls */}
-      <div className="flex items-center gap-2" data-tour="topbar-personalize">
-        {/* Language selector */}
-        <div className="relative flex items-center gap-1">
-          <Globe className="h-4 w-4 text-muted-foreground" />
-          <select
-            value={i18n.language}
-            onChange={(e) => i18n.changeLanguage(e.target.value)}
-            data-testid="language-selector"
-            className="appearance-none rounded-md bg-transparent px-2 py-1.5 text-sm text-foreground outline-none transition-colors hover:bg-secondary focus:ring-2 focus:ring-ring"
-          >
-            {languages.map((lang) => (
-              <option key={lang.code} value={lang.code}>
-                {lang.label}
-              </option>
-            ))}
-          </select>
+      {/* Right: Operator launcher, then the personalization controls. The
+          operator sits outside the tour target — the tour step is about theme
+          and language, not about the operator. */}
+      <div className="flex items-center gap-2">
+        <OperatorDrawer />
+
+        <div className="flex items-center gap-2" data-tour="topbar-personalize">
+          {/* Language selector */}
+          <div className="relative flex items-center gap-1">
+            <Globe className="h-4 w-4 text-muted-foreground" />
+            <select
+              value={i18n.language}
+              onChange={(e) => i18n.changeLanguage(e.target.value)}
+              data-testid="language-selector"
+              className="appearance-none rounded-md bg-transparent px-2 py-1.5 text-sm text-foreground outline-none transition-colors hover:bg-secondary focus:ring-2 focus:ring-ring"
+            >
+              {languages.map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.label}
+                </option>
+              ))}
+            </select>
         </div>
 
         {/* Theme toggle */}
@@ -294,6 +300,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
             )}
           </div>
         )}
+        </div>
       </div>
     </header>
   );

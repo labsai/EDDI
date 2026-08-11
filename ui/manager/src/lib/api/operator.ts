@@ -82,14 +82,21 @@ export const OPERATOR_VARIABLE_KEY = "platform.operator";
 export function defaultOperatorConfig(promptBody?: string): OperatorConfig {
   // Derived from the scope set here rather than restated by callers, so the
   // seeded body can never describe a capability this config does not grant.
-  const scope: OperatorScope = "read_only";
+  //
+  // Write-gated is the DEFAULT posture, not an upgrade: every write pauses for
+  // human approval (buildToolApprovals gates all non-GET methods), and
+  // activation refuses to leave a write-capable operator deployed unless a real
+  // test write provably paused (enforceWriteCanaryGate rolls back otherwise).
+  // An admin who wants a purely inspecting operator picks read_only in the
+  // activation form.
+  const scope: OperatorScope = "read_write";
   return {
     enabled: false,
     agentId: null,
     version: null,
     environment: "production",
     provider: "anthropic",
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-5",
     credentialKey: null,
     scope,
     authMode: "none",

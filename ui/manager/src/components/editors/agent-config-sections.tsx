@@ -932,7 +932,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmModel", "LLM Model")}</label>
-                      <DebouncedInput type="text" value={dream.llmModel ?? "claude-sonnet-4-6"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-4-6" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedInput type="text" value={dream.llmModel ?? "claude-sonnet-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-3">

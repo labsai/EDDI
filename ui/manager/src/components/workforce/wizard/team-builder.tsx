@@ -209,7 +209,7 @@ function MemberCard({
                   onChange={(e) => update({ model: e.target.value })}
                   placeholder={t(
                     "Workforce.wizard.modelPlaceholder",
-                    "e.g. claude-sonnet-4-6",
+                    "e.g. claude-sonnet-5",
                   )}
                   className="h-9 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 />
