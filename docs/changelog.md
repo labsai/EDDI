@@ -7,6 +7,48 @@
 
 
 
+## 🏷️ docs(release): the release guide told you to push a tag that triggers nothing (2026-08-11)
+
+**Repo:** EDDI (`chore/eddi-version-6-3-0`)
+
+`ci.yml` triggers on `tags: ["[0-9]*"]` — a release tag must start with a digit. `docs/release-
+versioning.md` instructed `git tag v6.0.0` in eight places, and `docs/release-signing.md` in three
+more. A `v`-prefixed tag matches that filter nowhere, and **GitHub reports no error for a tag that
+matches no workflow**: the push succeeds, and nothing runs. No build, no image, no `latest`, no
+cosign signature, no SLSA attestation, no GitHub release. Following the release guide verbatim
+produced a silent non-release — the worst failure shape available, since there is nothing red to
+notice.
+
+AGENTS.md §1 already documented the digit-prefixed rule, so the two release docs were the artefacts
+disagreeing with both the workflow and the rest of the documentation. Fixed in favour of the
+workflow, which is the executable truth.
+
+Three further claims were checked against `ci.yml` while in there, rather than assumed:
+
+1. **The tag→image table was wrong twice over.** It mapped "Git tag `v6.0.0`" → `labsai/eddi:6.0.0`,
+   but CI uses the tag name *verbatim* (`PRIMARY_TAG="${GITHUB_REF#refs/tags/}"`), so the `v` would
+   not be stripped even if the tag did fire. Both halves corrected.
+2. **The `6.3` and `6` moving aliases were undocumented.** CI publishes them for stable releases
+   only, gated on `^([0-9]+)\.([0-9]+)\.([0-9]+)$` so an RC never claims them. They are user-facing
+   — `helm/eddi/values.yaml` warns against deploying from the mutable major tag — yet the tag
+   strategy table listed neither. Added, with the "pin the patch version" guidance the k8s and Helm
+   manifests already follow.
+3. **The job table said docker runs on tag `v*`.** Same defect in a second spelling; now `[0-9]*`,
+   and it records that `[skip docker]` is ignored on tags.
+
+Also: the canonical-version line quoted `<version>6.0.0</version>` and had sat three releases stale,
+so it now names the `<version>` element and the `grep` CI actually uses instead of a number that
+rots. The running example moved to 6.3.0 throughout, the lifecycle diagram was realigned (its
+columns were already off by four before this change), and a pointer was added that `pom.xml` is not
+the only artefact carrying the release number.
+
+Verified no `v`-prefixed tag command survives anywhere in tracked files; the only remaining `v6.x`
+strings in these two pages are the warnings about the prefix itself.
+
+---
+
+
+
 ## 🔖 chore(release): bump EDDI version 6.2.0 → 6.3.0 (2026-08-11)
 
 **Repo:** EDDI (`chore/eddi-version-6-3-0`)

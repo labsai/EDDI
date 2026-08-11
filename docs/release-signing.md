@@ -132,16 +132,21 @@ This outputs the full certificate chain and Rekor log entry as JSON.
 
 ## Git Tag Signing
 
-For version tags in the Git repository (e.g., `v6.0.0`, `v6.0.0-RC2`), maintainers sign tags using GPG or SSH keys:
+For version tags in the Git repository (e.g., `6.3.0`, `6.3.0-RC2`), maintainers sign tags using GPG or SSH keys:
 
 ```bash
 # Create a signed tag
-git tag -s v6.0.0 -m "Release 6.0.0"
-git push origin v6.0.0
+git tag -s 6.3.0 -m "Release 6.3.0"
+git push origin 6.3.0
 
 # Verify a signed tag
-git tag -v v6.0.0
+git tag -v 6.3.0
 ```
+
+> **Release tags carry no `v` prefix.** `ci.yml` triggers on `tags: ["[0-9]*"]`, so `v6.3.0` matches
+> nothing and silently runs no workflow — no build, no image, and none of the signing or attestation
+> described on this page. Signing the tag does not change that; a signed `v6.3.0` is just as inert.
+> See [Release & Versioning Strategy](release-versioning.md#version-format).
 
 > **Note:** The primary release integrity guarantee is provided by the Docker image signing described above. Git tag signing provides an additional layer of assurance that the tag was created by an authorized maintainer.
 
