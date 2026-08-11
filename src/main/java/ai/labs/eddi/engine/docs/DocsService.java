@@ -43,22 +43,39 @@ public class DocsService {
     String docsPath;
 
     /**
+     * Deployment-wide docs kill switch. All four surfaces serving documentation —
+     * REST list/read, MCP resources, MCP tools — delegate to this class, so one
+     * flag here honestly disables all of them at once. The previous way to achieve
+     * this was pointing {@code eddi.docs.path} at a directory that does not exist,
+     * which "worked" but read as a misconfiguration in every log line and
+     * diagnostic. A policy deserves a switch, not a hack.
+     */
+    @ConfigProperty(name = "eddi.docs.enabled", defaultValue = "true")
+    boolean docsEnabled = true; // initialized so plain construction (tests) matches the config default
+
+    /**
      * The configured docs directory, for diagnostics. Callers surface this when
      * {@link #isAvailable()} is false — "0 documents" reads as success, whereas a
      * mis-set {@code eddi.docs.path} is the realistic misconfiguration and should
      * say so.
      */
     public String docsDirectory() {
-        return docsPath;
+        return docsEnabled ? docsPath : docsPath + " (disabled via eddi.docs.enabled=false)";
     }
 
-    /** Whether the configured docs directory exists and is a directory. */
+    /**
+     * Whether docs are enabled and the configured directory exists and is a
+     * directory.
+     */
     public boolean isAvailable() {
-        return Files.isDirectory(Path.of(docsPath));
+        return docsEnabled && Files.isDirectory(Path.of(docsPath));
     }
 
     /** Sorted names of the available docs, without the {@code .md} suffix. */
     public List<String> listDocs() {
+        if (!docsEnabled) {
+            return List.of();
+        }
         Path docsDir = Path.of(docsPath);
         if (!Files.isDirectory(docsDir)) {
             LOGGER.warnf("Docs directory not found: %s", docsPath);
@@ -100,6 +117,12 @@ public class DocsService {
      * the name is unusable or no such doc exists.
      */
     public String readDoc(String name) {
+        if (!docsEnabled) {
+            // Reads as "no such page" to every surface — deliberately identical to
+            // the absent-directory case, so disabling docs does not create a new
+            // response shape callers never handled.
+            return null;
+        }
         if (!isValidDocName(name)) {
             LOGGER.warnf("Rejected doc name: %s", name);
             return null;
