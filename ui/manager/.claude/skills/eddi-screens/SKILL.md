@@ -75,6 +75,10 @@ Rules that hold across pages:
 Loading → error → empty → content, as guarded blocks (the `agents.tsx` form):
 
 ```tsx
+// A failed *background* refetch keeps the last good data (see the gating rule
+// below), so only a failed initial load has nothing left to show.
+const loadFailed = isError && !data;
+
 {isLoading && (
   <div className="cq-card-grid" data-testid="agents-loading">
     {Array.from({ length: 4 }).map((_, i) => (
@@ -86,12 +90,12 @@ Loading → error → empty → content, as guarded blocks (the `agents.tsx` for
   </div>
 )}
 
-{isError && (
+{loadFailed && (
   <ErrorState message={t("common.error", "Something went wrong")}
               onRetry={() => refetch()} retryLabel={t("common.retry", "Retry")} />
 )}
 
-{!isLoading && !isError && items.length === 0 && (
+{!isLoading && !loadFailed && items.length === 0 && (
   <EmptyState icon={Bot}
               title={search ? t("common.noResults", "No results found")
                             : t("agents.empty", "No agents yet")}
