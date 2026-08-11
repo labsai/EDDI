@@ -19,6 +19,11 @@
 | `VaultSecretProvider` | "stored for visibility/documentation but NOT enforced at resolution time" | True of *that class*, reads as "not enforced anywhere" |
 | `EncryptedSecret` | "for visibility/documentation only" (twice) | Same |
 | `AgentSetupService` | "Narrowing this list would imply an enforcement that does not exist" | The enforcement now exists |
+| `ISecretProvider`, `SecretReference`, `IRestSecretStore`, `SecretResolver` | "access control is via configuration authorship" | Found by grepping the phrase rather than fixing one file per review comment |
+
+`VaultGrantChecker` and its test quote the old wording deliberately — "was documented as…" — and keep it; that is history, not a stale claim.
+
+A review comment (CodeRabbit, #667) also caught that "a violation stops the agent coming up" is only true under `enforce`; `warn` logs and allows, `off` does not check. Every place asserting the blocking behavior now names `eddi.vault.grant-enforcement` as what decides it, including the doc's own lead paragraph.
 
 This is the same text that, earlier in this review, caused a proposed narrowing of `allowedAgents` to be reverted as security theater — the documentation was accurate then and became false when the behavior changed under it. Left alone it now misleads in the opposite direction.
 

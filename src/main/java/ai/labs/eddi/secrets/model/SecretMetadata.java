@@ -14,10 +14,15 @@ import java.util.List;
  * exposed through this record.
  * <p>
  * Secrets are stored at the <b>tenant level</b>. Which agents may use one is
- * governed by {@code allowedAgents}, enforced when an agent is deployed (see
+ * governed by {@code allowedAgents}, checked when an agent is deployed (see
  * {@link ai.labs.eddi.secrets.VaultGrantGate}) rather than when a secret is
- * resolved — a violation stops the agent coming up instead of failing a live
- * conversation.
+ * resolved, so a misconfiguration surfaces before the agent serves traffic
+ * rather than in the middle of a live conversation.
+ * <p>
+ * What a violation costs depends on {@code eddi.vault.grant-enforcement}: under
+ * {@code enforce} (the default) the deployment is blocked, under {@code warn}
+ * it is logged and allowed, and under {@code off} the check does not run at
+ * all.
  *
  * @param tenantId
  *            the owning tenant

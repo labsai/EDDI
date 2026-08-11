@@ -71,11 +71,11 @@ Vault references are resolved **at runtime** when the task executes, never store
 
 ## Agent Grants (`allowedAgents`)
 
-Every stored secret carries an `allowedAgents` list — the agent IDs permitted to use it, or `["*"]` for all agents. It is enforced **when an agent is deployed**, not when a secret is resolved.
+Every stored secret carries an `allowedAgents` list — the agent IDs permitted to use it, or `["*"]` for all agents. It is checked **when an agent is deployed**, not when a secret is resolved. What a violation costs is set by [the enforcement mode](#modes) — blocked, logged, or not checked at all.
 
 ### Why deploy time, not resolution time
 
-Blocking at resolution would fail in the middle of a live conversation, after the agent is already serving users, and the operator would learn about the misconfiguration from a broken turn. The deploy-time check runs once, before any user is affected: a misconfigured agent simply does not come up, and the reason is a single ERROR line.
+Blocking at resolution would fail in the middle of a live conversation, after the agent is already serving users, and the operator would learn about the misconfiguration from a broken turn. The deploy-time check runs once, before any user is affected: in `enforce` mode a misconfigured agent simply does not come up, and the reason is a single ERROR line.
 
 The gate lives in `AgentFactory.deployAgent` — the one boundary every deployment path funnels through (REST administration, conversation-triggered deployment, the scheduled deployment poller). Placing it there rather than at each caller means it cannot be bypassed by reaching deployment through a different entry point.
 

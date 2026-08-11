@@ -13,8 +13,9 @@ import java.util.List;
  * <p>
  * Secrets are stored at the <b>tenant level</b> — identified by
  * {@code (tenantId, keyName)}. The {@code allowedAgents} field restricts which
- * agents may use the secret, enforced at deployment time by
- * {@link ai.labs.eddi.secrets.VaultGrantGate}.
+ * agents may use the secret, checked at deployment time by
+ * {@link ai.labs.eddi.secrets.VaultGrantGate}; whether a violation blocks the
+ * deployment depends on {@code eddi.vault.grant-enforcement}.
  *
  * @author ginccc
  * @since 6.0.0
