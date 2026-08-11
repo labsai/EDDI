@@ -43,7 +43,12 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
 @ApplicationScoped
 public class McpDocTools {
 
-    private static final String[] DOC_READ_ROLES = {"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver", "eddi-viewer"};
+    /**
+     * Immutable, and a {@code List} rather than an array: a {@code static final}
+     * array is still element-mutable, which is both a static-analysis finding and a
+     * real hazard for a constant that decides an authorization check.
+     */
+    private static final List<String> DOC_READ_ROLES = List.of("eddi-admin", "eddi-editor", "eddi-user", "eddi-approver", "eddi-viewer");
 
     private final DocsService docsService;
     private final SecurityIdentity identity;

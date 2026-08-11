@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 
+import java.util.Collection;
 import java.util.Map;
 
 /**
@@ -57,7 +58,7 @@ final class McpToolUtils {
      * @throws ForbiddenException
      *             if the caller holds none of the given roles
      */
-    static void requireAnyRole(SecurityIdentity identity, boolean authEnabled, String... roles) {
+    static void requireAnyRole(SecurityIdentity identity, boolean authEnabled, Collection<String> roles) {
         if (!authEnabled) {
             return;
         }
