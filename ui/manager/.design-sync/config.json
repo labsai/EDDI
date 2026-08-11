@@ -7,16 +7,60 @@
   "tsconfig": "tsconfig.app.json",
   "buildCmd": "node .design-sync/build-css.mjs",
   "cssEntry": ".design-sync/.cache/compiled.css",
-  "extraFonts": ["node_modules/@fontsource-variable/noto-sans/index.css"],
+  "extraFonts": [
+    "node_modules/@fontsource-variable/noto-sans/index.css"
+  ],
   "readmeHeader": ".design-sync/conventions.md",
-  "provider": { "component": "DesignSyncProvider" },
+  "provider": {
+    "component": "DesignSyncProvider"
+  },
   "overrides": {
-    "AccessibleDialog": { "cardMode": "single", "viewport": "560x560" },
-    "AlertDialog": { "cardMode": "single", "viewport": "560x440" },
-    "UnsavedChangesDialog": { "cardMode": "single", "viewport": "520x480" },
-    "CreateOrWizardDialog": { "cardMode": "single", "viewport": "760x620" },
-    "AgentPicker": { "cardMode": "column" },
-    "SecretKeyPicker": { "cardMode": "column" }
+    "AccessibleDialog": {
+      "cardMode": "single",
+      "viewport": "560x560"
+    },
+    "AlertDialog": {
+      "cardMode": "single",
+      "viewport": "560x440"
+    },
+    "UnsavedChangesDialog": {
+      "cardMode": "single",
+      "viewport": "520x480"
+    },
+    "CreateOrWizardDialog": {
+      "cardMode": "single",
+      "viewport": "760x620"
+    },
+    "AgentPicker": {
+      "cardMode": "column"
+    },
+    "SecretKeyPicker": {
+      "cardMode": "column"
+    },
+    "DropdownMenu": {
+      "cardMode": "single",
+      "viewport": "440x380"
+    },
+    "MockDataBanner": {
+      "cardMode": "single",
+      "viewport": "760x120"
+    },
+    "PageLoader": {
+      "cardMode": "single",
+      "viewport": "860x460"
+    },
+    "PlatformStatus": {
+      "cardMode": "single",
+      "viewport": "440x320"
+    },
+    "Sidebar": {
+      "cardMode": "single",
+      "viewport": "340x800"
+    },
+    "TopBar": {
+      "cardMode": "single",
+      "viewport": "960x160"
+    }
   },
   "componentSrcMap": {
     "AccessibleDialog": "src/components/ui/accessible-dialog.tsx",
@@ -24,6 +68,7 @@
     "Badge": "src/components/ui/badge.tsx",
     "Button": "src/components/ui/button.tsx",
     "Card": "src/components/ui/card.tsx",
+    "DropdownMenu": "src/components/ui/dropdown-menu.tsx",
     "ErrorBoundary": "src/components/ui/error-boundary.tsx",
     "Input": "src/components/ui/input.tsx",
     "Skeleton": "src/components/ui/skeleton.tsx",
@@ -37,8 +82,15 @@
     "EmptyState": "src/components/shared/empty-state.tsx",
     "ErrorState": "src/components/shared/error-state.tsx",
     "InfiniteScrollSentinel": "src/components/shared/infinite-scroll-sentinel.tsx",
+    "ModeSwitcher": "src/components/shared/mode-switcher.tsx",
+    "RefetchErrorNotice": "src/components/shared/refetch-error-notice.tsx",
     "ResourceTypeBadge": "src/components/shared/resource-type-badge.tsx",
     "SecretKeyPicker": "src/components/shared/secret-key-picker.tsx",
-    "ViewToggle": "src/components/shared/view-toggle.tsx"
+    "ViewToggle": "src/components/shared/view-toggle.tsx",
+    "MockDataBanner": "src/components/layout/mock-data-banner.tsx",
+    "PageLoader": "src/components/layout/page-loader.tsx",
+    "PlatformStatus": "src/components/layout/platform-status.tsx",
+    "Sidebar": "src/components/layout/sidebar.tsx",
+    "TopBar": "src/components/layout/top-bar.tsx"
   }
 }

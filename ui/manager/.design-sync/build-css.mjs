@@ -3,8 +3,9 @@
 // EDDI-Manager has no library dist; its app CSS (dist/assets/index-<hash>.css)
 // is hash-named (not reproducible) and pulls in Monaco/VSCode CSS the synced
 // components never use. This regenerates src/index.css's tokens + ONLY the
-// Tailwind utilities used by src/components/ui + src/components/shared + the
-// authored previews, to a fixed path: .design-sync/.cache/compiled.css.
+// Tailwind utilities used by src/components/ui + src/components/shared +
+// src/components/layout + the authored previews, to a fixed path:
+// .design-sync/.cache/compiled.css.
 //
 // Wired as cfg.buildCmd so re-sync regenerates it before the converter runs.
 // Requires @tailwindcss/cli in .ds-sync/node_modules (staged converter deps).
@@ -26,6 +27,12 @@ const scoped = [
   '@import "tailwindcss" source(none);',
   '@source "../../src/components/ui";',
   '@source "../../src/components/shared";',
+  // Required, not cosmetic: Tailwind v4 only emits an @theme token if a scanned
+  // file uses it. Nothing in ui/ or shared/ references --color-sidebar*, so
+  // without this line :root ships zero sidebar tokens and the sidebar's brand
+  // gold resolves to nothing. (The .dark overrides are plain CSS and ship
+  // regardless, which is why the gap only shows in light mode.)
+  '@source "../../src/components/layout";',
   '@source "../ds-entry.tsx";',
   '@source "../previews";',
 ].join("\n");
