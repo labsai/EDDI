@@ -58,6 +58,18 @@
                 <artifactId>jackson-core</artifactId>
                 <version>2.22.1</version>
             </dependency>
+            <!-- Override jackson-databind to fix GHSA-5gvw-p9qm-jgwh (@JsonView bypassed for
+                 @JsonUnwrapped containers) and GHSA-5jmj-h7xm-6q6v (case-insensitive
+                 deserialization bypasses per-property @JsonIgnoreProperties), both <2.22.1.
+                 Managed by the Quarkus BOM at 2.22.0, same as jackson-core above. Neither is
+                 reachable from our code — @JsonView is unused and every @JsonIgnoreProperties
+                 is class-level ignoreUnknown — but OpenSSF Scorecard counts advisories
+                 regardless of reachability. -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>2.22.1</version>
+            </dependency>
             <!-- Override reactor-netty-http to fix CVE-2025-22227 (pulled by langchain4j-azure-open-ai) -->
             <dependency>
                 <groupId>io.projectreactor.netty</groupId>
@@ -71,6 +83,15 @@
                 <groupId>org.postgresql</groupId>
                 <artifactId>postgresql</artifactId>
                 <version>42.7.13</version>
+            </dependency>
+            <!-- Override bcprov-lts8on to fix GHSA-mx76-r943-rf8g (native GCM chunking can throw
+                 a bad-tag exception on decryption, 2.73.0–2.73.10). Pulled by io.nats:jnats at
+                 2.73.10; jnats 2.26.1 still declares 2.73.10, so a bump of the parent does not
+                 clear it and the version has to be pinned here. -->
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-lts8on</artifactId>
+                <version>2.73.12</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -288,7 +309,7 @@
         <dependency>
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
-            <version>1.22.2</version>
+            <version>1.23.1</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
