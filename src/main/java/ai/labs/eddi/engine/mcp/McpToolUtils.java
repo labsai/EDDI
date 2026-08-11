@@ -46,6 +46,32 @@ final class McpToolUtils {
     }
 
     /**
+     * As {@link #requireRole}, but satisfied by <em>any</em> of the given roles.
+     * <p>
+     * EDDI has no role hierarchy — {@code hasRole} is a literal check, so a
+     * single-role requirement of {@code eddi-viewer} would refuse an
+     * {@code eddi-admin}. A tool whose REST counterpart enumerates several roles
+     * (the docs endpoints, above all) needs the same enumeration here, or the two
+     * surfaces guard the same content differently.
+     *
+     * @throws ForbiddenException
+     *             if the caller holds none of the given roles
+     */
+    static void requireAnyRole(SecurityIdentity identity, boolean authEnabled, String... roles) {
+        if (!authEnabled) {
+            return;
+        }
+        if (identity != null && !identity.isAnonymous()) {
+            for (String role : roles) {
+                if (identity.hasRole(role)) {
+                    return;
+                }
+            }
+        }
+        throw new ForbiddenException("MCP operation requires one of roles: " + String.join(", ", roles));
+    }
+
+    /**
      * Get a REST interface proxy via IRestInterfaceFactory. These proxies make HTTP
      * calls that go through the full JAX-RS workflow, including
      * DocumentDescriptorFilter which auto-creates descriptors.
