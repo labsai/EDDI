@@ -119,10 +119,19 @@ export function AgentStudioPage() {
   // descriptor or workflow fetch falls through to the normal chrome with an
   // empty pipeline, which is indistinguishable from an agent that has no
   // workflow at all.
-  if (descriptorsError || agentError || workflowError) {
-    const retryFailed = descriptorsError
+  //
+  // Each error is additionally gated on its data being absent: TanStack Query
+  // keeps the last good result when a background refetch fails (window
+  // refocus, default retry), and unmounting the whole studio — including any
+  // in-progress editor state — over a blip while usable data exists would be
+  // strictly worse than continuing to show it.
+  const descriptorsBlocked = descriptorsError && !descriptors;
+  const agentBlocked = agentError && !agentConfig;
+  const workflowBlocked = workflowError && !workflowConfig;
+  if (descriptorsBlocked || agentBlocked || workflowBlocked) {
+    const retryFailed = descriptorsBlocked
       ? refetchDescriptors
-      : agentError
+      : agentBlocked
         ? refetchAgent
         : refetchWorkflow;
     return (

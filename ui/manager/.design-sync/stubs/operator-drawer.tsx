@@ -14,10 +14,10 @@
 // assumed.
 //
 // So the converter resolves the module to this file instead, via an exact
-// `paths` entry in `tsconfig.design-sync.json` (which `config.json` points
-// `cfg.tsconfig` at). That same tsconfig type-checks `.design-sync/`, so `tsc -b`
-// validates this stub against TopBar's actual usage — if the real component's
-// signature changes, the build fails here rather than at sync time.
+// `paths` entry in `tsconfig.ds-bundle.json` — the file `config.json` points
+// `cfg.tsconfig` at. `tsconfig.design-sync.json` extends it for type-checking,
+// so `tsc -b` validates this stub against TopBar's actual usage — if the real
+// component's signature changes, the build fails here rather than at sync time.
 //
 // WHAT IT RENDERS
 // The launcher button only, in its resting state, matching the real markup so

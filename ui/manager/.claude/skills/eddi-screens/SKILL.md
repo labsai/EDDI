@@ -113,6 +113,11 @@ backend". Pick the shape by surface:
 - `ErrorState` — replaces the container. For a page or panel with nothing else to show.
   Carries `data-testid="error-state"` and `data-testid="error-state-retry"`; assert on those
   rather than on the translated copy, which changes with the locale.
+  **Gate it on the data being absent** (`isError && !data`), not on `isError` alone:
+  TanStack Query keeps the last good result when a background refetch fails (and
+  `refetchOnWindowFocus` is on by default), so an ungated branch replaces a usable page
+  with an error over a focus blip. `isError` alone is only correct when there can be no
+  cached data.
 - `RefetchErrorNotice` — a compact amber strip that keeps the last good data on screen.
   For a *background* refetch failure on a polling page, or an inline control (a picker
   inside a form) where a full error box would be out of scale. Pass an explicit `message`

@@ -165,7 +165,11 @@ export function ChannelsPage() {
             <div key={i} className="h-40 rounded-xl border border-border/50 bg-card animate-pulse" />
           ))}
         </div>
-      ) : isError ? (
+      ) : isError && !channels ? (
+        // Gated on !channels: TanStack Query keeps the last good list when a
+        // background refetch fails (refetchOnWindowFocus is on by default), and
+        // replacing usable rows with a full-page error on a focus blip is worse
+        // than showing them. Only a failed INITIAL load has nothing to show.
         <ErrorState
           message={t("common.error", "Something went wrong")}
           onRetry={() => refetch()}

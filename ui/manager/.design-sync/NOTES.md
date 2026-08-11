@@ -203,16 +203,37 @@ node .ds-sync/node_modules/esbuild/bin/esbuild .design-sync/ds-entry.tsx \
   --external:react --external:react-dom --external:react/jsx-runtime \
   --outfile=/tmp/ds-bundle.js
 
+# 1b. config.json agrees with itself and with disk: every componentSrcMap path
+#     exists, and componentSrcMap / dtsPropsFor cover the identical component
+#     set (a component in one but not the other ships broken).
+node --input-type=module -e "
+import { readFileSync, existsSync } from 'node:fs';
+const c = JSON.parse(readFileSync('.design-sync/config.json','utf8'));
+const src = Object.keys(c.componentSrcMap), dts = Object.keys(c.dtsPropsFor);
+const missing = Object.entries(c.componentSrcMap).filter(([,p]) => !existsSync(p));
+const only = [...src.filter(n=>!dts.includes(n)), ...dts.filter(n=>!src.includes(n))];
+console.log(missing.length || only.length
+  ? 'FAIL missing-paths=' + JSON.stringify(missing) + ' set-mismatch=' + JSON.stringify(only)
+  : 'OK ' + src.length + ' components, all paths exist, srcMap == dtsPropsFor');
+"
+
 # 2. Nothing heavy leaked in. All of these must print 0.
 #    NOTE: this plain esbuild call does NOT apply cfg.tsconfig's paths, so it will
 #    still show the operator subsystem. To measure what the converter actually
 #    produces, drive it through tsconfigPathsPlugin from .ds-sync/lib/bundle.mjs.
 grep -oc 'monaco\|vscode\|codicon\|JsonEditor\|tool-scopes' /tmp/ds-bundle.js
 
-# 3. The tokens actually ship. build-css minifies, so match inside the :root block
-#    rather than grepping line-wise.
+# 3. The tokens actually ship: build, then assert. compiled.css is minified
+#    (one line), so count distinct declarations, not lines — this must print
+#    the five sidebar custom properties.
 node .design-sync/build-css.mjs
+grep -o -- '--color-sidebar[a-z-]*:' .design-sync/.cache/compiled.css | sort -u
 ```
+
+> Shell gotcha, learned the hard way: in Git Bash on Windows, `node -e '<script>'`
+> one-liners can silently lose backslashes inside string-built regexes (`"\\s"`
+> arrives as `"s"`), making a checker match nothing while printing success.
+> Anything with regex escapes belongs in a `.mjs` file, not inline.
 
 The previews are type-checked by `tsconfig.design-sync.json` (wired into `tsc -b`), so
 `npm run typecheck` already catches a preview that passes a prop the component does not

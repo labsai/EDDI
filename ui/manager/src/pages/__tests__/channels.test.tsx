@@ -297,6 +297,39 @@ describe("ChannelsPage", () => {
     });
   });
 
+  // ─── View-mode persistence ──────────────────────────────────────────────
+
+  it("restores the persisted view mode on remount", async () => {
+    // Scoped cleanup: the suite's other tests assume the card-view default,
+    // so the persisted key must not leak past this test.
+    const KEY = "eddi-view-mode-channels";
+    try {
+      const first = renderWithProviders(<ChannelsPage />, {
+        initialRoute: "/manage/channels",
+      });
+      await waitFor(() => {
+        expect(screen.getAllByTestId(/^channel-card-/).length).toBeGreaterThanOrEqual(1);
+      });
+
+      const user = userEvent.setup();
+      await user.click(screen.getByTestId("view-toggle-list"));
+      await waitFor(() => {
+        expect(screen.getAllByTestId(/^channel-row-/).length).toBeGreaterThanOrEqual(1);
+      });
+
+      // Remount from scratch — the choice must come back from localStorage,
+      // not from surviving component state.
+      first.unmount();
+      renderWithProviders(<ChannelsPage />, { initialRoute: "/manage/channels" });
+      await waitFor(() => {
+        expect(screen.getAllByTestId(/^channel-row-/).length).toBeGreaterThanOrEqual(1);
+      });
+      expect(screen.queryByTestId(/^channel-card-/)).not.toBeInTheDocument();
+    } finally {
+      localStorage.removeItem(KEY);
+    }
+  });
+
   // ─── Error state ────────────────────────────────────────────────────────
 
   it("shows an error state, not the empty state, when the list fails to load", async () => {

@@ -2022,10 +2022,11 @@ function GroupMemberPicker({
         <div className="rounded-lg border border-input bg-background px-3 py-2 text-xs text-muted-foreground animate-pulse">
           {t("common.loading", "Loading…")}
         </div>
-      ) : isError ? (
+      ) : isError && !groups ? (
         // Distinct from "no groups available" — that reads as a fact about the
         // account and points the user at creating one, which does not help when
-        // the list simply failed to load.
+        // the list simply failed to load. Gated on !groups so a background
+        // refetch failure keeps the cached, still-selectable list visible.
         <RefetchErrorNotice
           onRetry={() => refetch()}
           message={t("common.loadError", "Failed to load data")}
