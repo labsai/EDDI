@@ -7,6 +7,41 @@
 
 
 
+## 🔓 fix(csp): the Manager's update check was blocked by our own CSP, in every deployment (2026-08-12)
+
+**Repo:** EDDI (`fix/csp-allow-github-release-check`)
+
+The Manager ships an opt-in *"is a newer EDDI released?"* check that reads
+`api.github.com/repos/labsai/EDDI/releases/latest` straight from the browser. Under the
+`csp-default` filter's `connect-src 'self'` the browser refuses that request **before it leaves the
+page** — so the feature worked against a dev server, which sends no CSP, and was dead everywhere it
+actually shipped.
+
+It failed misleadingly, too. A CSP-blocked `fetch` rejects with the same `TypeError` as an
+unreachable host, so the Manager reported *"could not reach api.github.com — check your network or
+any outbound proxy"*, pointing operators at a network path and a proxy that were never involved.
+(The Manager now tells the two apart by listening for `securitypolicyviolation` and names CSP as the
+cause — labsai/EDDI-Manager#138.)
+
+`connect-src` in `csp-default` now carries `https://api.github.com`. The exception is narrow by
+construction: read-only, one public endpoint, no `Authorization` header, `credentials: "omit"`, and
+`referrerPolicy: "no-referrer"` — so not even this deployment's hostname, which for a self-hosted
+instance *is* deployment data, reaches GitHub. Nothing is requested until an operator presses
+*Check now* or opts into the per-reload check. **The Swagger UI policy is untouched**: it never
+calls GitHub, and widening it would be pure surface.
+
+Both halves are now pinned by `InfrastructureIT`, which previously asserted only `script-src` and
+would have stayed green if the source were dropped again — or pasted into the Swagger policy. The
+application path must carry the source; the Swagger path must not.
+
+Verified in a browser, serving the Manager's production bundle behind this exact header: with
+`connect-src 'self'` the check is blocked and reports CSP; with the source added it completes and
+returns the latest release and its notes.
+
+---
+
+
+
 ## 🔢 docs(mcp): the MCP tool catalogue was eight tools short, and a count sweep of both READMEs (2026-08-11)
 
 **Repo:** EDDI (`docs/group-collaboration-refresh`)
