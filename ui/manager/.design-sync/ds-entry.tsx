@@ -3,6 +3,20 @@
 // so the converter bundles exactly this surface — not the whole app.
 // Authored input; safe to commit.
 
+// `__APP_VERSION__` is injected by Vite's `define` (vite.config.ts) in the app
+// build. The design-system bundle is built by esbuild, which does not apply
+// Vite's defines and has no config hook for them — so `Sidebar`'s version
+// footer threw "ReferenceError: __APP_VERSION__ is not defined" on every
+// render. In a preview there is no backend, so `serverVersion` is unknown and
+// that footer ALWAYS takes the `EDDI Demo ${__APP_VERSION__}` branch.
+//
+// Defining it here runs at bundle init, before anything mounts, so it covers
+// designs built with the DS as well as the preview cards — and leaves the real
+// component untouched. The value is cosmetic chrome; it is a static string and
+// will drift from package.json (recorded in NOTES.md's re-sync risks).
+(globalThis as unknown as { __APP_VERSION__?: string }).__APP_VERSION__ ??=
+  "6.3.0";
+
 // ── ui/ ────────────────────────────────────────────────────────────────────
 export { AccessibleDialog } from "@/components/ui/accessible-dialog";
 export { AlertDialog } from "@/components/ui/alert-dialog";

@@ -372,10 +372,11 @@ if (ver && previews !== ver.componentCount) {
 }
 
 // TypeScript syntax check on every emitted .d.ts — catches malformed prelude/
-// body debris before it reaches the app's parser. Best-effort (needs
-// typescript in node_modules, usually present via the DS's own dev deps).
+// body debris before it reaches the app's parser. Uses the compiler ts-morph
+// bundles (a required converter dependency, so present regardless of the DS's
+// own `typescript` — v7 has no JS API on its root export). Best-effort.
 try {
-  const ts = await import('typescript');
+  const { ts } = await import('ts-morph');
   let dtsErrs = 0;
   (function walkDts(d) {
     for (const e of readdirSync(d, { withFileTypes: true })) {
@@ -392,7 +393,7 @@ try {
   })(join(OUT, 'components'));
   if (!dtsErrs) ok(`all .d.ts parse cleanly`);
 } catch {
-  console.error('  (.d.ts parse check skipped — typescript not in node_modules)');
+  console.error('  (.d.ts parse check skipped — ts-morph not in node_modules)');
 }
 
 // Render check (optional — runs when playwright is importable and

@@ -100,9 +100,55 @@ regardless.
   `AuthContext` has a real `GUEST_CONTEXT` default, so they render the signed-out state
   rather than throwing.
 
+## Prop contracts are hand-written (`cfg.dtsPropsFor`) — and must stay that way
+
+`<Name>.d.ts` is the API the design agent codes against, and **auto-extraction produces
+nothing here**. `lib/dts.mjs` builds its ts-morph project from `*.d.ts` files only
+(`addSourceFilesAtPaths(['<root>/**/*.d.ts'])`); this repo is an app with no declaration
+tree, so the extractor parses exactly one file (`src/vite-env.d.ts`) and every component
+falls back to `[key: string]: unknown`. That is not a warning — validate exits 0 — so it is
+invisible unless you read the emitted `.d.ts`.
+
+The first sync shipped all 21 components with that empty contract. `cfg.dtsPropsFor` now
+carries a hand-written body for **all 29**, transcribed from each component's real props
+interface. Consequences:
+
+- **Adding a component means adding its `dtsPropsFor` entry too** — alongside
+  `ds-entry.tsx` and `componentSrcMap`. Without it the component ships contract-less.
+- **Changing a component's props means updating the entry.** Nothing cross-checks them;
+  `npm run typecheck` validates the *previews*, not these strings.
+- Keep every type either `React.`-qualified, a DOM lib global, or inline. A bare imported
+  name (the original `icon: LucideIcon`) emits a `.d.ts` that does not resolve — it is
+  written as `React.ComponentType<{ className?: string }>` instead.
+- A permanent fix would be emitting real declarations (`tsc --emitDeclarationOnly` over the
+  entry) into a tree the extractor globs, which would make contracts self-maintaining.
+  Not attempted; `dtsPropsFor` is the documented remedy and is what is in place.
+
 ## Known render warns
 - None. (Earlier GRID_OVERFLOW on the two pickers resolved via `cardMode: column`;
   earlier FONT_MISSING/TOKENS_MISSING resolved by the scoped cssEntry.)
+- `PlatformStatus` captures in its **checking** state, not online/offline: the preview has
+  no backend and the health probe carries `AbortSignal.timeout(5000)`, so the screenshot is
+  taken long before the request fails. Graded good — it is a real state, honestly rendered.
+  Driving it to online would mean seeding react-query from the preview, which cannot work:
+  the preview would import its own copy of the library and its provider would not be the one
+  the bundled component reads.
+
+## Two app-asset defects the chrome sync exposed (both fixed in app source)
+
+Neither is a design-sync bug; both only became visible because `Sidebar` entered the surface.
+
+- **`__APP_VERSION__` is a Vite `define`, and esbuild does not apply it.** The converter has
+  no define hook, so `Sidebar`'s version footer threw
+  `ReferenceError: __APP_VERSION__ is not defined` on every render — and in a preview there
+  is no backend, so that footer *always* takes the `EDDI Demo ${__APP_VERSION__}` branch.
+  `ds-entry.tsx` now defines it at bundle init (covers designs, not just preview cards).
+  The value is a static string and **will drift from package.json**.
+- **`/logo_eddi.png` was an absolute `public/` path**, which the DS bundle cannot ship — the
+  expanded sidebar rendered a broken image. The asset moved to `src/assets/` and both
+  sidebars import it: at 2 KB it is under Vite's 4 KB `assetsInlineLimit`, so the app inlines
+  it (same pixels, one fewer request) and esbuild's `.png: dataurl` loader inlines it for the
+  bundle. **Do not move it back to `public/`.**
 
 ## Why `layout/` is in the `@source` list (measured, not assumed)
 
@@ -171,6 +217,13 @@ The previews are type-checked by `tsconfig.design-sync.json` (wired into `tsc -b
 take.
 
 ## Re-sync risks / watch-list
+- **`cfg.dtsPropsFor` is hand-maintained and nothing verifies it against the source.** It
+  is the highest-value thing in the config (see the section above) and the easiest to let
+  rot — a prop renamed in `src/` leaves the design agent coding against the old name.
+- **`__APP_VERSION__` in `ds-entry.tsx` is a hardcoded `"6.3.0"`.** Cosmetic (it only feeds
+  the sidebar footer), but bump it when the app's major/minor moves, or accept the drift.
+- **`src/assets/logo_eddi.png` must stay importable.** Moving it back under `public/`
+  silently reintroduces a broken image in every design using the expanded `Sidebar`.
 - **`build-css.mjs` depends on `src/index.css`'s `@import 'tailwindcss';` line** and on
   `@source`-able component dirs. If the app migrates Tailwind config or moves index.css,
   update build-css.mjs.

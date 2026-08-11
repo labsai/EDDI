@@ -45,6 +45,12 @@ import { TOUR_CHAPTERS } from "@/components/onboarding/tour-chapters";
 import { useEddiVersion } from "@/hooks/use-update-check";
 import { UNKNOWN_VERSION } from "@/lib/api/system";
 import { ModeSwitcher } from "@/components/shared/mode-switcher";
+// Imported rather than referenced as "/logo_eddi.png" from public/: at 2 KB it
+// is under Vite's 4 KB assetsInlineLimit, so the app inlines it as a data URI
+// (same pixels, one fewer request) — and the design-system bundle, which cannot
+// ship public/ assets, inlines it too instead of rendering a broken image in
+// every design built with Sidebar.
+import logoEddi from "@/assets/logo_eddi.png";
 
 const navSections = [
   {
@@ -194,7 +200,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           // sidebar (dark mode) but invert to near-black on the white sidebar
           // (light mode) so it stays visible.
           <img
-            src="/logo_eddi.png"
+            src={logoEddi}
             alt="EDDI"
             className="h-7 w-auto invert dark:invert-0"
           />
