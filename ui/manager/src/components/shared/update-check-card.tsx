@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -44,7 +44,7 @@ export function UpdateCheckCard() {
   const {
     autoCheck,
     setAutoCheck,
-    installedVersion,
+    knownInstalledVersion: knownInstalled,
     installedVersionLoading,
     latest,
     status,
@@ -56,8 +56,6 @@ export function UpdateCheckCard() {
   } = useUpdateCheck();
 
   const updateAvailable = status === "update-available";
-  const knownInstalled =
-    !!installedVersion && installedVersion !== "Unknown" ? installedVersion : null;
 
   // `dateStyle: "medium"` over the bare numeric default: this app ships both
   // month-first and day-first locales, and "3/4/2026" is a different day in
@@ -414,12 +412,18 @@ function UpdateInstructions() {
 function CommandBlock({ command }: { command: string }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Clear on unmount: navigating away inside the 2s window would otherwise
+  // leave a timer firing setState against a component that is gone.
+  useEffect(() => () => clearTimeout(resetTimer.current), []);
 
   const copy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(command);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      clearTimeout(resetTimer.current);
+      resetTimer.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       /* clipboard blocked (insecure context or denied) — the text stays selectable */
     }

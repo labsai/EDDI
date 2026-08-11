@@ -16,7 +16,7 @@ import { useUpdateCheck } from "@/hooks/use-update-check";
  */
 export function UpdateBanner() {
   const { t } = useTranslation();
-  const { autoCheck, status, latest, installedVersion } = useUpdateCheck();
+  const { autoCheck, status, latest, knownInstalledVersion } = useUpdateCheck();
   const [dismissed, setDismissed] = useState(false);
 
   if (!autoCheck || status !== "update-available" || !latest || dismissed) {
@@ -34,11 +34,11 @@ export function UpdateBanner() {
         {t("updates.updateAvailable", "EDDI {{version}} is available", {
           version: latest.version,
         })}
-        {installedVersion && installedVersion !== "Unknown" && (
+        {knownInstalledVersion && (
           <>
             {" "}
             {t("updates.updateAvailableDetail", "You are running {{installed}}.", {
-              installed: installedVersion,
+              installed: knownInstalledVersion,
             })}
           </>
         )}

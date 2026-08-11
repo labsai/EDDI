@@ -41,12 +41,12 @@
  * same-origin raw fetches.
  */
 
-export const EDDI_REPO = "labsai/EDDI";
-export const EDDI_RELEASES_URL = `https://github.com/${EDDI_REPO}/releases`;
-export const EDDI_REPO_URL = `https://github.com/${EDDI_REPO}`;
+const EDDI_REPO = "labsai/EDDI";
+const EDDI_DOCKER_IMAGE = "labsai/eddi";
+const EDDI_DOCKER_URL = `https://hub.docker.com/r/${EDDI_DOCKER_IMAGE}`;
 
-export const EDDI_DOCKER_IMAGE = "labsai/eddi";
-export const EDDI_DOCKER_URL = `https://hub.docker.com/r/${EDDI_DOCKER_IMAGE}`;
+/** The two links the card offers when it has nothing more specific to point at. */
+export const EDDI_RELEASES_URL = `https://github.com/${EDDI_REPO}/releases`;
 export const EDDI_DOCKER_TAGS_URL = `${EDDI_DOCKER_URL}/tags`;
 
 const LATEST_RELEASE_API = `https://api.github.com/repos/${EDDI_REPO}/releases/latest`;
@@ -148,7 +148,14 @@ interface GitHubRelease {
   body?: unknown;
 }
 
-/** Shared timeout + no-credentials plumbing for both third-party lookups. */
+/**
+ * The one outbound request this module makes, with its two contracts named:
+ * it carries no credentials, and it gives up rather than hanging.
+ *
+ * A named function for a single caller because the no-credentials part is the
+ * security-relevant bit — `git grep getWithoutCredentials` should keep finding
+ * every off-origin call the Manager makes.
+ */
 async function getWithoutCredentials(url: string, accept: string): Promise<Response> {
   // `AbortSignal.timeout` is not reliably present in the jsdom test env, so the
   // timeout is wired by hand.
@@ -224,7 +231,7 @@ export async function fetchLatestEddiRelease(): Promise<EddiRelease> {
  * link says better, so the card shows the opening — which is where these notes
  * put their summary — and hands off to GitHub for the rest.
  */
-export const RELEASE_NOTES_PREVIEW_CHARS = 1500;
+const RELEASE_NOTES_PREVIEW_CHARS = 1500;
 
 export interface ReleaseNotesPreview {
   markdown: string;

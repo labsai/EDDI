@@ -43,6 +43,7 @@ import { useNavigate } from "react-router-dom";
 import { useOnboarding, ALL_CHAPTERS, type TourChapterId } from "@/hooks/use-onboarding";
 import { TOUR_CHAPTERS } from "@/components/onboarding/tour-chapters";
 import { useEddiVersion } from "@/hooks/use-update-check";
+import { UNKNOWN_VERSION } from "@/lib/api/system";
 import { ModeSwitcher } from "@/components/shared/mode-switcher";
 
 const navSections = [
@@ -376,11 +377,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {!collapsed && (
           <p 
             className="mb-1 px-3 text-center text-[10px] text-sidebar-foreground/30"
-            title={serverVersion === "Unknown" ? `Standalone Demo Mode fallback` : undefined}
+            title={serverVersion === UNKNOWN_VERSION ? `Standalone Demo Mode fallback` : undefined}
           >
-            {isLoading 
+            {isLoading
               ? "Checking version..."
-              : serverVersion && serverVersion !== "Unknown" 
+              : serverVersion && serverVersion !== UNKNOWN_VERSION
                 ? `EDDI ${serverVersion}`
                 : `EDDI Demo ${__APP_VERSION__}`}
           </p>

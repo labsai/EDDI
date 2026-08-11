@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getEddiVersion } from "@/lib/api/system";
+import { getEddiVersion, UNKNOWN_VERSION } from "@/lib/api/system";
 import {
   dockerImageFor,
   fetchLatestEddiRelease,
@@ -89,6 +89,12 @@ export interface UpdateCheckResult {
   setAutoCheck: (next: boolean) => void;
   /** Installed EDDI version, or `undefined` while it is still loading. */
   installedVersion: string | undefined;
+  /**
+   * The installed version only when it is an actual version — `null` while
+   * loading, on failure, or when the backend reported `UNKNOWN_VERSION`.
+   * Derived here so no consumer has to know the sentinel's spelling.
+   */
+  knownInstalledVersion: string | null;
   installedVersionLoading: boolean;
   latest: EddiRelease | undefined;
   status: UpdateStatus;
@@ -163,6 +169,8 @@ export function useUpdateCheck(): UpdateCheckResult {
     autoCheck,
     setAutoCheck,
     installedVersion,
+    knownInstalledVersion:
+      installedVersion && installedVersion !== UNKNOWN_VERSION ? installedVersion : null,
     installedVersionLoading,
     latest: query.data,
     status,
