@@ -193,7 +193,7 @@ class HitlCrashRecoveryObserverTest {
 
             var captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
             verify(scheduleStore).createSchedule(captor.capture());
-            Instant expectedDue = pausedAt.plus(java.time.Duration.parse("PT72H"));
+            Instant expectedDue = pausedAt.plus(Duration.parse("PT72H"));
             assertEquals(expectedDue, captor.getValue().getNextFire());
         }
 

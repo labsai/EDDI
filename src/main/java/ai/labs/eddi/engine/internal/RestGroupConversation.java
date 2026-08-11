@@ -32,6 +32,7 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -773,7 +774,7 @@ public class RestGroupConversation implements IRestGroupConversation {
                             .map(SharedTaskList.TaskItem::id)
                             .toList()
                     : List.of();
-            var summary = new java.util.LinkedHashMap<String, Object>();
+            var summary = new LinkedHashMap<String, Object>();
             summary.put("groupConversationId", gcId);
             summary.put("state", gc.getState() != null ? gc.getState().name() : "");
             summary.put("pausedAt", paused && gc.getPausedAt() != null ? gc.getPausedAt().toString() : "");

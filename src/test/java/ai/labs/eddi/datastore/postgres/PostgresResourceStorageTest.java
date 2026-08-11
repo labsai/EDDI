@@ -804,7 +804,7 @@ class PostgresResourceStorageTest {
 
         var filter = new IResourceFilter.QueryFilter("name", "test.*");
         var queryFilters = new IResourceFilter.QueryFilters(
-                java.util.List.of(filter));
+                List.of(filter));
 
         var results = storage.findResources(
                 new IResourceFilter.QueryFilters[]{queryFilters},
@@ -819,7 +819,7 @@ class PostgresResourceStorageTest {
 
         var filter = new IResourceFilter.QueryFilter("name", "test.*");
         var queryFilters = new IResourceFilter.QueryFilters(
-                java.util.List.of(filter));
+                List.of(filter));
 
         storage.findResources(
                 new IResourceFilter.QueryFilters[]{queryFilters},
@@ -838,7 +838,7 @@ class PostgresResourceStorageTest {
 
         var filter = new IResourceFilter.QueryFilter("name", "test.*");
         var queryFilters = new IResourceFilter.QueryFilters(
-                java.util.List.of(filter));
+                List.of(filter));
 
         storage.findResources(
                 new IResourceFilter.QueryFilters[]{queryFilters},
@@ -856,7 +856,7 @@ class PostgresResourceStorageTest {
 
         var filter = new IResourceFilter.QueryFilter("enabled", true);
         var queryFilters = new IResourceFilter.QueryFilters(
-                java.util.List.of(filter));
+                List.of(filter));
 
         var results = storage.findResources(
                 new IResourceFilter.QueryFilters[]{queryFilters},
@@ -872,7 +872,7 @@ class PostgresResourceStorageTest {
         // Integer filter — goes through the else branch (toString)
         var filter = new IResourceFilter.QueryFilter("count", 42);
         var queryFilters = new IResourceFilter.QueryFilters(
-                java.util.List.of(filter));
+                List.of(filter));
 
         var results = storage.findResources(
                 new IResourceFilter.QueryFilters[]{queryFilters},
@@ -889,7 +889,7 @@ class PostgresResourceStorageTest {
         var filter2 = new IResourceFilter.QueryFilter("name", "b");
         var queryFilters = new IResourceFilter.QueryFilters(
                 IResourceFilter.QueryFilters.ConnectingType.OR,
-                java.util.List.of(filter1, filter2));
+                List.of(filter1, filter2));
 
         var results = storage.findResources(
                 new IResourceFilter.QueryFilters[]{queryFilters},
@@ -902,7 +902,7 @@ class PostgresResourceStorageTest {
     void findResources_sqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeQuery()).thenThrow(new SQLException("DB error"));
 
-        var queryFilters = new IResourceFilter.QueryFilters(java.util.List.of());
+        var queryFilters = new IResourceFilter.QueryFilters(List.of());
 
         assertThrows(RuntimeException.class,
                 () -> storage.findResources(

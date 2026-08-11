@@ -30,6 +30,7 @@ import io.opentelemetry.context.Scope;
 import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.Counter;
+import java.time.Duration;
 
 import java.time.Instant;
 import java.util.*;
@@ -464,7 +465,7 @@ public class LifecycleManager implements ILifecycleManager {
                         .tag("task.type", taskType)
                         .description("Pipeline task execution duration")
                         .publishPercentileHistogram()
-                        .register(Metrics.globalRegistry)).record(java.time.Duration.ofMillis(durationMs));
+                        .register(Metrics.globalRegistry)).record(Duration.ofMillis(durationMs));
 
                 taskSpan.end();
             }

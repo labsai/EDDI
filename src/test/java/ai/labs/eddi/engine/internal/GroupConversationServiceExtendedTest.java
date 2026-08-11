@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -592,7 +593,7 @@ class GroupConversationServiceExtendedTest {
             // proves nothing about what a crashed-and-recovered pod would see
             // (review finding: a captor would hold the same mutable instance, so
             // the value is recorded AT persist time instead).
-            var basesAtPersistTime = new java.util.ArrayList<Integer>();
+            var basesAtPersistTime = new ArrayList<Integer>();
             doAnswer(inv -> {
                 basesAtPersistTime.add(((GroupConversation) inv.getArgument(0)).getPausedRepeatSliceBase());
                 return null;
@@ -625,9 +626,9 @@ class GroupConversationServiceExtendedTest {
             gc.setState(GroupConversationState.IN_PROGRESS);
             gc.setOriginalQuestion(QUESTION);
             gc.getTranscript().add(new TranscriptEntry("a1", "Alice", "Opinion A", 0, "Discuss",
-                    TranscriptEntryType.OPINION, java.time.Instant.now(), null, null));
+                    TranscriptEntryType.OPINION, Instant.now(), null, null));
             gc.getTranscript().add(new TranscriptEntry("h1", "Hannah", "Human view", 0, "Discuss",
-                    TranscriptEntryType.OPINION, java.time.Instant.now(), null, null));
+                    TranscriptEntryType.OPINION, Instant.now(), null, null));
             gc.setResumePoint(new GroupConversation.ResumePoint(0, 0, 2, GroupConversation.RESUME_KIND_HUMAN_TURN));
             gc.setPausedRepeatSliceBase(0);
 

@@ -30,10 +30,12 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.inject.Instance;
+import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -464,10 +466,10 @@ class GdprComplianceServiceTest {
         var auditEntry = new AuditEntry(
                 "ae-1", "conv-1", "agent-1", 1, USER_ID, "unrestricted",
                 0, "ai.labs.llm", "llm", 0, 150L,
-                java.util.Map.of(), java.util.Map.of(),
-                java.util.Map.of("model", "gpt-4"), null,
+                Map.of(), Map.of(),
+                Map.of("model", "gpt-4"), null,
                 List.of("chat_complete"), 0.003,
-                java.time.Instant.now(), null, null);
+                Instant.now(), null, null);
         when(auditStore.getEntriesByUserId(eq(USER_ID), eq(0), eq(10_000)))
                 .thenReturn(List.of(auditEntry));
 
@@ -541,7 +543,7 @@ class GdprComplianceServiceTest {
                 "entry-id", USER_ID, "_gdpr_processing_restricted", "true",
                 "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
-                java.time.Instant.now(), java.time.Instant.now());
+                Instant.now(), Instant.now());
         when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
                 .thenReturn(Optional.of(entry));
 
@@ -583,7 +585,7 @@ class GdprComplianceServiceTest {
                 "entry-id", USER_ID, "_gdpr_processing_restricted", "true",
                 "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
-                java.time.Instant.now(), java.time.Instant.now());
+                Instant.now(), Instant.now());
         when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
                 .thenReturn(Optional.of(entry));
 
@@ -608,7 +610,7 @@ class GdprComplianceServiceTest {
                 "entry-id", USER_ID, "_gdpr_processing_restricted", Boolean.TRUE,
                 "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
-                java.time.Instant.now(), java.time.Instant.now());
+                Instant.now(), Instant.now());
         when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
                 .thenReturn(Optional.of(entry));
 
@@ -633,7 +635,7 @@ class GdprComplianceServiceTest {
                 "entry-id", USER_ID, "_gdpr_processing_restricted", "false",
                 "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
-                java.time.Instant.now(), java.time.Instant.now());
+                Instant.now(), Instant.now());
         when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
                 .thenReturn(Optional.of(entry));
 

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -455,7 +456,7 @@ class SharedTaskListTest {
 
         // Concurrently assign + start + complete from multiple threads
         var tasks = list.all();
-        var futures = new java.util.ArrayList<CompletableFuture<Void>>();
+        var futures = new ArrayList<CompletableFuture<Void>>();
         for (var task : tasks) {
             futures.add(CompletableFuture.runAsync(() -> {
                 try {
@@ -706,10 +707,10 @@ class SharedTaskListTest {
         int taskCount = 50;
         var latch = new CountDownLatch(1);
         var errors = new CopyOnWriteArrayList<Throwable>();
-        var threads = new java.util.ArrayList<Thread>();
+        var threads = new ArrayList<Thread>();
 
         // Pre-populate tasks
-        var taskIds = new java.util.ArrayList<String>();
+        var taskIds = new ArrayList<String>();
         for (int i = 0; i < taskCount; i++) {
             var task = list.addTask(new SharedTaskList.TaskItem("Task " + i, "desc " + i, i));
             taskIds.add(task.id());
@@ -758,7 +759,7 @@ class SharedTaskListTest {
         var errors = new CopyOnWriteArrayList<Throwable>();
         int writerCount = 20;
         int readerCount = 20;
-        var threads = new java.util.ArrayList<Thread>();
+        var threads = new ArrayList<Thread>();
 
         // Writers: add tasks and transition them
         for (int i = 0; i < writerCount; i++) {
@@ -880,7 +881,7 @@ class SharedTaskListTest {
     @Test
     void realisticContention_lifecycleWithDependencyQueries() throws Exception {
         // Create a realistic task graph: 5 root tasks, 5 dependent tasks
-        var rootIds = new java.util.ArrayList<String>();
+        var rootIds = new ArrayList<String>();
         for (int i = 0; i < 5; i++) {
             var task = list.addTask(new SharedTaskList.TaskItem("Root " + i, "desc", 0));
             rootIds.add(task.id());
@@ -895,7 +896,7 @@ class SharedTaskListTest {
 
         var latch = new CountDownLatch(1);
         var errors = new CopyOnWriteArrayList<Throwable>();
-        var threads = new java.util.ArrayList<Thread>();
+        var threads = new ArrayList<Thread>();
 
         // 5 threads drive root tasks through lifecycle
         for (String rootId : rootIds) {

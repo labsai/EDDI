@@ -402,7 +402,7 @@ class McpSetupToolsTest {
 
         var task = config.tasks().get(0);
         assertTrue(task.getEnableBuiltInTools());
-        assertEquals(java.util.List.of("calculator", "websearch"), task.getBuiltInToolsWhitelist());
+        assertEquals(List.of("calculator", "websearch"), task.getBuiltInToolsWhitelist());
     }
 
     @Test

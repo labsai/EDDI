@@ -22,6 +22,7 @@ import org.mockito.Mock;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -186,7 +187,7 @@ class V6RenameMigrationTest {
         void renamesAllCollections() {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
 
-            var oldNames = java.util.Set.of("bots", "bots.history", "packages", "packages.history", "behaviorrulesets", "behaviorrulesets.history",
+            var oldNames = Set.of("bots", "bots.history", "packages", "packages.history", "behaviorrulesets", "behaviorrulesets.history",
                     "httpcalls", "httpcalls.history", "langchain", "langchain.history", "regulardictionaries", "regulardictionaries.history");
 
             // Use thenAnswer to return non-empty for old names, empty for everything else
@@ -204,7 +205,7 @@ class V6RenameMigrationTest {
             when(database.getName()).thenReturn("eddi");
 
             // Track all rename calls across all mock collections
-            java.util.List<String> renamedTo = new java.util.ArrayList<>();
+            List<String> renamedTo = new ArrayList<>();
             // Re-wire: capture renameCollection calls
             when(database.getCollection(anyString())).thenAnswer(invocation -> {
                 String name = invocation.getArgument(0);
@@ -785,7 +786,7 @@ class V6RenameMigrationTest {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
 
             // Agent document with old field name 'packages'
-            var agentDoc = new Document("packages", java.util.List.of("workflow-ref"))
+            var agentDoc = new Document("packages", List.of("workflow-ref"))
                     .append("_id", new org.bson.types.ObjectId());
 
             MongoCollection<Document> agentCol = mock(MongoCollection.class);

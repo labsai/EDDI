@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.ArrayList;
 
 import java.util.List;
 import java.util.Map;
@@ -1943,7 +1944,7 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
      */
     public static class IdentityMaskingConfig {
         private boolean enabled = false;
-        private List<String> rules = new java.util.ArrayList<>();
+        private List<String> rules = new ArrayList<>();
 
         public boolean isEnabled() {
             return enabled;

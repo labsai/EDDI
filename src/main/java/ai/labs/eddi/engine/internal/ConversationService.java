@@ -62,6 +62,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.*;
+import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -1165,13 +1166,13 @@ public class ConversationService implements IConversationService {
     }
 
     @Override
-    public java.util.List<PendingApprovalSummary> listPendingApprovals(int limit)
+    public List<PendingApprovalSummary> listPendingApprovals(int limit)
             throws ResourceStoreException {
         return conversationHitlService.listPendingApprovals(limit);
     }
 
     @Override
-    public java.util.List<PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
+    public List<PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
             throws ResourceStoreException {
         return conversationHitlService.listPendingApprovals(ownerUserId, limit);
     }

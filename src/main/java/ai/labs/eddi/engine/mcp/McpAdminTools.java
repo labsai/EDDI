@@ -112,7 +112,7 @@ public class McpAdminTools {
             Response response = agentAdmin.deployAgent(env, agentId, ver, true, true);
             int httpStatus = response.getStatus();
 
-            var result = new java.util.LinkedHashMap<String, Object>();
+            var result = new LinkedHashMap<String, Object>();
             result.put("agentId", agentId);
             result.put("version", ver);
             result.put("environment", env.name());
@@ -122,7 +122,7 @@ public class McpAdminTools {
                 // Read actual deployment status from response body
                 try {
                     @SuppressWarnings("unchecked")
-                    var body = (java.util.Map<String, Object>) response.getEntity();
+                    var body = (Map<String, Object>) response.getEntity();
                     if (body != null && body.containsKey("status")) {
                         String deployStatus = body.get("status").toString();
                         result.put("deploymentStatus", deployStatus);

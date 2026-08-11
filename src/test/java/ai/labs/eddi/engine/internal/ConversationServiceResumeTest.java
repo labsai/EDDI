@@ -54,6 +54,7 @@ import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
@@ -632,7 +633,7 @@ class ConversationServiceResumeTest {
             call.setToolName("chargeCard");
             call.setSource("mcp");
             call.setArgumentsRaw("{}");
-            batch.setCalls(java.util.List.of(call));
+            batch.setCalls(List.of(call));
             snapshot.setHitlPendingToolCalls(batch);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
 

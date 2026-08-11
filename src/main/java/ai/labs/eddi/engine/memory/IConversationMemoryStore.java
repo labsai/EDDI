@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -127,7 +128,7 @@ public interface IConversationMemoryStore {
                                                                       String ownerUserId, int limit)
             throws IResourceStore.ResourceStoreException {
         return findPendingApprovalSummaries(limit).stream()
-                .filter(summary -> java.util.Objects.equals(ownerUserId, summary.getUserId()))
+                .filter(summary -> Objects.equals(ownerUserId, summary.getUserId()))
                 .toList();
     }
 

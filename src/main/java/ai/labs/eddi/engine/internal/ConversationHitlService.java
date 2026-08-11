@@ -1303,13 +1303,13 @@ class ConversationHitlService {
         }
         return snapshot;
     }
-    public java.util.List<PendingApprovalSummary> listPendingApprovals(int limit)
+    public List<PendingApprovalSummary> listPendingApprovals(int limit)
             throws ResourceStoreException {
         // #17: bounded, projection-based listing — never deserializes full
         // conversation documents on the Mongo backend.
         return conversationMemoryStore.findPendingApprovalSummaries(Math.max(1, Math.min(limit, 1000)));
     }
-    public java.util.List<PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
+    public List<PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
             throws ResourceStoreException {
         // Owner filter is pushed into the query so the limit applies AFTER the
         // restriction — a non-admin inbox can't be starved by others' backlog.

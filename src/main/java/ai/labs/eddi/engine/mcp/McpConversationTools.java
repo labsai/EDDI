@@ -48,6 +48,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.*;
+import java.util.ArrayList;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -787,7 +789,7 @@ public class McpConversationTools {
         if (batch != null && batch.getCalls() != null) {
             var toolNames = batch.getCalls().stream()
                     .map(PendingToolCallBatch.PendingToolCall::getToolName)
-                    .filter(java.util.Objects::nonNull)
+                    .filter(Objects::nonNull)
                     .toList();
             if (!toolNames.isEmpty()) {
                 result.put("tools", toolNames);
@@ -976,7 +978,7 @@ public class McpConversationTools {
             // Agent response text — extract text strings from output items
             var outputItems = lastOutput.get("output");
             if (outputItems instanceof List<?> items) {
-                var texts = new java.util.ArrayList<String>();
+                var texts = new ArrayList<String>();
                 for (var item : items) {
                     if (item instanceof Map<?, ?> map && map.containsKey("text")) {
                         texts.add(String.valueOf(map.get("text")));
@@ -993,7 +995,7 @@ public class McpConversationTools {
             // QuickReplies — extract value strings for easy AI consumption
             var quickReplies = lastOutput.get("quickReplies");
             if (quickReplies instanceof List<?> qrList && !qrList.isEmpty()) {
-                var qrValues = new java.util.ArrayList<String>();
+                var qrValues = new ArrayList<String>();
                 for (var qr : qrList) {
                     if (qr instanceof Map<?, ?> map && map.containsKey("value")) {
                         qrValues.add(String.valueOf(map.get("value")));

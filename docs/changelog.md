@@ -7,6 +7,74 @@
 
 
 
+## 🧪 test: regression cover for every fix in this branch, and a bug the coverage work found (2026-08-12)
+
+**Repo:** EDDI (`fix/code-review-defects-and-docs`)
+
+Writing the tests found a defect in the fix they were written for, which is the argument for writing
+them.
+
+**The flush window.** The eviction fix retains any conversation whose chain positions are still
+in flight — queued, in the flush batch, or dead-lettered. But `flush()` published its batch to
+`inFlightBatch` *after* draining the queue. Between those two statements the entries were in
+**neither** collection, so an eviction landing in that window read their conversations as fully
+persisted and re-seeded them — reintroducing the exact duplicate the fix exists to prevent, through
+a narrower door. The drain and the publish now happen under the same read lock submitters take, so
+eviction cannot observe the intermediate state. No I/O is inside the lock.
+
+**Every fix in this branch now has a mutation-checked regression test.** Not merely "a test that
+passes" — in each case the fix was reverted and the test was confirmed to fail, with the message it
+would print to whoever broke it:
+
+| Fix | Test | Reverting the fix produces |
+| --- | --- | --- |
+| Sequence eviction | `sequenceEvictionKeepsQueuedConversationsUnique` | `expected <[0, 1]> but was <[0, 0]>` — the duplicate itself |
+| In-flight batch retention | `sequenceEvictionRetainsTheInFlightBatch` | `expected <1> but was <-1>` (UNSEQUENCED) |
+| Eviction still reclaims | `sequenceEvictionReclaimsPersistedConversations` | guards the opposite failure — a "fix" that never evicts |
+| Rate-limiter overflow | `idleBucketRefillsRatherThanLatchingShut` | a bucket that denies every call after a long idle |
+| `HUMAN_DECIDES` message | `votePhase_humanDecidesIsRejectedPendingResumePath` | fails if the message claims HUMAN members are unavailable |
+| MCP class-list drift | `everyToolClassInThePackageIsListed` | names the `Mcp*Tools` class missing from `TOOL_CLASSES` |
+| Link rot | `everyRelativeLinkResolves` | names the file and the target that does not resolve |
+| ToC drift | `everyDocIsListedInSummary` | names the unreachable page |
+| Inline FQNs | `noInlineFullyQualifiedNames` | names file, line and the offending name |
+
+Two of these deserve note as *class-of-bug* guards rather than single-defect regressions.
+
+`DocumentationLinksTest` walks every markdown file in the repository and resolves every relative
+link. Link rot is invisible to every other check in this build — markdown compiles to nothing, so a
+wrong path is indistinguishable from a right one until a human clicks it, which is how 38 of them
+accumulated. It found one immediately that the initial sweep had missed: the README banner uses a
+repository-root-relative `/screenshots/…`, which a naive resolver sends to the filesystem root. The
+link was fine; the resolver was wrong, and now handles the leading `/` the way the forge does.
+Documentation *of* link syntax (the `` `![alt](uri)` `` rows in the output-format tables) is excluded
+by stripping code spans and fences, not by an ignore list that would rot in turn.
+
+`ImportStyleTest` enforces AGENTS.md §4.7. These accumulate precisely because nothing fails when one
+is added — the code compiles either way, so the rule was advice a reviewer had to catch by eye.
+Writing it exposed that the original audit had **under-counted**: its pattern required a package
+segment after `java.util`, so `java.util.List` never matched. The real total was 575, not 141, and
+the remaining 209 (mostly `java.util.Objects` in `equals`/`hashCode`) are now cleaned up too. The
+one genuine exception AGENTS.md allows — `mongo.HistorizedResourceStore extends
+datastore.HistorizedResourceStore` and its Modifiable twin — is an explicit allowlist, so adding to
+it is a reviewable act rather than silent drift.
+
+**Two seams were widened for testability, both deliberately.** `RateLimitBucket` became
+package-private with a `backdateLastRefill` hook, because a ~107-day idle bucket cannot be reached
+through the public API and reflecting into a private field pins the field name rather than the
+behaviour. `SafeHttpClient.withDefaultTimeout` became package-private so its five cases can run
+without an embedded server — the existing `SafeHttpClientTest` binds a loopback socket in
+`@BeforeEach` and therefore only runs where those are available.
+
+**And a proof rather than an assurance about the 575-name refactor.** Every string literal in all
+273 mechanically-changed files was extracted and compared against `origin/main`: byte-identical.
+A rewrite that reached inside a literal — a reflective class name, a config key, a log format —
+would compile, pass every test, and show up nowhere else. The only six files whose literals changed
+are the hand-edited ones, and each change is a message this branch intended to change.
+
+---
+
+
+
 ## 🧹 chore: close the gaps outside the build — installer CI, link rot, dead code, 366 inline FQNs (2026-08-12)
 
 **Repo:** EDDI (`fix/code-review-defects-and-docs`)

@@ -53,6 +53,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
@@ -407,7 +408,7 @@ class ConversationServiceToolTimeoutTest {
             Object toolDecisionsObj = approval.output().get("toolDecisions");
             assertInstanceOf(List.class, toolDecisionsObj, "toolDecisions summary must be present");
             @SuppressWarnings("unchecked")
-            List<java.util.Map<String, Object>> toolDecisions = (List<java.util.Map<String, Object>>) toolDecisionsObj;
+            List<Map<String, Object>> toolDecisions = (List<Map<String, Object>>) toolDecisionsObj;
             assertFalse(toolDecisions.isEmpty());
 
             var first = toolDecisions.get(0);

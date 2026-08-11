@@ -39,6 +39,7 @@ import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Duration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,7 +47,9 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -232,7 +235,7 @@ class GroupConversationServiceHitlCoverageTest {
         doReturn(gc).when(conversationStore).read("gc-phase-with-taskapprovals");
 
         var request = approvedRequest();
-        request.setTaskApprovals(java.util.Map.of("whatever", "APPROVED"));
+        request.setTaskApprovals(Map.of("whatever", "APPROVED"));
 
         var ex = assertThrows(IllegalArgumentException.class,
                 () -> service.resumeDiscussion("gc-phase-with-taskapprovals", request, null));
@@ -249,7 +252,7 @@ class GroupConversationServiceHitlCoverageTest {
         doReturn(gc).when(conversationStore).read("gc-no-tasklist");
 
         var request = approvedRequest();
-        request.setTaskApprovals(java.util.Map.of("whatever", "APPROVED"));
+        request.setTaskApprovals(Map.of("whatever", "APPROVED"));
 
         var ex = assertThrows(IllegalArgumentException.class,
                 () -> service.resumeDiscussion("gc-no-tasklist", request, null));
@@ -370,7 +373,7 @@ class GroupConversationServiceHitlCoverageTest {
         var snapshot = new SimpleConversationMemorySnapshot();
         var output = new ConversationOutput();
         output.put("output", List.of("Test response"));
-        snapshot.setConversationOutputs(new java.util.ArrayList<>(List.of(output)));
+        snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
         doAnswer(inv -> {
             IConversationService.ConversationResponseHandler handler = inv.getArgument(8);
             if (handler != null) {
@@ -455,7 +458,7 @@ class GroupConversationServiceHitlCoverageTest {
         var gc = pausedPhaseGc("gc-past-due");
         gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
         gc.setHitlApprovalTimeout("PT1M");
-        gc.setPausedAt(Instant.now().minus(java.time.Duration.ofHours(2))); // long past due
+        gc.setPausedAt(Instant.now().minus(Duration.ofHours(2))); // long past due
 
         var m = GroupConversationService.class.getDeclaredMethod(
                 "scheduleGroupHitlTimeout", GroupConversation.class);

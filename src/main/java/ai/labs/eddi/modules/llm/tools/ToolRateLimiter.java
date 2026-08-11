@@ -153,7 +153,11 @@ public class ToolRateLimiter {
      * be called while holding it.
      * </p>
      */
-    private static class RateLimitBucket {
+    // Package-private (not private) so the overflow regression test can drive it
+    // directly: reproducing a ~107-day idle bucket through the public API is not
+    // possible, and the alternative — reflecting into a private field — pins the
+    // field name rather than the behaviour.
+    static class RateLimitBucket {
         private int limit;
         private double tokens;
         private long lastRefillNanos;
@@ -162,6 +166,21 @@ public class ToolRateLimiter {
             this.limit = Math.max(0, limit);
             this.tokens = this.limit;
             this.lastRefillNanos = System.nanoTime();
+        }
+
+        /**
+         * Backdate this bucket's last refill, so idle-window behaviour is provable
+         * without waiting for the window. Same test seam as
+         * {@code WorkflowTraversal.discoverConfigs(..., nowMillis)}: an explicit clock
+         * reading rather than a sleep.
+         */
+        synchronized void backdateLastRefill(long nanosAgo) {
+            lastRefillNanos -= nanosAgo;
+        }
+
+        /** Raw token count, for assertions that need sub-integer precision. */
+        synchronized double tokenCount() {
+            return tokens;
         }
 
         /**

@@ -615,7 +615,7 @@ class RestImportServiceUncoveredBranchTest {
                     "createResourcePath", Path.class, String.class, String.class);
             method.setAccessible(true);
 
-            Path workflowPath = java.nio.file.Paths.get("tmp", "import");
+            Path workflowPath = Paths.get("tmp", "import");
             Path result = (Path) method.invoke(service, workflowPath, "out1", "output");
             assertTrue(result.toString().endsWith("out1.output.json"));
         }
@@ -627,7 +627,7 @@ class RestImportServiceUncoveredBranchTest {
                     "createResourcePath", Path.class, String.class, String.class);
             method.setAccessible(true);
 
-            Path workflowPath = java.nio.file.Paths.get("data");
+            Path workflowPath = Paths.get("data");
             Path result = (Path) method.invoke(service, workflowPath, "p1", "property");
             assertTrue(result.toString().endsWith("p1.property.json"));
         }
@@ -639,7 +639,7 @@ class RestImportServiceUncoveredBranchTest {
                     "createResourcePath", Path.class, String.class, String.class);
             method.setAccessible(true);
 
-            Path workflowPath = java.nio.file.Paths.get("data");
+            Path workflowPath = Paths.get("data");
             Path result = (Path) method.invoke(service, workflowPath, "h1", "httpcalls");
             assertTrue(result.toString().endsWith("h1.httpcalls.json"));
         }
@@ -651,7 +651,7 @@ class RestImportServiceUncoveredBranchTest {
                     "createResourcePath", Path.class, String.class, String.class);
             method.setAccessible(true);
 
-            Path workflowPath = java.nio.file.Paths.get("data");
+            Path workflowPath = Paths.get("data");
             Path result = (Path) method.invoke(service, workflowPath, "m1", "mcpcalls");
             assertTrue(result.toString().endsWith("m1.mcpcalls.json"));
         }
@@ -663,7 +663,7 @@ class RestImportServiceUncoveredBranchTest {
                     "createResourcePath", Path.class, String.class, String.class);
             method.setAccessible(true);
 
-            Path workflowPath = java.nio.file.Paths.get("data");
+            Path workflowPath = Paths.get("data");
             Path result = (Path) method.invoke(service, workflowPath, "s1", "snippet");
             assertTrue(result.toString().endsWith("s1.snippet.json"));
         }

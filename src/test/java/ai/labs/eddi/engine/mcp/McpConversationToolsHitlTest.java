@@ -32,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -242,7 +243,7 @@ class McpConversationToolsHitlTest {
         call1.setArgumentsRaw("{\"token\":\"topsecret\"}");
         var call2 = new PendingToolCallBatch.PendingToolCall();
         call2.setToolName("wire_transfer");
-        batch.setCalls(java.util.List.of(call1, call2));
+        batch.setCalls(List.of(call1, call2));
 
         var snapshot = new SimpleConversationMemorySnapshot();
         snapshot.setConversationState(ConversationState.AWAITING_HUMAN);

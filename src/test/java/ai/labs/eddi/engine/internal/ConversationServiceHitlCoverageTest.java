@@ -52,6 +52,7 @@ import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
@@ -119,7 +120,7 @@ class ConversationServiceHitlCoverageTest {
     void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
         doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
-        lenient().doReturn(new java.util.HashMap<String, String>()).when(contextLogger)
+        lenient().doReturn(new HashMap<String, String>()).when(contextLogger)
                 .createLoggingContext(any(), any(), any(), any());
         meterRegistry = new SimpleMeterRegistry();
         conversationService = new ConversationService(

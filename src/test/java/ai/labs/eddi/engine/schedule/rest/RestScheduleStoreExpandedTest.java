@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -91,7 +92,7 @@ class RestScheduleStoreExpandedTest {
     private static ScheduleConfiguration hitlSchedule(String id) {
         var s = makeCronSchedule(id);
         s.setName("hitl-timeout-conv-" + id);
-        s.setMetadata(java.util.Map.of("hitlType", "hitl_timeout", "policy", "AUTO_REJECT",
+        s.setMetadata(Map.of("hitlType", "hitl_timeout", "policy", "AUTO_REJECT",
                 "surface", "regular", "conversationId", "conv-" + id));
         return s;
     }

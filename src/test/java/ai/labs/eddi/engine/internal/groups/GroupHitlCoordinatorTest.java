@@ -229,7 +229,7 @@ class GroupHitlCoordinatorTest {
         var gc = gc(GroupConversationState.AWAITING_APPROVAL);
         gc.setHitlApprovalTimeout("PT10M");
         gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
-        gc.setPausedAt(java.time.Instant.now());
+        gc.setPausedAt(Instant.now());
 
         coordinator().scheduleGroupHitlTimeout(gc);
 
@@ -241,7 +241,7 @@ class GroupHitlCoordinatorTest {
         var gc = gc(GroupConversationState.AWAITING_APPROVAL);
         gc.setHitlApprovalTimeout("PT10M");
         gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
-        gc.setPausedAt(java.time.Instant.now());
+        gc.setPausedAt(Instant.now());
         var coordinator = coordinator();
         doThrow(new RuntimeException("store down")).when(scheduleStore).createSchedule(any());
 
@@ -626,7 +626,7 @@ class GroupHitlCoordinatorTest {
         gc.setPausedAtPhaseIndex(0);
         gc.setPausedPhaseName("Phase 1");
         gc.setHitlPauseType(GroupConversation.HitlPauseType.PHASE);
-        gc.setPausedAt(java.time.Instant.now());
+        gc.setPausedAt(Instant.now());
         when(conversationStore.read(GC_ID)).thenReturn(gc);
         when(executorService.submit(any(Runnable.class))).thenAnswer(invocation -> {
             // The racing cancel: lands after the fresh token was registered but

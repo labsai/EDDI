@@ -433,17 +433,26 @@ public class AuditLedgerService {
             return;
 
         List<AuditEntry> batch = new ArrayList<>();
-        AuditEntry entry;
-        while ((entry = queue.poll()) != null) {
-            queueSize.decrementAndGet();
-            batch.add(entry);
+        // Draining and publishing must be atomic WITH RESPECT TO EVICTION: an
+        // entry that has been polled but not yet published is in neither `queue`
+        // nor `inFlightBatch`, and an eviction landing in that window would read
+        // its conversation as fully persisted and re-seed it — reintroducing the
+        // duplicate this whole mechanism exists to prevent. The read lock is the
+        // same one submitters hold, so this only ever contends with eviction, and
+        // no I/O happens inside it.
+        sequenceLock.readLock().lock();
+        try {
+            AuditEntry entry;
+            while ((entry = queue.poll()) != null) {
+                queueSize.decrementAndGet();
+                batch.add(entry);
+            }
+            inFlightBatch = batch;
+        } finally {
+            sequenceLock.readLock().unlock();
         }
 
         if (!batch.isEmpty()) {
-            // Publish before the store call: between the poll above and a
-            // successful append these positions exist only here, and eviction
-            // must not read their conversations as fully persisted.
-            inFlightBatch = batch;
             try {
                 auditStore.appendBatch(batch);
                 consecutiveFailures.set(0);

@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
@@ -66,7 +67,7 @@ class ConverseWithAgentToolHitlTest {
         call1.setArgumentsRaw("{\"secret\":\"nuke\"}");
         var call2 = new PendingToolCallBatch.PendingToolCall();
         call2.setToolName("wire_transfer");
-        batch.setCalls(java.util.List.of(call1, call2));
+        batch.setCalls(List.of(call1, call2));
 
         var snapshot = new SimpleConversationMemorySnapshot();
         snapshot.setConversationState(ConversationState.AWAITING_HUMAN);

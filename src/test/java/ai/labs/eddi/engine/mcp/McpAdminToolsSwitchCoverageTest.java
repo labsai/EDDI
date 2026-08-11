@@ -42,6 +42,7 @@ import org.mockito.Mock;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -782,7 +783,7 @@ class McpAdminToolsSwitchCoverageTest {
 
             var step = new WorkflowConfiguration.WorkflowStep();
             step.setType(URI.create("ai.labs.rules"));
-            step.setConfig(new java.util.HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
             var wfConfig = new WorkflowConfiguration();
             wfConfig.setWorkflowSteps(List.of(step));
             when(workflowStore.readWorkflow("wf1", 1)).thenReturn(wfConfig);
@@ -847,7 +848,7 @@ class McpAdminToolsSwitchCoverageTest {
 
             var step = new WorkflowConfiguration.WorkflowStep();
             step.setType(null);
-            step.setConfig(new java.util.HashMap<>());
+            step.setConfig(new HashMap<>());
             var wfConfig = new WorkflowConfiguration();
             wfConfig.setWorkflowSteps(List.of(step));
             when(workflowStore.readWorkflow("wf1", 1)).thenReturn(wfConfig);
@@ -1019,7 +1020,7 @@ class McpAdminToolsSwitchCoverageTest {
         @Test
         @DisplayName("workflow modified → agent updated with new workflow URIs")
         void workflowModified() throws Exception {
-            var mapping = new java.util.HashMap<String, String>();
+            var mapping = new HashMap<String, String>();
             mapping.put("oldUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1");
             mapping.put("newUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=2");
             when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(List.of(mapping));
@@ -1030,7 +1031,7 @@ class McpAdminToolsSwitchCoverageTest {
             when(restAgentStore.readAgent("agent1", 1)).thenReturn(agent);
 
             var step = new WorkflowConfiguration.WorkflowStep();
-            step.setConfig(new java.util.HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
             var wfConfig = new WorkflowConfiguration();
             wfConfig.setWorkflowSteps(List.of(step));
             when(workflowStore.readWorkflow("wf1", 1)).thenReturn(wfConfig);
@@ -1053,7 +1054,7 @@ class McpAdminToolsSwitchCoverageTest {
         @Test
         @DisplayName("redeploy=true after cascade")
         void redeployAfterCascade() throws Exception {
-            var mapping = new java.util.HashMap<String, String>();
+            var mapping = new HashMap<String, String>();
             mapping.put("oldUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1");
             mapping.put("newUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=2");
             when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(List.of(mapping));
@@ -1064,7 +1065,7 @@ class McpAdminToolsSwitchCoverageTest {
             when(restAgentStore.readAgent("agent1", 1)).thenReturn(agent);
 
             var step = new WorkflowConfiguration.WorkflowStep();
-            step.setConfig(new java.util.HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
             var wfConfig = new WorkflowConfiguration();
             wfConfig.setWorkflowSteps(List.of(step));
             when(workflowStore.readWorkflow("wf1", 1)).thenReturn(wfConfig);
@@ -1090,7 +1091,7 @@ class McpAdminToolsSwitchCoverageTest {
         @Test
         @DisplayName("redeploy exception → deployError in result")
         void redeployException() throws Exception {
-            var mapping = new java.util.HashMap<String, String>();
+            var mapping = new HashMap<String, String>();
             mapping.put("oldUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1");
             mapping.put("newUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=2");
             when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(List.of(mapping));
@@ -1101,7 +1102,7 @@ class McpAdminToolsSwitchCoverageTest {
             when(restAgentStore.readAgent("agent1", 1)).thenReturn(agent);
 
             var step = new WorkflowConfiguration.WorkflowStep();
-            step.setConfig(new java.util.HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
             var wfConfig = new WorkflowConfiguration();
             wfConfig.setWorkflowSteps(List.of(step));
             when(workflowStore.readWorkflow("wf1", 1)).thenReturn(wfConfig);
@@ -1125,7 +1126,7 @@ class McpAdminToolsSwitchCoverageTest {
         @Test
         @DisplayName("workflow config null → keep URI as-is")
         void workflowConfigNull() throws Exception {
-            var mapping = new java.util.HashMap<String, String>();
+            var mapping = new HashMap<String, String>();
             mapping.put("oldUri", "old");
             mapping.put("newUri", "new");
             when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(List.of(mapping));

@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.lifecycle.model;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * Human decision on a paused conversation or group discussion.
@@ -33,7 +35,7 @@ public class HitlDecision {
                 return null;
             }
             try {
-                return HitlVerdict.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+                return HitlVerdict.valueOf(value.trim().toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException unrecognized) {
                 return null;
             }
@@ -48,7 +50,7 @@ public class HitlDecision {
      * Per-tool-call verdicts, keyed by {@code callId} — TOOL_CALL pauses only.
      * Calls not listed here inherit the top-level {@link #verdict}.
      */
-    private java.util.Map<String, ToolCallDecision> toolDecisions;
+    private Map<String, ToolCallDecision> toolDecisions;
 
     public HitlVerdict getVerdict() {
         return verdict;
@@ -74,11 +76,11 @@ public class HitlDecision {
         this.decidedBy = decidedBy;
     }
 
-    public java.util.Map<String, ToolCallDecision> getToolDecisions() {
+    public Map<String, ToolCallDecision> getToolDecisions() {
         return toolDecisions;
     }
 
-    public void setToolDecisions(java.util.Map<String, ToolCallDecision> toolDecisions) {
+    public void setToolDecisions(Map<String, ToolCallDecision> toolDecisions) {
         this.toolDecisions = toolDecisions;
     }
 }

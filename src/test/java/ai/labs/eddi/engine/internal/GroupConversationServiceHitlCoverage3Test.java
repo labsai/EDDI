@@ -47,7 +47,10 @@ import org.mockito.MockitoAnnotations;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -342,7 +345,7 @@ class GroupConversationServiceHitlCoverage3Test {
     @Test
     @DisplayName("filterByScope: ANONYMOUS scope → speaker attribution stripped to 'Anonymous'")
     void filterByScopeAnonymous() throws Exception {
-        var result = (List<java.util.Map<String, Object>>) filterByScope(ContextScope.ANONYMOUS,
+        var result = (List<Map<String, Object>>) filterByScope(ContextScope.ANONYMOUS,
                 List.of(entry(AGENT_A, "Agent A", "secret", TranscriptEntryType.OPINION, null)), 1, member());
         assertEquals(1, result.size());
         assertEquals("Anonymous", result.get(0).get("speaker"));
@@ -689,7 +692,7 @@ class GroupConversationServiceHitlCoverage3Test {
     void parseVerificationJsonPassed() throws Exception {
         var g = gcWithCompletedTask("gc-verif-json");
         var completed = g.getTaskList().all();
-        doReturn(List.of(java.util.Map.of("subject", "Build", "passed", true, "feedback", "ok")))
+        doReturn(List.of(Map.of("subject", "Build", "passed", true, "feedback", "ok")))
                 .when(jsonSerialization).deserialize(anyString(), eq(List.class));
         invoke(parseVerificationMethod(), g, completed, "[{\"subject\":\"Build\",\"passed\":true}]", null);
         assertEquals(TaskStatus.VERIFIED, g.getTaskList().all().get(0).status());
@@ -700,7 +703,7 @@ class GroupConversationServiceHitlCoverage3Test {
     void parseVerificationJsonFailed() throws Exception {
         var g = gcWithCompletedTask("gc-verif-json-fail");
         var completed = g.getTaskList().all();
-        doReturn(List.of(java.util.Map.of("subject", "Build", "passed", false)))
+        doReturn(List.of(Map.of("subject", "Build", "passed", false)))
                 .when(jsonSerialization).deserialize(anyString(), eq(List.class));
         invoke(parseVerificationMethod(), g, completed, "[{\"subject\":\"Build\",\"passed\":false}]", null);
         assertEquals(TaskStatus.FAILED, g.getTaskList().all().get(0).status());
@@ -804,7 +807,7 @@ class GroupConversationServiceHitlCoverage3Test {
         g.setTaskList(taskList);
         var task = g.getTaskList().all().get(0);
 
-        var errors = java.util.Collections.synchronizedList(new java.util.ArrayList<GroupDiscussionException>());
+        var errors = Collections.synchronizedList(new ArrayList<GroupDiscussionException>());
         // handleTaskFailure was split so the SSE listener callback is not made while
         // holding the task-list monitor; recordTaskFailure is the document-mutating
         // half these tests actually assert on.
@@ -832,7 +835,7 @@ class GroupConversationServiceHitlCoverage3Test {
         g.setTaskList(taskList);
         var task = g.getTaskList().all().get(0);
 
-        var errors = java.util.Collections.synchronizedList(new java.util.ArrayList<GroupDiscussionException>());
+        var errors = Collections.synchronizedList(new ArrayList<GroupDiscussionException>());
         // handleTaskFailure was split so the SSE listener callback is not made while
         // holding the task-list monitor; recordTaskFailure is the document-mutating
         // half these tests actually assert on.

@@ -6,6 +6,9 @@ package ai.labs.eddi.modules.llm.tools.spi;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -144,7 +147,7 @@ class ToolSourceProviderTest {
     @Test
     void nullProviderEntriesAreSkipped() {
         var assembled = ToolSourceRegistry.assemble(
-                java.util.Arrays.asList(null, provider("builtin", "calculator"), null), null);
+                Arrays.asList(null, provider("builtin", "calculator"), null), null);
 
         assertEquals(1, assembled.specs().size());
     }
@@ -374,8 +377,8 @@ class ToolSourceProviderTest {
 
     @Test
     void contributionComponentsAreImmutableRegardlessOfWhatAProviderPassed() {
-        var mutableSpecs = new java.util.ArrayList<ToolSpecification>();
-        var mutableSources = new java.util.HashMap<String, String>();
+        var mutableSpecs = new ArrayList<ToolSpecification>();
+        var mutableSources = new HashMap<String, String>();
         var contribution = new ToolContribution(mutableSpecs, Map.of(), mutableSources, Map.of(), List.of(), Map.of());
 
         assertThrows(UnsupportedOperationException.class,

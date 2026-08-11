@@ -8,6 +8,8 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
 import io.restassured.response.Response;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.*;
 
 import static io.restassured.RestAssured.given;
@@ -23,7 +25,7 @@ import static org.hamcrest.Matchers.*;
 @TestProfile(IntegrationTestProfile.class)
 public class AgentDeploymentComponentIT extends BaseIntegrationIT {
 
-    private static final java.util.List<ResourceId> createdAgents = new java.util.ArrayList<>();
+    private static final List<ResourceId> createdAgents = new ArrayList<>();
 
     @AfterAll
     static void cleanup() {

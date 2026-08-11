@@ -38,6 +38,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -506,7 +507,7 @@ class AgentOrchestratorResumeToolLoopTest {
         when(journalStore.tryClaim(anyString(), anyString(), eq("c1"), anyString(), anyString())).thenReturn(false);
         when(journalStore.find("conv-1", "epoch-1", "c1")).thenReturn(Optional.of(
                 new IHitlToolJournalStore.JournalEntry("conv-1", "epoch-1", "c1", "calculate",
-                        IHitlToolJournalStore.Status.EXECUTED, "42", java.time.Instant.now(), "reviewer-1")));
+                        IHitlToolJournalStore.Status.EXECUTED, "42", Instant.now(), "reviewer-1")));
 
         ChatModel chatModel = mock(ChatModel.class);
         var captor = ArgumentCaptor.forClass(ChatRequest.class);

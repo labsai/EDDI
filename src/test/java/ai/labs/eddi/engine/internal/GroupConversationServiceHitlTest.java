@@ -54,9 +54,12 @@ import org.mockito.MockitoAnnotations;
 import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -1084,7 +1087,7 @@ class GroupConversationServiceHitlTest {
             return gc;
         }
 
-        private GroupApprovalRequest approvedRequest(java.util.Map<String, String> taskApprovals) {
+        private GroupApprovalRequest approvedRequest(Map<String, String> taskApprovals) {
             var request = new GroupApprovalRequest();
             var decision = new HitlDecision();
             decision.setVerdict(HitlVerdict.APPROVED);
@@ -1101,7 +1104,7 @@ class GroupConversationServiceHitlTest {
 
             var ex = assertThrows(IllegalArgumentException.class,
                     () -> service.resumeDiscussion("gc-approvals",
-                            approvedRequest(java.util.Map.of("no-such-task", "APPROVED")), null));
+                            approvedRequest(Map.of("no-such-task", "APPROVED")), null));
             assertTrue(ex.getMessage().contains("no-such-task"), ex.getMessage());
 
             assertTrue(gc.getTaskList().hasAwaitingApproval(), "no task may be mutated on a rejected request");
@@ -1121,7 +1124,7 @@ class GroupConversationServiceHitlTest {
 
             var ex = assertThrows(IllegalArgumentException.class,
                     () -> service.resumeDiscussion("gc-approvals",
-                            approvedRequest(java.util.Map.of(assignedTaskId, "APPROVED")), null));
+                            approvedRequest(Map.of(assignedTaskId, "APPROVED")), null));
             assertTrue(ex.getMessage().contains("not awaiting approval"), ex.getMessage());
             verify(conversationStore, never()).updateIfState(any(), any());
         }
@@ -1137,7 +1140,7 @@ class GroupConversationServiceHitlTest {
 
             var ex = assertThrows(IllegalArgumentException.class,
                     () -> service.resumeDiscussion("gc-approvals",
-                            approvedRequest(java.util.Map.of(awaitingTaskId, "MAYBE")), null));
+                            approvedRequest(Map.of(awaitingTaskId, "MAYBE")), null));
             assertTrue(ex.getMessage().contains("APPROVED or REJECTED"), ex.getMessage());
 
             assertTrue(gc.getTaskList().hasAwaitingApproval(), "no task may be mutated on a rejected request");
@@ -1154,7 +1157,7 @@ class GroupConversationServiceHitlTest {
                     .findFirst().orElseThrow().id();
 
             service.resumeDiscussion("gc-approvals",
-                    approvedRequest(java.util.Map.of(awaitingTaskId, "approved")), null);
+                    approvedRequest(Map.of(awaitingTaskId, "approved")), null);
 
             assertFalse(gc.getTaskList().hasAwaitingApproval(), "lowercase 'approved' must be accepted");
         }
@@ -1165,7 +1168,7 @@ class GroupConversationServiceHitlTest {
             var gc = pausedGcWithTasks();
             doReturn(gc).when(conversationStore).read("gc-approvals");
 
-            service.resumeDiscussion("gc-approvals", approvedRequest(java.util.Map.of()), null);
+            service.resumeDiscussion("gc-approvals", approvedRequest(Map.of()), null);
 
             assertFalse(gc.getTaskList().hasAwaitingApproval(),
                     "an explicit {} must auto-approve like an absent map — otherwise the phase instantly re-pauses");
@@ -1330,7 +1333,7 @@ class GroupConversationServiceHitlTest {
             request.setDecision(dec);
 
             // Capture phase indices via a listener
-            var observedPhaseIndices = java.util.Collections.synchronizedList(new java.util.ArrayList<Integer>());
+            var observedPhaseIndices = Collections.synchronizedList(new ArrayList<Integer>());
             var resumeDone = new CountDownLatch(1);
 
             var listener = new IGroupConversationService.GroupDiscussionEventListener() {
@@ -1400,7 +1403,7 @@ class GroupConversationServiceHitlTest {
             dec.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(dec);
 
-            var observedPhaseIndices = java.util.Collections.synchronizedList(new java.util.ArrayList<Integer>());
+            var observedPhaseIndices = Collections.synchronizedList(new ArrayList<Integer>());
             var resumeDone = new CountDownLatch(1);
 
             var listener = new IGroupConversationService.GroupDiscussionEventListener() {
@@ -1546,7 +1549,7 @@ class GroupConversationServiceHitlTest {
             dec.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(dec);
 
-            var completedSpeakers = java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+            var completedSpeakers = Collections.synchronizedSet(new HashSet<String>());
             var resumeDone = new CountDownLatch(1);
             var listener = new IGroupConversationService.GroupDiscussionEventListener() {
                 @Override
@@ -1570,7 +1573,7 @@ class GroupConversationServiceHitlTest {
             assertTrue(resumeDone.await(5, TimeUnit.SECONDS),
                     "Async resume should complete within 5s");
 
-            assertEquals(java.util.Set.of(AGENT_A, "agent-b"), completedSpeakers,
+            assertEquals(Set.of(AGENT_A, "agent-b"), completedSpeakers,
                     "a PARALLEL resume must run every speaker — the speaker bookmark is not honored for PARALLEL phases");
             assertNull(gc.getResumePoint(), "the bookmark must be consumed/cleared even though its offset was ignored");
         }
@@ -1989,7 +1992,7 @@ class GroupConversationServiceHitlTest {
             var dec = new HitlDecision();
             dec.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(dec);
-            request.setTaskApprovals(java.util.Map.of("some-task", "APPROVED"));
+            request.setTaskApprovals(Map.of("some-task", "APPROVED"));
 
             var ex = assertThrows(IllegalArgumentException.class,
                     () -> service.resumeDiscussion("gc-phase-only", request, null),

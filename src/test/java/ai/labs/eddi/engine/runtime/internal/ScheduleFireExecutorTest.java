@@ -21,6 +21,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -168,7 +169,7 @@ class ScheduleFireExecutorTest {
         var ctx = inputCaptor.getValue().getContext();
         var scheduleCtx = ctx.get("schedule");
         assertNotNull(scheduleCtx);
-        var data = (java.util.Map<?, ?>) scheduleCtx.getValue();
+        var data = (Map<?, ?>) scheduleCtx.getValue();
         assertEquals("heartbeat", data.get("trigger"));
         assertEquals("HEARTBEAT", data.get("triggerType"));
     }
@@ -355,7 +356,7 @@ class ScheduleFireExecutorTest {
         // The metadata key ('hitlType') and value ('hitl_timeout') route into the
         // handler — a rename on either side would break this and the timeout would
         // silently never fire.
-        var mdCaptor = ArgumentCaptor.forClass(java.util.Map.class);
+        var mdCaptor = ArgumentCaptor.forClass(Map.class);
         verify(hitlTimeoutHandler).handleTimeout(mdCaptor.capture());
         assertEquals("hitl_timeout", mdCaptor.getValue().get("hitlType"));
         assertEquals("conv-paused", mdCaptor.getValue().get("conversationId"));
@@ -543,7 +544,7 @@ class ScheduleFireExecutorTest {
         s.setTimeZone("UTC");
         s.setFireStatus(FireStatus.CLAIMED);
         s.setNextFire(Instant.now().minusSeconds(1));
-        s.setMetadata(java.util.Map.of(
+        s.setMetadata(Map.of(
                 TeamCadenceService.METADATA_TYPE_KEY, TeamCadenceService.METADATA_TYPE_CADENCE,
                 TeamCadenceService.METADATA_GROUP_ID_KEY, "group-1",
                 TeamCadenceService.METADATA_CADENCE_ID_KEY, "cadence-1"));
@@ -597,7 +598,7 @@ class ScheduleFireExecutorTest {
         s.setUserId(userId);
         s.setFireStatus(FireStatus.CLAIMED);
         s.setNextFire(Instant.now().minusSeconds(1));
-        s.setMetadata(java.util.Map.of(
+        s.setMetadata(Map.of(
                 DreamService.METADATA_TYPE_KEY, DreamService.METADATA_TYPE_CONSOLIDATION));
         return s;
     }
@@ -612,7 +613,7 @@ class ScheduleFireExecutorTest {
         s.setNextFire(Instant.now().minusSeconds(1));
         // The producer (ConversationService.scheduleHitlTimeout) sets exactly these
         // keys.
-        s.setMetadata(java.util.Map.of(
+        s.setMetadata(Map.of(
                 "hitlType", "hitl_timeout",
                 "policy", policy,
                 "surface", "regular",

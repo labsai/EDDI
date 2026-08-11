@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.Dissent;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import java.util.ArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -350,7 +351,7 @@ class SlackGroupDiscussionListenerTest {
     }
 
     private GroupConversationEventSink.GroupStartEvent groupStart(String style, int memberCount) {
-        List<String> ids = new java.util.ArrayList<>();
+        List<String> ids = new ArrayList<>();
         for (int i = 0; i < memberCount; i++)
             ids.add("a" + i);
         return new GroupConversationEventSink.GroupStartEvent(
@@ -397,13 +398,13 @@ class SlackGroupDiscussionListenerTest {
 
         withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
 
-        var blocksCaptor = org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        var blocksCaptor = org.mockito.ArgumentCaptor.forClass(List.class);
         verify(slackApi).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), blocksCaptor.capture(), anyString());
         @SuppressWarnings("unchecked")
-        var blocks = (java.util.List<java.util.Map<String, Object>>) blocksCaptor.getValue();
+        var blocks = (List<Map<String, Object>>) blocksCaptor.getValue();
         var actions = blocks.stream().filter(b -> "actions".equals(b.get("type"))).findFirst().orElseThrow();
         @SuppressWarnings("unchecked")
-        var elements = (java.util.List<java.util.Map<String, Object>>) actions.get("elements");
+        var elements = (List<Map<String, Object>>) actions.get("elements");
         String value = (String) elements.get(0).get("value");
         var parsed = SlackHitlSupport.parseActionValue(value);
         assertEquals("acme-int", parsed.integrationName());

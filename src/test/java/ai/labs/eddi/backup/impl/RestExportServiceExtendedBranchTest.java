@@ -37,6 +37,8 @@ import org.mockito.Mock;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -109,10 +111,10 @@ class RestExportServiceExtendedBranchTest {
         @DisplayName("empty referenced names — returns early")
         void emptyReferencedNames() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
-                    "exportSnippets", java.nio.file.Path.class, Set.class);
+                    "exportSnippets", Path.class, Set.class);
             method.setAccessible(true);
             // Should not throw; no snippets directory creation attempted
-            method.invoke(exportService, java.nio.file.Files.createTempDirectory("test-snippets"), new LinkedHashSet<>());
+            method.invoke(exportService, Files.createTempDirectory("test-snippets"), new LinkedHashSet<>());
             verify(documentDescriptorStore, never()).readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean());
         }
 
@@ -120,7 +122,7 @@ class RestExportServiceExtendedBranchTest {
         @DisplayName("null descriptors from store — returns early")
         void nullDescriptors() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
-                    "exportSnippets", java.nio.file.Path.class, Set.class);
+                    "exportSnippets", Path.class, Set.class);
             method.setAccessible(true);
 
             when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false)))
@@ -128,14 +130,14 @@ class RestExportServiceExtendedBranchTest {
 
             Set<String> names = new LinkedHashSet<>();
             names.add("greeting");
-            method.invoke(exportService, java.nio.file.Files.createTempDirectory("test-snippets"), names);
+            method.invoke(exportService, Files.createTempDirectory("test-snippets"), names);
         }
 
         @Test
         @DisplayName("empty descriptors from store — returns early")
         void emptyDescriptors() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
-                    "exportSnippets", java.nio.file.Path.class, Set.class);
+                    "exportSnippets", Path.class, Set.class);
             method.setAccessible(true);
 
             when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false)))
@@ -143,14 +145,14 @@ class RestExportServiceExtendedBranchTest {
 
             Set<String> names = new LinkedHashSet<>();
             names.add("greeting");
-            method.invoke(exportService, java.nio.file.Files.createTempDirectory("test-snippets"), names);
+            method.invoke(exportService, Files.createTempDirectory("test-snippets"), names);
         }
 
         @Test
         @DisplayName("snippet with null name is skipped")
         void snippetWithNullNameSkipped() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
-                    "exportSnippets", java.nio.file.Path.class, Set.class);
+                    "exportSnippets", Path.class, Set.class);
             method.setAccessible(true);
 
             DocumentDescriptor desc = new DocumentDescriptor();
@@ -164,14 +166,14 @@ class RestExportServiceExtendedBranchTest {
 
             Set<String> names = new LinkedHashSet<>();
             names.add("greeting");
-            method.invoke(exportService, java.nio.file.Files.createTempDirectory("test-snippets"), names);
+            method.invoke(exportService, Files.createTempDirectory("test-snippets"), names);
         }
 
         @Test
         @DisplayName("snippet not in referenced set is skipped")
         void snippetNotReferencedSkipped() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
-                    "exportSnippets", java.nio.file.Path.class, Set.class);
+                    "exportSnippets", Path.class, Set.class);
             method.setAccessible(true);
 
             DocumentDescriptor desc = new DocumentDescriptor();
@@ -185,14 +187,14 @@ class RestExportServiceExtendedBranchTest {
 
             Set<String> names = new LinkedHashSet<>();
             names.add("greeting"); // only "greeting" is referenced
-            method.invoke(exportService, java.nio.file.Files.createTempDirectory("test-snippets"), names);
+            method.invoke(exportService, Files.createTempDirectory("test-snippets"), names);
         }
 
         @Test
         @DisplayName("ResourceNotFoundException on snippet read is handled gracefully")
         void snippetResourceNotFound() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
-                    "exportSnippets", java.nio.file.Path.class, Set.class);
+                    "exportSnippets", Path.class, Set.class);
             method.setAccessible(true);
 
             DocumentDescriptor desc = new DocumentDescriptor();
@@ -205,7 +207,7 @@ class RestExportServiceExtendedBranchTest {
             Set<String> names = new LinkedHashSet<>();
             names.add("greeting");
             // Should not throw
-            method.invoke(exportService, java.nio.file.Files.createTempDirectory("test-snippets"), names);
+            method.invoke(exportService, Files.createTempDirectory("test-snippets"), names);
         }
     }
 
@@ -221,12 +223,12 @@ class RestExportServiceExtendedBranchTest {
         @DisplayName("empty schedules — returns early")
         void emptySchedules() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
-                    "exportSchedules", String.class, java.nio.file.Path.class);
+                    "exportSchedules", String.class, Path.class);
             method.setAccessible(true);
 
             when(scheduleStore.readSchedulesByAgentId("agent1")).thenReturn(Collections.emptyList());
 
-            method.invoke(exportService, "agent1", java.nio.file.Files.createTempDirectory("test-sched"));
+            method.invoke(exportService, "agent1", Files.createTempDirectory("test-sched"));
             // No files should be written
         }
 
@@ -234,7 +236,7 @@ class RestExportServiceExtendedBranchTest {
         @DisplayName("schedule export exception is handled gracefully")
         void scheduleExportException() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
-                    "exportSchedules", String.class, java.nio.file.Path.class);
+                    "exportSchedules", String.class, Path.class);
             method.setAccessible(true);
 
             when(scheduleStore.readSchedulesByAgentId("agent1"))
@@ -242,7 +244,7 @@ class RestExportServiceExtendedBranchTest {
 
             // Should not throw
             assertDoesNotThrow(() -> method.invoke(exportService, "agent1",
-                    java.nio.file.Files.createTempDirectory("test-sched")));
+                    Files.createTempDirectory("test-sched")));
         }
     }
 
@@ -360,10 +362,10 @@ class RestExportServiceExtendedBranchTest {
         @DisplayName("null selectedIds writes all configs")
         void nullSelectedIdsWritesAll() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
-                    "writeSelectedConfigs", java.nio.file.Path.class, Map.class, String.class, Set.class);
+                    "writeSelectedConfigs", Path.class, Map.class, String.class, Set.class);
             method.setAccessible(true);
             // Should call writeConfigs with all configs — just verify no NPE
-            method.invoke(exportService, java.nio.file.Files.createTempDirectory("test"),
+            method.invoke(exportService, Files.createTempDirectory("test"),
                     Collections.emptyMap(), "ext", null);
         }
 
@@ -371,10 +373,10 @@ class RestExportServiceExtendedBranchTest {
         @DisplayName("non-null selectedIds filters configs")
         void nonNullSelectedIdsFilters() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
-                    "writeSelectedConfigs", java.nio.file.Path.class, Map.class, String.class, Set.class);
+                    "writeSelectedConfigs", Path.class, Map.class, String.class, Set.class);
             method.setAccessible(true);
             // Should call writeConfigs with filtered configs
-            method.invoke(exportService, java.nio.file.Files.createTempDirectory("test"),
+            method.invoke(exportService, Files.createTempDirectory("test"),
                     Collections.emptyMap(), "ext", Set.of("r1"));
         }
     }

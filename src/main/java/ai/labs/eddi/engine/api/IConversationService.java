@@ -356,7 +356,7 @@ public interface IConversationService {
      * @throws ResourceStoreException
      *             on persistence failures
      */
-    java.util.List<PendingApprovalSummary> listPendingApprovals(int limit)
+    List<PendingApprovalSummary> listPendingApprovals(int limit)
             throws ResourceStoreException;
 
     /**
@@ -365,7 +365,7 @@ public interface IConversationService {
      * restriction — a non-admin caller's approval inbox cannot be starved by other
      * users' backlog.
      */
-    java.util.List<PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
+    List<PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
             throws ResourceStoreException;
 
     // --- Domain exceptions (no JAX-RS dependency) ---

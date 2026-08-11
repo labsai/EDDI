@@ -10,6 +10,7 @@ import ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.ExecutionState;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -76,7 +77,7 @@ public class Rule implements Cloneable {
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(name);
+        return Objects.hash(name);
     }
 
     @Override

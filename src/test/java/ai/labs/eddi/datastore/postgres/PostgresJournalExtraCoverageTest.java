@@ -38,6 +38,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -216,7 +217,7 @@ class PostgresJournalExtraCoverageTest {
         void listScopedGroup_approverSeesAll() throws Exception {
             when(ownershipValidator.isAdmin(identity)).thenReturn(false);
             when(ownershipValidator.isApprover(identity)).thenReturn(true);
-            when(groupConversationService.listGroupPendingApprovals(null, 10)).thenReturn(java.util.List.of());
+            when(groupConversationService.listGroupPendingApprovals(null, 10)).thenReturn(List.of());
 
             assertTrue(guard.listScopedGroupPendingApprovals(null, 10).isEmpty());
         }
@@ -229,7 +230,7 @@ class PostgresJournalExtraCoverageTest {
             Principal p = mock(Principal.class);
             when(p.getName()).thenReturn(""); // blank → isBlank() branch
             when(identity.getPrincipal()).thenReturn(p);
-            when(groupConversationService.listGroupPendingApprovals("g1", 10)).thenReturn(java.util.List.of());
+            when(groupConversationService.listGroupPendingApprovals("g1", 10)).thenReturn(List.of());
 
             assertTrue(guard.listScopedGroupPendingApprovals("g1", 10).isEmpty());
         }

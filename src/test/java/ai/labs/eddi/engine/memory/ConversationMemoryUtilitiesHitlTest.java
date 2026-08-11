@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -228,7 +229,7 @@ class ConversationMemoryUtilitiesHitlTest {
             batch.setPauseEpoch("epoch-1");
             batch.setLlmTaskId("task-a");
             batch.setChatTranscriptJson(CANARY_TRANSCRIPT);
-            batch.setTraceSoFar(List.of(java.util.Map.of("args", CANARY_ARGS)));
+            batch.setTraceSoFar(List.of(Map.of("args", CANARY_ARGS)));
             batch.setFingerprint("sha256-" + CANARY_SECRET);
             batch.setCalls(List.of(call));
             // Fix #1: the batch carries the effective tool-approval config — it must NOT

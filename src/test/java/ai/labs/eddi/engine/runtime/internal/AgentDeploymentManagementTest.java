@@ -37,6 +37,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -303,7 +304,7 @@ class AgentDeploymentManagementTest {
         private WorkflowConfiguration behaviorWorkflow(URI ruleSetUri) {
             var step = new WorkflowConfiguration.WorkflowStep();
             step.setType(URI.create("eddi://ai.labs.behavior"));
-            step.setConfig(java.util.Map.of("uri", ruleSetUri.toString()));
+            step.setConfig(Map.of("uri", ruleSetUri.toString()));
 
             var workflowConfiguration = new WorkflowConfiguration();
             workflowConfiguration.setWorkflowSteps(List.of(step));

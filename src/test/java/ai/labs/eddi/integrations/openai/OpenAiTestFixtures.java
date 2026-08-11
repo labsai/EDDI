@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.openai;
 
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
@@ -50,7 +51,7 @@ final class OpenAiTestFixtures {
         boolean exposeStatelessVariants = true;
 
         OpenAiCompatConfig build() {
-            return new OpenAiCompatConfig(enabled, java.util.Optional.ofNullable(apiKey), httpPolicy,
+            return new OpenAiCompatConfig(enabled, Optional.ofNullable(apiKey), httpPolicy,
                     trustUserHeaders, allowAnonymous, defaultUser, environment, requestTimeoutSeconds,
                     maxConcurrentRequests, modelCacheSeconds, exposeStatelessVariants);
         }

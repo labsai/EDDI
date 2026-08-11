@@ -22,6 +22,7 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -335,15 +336,15 @@ public class HttpClientWrapper implements IHttpClient {
             if (o == null || getClass() != o.getClass())
                 return false;
             RequestWrapper that = (RequestWrapper) o;
-            return maxLength == that.maxLength && currentTimeout == that.currentTimeout && java.util.Objects.equals(uri, that.uri)
-                    && java.util.Objects.equals(request, that.request) && java.util.Objects.equals(method, that.method)
-                    && java.util.Objects.equals(requestBody, that.requestBody) && java.util.Objects.equals(requestEncoding, that.requestEncoding)
-                    && java.util.Objects.equals(queryParamsMap, that.queryParamsMap);
+            return maxLength == that.maxLength && currentTimeout == that.currentTimeout && Objects.equals(uri, that.uri)
+                    && Objects.equals(request, that.request) && Objects.equals(method, that.method)
+                    && Objects.equals(requestBody, that.requestBody) && Objects.equals(requestEncoding, that.requestEncoding)
+                    && Objects.equals(queryParamsMap, that.queryParamsMap);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(uri, request, method, maxLength, requestBody, requestEncoding, currentTimeout, queryParamsMap);
+            return Objects.hash(uri, request, method, maxLength, requestBody, requestEncoding, currentTimeout, queryParamsMap);
         }
     }
 
@@ -402,13 +403,13 @@ public class HttpClientWrapper implements IHttpClient {
             if (o == null || getClass() != o.getClass())
                 return false;
             ResponseWrapper that = (ResponseWrapper) o;
-            return httpCode == that.httpCode && java.util.Objects.equals(contentAsString, that.contentAsString)
-                    && java.util.Objects.equals(httpCodeMessage, that.httpCodeMessage) && java.util.Objects.equals(httpHeader, that.httpHeader);
+            return httpCode == that.httpCode && Objects.equals(contentAsString, that.contentAsString)
+                    && Objects.equals(httpCodeMessage, that.httpCodeMessage) && Objects.equals(httpHeader, that.httpHeader);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(contentAsString, httpCode, httpCodeMessage, httpHeader);
+            return Objects.hash(contentAsString, httpCode, httpCodeMessage, httpHeader);
         }
     }
 

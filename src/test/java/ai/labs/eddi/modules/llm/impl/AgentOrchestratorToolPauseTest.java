@@ -33,6 +33,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import java.util.ArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -322,7 +323,7 @@ class AgentOrchestratorToolPauseTest {
         doReturn(dataOfInt(1)).when(currentStep).getLatestData("hitl:tool_pause_count");
 
         // Audit context present — Task 10 records the guard through the collector.
-        var collected = new java.util.ArrayList<AuditEntry>();
+        var collected = new ArrayList<AuditEntry>();
         when(memory.getUserId()).thenReturn("user-1");
         when(memory.getAuditCollector()).thenReturn(collected::add);
 

@@ -127,8 +127,12 @@ public class SafeHttpClient {
      * Returns {@code request} unchanged when it already carries a timeout, else a
      * copy bounded by {@link #DEFAULT_REQUEST_TIMEOUT}. {@link HttpRequest} is
      * immutable, so the bound can only be applied by rebuilding.
+     * <p>
+     * Package-private so {@code SafeHttpClientTimeoutTest} can pin the rebuild
+     * without an embedded server — the server-backed cases live in
+     * {@code SafeHttpClientTest} and only run where loopback sockets are available.
      */
-    private static HttpRequest withDefaultTimeout(HttpRequest request) {
+    static HttpRequest withDefaultTimeout(HttpRequest request) {
         if (request.timeout().isPresent()) {
             return request;
         }

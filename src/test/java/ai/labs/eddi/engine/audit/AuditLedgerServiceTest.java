@@ -185,6 +185,53 @@ class AuditLedgerServiceTest {
         assertNotEquals(AuditEntry.UNSEQUENCED, fresh.sequence());
     }
 
+    /**
+     * The third place a consumed chain position can live. Once
+     * {@link AuditLedgerService#flush()} has polled a batch off the queue, those
+     * positions are in neither the queue nor the store until the append returns —
+     * so an eviction landing in that window would read their conversations as fully
+     * persisted and re-seed them straight into a duplicate.
+     * <p>
+     * Driven from inside the mocked {@code appendBatch}, which is precisely when
+     * the batch is in flight.
+     */
+    @Test
+    @DisplayName("sequence eviction — a conversation in the in-flight flush batch is not re-seeded")
+    void sequenceEvictionRetainsTheInFlightBatch() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation(anyString())).thenReturn(0L);
+        service = createService(true, null);
+
+        // Position 0 for "live", then force it out of the queue and into the
+        // in-flight batch by flushing with an append that overflows the table
+        // while it is still executing.
+        service.submit(entry("live-1", "live", "agent1"));
+        doAnswer(invocation -> {
+            for (int i = 0; i < AuditLedgerService.MAX_TRACKED_CONVERSATIONS + 5; i++) {
+                service.submit(entry("fill-" + i, "filler-" + i, "agent1"));
+            }
+            return null;
+        }).when(auditStore).appendBatch(any());
+
+        service.flush();
+
+        // The append has returned, so "live" is genuinely persisted now; what
+        // matters is that eviction did not drop its counter mid-flight.
+        doAnswer(invocation -> null).when(auditStore).appendBatch(any());
+        service.submit(entry("live-2", "live", "agent1"));
+
+        var persisted = ArgumentCaptor.forClass(List.class);
+        service.flush();
+        verify(auditStore, atLeastOnce()).appendBatch(persisted.capture());
+        @SuppressWarnings("unchecked")
+        var live2 = ((List<AuditEntry>) persisted.getValue()).stream()
+                .filter(e -> "live".equals(e.conversationId()))
+                .findFirst().orElseThrow();
+
+        assertEquals(1L, live2.sequence(),
+                "the counter must have survived an eviction that ran while its entry was in the flush batch");
+    }
+
     @Test
     @DisplayName("flush — does nothing when queue is empty")
     void flushEmptyQueue() {

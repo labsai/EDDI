@@ -31,6 +31,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -144,7 +145,7 @@ class AttachmentForwarderTest {
             when(store.load(eq("ref-1"), any())).thenReturn(pdf);
 
             // The map form Jackson hands back for a persisted Attachment.
-            Map<String, Object> persisted = new java.util.HashMap<>();
+            Map<String, Object> persisted = new HashMap<>();
             persisted.put("storageRef", "ref-1");
             persisted.put("fileName", "report.pdf");
             persisted.put("mimeType", "application/pdf");

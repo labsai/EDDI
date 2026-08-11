@@ -26,6 +26,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.*;
+import java.util.ArrayList;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -426,7 +427,7 @@ class ApiCallExecutorTest {
         // while execute() sent a request with every {arg} rendered empty.
         ApiCall call = createSimpleApiCall("empty-instructions-call", false);
         var preRequest = new HttpPreRequest();
-        preRequest.setPropertyInstructions(new java.util.ArrayList<>());
+        preRequest.setPropertyInstructions(new ArrayList<>());
         call.setPreRequest(preRequest);
         stubRequestMap();
 

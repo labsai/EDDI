@@ -25,6 +25,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.security.Principal;
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -313,7 +315,7 @@ class RestGroupConversationHitlTest {
 
         private PendingApprovalSummary summaryOwnedBy(String gcId, String ownerId) {
             var summary = new PendingApprovalSummary(
-                    gcId, null, ownerId, java.time.Instant.now(), "needs review", "WAIT_INDEFINITELY");
+                    gcId, null, ownerId, Instant.now(), "needs review", "WAIT_INDEFINITELY");
             summary.setGroupId(GROUP_ID);
             return summary;
         }
@@ -322,7 +324,7 @@ class RestGroupConversationHitlTest {
         @DisplayName("admin sees all of the group's pending summaries")
         void adminSeesAll() throws Exception {
             asAdmin(ADMIN_ID);
-            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(java.util.List.of(
+            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(List.of(
                     summaryOwnedBy("gc-1", OWNER_ID), summaryOwnedBy("gc-2", "someone-else")));
 
             var result = restGroupConversation.listGroupPendingApprovals(GROUP_ID, 100);
@@ -338,7 +340,7 @@ class RestGroupConversationHitlTest {
             when(identity.getPrincipal()).thenReturn(principal);
             when(identity.hasRole("eddi-admin")).thenReturn(false);
             when(identity.hasRole("eddi-approver")).thenReturn(true);
-            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(java.util.List.of(
+            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(List.of(
                     summaryOwnedBy("gc-1", OWNER_ID), summaryOwnedBy("gc-2", "someone-else")));
 
             var result = restGroupConversation.listGroupPendingApprovals(GROUP_ID, 100);
@@ -350,7 +352,7 @@ class RestGroupConversationHitlTest {
         @DisplayName("regular user sees ONLY their own conversations")
         void ownerSeesOnlyOwn() throws Exception {
             asUser(OWNER_ID);
-            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(java.util.List.of(
+            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(List.of(
                     summaryOwnedBy("gc-mine", OWNER_ID),
                     summaryOwnedBy("gc-theirs", "someone-else"),
                     summaryOwnedBy("gc-unowned", null)));
@@ -366,7 +368,7 @@ class RestGroupConversationHitlTest {
         void anonymousSeesNothing() throws Exception {
             when(identity.getPrincipal()).thenReturn(null);
             when(identity.hasRole(anyString())).thenReturn(false);
-            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(java.util.List.of(
+            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(List.of(
                     summaryOwnedBy("gc-1", OWNER_ID)));
 
             var result = restGroupConversation.listGroupPendingApprovals(GROUP_ID, 100);
@@ -378,7 +380,7 @@ class RestGroupConversationHitlTest {
         @DisplayName("null limit param defaults to 100")
         void nullLimitDefaults() throws Exception {
             asAdmin(ADMIN_ID);
-            when(groupService.listGroupPendingApprovals(GROUP_ID, 100)).thenReturn(java.util.List.of());
+            when(groupService.listGroupPendingApprovals(GROUP_ID, 100)).thenReturn(List.of());
 
             restGroupConversation.listGroupPendingApprovals(GROUP_ID, null);
 

@@ -41,6 +41,7 @@ import org.mockito.Mock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -393,7 +394,7 @@ class GroupConversationServiceTaskForceTest {
         @DisplayName("Setter wraps plain HashMap into ConcurrentHashMap")
         void setter_wrapsInConcurrentHashMap() {
             var gc = new GroupConversation();
-            gc.setMemberConversationIds(new java.util.LinkedHashMap<>(
+            gc.setMemberConversationIds(new LinkedHashMap<>(
                     Map.of("agent-1", "conv-1")));
 
             assertTrue(gc.getMemberConversationIds() instanceof ConcurrentHashMap,

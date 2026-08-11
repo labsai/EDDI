@@ -34,6 +34,7 @@ import org.mockito.MockitoAnnotations;
 import java.security.Principal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -336,7 +337,7 @@ class RestAgentEngineHitlTest {
 
             assertEquals(200, response.getStatus());
             @SuppressWarnings("unchecked")
-            var summary = (java.util.Map<String, Object>) response.getEntity();
+            var summary = (Map<String, Object>) response.getEntity();
             assertEquals("", summary.get("pauseReason"), "Stale pause fields must be suppressed");
         }
     }

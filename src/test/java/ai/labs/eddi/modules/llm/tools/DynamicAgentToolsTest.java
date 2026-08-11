@@ -31,6 +31,8 @@ import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
@@ -486,7 +488,7 @@ class DynamicAgentToolsTest {
         @DisplayName("Fix 3: null entries in allowedProviders list don't cause NPE")
         void createSubAgent_nullEntryInProviderAllowList() {
             // Simulates malformed JSON config with null entries
-            var providers = new java.util.ArrayList<String>();
+            var providers = new ArrayList<String>();
             providers.add(null);
             providers.add("openai");
             config.setAllowedProviders(providers);
@@ -500,7 +502,7 @@ class DynamicAgentToolsTest {
         @DisplayName("Fix 4: null values in allowedModels map don't cause NPE (with provider)")
         void createSubAgent_nullModelListInAllowedModels_withProvider() throws Exception {
             // Map with a provider key mapping to null list
-            var models = new java.util.HashMap<String, List<String>>();
+            var models = new HashMap<String, List<String>>();
             models.put("openai", null); // null list for provider
             config.setAllowedModels(models);
             config.setAllowedProviders(List.of("openai"));
@@ -518,7 +520,7 @@ class DynamicAgentToolsTest {
         @DisplayName("Fix 4: null values in allowedModels map don't cause NPE (without provider)")
         void createSubAgent_nullModelListInAllowedModels_noProvider() {
             // Map with a provider key mapping to null list
-            var models = new java.util.HashMap<String, List<String>>();
+            var models = new HashMap<String, List<String>>();
             models.put("openai", null);
             config.setAllowedModels(models);
 
@@ -532,7 +534,7 @@ class DynamicAgentToolsTest {
         @Test
         @DisplayName("Fix 4: null model entries in allowedModels list don't cause NPE")
         void createSubAgent_nullModelEntryInList() {
-            var modelList = new java.util.ArrayList<String>();
+            var modelList = new ArrayList<String>();
             modelList.add(null);
             modelList.add("gpt-4o");
             config.setAllowedModels(Map.of("openai", modelList));

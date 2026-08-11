@@ -437,7 +437,7 @@ public class McpHitlTools {
             // (e.g. {"t1": 5}) would otherwise survive to resumeDiscussion and throw
             // a ClassCastException that surfaces as INTERNAL instead of the correct
             // BAD_REQUEST. Fail fast with a clear message; keys are always JSON strings.
-            taskApprovals = new java.util.LinkedHashMap<>();
+            taskApprovals = new LinkedHashMap<>();
             for (var entry : rawApprovals.entrySet()) {
                 if (!(entry.getValue() instanceof String value) || value.isBlank()) {
                     return errorJson("Invalid taskApprovals: each value must be a non-empty string "

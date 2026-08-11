@@ -29,7 +29,9 @@ import org.mockito.Mock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -307,9 +309,9 @@ class HitlJournalCodecCoverageTest {
         void exemptPrecedenceAllows() {
             var gate = new ToolApprovalGate();
             var batch = List.of(req("1", "read_file"));
-            var sources = java.util.Map.of("read_file", "mcp");
+            var sources = Map.of("read_file", "mcp");
             var result = gate.classify(batch, sources,
-                    cfg(List.of("mcp:*"), List.of("mcp:read_*")), java.util.Set.of());
+                    cfg(List.of("mcp:*"), List.of("mcp:read_*")), Set.of());
             assertTrue(result.gated().isEmpty(), "exempt must beat require");
             assertEquals(1, result.allowed().size());
         }
@@ -319,8 +321,8 @@ class HitlJournalCodecCoverageTest {
         void clearedCallIdAllowed() {
             var gate = new ToolApprovalGate();
             var batch = List.of(req("1", "delete_account"));
-            var result = gate.classify(batch, java.util.Map.of("delete_account", "http"),
-                    cfg(List.of("delete_*"), null), java.util.Set.of("1"));
+            var result = gate.classify(batch, Map.of("delete_account", "http"),
+                    cfg(List.of("delete_*"), null), Set.of("1"));
             assertTrue(result.gated().isEmpty());
             assertEquals(1, result.allowed().size());
         }
@@ -330,8 +332,8 @@ class HitlJournalCodecCoverageTest {
         void gatedNonNullIdRecordsReason() {
             var gate = new ToolApprovalGate();
             var batch = List.of(req("call-9", "delete_account"));
-            var result = gate.classify(batch, java.util.Map.of("delete_account", "http"),
-                    cfg(List.of("delete_*"), null), java.util.Set.of());
+            var result = gate.classify(batch, Map.of("delete_account", "http"),
+                    cfg(List.of("delete_*"), null), Set.of());
             assertEquals(1, result.gated().size());
             assertEquals("delete_*", result.gateReasonByCallId().get("call-9"),
                     "the matched require-pattern must be recorded as the gate reason");

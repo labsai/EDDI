@@ -49,6 +49,7 @@ import org.mockito.MockitoAnnotations;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -166,7 +167,7 @@ class GroupConversationServiceHitlCoverage2Test {
         snap.setConversationState(state);
         var output = new ConversationOutput();
         output.put("output", List.of(text));
-        snap.setConversationOutputs(new java.util.ArrayList<>(List.of(output)));
+        snap.setConversationOutputs(new ArrayList<>(List.of(output)));
         return snap;
     }
 
@@ -307,7 +308,7 @@ class GroupConversationServiceHitlCoverage2Test {
         // placeholder
         var errSnap = new SimpleConversationMemorySnapshot();
         errSnap.setConversationState(ConversationState.ERROR);
-        errSnap.setConversationOutputs(new java.util.ArrayList<>());
+        errSnap.setConversationOutputs(new ArrayList<>());
         doAnswer(inv -> {
             IConversationService.ConversationResponseHandler h = inv.getArgument(2);
             h.onComplete(errSnap);
@@ -961,7 +962,7 @@ class GroupConversationServiceHitlCoverage2Test {
     void propagateEmptySteps() {
         var gc = pausedPhaseGc("gc-prop-empty");
         var snap = new SimpleConversationMemorySnapshot();
-        snap.setConversationSteps(new java.util.ArrayList<>());
+        snap.setConversationSteps(new ArrayList<>());
         GroupConversationService.propagateDynamicAgentTracking(snap, gc);
         assertTrue(gc.getCreatedAgentIds().isEmpty());
     }

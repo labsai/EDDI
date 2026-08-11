@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
+import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -404,7 +405,7 @@ class ConversationHitlTest {
             memory.setConversationState(ConversationState.AWAITING_HUMAN);
             memory.setHitlPausedWorkflowId("wf1");
             memory.setHitlPausedAbsoluteTaskIndex(2);
-            memory.setHitlPausedAt(java.time.Instant.now());
+            memory.setHitlPausedAt(Instant.now());
             memory.setHitlPauseReason("some reason");
 
             var conv = createConversation();

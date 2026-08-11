@@ -16,6 +16,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -113,7 +114,7 @@ public class GroupConversationStore implements IGroupConversationStore {
             // filter value into an unanchored regex, so a raw groupId would
             // substring-match other groups.
             var filter = new IResourceFilter.QueryFilters(
-                    java.util.List.of(new IResourceFilter.QueryFilter(
+                    List.of(new IResourceFilter.QueryFilter(
                             "groupId", "^" + groupId + "$")));
             var resourceIds = storage.findResources(new IResourceFilter.QueryFilters[]{filter}, "lastModified", index, limit);
             for (var resourceId : resourceIds) {
@@ -144,7 +145,7 @@ public class GroupConversationStore implements IGroupConversationStore {
             return false;
         }
         gc.setState(newState);
-        gc.setLastModified(java.time.Instant.now());
+        gc.setLastModified(Instant.now());
         try {
             // Conditional write — the persisted state must STILL be expectedState. The
             // read-check above alone was a read-check-update (single-node only): two

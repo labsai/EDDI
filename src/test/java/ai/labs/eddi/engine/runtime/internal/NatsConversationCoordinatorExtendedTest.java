@@ -424,7 +424,7 @@ class NatsConversationCoordinatorExtendedTest {
 
         // Consume metrics should be recorded even on failure
         verify(consumeCount).increment();
-        verify(consumeDuration).record(any(java.time.Duration.class));
+        verify(consumeDuration).record(any(Duration.class));
     }
 
     // ==================== Extract JSON helpers ====================

@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+import java.util.Date;
 
 import java.util.List;
 import java.util.concurrent.*;
@@ -235,7 +236,7 @@ class RestAgentAdministrationTest {
             when(agent1.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
 
             var desc1 = new DocumentDescriptor();
-            desc1.setLastModifiedOn(new java.util.Date(1000));
+            desc1.setLastModifiedOn(new Date(1000));
             when(documentDescriptorStore.readDescriptor("agent-1", 1)).thenReturn(desc1);
 
             when(agentFactory.getAllLatestAgents(any())).thenReturn(List.of(agent1));

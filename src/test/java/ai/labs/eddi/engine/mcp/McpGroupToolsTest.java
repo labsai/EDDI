@@ -25,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -362,7 +363,7 @@ class McpGroupToolsTest {
         gc.setId("gc-async-1");
         gc.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
         when(groupConversationService.startAndDiscussAsync("g1", "Build it", "user1", null)).thenReturn(gc);
-        when(jsonSerialization.serialize(any(java.util.Map.class))).thenReturn(
+        when(jsonSerialization.serialize(any(Map.class))).thenReturn(
                 "{\"groupConversationId\":\"gc-async-1\",\"state\":\"IN_PROGRESS\",\"message\":\"Discussion started.\"}");
 
         String result = tools.start_group_discussion("g1", "Build it", "user1");
@@ -373,7 +374,7 @@ class McpGroupToolsTest {
 
         // Verify the Map passed to serialize contains the right keys
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<java.util.Map<String, Object>> captor = ArgumentCaptor.forClass(java.util.Map.class);
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
         verify(jsonSerialization).serialize(captor.capture());
         var map = captor.getValue();
         assertEquals("gc-async-1", map.get("groupConversationId"));

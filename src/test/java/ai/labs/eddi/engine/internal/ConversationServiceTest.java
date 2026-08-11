@@ -58,6 +58,7 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.util.*;
+import java.util.Stack;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -166,7 +167,7 @@ class ConversationServiceTest {
             doReturn(conversation).when(agent).startConversation(eq(USER_ID), anyMap(), any(), isNull());
             doReturn(memory).when(conversation).getConversationMemory();
             doReturn(ConversationState.READY).when(memory).getConversationState();
-            doReturn(new java.util.Stack<>()).when(memory).getRedoCache();
+            doReturn(new Stack<>()).when(memory).getRedoCache();
             doReturn(mock(IConversationMemory.IConversationStepStack.class)).when(memory).getAllSteps();
             doReturn(new ConversationProperties(memory)).when(memory).getConversationProperties();
             doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
@@ -231,7 +232,7 @@ class ConversationServiceTest {
             doReturn(conversation).when(agent).startConversation(eq(USER_ID), eq(context), any(), isNull());
             doReturn(memory).when(conversation).getConversationMemory();
             doReturn(ConversationState.READY).when(memory).getConversationState();
-            doReturn(new java.util.Stack<>()).when(memory).getRedoCache();
+            doReturn(new Stack<>()).when(memory).getRedoCache();
             doReturn(mock(IConversationMemory.IConversationStepStack.class)).when(memory).getAllSteps();
             doReturn(new ConversationProperties(memory)).when(memory).getConversationProperties();
             doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());

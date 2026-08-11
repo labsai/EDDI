@@ -16,7 +16,9 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -237,7 +239,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
         WorkflowConfiguration.WorkflowStep unknownStep = new WorkflowConfiguration.WorkflowStep();
         unknownStep.setType(URI.create("ai.labs.unknown"));
         unknownStep
-                .setExtensions(new java.util.HashMap<>(java.util.Map.<String, Object>of("uri", "eddi://ai.labs.unknown/store/things/t1?version=1")));
+                .setExtensions(new HashMap<>(Map.<String, Object>of("uri", "eddi://ai.labs.unknown/store/things/t1?version=1")));
 
         wfConfig.setWorkflowSteps(List.of(nullTypeStep, unknownStep));
         doReturn(wfConfig).when(jsonSerialization).deserialize(anyString(), eq(WorkflowConfiguration.class));
@@ -315,7 +317,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
         WorkflowConfiguration wfConfig = new WorkflowConfiguration();
         WorkflowConfiguration.WorkflowStep step = new WorkflowConfiguration.WorkflowStep();
         step.setType(URI.create("ai.labs.llm"));
-        step.setExtensions(new java.util.HashMap<>(java.util.Map.<String, Object>of("uri", "eddi://ai.labs.llm/llmstore/llms/llm1?version=1")));
+        step.setExtensions(new HashMap<>(Map.<String, Object>of("uri", "eddi://ai.labs.llm/llmstore/llms/llm1?version=1")));
         wfConfig.setWorkflowSteps(List.of(step));
         doReturn(wfConfig).when(jsonSerialization).deserialize(anyString(), eq(WorkflowConfiguration.class));
         doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
