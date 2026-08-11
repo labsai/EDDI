@@ -16,11 +16,11 @@
 # and nothing to do with security). The image ships the same Maven 3.9 line the
 # wrapper pins, and pom.xml governs everything that actually matters.
 #
-# Not for production: unpinned base images and a full build toolchain in the
-# build stage. It exists so the adapter can be demonstrated from a checkout.
+# Not for production: a full build toolchain in the build stage. It exists so
+# the adapter can be demonstrated from a checkout.
 # ─────────────────────────────────────────────────────────────────────────────
 
-FROM maven:3.9-eclipse-temurin-25 AS build
+FROM maven:3.9-eclipse-temurin-25@sha256:1b1fc6d0168ea616afd1c861d6f32ec37c9ec2ffe88a0351b3771dd4ad86b0d8 AS build
 
 WORKDIR /src
 
@@ -43,7 +43,7 @@ RUN --mount=type=cache,target=/root/.m2 \
     mvn -B package -DskipTests
 
 # ── Runtime ──
-FROM eclipse-temurin:25-jre
+FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e
 
 ENV LANG='C.utf8' LANGUAGE='C.utf8'
 
