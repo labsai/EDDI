@@ -49,7 +49,9 @@ regardless.
   points at `.design-sync/ds-entry.tsx`, a hand-authored file that re-exports exactly
   the 29 scoped components (+ the preview provider). The converter esbuilds from it, so
   only this surface + its deps land in `_ds_bundle.js` — not Monaco/editors/etc.
-  **To add/remove a synced component: edit ds-entry.tsx AND `cfg.componentSrcMap`.**
+  **To add/remove a synced component: edit ds-entry.tsx, `cfg.componentSrcMap`,
+  `cfg.dtsPropsFor` (see the prop-contracts section below) and a preview in
+  `previews/` — all four, or the component ships broken in some dimension.**
 - `componentSrcMap` pins all 29 src paths because there is no shipped `.d.ts`.
 - `cfg.tsconfig = tsconfig.ds-bundle.json` so esbuild resolves the `@/*` alias — and, via
   one exact entry ahead of the wildcard, swaps the operator drawer for a stub. See the

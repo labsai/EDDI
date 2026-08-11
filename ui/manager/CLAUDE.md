@@ -46,7 +46,9 @@ newer than the last sync; see NOTES.md). `.design-sync/conventions.md` is the st
 contract; `.design-sync/NOTES.md` explains the build wiring.
 
 **Adding a component to `ui/`, `shared/` or `layout/` does not add it to the design system**
-— it must also be added to `.design-sync/ds-entry.tsx`, `config.json`'s `componentSrcMap`,
-and a preview in `.design-sync/previews/`. If it reads a token no other synced file uses,
+— it must also be added to `.design-sync/ds-entry.tsx`, `config.json`'s `componentSrcMap`
+**and `dtsPropsFor`** (the hand-written props contract — the repo has no `.d.ts` tree, so
+without an entry the component ships an empty API), and a preview in
+`.design-sync/previews/`. If it reads a token no other synced file uses,
 check that token still reaches `:root` in the compiled CSS: Tailwind v4 tree-shakes `@theme`
 tokens, so an unscanned utility means a missing variable (see NOTES.md).
