@@ -80,6 +80,23 @@ class McpGroupToolsTest {
         assertTrue(result.contains("TASK_FORCE"));
     }
 
+    /**
+     * Enumerating the enum rather than listing the styles by hand: the previous
+     * test hardcoded six names and stayed green for the whole life of NEGOTIATION,
+     * which the tool never described. A caller picks a style from this text, so a
+     * style missing from it is a style that effectively does not exist over MCP.
+     * Driving the assertion off {@code DiscussionStyle} means the next style added
+     * fails here until it is described.
+     */
+    @Test
+    void describeDiscussionStyles_describesEveryDiscussionStyle() {
+        String result = tools.describe_discussion_styles();
+
+        for (AgentGroupConfiguration.DiscussionStyle style : AgentGroupConfiguration.DiscussionStyle.values()) {
+            assertTrue(result.contains(style.name()), "describe_discussion_styles omits the style " + style.name());
+        }
+    }
+
     // --- list_groups ---
 
     @Test

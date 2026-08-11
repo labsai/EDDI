@@ -1,6 +1,6 @@
 # Developer Quickstart Guide
 
-**Version: 6.2.0**
+[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases)
 
 This guide helps developers quickly understand EDDI's architecture and start building agents.
 

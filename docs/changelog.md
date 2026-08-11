@@ -5,6 +5,148 @@
 
 ---
 
+
+
+## 🔢 docs(mcp): the MCP tool catalogue was eight tools short, and a count sweep of both READMEs (2026-08-11)
+
+**Repo:** EDDI (`docs/group-collaboration-refresh`)
+
+`docs/mcp-server.md` claimed **76** tools and its twelve section headers summed to 76 — internally
+consistent and externally wrong. The code has **84** `@Tool` methods, and `McpToolFilter.MCP_TOOLS`
+whitelists exactly those 84, so the doc was the only artefact disagreeing. Two tables had silently
+stopped being updated:
+
+- **Group Conversation Tools: 11 → 18.** Missing `followup_with_member`,
+  `continue_group_discussion`, `close_group_conversation`, `add_team_task`, `list_team_backlog`,
+  `list_group_templates`, `create_group_from_template` — i.e. the whole of I10 (templates) and I13
+  (standing teams), plus the entire post-discussion lifecycle.
+- **HITL Tools: 9 → 10.** Missing `submit_group_human_input`, the one that lets a HUMAN member
+  actually speak (as opposed to approve) — the counterpart already documented on the REST side.
+
+Header now 84, the whitelist paragraph too, and every section header matches its own row count.
+Verified mechanically rather than by eye: each of the 84 names is now present in the page, and the
+whitelist and the `@Tool` set are in exact parity with no entry on either side alone.
+
+**`describe_discussion_styles` was two styles short, and that one is a code fix.** Its hardcoded
+text covered six styles; the engine has seven built-in plus `CUSTOM`. This is not cosmetic — the
+tool exists so a caller can *pick* a style before `create_group`, so a style absent from it is a
+style that effectively does not exist over MCP. `NEGOTIATION` shipped in I11 and was never
+selectable this way. Both are now described: `NEGOTIATION` with its real preset flow (positions →
+proposals → bargaining → arbitration → synthesis, arbitration **skipped** on
+`AGREEMENT_REACHED`, read off `DiscussionStylePresets`), and `CUSTOM` as the escape hatch. The
+`@Tool` description string listed the same six and now matches.
+
+The existing test asserted six hardcoded names and stayed green for the entire life of the bug.
+Its replacement iterates `DiscussionStyle.values()`, so the next style added fails the build until
+it is described. Mutation-checked rather than assumed: with the `NEGOTIATION` block removed, the
+new test fails with *"describe_discussion_styles omits the style NEGOTIATION"* and the old one
+still passes — which is exactly the blind spot that let this drift.
+
+**Count sweep of both READMEs.** Every numeric claim re-derived from source; all four hold, so no
+edit was needed: `7 built-in discussion styles` (7 + `CUSTOM`), `80+ MCP tools` (84), `50+
+Micrometer metrics` (127 distinct meter names), and the `tests-14,000+` badge (14,368 annotations).
+The badges are floors on purpose — that is what lets them survive a merge without a doc change.
+
+One neighbour did not hold: **`docs/langchain.md` claimed 12 providers and then listed ten**,
+omitting Google Vertex AI (`gemini-vertex`) — a registered builder in `LlmModule`, and one the same
+page's own JSON-format table refers to. The enumeration now names all eleven builders, so the
+sentence's arithmetic closes: eleven registered + any OpenAI-compatible endpoint via `baseUrl` = 12.
+
+---
+
+
+## 🔎 docs: Copilot review on #647 — five findings, all confirmed against source (2026-08-11)
+
+**Repo:** EDDI (`docs/group-collaboration-refresh`)
+
+Each was verified in the code before being accepted; all five held.
+
+1. **`convergence.judge: SERVICE` was documented as "a cheap dedicated call".** It is accepted but
+   not wired: `PhaseExecutionEngine.runJudge` logs a warning and falls back to the moderator-agent
+   path, so it costs exactly what `MODERATOR` costs. Documented as the fallback it is — a doc that
+   promises a cheaper call than the one actually made is worse than no doc. The same passage now
+   also records that a group with no moderator skips the judge entirely.
+2. **The REST catalogue listed only the cross-group approval inbox.** `IRestGroupConversation`
+   declares the per-group route beside it (`GET /groups/{groupId}/conversations/pending-approvals`);
+   without it, a caller wanting one group's pauses had to filter the global inbox. Both rows now
+   present, and the global one says "across all groups" so the pair reads as a pair.
+3. **The MCP table claimed three group tools from the HITL set; `McpHitlTools` exposes six.** The
+   three missing ones — `list_group_pending_approvals`, `list_all_group_pending_approvals`,
+   `get_group_approval_status` — are the discovery half of the approval workflow, so a "completed"
+   catalogue that omits them hides how an approver finds anything to approve.
+4. **A pinned test count (14,205) that the source no longer matches** — it is 14,368 today and
+   moves with every merge. The entry now states the figure as a point-in-time floor rather than a
+   measurement to be re-pinned. Same treatment applied to the "(actual 82)" MCP count, which main's
+   docs tools took to 84 — the badges say `14,000+` and `80+` precisely so they survive this.
+5. **The version-label paragraph contradicted itself**, calling `docs/README.md` one of the twelve
+   `6.2.0` docs and then correctly noting it was stuck at `6.0.0`. The real tally: ten
+   `**Version: 6.2.0**`, one `**EDDI Version:** 6.2.0`, and `docs/README.md`'s stale
+   `**Latest version: 6.0.0**` — twelve files, eleven of them at 6.2.0.
+
+---
+
+
+## 🔀 docs: merge `main` into the documentation refresh and adapt to what landed since (2026-08-11)
+
+**Repo:** EDDI (`docs/group-collaboration-refresh`)
+
+The refresh branched at the group-collaboration merge (`d5294a60`); ten changes landed on `main`
+afterwards. Merged, with one conflict — `docs/changelog.md`, where both sides had added entries at
+the top; resolved by keeping both in date order, nothing dropped. `docs/group-conversations.md`
+auto-merged (main's attachments / protocol-defaults / not-yet-supported work versus the refresh's
+new sections and completed tables), and every overlapping region was re-read rather than trusted.
+
+`main` then moved again before this branch was pushed, so it was merged a **second** time (PRs #664,
+#665, #667, #668). Two conflicts, both in docs: the changelog again — same resolution — and
+`secrets-vault.md`, where #667 had written the vault-grant documentation independently. That one is
+resolved in main's favour and is described under *Vault agent grants* below.
+
+Then each of main's changes was checked against what the refresh claims. Five claims were stale or
+missing; four checks came back clean and are recorded so they are not re-run:
+
+**Adapted:**
+
+- **Standing Teams cadence claims** (`group-conversations.md`) — step 1 said a run "paused at an
+  HITL gate for days" simply skips the fire, which was the wedge `fix/cadence-claim-expiry` closed.
+  New **Stale claims** paragraph: `eddi.groups.cadence.claim-ttl` (default `PT24H`), cancel-then-
+  ordinary-failure-writeback so pulled tasks return to `PENDING`, non-positive disables reclaiming,
+  and the save-time warning for `requiresApproval` + `WAIT_INDEFINITELY`.
+- **`inheritParentModel`** (`group-conversations.md`) — documented as working; it was a field
+  nothing read until `fix/sub-agent-setup-hardening`. New **Model and credential inheritance**
+  subsection: the provider → model → key order, model inherited only while the provider is still
+  the parent's, and **only a vault reference is ever inherited, never a plaintext key** (a parent
+  with a plaintext key inherits nothing and creation fails with "API key is required").
+- **`allowedProviders` / `allowedModels`** (`group-conversations.md`) — now checked against the
+  **effective** provider and model, so omitting the parameter no longer bypasses the allow-list;
+  and with no provider named, the default provider must itself be covered. Both documented,
+  including the deliberate asymmetry (named provider: absent entry = no restriction).
+- **Vault agent grants** — `feat/vault-grant-enforcement` added a user-visible deployment failure
+  mode with no documentation anywhere, so this branch wrote an **Agent grants** section for
+  `secrets-vault.md`. A second merge of `main` (below) then brought in #667, which had documented
+  the same thing independently and better, plus `chore(vault): default grant-enforcement to enforce`
+  — which made this branch's "`warn` *(default)*" row outright wrong. **Main's section is kept
+  whole and this branch's was dropped**, rather than interleaved: two overlapping explanations of
+  one control is how a doc starts contradicting itself. What survives here is the cross-reference
+  from the group docs, retargeted at main's anchor and rewritten to say the thing main's section
+  does not — that a sub-agent inheriting a parent's vault reference must itself be granted the
+  secret or, under the now-default `enforce`, will not deploy.
+- **Metrics** (`metrics.md`) — `eddi_team_cadence_claims_reclaimed_total` is new and had no home.
+  Added the Standing Team block (4 counters) and completed the group block, which listed 3 of 10.
+  Meter types verified against the registrations: `eddi_group_cost_dollars` is a gauge, and
+  `eddi_group_facilitator_moves_total` carries `move`/`outcome` tags.
+- Also: the group **Configuration** block gained `eddi.groups.cadence.claim-ttl` and
+  `eddi.attachments.max-per-turn` (main documented the latter in prose but never listed it), and a
+  pointer to the vault grant setting; `maxCreatedAgentsPerDiscussion` notes that a torn-down agent
+  frees its slot.
+
+**Verified unchanged, no edit needed:** the **SSE catalogue** still lists exactly the 23 events the
+sink emits; **no REST endpoint or MCP tool was added or removed** on `main`, so the completed tables
+and the 82-tool count hold; the "counted across **all** members" note on
+`maxCreatedAgentsPerDiscussion` is what `seedCreatedAgentIds` actually does; and the idle-sweep and
+deployment-wait fixes are internal — no doc asserted the behaviour they corrected.
+
+---
+
 ## 📚🔀🛡️ feat(docs+mcp+hitl): docs for agents on every surface, an MCP resource bridge, and strict task-level toolApprovals (2026-08-11)
 
 **Repo:** EDDI (`feat/agent-docs-and-hitl-strict`, branched from `main` @ 8dda2dab5). Four items, driven by the EDDI-Manager Platform Operator work (write-by-default + llmstore writes behind the Manager's gate-guard) and a critical rethink of each before building.
@@ -268,6 +410,74 @@ Also: removed an unreachable version comparison in `getAllLatestAgents` (it comp
 Suites: `AgentFactory*`, `AgentDeploymentManagement*`, `TaskForceEngine*`, `GroupConversationService*`, `McpGroupTools*`, `AgentGroupConfiguration*`, `RestAgentAdministration*` — 820 tests green, plus 19 new.
 
 ---
+## 📚 docs: post-merge documentation refresh for the group-collaboration set (2026-08-08)
+
+**Repo:** EDDI (`docs/group-collaboration-refresh`)
+
+The nine group-collaboration items merged to `main` — PRs #637–#645, alongside #636 which
+carried the pre-feature defect fixes — and this brings every user-facing doc in line with what
+actually shipped. Each claim below was verified against the
+source, not against the plan.
+
+**`docs/group-conversations.md`** (the main reference, +230 lines):
+- Corrected `GET /groupstore/groups` — that endpoint does not exist; listing is
+  `GET /groupstore/groups/descriptors`.
+- Corrected the `HUMAN_DECIDES` note: I6 shipped humans as group *members*, but the tie-break
+  is still save-time rejected because it needs its own resume machinery.
+- Completed the REST table (+20 rows: streaming, follow-up/continue/close/cancel, approve,
+  human-input, approval-status, pending-approvals, all 3 template routes, all 5 workspace
+  routes) and the MCP table (+10 tools).
+- Completed the reference tables: `PhaseType` gained `VOTE`/`PROPOSAL`/`BARGAIN`/`RETRO`;
+  `TaskStatus` gained `BLOCKED`/`AWAITING_APPROVAL`; `ProtocolConfig` gained `maxTurns`,
+  `maxCostPerDiscussion`, `onCostExceeded` (all three were referenced elsewhere but never
+  defined); `DynamicAgentConfig` gained `maxDelegationDepth`/`allowedDelegationTargets`.
+- New sections for things referenced but never documented: **per-phase controls**
+  (`repeats`/`requiresApproval`/`convergence`/`allowAbstention`), **dissent (I4)**, and the
+  **SSE event catalogue** (all 23 events).
+- Documented the new RETRO hard ceilings (20/run, 500 stored) and creation-ordered FIFO.
+- Structure: moved the orphaned `taskListConfig` cap paragraph back out of the windowing
+  section, re-parented bid-based assignment under TASK_FORCE (it is task-force machinery, not
+  negotiation), and unglued 4 headings from the preceding paragraph.
+
+**`README.md`**: 6 → 7 built-in styles; nine new capability bullets (voting, artifacts, human
+members, facilitator, negotiation, bidding, team memory, standing teams, templates) plus a HITL
+bullet for humans-as-members; MCP tool count 60+ → 80+ (82 `@Tool` methods when this was
+written; 84 once main's docs tools landed — again a floor, not a pinned figure); test badge 11,000+ →
+14,000+ (over 14,200 test annotations across `src/test` when this was written, and still
+climbing — the badge is deliberately a floor, not a measurement to re-pin each release); an
+OpenAI-Compatible API docs row.
+
+**`AGENTS.md`**: Phase 10 row 6 → 7 styles; new Completed rows 10c (Group Deliberation) and
+10d (Group Work Products); test count 12,000+ → 14,000+; the HITL-remaining row now
+distinguishes the still-reserved `inGroupTurns: INBOX` from the shipped human-member work; §4.2
+gained the *opt-in by absence* convention, which governs every group capability and lived only
+in Javadoc.
+
+**`docs/README.md`**: the hardcoded version line became the dynamic release badge (it had been stuck on 6.0.0, two releases behind); MCP 48+ → 80+; group styles list; HITL and
+OpenAI-Compatible entries. **`docs/SUMMARY.md`**: added the missing `hitl.md` and
+`open-webui-integration.md` (both shipped flagships absent from the index), plus the monitoring
+guide, code-review standards, build reproducibility and changelog. **`docs/rag.md`**: added the
+`gemini` embedding provider and `chroma` vector store rows — the code supports 8 and 6, the
+tables listed 7 and 5.
+
+**Version labels no longer hand-maintained.** Twelve docs carried a hardcoded version header
+that had to be touched on every release: ten as `**Version: 6.2.0**`, one as
+`**EDDI Version:** 6.2.0` (`agent-father-langchain-tools-guide.md`), and `docs/README.md` as a
+`**Latest version: 6.0.0**` line — which is the drift the scheme invites, that file having sat
+two releases behind. All of them now use the same dynamic shields.io badge the root README uses
+for its release, which reads the latest GitHub release tag and can never go stale:
+`[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases)`.
+Deliberately **not** converted: `**Version: ≥6.0.0**` in `security.md` and the
+`Available since v6.0.0` status lines in `a2a-protocol.md`/`audit-ledger.md` — those are
+historical minimum-version facts, not "the current release", and pinning them is correct.
+
+**`planning/group-collaboration-NEXT.md`**: the queue is empty — every §3 item marked done with
+its PR number, the three implementation-time constraints recorded as deviations, and the two
+§4 gaps that this work closed (`decision_reached` never firing, the doc drift itself) struck
+through.
+
+---
+
 
 ## 🔎 fix(groups): pre-merge deep review — facilitator HITL bypass, CALL_VOTE guards, metric cardinality, template honesty (2026-08-08)
 

@@ -138,6 +138,22 @@ eddi_tool_costs{tool="weather"}             # Cost per tool
 eddi_group_discussion_count_total           # Discussions started
 eddi_group_discussion_failure_count_total   # Discussions failed
 eddi_group_discussion_duration_seconds      # Duration (timer)
+eddi_group_cost_dollars                     # Cumulative discussion cost (gauge)
+eddi_group_cost_ceiling_hit_total           # maxCostPerDiscussion reached
+eddi_group_facilitator_moves_total{move,outcome}  # Facilitator moves
+eddi_group_member_pause_skipped_count_total # Member turns skipped instead of paused
+eddi_group_continue_count_total             # Continuation rounds
+eddi_group_followup_count_total             # Member follow-ups
+eddi_group_close_count_total                # Conversations closed to further rounds
+```
+
+### Standing Team (Cadence) Metrics
+
+```
+eddi_team_cadence_runs_started_total        # Cadence fires that started a discussion
+eddi_team_cadence_runs_skipped_total        # Fires skipped (run still in flight, empty backlog, claim lost)
+eddi_team_cadence_writebacks_total          # Completed runs written back to the backlog
+eddi_team_cadence_claims_reclaimed_total    # Stale claims reclaimed after claim-ttl
 ```
 
 ### Scheduled Trigger Metrics

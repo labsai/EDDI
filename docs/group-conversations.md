@@ -152,6 +152,11 @@ tools.
   dependency, circular dependency, subject over 200 chars, description over
   4,000, and either cap being reached.
 
+Both caps are enforced independently: `maxPerTurn` bounds a runaway single turn,
+`maxAgentAddedTasksPerDiscussion` bounds slow drift across a long discussion. The
+discussion cap counts only agent-filed tasks, so a large planned backlog does not
+exhaust it. A rejected call does not consume the per-turn budget.
+
 **No claim or complete tools.** The wave loop owns every task-state transition;
 a second writer racing it would corrupt the state machine that decides what runs
 next. Filing is the only agent-side write.
@@ -194,10 +199,6 @@ marker and the next boundary catches up.
 - The convergence judge's input is not windowed — it is already bounded to the
   last two rounds.
 
-Both caps are enforced independently: `maxPerTurn` bounds a runaway single turn,
-`maxAgentAddedTasksPerDiscussion` bounds slow drift across a long discussion. The
-discussion cap counts only agent-filed tasks, so a large planned backlog does not
-exhaust it. A rejected call does not consume the per-turn budget.
 
 ## Voting
 
@@ -238,8 +239,9 @@ peer-hidden until their phase completes (commit-reveal).
 - **Ties and quorum failures** go to `tiePolicy`: `MODERATOR_DECIDES` runs one
   moderator turn choosing among the unresolved options (method
   `vote+moderator-tiebreak`); `NO_DECISION` (default) records an honest
-  `type: NONE` and the discussion continues. `HUMAN_DECIDES` is reserved for
-  human group members (I6) and is rejected at save time until then.
+  `type: NONE` and the discussion continues. `HUMAN_DECIDES` is still rejected at save
+  time: humans can now be group *members* (I6), but a tie-break that waits on a
+  person needs its own resume machinery, which has not shipped.
 - The result fires the `decision_reached` SSE event (which this feature also
   wires for debate verdicts) and renders a tally block in Slack.
 
@@ -340,6 +342,7 @@ resume path — approval, human turn, timeout skip — executes and drift-checks
 against that list, so a pause taken inside an inserted phase resumes
 correctly. The divergence is one-off: completion (and every new round) starts
 from the config again.
+
 ## Negotiation (I11)
 
 EDDI's other decision forms are win/lose; `NEGOTIATION` is the **trade** form —
@@ -370,37 +373,7 @@ single deterministic skip condition) ⑤ *Synthesis*.
   co-signatures; no new crypto.
 - No agreement → the arbitration runs and its conclusion becomes
   `decision: {type: "VERDICT", method: "arbitration"}`.
-### Bid-based assignment (I18, CNP-lite)
 
-The planner cannot know members' actual fit or load. Setting
-`assignmentMode: "BID"` — per task on a `TaskDefinition`, or as the group
-default on `taskListConfig` — leaves those tasks unassigned at PLAN time; the
-execution wave **announces** them to eligible members in blind, parallel bid
-turns and **awards** each to the highest self-assessed confidence:
-
-```json
-"taskListConfig": { "assignmentMode": "BID" },
-"tasks": [
-  { "subject": "Write the migration", "description": "...", "assignmentMode": "BID" }
-]
-```
-
-- Members reply `{"bids": [{"subject", "confidence": 0..1, "estimatedComplexity":
-  "XS|S|M|L", "rationale"}]}` — three-tier parse; prose casts no bids; bids on
-  unannounced tasks are dropped; confidence is clamped.
-- **Blind**: the bid prompt carries the announced tasks and nothing else — no
-  transcript, no peer bids. Bid replies land as `BID` transcript entries
-  (peer-hidden while the phase runs, auditable afterwards).
-- **Deterministic award**: highest confidence; ties break by speaking order,
-  then agent id. The winning bid is recorded per task
-  (`taskList.awardedBids[taskId] = {agentId, confidence, estimatedComplexity,
-  rationale}`).
-- **Never stalls a wave**: a task nobody bid on falls back to the ROLE path,
-  and the auction skips itself entirely (logged) when it cannot beat its own
-  overhead — fewer than 2 eligible bidders or fewer than 2 unassigned tasks —
-  or when the remaining turn budget cannot cover one bid turn per member.
-- Bid turns are real member turns: they count toward the turn budget and their
-  cost lands in the discussion's cost attribution.
 ## Retro → group memory
 
 A `RETRO` phase stops discussions from evaporating: the group reviews how it
@@ -422,7 +395,13 @@ knowledge that compounds run-over-run.
   identity. The idempotency key `retro:<hash(lesson)>` makes re-running the
   same retro a no-op.
 - **Bounded growth is non-negotiable:** the stored set FIFOs at
-  `maxStoredLessons` — storing past the cap evicts the oldest.
+  `maxStoredLessons` — storing past the cap evicts the oldest, ordered by
+  *creation* time, so re-harvesting an old lesson cannot shield it from
+  eviction. Both caps are clamped to hard ceilings (20 per run, 500 stored) no
+  config can exceed: an LLM-driven write surface with an operator-supplied
+  ceiling is only as bounded as the operator's typing.
+- `maxLessonsPerRun` bounds the whole harvest, not each contribution — a RETRO
+  phase with several participants or repeats cannot multiply it.
 - Member conversations already load group-visible entries at init, so recall
   needs no new namespace. The `retro_recorded` SSE event reports each harvest.
 
@@ -449,7 +428,8 @@ claim/lease/retry/dead-letter; the executor branches on
 `teamCadenceType: "team_cadence"` exactly like Dream consolidation). Each fire:
 
 1. **Reconcile** — a finished previous run is written back first; one still in
-   flight (or paused at an HITL gate for days) skips the fire.
+   flight skips the fire. A run paused at an HITL gate is *not* terminal, so it
+   holds the claim — but only up to a TTL (see **Stale claims** below).
 2. **Pull** — top-N *executable* backlog tasks by priority; an empty pull
    skips, logged.
 3. **Claim** — a conditional store write on `runningDiscussionId`; two pods
@@ -467,10 +447,26 @@ reviewer's feedback appended to the description — **the cross-run retry
 loop**. A FAILED/CANCELLED discussion returns every pulled task untouched.
 Retro lessons flow through I8 unchanged (no duplication).
 
+**Stale claims are reclaimed.** The default group HITL timeout policy is
+`WAIT_INDEFINITELY`, so a pause nobody resolves never reaches a terminal state:
+without a backstop the claim would be held forever, every subsequent fire
+skipped as "still running", and the pulled backlog tasks stuck `IN_PROGRESS`.
+A claim older than `eddi.groups.cadence.claim-ttl` (default `PT24H`) is
+reclaimed — the stranded discussion is cancelled and put through the *ordinary*
+failure writeback, so pulled tasks return to `PENDING` and the claim clears.
+Cancel happens before release, so a reclaimed run cannot keep spending against a
+budget nobody is tracking. Set the TTL non-positive to disable reclaiming, for
+an operator who would rather wedge than risk abandoning a pause; the counter is
+`eddi_team_cadence_claims_reclaimed_total`. Creating a cadence on a group that
+combines `requiresApproval` phases with `WAIT_INDEFINITELY` logs a warning —
+that combination is what makes the backstop reachable — but is not rejected: it
+is legitimate for a team whose approver really is always available.
+
 Per-member stats are reliability **recording only** — nothing routes or
 weights on them in v1. A *permanent* group deletion cascades to the workspace;
 a soft (versioned) delete keeps it, because the group can come back. Not in
 v1: cross-team handoff, Manager UI, reputation weighting.
+
 ## Shared artifacts (blackboard-lite)
 
 Without artifacts, the transcript is the only medium — every structured thing an
@@ -614,6 +610,66 @@ For full control, define phases directly:
 }
 ```
 
+### Per-phase controls
+
+Beyond `type`/`participants`/`turnOrder`/`contextScope`, a phase carries four
+controls that shape *when it stops* and *what it costs*:
+
+```json
+{
+  "name": "Estimates",
+  "type": "OPINION",
+  "repeats": 3,
+  "requiresApproval": false,
+  "allowAbstention": true,
+  "convergence": { "enabled": true, "minRepeats": 2, "threshold": 0.8, "judge": "SERVICE" }
+}
+```
+
+**`repeats`** runs the same phase N times over the growing transcript — the
+mechanism behind DELPHI's rounds.
+
+**`requiresApproval`** pauses the discussion at the phase boundary until a human
+approves or rejects (see [HITL](hitl.md)). At `TASK` granularity on an `EXECUTE`
+phase it pauses per submitted task instead.
+
+**`convergence` (I2)** ends a repeating phase early once the round stopped
+producing movement, so a group that agreed after round 2 does not pay for round
+5. A judge compares this round's contributions against the previous round's and
+scores similarity against `threshold`; `minRepeats` (minimum 2 — one round has
+nothing to compare against) guards against calling convergence before there is
+evidence. `judge` selects who scores it: `MODERATOR` runs the moderator agent as
+the judge (in its own conversation, so the judge's JSON-only prompts never leak
+into a later SYNTHESIS turn). `SERVICE` is **accepted but not yet wired** — it
+logs a warning and falls back to the same moderator-agent path, so it currently
+costs the same as `MODERATOR` rather than the cheaper dedicated call the name
+suggests. Either way, a group with no moderator skips the judge and the phase
+simply keeps going. Converging is a *real completed repeat*: it still
+persists, still fires `onPhaseComplete`, and still runs the phase's decision
+block.
+
+**`allowAbstention` (I4)** appends an instruction telling members they may reply
+with the single token `PASS` when they have nothing to add. A passing member
+produces an `ABSTAINED` entry carrying no content: peers, the synthesizer and
+the convergence judge never see it, so a late DELPHI round costs one short call
+instead of three agents restating agreement in prose. The entry is still
+*counted* — a round in which every scheduled participant abstained ends the
+phase through the unanimous-abstention exit. Task phases never advertise the
+token — the detector and the prompt read the same switch, so they cannot
+disagree.
+
+### Dissent (I4)
+
+`"recordDissents": true` on the group gives every participant who did *not*
+write a synthesis one short turn to state where they still materially disagree.
+Non-`PASS` replies become public `DISSENT` transcript entries and populate
+`decision.dissents`.
+
+It is opt-in because it costs one extra short call per non-synthesizer. It is
+nonetheless the honest design: the alternative is asking the synthesizer to
+report the objections to its own synthesis, which is precisely the failure mode
+a minority report exists to prevent.
+
 ### Phase Types
 
 | Type | Purpose |
@@ -629,6 +685,10 @@ For full control, define phases directly:
 | `EXECUTE` | Work on assigned sub-task |
 | `VERIFY` | Review and validate another member's work |
 | `SYNTHESIS` | Moderator produces balanced conclusion |
+| `VOTE` | Collect explicit ballots and tally a decision (I14) |
+| `PROPOSAL` | State an opening offer in a negotiation (I11) |
+| `BARGAIN` | Counter, concede, or sign an acceptance (I11) |
+| `RETRO` | Draw process lessons into team memory (I8) |
 
 ### Context Scopes
 
@@ -702,7 +762,41 @@ Use `dependsOn` to create sequential execution chains. Each entry references a t
 | `IN_PROGRESS` | Currently being executed by an agent |
 | `COMPLETED` | Agent produced output |
 | `VERIFIED` | Moderator verified the result |
+| `BLOCKED` | Reserved for dependency/resource blocking — recognized as non-terminal, but the engine does not set it yet |
+| `AWAITING_APPROVAL` | Result submitted, waiting on a human (TASK-granularity HITL) |
 | `FAILED` | Agent or verification failed |
+
+### Bid-based assignment (I18, CNP-lite)
+
+The planner cannot know members' actual fit or load. Setting
+`assignmentMode: "BID"` — per task on a `TaskDefinition`, or as the group
+default on `taskListConfig` — leaves those tasks unassigned at PLAN time; the
+execution wave **announces** them to eligible members in blind, parallel bid
+turns and **awards** each to the highest self-assessed confidence:
+
+```json
+"taskListConfig": { "assignmentMode": "BID" },
+"tasks": [
+  { "subject": "Write the migration", "description": "...", "assignmentMode": "BID" }
+]
+```
+
+- Members reply `{"bids": [{"subject", "confidence": 0..1, "estimatedComplexity":
+  "XS|S|M|L", "rationale"}]}` — three-tier parse; prose casts no bids; bids on
+  unannounced tasks are dropped; confidence is clamped.
+- **Blind**: the bid prompt carries the announced tasks and nothing else — no
+  transcript, no peer bids. Bid replies land as `BID` transcript entries
+  (peer-hidden while the phase runs, auditable afterwards).
+- **Deterministic award**: highest confidence; ties break by speaking order,
+  then agent id. The winning bid is recorded per task
+  (`taskList.awardedBids[taskId] = {agentId, confidence, estimatedComplexity,
+  rationale}`).
+- **Never stalls a wave**: a task nobody bid on falls back to the ROLE path,
+  and the auction skips itself entirely (logged) when it cannot beat its own
+  overhead — fewer than 2 eligible bidders or fewer than 2 unassigned tasks —
+  or when the remaining turn budget cannot cover one bid turn per member.
+- Bid turns are real member turns: they count toward the turn budget and their
+  cost lands in the discussion's cost attribution.
 
 ### Dynamic Agents
 
@@ -769,16 +863,47 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `allowCreation` | `false` | Allow creating new agents (vs. only recruiting existing) |
 | `allowRecruitment` | `false` | Allow recruiting already-deployed agents into the discussion |
 | `allowDelegation` | `true` | Allow delegating sub-tasks to other agents |
-| `maxCreatedAgentsPerDiscussion` | `5` | Cap on new agents created per discussion — counted across **all** members, not per member |
+| `maxCreatedAgentsPerDiscussion` | `5` | Cap on new agents created per discussion — counted across **all** members, not per member; a torn-down agent frees its slot |
 | `maxRecruitedAgentsPerDiscussion` | `10` | Cap on recruited agents per discussion |
 | `delegationTimeoutSeconds` | `60` | How long a delegating agent waits for its delegate's turn. Non-positive falls back to the default |
 | `maxDelegationsPerTask` | `3` | Cap on delegations per task |
+| `maxDelegationDepth` | `3` | How deep a delegation chain may nest before it is refused |
+| `allowedDelegationTargets` | `null` (any deployed agent) | Whitelist of agent ids a member may delegate to |
 | `lifecyclePolicy` | `EPHEMERAL` | `EPHEMERAL`, `KEEP_DEPLOYED`, `UNDEPLOY_ONLY`, or `AGENT_DECIDES` |
-| `inheritParentModel` | `true` | Created agents inherit the parent agent's model |
+| `inheritParentModel` | `true` | Created agents inherit the parent's provider, model and API-key **reference** — see below |
 | `allowedProviders` | `null` (any) | Whitelist of LLM providers |
 | `allowedModels` | `null` (any) | Per-provider model whitelist |
 
 Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentIds`, and `retainedAgentIds`.
+
+#### Model and credential inheritance
+
+`createSubAgent` takes `provider` and `model` as optional arguments. What is not
+given is inherited from the creating agent, in this order:
+
+1. **Provider** — the parent's, when `inheritParentModel` is on.
+2. **Model** — the parent's, but only if the effective provider is *still* the
+   parent's. An anthropic parent creating an `ollama` sub-agent does not hand it
+   a Claude model name.
+3. **API key** — the parent's `${vault:...}` **reference**, again only when the
+   provider matches, because a vault reference names one provider's secret.
+
+**Only a vault reference is inherited, never a plaintext key.** When the vault is
+unconfigured, `vaultApiKey` falls back to storing the key in clear; copying such a
+value into a second config would multiply that fallback's blast radius. A parent
+whose key is plaintext therefore inherits nothing, and creation fails with the
+ordinary "API key is required" error.
+
+**The allow-lists are checked against the *effective* provider and model** — the
+values after inheritance and defaults are applied, not the raw arguments. Omitting
+`provider` does not skip `allowedProviders`. For `allowedModels`:
+
+- **Provider named** (or inherited): an absent or empty entry for that provider
+  means *no restriction for that provider*.
+- **No provider named**: the model is about to be paired with the default
+  provider, so that provider must itself appear in `allowedModels`. A config
+  restricting `openai` to `gpt-4o-mini` will not silently build an *anthropic*
+  agent running `gpt-4o-mini`.
 
 ### Tenant Quota Enforcement
 
@@ -792,7 +917,10 @@ If tenant quotas are enabled, `QuotaExceededException` is propagated regardless 
     "agentTimeoutSeconds": 180,
     "onAgentFailure": "SKIP",
     "maxRetries": 2,
-    "onMemberUnavailable": "SKIP"
+    "onMemberUnavailable": "SKIP",
+    "maxTurns": 50,
+    "maxCostPerDiscussion": 5.00,
+    "onCostExceeded": "SYNTHESIZE_NOW"
   }
 }
 ```
@@ -803,6 +931,20 @@ If tenant quotas are enabled, `QuotaExceededException` is propagated regardless 
 | `onAgentFailure` | `SKIP`, `RETRY`, `ABORT` | `SKIP` |
 | `maxRetries` | 0+ | 2 |
 | `onMemberUnavailable` | `SKIP`, `FAIL` | `SKIP` |
+| `maxTurns` | Any positive integer (0 or negative → default) | 50 |
+| `maxCostPerDiscussion` | Dollars, or `null` for unlimited | `null` |
+| `onCostExceeded` | `SYNTHESIZE_NOW`, `ABORT` | `SYNTHESIZE_NOW` |
+
+**The two ceilings are different instruments.** `maxTurns` bounds *how many
+member turns* a discussion may spend — it is the structural stop that keeps a
+recruiting, extending, re-planning discussion finite. `maxCostPerDiscussion`
+bounds *dollars*, which is what actually differs between a cheap 40-turn round
+table and an expensive 8-turn one with large contexts. Hitting the cost ceiling
+under `SYNTHESIZE_NOW` skips the remaining discussion phases and jumps straight
+to synthesis, so the caller still gets an answer for what was already spent;
+`ABORT` fails the discussion instead. Every LLM call in the discussion is
+attributed, including the facilitator's, the convergence judge's, and the
+summarizer's.
 
 > The defaults above apply when the `protocol` block is **omitted entirely**, not only when an individual setting is. Nothing backfills a stored config, so a group saved without a `protocol` block runs on exactly these values.
 
@@ -813,7 +955,7 @@ If tenant quotas are enabled, `QuotaExceededException` is propagated regardless 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/groupstore/groups` | Create group config |
-| `GET` | `/groupstore/groups` | List group configs |
+| `GET` | `/groupstore/groups/descriptors` | List group configs (`filter`, `index`, `limit`) |
 | `GET` | `/groupstore/groups/{id}` | Read group config |
 | `PUT` | `/groupstore/groups/{id}` | Update group config |
 | `DELETE` | `/groupstore/groups/{id}` | Delete group config |
@@ -822,8 +964,61 @@ If tenant quotas are enabled, `QuotaExceededException` is propagated regardless 
 | `GET` | `/groups/{groupId}/conversations/{id}` | Read transcript |
 | `GET` | `/groups/{groupId}/conversations` | List conversations |
 | `DELETE` | `/groups/{groupId}/conversations/{id}` | Delete + cascade |
+| `GET` | `/groupstore/groups/jsonSchema` | JSON schema for the group config |
+| `POST` | `/groups/{groupId}/conversations/stream` | Start discussion, stream events over SSE |
+| `POST` | `/groups/{groupId}/conversations/{id}/followup` | Ask one member a follow-up |
+| `POST` | `/groups/{groupId}/conversations/{id}/continue` | Continue with a new question (same transcript) |
+| `POST` | `/groups/{groupId}/conversations/{id}/continue/stream` | Continue, streaming |
+| `POST` | `/groups/{groupId}/conversations/{id}/close` | Close the conversation to further rounds |
+| `POST` | `/groups/{groupId}/conversations/{id}/cancel` | Cancel a running discussion |
+| `POST` | `/groups/{groupId}/conversations/{id}/approve` | Approve/reject a HITL pause |
+| `POST` | `/groups/{groupId}/conversations/{id}/approve/stream` | Approve and stream the resumed run |
+| `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6) |
+| `GET` | `/groups/{groupId}/conversations/{id}/approval-status` | Pause coordinates (`detail=full` for approvers) |
+| `GET` | `/groups/{groupId}/conversations/pending-approvals` | This group's discussions awaiting a decision |
+| `GET` | `/groups/pending-approvals` | Every group discussion awaiting a decision, across all groups |
+| `GET` | `/groupstore/templates` | List preset templates (I10) |
+| `GET` | `/groupstore/templates/{templateId}` | Read one template |
+| `POST` | `/groupstore/templates/{templateId}/instantiate` | Create a group from a template |
+| `GET` | `/groupstore/groups/{id}/workspace` | Read the standing-team workspace (I13) |
+| `GET` | `/groupstore/groups/{id}/workspace/backlog` | Read the team backlog |
+| `POST` | `/groupstore/groups/{id}/workspace/backlog` | File a backlog task |
+| `POST` | `/groupstore/groups/{id}/workspace/cadences` | Add a cron cadence |
+| `DELETE` | `/groupstore/groups/{id}/workspace/cadences/{cadenceId}` | Remove a cadence and its schedule |
+
+## SSE Events
+
+`POST /groups/{groupId}/conversations/stream` (and the `continue`/`approve`
+streaming variants) emit these events. A client that only cares about the
+answer can watch `group_complete`; a UI rendering the discussion live wants the
+speaker and phase pairs.
+
+| Event | Fires when |
+|---|---|
+| `group_start` | The discussion begins (carries group id and question) |
+| `phase_start` / `phase_complete` | A phase opens / closes |
+| `round_start` | A continuation round (round 2+) of the whole discussion begins — see `POST .../continue`. Phase repeats fire `phase_start` instead |
+| `speaker_start` / `speaker_complete` | A member's turn opens / closes (complete carries the content) |
+| `token` | Incremental token from a streaming member turn |
+| `synthesis_start` / `synthesis_complete` | The synthesis phase opens / closes |
+| `convergence_checked` / `convergence_reached` | A convergence judge ran / declared the phase converged (I2) |
+| `decision_reached` | A `DecisionRecord` was set — vote tally, debate verdict, or negotiation agreement (I14/I11) |
+| `task_plan_created` / `task_verified` | TASK_FORCE planned its backlog / verified a task |
+| `retro_recorded` | A RETRO phase finished, with the number of lessons stored (I8) |
+| `artifact_updated` | A shared artifact was created or revised (I17) |
+| `human_input_requested` | A HUMAN member's turn is pending (I6) |
+| `awaiting_approval` / `hitl_resume` | A HITL pause was committed / released |
+| `member_pause_skipped` | A member turn was skipped rather than paused |
+| `cancelled` | The discussion was cancelled |
+| `group_complete` | Terminal — carries the final state and the synthesized answer |
+| `group_error` | Terminal failure, with a curated (never raw) message |
 
 ## MCP Tools
+
+Group-related tools live in two classes: the group tools below, plus six
+group-scoped tools provided by the HITL tool set (marked) — three that act on a
+pause and three that find one. Both are exposed on the same MCP server; the
+split is internal.
 
 | Tool | Description |
 |---|---|
@@ -838,6 +1033,19 @@ If tenant quotas are enabled, `QuotaExceededException` is propagated regardless 
 | `list_group_conversations`  | List past discussions for a group, with state and timestamps                                                                         |
 | `start_group_discussion`    | Start a discussion asynchronously (returns immediately). Poll with `read_group_conversation`                                         |
 | `delete_group_conversation` | Delete a group conversation and cascade-delete all member conversations                                                              |
+| `followup_with_member` | Ask a single member a follow-up on a finished discussion |
+| `continue_group_discussion` | Continue a discussion with a new question |
+| `close_group_conversation` | Close a conversation to further rounds |
+| `list_group_pending_approvals` | List one group's discussions awaiting a decision — HITL tool set |
+| `list_all_group_pending_approvals` | The cross-group approval inbox — HITL tool set |
+| `get_group_approval_status` | Pause coordinates for one discussion — HITL tool set |
+| `submit_group_human_input` | Submit a HUMAN member's turn (I6) — HITL tool set |
+| `approve_group_phase` | Approve or reject a HITL pause — HITL tool set |
+| `cancel_group_discussion` | Cancel a running discussion — HITL tool set |
+| `add_team_task` | File a task on a standing team's backlog (I13) |
+| `list_team_backlog` | Read a standing team's backlog |
+| `list_group_templates` | List the preset group templates (I10) |
+| `create_group_from_template` | Create a group from a template + role assignments |
 
 ## Slack Integration
 
@@ -895,6 +1103,13 @@ Known bounds, so they are not discovered at runtime:
 
 ```properties
 # application.properties
-eddi.groups.max-depth=3    # Max recursion depth for nested groups
+eddi.groups.max-depth=3             # Max recursion depth for nested groups
+eddi.groups.cadence.claim-ttl=PT24H # Standing-team claim TTL; non-positive disables reclaiming
+eddi.attachments.max-per-turn=5     # Attachments forwarded per member turn
 ```
+
+A sub-agent that inherits a parent's vault reference must itself be granted that
+secret, or — under the default `eddi.vault.grant-enforcement=enforce` — it will
+not deploy. See
+[secrets-vault.md → Agent Grants](secrets-vault.md#agent-grants-allowedagents).
 

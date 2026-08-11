@@ -386,5 +386,5 @@ When Agent Father creates the langchain configuration, it generates:
 ---
 
 **Last Updated:** March 2026  
-**EDDI Version:** 6.2.0  
+**EDDI Version:** [![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases)  
 **Agent Father Version:** 3.0.1

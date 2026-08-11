@@ -122,8 +122,8 @@ public class McpGroupTools {
     // --- Discovery ---
 
     @Tool(description = "Describe all available discussion styles for agent " + "groups. Returns the name, phase flow, and recommended use case "
-            + "for each style (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, " + "DELPHI, DEBATE, TASK_FORCE). Call this before create_group to "
-            + "choose the right style.")
+            + "for each style (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, " + "DELPHI, DEBATE, TASK_FORCE, NEGOTIATION, plus CUSTOM). Call this "
+            + "before create_group to choose the right style.")
     public String describe_discussion_styles() {
         requireRole(identity, authEnabled, "eddi-viewer");
         return """
@@ -163,6 +163,22 @@ public class McpGroupTools {
                 Member roles: none required. Moderator handles planning and synthesis.
                 Optional: pass pre-configured tasks via the `tasks` parameter to skip the
                 PLAN phase entirely.
+
+                ### NEGOTIATION
+                Flow: Positions & Interests → Opening Proposals → Bargaining (N rounds) → Arbitration → Synthesis
+                Trade, not win/lose. Members state interests independently (they do not see each
+                other first), then exchange proposals and bargain with a concession ledger tracking
+                what each side gave up. Arbitration is SKIPPED when agreement is reached — the
+                moderator only rules when bargaining failed to converge.
+                Use when: surfacing trade-offs, splitting scarce budget or scope, drafting a
+                compromise both sides can sign.
+                Member roles: none required. Moderator arbitrates and synthesizes.
+
+                ### CUSTOM
+                Flow: whatever you define via the `phases` parameter.
+                Use when: none of the presets fit — you need your own phase sequence, per-phase
+                turn order, context scope, voting, or approval gates.
+                Member roles: as your phases require.
 
                 ## Nested Groups (Group-of-Groups)
                 Members can be other groups (memberTypes=GROUP). The sub-group runs its
