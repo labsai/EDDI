@@ -5,6 +5,22 @@
 
 ---
 
+## 🔒 chore(vault): default grant-enforcement to enforce (2026-08-11)
+
+**Repo:** EDDI (`chore/vault-grant-enforce`)
+
+`eddi.vault.grant-enforcement` now ships as `enforce` rather than `warn`, so an agent whose configuration names a vault secret its `allowedAgents` does not grant is blocked at deployment instead of merely logged.
+
+Safe as a shipped default for two reasons, both worth knowing before relying on it:
+1. **Inert without a master key.** `eddi.vault.master-key` is empty by default; with the vault disabled the checker returns "no violations" without looking at anything.
+2. **Wildcard grants.** Every key `AgentSetupService` vaults carries `allowedAgents = ["*"]`. Only a grant an operator has deliberately narrowed can produce a violation.
+
+**Operational note:** on a deployment that has *both* a master key and narrowed grants, run once on `warn` and confirm the log is free of `references vault secret(s) it is not granted` before enabling this. In `enforce` mode that condition is an ERROR that stops the agent deploying — there is no warning to notice first.
+
+No shipped agent configuration (initial-agents, docs/agent-configs) contains a vault reference, so nothing in the repo can trip the check.
+
+---
+
 ## 🔒 feat(vault): allowedAgents is enforced instead of decorative (2026-08-10)
 
 **Repo:** EDDI (`feat/vault-grant-enforcement`)
