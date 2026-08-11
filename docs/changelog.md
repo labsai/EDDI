@@ -7,6 +7,37 @@
 
 
 
+## 🔎 docs: Copilot review on #647 — five findings, all confirmed against source (2026-08-11)
+
+**Repo:** EDDI (`docs/group-collaboration-refresh`)
+
+Each was verified in the code before being accepted; all five held.
+
+1. **`convergence.judge: SERVICE` was documented as "a cheap dedicated call".** It is accepted but
+   not wired: `PhaseExecutionEngine.runJudge` logs a warning and falls back to the moderator-agent
+   path, so it costs exactly what `MODERATOR` costs. Documented as the fallback it is — a doc that
+   promises a cheaper call than the one actually made is worse than no doc. The same passage now
+   also records that a group with no moderator skips the judge entirely.
+2. **The REST catalogue listed only the cross-group approval inbox.** `IRestGroupConversation`
+   declares the per-group route beside it (`GET /groups/{groupId}/conversations/pending-approvals`);
+   without it, a caller wanting one group's pauses had to filter the global inbox. Both rows now
+   present, and the global one says "across all groups" so the pair reads as a pair.
+3. **The MCP table claimed three group tools from the HITL set; `McpHitlTools` exposes six.** The
+   three missing ones — `list_group_pending_approvals`, `list_all_group_pending_approvals`,
+   `get_group_approval_status` — are the discovery half of the approval workflow, so a "completed"
+   catalogue that omits them hides how an approver finds anything to approve.
+4. **A pinned test count (14,205) that the source no longer matches** — it is 14,368 today and
+   moves with every merge. The entry now states the figure as a point-in-time floor rather than a
+   measurement to be re-pinned. Same treatment applied to the "(actual 82)" MCP count, which main's
+   docs tools took to 84 — the badges say `14,000+` and `80+` precisely so they survive this.
+5. **The version-label paragraph contradicted itself**, calling `docs/README.md` one of the twelve
+   `6.2.0` docs and then correctly noting it was stuck at `6.0.0`. The real tally: ten
+   `**Version: 6.2.0**`, one `**EDDI Version:** 6.2.0`, and `docs/README.md`'s stale
+   `**Latest version: 6.0.0**` — twelve files, eleven of them at 6.2.0.
+
+---
+
+
 ## 🔀 docs: merge `main` into the documentation refresh and adapt to what landed since (2026-08-11)
 
 **Repo:** EDDI (`docs/group-collaboration-refresh`)
@@ -362,8 +393,11 @@ source, not against the plan.
 
 **`README.md`**: 6 → 7 built-in styles; nine new capability bullets (voting, artifacts, human
 members, facilitator, negotiation, bidding, team memory, standing teams, templates) plus a HITL
-bullet for humans-as-members; MCP tool count 60+ → 80+ (actual 82); test badge 11,000+ →
-14,000+ (14,205 test annotations across `src/test`); an OpenAI-Compatible API docs row.
+bullet for humans-as-members; MCP tool count 60+ → 80+ (82 `@Tool` methods when this was
+written; 84 once main's docs tools landed — again a floor, not a pinned figure); test badge 11,000+ →
+14,000+ (over 14,200 test annotations across `src/test` when this was written, and still
+climbing — the badge is deliberately a floor, not a measurement to re-pin each release); an
+OpenAI-Compatible API docs row.
 
 **`AGENTS.md`**: Phase 10 row 6 → 7 styles; new Completed rows 10c (Group Deliberation) and
 10d (Group Work Products); test count 12,000+ → 14,000+; the HITL-remaining row now
@@ -378,10 +412,11 @@ guide, code-review standards, build reproducibility and changelog. **`docs/rag.m
 `gemini` embedding provider and `chroma` vector store rows — the code supports 8 and 6, the
 tables listed 7 and 5.
 
-**Version labels no longer hand-maintained.** Twelve docs carried a hardcoded `**Version:
-6.2.0**` header (and `docs/README.md` a `**Latest version: 6.2.0**` line) that had to be
-touched on every release — and had already drifted: `docs/README.md` still said 6.0.0, two
-releases behind. All of them now use the same dynamic shields.io badge the root README uses
+**Version labels no longer hand-maintained.** Twelve docs carried a hardcoded version header
+that had to be touched on every release: ten as `**Version: 6.2.0**`, one as
+`**EDDI Version:** 6.2.0` (`agent-father-langchain-tools-guide.md`), and `docs/README.md` as a
+`**Latest version: 6.0.0**` line — which is the drift the scheme invites, that file having sat
+two releases behind. All of them now use the same dynamic shields.io badge the root README uses
 for its release, which reads the latest GitHub release tag and can never go stale:
 `[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases)`.
 Deliberately **not** converted: `**Version: ≥6.0.0**` in `security.md` and the

@@ -638,8 +638,13 @@ producing movement, so a group that agreed after round 2 does not pay for round
 5. A judge compares this round's contributions against the previous round's and
 scores similarity against `threshold`; `minRepeats` (minimum 2 — one round has
 nothing to compare against) guards against calling convergence before there is
-evidence. `judge` is `SERVICE` (a cheap dedicated call) or `MODERATOR` (the
-moderator agent judges). Converging is a *real completed repeat*: it still
+evidence. `judge` selects who scores it: `MODERATOR` runs the moderator agent as
+the judge (in its own conversation, so the judge's JSON-only prompts never leak
+into a later SYNTHESIS turn). `SERVICE` is **accepted but not yet wired** — it
+logs a warning and falls back to the same moderator-agent path, so it currently
+costs the same as `MODERATOR` rather than the cheaper dedicated call the name
+suggests. Either way, a group with no moderator skips the judge and the phase
+simply keeps going. Converging is a *real completed repeat*: it still
 persists, still fires `onPhaseComplete`, and still runs the phase's decision
 block.
 
@@ -970,7 +975,8 @@ summarizer's.
 | `POST` | `/groups/{groupId}/conversations/{id}/approve/stream` | Approve and stream the resumed run |
 | `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6) |
 | `GET` | `/groups/{groupId}/conversations/{id}/approval-status` | Pause coordinates (`detail=full` for approvers) |
-| `GET` | `/groups/pending-approvals` | Every group discussion awaiting a decision |
+| `GET` | `/groups/{groupId}/conversations/pending-approvals` | This group's discussions awaiting a decision |
+| `GET` | `/groups/pending-approvals` | Every group discussion awaiting a decision, across all groups |
 | `GET` | `/groupstore/templates` | List preset templates (I10) |
 | `GET` | `/groupstore/templates/{templateId}` | Read one template |
 | `POST` | `/groupstore/templates/{templateId}/instantiate` | Create a group from a template |
@@ -1009,9 +1015,10 @@ speaker and phase pairs.
 
 ## MCP Tools
 
-Group-related tools live in two classes: the group tools below, plus three
-lifecycle/approval tools provided by the HITL tool set (marked). Both are exposed
-on the same MCP server — the split is internal.
+Group-related tools live in two classes: the group tools below, plus six
+group-scoped tools provided by the HITL tool set (marked) — three that act on a
+pause and three that find one. Both are exposed on the same MCP server; the
+split is internal.
 
 | Tool | Description |
 |---|---|
@@ -1029,6 +1036,9 @@ on the same MCP server — the split is internal.
 | `followup_with_member` | Ask a single member a follow-up on a finished discussion |
 | `continue_group_discussion` | Continue a discussion with a new question |
 | `close_group_conversation` | Close a conversation to further rounds |
+| `list_group_pending_approvals` | List one group's discussions awaiting a decision — HITL tool set |
+| `list_all_group_pending_approvals` | The cross-group approval inbox — HITL tool set |
+| `get_group_approval_status` | Pause coordinates for one discussion — HITL tool set |
 | `submit_group_human_input` | Submit a HUMAN member's turn (I6) — HITL tool set |
 | `approve_group_phase` | Approve or reject a HITL pause — HITL tool set |
 | `cancel_group_discussion` | Cancel a running discussion — HITL tool set |
