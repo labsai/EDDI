@@ -913,17 +913,15 @@ public class AgentSetupService {
                 createdResources.put(VAULTED_SECRET_KEY, keyName);
             }
             var ref = new SecretReference(SecretReference.DEFAULT_TENANT, keyName);
-            // "*" is deliberate and is NOT an access-control decision made here:
-            // VaultSecretProvider documents that allowedAgents is "stored for
-            // visibility/documentation but NOT enforced at resolution time". The
-            // vault's access model is "the admin who writes the agent config decides
-            // which references to include". Narrowing this list would imply an
-            // enforcement that does not exist.
+            // "*" is deliberate. allowedAgents IS enforced now (VaultGrantGate, at
+            // deploy time), so this list is a real access-control decision — but the
+            // agent being set up does not have an ID yet at this point, and the key is
+            // created for whichever agent this setup produces. Narrowing it here would
+            // have to guess that ID, and guessing wrong blocks the very agent the key
+            // was vaulted for.
             //
-            // Worth flagging rather than silently narrowing: that access model assumes
-            // a human admin authors the config, and create_sub_agent lets an LLM author
-            // one. Making allowedAgents enforceable is a vault-level feature, not a
-            // one-line change at this call site.
+            // Operators who want a narrow grant set it after setup, via the secrets
+            // REST API; see docs/secrets-vault.md "Agent Grants".
             secretProvider.store(ref, apiKey, "Auto-vaulted by AgentSetupService for agent: " + agentName,
                     List.of("*"));
             LOGGER.infof("API key vaulted for agent '%s' (key: %s)", agentName, keyName);

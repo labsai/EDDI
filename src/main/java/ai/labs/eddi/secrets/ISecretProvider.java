@@ -13,10 +13,11 @@ import java.util.List;
  * Service Provider Interface for secrets management. Implementations handle the
  * actual storage and retrieval of encrypted secrets.
  * <p>
- * Secrets are scoped at the <b>tenant level</b>, identified by
- * {@code (tenantId, keyName)}. There is no agent-level scoping — access control
- * is via <b>configuration authorship</b>: the admin who writes the agent config
- * decides which vault references ({@code ${vault:keyName}}) to include.
+ * Secrets are stored at the <b>tenant level</b>, identified by
+ * {@code (tenantId, keyName)}. Which agents may use a secret is governed by
+ * {@code SecretMetadata.allowedAgents}, checked when an agent is deployed (see
+ * {@link VaultGrantGate}) — not by this interface, whose implementations
+ * resolve any valid reference they are asked for.
  * <p>
  * All implementations MUST ensure:
  * <ul>
