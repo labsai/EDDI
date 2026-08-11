@@ -2026,7 +2026,10 @@ function GroupMemberPicker({
         // Distinct from "no groups available" — that reads as a fact about the
         // account and points the user at creating one, which does not help when
         // the list simply failed to load.
-        <RefetchErrorNotice onRetry={() => refetch()} message={t("common.loadError")} />
+        <RefetchErrorNotice
+          onRetry={() => refetch()}
+          message={t("common.loadError", "Failed to load data")}
+        />
       ) : !hasGroups ? (
         <div className="rounded-lg border border-dashed border-amber-400/50 bg-amber-400/5 px-3 py-3 text-center">
           <Users className="h-4 w-4 text-amber-500 mx-auto mb-1" />

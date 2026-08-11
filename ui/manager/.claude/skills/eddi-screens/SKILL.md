@@ -29,9 +29,11 @@ Reference: `src/pages/agents.tsx`.
     <div>
       <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
         <Bot className="h-8 w-8 text-primary" />
-        {t("pages.agents.title")}
+        {t("pages.agents.title", "Agents")}
       </h1>
-      <p className="mt-1 text-muted-foreground">{t("pages.agents.subtitle")}</p>
+      <p className="mt-1 text-muted-foreground">
+        {t("pages.agents.subtitle", "Build and deploy conversational agents")}
+      </p>
     </div>
     <div className="flex flex-wrap items-center gap-2">
       <Button variant="outline" data-testid="import-agent-btn">…</Button>
@@ -85,13 +87,16 @@ Loading → error → empty → content, as guarded blocks (the `agents.tsx` for
 )}
 
 {isError && (
-  <ErrorState message={t("common.error")} onRetry={() => refetch()} retryLabel={t("common.retry")} />
+  <ErrorState message={t("common.error", "Something went wrong")}
+              onRetry={() => refetch()} retryLabel={t("common.retry", "Retry")} />
 )}
 
 {!isLoading && !isError && items.length === 0 && (
-  <EmptyState icon={Bot} title={search ? t("common.noResults") : t("agents.empty")}
-              description={!search ? t("agents.emptyDescription") : undefined}
-              actionLabel={!search ? t("agents.createAgent") : undefined}
+  <EmptyState icon={Bot}
+              title={search ? t("common.noResults", "No results found")
+                            : t("agents.empty", "No agents yet")}
+              description={!search ? t("agents.emptyDescription", "Use the wizard to create one.") : undefined}
+              actionLabel={!search ? t("agents.createAgent", "Create Agent") : undefined}
               onAction={!search ? () => setCreateOpen(true) : undefined} />
 )}
 ```
@@ -106,6 +111,8 @@ exists yet" or "data will appear automatically" when the truth is "we could not 
 backend". Pick the shape by surface:
 
 - `ErrorState` — replaces the container. For a page or panel with nothing else to show.
+  Carries `data-testid="error-state"` and `data-testid="error-state-retry"`; assert on those
+  rather than on the translated copy, which changes with the locale.
 - `RefetchErrorNotice` — a compact amber strip that keeps the last good data on screen.
   For a *background* refetch failure on a polling page, or an inline control (a picker
   inside a form) where a full error box would be out of scale. Pass an explicit `message`

@@ -167,9 +167,9 @@ export function ChannelsPage() {
         </div>
       ) : isError ? (
         <ErrorState
-          message={t("common.error")}
+          message={t("common.error", "Something went wrong")}
           onRetry={() => refetch()}
-          retryLabel={t("common.retry")}
+          retryLabel={t("common.retry", "Retry")}
         />
       ) : filtered.length === 0 ? (
         <EmptyState

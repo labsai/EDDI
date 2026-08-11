@@ -311,7 +311,7 @@ describe("ChannelsPage", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+      expect(screen.getByTestId("error-state")).toBeInTheDocument();
     });
 
     // The bug this pins: a failed fetch used to fall through to "No channels
@@ -335,11 +335,11 @@ describe("ChannelsPage", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+      expect(screen.getByTestId("error-state")).toBeInTheDocument();
     });
 
     const user = userEvent.setup();
-    await user.click(screen.getByText("Retry"));
+    await user.click(screen.getByTestId("error-state-retry"));
 
     await waitFor(() => {
       expect(screen.getByText("No channels yet")).toBeInTheDocument();

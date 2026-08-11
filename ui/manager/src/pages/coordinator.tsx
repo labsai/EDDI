@@ -220,9 +220,9 @@ export function CoordinatorPage() {
         // Distinct from the empty state below: that one tells the user to wait for
         // data that is still coming, which is the wrong advice after a failed fetch.
         <ErrorState
-          message={t("common.error")}
+          message={t("common.error", "Something went wrong")}
           onRetry={() => refetchStatus()}
-          retryLabel={t("common.retry")}
+          retryLabel={t("common.retry", "Retry")}
         />
       ) : currentStatus ? (
         <>

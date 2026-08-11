@@ -38,7 +38,11 @@ export function AgentStudioPage() {
   const [mobileTab, setMobileTab] = useState<"pipeline" | "editor" | "chat">("pipeline");
 
   // Fetch agent descriptor for name — filter by ID to avoid fetching all agents
-  const { data: descriptors } = useQuery({
+  const {
+    data: descriptors,
+    isError: descriptorsError,
+    refetch: refetchDescriptors,
+  } = useQuery({
     queryKey: ["studio", "descriptors", agentId],
     queryFn: () => getAgentDescriptors(10, 0, agentId ?? ""),
     enabled: !!agentId,
@@ -80,7 +84,11 @@ export function AgentStudioPage() {
     return { workflowId: parsed.id, workflowVersion: parsed.version };
   }, [workflowUri]);
 
-  const { data: workflowConfig } = useQuery({
+  const {
+    data: workflowConfig,
+    isError: workflowError,
+    refetch: refetchWorkflow,
+  } = useQuery({
     queryKey: ["studio", "workflow", workflowId],
     queryFn: () => getWorkflow(workflowId!, workflowVersion),
     enabled: !!workflowId,
@@ -103,6 +111,31 @@ export function AgentStudioPage() {
     );
   }
 
+  // Checked before the loading branch, and covering all three queries rather
+  // than just the agent one. Each is gated on the previous succeeding
+  // (`enabled: !!agentDescriptor`, `enabled: !!workflowId`), so a failed
+  // prerequisite leaves the next query *disabled* rather than errored — it
+  // never reports isLoading or isError. Without every branch here, a failed
+  // descriptor or workflow fetch falls through to the normal chrome with an
+  // empty pipeline, which is indistinguishable from an agent that has no
+  // workflow at all.
+  if (descriptorsError || agentError || workflowError) {
+    const retryFailed = descriptorsError
+      ? refetchDescriptors
+      : agentError
+        ? refetchAgent
+        : refetchWorkflow;
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <ErrorState
+          message={t("common.error", "Something went wrong")}
+          onRetry={() => retryFailed()}
+          retryLabel={t("common.retry", "Retry")}
+        />
+      </div>
+    );
+  }
+
   if (agentLoading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -110,20 +143,6 @@ export function AgentStudioPage() {
         <p className="ms-2 text-sm text-muted-foreground">
           {t("studio.loading", "Loading agent...")}
         </p>
-      </div>
-    );
-  }
-
-  // Without this the studio fell through to its normal chrome with an empty
-  // pipeline, which is indistinguishable from an agent that has no workflow.
-  if (agentError) {
-    return (
-      <div className="flex h-full items-center justify-center p-6">
-        <ErrorState
-          message={t("common.error")}
-          onRetry={() => refetchAgent()}
-          retryLabel={t("common.retry")}
-        />
       </div>
     );
   }

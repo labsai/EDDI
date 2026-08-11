@@ -448,7 +448,7 @@ describe("CoordinatorPage", () => {
     renderCoordinator();
 
     await waitFor(() => {
-      expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+      expect(screen.getByTestId("error-state")).toBeInTheDocument();
     });
 
     expect(
