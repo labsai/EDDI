@@ -117,7 +117,7 @@ public final class TaskToolApprovalsResolver {
         merged.setMaxPausesPerTurn(taskLevel.getMaxPausesPerTurn() != null
                 ? taskLevel.getMaxPausesPerTurn()
                 : agent.getMaxPausesPerTurn());
-        merged.setMaxAutoApprovalsPerTurn(minNonNull(agent.getMaxAutoApprovalsPerTurn(), taskLevel.getMaxAutoApprovalsPerTurn()));
+        merged.setMaxAutoApprovalsPerTurn(strictAutoApprovalBudget(agent.getMaxAutoApprovalsPerTurn(), taskLevel.getMaxAutoApprovalsPerTurn()));
         merged.setOnNoProgress(firstNonBlank(taskLevel.getOnNoProgress(), agent.getOnNoProgress()));
         merged.setPauseReason(firstNonBlank(taskLevel.getPauseReason(), agent.getPauseReason()));
         merged.setPendingMessage(firstNonBlank(taskLevel.getPendingMessage(), agent.getPendingMessage()));
@@ -196,17 +196,24 @@ public final class TaskToolApprovalsResolver {
         return List.copyOf(merged);
     }
 
+    /**
+     * The auto-approval budget may only shrink. An unset agent value is NOT "no
+     * cap" — the runtime resolves it to
+     * {@link ToolApprovalsConfig#DEFAULT_MAX_AUTO_APPROVALS_PER_TURN}, so a task
+     * stating a larger number against an unset agent value would raise the
+     * effective budget. (Today a fixed no-progress threshold downstream happens to
+     * bound the damage; this contract must not depend on it.)
+     */
+    private static Integer strictAutoApprovalBudget(Integer agent, Integer task) {
+        if (task == null) {
+            return agent;
+        }
+        int effectiveAgentCap = agent != null ? agent : ToolApprovalsConfig.DEFAULT_MAX_AUTO_APPROVALS_PER_TURN;
+        return Math.min(effectiveAgentCap, task);
+    }
+
     private static String firstNonBlank(String preferred, String fallback) {
         return preferred != null && !preferred.isBlank() ? preferred : fallback;
     }
 
-    private static Integer minNonNull(Integer a, Integer b) {
-        if (a == null) {
-            return b;
-        }
-        if (b == null) {
-            return a;
-        }
-        return Math.min(a, b);
-    }
 }

@@ -22,9 +22,12 @@ import java.util.TreeSet;
  * more than one surface. MCP <em>resources</em> are only usable by a client
  * that asks for them — EDDI's own MCP client never calls {@code resources/read}
  * — so as long as this logic lived only behind {@code eddi://docs/*}, a desktop
- * MCP client could read EDDI's documentation and an EDDI agent could not. The
- * REST surface ({@code /administration/docs}) closes that gap: an agent
- * generated from EDDI's OpenAPI spec gets doc access as ordinary tools.
+ * MCP client could read EDDI's documentation and an EDDI agent could not. Two
+ * surfaces close that gap: REST ({@code /administration/docs}), which an agent
+ * generated from EDDI's OpenAPI spec binds as ordinary tools, and the MCP tools
+ * {@code list_docs}/{@code read_docs} ({@code McpDocTools}) for agents
+ * consuming EDDI's MCP server. All of them — and the resources — delegate here,
+ * so {@code eddi.docs.enabled=false} switches every one off together.
  *
  * <h2>Runtime doc set is smaller than the repo's</h2> The Docker image copies
  * only top-level {@code docs/*.md} (non-recursive) and then deletes

@@ -154,6 +154,25 @@ class TaskToolApprovalsResolverTest {
     // ── strict: scalars and rules ────────────────────────────────────────
 
     @Test
+    void strictBudgetCannotGrowPastAnUnsetAgentValue() {
+        // An unset agent budget is the RUNTIME DEFAULT (2), not "no cap" — a
+        // task stating 10 against an unset agent value must clamp to it, or the
+        // task quietly raised the auto-approval budget. A task may still
+        // tighten below the default.
+        var agent = new ToolApprovalsConfig();
+        agent.setRequireApproval(List.of("http.post:*"));
+
+        var loosening = new ToolApprovalsConfig();
+        loosening.setMaxAutoApprovalsPerTurn(10);
+        assertEquals(ToolApprovalsConfig.DEFAULT_MAX_AUTO_APPROVALS_PER_TURN,
+                TaskToolApprovalsResolver.resolve(agent, loosening, Mode.STRICT).getMaxAutoApprovalsPerTurn());
+
+        var tightening = new ToolApprovalsConfig();
+        tightening.setMaxAutoApprovalsPerTurn(0);
+        assertEquals(0, TaskToolApprovalsResolver.resolve(agent, tightening, Mode.STRICT).getMaxAutoApprovalsPerTurn());
+    }
+
+    @Test
     void strictTakesTheSmallerAutoApprovalBudget() {
         var task = new ToolApprovalsConfig();
         task.setMaxAutoApprovalsPerTurn(10);

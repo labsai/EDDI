@@ -19,6 +19,16 @@ import java.util.List;
  * compatible).
  */
 public class ToolApprovalsConfig {
+
+    /**
+     * Runtime default for {@link #getMaxAutoApprovalsPerTurn()} when unset. Lives
+     * on the model so the runtime consumer
+     * ({@code ConversationHitlService.resolveMaxAutoApprovals}) and the strict
+     * task-level merge ({@code TaskToolApprovalsResolver}) read one constant — the
+     * merge must treat "agent unset" as this value, or a task stating a larger
+     * number would silently raise the effective budget.
+     */
+    public static final int DEFAULT_MAX_AUTO_APPROVALS_PER_TURN = 2;
     /** Glob patterns of tools requiring approval, e.g. "mcp:*", "delete_*". */
     private List<String> requireApproval;
     /** Exemptions — always beat requireApproval. */
