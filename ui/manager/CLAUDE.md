@@ -38,8 +38,14 @@ the whole app gets it; don't patch it at the call site.
 
 ## Design system mirror
 
-The presentational surface (29 components) is synced to a Claude design system via
-`.design-sync/`. `.design-sync/conventions.md` is the styling contract; `.design-sync/NOTES.md`
-explains the build wiring. **Adding a component to `src/components/ui/` or `shared/` does not
-add it to the design system** — it must also be added to `.design-sync/ds-entry.tsx` and
-`config.json`'s `componentSrcMap`.
+The synced surface is **29 components**: the 24 above plus five pieces of chrome from
+`src/components/layout/` (`Sidebar`, `TopBar`, `PlatformStatus`, `PageLoader`,
+`MockDataBanner`). `AppLayout` and `ConfigEditorLayout` are excluded on purpose — both pull
+Monaco into the bundle. `.design-sync/conventions.md` is the styling contract;
+`.design-sync/NOTES.md` explains the build wiring.
+
+**Adding a component to `ui/`, `shared/` or `layout/` does not add it to the design system**
+— it must also be added to `.design-sync/ds-entry.tsx`, `config.json`'s `componentSrcMap`,
+and a preview in `.design-sync/previews/`. If it reads a token no other synced file uses,
+check that token still reaches `:root` in the compiled CSS: Tailwind v4 tree-shakes `@theme`
+tokens, so an unscanned utility means a missing variable (see NOTES.md).

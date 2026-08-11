@@ -27,11 +27,13 @@ const scoped = [
   '@import "tailwindcss" source(none);',
   '@source "../../src/components/ui";',
   '@source "../../src/components/shared";',
-  // Required, not cosmetic: Tailwind v4 only emits an @theme token if a scanned
-  // file uses it. Nothing in ui/ or shared/ references --color-sidebar*, so
-  // without this line :root ships zero sidebar tokens and the sidebar's brand
-  // gold resolves to nothing. (The .dark overrides are plain CSS and ship
-  // regardless, which is why the gap only shows in light mode.)
+  // Required, not cosmetic: Tailwind v4 tree-shakes @theme tokens, emitting one
+  // only if a scanned file uses a utility that reads it. Without this line the
+  // :root block carries 2 of the 5 --color-sidebar* tokens (shared/mode-switcher
+  // is the only non-layout file touching them); with it, 4. The missing
+  // border-sidebar-border / fill-sidebar-accent live in layout/sidebar.tsx.
+  // (--color-sidebar-accent-foreground reaches :root in no configuration — no
+  // file uses that utility — and ships only via the plain-CSS .dark block.)
   '@source "../../src/components/layout";',
   '@source "../ds-entry.tsx";',
   '@source "../previews";',

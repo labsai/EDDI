@@ -72,23 +72,39 @@ the first two pull Monaco and the operator tool-scope graph into the bundle, and
 
 ## Why `layout/` is in the `@source` list (measured, not assumed)
 
-Adding `@source "../../src/components/layout"` is required for the **utilities** the chrome
-uses: without it the compiled sheet has no `.fill-sidebar-accent`, no `.border-s-2`, and
-~8.7 KB of other layout utilities (45.4 KB → 54.1 KB), so a synced `Sidebar`/`TopBar`
-renders unstyled.
+Tailwind v4 **tree-shakes `@theme` tokens**: a token reaches the `:root` block in the
+`theme` layer only if some scanned file uses a utility that reads it. A control build
+scanning nothing at all emits none of the five `--color-sidebar*` tokens. This is why the
+scoped `@source` list is load-bearing for tokens, not just for utilities.
 
-It is **not** what puts the `--color-sidebar*` tokens in `:root`, contrary to what an
-earlier note claimed. Tailwind v4 emits this project's `@theme` block into `:root`
-regardless of scanned usage — a control build scanning *nothing at all* still emits
-`--color-sidebar`, `--color-sidebar-foreground`, `--color-sidebar-border` and
-`--color-sidebar-accent`. Before and after the `layout` line, `:root` carries the same
-four. So there was no sidebar-token bug to fix here.
+Measured against `src/index.css` (each row is a full CLI build; comment-stripped and
+comment-intact runs agree, so nothing here depends on incidental matches):
 
-The one genuine gap: **`--color-sidebar-accent-foreground` is absent from `:root`** in every
-configuration, including the zero-scan control, and ships only in the `.dark` block (which
-is plain CSS). Nothing in the app uses a `*-sidebar-accent-foreground` utility, so nothing
-renders wrong today — but the light-mode value declared in `src/index.css` (`#ffffff`) does
-not reach the bundle. Fixing that means touching `src/index.css`, so it is left alone here.
+| `@source` set | `--color-sidebar*` in `:root` |
+|---|---|
+| nothing | 0 of 5 |
+| `ui` + `shared` (pre-patch) | **2 of 5** — `-foreground`, `-accent` |
+| `ui` + `shared` + `layout` | **4 of 5** — adds `--color-sidebar`, `-border` |
+
+The two that survive without `layout` are held up by `shared/mode-switcher.tsx` alone
+(`bg-sidebar`, `text-sidebar-foreground`, `text-sidebar-accent`). Everything else that reads
+these tokens — `border-sidebar-border`, `fill-sidebar-accent`, `bg-sidebar-accent` — lives in
+`layout/sidebar.tsx`, so scanning `layout` is what restores them.
+
+Adding the line also emits the layout **utilities** themselves — without it the sheet has no
+`.fill-sidebar-accent` and no `.border-s-2`, ~8.7 KB in all (45.4 KB → 54.1 KB), so a synced
+`Sidebar`/`TopBar` renders unstyled.
+
+**`--color-sidebar-accent-foreground` never reaches `:root` in any configuration**, because
+no file anywhere uses a `*-sidebar-accent-foreground` utility — `sidebar.tsx` pairs
+`bg-sidebar-accent` with `text-sidebar` instead. It ships only inside the `.dark` block,
+which is plain CSS and emitted verbatim. Nothing renders wrong today, but the light value
+declared in `src/index.css` (`#ffffff`) does not reach the bundle. Fixing it means touching
+`src/index.css`, so it is left alone here.
+
+> An earlier version of this note claimed the pre-patch bundle shipped **zero** sidebar
+> tokens and that the `layout` line restores **five**. Both numbers were wrong (it is 2 → 4),
+> but the conclusion stands: the scan was incomplete and the line is required.
 
 ## Re-sync risks / watch-list
 - **`build-css.mjs` depends on `src/index.css`'s `@import 'tailwindcss';` line** and on

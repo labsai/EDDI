@@ -5,13 +5,22 @@ description: How an EDDI Manager page is actually built — the app shell, the l
 
 # EDDI Manager screen patterns
 
-Pages live in `src/pages/` and render inside `AppLayout` (sidebar + top bar). The layout
-already supplies `p-6`, `max-w-screen-2xl`, scroll, and a `@container/main` context — a
-page renders its own content only, no shell, no width cap, no page background.
+Most pages live in `src/pages/` and render inside `AppLayout` (sidebar + top bar) via its
+`<Outlet />`. The layout already supplies `p-6`, `max-w-screen-2xl`, scroll, and a
+`@container/main` context — such a page renders its own content only, no shell, no width cap,
+no page background.
+
+**Three surfaces deliberately render outside `AppLayout`** and own their full frame:
+`landing-page.tsx` (`/welcome`), `agent-studio.tsx` (`/manage/studio/:agentId`, a full-screen
+breakout), and everything under `src/pages/workforce/` (mounted on `WorkforceLayout`, a
+standalone app with no Manager chrome). Check `src/app.tsx` before assuming the shell is
+there — those pages *do* supply their own padding, and the rules below are about the
+`AppLayout` ones.
 
 ## Page skeleton
 
-Every page is a single `space-y-6` column (29 of 40 pages). Reference: `src/pages/agents.tsx`.
+Most pages are a single `space-y-6` column — 29 of the 40 files in `src/pages/`.
+Reference: `src/pages/agents.tsx`.
 
 ```tsx
 <div className="space-y-6">
@@ -43,17 +52,20 @@ Every page is a single `space-y-6` column (29 of 40 pages). Reference: `src/page
 Rules that hold across pages:
 
 - **Do not add `p-6` to the page root.** `AppLayout`'s `<main>` already applies
-  `p-6` inside `@container/main mx-auto max-w-screen-2xl`. Seven pages
-  (`channels`, `channel-detail`, `coordinator`, `orphans`, `schedules`, `secrets`,
-  `variables`) still self-pad and end up double-padded — don't copy them.
+  `p-6` inside `@container/main mx-auto max-w-screen-2xl`, so a page that pads itself
+  renders at 48px. Every page currently complies; keep it that way.
 - `h1` is `flex items-center gap-2 text-3xl font-bold text-foreground` with an
-  `h-8 w-8 text-primary` Lucide icon. (`channels.tsx` uses a smaller `text-2xl` /
-  `h-6 w-6` variant; it is the outlier, not the rule.)
+  `h-8 w-8 text-primary` Lucide icon. **Heading size is genuinely mixed** — 22 `text-3xl`
+  against 18 `text-2xl` (plus 3 `text-xl` on dense detail headers). `text-3xl` is the one to
+  reach for on a new top-level page, but match the neighbouring screens rather than treating
+  either as absolute.
 - The page's primary action is a `primary` Button top-right; secondary actions sit beside it
   in a `flex flex-wrap items-center gap-2` group. Buttons already supply `gap-2` from `cva`.
 - Toolbar: search on `flex-1`, `ViewToggle` after it. Persist the choice with
   `getStoredViewMode(page)` / `setStoredViewMode(page, mode)` from
-  `src/components/shared/view-mode.ts`. Where a result count is shown, it is a
+  `src/components/shared/view-mode.ts` — 5 of the 6 pages with a `ViewToggle` do
+  (`channels.tsx` is the one that forgets, so its view resets on every visit).
+  Where a result count is shown, it is a
   `text-xs font-semibold uppercase tracking-wider text-muted-foreground` line above the grid.
 - Inline guidance banners: `rounded-xl border border-primary/20 bg-primary/5 p-4`.
 

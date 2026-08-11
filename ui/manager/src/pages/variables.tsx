@@ -166,7 +166,7 @@ export function VariablesPage() {
     s.length > max ? s.substring(0, max) + "…" : s;
 
   return (
-    <div className="space-y-6 p-6" data-testid="variables-page">
+    <div className="space-y-6" data-testid="variables-page">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

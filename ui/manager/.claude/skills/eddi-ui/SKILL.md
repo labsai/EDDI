@@ -21,7 +21,7 @@ class system, never use raw hex.
 | `Input` | `h-10 rounded-lg`, gold focus ring. Plain `InputHTMLAttributes`. |
 | `Skeleton` | Loading placeholder. |
 | `AccessibleDialog` | Focus-trapped modal. |
-| `AlertDialog` | Confirm/destructive prompt: `title`, `description`, `onConfirm`, `confirmLabel`, `cancelLabel`, `isPending`. Use for every delete. |
+| `AlertDialog` | Confirm/destructive prompt: `open`, `onOpenChange`, `title`, `description`, `onConfirm`, `confirmLabel`, `cancelLabel`, `isPending`, `variant` (`destructive` \| `warning`), plus `children` for extra controls between description and buttons (e.g. a "permanently delete" checkbox). Use for every delete. |
 | `UnsavedChangesDialog` | Discard-changes confirm. Pair with `useUnsavedChangesGuard`. |
 | `DropdownMenu` | Radix wrapper. |
 | `ErrorBoundary` | Wrap risky subtrees. |
