@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { GroupConversation } from "@/lib/api/groups";
+import { hasDisplayableDecision } from "@/lib/group-config";
 
 // ─── Helpers (not exported) ──────────────────────────────────────
 
@@ -51,6 +52,42 @@ function generateMarkdown(
       lines.push(entry.content ?? "");
       lines.push(``);
     }
+  }
+
+  // Structured decision (F3) — without it the export keeps "who won" only as
+  // prose, which is the gap the decision record exists to close.
+  if (hasDisplayableDecision(conversation.decision)) {
+    const d = conversation.decision;
+    lines.push(`---`);
+    lines.push(``);
+    lines.push(`## Decision (${d.type})`);
+    lines.push(``);
+    if (d.winner) lines.push(`**Winner:** ${d.winner}`);
+    if (d.outcome) lines.push(`**Outcome:** ${d.outcome}`);
+    // A NONE decision that carries `raw` means a judgment WAS produced but
+    // could not be parsed — the card shows it verbatim, so the export must too
+    // or the section is an empty heading.
+    if (d.type === "NONE" && d.raw?.trim()) {
+      lines.push(``);
+      lines.push(`### Unparsed judgment`);
+      lines.push(``);
+      lines.push(d.raw);
+    }
+    if (d.tally && Object.keys(d.tally).length > 0) {
+      lines.push(``);
+      for (const [key, value] of Object.entries(d.tally)) {
+        lines.push(`- ${key}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`);
+      }
+    }
+    const dissents = d.dissents ?? [];
+    if (dissents.length > 0) {
+      lines.push(``);
+      lines.push(`**Minority report:**`);
+      for (const dis of dissents) {
+        lines.push(`- ${dis.displayName || dis.agentId}: ${dis.position}`);
+      }
+    }
+    lines.push(``);
   }
 
   if (conversation.synthesizedAnswer?.trim()) {

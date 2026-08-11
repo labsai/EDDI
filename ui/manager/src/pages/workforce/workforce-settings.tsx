@@ -24,10 +24,10 @@ import {
   useUpdateGroup,
   useDeleteGroup,
   useDeleteGroupWithMembers,
+  useAvailableStyles,
 } from "@/hooks/use-groups";
+import { styleDisplay } from "@/lib/discussion-styles";
 import {
-  STYLE_INFO,
-  DISCUSSION_STYLES,
   MAX_DISCUSSION_ROUNDS,
   MAX_GROUP_MEMBERS,
   DEFAULT_MAX_DELEGATION_DEPTH,
@@ -49,6 +49,7 @@ import {
   DEFAULT_GROUP_TASK_CONFIG,
   isValidCostCeiling,
   moderatorlessPhaseNames,
+  uncoveredRolePhases,
   normalizeGroupTaskConfig,
 } from "@/lib/group-config";
 import { DEFAULT_AGENT_TIMEOUT_SECONDS } from "@/lib/group-templates";
@@ -512,6 +513,23 @@ function WorkforceSettings() {
     [moderatorAgentId, config?.phases, style, maxRounds],
   );
 
+  // Same live-form recomputation as above: phases restricted to a ROLE no
+  // member carries would run with zero speakers, silently.
+  const roleGaps = useMemo(
+    () => uncoveredRolePhases({ members, phases: config?.phases ?? null, style, maxRounds }),
+    [members, config?.phases, style, maxRounds],
+  );
+
+  // Styles the backend supports. Unlike the creation paths, this edits an
+  // EXISTING group: its saved style stays in the list even when unsupported,
+  // because dropping it would silently rewrite the select to another value and
+  // save that on the next submit.
+  const availableStyles = useAvailableStyles();
+  const styleOptions = useMemo(
+    () => (availableStyles.includes(style) ? availableStyles : [...availableStyles, style]),
+    [availableStyles, style],
+  );
+
   /** Whether the stored config pins its own phases — see the note by the style field. */
   const hasExplicitPhases = (config?.phases?.length ?? 0) > 0;
 
@@ -677,14 +695,14 @@ function WorkforceSettings() {
               onChange={(e) => setStyle(e.target.value as DiscussionStyle)}
               className="h-10 w-full rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow appearance-none cursor-pointer"
             >
-              {DISCUSSION_STYLES.map((s) => (
+              {styleOptions.map((s) => (
                 <option key={s} value={s}>
-                  {STYLE_INFO[s].icon} {STYLE_INFO[s].label}
+                  {styleDisplay(s, t).icon} {styleDisplay(s, t).label}
                 </option>
               ))}
             </select>
             <p className="text-xs text-muted-foreground mt-1">
-              {STYLE_INFO[style].flow}
+              {styleDisplay(style, t).flow}
             </p>
           </FormField>
 
@@ -785,6 +803,29 @@ function WorkforceSettings() {
                   { phases: moderatorlessPhases.join(", ") },
                 )}
               </p>
+            </div>
+          )}
+
+          {/* A phase addressed to ROLE:<x> with no member carrying <x> runs with
+              zero speakers — the debate happens with one side missing and nothing
+              says so until the transcript comes back hollow. */}
+          {roleGaps.length > 0 && (
+            <div
+              className="flex flex-col gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5"
+              data-testid="role-coverage-warning"
+            >
+              {roleGaps.map((gap) => (
+                <div key={gap.role} className="flex items-start gap-2.5">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                  <p className="text-xs text-muted-foreground">
+                    {t(
+                      "groups.roleCoverageWarning",
+                      'No member carries the role "{{role}}" — every member will speak in {{phases}} instead.',
+                      { role: gap.role, phases: gap.phaseNames.join(", ") },
+                    )}
+                  </p>
+                </div>
+              ))}
             </div>
           )}
         </div>

@@ -4,11 +4,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { server } from "@/test/mocks/server";
 import { type ReactNode } from "react";
 import { http, HttpResponse } from "msw";
+import { DISCUSSION_STYLES } from "@/lib/api/groups";
 import {
   useGroupDescriptors,
   useEnrichedGroupDescriptors,
   useGroup,
   useDiscussionStyles,
+  useAvailableStyles,
+  isStyleSupported,
   useCreateGroup,
   useUpdateGroup,
   useDeleteGroup,
@@ -89,6 +92,110 @@ describe("useDiscussionStyles", () => {
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toBeDefined();
+  });
+});
+
+describe("useAvailableStyles", () => {
+  // The endpoint returns an ARRAY of {style, phases, description} — see
+  // RestAgentGroupStore.readDiscussionStyles. Reading it as a map keyed by the
+  // enum matched nothing and silently disabled the check against the real API,
+  // so these fixtures deliberately mirror the wire format exactly.
+  const descriptor = (style: string) => ({
+    style,
+    phases: ["Initial Opinions", "Synthesis"],
+    description: `${style} description`,
+  });
+
+  it("offers only the styles the backend reports", async () => {
+    server.use(
+      http.get("*/groupstore/groups/styles", () =>
+        HttpResponse.json([
+          descriptor("ROUND_TABLE"),
+          descriptor("DEBATE"),
+          descriptor("CUSTOM"),
+        ]),
+      ),
+    );
+    const { result } = renderHook(() => useAvailableStyles(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() =>
+      expect(result.current).toEqual(["ROUND_TABLE", "DEBATE", "CUSTOM"]),
+    );
+  });
+
+  it("never offers a style this build does not know", async () => {
+    server.use(
+      http.get("*/groupstore/groups/styles", () =>
+        HttpResponse.json([descriptor("ROUND_TABLE"), descriptor("FISHBOWL")]),
+      ),
+    );
+    const { result } = renderHook(() => useAvailableStyles(), {
+      wrapper: createWrapper(),
+    });
+    // Nothing in this build can describe, preview or configure it.
+    await waitFor(() => expect(result.current).toEqual(["ROUND_TABLE"]));
+  });
+
+  it("falls back to the full static list when the request fails", async () => {
+    let requested = false;
+    server.use(
+      http.get("*/groupstore/groups/styles", () => {
+        requested = true;
+        return HttpResponse.json({ message: "boom" }, { status: 500 });
+      }),
+    );
+    const { result } = renderHook(() => useAvailableStyles(), {
+      wrapper: createWrapper(),
+    });
+    // Wait for the failing request to actually land, so this asserts the error
+    // path rather than the pre-request state that looks identical.
+    await waitFor(() => expect(requested).toBe(true));
+    await waitFor(() => expect(result.current).toEqual([...DISCUSSION_STYLES]));
+  });
+
+  it("ignores a response that shares no style with this build", async () => {
+    let requested = false;
+    server.use(
+      http.get("*/groupstore/groups/styles", () => {
+        requested = true;
+        return HttpResponse.json([descriptor("SOMETHING_ELSE")]);
+      }),
+    );
+    const { result } = renderHook(() => useAvailableStyles(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(requested).toBe(true));
+    // A response with nothing in common is a contract change, not a backend
+    // with zero presets — the static list stands rather than blanking pickers.
+    await waitFor(() => expect(result.current).toEqual([...DISCUSSION_STYLES]));
+  });
+
+  it("keeps the static list for a map-shaped response (the old wrong contract)", async () => {
+    let requested = false;
+    server.use(
+      http.get("*/groupstore/groups/styles", () => {
+        requested = true;
+        return HttpResponse.json({ ROUND_TABLE: { label: "x", phases: [] } });
+      }),
+    );
+    const { result } = renderHook(() => useAvailableStyles(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(requested).toBe(true));
+    await waitFor(() => expect(result.current).toEqual([...DISCUSSION_STYLES]));
+  });
+});
+
+describe("isStyleSupported", () => {
+  it("accepts a supported style and a blank one", () => {
+    expect(isStyleSupported("DEBATE", ["DEBATE", "ROUND_TABLE"])).toBe(true);
+    // No style chosen yet is not an error state.
+    expect(isStyleSupported(null, ["DEBATE"])).toBe(true);
+  });
+
+  it("rejects a style the backend does not offer", () => {
+    expect(isStyleSupported("NEGOTIATION", ["DEBATE", "ROUND_TABLE"])).toBe(false);
   });
 });
 

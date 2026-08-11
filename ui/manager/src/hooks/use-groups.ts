@@ -1,5 +1,8 @@
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  DISCUSSION_STYLES,
+  type DiscussionStyle,
   getGroupDescriptors,
   getEnrichedGroupDescriptors,
   getGroup,
@@ -58,6 +61,53 @@ export function useDiscussionStyles() {
     queryFn: () => getDiscussionStyles(),
     staleTime: Infinity,
   });
+}
+
+/**
+ * The discussion styles this UI should offer, reconciled with what the backend
+ * actually supports (`GET /groupstore/groups/styles`).
+ *
+ * The static `DISCUSSION_STYLES` list was the only source before, so a style the
+ * backend dropped (or an older backend never had) was still offered and then
+ * failed at save time. While the request is in flight — or fails — the static
+ * list stands, so pickers never render empty.
+ *
+ * Narrowed to styles this build KNOWS: everything that makes a style usable —
+ * its localized name and flow text, phase expansion for the HITL approval
+ * picker, the wizard hint, the transcript breadcrumb — is keyed off
+ * `DiscussionStyle`, so a backend-only name would be an option the UI cannot
+ * describe or configure. Such a style is simply not offered; one already SAVED
+ * on a group still renders, via `styleDisplay`'s raw-value fallback.
+ */
+export function useAvailableStyles(): DiscussionStyle[] {
+  const { data } = useDiscussionStyles();
+  return useMemo(() => {
+    const fallback = [...DISCUSSION_STYLES];
+    // The wire format is an array of descriptors, so read each entry's `style`
+    // field. Treating the payload as a map keyed by the enum — as this hook
+    // first did — yields the array indices "0", "1", "2"… instead, matches
+    // nothing, and silently disables the whole check against the real API.
+    if (!Array.isArray(data)) return fallback;
+    const supported = new Set(
+      data
+        .map((entry) => (entry && typeof entry === "object" ? entry.style : null))
+        .filter((style): style is string => typeof style === "string"),
+    );
+    if (supported.size === 0) return fallback;
+
+    const known = DISCUSSION_STYLES.filter((s) => supported.has(s));
+    // A response with none of the known styles is far more likely a contract
+    // change than a backend with zero presets — don't blank every picker over it.
+    return known.length > 0 ? known : fallback;
+  }, [data]);
+}
+
+/** Whether a style can still be created against the running backend. */
+export function isStyleSupported(
+  style: DiscussionStyle | null | undefined,
+  supported: readonly DiscussionStyle[],
+): boolean {
+  return !style || supported.includes(style);
 }
 
 export function useCreateGroup() {

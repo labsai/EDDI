@@ -452,7 +452,7 @@ function OperatorDiscoveryCard() {
           <div>
             <p className="font-medium">{t("operator.discovery.title", "Meet your Platform Operator")}</p>
             <p className="text-sm text-muted-foreground">
-              {t("operator.discovery.description", "An assistant that inspects and explains this deployment. Off by default, read-only, one click to activate.")}
+              {t("operator.discovery.description", "An assistant that inspects and operates this deployment. Off by default; every change it makes pauses for your approval.")}
             </p>
           </div>
         </div>

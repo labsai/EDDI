@@ -139,25 +139,34 @@
     border-radius: var(--radius);
   }
 
-  /* Skip to main content link — hidden until focused */
+  /* Skip to main content link — hidden until focused.
+     Clipped in place rather than parked off-screen: `left: -9999px` does not
+     mirror under `dir="rtl"`, and in RTL the left side is scrollable overflow,
+     so the old rule inflated the document's scrollWidth by 9999px on every
+     page and pushed the whole layout sideways. */
   .skip-to-main {
     position: absolute;
-    left: -9999px;
-    top: auto;
+    inset-block-start: auto;
+    inset-inline-start: 0;
     width: 1px;
     height: 1px;
     overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
     z-index: 9999;
   }
 
   .skip-to-main:focus {
     position: fixed;
-    top: 0.5rem;
-    left: 50%;
-    transform: translateX(-50%);
-    width: auto;
+    inset-block-start: 0.5rem;
+    /* Direction-neutral centering — no `left`/`translateX` needed, and it
+       cannot overflow either edge. */
+    inset-inline: 0;
+    margin-inline: auto;
+    width: fit-content;
     height: auto;
     overflow: visible;
+    clip-path: none;
     padding: 0.5rem 1.5rem;
     background: var(--color-primary);
     color: var(--color-primary-foreground);
@@ -254,28 +263,37 @@
 
   /* ── Container-query responsive grid ─────────── */
   /* Responds to the ACTUAL content area width, not viewport.
-     This ensures grids adapt when the chat drawer (420px) is open. */
+     This ensures grids adapt when the chat drawer (420px) is open.
+
+     Columns are `minmax(0, 1fr)`, never bare `1fr`. `1fr` means
+     `minmax(auto, 1fr)`, and that `auto` floor resolves to the item's
+     min-content width — which for the `truncate` (`white-space: nowrap`)
+     headings and descriptions inside these cards is the *entire* untruncated
+     string. Columns then overrun the container instead of ellipsising. It
+     stayed invisible in English only because those strings happened to be
+     short; longer translations (Arabic, German) blew the grid out and made
+     the content area scroll horizontally. A 0 floor lets truncation engage. */
   .cq-card-grid {
     display: grid;
     gap: 1rem;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   @container main (min-width: 32rem) {
     .cq-card-grid {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
   @container main (min-width: 56rem) {
     .cq-card-grid {
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
 
   @container main (min-width: 76rem) {
     .cq-card-grid {
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(4, minmax(0, 1fr));
     }
   }
 
@@ -283,18 +301,18 @@
   .cq-stat-grid {
     display: grid;
     gap: 1rem;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   @container main (min-width: 32rem) {
     .cq-stat-grid {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
   @container main (min-width: 56rem) {
     .cq-stat-grid {
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(4, minmax(0, 1fr));
     }
   }
 

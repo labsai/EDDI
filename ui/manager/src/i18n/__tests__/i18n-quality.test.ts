@@ -82,7 +82,7 @@ describe("i18n translation debt", () => {
    */
   const BASELINE: Record<string, number> = {
     de: 16, es: 19, fr: 28,
-    ar: 90, hi: 93, ja: 94, ko: 94, pt: 95, th: 95, zh: 95,
+    ar: 78, hi: 81, ja: 82, ko: 82, pt: 83, th: 83, zh: 83,
   };
 
   it("records a baseline for every locale", () => {

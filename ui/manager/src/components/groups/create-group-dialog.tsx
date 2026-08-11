@@ -5,17 +5,22 @@ import { X, ChevronRight, ChevronLeft, Users, Plus, Trash2, AlertTriangle, Check
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { useCreateGroup, useEnrichedGroupDescriptors } from "@/hooks/use-groups";
+import {
+  useCreateGroup,
+  useEnrichedGroupDescriptors,
+  useAvailableStyles,
+  isStyleSupported,
+} from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import {
-  DISCUSSION_STYLES,
-  STYLE_INFO,
   type DiscussionStyle,
   type GroupMember,
   type AgentGroupConfiguration,
   type MemberFailurePolicy,
   type MemberUnavailablePolicy,
 } from "@/lib/api/groups";
+import { styleInfo, styleLabel, styleDisplay } from "@/lib/discussion-styles";
+import { uncoveredRolePhases } from "@/lib/group-config";
 import {
   getGroupTemplates,
   DEFAULT_AGENT_TIMEOUT_SECONDS,
@@ -39,6 +44,8 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
     [agentDescriptors],
   );
 
+  // What the backend actually supports — see useAvailableStyles.
+  const availableStyles = useAvailableStyles();
   const [step, setStep] = useState<Step>(initialTemplate ? "basics" : "template");
   const [, setSelectedTemplate] = useState<GroupTemplate | null>(initialTemplate ?? null);
   const [name, setName] = useState(initialTemplate?.name ?? "");
@@ -166,9 +173,12 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
 
   const steps: Step[] = ["template", "basics", "members", "review"];
   const stepIdx = steps.indexOf(step);
+  // A style the running backend does not offer would fail at save time, so it
+  // blocks progression rather than being silently carried to Create.
+  const styleSupported = isStyleSupported(style, availableStyles);
   const canNext =
     step === "template" ||
-    (step === "basics" && name.trim()) ||
+    (step === "basics" && name.trim() && styleSupported) ||
     (step === "members" && members.length >= 2) ||
     step === "review";
 
@@ -233,7 +243,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                     <p className="text-xs text-muted-foreground line-clamp-2">{tmpl.description}</p>
                     <div className="flex items-center gap-2 mt-2">
                       <Badge variant="outline" className="text-[10px]">
-                        {STYLE_INFO[tmpl.style]?.label}
+                        {styleLabel(tmpl.style, t)}
                       </Badge>
                       <Badge variant="secondary" className="text-[10px]">
                         {tmpl.roles.length} roles
@@ -290,7 +300,11 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                   {t("groups.discussionStyle", "Discussion Style")}
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1">
-                  {DISCUSSION_STYLES.map((s) => (
+                  {/* Only styles the backend supports. This is a CREATION
+                      path, so an unsupported one must not stay selectable: the
+                      save would fail after the fact. A template that preselected
+                      one is flagged below instead. */}
+                  {availableStyles.map((s) => (
                     <button
                       key={s}
                       onClick={() => setStyle(s)}
@@ -301,11 +315,30 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                           : "border-border hover:border-primary/30"
                       )}
                     >
-                      <span className="text-sm">{STYLE_INFO[s]?.icon}</span>{" "}
-                      <span className="font-medium">{STYLE_INFO[s]?.label}</span>
+                      <span className="text-sm">{styleDisplay(s, t).icon}</span>{" "}
+                      <span className="font-medium">{styleDisplay(s, t).label}</span>
                     </button>
                   ))}
                 </div>
+                {/* A template can preselect a style the running backend does
+                    not have. Saying so here — and blocking Create — beats a 400
+                    after the user has filled in the whole form. */}
+                {!styleSupported && (
+                  <div
+                    className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2 mt-2"
+                    data-testid="unsupported-style-warning"
+                  >
+                    <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-muted-foreground">
+                      {t(
+                        "groups.unsupportedStyle",
+                        "This server does not support {{style}}. Pick another framework to continue.",
+                        { style: styleDisplay(style, t).label },
+                      )}
+                    </p>
+                  </div>
+                )}
+
                 {/* Style-specific hints */}
                 {style === "ROUND_TABLE" && (
                   <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2 mt-2">
@@ -352,6 +385,18 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                     <Info className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
                     <p className="text-[11px] text-muted-foreground">
                       {t("groupWizard.hintTaskForce", "The moderator creates a task plan, assigns work to agents in parallel, then verifies and synthesizes the results.")}
+                    </p>
+                  </div>
+                )}
+                {/* NEGOTIATION shipped without a hint here, so the one style
+                    whose Max Rounds means something different (it repeats
+                    Bargaining rather than adding phases) was also the one
+                    explaining itself least. */}
+                {style === "NEGOTIATION" && (
+                  <div className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2 mt-2">
+                    <Info className="h-3.5 w-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("groupWizard.hintNegotiation", "Members state their interests, table proposals, then bargain — Max Rounds sets how many bargaining rounds run. The moderator arbitrates only if no agreement is reached.")}
                     </p>
                   </div>
                 )}
@@ -687,6 +732,9 @@ function ReviewStep({
 }: ReviewStepProps) {
   const { t } = useTranslation();
   const unassignedCount = members.filter((m) => !m.agentId).length;
+  // A ROLE:<x> phase with no member carrying <x> runs with zero speakers —
+  // last chance to say so before Create.
+  const roleGaps = uncoveredRolePhases({ members, phases: null, style, maxRounds });
 
   return (
     <div className="space-y-4" data-testid="review-summary">
@@ -709,6 +757,27 @@ function ReviewStep({
         </div>
       )}
 
+      {/* Role coverage — a phase addressed to a role nobody carries */}
+      {roleGaps.length > 0 && (
+        <div
+          className="flex flex-col gap-1.5 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2.5"
+          data-testid="dialog-role-coverage-warning"
+        >
+          {roleGaps.map((gap) => (
+            <div key={gap.role} className="flex items-start gap-2.5">
+              <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "groups.roleCoverageWarning",
+                  'No member carries the role "{{role}}" — every member will speak in {{phases}} instead.',
+                  { role: gap.role, phases: gap.phaseNames.join(", ") },
+                )}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Section 1: Group Identity */}
       <div className="rounded-lg border border-border bg-secondary/10 p-3 space-y-2">
         <div className="flex items-start justify-between gap-3">
@@ -719,11 +788,11 @@ function ReviewStep({
             )}
           </div>
           <Badge variant="outline" className="shrink-0">
-            {STYLE_INFO[style]?.icon} {STYLE_INFO[style]?.label}
+            {styleInfo(style, t)?.icon} {styleLabel(style, t)}
           </Badge>
         </div>
         <p className="text-[10px] text-muted-foreground font-mono">
-          {STYLE_INFO[style]?.flow}
+          {styleInfo(style, t)?.flow}
         </p>
       </div>
 

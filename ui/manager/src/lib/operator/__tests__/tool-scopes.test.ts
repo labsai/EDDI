@@ -10,18 +10,7 @@ import {
   grantsWriteCapability,
   grantsAgentCreation,
   grantsAgentModification,
-  type WriteScopeFacts,
 } from "../tool-scopes";
-
-function allFacts(overrides: Partial<WriteScopeFacts> = {}): WriteScopeFacts {
-  return {
-    backendAcceptsHitlConfig: true,
-    gateVerifiedOnEveryVersion: true,
-    authMode: "caller-identity",
-    approvalSurfaceMounted: true,
-    ...overrides,
-  };
-}
 
 describe("tool-scopes", () => {
   describe("the allow-list itself", () => {
@@ -115,6 +104,8 @@ describe("tool-scopes", () => {
         "PUT /workflowstore/workflows/{id}",
         "POST /workflowstore/workflows",
         "PUT /agentstore/agents/{id}/updateResourceUri",
+        "PUT /llmstore/llms/{id}",
+        "POST /llmstore/llms",
         "PUT /rulestore/rulesets/{id}",
         "POST /rulestore/rulesets",
         "PUT /outputstore/outputsets/{id}",
@@ -191,23 +182,25 @@ describe("tool-scopes", () => {
       }
     });
 
-    it("never grants an llmstore WRITE — it carries a gate that fully replaces the agent's", () => {
-      // The load-bearing exclusion. LlmConfiguration.Task.toolApprovals fully
-      // REPLACES the agent-level hitlConfig.toolApprovals (LlmTask.java:
-      // task.getToolApprovals() != null ? task.getToolApprovals() : <agent>).
-      // So a granted llmstore PUT would let the operator propose a write to its
-      // OWN config setting requireApproval: [] — one approved, near-unreviewable
-      // whole-document write and every future write executes ungated. Same class
-      // of risk as PUT /agentstore/agents/{id}, excluded for the same reason.
-      expect(WRITE_ENDPOINTS).not.toContain("PUT /llmstore/llms/{id}");
-      expect(WRITE_ENDPOINTS).not.toContain("POST /llmstore/llms");
-      expect(WRITE_ENDPOINTS.filter((e) => e.includes("/llmstore/"))).toEqual([]);
+    it("grants the llmstore WRITE only in the create/update shapes the gate guard covers", () => {
+      // LlmConfiguration.Task.toolApprovals fully REPLACES the agent-level
+      // hitlConfig.toolApprovals (LlmTask.java: task.getToolApprovals() != null
+      // ? task.getToolApprovals() : <agent>), so this is the ONE writable store
+      // whose document can carry a gate. It is bound only because gate-guard.ts
+      // hard-refuses any llmstore write carrying that field — the two must
+      // change together, which is what this test pins.
+      expect(WRITE_ENDPOINTS).toContain("PUT /llmstore/llms/{id}");
+      expect(WRITE_ENDPOINTS).toContain("POST /llmstore/llms");
+      // Still no DELETE and no duplicate-by-id, same as every other store.
+      expect(WRITE_ENDPOINTS.filter((e) => e.includes("/llmstore/")).sort()).toEqual([
+        "POST /llmstore/llms",
+        "PUT /llmstore/llms/{id}",
+      ]);
     });
 
-    it("still READS llmstore, so it can show a prompt it cannot change", () => {
-      // Excluding the write must not blind it: "what is this agent's prompt?"
-      // stays answerable, and the handoff to the manager UI is only useful if
-      // the operator can first show the user what is there now.
+    it("still READS llmstore, which every write of it depends on", () => {
+      // A whole-document PUT needs the current document first — the operator
+      // has to read a prompt before it can change one word of it.
       expect(READ_ENDPOINTS).toContain("GET /llmstore/llms/{id}");
     });
 
@@ -244,38 +237,14 @@ describe("tool-scopes", () => {
       expect(WRITE_ENDPOINTS).not.toContain(excluded);
     });
 
-    // The approval seam: writes must be unreachable, not merely discouraged.
-    it("is unavailable with no verified facts", () => {
-      expect(
-        isWriteScopeAvailable({
-          backendAcceptsHitlConfig: false,
-          gateVerifiedOnEveryVersion: false,
-          authMode: "none",
-          approvalSurfaceMounted: false,
-        }),
-      ).toBe(false);
-    });
-
-    it("becomes available once every fact holds — the seam actually opens, not just closes", () => {
-      // The mirror of every "stays unavailable" test below: this is the one
-      // proving the mechanism WORKS, not just that it fails safe. A regression
-      // that made writes permanently unreachable would pass every other test in
-      // this block while silently breaking the feature.
-      expect(isWriteScopeAvailable(allFacts())).toBe(true);
-    });
-
-    it.each([
-      ["backendAcceptsHitlConfig", { backendAcceptsHitlConfig: false }],
-      ["gateVerifiedOnEveryVersion", { gateVerifiedOnEveryVersion: false }],
-      ["approvalSurfaceMounted", { approvalSurfaceMounted: false }],
-    ] as const)("stays unavailable when only %s is false", (_name, override) => {
-      expect(isWriteScopeAvailable(allFacts(override))).toBe(false);
-    });
-
-    it("stays unavailable when authMode is 'none', even if every other fact holds", () => {
-      // 'none' cannot support attributed approval decisions or self-approval
-      // prevention, so it must never be treated as good enough on its own.
-      expect(isWriteScopeAvailable(allFacts({ authMode: "none" }))).toBe(false);
+    it("is offered now that WRITE_ENDPOINTS is populated", () => {
+      // The seam no longer gates on a previously verified gate or auth mode —
+      // activation itself proves the gate about the agent it actually creates
+      // (verifyGateInstalled read-back + the write canary's enforced rollback),
+      // which is strictly stronger than a precondition remembered from a
+      // predecessor. The only remaining fact is that there is something to
+      // grant at all.
+      expect(isWriteScopeAvailable()).toBe(true);
     });
 
     it("read_write grants exactly READ_ENDPOINTS plus WRITE_ENDPOINTS, in that order", () => {
@@ -422,10 +391,11 @@ describe("tool-scopes", () => {
       }
     });
 
-    it("is false for an llmstore write, which is never granted and never ordinary modify", () => {
-      // Reads the writable list, not the full read list — so a hypothetical
-      // llmstore grant could never be reported as routine modify capability.
-      expect(grantsAgentModification(["PUT /llmstore/llms/{id}"])).toBe(false);
+    it("is true for an llmstore write — editing a prompt or model IS modifying the agent", () => {
+      // Reads the writable list, so this tracks WRITABLE_EXTENSION_STORES
+      // rather than restating it. It flipped to true when llmstore became
+      // writable behind gate-guard.ts.
+      expect(grantsAgentModification(["PUT /llmstore/llms/{id}"])).toBe(true);
     });
 
     it("is false for the corresponding create verb alone — creating is not modifying", () => {

@@ -32,7 +32,7 @@ import { useApprovalStatus } from "@/hooks/use-hitl";
 import { getErrorMessage } from "@/lib/api-client";
 import { fetchOpenApiSpec, type OperatorConfig } from "@/lib/api/operator";
 import { buildOperationIdIndex, reconstructEndpoint } from "@/lib/operator/reconstruct-endpoint";
-import { findSelfTargetedCalls } from "@/lib/operator/self-guard";
+import { findBlockedCalls } from "@/lib/operator/blocked-calls";
 import { RequestPreview } from "@/components/operator/request-preview";
 import type { PendingToolCallView } from "@/lib/api/hitl";
 
@@ -88,26 +88,18 @@ export function OperatorPage() {
     [specQuery.data],
   );
   /**
-   * Writes the operator aimed at its OWN agent document — refused, not merely
-   * flagged. See `self-guard.ts`: repointing its own agent is the hinge of the
-   * chain that ends with the operator running an LLM task whose `toolApprovals`
-   * has replaced the gate, redeployed via the deploy verb it legitimately
-   * holds. Every other write on this surface is reviewable; this is the one
-   * that removes the reviewing.
+   * The writes this surface refuses outright rather than merely flagging — a
+   * write aimed at the operator's OWN agent document, and an LLM-config write
+   * that would set its own approval gate. See `blocked-calls.ts`, which resolves
+   * both guards so all three approval surfaces refuse identically. Every other
+   * write here is reviewable; these are the two that remove the reviewing.
    */
   const blockedCalls = useMemo(() => {
     const details = chat.isPaused ? approvalStatus.data?.pauseDetails : undefined;
     // Narrowed on the discriminator rather than a `"calls" in` probe: a RULE
     // pause has no per-call requests to target anything with.
     const pending = details?.type === "TOOL_CALL" ? details.calls : undefined;
-    return findSelfTargetedCalls(pending, config?.agentId).map((hit) => ({
-      callId: hit.callId,
-      reason: t(
-        "operator.approval.blockedSelfTarget",
-        "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page.",
-        { agentId: hit.agentId },
-      ),
-    }));
+    return findBlockedCalls(pending, config?.agentId, t);
   }, [chat.isPaused, approvalStatus.data, config?.agentId, t]);
   /**
    * Resolve the pause, then DROP the cached approval-status.
@@ -299,7 +291,6 @@ export function OperatorPage() {
           initial={seedConfig(config)}
           stage={stage}
           error={activationError}
-          gate={gate.data}
           onActivate={handleActivate}
           onCancel={() => {
             setShowActivation(false);
@@ -361,7 +352,7 @@ export function OperatorPage() {
         <EmptyState
           icon={Sparkles}
           title={t("operator.empty.title", "The Platform Operator is off")}
-          description={t("operator.empty.description", "Turn it on to chat with an agent that can inspect your agents, workflows, conversations, deployments and logs — and explain what it finds. It is read-only and cannot change anything.")}
+          description={t("operator.empty.description", "Turn it on to chat with an agent that can inspect your agents, workflows, conversations, deployments and logs — and, with your approval of each change, operate them for you.")}
           actionLabel={t("operator.empty.action", "Activate the Platform Operator")}
           onAction={() => setShowActivation(true)}
         />

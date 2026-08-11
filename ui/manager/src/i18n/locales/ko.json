@@ -1126,7 +1126,7 @@
     "cascadeInAgent": "에이전트 모드(도구 사용)에서도 캐스케이드 적용",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "예: claude-sonnet-4-6",
+    "cascadeModelName": "예: claude-sonnet-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "비워두면 항상 수락",
     "cascadeTimeout": "타임아웃 (ms)",
@@ -2377,6 +2377,7 @@
     "agentFiledCaps": "상한",
     "agentFiledCapsValue": "{{perDiscussion}} / 토론 · {{perTurn}} / 턴",
     "moderatorlessWarning": "이 그룹에 없는 진행자로 제한됨: {{phases}}. 발언 순서상 첫 번째 구성원이 대신합니다.",
+    "roleCoverageWarning": "\"{{role}}\" 역할을 가진 구성원이 없어 {{phases}} 단계에서는 모든 구성원이 발언합니다.",
     "delegationDepth": "최대 깊이",
     "delegationTimeout": "위임 제한 시간",
     "secondsShort": "{{seconds}}초",
@@ -2527,7 +2528,42 @@
     "retroRecordedBadge_other": "{{phase}}: {{count}}개의 교훈이 팀 메모리에 저장됨",
     "retroRecordedBadge_one": "{{phase}}: {{count}}개의 교훈이 팀 메모리에 저장됨",
     "artifactRevisions_other": "이전 리비전 {{count}}개",
-    "artifactRevisions_one": "이전 리비전 {{count}}개"
+    "artifactRevisions_one": "이전 리비전 {{count}}개",
+    "styles": {
+      "ROUND_TABLE": {
+        "label": "라운드 테이블",
+        "flow": "모두가 의견을 내고 여러 라운드에 걸쳐 서로의 의견을 발전시킵니다"
+      },
+      "PEER_REVIEW": {
+        "label": "동료 검토",
+        "flow": "각자 따로 답한 뒤 서로 비평하고 수정합니다"
+      },
+      "DEVIL_ADVOCATE": {
+        "label": "악마의 변호인",
+        "flow": "한 구성원이 그룹의 입장을 공격하고 나머지가 이를 방어합니다"
+      },
+      "DELPHI": {
+        "label": "익명 라운드",
+        "flow": "모두 익명으로 답하고 라운드마다 수정해 첫 발언에 휩쓸리지 않습니다"
+      },
+      "DEBATE": {
+        "label": "찬반 토론",
+        "flow": "한쪽은 찬성, 다른 쪽은 반대를 주장한 뒤 반박과 판정이 이어집니다"
+      },
+      "TASK_FORCE": {
+        "label": "태스크 포스",
+        "flow": "모더레이터가 계획하고 구성원이 병렬로 작업하며 결과를 검증합니다"
+      },
+      "NEGOTIATION": {
+        "label": "협상",
+        "flow": "당사자들이 합의할 때까지 제안을 주고받고, 합의가 안 될 때만 중재자가 결정합니다"
+      },
+      "CUSTOM": {
+        "label": "사용자 지정 흐름",
+        "flow": "직접 정의하는 단계"
+      }
+    },
+    "unsupportedStyle": "이 서버는 {{style}}을(를) 지원하지 않습니다. 다른 형식을 선택하세요."
   },
   "taskBoard": {
     "title": "작업 보드",
@@ -2819,6 +2855,9 @@
     "hintDevilAdvocate": "최소 한 명의 멤버에게 DEVIL_ADVOCATE 역할을 할당합니다. 그들은 그룹의 합의에 이의를 제기합니다.",
     "hintPeerReview": "각 멤버가 다른 모든 멤버의 작업을 개별적으로 비평한 후, 받은 피드백을 바탕으로 수정합니다.",
     "hintDelphi": "모든 멤버가 독립적이고 익명으로 응답합니다. 각 라운드 후 익명 결과를 확인하고 조정할 수 있습니다. 최대 턴 수가 익명 반복 횟수를 제어합니다.",
+    "hintNegotiation": "구성원이 각자의 이해관계를 밝히고 제안을 내놓은 뒤 협상합니다. '최대 라운드'는 협상 라운드 횟수를 정합니다. 합의에 이르지 못할 때만 모더레이터가 중재합니다.",
+    "roleCoverageWarning": "\"{{role}}\" 역할을 가진 구성원이 없습니다",
+    "roleCoverageHint": "서버는 대신 {{phases}} 단계에서 모든 구성원이 발언하도록 하므로 같은 사람들이 양쪽 입장을 모두 주장하게 됩니다. '구성원'으로 돌아가 역할 필드를 설정하세요.",
     "hintTaskForce": "모더레이터가 작업 계획을 생성하고, 에이전트에게 병렬로 작업을 할당한 후, 결과를 검증하고 종합합니다.",
     "hintCustom": "자체 단계를 수동으로 정의합니다. 사용자 정의 단계는 생성 후 API를 통해 구성할 수 있습니다.",
     "hintRoundTable": "모든 멤버가 의견을 공유하고, 여러 라운드에 걸쳐 서로의 관점을 토론한 후 모더레이터가 종합합니다.",
@@ -2851,27 +2890,29 @@
     "memberTypeHuman": "사람"
   },
   "groupTemplates": {
-    "advisoryBoard": "Advisory Board",
-    "advisoryBoardDesc": "A panel of expert advisors consulting on strategic decisions.",
-    "codeReview": "Code Review Panel",
-    "codeReviewDesc": "Structured code review with independent opinions, peer critique, and revision.",
-    "riskAssessment": "Risk Assessment",
-    "riskAssessmentDesc": "A panel with a devil's advocate who challenges assumptions.",
-    "forecasting": "Forecasting Panel",
-    "forecastingDesc": "Delphi-style anonymous deliberation for unbiased estimates.",
-    "proCon": "Pro/Con Debate",
-    "proConDesc": "Formal debate with pro and con teams arguing their positions.",
+    "advisoryBoard": "자문단",
+    "advisoryBoardDesc": "마케팅·엔지니어링·재무·법무·전략의 다섯 가지 관점이 같은 질문에 의견을 내고 모더레이터가 정리합니다.",
+    "peerReview": "동료 검토 패널",
+    "peerReviewDesc": "검토자들이 초안·계획·제안 등 가져온 자료를 평가하고 서로의 평가를 비평한 뒤 수정하며, 모더레이터가 결과를 합칩니다.",
+    "riskAssessment": "리스크 평가",
+    "riskAssessmentDesc": "각자 판단을 내놓고 한 명이 일부러 반대 입장을 취해 맹점을 드러내면 나머지가 반박하며, 모더레이터가 남은 결론을 정리합니다.",
+    "forecasting": "독립 추정",
+    "forecastingDesc": "구성원이 여러 라운드에 걸쳐 익명으로 답하고 그 사이에는 익명 결과만 보기 때문에 첫 발언에 휩쓸리지 않습니다.",
+    "proCon": "찬반 토론",
+    "proConDesc": "두 명은 제안에 찬성하고 두 명은 반대하며, 반박을 거쳐 모더레이터가 판정합니다.",
+    "negotiation": "협상",
+    "negotiationDesc": "두 당사자가 이해관계를 밝히고 제안을 내놓으며 라운드마다 양보를 주고받습니다. 합의에 이르지 못할 때만 모더레이터가 중재합니다.",
     "taskForce": "태스크 포스",
-    "taskForceDesc": "목표 지향적 작업 조율로 에이전트가 계획, 병렬 실행, 결과 검증 및 결과 종합을 수행합니다.",
+    "taskForceDesc": "모더레이터가 목표를 작업으로 나누고 구성원이 병렬로 처리하면, 모더레이터가 검증해 결과를 합칩니다.",
     "roles": {
-      "marketingExpert": "Marketing Expert",
-      "techLead": "Tech Lead",
-      "financeDirector": "Finance Director",
-      "legalCounsel": "Legal Counsel",
-      "strategyConsultant": "Strategy Consultant",
-      "seniorEngineer": "Senior Engineer",
-      "architect": "Architect",
-      "securityReviewer": "Security Reviewer",
+      "marketingExpert": "마케팅 전문가",
+      "techLead": "테크 리드",
+      "financeDirector": "재무 이사",
+      "legalCounsel": "법무 자문",
+      "strategyConsultant": "전략 컨설턴트",
+      "substanceReviewer": "내용 검토자",
+      "structureReviewer": "구조 검토자",
+      "riskReviewer": "리스크 검토자",
       "riskAnalyst": "Risk Analyst",
       "domainExpert": "Domain Expert",
       "devilsAdvocate": "Devil's Advocate",
@@ -2883,6 +2924,8 @@
       "proAdvocate2": "Pro Advocate 2",
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2",
+      "partyA": "당사자 A",
+      "partyB": "당사자 B",
       "projectLead": "프로젝트 리더",
       "researcher": "연구원",
       "implementer": "구현자",
@@ -3438,12 +3481,12 @@
     "configError": "오퍼레이터 설정을 불러오지 못했습니다",
     "empty": {
       "title": "플랫폼 오퍼레이터가 꺼져 있습니다",
-      "description": "켜면 에이전트, 워크플로, 대화, 배포, 로그를 살펴보고 찾은 내용을 설명해 주는 에이전트와 대화할 수 있습니다. 읽기 전용이라 무엇도 변경하지 않습니다.",
+      "description": "켜면 에이전트, 워크플로, 대화, 배포, 로그를 검사할 수 있는 에이전트와 채팅할 수 있습니다. 또한 각 변경을 승인하면 대신 운영도 수행합니다.",
       "action": "플랫폼 오퍼레이터 활성화"
     },
     "discovery": {
       "title": "플랫폼 오퍼레이터를 만나보세요",
-      "description": "이 배포를 살펴보고 설명해 주는 어시스턴트입니다. 기본값은 꺼짐, 읽기 전용, 클릭 한 번으로 활성화됩니다.",
+      "description": "이 배포를 검사하고 운영하는 어시스턴트입니다. 기본적으로 꺼져 있으며, 모든 변경은 승인 대기 상태로 일시 중지됩니다.",
       "action": "활성화"
     },
     "activation": {
@@ -3464,6 +3507,7 @@
       "authNoneBlocked": "이 배포는 인증이 켜져 있어 인증되지 않은 도구 호출은 거부됩니다. 오퍼레이터는 배포에는 성공하지만 이후 모든 조회에 실패합니다. 대신 \"사용자 ID\"를 선택하세요.",
       "scope": {
         "label": "권한 범위",
+        "default": "기본값",
         "hint": "오퍼레이터가 수행할 수 있는 작업입니다. 모든 쓰기 작업은 여전히 승인을 기다립니다 — 아래 안전 규칙을 참고하세요.",
         "readOnly": {
           "label": "읽기 전용",
@@ -3473,8 +3517,6 @@
           "label": "읽기 및 쓰기",
           "description": "에이전트와 에이전트 그룹 생성 및 수정, 배포, 배포 취소, 폭주하는 일정 비활성화, 에이전트 설명 편집도 가능합니다 — 각각 먼저 승인을 기다립니다."
         },
-        "unavailableNotVerified": "아직 사용할 수 없습니다 — 이 오퍼레이터의 승인 게이트가 안전한지 검증되지 않았습니다. 상태 패널에서 연결을 확인하거나 아래에서 “내 신원”을 선택한 뒤 다시 구성하세요.",
-        "unavailableFirstActivation": "처음 활성화할 때는 사용할 수 없습니다. 먼저 읽기 전용으로 활성화하여 승인 게이트가 안전함을 증명한 뒤, 다시 구성하여 쓰기 권한을 부여하세요.",
         "writeWarning": "활성화하면 쓰기 카나리 테스트가 실행됩니다: 실제이지만 무해한 테스트 쓰기 작업으로, 이 배포가 완료되기 전에 승인을 기다리며 일시 중지되어야 합니다. 일시 중지되지 않으면 활성화가 거부되고, 검증되지 않은 쓰기 게이트 상태로 배포된 채 남겨두는 대신 오퍼레이터가 제거됩니다."
       },
       "safetyPreamble": "안전 규칙 (수정 불가)",
@@ -3578,7 +3620,10 @@
         "agentCreatedWithExternalTools": "이 에이전트는 외부 MCP 서버가 제공하는 모든 도구를 가지고 생성되고 있습니다. 어떤 도구인지는 해당 서버가 결정하며, 나중에 변경할 수도 있습니다.",
         "unchecked": "본문이 너무 길어 권한 부여 여부를 확인할 수 없었습니다 — 승인하기 전에 전문을 읽어보세요."
       },
-      "blockedSelfTarget": "에이전트는 자신의 정의를 수정할 수 없으며, 이 요청은 오퍼레이터 자신의 에이전트({{agentId}})를 대상으로 합니다. 이 요청이 포함된 동안에는 전체 배치를 승인할 수 없습니다 — 거부한 뒤 해당 에이전트의 페이지에서 이 변경을 수행하세요."
+      "blockedSelfTarget": "에이전트는 자신의 정의를 수정할 수 없으며, 이 요청은 오퍼레이터 자신의 에이전트({{agentId}})를 대상으로 합니다. 이 요청이 포함된 동안에는 전체 배치를 승인할 수 없습니다 — 거부한 뒤 해당 에이전트의 페이지에서 이 변경을 수행하세요.",
+      "blockedGateCarrying": "이 요청은 자체 승인 게이트(toolApprovals)를 설정하는 LLM 구성을 기록하며, 이는 해당 요청을 검토하는 게이트를 대체하게 됩니다. 이 항목이 있는 동안에는 배치 전체를 승인할 수 없습니다 — 거부하고 게이트는 해당 에이전트 페이지에서 변경하세요.",
+      "blockedGateUnverifiable": "이 요청은 본문을 완전히 읽을 수 없는 LLM 구성을 기록합니다(표시하기에 너무 크거나 유효한 JSON이 아님). 따라서 승인 게이트 재정의가 없음을 확인할 수 없습니다. 이 항목이 있는 동안에는 배치 전체를 승인할 수 없습니다 — 거부하고 이 변경은 해당 에이전트 페이지에서 수행하세요.",
+      "blockedGateUnpinned": "이 요청은 LLM 구성을 기록하지만 고정되지 않았으므로 실제로 실행되는 내용이 여기 표시된 것과 다를 수 있으며, 승인 게이트 재정의가 없음을 확인할 수 없습니다. 이 항목이 있는 동안에는 배치 전체를 승인할 수 없습니다 — 거부하고 이 변경은 해당 에이전트 페이지에서 수행하세요."
     },
     "starters": {
       "whatsDeployed": "지금 무엇이 배포되어 있나요?",

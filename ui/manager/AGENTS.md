@@ -214,17 +214,23 @@ what it finds. Off by default. Worth knowing before touching it:
   or deleting it there breaks the operator screen.
 - **Its capability boundary is the allow-list** in `src/lib/operator/tool-scopes.ts`
   — an allow-list, never a deny-list, because a deny-list silently grants any
-  endpoint the backend adds later. `WRITE_ENDPOINTS` holds 22 entries — read the
-  constant rather than this line, and read its doc comment before adding to it:
-  what is excluded (every `DELETE`, the full agent and group document PUTs, and
-  every `llmstore` write — each because that document carries an approval gate
-  of its own) is as deliberate as what is included.
-  Offering any of them is additionally gated by `isWriteScopeAvailable`
-  (backend HITL support, an already-verified gate, caller-identity auth, and a
-  mounted approval surface all have to hold — see `operator-activation.tsx`).
-  Granting `read_write` runs a write canary (`write-canary.ts`) that provokes
-  a real gated write and rolls the whole activation back on anything but a
-  clean pause.
+  endpoint the backend adds later. Read the constant rather than any count
+  quoted here, and read its doc comment before adding to it: what is excluded
+  (every `DELETE`, and the full agent and group document PUTs, each because that
+  document carries an approval gate of its own) is as deliberate as what is
+  included. `llmstore` writes ARE granted — that document can carry a gate
+  (`Task.toolApprovals` fully replaces the agent's), so the grant is valid only
+  alongside `gate-guard.ts`, which hard-refuses any llmstore write carrying that
+  field. Do not separate the two.
+  `read_write` is the DEFAULT scope and freely selectable on first activation
+  (read-only is the explicit opt-down); the safety lives in activation itself:
+  the gate is read back from the just-provisioned document
+  (`verifyGateInstalled`), and granting `read_write` runs a write canary
+  (`write-canary.ts`) that provokes a real gated write and rolls the whole
+  activation back on anything but a clean pause.
+  **Backend floor: operator activation requires EDDI 6.2.0+** — the allow-list
+  includes `GET /administration/docs{,/{name}}` (`@since 6.2.0`), and
+  `findMissingEndpoints` refuses activation when the spec lacks an entry.
 - **Config is one atomic JSON blob** in the `platform.operator` global variable.
   Activation writes several values that must land together and the variable
   store has no transaction.

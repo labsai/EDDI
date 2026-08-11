@@ -8,10 +8,13 @@
 /** Popular model suggestions per provider — users can still type any custom model */
 export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   anthropic: [
-    // Anthropic API uses dashes in version numbers (e.g. sonnet-4-6 = v4.6)
+    // Anthropic API uses dashes in version numbers (e.g. sonnet-4-6 = v4.6).
+    // claude-sonnet-5 leads because it is the app-wide default model — a
+    // datalist's first entry is what an admin sees before typing, so it should
+    // match the placeholder they were already shown.
+    "claude-sonnet-5",
     "claude-fable-5",
     "claude-opus-5",
-    "claude-sonnet-5",
     "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
@@ -60,6 +63,9 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     // Model Garden / Third-Party
     "google/gemma3@gemma-3-12b-it",
     "google/gemma2@gemma-2-2b-it",
+    // Vertex serves current-generation Claude under the bare first-party id.
+    "claude-sonnet-5",
+    "claude-opus-5",
     "claude-opus-4-8",
     "claude-sonnet-4-6",
     "claude-haiku-4-5@20251001",
@@ -111,7 +117,10 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   ],
   bedrock: [
     // AWS Bedrock model IDs follow the pattern: provider.model-name-v1:0
-    // Anthropic
+    // Anthropic — current-generation ids carry the `anthropic.` prefix with no
+    // version suffix.
+    "anthropic.claude-sonnet-5",
+    "anthropic.claude-opus-5",
     "anthropic.claude-opus-4-8",
     "anthropic.claude-sonnet-4-6",
     "anthropic.claude-haiku-4-5-20251001-v1:0",

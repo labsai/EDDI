@@ -1126,7 +1126,7 @@
     "cascadeInAgent": "Kaskade auch im Agentenmodus (mit Werkzeugen) verwenden",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "z. B. claude-sonnet-4-6",
+    "cascadeModelName": "z. B. claude-sonnet-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "leer = immer akzeptieren",
     "cascadeTimeout": "Zeitlimit (ms)",
@@ -2377,6 +2377,7 @@
     "agentFiledCaps": "Grenzen",
     "agentFiledCapsValue": "{{perDiscussion}} / Diskussion · {{perTurn}} / Zug",
     "moderatorlessWarning": "Auf einen Moderator beschränkt, den diese Gruppe nicht hat: {{phases}}. Das erste Mitglied nach Sprechreihenfolge springt ein.",
+    "roleCoverageWarning": "Kein Mitglied trägt die Rolle „{{role}}“ – stattdessen sprechen in {{phases}} alle Mitglieder.",
     "delegationDepth": "Max. Tiefe",
     "delegationTimeout": "Delegations-Timeout",
     "secondsShort": "{{seconds}}s",
@@ -2527,7 +2528,42 @@
     "retroRecordedBadge_one": "{{phase}}: {{count}} Erkenntnis im Team-Gedächtnis gespeichert",
     "retroRecordedBadge_other": "{{phase}}: {{count}} Erkenntnisse im Team-Gedächtnis gespeichert",
     "artifactRevisions_one": "{{count}} frühere Revision",
-    "artifactRevisions_other": "{{count}} frühere Revisionen"
+    "artifactRevisions_other": "{{count}} frühere Revisionen",
+    "styles": {
+      "ROUND_TABLE": {
+        "label": "Gesprächsrunde",
+        "flow": "Alle äußern ihre Sicht und bauen über mehrere Runden aufeinander auf"
+      },
+      "PEER_REVIEW": {
+        "label": "Gegenseitige Prüfung",
+        "flow": "Alle antworten zunächst allein, kritisieren sich gegenseitig und überarbeiten dann"
+      },
+      "DEVIL_ADVOCATE": {
+        "label": "Advocatus Diaboli",
+        "flow": "Ein Mitglied greift die Position der Gruppe an, die anderen verteidigen sie"
+      },
+      "DELPHI": {
+        "label": "Anonyme Runden",
+        "flow": "Alle antworten anonym und überarbeiten in jeder Runde – niemand richtet sich nach dem ersten Beitrag"
+      },
+      "DEBATE": {
+        "label": "Pro/Contra-Debatte",
+        "flow": "Eine Seite argumentiert dafür, eine dagegen, danach folgen Erwiderungen und ein Urteil"
+      },
+      "TASK_FORCE": {
+        "label": "Einsatzgruppe",
+        "flow": "Die Moderation plant die Arbeit, die Mitglieder erledigen Aufgaben parallel, die Ergebnisse werden geprüft"
+      },
+      "NEGOTIATION": {
+        "label": "Verhandlung",
+        "flow": "Die Parteien tauschen Vorschläge aus, bis sie sich einigen; nur andernfalls entscheidet eine Schlichtung"
+      },
+      "CUSTOM": {
+        "label": "Eigener Ablauf",
+        "flow": "Phasen, die Sie selbst festlegen"
+      }
+    },
+    "unsupportedStyle": "Dieser Server unterstützt {{style}} nicht. Wählen Sie ein anderes Format, um fortzufahren."
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -2627,6 +2663,9 @@
     "hintDevilAdvocate": "Weisen Sie mindestens einem Mitglied die Rolle DEVIL_ADVOCATE zu. Es wird den Konsens der Gruppe hinterfragen.",
     "hintPeerReview": "Jedes Mitglied kritisiert individuell die Arbeit aller anderen und überarbeitet dann basierend auf dem erhaltenen Feedback.",
     "hintDelphi": "Alle Mitglieder antworten unabhängig und anonym. Nach jeder Runde sehen sie die anonymen Ergebnisse und können anpassen. Max. Runden steuert die Anzahl der anonymen Iterationen.",
+    "hintNegotiation": "Die Mitglieder nennen ihre Interessen, legen Vorschläge vor und feilschen dann – „Max. Runden“ legt fest, wie viele Verhandlungsrunden laufen. Die Moderation schlichtet nur, wenn keine Einigung zustande kommt.",
+    "roleCoverageWarning": "Kein Mitglied hat die Rolle „{{role}}“",
+    "roleCoverageHint": "Der Server lässt ersatzweise alle Mitglieder in {{phases}} sprechen, sodass dieselben Personen beide Seiten vertreten. Gehen Sie zurück zu „Mitglieder“ und setzen Sie das Rollenfeld.",
     "hintTaskForce": "Der Moderator erstellt einen Aufgabenplan, weist Arbeit parallel an Agenten zu, überprüft dann die Ergebnisse und fasst sie zusammen.",
     "hintCustom": "Definieren Sie Ihre eigenen Phasen manuell. Benutzerdefinierte Phasen können nach der Erstellung über die API konfiguriert werden.",
     "hintRoundTable": "Alle Mitglieder teilen ihre Meinungen, diskutieren dann die Ansichten der anderen über mehrere Runden, bevor der Moderator zusammenfasst.",
@@ -2660,26 +2699,28 @@
   },
   "groupTemplates": {
     "advisoryBoard": "Beratungsgremium",
-    "advisoryBoardDesc": "Ein Expertengremium für strategische Entscheidungen. Jeder Agent vertritt eine andere Geschäftsfunktion.",
-    "codeReview": "Code-Review-Panel",
-    "codeReviewDesc": "Strukturiertes Code-Review mit unabhängigen Meinungen, Peer-Kritik, Überarbeitung und Gesamtbewertung.",
+    "advisoryBoardDesc": "Fünf Geschäftsperspektiven – Marketing, Technik, Finanzen, Recht, Strategie – beurteilen dieselbe Frage, danach fasst die Moderation zusammen.",
+    "peerReview": "Peer-Review-Runde",
+    "peerReviewDesc": "Die Prüfenden beurteilen, was Sie einbringen – Entwurf, Plan oder Vorschlag –, kritisieren die Beurteilungen der anderen, überarbeiten sie, und die Moderation führt alles zusammen.",
     "riskAssessment": "Risikobewertung",
-    "riskAssessmentDesc": "Panel mit einem Advocatus Diaboli, der Annahmen hinterfragt und blinde Flecken aufdeckt.",
-    "forecasting": "Prognosepanel",
-    "forecastingDesc": "Anonyme Delphi-Beratung zur Vermeidung von Gruppendenken und für unvoreingenommene Einschätzungen.",
+    "riskAssessmentDesc": "Alle geben ihre Einschätzung ab, ein Mitglied vertritt bewusst die Gegenposition, die anderen halten dagegen, danach fasst die Moderation zusammen, was standgehalten hat.",
+    "forecasting": "Unabhängige Schätzungen",
+    "forecastingDesc": "Die Mitglieder antworten über mehrere Runden anonym und sehen dazwischen nur anonymisierte Ergebnisse – niemand richtet sich nach dem ersten Beitrag.",
     "proCon": "Pro/Contra-Debatte",
-    "proConDesc": "Formale Debatte mit Pro- und Contra-Teams, gefolgt von Erwiderungen und einem Urteil.",
+    "proConDesc": "Zwei Mitglieder argumentieren für den Vorschlag, zwei dagegen, danach folgen Erwiderungen und ein Urteil der Moderation.",
+    "negotiation": "Verhandlung",
+    "negotiationDesc": "Zwei Parteien nennen ihre Interessen, legen Vorschläge vor und tauschen Runde für Runde Zugeständnisse aus; die Moderation schlichtet nur, wenn keine Einigung zustande kommt.",
     "taskForce": "Einsatzgruppe",
-    "taskForceDesc": "Zielorientierte Aufgabenorchestrierung, bei der Agenten planen, Aufgaben parallel ausführen, Ergebnisse überprüfen und Erkenntnisse zusammenfassen.",
+    "taskForceDesc": "Die Moderation zerlegt das Ziel in Aufgaben, die Mitglieder bearbeiten sie parallel, danach prüft und verbindet die Moderation die Ergebnisse.",
     "roles": {
       "marketingExpert": "Marketing-Experte",
       "techLead": "Tech-Lead",
       "financeDirector": "Finanzdirektor",
       "legalCounsel": "Rechtsberater",
       "strategyConsultant": "Strategieberater",
-      "seniorEngineer": "Senior-Ingenieur",
-      "architect": "Architekt",
-      "securityReviewer": "Sicherheitsprüfer",
+      "substanceReviewer": "Inhaltsprüfer",
+      "structureReviewer": "Strukturprüfer",
+      "riskReviewer": "Risikoprüfer",
       "riskAnalyst": "Risikoanalyst",
       "domainExpert": "Fachexperte",
       "devilsAdvocate": "Advocatus Diaboli",
@@ -2691,6 +2732,8 @@
       "proAdvocate2": "Pro-Vertreter 2",
       "conAdvocate1": "Contra-Vertreter 1",
       "conAdvocate2": "Contra-Vertreter 2",
+      "partyA": "Partei A",
+      "partyB": "Partei B",
       "projectLead": "Projektleiter",
       "researcher": "Forscher",
       "implementer": "Umsetzer",
@@ -3438,12 +3481,12 @@
     "configError": "Die Operator-Konfiguration konnte nicht geladen werden",
     "empty": {
       "title": "Der Plattform-Operator ist deaktiviert",
-      "description": "Aktivieren Sie ihn, um mit einem Agenten zu chatten, der Ihre Agenten, Workflows, Konversationen, Deployments und Logs einsehen und erklären kann. Er hat ausschließlich Lesezugriff und kann nichts verändern.",
+      "description": "Aktivieren Sie ihn, um mit einem Agenten zu chatten, der Ihre Agenten, Workflows, Konversationen, Deployments und Logs inspiziert — und sie, mit Ihrer Freigabe jeder Änderung, für Sie bedient.",
       "action": "Plattform-Operator aktivieren"
     },
     "discovery": {
       "title": "Ihr Plattform-Operator",
-      "description": "Ein Assistent, der diese Installation untersucht und erklärt. Standardmäßig deaktiviert, nur Lesezugriff, ein Klick zum Aktivieren.",
+      "description": "Ein Assistent, der dieses Deployment inspiziert und bedient. Standardmäßig aus; jede Änderung wartet auf Ihre Freigabe.",
       "action": "Aktivieren"
     },
     "activation": {
@@ -3464,6 +3507,7 @@
       "authNoneBlocked": "Für diese Installation ist die Authentifizierung aktiviert, daher würden nicht authentifizierte Tool-Aufrufe abgelehnt. Der Operator würde erfolgreich deployt und danach bei jeder Abfrage scheitern. Wählen Sie stattdessen „Ihre Identität“.",
       "scope": {
         "label": "Berechtigung",
+        "default": "Standard",
         "hint": "Was der Operator tun darf. Jede Änderung wartet weiterhin auf Ihre Genehmigung — siehe die Sicherheitsregeln unten.",
         "readOnly": {
           "label": "Nur Lesezugriff",
@@ -3473,8 +3517,6 @@
           "label": "Lese- und Schreibzugriff",
           "description": "Kann außerdem Agenten und Agentengruppen erstellen und ändern, bereitstellen, die Bereitstellung aufheben, einen außer Kontrolle geratenen Zeitplan deaktivieren und die Beschreibung eines Agenten bearbeiten — jeweils erst nach Ihrer Genehmigung."
         },
-        "unavailableNotVerified": "Noch nicht verfügbar — das Genehmigungsgate dieses Operators wurde nicht als sicher verifiziert. Prüfen Sie die Verbindung im Statusbereich, oder wählen Sie unten „Ihre Identität“ und konfigurieren Sie danach neu.",
-        "unavailableFirstActivation": "Bei der ersten Aktivierung nicht verfügbar. Aktivieren Sie zunächst mit Nur-Lesezugriff, um zu belegen, dass das Genehmigungsgate zuverlässig funktioniert, und konfigurieren Sie dann neu, um Schreibzugriff zu gewähren.",
         "writeWarning": "Beim Aktivieren wird ein Schreib-Kanarientest ausgeführt: ein echter, harmloser Testschreibvorgang, der vor Abschluss dieses Deployments auf Ihre Genehmigung warten muss. Pausiert er nicht, wird die Aktivierung verweigert und der Operator entfernt, statt mit einem ungeprüften Schreib-Gate bereitgestellt zu bleiben."
       },
       "safetyPreamble": "Sicherheitsregeln (nicht bearbeitbar)",
@@ -3578,7 +3620,10 @@
         "agentCreatedWithExternalTools": "Dieser Agent wird mit sämtlichen Tools erstellt, die ein externer MCP-Server anbietet. Welche das sind, entscheidet dieser Server, und er kann sie später ändern.",
         "unchecked": "Der Body war zu lang, um ihn auf Berechtigungserweiterungen zu prüfen — lesen Sie ihn vor der Freigabe vollständig."
       },
-      "blockedSelfTarget": "Ein Agent darf seine eigene Definition nicht ändern, und diese Anfrage betrifft den eigenen Agenten des Operators ({{agentId}}). Solange sie enthalten ist, kann der gesamte Stapel nicht genehmigt werden — lehnen Sie ab und nehmen Sie diese Änderung auf der Seite dieses Agenten vor."
+      "blockedSelfTarget": "Ein Agent darf seine eigene Definition nicht ändern, und diese Anfrage betrifft den eigenen Agenten des Operators ({{agentId}}). Solange sie enthalten ist, kann der gesamte Stapel nicht genehmigt werden — lehnen Sie ab und nehmen Sie diese Änderung auf der Seite dieses Agenten vor.",
+      "blockedGateCarrying": "Diese Anfrage schreibt eine LLM-Konfiguration, die ihr eigenes Freigabe-Gate (toolApprovals) setzt und damit das prüfende Gate ersetzen würde. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und ändern Sie das Gate auf der Seite des Agenten.",
+      "blockedGateUnverifiable": "Diese Anfrage schreibt eine LLM-Konfiguration, deren Inhalt nicht vollständig lesbar ist — zu groß für die Anzeige oder kein gültiges JSON —, daher lässt sich nicht bestätigen, dass sie kein Freigabe-Gate überschreibt. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und nehmen Sie die Änderung auf der Seite des Agenten vor.",
+      "blockedGateUnpinned": "Diese Anfrage schreibt eine LLM-Konfiguration, ist aber nicht fixiert; was tatsächlich ausgeführt wird, kann daher vom hier Gezeigten abweichen und es lässt sich nicht bestätigen, dass kein Freigabe-Gate überschrieben wird. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und nehmen Sie die Änderung auf der Seite des Agenten vor."
     },
     "starters": {
       "whatsDeployed": "Was ist derzeit deployt?",

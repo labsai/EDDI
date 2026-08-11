@@ -9,7 +9,6 @@ import { WorkforceTopbar } from "./workforce-topbar";
 import { WorkforceBottomTabs } from "./workforce-bottom-tabs";
 import { WorkforceShortcuts } from "./workforce-shortcuts";
 import { ShortcutsDialog } from "./shortcuts-dialog";
-import { OperatorDrawer } from "@/components/operator/operator-drawer";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -138,7 +137,6 @@ export function WorkforceLayout() {
           <Outlet />
         </main>
         <WorkforceBottomTabs />
-        <OperatorDrawer clearsBottomTabBar />
       </div>
     );
   }
@@ -197,7 +195,6 @@ export function WorkforceLayout() {
             </div>
           </>
         )}
-        <OperatorDrawer />
       </div>
     );
   }
@@ -225,7 +222,6 @@ export function WorkforceLayout() {
           <Outlet />
         </main>
       </div>
-      <OperatorDrawer />
     </div>
   );
 }

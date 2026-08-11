@@ -5,11 +5,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn, hashColor, getInitials, formatUsd } from "@/lib/utils";
 import type { AgentGroupConfiguration, DiscussionStyle, DiscussionPhase } from "@/lib/api/groups";
-import { STYLE_INFO, normalizeLifecyclePolicy } from "@/lib/api/groups";
+import { normalizeLifecyclePolicy } from "@/lib/api/groups";
+import { styleDisplay } from "@/lib/discussion-styles";
 import {
   effectiveDelegationDepth,
   effectiveDelegationTimeout,
   moderatorlessPhaseNames,
+  uncoveredRolePhases,
 } from "@/lib/group-config";
 import { timeoutPolicyLabel, granularityLabel, rejectionPolicyLabel } from "@/lib/hitl-labels";
 import { formatIsoDuration } from "@/lib/hitl-config";
@@ -53,7 +55,7 @@ const CONTEXT_SCOPE_FALLBACKS: Record<string, string> = {
 export function GroupConfigPanel({ config, groupId, groupVersion, className }: GroupConfigPanelProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const styleInfo = STYLE_INFO[config.style] || STYLE_INFO.ROUND_TABLE;
+  const styleInfo = styleDisplay(config.style, t);
   const styleColors = PANEL_STYLE_COLORS[config.style as DiscussionStyle] || PANEL_STYLE_COLORS.ROUND_TABLE;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<"group" | "all" | null>(null);
   // Mutually exclusive on purpose. Both editors write the whole config from
@@ -84,6 +86,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
   const approvalPhaseNames = (config.phases ?? []).filter((p) => p.requiresApproval).map((p) => p.name);
   const hasHitl = !!hitl || approvalPhaseNames.length > 0;
   const moderatorlessPhases = useMemo(() => moderatorlessPhaseNames(config), [config]);
+  const roleGaps = useMemo(() => uncoveredRolePhases(config), [config]);
   const canEditPhases = !!groupId && groupVersion != null;
 
   /**
@@ -363,6 +366,26 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
           </p>
         </div>
       )}
+
+      {/* Phases addressed to a ROLE no member carries (a DEBATE with no CON,
+          a DEVIL_ADVOCATE group without the advocate) — they would run with
+          zero speakers and the backend never says so. */}
+      {roleGaps.map((gap) => (
+        <div
+          key={gap.role}
+          className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5"
+          data-testid="group-role-coverage-warning"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <p className="text-[10px] leading-relaxed text-muted-foreground">
+            {t(
+              "groups.roleCoverageWarning",
+              'No member carries the role "{{role}}" — every member will speak in {{phases}} instead.',
+              { role: gap.role, phases: gap.phaseNames.join(", ") },
+            )}
+          </p>
+        </div>
+      ))}
 
       {/* Human-in-the-Loop approval — read-only summary + inline editor */}
       {(hasHitl || canEditHitl) && (

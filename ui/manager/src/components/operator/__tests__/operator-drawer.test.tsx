@@ -123,29 +123,25 @@ describe("OperatorDrawer", () => {
     });
   });
 
-  it("sits clear of the Workforce mobile shell's own bottom furniture when told to", () => {
-    // Two separate findings landed here. First, live in the browser: at the
-    // original bottom-6 the launcher sat ~40px inside WorkforceBottomTabs
-    // (fixed, h-16, bottom-0). Then a review caught the worse one — the
-    // Workforce dashboard has its OWN MobileFab at `fixed bottom-24 z-40
-    // sm:hidden`, which overlapped this z-30 launcher and won the hit test,
-    // so tapping the operator launcher navigated to /workforce/new. bottom-40
-    // (160px) clears MobileFab's 152px top edge.
-    //
-    // The default moved too: bottom-6 collided with sonner's toast viewport
-    // and ChatDrawer's Send button in the Manager's own bottom-right corner.
+  it("anchors the panel to the launcher, not to a corner of the viewport", async () => {
+    // This replaces a test that pinned the old `bottom-24` / `bottom-40`
+    // offsets. Those numbers existed to dodge whatever else occupied the
+    // bottom-right corner — sonner's toast viewport, ChatDrawer's composer,
+    // WorkforceBottomTabs, workforce-dashboard's own MobileFab (which won the
+    // hit test and navigated to /workforce/new when tapped). Living in the
+    // header removes the whole class of collision, so what matters now is that
+    // the panel positions relative to its launcher and never reintroduces a
+    // viewport-fixed offset of its own.
     serveConfig(activeConfig());
-    const { container: withoutClearance } = renderWithProviders(<OperatorDrawer />, {
+    const { container } = renderWithProviders(<OperatorDrawer />, {
       initialRoute: "/manage/agents",
     });
-    expect(withoutClearance.querySelector('[class*="bottom-24"]')).toBeInTheDocument();
-    expect(withoutClearance.querySelector('[class*="bottom-40"]')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("operator-drawer-fab"));
 
-    const { container: withClearance } = renderWithProviders(<OperatorDrawer clearsBottomTabBar />, {
-      initialRoute: "/manage/agents",
-    });
-    expect(withClearance.querySelector('[class*="bottom-40"]')).toBeInTheDocument();
-    expect(withClearance.querySelector('[class*="bottom-24"]')).not.toBeInTheDocument();
+    const panel = await screen.findByTestId("operator-drawer-panel");
+    expect(panel.className).toContain("absolute");
+    expect(panel.className).not.toContain("fixed");
+    expect(container.querySelector('[class*="bottom-"]')).not.toBeInTheDocument();
   });
 
   it("starts closed, showing only the launcher", async () => {

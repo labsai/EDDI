@@ -22,13 +22,14 @@ describe("filter-utils", () => {
 
   describe("styleLabel", () => {
     it("returns correct labels for known styles", () => {
-      expect(styleLabel("DEBATE")).toBe("Structured Deliberation");
-      expect(styleLabel("ROUND_TABLE")).toBe("Collaborative Council");
-      expect(styleLabel("PEER_REVIEW")).toBe("Quality Review");
-      expect(styleLabel("DEVIL_ADVOCATE")).toBe("Stress Test");
-      expect(styleLabel("DELPHI")).toBe("Expert Forecast");
-      expect(styleLabel("TASK_FORCE")).toBe("Operational Task Force");
-      expect(styleLabel("CUSTOM")).toBe("Custom Framework");
+      expect(styleLabel("DEBATE")).toBe("Pro/Con Debate");
+      expect(styleLabel("ROUND_TABLE")).toBe("Round Table");
+      expect(styleLabel("PEER_REVIEW")).toBe("Peer Review");
+      expect(styleLabel("DEVIL_ADVOCATE")).toBe("Devil's Advocate");
+      expect(styleLabel("DELPHI")).toBe("Anonymous Rounds");
+      expect(styleLabel("TASK_FORCE")).toBe("Task Force");
+      expect(styleLabel("NEGOTIATION")).toBe("Negotiation");
+      expect(styleLabel("CUSTOM")).toBe("Custom Flow");
     });
 
     it("returns raw value for unknown style", () => {

@@ -1138,7 +1138,7 @@
     "cascadeInAgent": "Usar cascata também no modo agente (com ferramentas)",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "ex. claude-sonnet-4-6",
+    "cascadeModelName": "ex. claude-sonnet-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "vazio = aceitar sempre",
     "cascadeTimeout": "Tempo limite (ms)",
@@ -2398,6 +2398,7 @@
     "agentFiledCaps": "Limites",
     "agentFiledCapsValue": "{{perDiscussion}} / discussão · {{perTurn}} / turno",
     "moderatorlessWarning": "Restrito a um moderador que este grupo não possui: {{phases}}. O primeiro membro por ordem de fala assumirá.",
+    "roleCoverageWarning": "Nenhum membro tem o papel “{{role}}” — em {{phases}} todos os membros falarão.",
     "delegationDepth": "Profundidade máx.",
     "delegationTimeout": "Tempo do delegado",
     "secondsShort": "{{seconds}}s",
@@ -2550,9 +2551,44 @@
     "retroRecordedBadge_many": "{{phase}}: {{count}} liçãoões guardadas na memória da equipa",
     "retroRecordedBadge_one": "{{phase}}: {{count}} lição guardada na memória da equipa",
     "retroRecordedBadge_other": "{{phase}}: {{count}} liçãoões guardadas na memória da equipa",
-    "artifactRevisions_many": "{{count}} revisãoões anteriores",
+    "artifactRevisions_many": "{{count}} revisões anteriores",
     "artifactRevisions_one": "{{count}} revisão anterior",
-    "artifactRevisions_other": "{{count}} revisãoões anteriores"
+    "artifactRevisions_other": "{{count}} revisões anteriores",
+    "styles": {
+      "ROUND_TABLE": {
+        "label": "Mesa redonda",
+        "flow": "Cada um expõe sua visão e desenvolve a dos outros ao longo de várias rodadas"
+      },
+      "PEER_REVIEW": {
+        "label": "Revisão por pares",
+        "flow": "Cada um responde por conta própria, critica os demais e depois revisa"
+      },
+      "DEVIL_ADVOCATE": {
+        "label": "Advogado do diabo",
+        "flow": "Um membro ataca a posição do grupo e os demais a defendem"
+      },
+      "DELPHI": {
+        "label": "Rodadas anônimas",
+        "flow": "Todos respondem de forma anônima e revisam a cada rodada, sem se ancorar em quem falou primeiro"
+      },
+      "DEBATE": {
+        "label": "Debate a favor/contra",
+        "flow": "Um lado argumenta a favor e o outro contra; depois vêm as réplicas e o veredito"
+      },
+      "TASK_FORCE": {
+        "label": "Força-tarefa",
+        "flow": "O moderador planeja, os membros executam tarefas em paralelo e os resultados são verificados"
+      },
+      "NEGOTIATION": {
+        "label": "Negociação",
+        "flow": "As partes trocam propostas até chegar a um acordo; só na falta dele um árbitro decide"
+      },
+      "CUSTOM": {
+        "label": "Fluxo personalizado",
+        "flow": "Fases que você mesmo define"
+      }
+    },
+    "unsupportedStyle": "Este servidor não oferece suporte a {{style}}. Escolha outro formato para continuar."
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
@@ -2844,6 +2880,9 @@
     "hintDevilAdvocate": "Atribua o papel DEVIL_ADVOCATE a pelo menos um membro. Ele questionará o consenso do grupo.",
     "hintPeerReview": "Cada membro critica individualmente o trabalho de todos os outros e depois revisa com base no feedback recebido.",
     "hintDelphi": "Todos os membros respondem de forma independente e anônima. Após cada rodada, veem os resultados anônimos e podem ajustar. Turnos máx. controla o número de iterações anônimas.",
+    "hintNegotiation": "Os membros expõem seus interesses, apresentam propostas e então negociam — «Máx. de rodadas» define quantas rodadas de barganha acontecem. O moderador arbitra apenas se não houver acordo.",
+    "roleCoverageWarning": "Nenhum membro tem o papel “{{role}}”",
+    "roleCoverageHint": "O servidor recorre a deixar todos os membros falarem em {{phases}}, então as mesmas pessoas defendem os dois lados. Volte a “Membros” e preencha o campo de papel.",
     "hintTaskForce": "O moderador cria um plano de tarefas, atribui trabalho aos agentes em paralelo, depois verifica e sintetiza os resultados.",
     "hintCustom": "Defina suas próprias fases manualmente. Fases personalizadas podem ser configuradas via API após a criação.",
     "hintRoundTable": "Todos os membros compartilham suas opiniões, depois discutem os pontos de vista uns dos outros em várias rodadas antes que o moderador sintetize.",
@@ -2876,27 +2915,29 @@
     "memberTypeHuman": "Humano"
   },
   "groupTemplates": {
-    "advisoryBoard": "Advisory Board",
-    "advisoryBoardDesc": "A panel of expert advisors consulting on strategic decisions.",
-    "codeReview": "Code Review Panel",
-    "codeReviewDesc": "Structured code review with independent opinions, peer critique, and revision.",
-    "riskAssessment": "Risk Assessment",
-    "riskAssessmentDesc": "A panel with a devil's advocate who challenges assumptions.",
-    "forecasting": "Forecasting Panel",
-    "forecastingDesc": "Delphi-style anonymous deliberation for unbiased estimates.",
-    "proCon": "Pro/Con Debate",
-    "proConDesc": "Formal debate with pro and con teams arguing their positions.",
-    "taskForce": "Força-Tarefa",
-    "taskForceDesc": "Orquestração de tarefas orientada a objetivos onde agentes planejam, executam tarefas em paralelo, verificam resultados e sintetizam descobertas.",
+    "advisoryBoard": "Conselho consultivo",
+    "advisoryBoardDesc": "Cinco perspectivas de negócio — marketing, engenharia, finanças, jurídico e estratégia — opinam sobre a mesma pergunta e o moderador resume.",
+    "peerReview": "Painel de revisão por pares",
+    "peerReviewDesc": "Os revisores avaliam o que você trouxer — um rascunho, um plano, uma proposta —, criticam a avaliação uns dos outros, revisam e o moderador junta o resultado.",
+    "riskAssessment": "Avaliação de riscos",
+    "riskAssessmentDesc": "Cada um dá sua leitura, um membro defende o oposto para expor pontos cegos, os demais respondem e o moderador resume o que se sustentou.",
+    "forecasting": "Estimativas independentes",
+    "forecastingDesc": "Os membros respondem de forma anônima ao longo de várias rodadas e só veem resultados anonimizados entre elas, então ninguém se ancora em quem falou primeiro.",
+    "proCon": "Debate a favor/contra",
+    "proConDesc": "Dois membros argumentam a favor da proposta e dois contra, seguidos de réplicas e do veredito do moderador.",
+    "negotiation": "Negociação",
+    "negotiationDesc": "Duas partes expõem seus interesses, apresentam propostas e trocam concessões rodada a rodada; o moderador arbitra apenas se não houver acordo.",
+    "taskForce": "Força-tarefa",
+    "taskForceDesc": "O moderador divide a meta em tarefas, os membros as executam em paralelo e ele verifica e combina os resultados.",
     "roles": {
-      "marketingExpert": "Marketing Expert",
-      "techLead": "Tech Lead",
-      "financeDirector": "Finance Director",
-      "legalCounsel": "Legal Counsel",
-      "strategyConsultant": "Strategy Consultant",
-      "seniorEngineer": "Senior Engineer",
-      "architect": "Architect",
-      "securityReviewer": "Security Reviewer",
+      "marketingExpert": "Especialista em marketing",
+      "techLead": "Líder técnico",
+      "financeDirector": "Diretor financeiro",
+      "legalCounsel": "Consultor jurídico",
+      "strategyConsultant": "Consultor de estratégia",
+      "substanceReviewer": "Revisor de conteúdo",
+      "structureReviewer": "Revisor de estrutura",
+      "riskReviewer": "Revisor de riscos",
       "riskAnalyst": "Risk Analyst",
       "domainExpert": "Domain Expert",
       "devilsAdvocate": "Devil's Advocate",
@@ -2908,6 +2949,8 @@
       "proAdvocate2": "Pro Advocate 2",
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2",
+      "partyA": "Parte A",
+      "partyB": "Parte B",
       "projectLead": "Líder de Projeto",
       "researcher": "Pesquisador",
       "implementer": "Implementador",
@@ -3466,12 +3509,12 @@
     "configError": "Não foi possível carregar a configuração do operador",
     "empty": {
       "title": "O operador da plataforma está desativado",
-      "description": "Ative-o para conversar com um agente capaz de inspecionar os seus agentes, fluxos de trabalho, conversas, implantações e registos, e explicar o que encontra. É somente leitura e não pode alterar nada.",
+      "description": "Ative-o para conversar com um agente que pode inspecionar seus agentes, fluxos de trabalho, conversas, implantações e logs — e, com a sua aprovação de cada alteração, operá-los por você.",
       "action": "Ativar o operador da plataforma"
     },
     "discovery": {
       "title": "O seu operador da plataforma",
-      "description": "Um assistente que inspeciona e explica esta instalação. Desativado por predefinição, somente leitura, um clique para ativar.",
+      "description": "Um assistente que inspeciona e opera esta implantação. Desativado por padrão; cada alteração aguarda a sua aprovação.",
       "action": "Ativar"
     },
     "activation": {
@@ -3492,6 +3535,7 @@
       "authNoneBlocked": "Esta instalação tem a autenticação ativada, pelo que chamadas de ferramentas não autenticadas seriam rejeitadas. O operador seria implantado com sucesso e depois falharia em todas as consultas. Escolha antes «A sua identidade».",
       "scope": {
         "label": "Capacidade",
+        "default": "Padrão",
         "hint": "O que o operador tem permissão para fazer. Cada escrita continua à espera da sua aprovação — veja as regras de segurança abaixo.",
         "readOnly": {
           "label": "Somente leitura",
@@ -3501,8 +3545,6 @@
           "label": "Leitura e escrita",
           "description": "Também permite criar e alterar agentes e grupos de agentes, implementar, remover a implementação, desativar uma agenda fora de controlo e editar o descritor de um agente — cada uma à espera da sua aprovação primeiro."
         },
-        "unavailableNotVerified": "Ainda não disponível — o gate de aprovação deste operador não foi verificado como fiável. Verifique a ligação no painel de estado, ou escolha «A sua identidade» abaixo e depois reconfigure.",
-        "unavailableFirstActivation": "Não disponível na primeira ativação. Ative primeiro em modo de leitura para provar que o gate de aprovação é fiável, depois reconfigure para conceder acesso de escrita.",
         "writeWarning": "Ativar irá executar um teste canário de escrita: uma escrita de teste real e inofensiva que tem de ficar em pausa à espera de aprovação antes de este deployment terminar. Se não pausar, a ativação é recusada e o operador é removido em vez de ficar implementado com um gate de escrita não verificado."
       },
       "safetyPreamble": "Regras de segurança (não editáveis)",
@@ -3606,7 +3648,10 @@
         "agentCreatedWithExternalTools": "Este agente está a ser criado com todas as ferramentas que um servidor MCP externo disponibiliza. É esse servidor que decide quais são, e pode alterá-las mais tarde.",
         "unchecked": "O corpo era demasiado longo para analisar concessões de capacidade — leia-o na íntegra antes de aprovar."
       },
-      "blockedSelfTarget": "Um agente não pode alterar a sua própria definição, e este pedido visa o próprio agente do operador ({{agentId}}). Enquanto estiver presente, todo o lote não pode ser aprovado — rejeite-o e faça esta alteração a partir da página desse agente."
+      "blockedSelfTarget": "Um agente não pode alterar a sua própria definição, e este pedido visa o próprio agente do operador ({{agentId}}). Enquanto estiver presente, todo o lote não pode ser aprovado — rejeite-o e faça esta alteração a partir da página desse agente.",
+      "blockedGateCarrying": "Esta solicitação grava uma configuração de LLM que define o seu próprio portão de aprovação (toolApprovals), o que substituiria o portão que a está a rever. A aprovação fica indisponível para todo o lote enquanto estiver presente — rejeite e altere o portão a partir da página do próprio agente.",
+      "blockedGateUnverifiable": "Esta solicitação grava uma configuração de LLM cujo corpo não pode ser lido por completo — é demasiado grande para ser apresentado ou não é JSON válido —, pelo que não é possível confirmar que não substitui o portão de aprovação. A aprovação fica indisponível para todo o lote enquanto estiver presente — rejeite e faça esta alteração a partir da página do próprio agente.",
+      "blockedGateUnpinned": "Esta solicitação grava uma configuração de LLM mas não está fixada, pelo que o que é realmente executado pode diferir do que é mostrado aqui e não é possível confirmar que não substitui o portão de aprovação. A aprovação fica indisponível para todo o lote enquanto estiver presente — rejeite e faça esta alteração a partir da página do próprio agente."
     },
     "starters": {
       "whatsDeployed": "O que está implantado neste momento?",

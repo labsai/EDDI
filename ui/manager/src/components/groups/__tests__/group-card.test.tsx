@@ -46,7 +46,7 @@ describe("GroupCard", () => {
     renderWithProviders(
       <GroupCard group={baseGroup} style="PEER_REVIEW" />
     );
-    expect(screen.getByText("Quality Review")).toBeInTheDocument();
+    expect(screen.getByText("Peer Review")).toBeInTheDocument();
   });
 
   it("renders 'Group' fallback when no style is provided", () => {
@@ -138,7 +138,7 @@ describe("GroupCard", () => {
     renderWithProviders(
       <GroupCard group={baseGroup} style="ROUND_TABLE" />
     );
-    expect(screen.getByText("Collaborative Council")).toBeInTheDocument();
+    expect(screen.getByText("Round Table")).toBeInTheDocument();
     expect(screen.getByText("🗣️")).toBeInTheDocument();
   });
 
@@ -146,7 +146,7 @@ describe("GroupCard", () => {
     renderWithProviders(
       <GroupCard group={baseGroup} style="TASK_FORCE" />
     );
-    expect(screen.getByText("Operational Task Force")).toBeInTheDocument();
+    expect(screen.getByText("Task Force")).toBeInTheDocument();
     expect(screen.getByText("🎯")).toBeInTheDocument();
   });
 

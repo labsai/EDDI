@@ -7,9 +7,20 @@ EDDI-Manager is an **application**, not a published component library. The synce
 Claude Design project: `408b967f-5a31-4a9f-85f7-f8794639218b` ("Design System").
 
 `AppLayout`, `ConfigEditorLayout` and `ThemeProvider` are deliberately **not** synced —
-the first two pull Monaco and the operator tool-scope graph into the bundle, and
-`ThemeProvider` is a provider rather than a visual component (it is already used by
-`ds-providers`). Compose `Sidebar` + `TopBar` by hand instead of reaching for `AppLayout`.
+the first two pull Monaco into the bundle, and `ThemeProvider` is a provider rather than a
+visual component (it is already used by `ds-providers`). Compose `Sidebar` + `TopBar` by
+hand instead of reaching for `AppLayout`.
+
+> **`TopBar` now drags the operator drawer in.** `refactor(operator): move the launcher
+> from a floating FAB into both shells' headers` (main, PR #137) moved `OperatorDrawer`
+> out of `AppLayout` and into `top-bar.tsx` as a static import. Since `TopBar` is a synced
+> component, the bundle grew **4.00 MB → 4.17 MB (+179 KB)** and now contains the operator
+> tool-scope allow-list (`tool-scopes`, `WRITE_ENDPOINTS`). Monaco is still out — that was
+> always the expensive half — but this is exactly the creep the scoped entry exists to
+> prevent. Options if it matters: lazy-load `OperatorDrawer` behind `React.lazy` in
+> `TopBar` (keeps both the header launcher and the lean bundle), or drop `TopBar` from the
+> synced surface (loses the chrome this sync exists to provide). Measure with the esbuild
+> command in "Verifying the surface" below before and after any such change.
 
 ## How the build is wired (non-obvious — read before re-syncing)
 
@@ -107,6 +118,31 @@ the bundle** — if it is ever refactored away, the token silently vanishes agai
 > tokens and that the `layout` line restores **five**. The first number was wrong (it was 2),
 > and five only became true once the avatar call site above was fixed. The conclusion always
 > stood: the scan was incomplete and the line is required.
+
+## Verifying the surface without a full sync
+
+Three checks worth running after touching `ds-entry.tsx`, `config.json`, or any synced
+component. They catch the things a re-sync would otherwise surface late.
+
+```bash
+# 1. Every named export resolves (stronger than checking the file paths exist).
+#    Also reports the bundle size, so dependency creep shows up as a number.
+node .ds-sync/node_modules/esbuild/bin/esbuild .design-sync/ds-entry.tsx \
+  --bundle --format=esm --jsx=automatic --alias:@=./src \
+  --external:react --external:react-dom --external:react/jsx-runtime \
+  --outfile=/tmp/ds-bundle.js
+
+# 2. Nothing heavy leaked in. All of these must print 0.
+grep -oc 'monaco\|vscode\|codicon\|JsonEditor' /tmp/ds-bundle.js
+
+# 3. The tokens actually ship. build-css minifies, so match inside the :root block
+#    rather than grepping line-wise.
+node .design-sync/build-css.mjs
+```
+
+The previews are type-checked by `tsconfig.design-sync.json` (wired into `tsc -b`), so
+`npm run typecheck` already catches a preview that passes a prop the component does not
+take.
 
 ## Re-sync risks / watch-list
 - **`build-css.mjs` depends on `src/index.css`'s `@import 'tailwindcss';` line** and on
