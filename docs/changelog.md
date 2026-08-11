@@ -20,7 +20,8 @@ a grep, so nothing that those touched is silently skipped:
   read at runtime — plus `smallrye-openapi.info-version` and `container-image.additional-tags`),
   `OpenApiConfig` `@Info(version)`, and the `EDDI_VERSION` build arg backing the Red Hat
   certification `version` label in the Dockerfile.
-- **Deployment:** `helm/eddi/Chart.yaml` `appVersion` and `helm/eddi/values.yaml` `eddi.image.tag`,
+- **Deployment:** `helm/eddi/Chart.yaml` `appVersion` (and the chart's own `version`, see below)
+  and `helm/eddi/values.yaml` `eddi.image.tag`,
   `k8s/base/eddi-deployment.yaml` and `k8s/quickstart.yaml` (both the `app.kubernetes.io/version`
   labels and the pinned `labsai/eddi:` tag, including the cosign/crane comment examples), and the
   `redhat-certify.yml` workflow input default.
@@ -44,7 +45,26 @@ keep `**Version: ≥6.0.0**` in `security.md` out of the dynamic-badge conversio
 `eddi.hitl.tool.task-approvals.mode` default flip, so 6.3.0 was already the assumed next release —
 that page is now consistent with the version the build actually reports.
 
-`./mvnw compile` green; no formatter drift in the working tree.
+**The Helm chart's own `version` moved for the first time: 1.0.0 → 1.0.1.** It is not the app
+version — `appVersion` is — but Helm requires it to change whenever anything under `helm/` changes,
+and chart repositories key on it: two different chart contents published under `1.0.0` are
+indistinguishable to any cache or mirror. It had sat at 1.0.0 since the chart was created, through
+the 6.1.0 and 6.2.0 bumps, because nothing enforces it and nothing packages the chart today — which
+is the only reason the drift was harmless rather than a stale-chart bug waiting for the first
+`helm package`. A comment on the field now states the rule so it stops depending on someone
+remembering.
+
+**Verified rather than assumed**, since a bump that misses one artefact fails at release time:
+CI's own extractor (`grep -m1 '<version>' pom.xml`) returns 6.3.0; all five edited YAML files parse;
+and `target/classes` confirms `available_agents.txt` still names a zip that exists, which is the one
+way the rename could have broken startup without breaking the build. `./mvnw compile` green, no
+formatter drift.
+
+**Not introduced here, but found while checking and left alone:** `docs/release-versioning.md`
+instructs `git tag v6.0.0` in eight places, while `ci.yml` triggers on `tags: ["[0-9]*"]` — a
+`v`-prefixed tag matches nothing, so following that guide produces no build, no image, no signature
+and no release, silently. AGENTS.md already documents the digit-prefixed rule; the release guide is
+the artefact that is wrong. Tracked separately rather than folded into a version bump.
 
 ---
 

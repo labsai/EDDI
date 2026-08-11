@@ -5,7 +5,13 @@ description: >-
   Orchestrate multiple AI agents, manage stateful conversations,
   and integrate with LLM providers via a unified REST API.
 type: application
-version: 1.0.0
+# The CHART's own version, independent of the app it deploys. Bump it on every
+# change to anything under helm/ — including the appVersion below. Chart repos
+# key on this field, so shipping two different chart contents under one version
+# leaves caches and mirrors unable to tell them apart. It sat at 1.0.0 across
+# three releases because nothing enforces this; nothing packages the chart yet,
+# which is the only reason that was harmless.
+version: 1.0.1
 appVersion: "6.3.0"
 home: https://eddi.labs.ai
 sources:
