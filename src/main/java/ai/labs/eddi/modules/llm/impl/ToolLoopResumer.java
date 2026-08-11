@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
@@ -251,15 +252,18 @@ class ToolLoopResumer {
         // ──
         // The gate resolves the SAME way the live path did (LlmTask.executeTask): the
         // cluster-wide eddi.hitl.tool.enabled kill-switch nulls the config (gate
-        // inert), otherwise task override else agent default, so NEW calls in the
-        // continuation re-gate → re-pause. Approved ids are pre-cleared so they are
-        // never re-gated if the model reissues them. Threading toolHitlEnabled here
-        // keeps the resume path from re-arming an approval flow an operator disabled.
+        // inert), otherwise the task and agent configs combine per
+        // eddi.hitl.tool.task-approvals.mode (TaskToolApprovalsResolver — strict
+        // merge by default, wholesale replace as the legacy escape hatch), so NEW
+        // calls in the continuation re-gate → re-pause under the same effective
+        // gate the live path would compute. Approved ids are pre-cleared so they
+        // are never re-gated if the model reissues them. Threading toolHitlEnabled
+        // here keeps the resume path from re-arming an approval flow an operator
+        // disabled.
         ToolApprovalsConfig effectiveToolApprovals = null;
         if (toolHitlEnabled) {
-            effectiveToolApprovals = task.getToolApprovals() != null
-                    ? task.getToolApprovals()
-                    : memory.getAgentToolApprovalsConfig();
+            effectiveToolApprovals = TaskToolApprovalsResolver.resolve(
+                    memory.getAgentToolApprovalsConfig(), task.getToolApprovals());
         }
         int llmTaskIndex = batch.getLlmTaskIndex();
 

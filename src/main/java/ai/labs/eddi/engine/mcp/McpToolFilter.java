@@ -29,8 +29,16 @@ public class McpToolFilter implements ToolFilter {
     /**
      * Whitelist of MCP tool names that should be exposed to external clients. All
      * other tools (built-in langchain4j Agent tools) are hidden.
+     * <p>
+     * <b>A tool missing from this set is invisible, silently.</b>
+     * {@code ToolFilter} sees only a name, so a newly added {@code @Tool} that
+     * nobody adds here still compiles, still passes its own unit test (which calls
+     * the method directly), and simply never appears in {@code tools/list}.
+     * {@code McpToolFilterCoverageTest} pins both directions — every {@code @Tool}
+     * is listed, and every listed name exists — so that failure mode cannot recur.
+     * Package-visible for exactly that test.
      */
-    private static final Set<String> MCP_TOOLS = Set.of(
+    static final Set<String> MCP_TOOLS = Set.of(
             // Conversation tools
             "list_agents", "list_agent_configs", "create_conversation", "talk_to_agent", "chat_with_agent", "read_conversation",
             "read_conversation_log", "list_conversations", "get_agent",
@@ -68,7 +76,11 @@ public class McpToolFilter implements ToolFilter {
             "list_user_memories", "get_visible_memories", "search_user_memories", "get_memory_by_key",
             "upsert_user_memory", "delete_user_memory", "delete_all_user_memories", "count_user_memories",
             // GDPR/CCPA data-subject operations (McpGdprTools) — admin-only
-            "delete_user_data", "export_user_data");
+            "delete_user_data", "export_user_data",
+            // EDDI's own documentation (McpDocTools) — the tool counterpart to the
+            // eddi://docs/* resources, for agentic clients that consume tools/list
+            // and never call resources/read
+            "list_docs", "read_docs");
 
     @Override
     public boolean test(ToolInfo toolInfo, FilterContext filterContext) {

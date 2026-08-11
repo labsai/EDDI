@@ -220,7 +220,7 @@ The gate lives in the tool-execution loop (`AgentOrchestrator`), so it is **fail
 `toolApprovals` has two homes, both optional:
 
 - **Agent-level default** — `AgentConfiguration.hitlConfig.toolApprovals` (applies to every LLM task in the agent).
-- **Per-task override** — `LlmConfiguration.task[n].toolApprovals` (a langchain task). This is a **full replace**, not a merge: if a task defines `toolApprovals`, its block is used verbatim and the agent-level block is ignored for that task.
+- **Per-task override** — `LlmConfiguration.task[n].toolApprovals` (a langchain task). How it combines with the agent-level block is decided by `eddi.hitl.tool.task-approvals.mode`: under the default **`strict`** the task block can only *strengthen* the agent gate (patterns are united, task-level `exempt` is ignored, task-level `AUTO_APPROVE` is demoted); under **`replace`** it is a full replace and the agent-level block is ignored for that task — the pre-6.3.0 behavior. See [Precedence](#precedence) for the per-field rules.
 
 ```json
 {
@@ -312,7 +312,7 @@ Patterns are matched by `ToolApprovalPatterns` / `ToolApprovalGate`:
 
 | Rule | Behavior |
 |------|----------|
-| **Task replaces agent** | A per-task `toolApprovals` is a **full replace** of the agent-level block — no field-level merge. |
+| **Task combines with agent per `eddi.hitl.tool.task-approvals.mode`** | **`strict` (default):** the task block can only STRENGTHEN the agent gate — `requireApproval` is the union of both lists, task-level `exempt` entries are ignored (exempt beats require, so a task-added exemption is precisely the ungating vector), task-level `AUTO_APPROVE` (scalar or rule) is demoted to `WAIT_INDEFINITELY` unless the agent-level policy itself grants it, and `maxAutoApprovalsPerTurn` takes the minimum. **`replace` (legacy):** a present task block is a full replace of the agent-level block — the pre-6.3.0 behavior, for designs that deliberately loosen one task. See `TaskToolApprovalsResolver`. |
 | **Exempt beats require** | If a call matches any `exempt` pattern, it runs — even if it also matches `requireApproval`. |
 | **Absent/empty `requireApproval` = gate off** | No `requireApproval` patterns → the gate is fully inactive; every call runs. |
 | **Any match suffices** | A call is gated if it matches *any* `requireApproval` pattern (and no `exempt` pattern). |

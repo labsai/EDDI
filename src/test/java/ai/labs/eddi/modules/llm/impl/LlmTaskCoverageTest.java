@@ -303,8 +303,15 @@ class LlmTaskCoverageTest {
     // ============================================================
 
     @Test
-    @DisplayName("toolHitlEnabled=true + task override → task's ToolApprovalsConfig threaded to orchestrator")
+    @DisplayName("toolHitlEnabled=true + task override → STRICT merge of task and agent configs threaded to orchestrator")
     void toolApprovals_taskOverrideUsed() throws Exception {
+        // The historical contract asserted assertSame(override, effective): a task
+        // config REPLACED the agent gate wholesale. Under the strict default of
+        // eddi.hitl.tool.task-approvals.mode the effective config is the merge —
+        // the task's patterns are added to the agent's, never substituted for
+        // them. TaskToolApprovalsResolverTest pins the full merge contract
+        // (replace mode included); this test pins that LlmTask actually threads
+        // the merged result through to the orchestrator.
         llmTask.toolHitlEnabled = true;
         wireStandardMemory(List.of("action1"));
         agentReturns("done");
@@ -313,14 +320,15 @@ class LlmTaskCoverageTest {
         override.setRequireApproval(List.of("delete_*"));
         var t = task("taskA", List.of("action1"), null);
         t.setToolApprovals(override);
-        // Agent default present but must be IGNORED in favor of the task override.
-        lenient().when(memory.getAgentToolApprovalsConfig()).thenReturn(new ToolApprovalsConfig());
+        var agentDefault = new ToolApprovalsConfig();
+        agentDefault.setRequireApproval(List.of("http.post:*"));
+        lenient().when(memory.getAgentToolApprovalsConfig()).thenReturn(agentDefault);
 
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
         var captor = ArgumentCaptor.forClass(ToolApprovalsConfig.class);
         verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), captor.capture(), anyInt(), anyInt(), any());
-        assertSame(override, captor.getValue());
+        assertEquals(List.of("http.post:*", "delete_*"), captor.getValue().getRequireApproval());
     }
 
     @Test

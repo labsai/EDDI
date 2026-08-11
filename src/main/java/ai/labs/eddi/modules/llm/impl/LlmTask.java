@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
+import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -278,16 +279,18 @@ public class LlmTask implements ILifecycleTask {
             throws ITemplatingEngine.TemplateEngineException, ChatModelRegistry.UnsupportedLlmTaskException, IOException, LifecycleException {
 
         // === Tool-approval (tool-level HITL) effective config resolution ===
-        // Per-task override fully replaces the agent-level default (no merging). The
-        // agent default reaches memory via a transient carrier set at turn start.
-        // The feature flag lets operators disable the gate cluster-wide during a
-        // rolling upgrade — when false the effective config is treated as null
-        // (gate inert), byte-identical to the pre-HITL path.
+        // How a task-level toolApprovals combines with the agent-level default is
+        // decided by eddi.hitl.tool.task-approvals.mode — strict (the default: the
+        // task can only STRENGTHEN the agent gate) or replace (the historical
+        // wholesale override). See TaskToolApprovalsResolver for the exact merge.
+        // The agent default reaches memory via a transient carrier set at turn
+        // start. The feature flag lets operators disable the gate cluster-wide
+        // during a rolling upgrade — when false the effective config is treated as
+        // null (gate inert), byte-identical to the pre-HITL path.
         ToolApprovalsConfig effectiveToolApprovals = null;
         if (toolHitlEnabled) {
-            effectiveToolApprovals = task.getToolApprovals() != null
-                    ? task.getToolApprovals()
-                    : memory.getAgentToolApprovalsConfig();
+            effectiveToolApprovals = TaskToolApprovalsResolver.resolve(
+                    memory.getAgentToolApprovalsConfig(), task.getToolApprovals());
         }
 
         var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects);
