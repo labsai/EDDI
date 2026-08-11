@@ -23,6 +23,7 @@ import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.hitl.lint.ReservedActionLint;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -44,9 +45,9 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.Period;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -413,25 +414,84 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 continue;
             }
 
-            var documentDescriptor = documentDescriptorStore.readDescriptor(conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
+            // Age comes from the CONVERSATION's own newest step timestamp.
+            //
+            // It used to come from the AGENT document's lastModifiedOn, which is not a
+            // property of the conversation at all: every conversation on a given agent
+            // version shared one age, so a conversation the user was talking in an hour
+            // ago counted as idle whenever its agent config happened to be old. That
+            // mis-signal was masked by the arithmetic bug in isOlderThanDays below —
+            // fixing the arithmetic alone would have started ENDing live conversations,
+            // which is why both are corrected together.
+            var lastInteraction = lastInteractionOf(conversationMemory);
+            if (lastInteraction == null) {
+                // No step ever carried a timestamp. Fall back to the agent descriptor,
+                // and skip entirely when even that is unavailable: "cannot prove it is
+                // idle" must never end a conversation.
+                //
+                // Read LAZILY, and never fatally. This lookup used to run
+                // unconditionally at the top of the loop, but readDescriptor THROWS for
+                // a deleted agent — and manageAgentDeployments deliberately routes
+                // deleted agents down this very path (getCurrentResourceId throwing is
+                // how it decides the agent is gone). One deleted agent therefore
+                // aborted the whole sweep, including conversations that carry a
+                // perfectly good timestamp of their own and never needed the descriptor.
+                Instant descriptorLastModified = descriptorLastModifiedOf(conversationMemory);
+                if (descriptorLastModified == null) {
+                    continue;
+                }
+                lastInteraction = descriptorLastModified;
+            }
+            // ONE calendar date drives both the decision and the message, and ONE
+            // reference "today" drives both this check and the age it reports. The
+            // sweep expires by LocalDate, so reporting elapsed 24-hour periods could
+            // end a conversation on its 30th calendar day while the log said 29 — and
+            // evaluating LocalDate.now() twice could disagree across midnight.
+            var lastInteractionDate = lastInteraction.atZone(ZoneId.systemDefault()).toLocalDate();
+            var today = LocalDate.now();
 
-            // NOTE: age is derived from the AGENT document's lastModifiedOn, not the
-            // conversation's — a pre-existing heuristic that predates the HITL branch
-            // and is intentionally left unchanged here.
-            var timeOfLastInteractionInConversation = documentDescriptor.getLastModifiedOn();
-
-            var isOlderThanMaximumAmountOfDays = isOlderThanDays(
-                    Instant.ofEpochMilli(timeOfLastInteractionInConversation.getTime()).atZone(ZoneId.systemDefault()).toLocalDate(),
-                    maximumLifeTimeOfIdleConversationsInDays);
+            var isOlderThanMaximumAmountOfDays = isOlderThanDays(lastInteractionDate, maximumLifeTimeOfIdleConversationsInDays, today);
 
             if (isOlderThanMaximumAmountOfDays) {
                 String conversationId = conversationMemory.getId();
-                conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
+                // Conditional on the state this snapshot was loaded with, NOT an
+                // unconditional write. The snapshots were read at the top of the sweep,
+                // so between that read and this write a user can send a turn, or the
+                // conversation can pause at an HITL gate — and an unconditional ENDED
+                // would destroy a live turn or a pending approval. This was a latent
+                // check-then-act race while the arithmetic bug kept the sweep mostly
+                // inert; correcting the arithmetic is exactly what makes it fire.
+                // Re-read immediately before the write. The snapshots were loaded at
+                // the top of the sweep, so without this the window in which a user can
+                // send a turn spans the entire scan.
+                //
+                // The state CAS alone is not enough: a turn that starts AND completes
+                // inside the window returns the state to the value we observed, so the
+                // CAS succeeds against a conversation that is demonstrably active. The
+                // age is the ABA-resistant part — a completed turn moves the newest
+                // step timestamp, so re-checking it here catches exactly that case.
+                //
+                // What remains is a turn completing entirely between this re-read and
+                // the CAS below. Closing that needs a revision-conditional update in
+                // IConversationMemoryStore (and in both backends) rather than a
+                // state-only CAS; that is a store-contract change, deliberately not
+                // bundled here.
+                if (!stillIdle(conversationId, maximumLifeTimeOfIdleConversationsInDays, today)) {
+                    LOGGER.info(format("Skipped ending conversation (id: %s): it became active while the sweep was running",
+                            conversationId));
+                    continue;
+                }
+                ConversationState observedState = conversationMemory.getConversationState();
+                if (!conversationMemoryStore.compareAndSetState(conversationId, observedState, ConversationState.ENDED)) {
+                    LOGGER.info(format("Skipped ending conversation (id: %s): its state changed from %s since the sweep read it",
+                            conversationId, observedState));
+                    continue;
+                }
                 var message = format(
                         "Ended conversation (id: %s) with Agent (name: %s, id: %s, version: %d) "
                                 + "because it is %d days older than the maximum idle time of %d days",
-                        conversationId, documentDescriptor.getName(), agentId, agentVersion,
-                        DAYS.between(timeOfLastInteractionInConversation.toInstant(), Instant.now()), maximumLifeTimeOfIdleConversationsInDays);
+                        conversationId, descriptorNameOf(conversationMemory), agentId, agentVersion,
+                        DAYS.between(lastInteractionDate, today), maximumLifeTimeOfIdleConversationsInDays);
 
                 LOGGER.info(message);
             }
@@ -445,23 +505,115 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
     }
 
-    private boolean isOlderThanDays(final LocalDate date, final int days) {
-        boolean result = false;
+    /**
+     * Re-reads the conversation and re-checks its age against the same limit and
+     * reference date the sweep used.
+     * <p>
+     * A store failure answers {@code false}: unable to confirm it is still idle is
+     * not permission to end it.
+     */
+    private boolean stillIdle(String conversationId, int maxIdleDays, LocalDate today) {
+        try {
+            var fresh = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (fresh == null) {
+                return false;
+            }
+            Instant freshLastInteraction = lastInteractionOf(fresh);
+            if (freshLastInteraction == null) {
+                // No conversation-side signal on the re-read; the original decision
+                // already used the descriptor fallback, so nothing new to check.
+                return true;
+            }
+            return isOlderThanDays(freshLastInteraction.atZone(ZoneId.systemDefault()).toLocalDate(), maxIdleDays, today);
+        } catch (Exception e) {
+            LOGGER.warn(format("Could not re-check conversation (id: %s) before ending it (%s) — leaving it alone",
+                    conversationId, e.getMessage()));
+            return false;
+        }
+    }
 
-        LocalDate now = LocalDate.now();
-        // period from now to date
-        Period period = Period.between(now, date);
+    /**
+     * The agent descriptor's {@code lastModifiedOn}, or {@code null} when it cannot
+     * be read. Never throws: the descriptor is a fallback age signal and a
+     * best-effort display name, and a deleted agent — which this sweep is
+     * specifically reached for — makes {@code readDescriptor} throw.
+     */
+    private Instant descriptorLastModifiedOf(ConversationMemorySnapshot conversationMemory) {
+        try {
+            var descriptor = documentDescriptorStore.readDescriptor(conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
+            return descriptor != null && descriptor.getLastModifiedOn() != null ? descriptor.getLastModifiedOn().toInstant() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
 
-        if (period.getYears() < 0) {
-            // if year is negative, 100% older than 6 months
-            result = true;
-        } else if (period.getYears() == 0) {
-            if (period.getDays() <= -days) {
-                result = true;
+    /** The agent's display name for the log line, or its id when unavailable. */
+    private String descriptorNameOf(ConversationMemorySnapshot conversationMemory) {
+        try {
+            var descriptor = documentDescriptorStore.readDescriptor(conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
+            return descriptor != null && descriptor.getName() != null ? descriptor.getName() : conversationMemory.getAgentId();
+        } catch (Exception e) {
+            return conversationMemory.getAgentId();
+        }
+    }
+
+    /**
+     * The newest timestamp any data item in the conversation carries, or
+     * {@code null} when nothing is timestamped. This is the conversation's own
+     * last-interaction time: every turn writes step data through
+     * {@code ConversationStep}, and {@code Data} stamps each entry at construction.
+     */
+    static Instant lastInteractionOf(ConversationMemorySnapshot snapshot) {
+        if (snapshot == null || snapshot.getConversationSteps() == null) {
+            return null;
+        }
+
+        Date newest = null;
+        for (var step : snapshot.getConversationSteps()) {
+            if (step == null || step.getWorkflows() == null) {
+                continue;
+            }
+            for (var workflow : step.getWorkflows()) {
+                if (workflow == null || workflow.getLifecycleTasks() == null) {
+                    continue;
+                }
+                for (var task : workflow.getLifecycleTasks()) {
+                    Date timestamp = task != null ? task.getTimestamp() : null;
+                    if (timestamp != null && (newest == null || timestamp.after(newest))) {
+                        newest = timestamp;
+                    }
+                }
             }
         }
 
-        return result;
+        return newest != null ? newest.toInstant() : null;
+    }
+
+    /**
+     * True when {@code date} is at least {@code days} days in the past.
+     * <p>
+     * This was written against {@link Period}, which normalizes into
+     * years/months/days — and the check only ever looked at the years and days
+     * components, never the months. For a 35-day-old date and a 30-day limit,
+     * {@code Period.between(now, date)} is {@code P-1M-4D}, so the test read
+     * {@code -4 <= -30} and answered "not old". Whole bands of ages between
+     * {@code days} and one year were therefore never reaped, and the ones that were
+     * passed only by coincidence of where the month boundary fell. Day arithmetic
+     * has no such components.
+     */
+    static boolean isOlderThanDays(final LocalDate date, final int days) {
+        return isOlderThanDays(date, days, LocalDate.now());
+    }
+
+    /**
+     * Reference-date overload. {@code today} is a parameter so a test can pin both
+     * sides of the comparison: with {@code LocalDate.now()} evaluated independently
+     * in the test and in this method, a case built at 23:59:59.999 and evaluated at
+     * 00:00:00.001 shifts by a day, which is exactly the kind of once-a-day flake
+     * that gets a boundary test deleted rather than fixed.
+     */
+    static boolean isOlderThanDays(final LocalDate date, final int days, final LocalDate today) {
+        return DAYS.between(date, today) >= days;
     }
 
     private interface UndeploymentExecutor {
