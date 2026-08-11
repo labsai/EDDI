@@ -1,7 +1,7 @@
 # Monorepo Migration Plan — EDDI + EDDI-Manager + EDDI-Chat-UI
 
 > **Status:** Proposed, not started. **Revision 2** — after two adversarial review passes with
-> local dry-runs of the critical build steps (2026-08-10).
+> local dry-runs of the critical build steps (2026-08-11).
 > **Author context:** This document is self-contained. An implementing agent should need no
 > other conversation context. Read it top to bottom before touching anything.
 > **⚠ THE PR THAT LANDS THIS MUST BE MERGED WITH A MERGE COMMIT — NEVER SQUASH. See §2.**
@@ -77,7 +77,7 @@ standalone `Dockerfile` / `build-service.sh` in the Manager repo are confirmed r
 
 ---
 
-## 3. Verified facts and dry-run evidence (2026-08-10)
+## 3. Verified facts and dry-run evidence (2026-08-11)
 
 An implementing agent can rely on these without re-deriving them. If reality disagrees with
 this table, stop and investigate before proceeding.
@@ -95,8 +95,9 @@ this table, stop and investigate before proceeding.
 | V9 | Chat sets `emptyOutDir: false` (to protect the old backend outDir). Must flip to `true` when retargeting to `dist/` (§6.3) | Read of `vite.config.ts:15` |
 | V10 | A fresh `chat-ui.DHWeOytM.js` differs byte-wise from the committed file of the same name — committed assets have already drifted (almost certainly LF/CRLF normalization at commit time) | `cmp` |
 | V11 | Branch protection on `labsai/EDDI` `main`: required checks are exactly `["CodeQL Analysis", "Build & Test"]` (job **names**), 1 review required, `required_linear_history: false`, all three merge methods allowed | `gh api repos/labsai/EDDI/branches/main/protection` |
-| V12 | `dependency-review.yml` runs on every PR with `fail-on-severity: high` and `deny-licenses: GPL-3.0, AGPL-3.0` — the monorepo PR introduces the full npm dependency graphs to this gate at once | Read of the workflow |
-| V13 | There are **two** CodeQL configs: the `codeql` job in `ci.yml` and a scheduled deep scan `codeql.yml`, each with its own `java-kotlin` language list | Read of both |
+| V12 | `dependency-review.yml` runs on every PR with `fail-on-severity: high` and `deny-licenses: GPL-3.0, AGPL-3.0` — the monorepo PR introduces the full npm dependency graphs to this gate at once. **Caveat:** the action now emits a deprecation warning that `deny-licenses` "is deprecated for possible removal in the next major release" (upstream issue 997), so do not build the license strategy on it long-term | Read of the workflow + the action's own PR comment on #670 |
+| V13 | There are **three** CodeQL surfaces, not two: the `codeql` job in `ci.yml`, the scheduled deep scan `codeql.yml` (both with their own `java-kotlin` language list), **and a GitHub-managed dynamic run** (`path: dynamic/github-code-scanning/codeql`, check name `Analyze (java-kotlin)`, surfaced as "Code Quality: PR #N"). The third is configured in **repo settings, not in any file in this repo**, so §9.2's TypeScript enablement is two file edits *plus* a settings change | Read of both workflows + `gh api repos/labsai/EDDI/actions/runs/<id>` on PR #670 |
+| V13b | As of `00420daa5` the ci.yml `codeql` job is **deliberately ungated** — no `needs: detect-changes`, no `if:` — so it builds with Maven on *every* PR including docs-only ones (done so OpenSSF Scorecard sees a SAST run on each PR head SHA). This makes its `-DskipUi=true` (§8.2) load-bearing: without it, every docs-only PR would run the full npm build | Read of ci.yml on current main |
 | V14 | `sbom` job invokes `cyclonedx:makeBom` as a direct plugin goal — it runs **no lifecycle phases** and therefore will not trigger the frontend build; it needs no `skipUi` flag | Maven invocation semantics + workflow read |
 | V15 | `git subtree` is available in the local Git for Windows | `git subtree -h` |
 | V16 | `gitleaks` is **not** installed locally; the Phase-0 history pre-scan (§4.3) needs it installed first | `command -v gitleaks` |
@@ -698,11 +699,17 @@ concurrency:
 
 Review `auto-approve-copilot.yml` to confirm its rules behave sensibly for npm dependabot PRs.
 
-### 9.2 CodeQL for TypeScript — **both** workflows (V13)
+### 9.2 CodeQL for TypeScript — **all three** surfaces (V13)
 
-Convert the language to a matrix `[java-kotlin, javascript-typescript]` in the ci.yml
-`codeql` job **and** in `codeql.yml`. The JS leg needs no Maven build step; the Java leg
-keeps its build with `-DskipUi=true` (§8.2). Own commit; independently revertible.
+1. Convert the language to a matrix `[java-kotlin, javascript-typescript]` in the ci.yml
+   `codeql` job **and** in `codeql.yml`. The JS leg needs no Maven build step; the Java leg
+   keeps its build with `-DskipUi=true` (§8.2).
+2. The **third** surface is the GitHub-managed dynamic run (`Analyze (java-kotlin)`, V13)
+   configured in **repo settings**, not in a file here. Enable `javascript-typescript` there
+   too, or the newly in-repo TypeScript stays unscanned by it. This is a settings change and
+   cannot be done in the PR — put it on the §10 checklist.
+
+Own commit; independently revertible.
 
 ### 9.3 `CODEOWNERS`
 
@@ -719,6 +726,11 @@ Add `ui/manager/` and `ui/chat/` entries mirroring the backend rules.
 - `README.md` + `CONTRIBUTING.md`: build instructions, badges.
 - Sweep stale references: `grep -rn "EDDI-Manager\|eddi-chat-ui\|EDDI-Chat-UI" docs/ README.md CONTRIBUTING.md`
 - Update `docs/changelog.md` **in the same commit** (AGENTS.md §2.8).
+- **`docs/` is published to docs.labs.ai via GitBook**, with `docs/SUMMARY.md` as the table of
+  contents — a GitBook check runs on every PR and renders a preview. Any *new* page added
+  under `docs/` needs a `SUMMARY.md` entry or it is written but never published. (Files not
+  listed there — `changelog.md` among them — are deliberately unpublished, and `planning/`
+  lies outside the GitBook space entirely, which is why plan documents belong there.)
 
 ### 9.5 Archive the old repos — sequencing
 
@@ -736,13 +748,34 @@ Add `ui/manager/` and `ui/chat/` entries mirroring the backend rules.
 
 | Where | What |
 |---|---|
-| GitHub branch protection on `labsai/EDDI` | Required contexts are currently `["CodeQL Analysis", "Build & Test"]` (V11). **Add** `UI Build & Test`, `Build Image`, `Backend E2E (mongodb)` (exact job `name:` strings once written). Without this the new gates are decorative. |
+| GitHub branch protection on `labsai/EDDI` | Required contexts are currently `["CodeQL Analysis", "Build & Test"]` (V11). **Add** `UI Build & Test`, `Build Image`, `Backend E2E (mongodb)` (exact job `name:` strings once written). Without this the new gates are decorative — **but read the skipped-check caveat below first.** |
 | GitHub repo settings | Confirm nothing later enables "require linear history" (would forbid the merge-commit this migration depends on for history) |
+| GitHub code-scanning settings | Add `javascript-typescript` to the **GitHub-managed** CodeQL surface (`Analyze (java-kotlin)`, V13) — it lives in repo settings, not in a workflow file, so §9.2's file edits do not reach it |
 | Local machines | `EDDI.code-workspace` references the separate folders — update. The `EDDI-Manager-track-2` checkout becomes obsolete. Delete stale local copies of the deploy scripts. |
 | eddi-website / docs.labs.ai | Repo links for Manager and chat-ui |
 | Docker Hub `labsai/eddi` description | Repo links |
 | Old repos | Dependabot/CodeQL/e2e workflows stop on archive — expected; their replacements live here |
 | Unaffected (verified) | `quarkus-eddi` SDK (consumes the Docker image only); `ContainerBaseIT`'s inline Dockerfile (UI rides inside `quarkus-app/`) |
+
+> **⚠ Caveat before making any path-gated job a required context.** All three proposed new
+> contexts are gated (`ui-build-and-test` on `outputs.ui`, `build-image` / `e2e-fullstack` on
+> `outputs.code`), so on a docs-only PR they do not run. GitHub reports a **job-level** `if:`
+> skip as a check run with conclusion `skipped`, which branch protection treats as satisfied
+> — unlike a **workflow-level** path filter, which leaves the context "Expected" forever and
+> wedges the PR. The existing `Build & Test` is job-level gated the same way, so the pattern
+> should be safe.
+>
+> This had never actually been exercised here: every recent `docs(...)` PR (#667, #652, #623)
+> also touched `src/`, so `Build & Test` really ran. **PR #670 — the plan PR itself — is the
+> first truly docs-only PR**, and it sat at `mergeStateStatus: BLOCKED` with
+> `Build & Test: SKIPPED`. That block was attributable to `reviewDecision: REVIEW_REQUIRED`,
+> not the skipped check.
+>
+> **Confirm empirically before adding the contexts:** once #670 has an approving review, check
+> whether `mergeStateStatus` becomes `CLEAN`. If it does, skipped-as-satisfied is proven and
+> the contexts are safe to add. If it stays `BLOCKED`, do **not** add path-gated jobs as
+> required — instead add a tiny always-running job that depends on them and reports success
+> when they are skipped, and require *that* instead.
 
 ---
 

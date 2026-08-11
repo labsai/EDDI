@@ -5,11 +5,13 @@
 
 ---
 
-## 📦 docs(planning): monorepo migration plan — fold EDDI-Manager and EDDI-Chat-UI into this repo (2026-08-10)
+## 📦 docs(planning): monorepo migration plan — fold EDDI-Manager and EDDI-Chat-UI into this repo (2026-08-11)
 
 **Repo:** EDDI (`chore/monorepo-migration-plan`)
 
-Plan only — no code moved yet. Adds `docs/planning/monorepo-migration-plan.md`.
+Plan only — no code moved yet. Adds `planning/monorepo-migration-plan.md`.
+
+**Corrections from observing the plan PR's own CI (#670)** — four facts the plan asserted or omitted, now fixed against reality: (a) there are **three** CodeQL surfaces, not two — besides the `ci.yml` job and `codeql.yml`, a GitHub-managed dynamic run (`Analyze (java-kotlin)`) is configured in repo *settings*, so enabling TypeScript is two file edits plus a settings change; (b) `dependency-review-action` now warns that `deny-licenses` is deprecated for removal in its next major, so the GPL/AGPL gate should not be built on it long-term; (c) `docs/` is published to docs.labs.ai through GitBook with `docs/SUMMARY.md` as the TOC — new pages need a SUMMARY entry or they are written but never published, and `planning/` sits outside that space, which independently confirms plan documents belong there; (d) the §10 advice to make the new `ui-build-and-test` / `build-image` / `e2e-fullstack` jobs *required* contexts carries a trap, because all three are path-gated and skip on docs-only PRs — job-level `if:` skips are reported as `skipped` and should satisfy protection (unlike workflow-level path filters, which wedge a PR forever), but this repo had never exercised it: every recent `docs(...)` PR also touched `src/`. #670 is the first genuinely docs-only PR, so the plan now says to confirm the behaviour on it before adding any path-gated context, with an always-running aggregator job as the fallback.
 
 The trigger was an E2E coverage audit. Full-stack browser tests live in `EDDI-Manager/.github/workflows/e2e.yml` and are the only place where frontend and backend are verified together — but they pull `labsai/eddi:latest` from Docker Hub, so they run against the last *published* backend, never the commit under test. A backend PR that breaks a Manager contract is therefore caught after publish and attributed to the wrong repo. The Manager's own PRs run only the MSW-mocked tier, so mock drift is silent by construction. Neither gap is fixable while the repos are split, because no single PR can build both sides.
 
