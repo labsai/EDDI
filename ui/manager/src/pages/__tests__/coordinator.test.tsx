@@ -433,7 +433,12 @@ describe("CoordinatorPage", () => {
 
   // --- No coordinator data ---
 
-  it("shows empty state when coordinator status API fails", async () => {
+  // This test used to assert the opposite — that a failed status fetch renders
+  // the empty state. That was the bug: "No coordinator data available / the
+  // service may still be starting up" tells the operator to wait for data that
+  // is never coming. The empty state is for a reachable coordinator with nothing
+  // to report; a failed fetch gets ErrorState and a retry.
+  it("shows an error state, not 'starting up', when the status fetch fails", async () => {
     server.use(
       http.get("*/administration/coordinator/status", () => {
         return new HttpResponse(null, { status: 500 });
@@ -443,8 +448,12 @@ describe("CoordinatorPage", () => {
     renderCoordinator();
 
     await waitFor(() => {
-      expect(screen.getByText(/No coordinator data available/)).toBeInTheDocument();
+      expect(screen.getByText("Something went wrong")).toBeInTheDocument();
     });
+
+    expect(
+      screen.queryByText(/No coordinator data available/),
+    ).not.toBeInTheDocument();
   });
 
   // --- Error categories (based on actual dead letter data) ---
@@ -480,4 +489,5 @@ describe("CoordinatorPage", () => {
       expect(screen.getByText("DISCONNECTED")).toBeInTheDocument();
     });
   });
+
 });

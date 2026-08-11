@@ -3126,6 +3126,7 @@
     "restrictionTitle": "处理限制（Art. 18）",
     "resultsTitle": "擦除完成",
     "statusActive": "处理已激活",
+    "statusUnknown": "状态不可用",
     "statusRestricted": "处理已受限",
     "subtitle": "符合 GDPR 的用户数据管理——擦除（Art. 17）、可携带性（Art. 15/20）和处理限制（Art. 18）",
     "title": "隐私与合规",

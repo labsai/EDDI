@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.design-sync.tsbuildinfo",
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      // The previews import from the bundle's package name; the converter maps it
+      // to the re-export entry, so mirror that here or every preview is an error.
+      "eddi-manager": ["./.design-sync/ds-entry.tsx"]
+    }
+  },
+  // src/vite-env.d.ts supplies `vite/client` and the `__APP_VERSION__` global. The
+  // entry re-exports real app code, so without it every `import.meta.env` and the
+  // sidebar's version footer fail to resolve here.
+  "include": [".design-sync/**/*.ts", ".design-sync/**/*.tsx", "src/vite-env.d.ts"]
+}

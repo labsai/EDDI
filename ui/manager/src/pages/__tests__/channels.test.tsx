@@ -297,6 +297,55 @@ describe("ChannelsPage", () => {
     });
   });
 
+  // ─── Error state ────────────────────────────────────────────────────────
+
+  it("shows an error state, not the empty state, when the list fails to load", async () => {
+    server.use(
+      http.get("*/channelstore/channels/descriptors", () => {
+        return HttpResponse.json({ message: "boom" }, { status: 500 });
+      })
+    );
+
+    renderWithProviders(<ChannelsPage />, {
+      initialRoute: "/manage/channels",
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    });
+
+    // The bug this pins: a failed fetch used to fall through to "No channels
+    // yet", telling the user nothing exists when nothing could be reached.
+    expect(screen.queryByText("No channels yet")).not.toBeInTheDocument();
+  });
+
+  it("offers a retry that refetches the list", async () => {
+    let calls = 0;
+    server.use(
+      http.get("*/channelstore/channels/descriptors", () => {
+        calls++;
+        return calls === 1
+          ? HttpResponse.json({ message: "boom" }, { status: 500 })
+          : HttpResponse.json([]);
+      })
+    );
+
+    renderWithProviders(<ChannelsPage />, {
+      initialRoute: "/manage/channels",
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Retry"));
+
+    await waitFor(() => {
+      expect(screen.getByText("No channels yet")).toBeInTheDocument();
+    });
+  });
+
   // ─── Confirm delete flow ──────────────────────────────────────────────
 
   it("confirms channel deletion when Delete is clicked", async () => {

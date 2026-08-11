@@ -84,32 +84,39 @@ comment-intact runs agree, so nothing here depends on incidental matches):
 |---|---|
 | nothing | 0 of 5 |
 | `ui` + `shared` (pre-patch) | **2 of 5** — `-foreground`, `-accent` |
-| `ui` + `shared` + `layout` | **4 of 5** — adds `--color-sidebar`, `-border` |
+| `ui` + `shared` + `layout` | **5 of 5** |
 
 The two that survive without `layout` are held up by `shared/mode-switcher.tsx` alone
 (`bg-sidebar`, `text-sidebar-foreground`, `text-sidebar-accent`). Everything else that reads
-these tokens — `border-sidebar-border`, `fill-sidebar-accent`, `bg-sidebar-accent` — lives in
-`layout/sidebar.tsx`, so scanning `layout` is what restores them.
+these tokens — `border-sidebar-border`, `fill-sidebar-accent`, `bg-sidebar-accent`,
+`text-sidebar-accent-foreground` — lives in `layout/sidebar.tsx`, so scanning `layout` is
+what restores them.
 
 Adding the line also emits the layout **utilities** themselves — without it the sheet has no
-`.fill-sidebar-accent` and no `.border-s-2`, ~8.7 KB in all (45.4 KB → 54.1 KB), so a synced
+`.fill-sidebar-accent` and no `.border-s-2`, ~8.7 KB in all (45.4 KB → 54.3 KB), so a synced
 `Sidebar`/`TopBar` renders unstyled.
 
-**`--color-sidebar-accent-foreground` never reaches `:root` in any configuration**, because
-no file anywhere uses a `*-sidebar-accent-foreground` utility — `sidebar.tsx` pairs
-`bg-sidebar-accent` with `text-sidebar` instead. It ships only inside the `.dark` block,
-which is plain CSS and emitted verbatim. Nothing renders wrong today, but the light value
-declared in `src/index.css` (`#ffffff`) does not reach the bundle. Fixing it means touching
-`src/index.css`, so it is left alone here.
+`--color-sidebar-accent-foreground` used to reach `:root` in **no** configuration, because
+nothing anywhere used that utility — the sidebar's user avatar paired `bg-sidebar-accent`
+with `text-sidebar`. It now uses `text-sidebar-accent-foreground`, its semantically correct
+partner (identical in light, one shade off in dark, so no visible change), which is what
+takes the count from 4 to 5. **That single call site is the only thing keeping the token in
+the bundle** — if it is ever refactored away, the token silently vanishes again.
 
 > An earlier version of this note claimed the pre-patch bundle shipped **zero** sidebar
-> tokens and that the `layout` line restores **five**. Both numbers were wrong (it is 2 → 4),
-> but the conclusion stands: the scan was incomplete and the line is required.
+> tokens and that the `layout` line restores **five**. The first number was wrong (it was 2),
+> and five only became true once the avatar call site above was fixed. The conclusion always
+> stood: the scan was incomplete and the line is required.
 
 ## Re-sync risks / watch-list
 - **`build-css.mjs` depends on `src/index.css`'s `@import 'tailwindcss';` line** and on
   `@source`-able component dirs. If the app migrates Tailwind config or moves index.css,
   update build-css.mjs.
+- **`.design-sync/` is type-checked** by `tsconfig.design-sync.json`, wired into `tsc -b`
+  via `tsconfig.json`'s references. It maps `eddi-manager` → `ds-entry.tsx` so the previews
+  resolve, and pulls in `src/vite-env.d.ts` for `import.meta.env` / `__APP_VERSION__`. A
+  preview that passes a wrong prop now fails `npm run typecheck` instead of surviving until
+  someone runs a sync.
 - **`cfg.entry` + `componentSrcMap` are hand-maintained.** New ui/shared components are
   NOT auto-discovered — they must be added to both. Conversely, deleting a component from
   the repo without updating these breaks the build.

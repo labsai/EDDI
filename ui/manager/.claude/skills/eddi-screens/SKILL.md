@@ -63,8 +63,7 @@ Rules that hold across pages:
   in a `flex flex-wrap items-center gap-2` group. Buttons already supply `gap-2` from `cva`.
 - Toolbar: search on `flex-1`, `ViewToggle` after it. Persist the choice with
   `getStoredViewMode(page)` / `setStoredViewMode(page, mode)` from
-  `src/components/shared/view-mode.ts` — 5 of the 6 pages with a `ViewToggle` do
-  (`channels.tsx` is the one that forgets, so its view resets on every visit).
+  `src/components/shared/view-mode.ts` — all 6 pages with a `ViewToggle` do.
   Where a result count is shown, it is a
   `text-xs font-semibold uppercase tracking-wider text-muted-foreground` line above the grid.
 - Inline guidance banners: `rounded-xl border border-primary/20 bg-primary/5 p-4`.
@@ -98,10 +97,23 @@ Loading → error → empty → content, as guarded blocks (the `agents.tsx` for
 ```
 
 Use the `Skeleton` primitive inside a card-shaped wrapper, not a bare `animate-pulse` div.
-Always render an error branch — `ErrorState` is in 16 pages, `EmptyState` in 8; the pages
-that hand-roll these (`channels.tsx` builds its own empty state inline) are the ones to fix,
-not to copy. Empty state distinguishes "no results for this search" from "nothing exists
-yet", and only the latter offers the create action.
+`ErrorState` is in 19 pages, `EmptyState` in 9. Empty state distinguishes "no results for
+this search" from "nothing exists yet", and only the latter offers the create action.
+
+**Every page that loads data has an error branch — keep it that way.** Falling through to
+the empty state on a failed fetch is the recurring bug here: it tells the user "nothing
+exists yet" or "data will appear automatically" when the truth is "we could not reach the
+backend". Pick the shape by surface:
+
+- `ErrorState` — replaces the container. For a page or panel with nothing else to show.
+- `RefetchErrorNotice` — a compact amber strip that keeps the last good data on screen.
+  For a *background* refetch failure on a polling page, or an inline control (a picker
+  inside a form) where a full error box would be out of scale. Pass an explicit `message`
+  when the initial load failed — its default wording says data is merely stale.
+- A neutral "unknown" state — when the value drives a decision. `gdpr.tsx` renders a grey
+  "status unavailable" chip rather than its green "Processing Active" badge, and disables
+  the toggle, because reporting an unknown restriction state as a known-safe one is worse
+  than showing nothing.
 
 ## Card grid vs table
 

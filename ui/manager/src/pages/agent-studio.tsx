@@ -7,6 +7,7 @@ import { getWorkflow } from "@/lib/api/workflows";
 import { PipelineRailroad } from "@/components/studio/pipeline-railroad";
 import { StudioEditorPanel, StudioEditorEmpty } from "@/components/studio/studio-editor-panel";
 import { ChatPanel } from "@/components/chat/chat-panel";
+import { ErrorState } from "@/components/shared/error-state";
 import {
   ArrowLeft,
   Bot,
@@ -59,7 +60,12 @@ export function AgentStudioPage() {
   }, [agentDescriptor]);
 
   // Fetch agent config — must pass version for the API to return data
-  const { data: agentConfig, isLoading: agentLoading } = useQuery({
+  const {
+    data: agentConfig,
+    isLoading: agentLoading,
+    isError: agentError,
+    refetch: refetchAgent,
+  } = useQuery({
     queryKey: ["studio", "agent", agentId, agentVersion],
     queryFn: () => getAgent(agentId!, agentVersion),
     enabled: !!agentId && !!agentDescriptor,
@@ -104,6 +110,20 @@ export function AgentStudioPage() {
         <p className="ms-2 text-sm text-muted-foreground">
           {t("studio.loading", "Loading agent...")}
         </p>
+      </div>
+    );
+  }
+
+  // Without this the studio fell through to its normal chrome with an empty
+  // pipeline, which is indistinguishable from an agent that has no workflow.
+  if (agentError) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetchAgent()}
+          retryLabel={t("common.retry")}
+        />
       </div>
     );
   }

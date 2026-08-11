@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { StreamBadge } from "@/components/ui/stream-badge";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { ErrorState } from "@/components/shared/error-state";
 import { toast } from "sonner";
 import {
   useCoordinatorStatus,
@@ -53,7 +54,7 @@ export function CoordinatorPage() {
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("coordinator"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
-  const { data: status, isLoading: statusLoading, refetch: refetchStatus } = useCoordinatorStatus();
+  const { data: status, isLoading: statusLoading, isError: statusError, refetch: refetchStatus } = useCoordinatorStatus();
   const { data: deadLetters, isLoading: dlLoading, refetch: refetchDL } = useDeadLetters();
   const { liveStatus, sseConnected, eventHistory } = useCoordinatorSSE();
   const replayMutation = useReplayDeadLetter();
@@ -215,6 +216,14 @@ export function CoordinatorPage() {
             </div>
           ))}
         </div>
+      ) : statusError && !currentStatus ? (
+        // Distinct from the empty state below: that one tells the user to wait for
+        // data that is still coming, which is the wrong advice after a failed fetch.
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetchStatus()}
+          retryLabel={t("common.retry")}
+        />
       ) : currentStatus ? (
         <>
           {/* Hero card — full-width connection status */}

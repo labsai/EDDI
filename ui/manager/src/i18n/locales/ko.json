@@ -3126,6 +3126,7 @@
     "restrictionTitle": "처리 제한 (Art. 18)",
     "resultsTitle": "삭제 완료",
     "statusActive": "처리 활성",
+    "statusUnknown": "상태를 확인할 수 없음",
     "statusRestricted": "처리 제한됨",
     "subtitle": "GDPR 준수 사용자 데이터 관리 — 삭제(Art. 17), 이동성(Art. 15/20), 처리 제한(Art. 18)",
     "title": "개인정보 보호 및 규정 준수",

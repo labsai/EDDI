@@ -344,7 +344,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             data-testid="sidebar-user"
           >
             {/* Avatar */}
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-xs font-bold text-sidebar">
+            {/* text-sidebar-accent-foreground is the token that pairs with
+                bg-sidebar-accent. Identical to the text-sidebar it replaces in light
+                mode (#ffffff), and one shade off in dark (#0c0a09 vs #09090b) — both
+                near-black on gold, so no visible change. It is also the app's only
+                use of the token: without it Tailwind tree-shakes it out of the
+                design-system bundle entirely (see .design-sync/NOTES.md). */}
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-xs font-bold text-sidebar-accent-foreground">
               {initials}
             </div>
             {!collapsed && (

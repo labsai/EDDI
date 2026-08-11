@@ -3152,6 +3152,7 @@
     "restrictionTitle": "Restrição de processamento (Art. 18)",
     "resultsTitle": "Exclusão concluída",
     "statusActive": "Processamento ativo",
+    "statusUnknown": "Estado indisponível",
     "statusRestricted": "Processamento restrito",
     "subtitle": "Gerenciamento de dados do usuário em conformidade com o GDPR — exclusão (Art. 17), portabilidade (Art. 15/20) e restrição de processamento (Art. 18)",
     "title": "Privacidade e conformidade",

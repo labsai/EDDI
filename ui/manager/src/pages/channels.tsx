@@ -6,6 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { ViewToggle } from "@/components/shared/view-toggle";
+import { EmptyState } from "@/components/shared/empty-state";
+import { ErrorState } from "@/components/shared/error-state";
+import {
+  getStoredViewMode,
+  setStoredViewMode,
+  type ViewMode,
+} from "@/components/shared/view-mode";
 import { ChannelCard } from "@/components/channels/channel-card";
 import { CreateChannelDialog } from "@/components/channels/create-channel-dialog";
 import {
@@ -19,14 +26,19 @@ export function ChannelsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"card" | "list">("card");
+  const [view, setView] = useState<ViewMode>(() => getStoredViewMode("channels"));
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{
     id: string;
     version: number;
   } | null>(null);
 
-  const { data: channels, isLoading } = useEnrichedChannelDescriptors();
+  const {
+    data: channels,
+    isLoading,
+    isError,
+    refetch,
+  } = useEnrichedChannelDescriptors();
   const deleteMutation = useDeleteChannel();
   const duplicateMutation = useDuplicateChannel();
 
@@ -57,6 +69,11 @@ export function ChannelsPage() {
 
   const handleDuplicate = (id: string, version: number) => {
     duplicateMutation.mutate({ id, version });
+  };
+
+  const handleViewChange = (mode: ViewMode) => {
+    setView(mode);
+    setStoredViewMode("channels", mode);
   };
 
   return (
@@ -137,7 +154,7 @@ export function ChannelsPage() {
           </Badge>
         )}
         <div className="ms-auto">
-          <ViewToggle view={view} onChange={setView} />
+          <ViewToggle view={view} onChange={handleViewChange} />
         </div>
       </div>
 
@@ -148,26 +165,27 @@ export function ChannelsPage() {
             <div key={i} className="h-40 rounded-xl border border-border/50 bg-card animate-pulse" />
           ))}
         </div>
+      ) : isError ? (
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetch()}
+          retryLabel={t("common.retry")}
+        />
       ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
-            <Cable className="h-8 w-8 text-muted-foreground" />
-          </div>
-          <div>
-            <p className="font-medium text-foreground">
-              {search ? t("common.noResults") : t("channels.empty", "No channels yet")}
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {t("channels.emptyDesc", "Create a channel integration to connect agents to Slack.")}
-            </p>
-          </div>
-          {!search && (
-            <Button onClick={() => setCreateOpen(true)} className="gap-2">
-              <Plus className="h-4 w-4" />
-              {t("channels.create", "Create Channel")}
-            </Button>
-          )}
-        </div>
+        <EmptyState
+          icon={Cable}
+          title={search ? t("common.noResults") : t("channels.empty", "No channels yet")}
+          description={
+            !search
+              ? t(
+                  "channels.emptyDesc",
+                  "Create a channel integration to connect agents to Slack.",
+                )
+              : undefined
+          }
+          actionLabel={!search ? t("channels.create", "Create Channel") : undefined}
+          onAction={!search ? () => setCreateOpen(true) : undefined}
+        />
       ) : view === "card" ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((ch) => (
