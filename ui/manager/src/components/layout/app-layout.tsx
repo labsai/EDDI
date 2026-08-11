@@ -9,6 +9,7 @@ import { WelcomeModal } from "@/components/onboarding/welcome-modal";
 import { GuidedTour } from "@/components/onboarding/guided-tour";
 import { TourOfferBar } from "@/components/onboarding/tour-offer-bar";
 import { MockDataBanner } from "./mock-data-banner";
+import { UpdateBanner } from "./update-banner";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 
 import { cn } from "@/lib/utils";
@@ -79,6 +80,7 @@ export function AppLayout() {
       {/* Main content area */}
       <div className="flex flex-1 flex-col overflow-hidden">
         <MockDataBanner />
+        <UpdateBanner />
         <TopBar
           onMenuClick={() => setMobileSidebarOpen(true)}
           sidebarVisible={mobileSidebarOpen}

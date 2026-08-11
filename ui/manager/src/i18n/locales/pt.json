@@ -3678,5 +3678,30 @@
   },
   "workforceWizard": {
     "title": "Nova equipa"
+  },
+  "updates": {
+    "title": "Atualizações do EDDI",
+    "description": "Verifique se existe uma versão mais recente do EDDI. Nada é enviado até que você solicite.",
+    "installed": "Instalada",
+    "latestRelease": "Versão mais recente",
+    "unknownVersion": "Desconhecida",
+    "checkNow": "Verificar agora",
+    "checking": "Verificando…",
+    "autoCheck": "Verificar automaticamente a cada carregamento da página",
+    "autoCheckHint": "Executa uma verificação por recarregamento do navegador e mostra um aviso quando houver uma versão mais recente.",
+    "privacyNote": "A verificação contata api.github.com diretamente do seu navegador. Nenhum dado da implantação é enviado.",
+    "neverChecked": "Nenhuma verificação executada ainda.",
+    "upToDate": "Você está usando a versão mais recente ({{version}}).",
+    "updateAvailable": "EDDI {{version}} está disponível",
+    "updateAvailableDetail": "Você está usando {{installed}}.",
+    "ahead": "Você está usando {{installed}}, mais recente que a última versão publicada ({{version}}).",
+    "unknownInstalled": "A versão mais recente é {{version}}. Não foi possível determinar a versão instalada, portanto não há com o que comparar.",
+    "publishedOn": "Publicada em {{date}}",
+    "releaseNotes": "Notas da versão",
+    "allReleases": "Todas as versões",
+    "howToUpdate": "Como atualizar",
+    "howToUpdateCli": "Com a CLI eddi (criada pelo instalador):",
+    "howToUpdateManual": "Sem a CLI, a partir do seu diretório de instalação (~/.eddi por padrão):",
+    "howToUpdateNote": "Ajuste as flags -f conforme a sua configuração — adicione -f docker-compose.auth.yml se usar Keycloak."
   }
 }

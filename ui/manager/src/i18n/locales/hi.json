@@ -3649,5 +3649,30 @@
   },
   "workforceWizard": {
     "title": "नई टीम"
+  },
+  "updates": {
+    "title": "EDDI अपडेट",
+    "description": "देखें कि EDDI का कोई नया रिलीज़ उपलब्ध है या नहीं। जब तक आप न कहें, कुछ भी नहीं भेजा जाता।",
+    "installed": "इंस्टॉल किया गया",
+    "latestRelease": "नवीनतम रिलीज़",
+    "unknownVersion": "अज्ञात",
+    "checkNow": "अभी जाँचें",
+    "checking": "जाँच हो रही है…",
+    "autoCheck": "हर बार पेज लोड होने पर स्वतः जाँचें",
+    "autoCheckHint": "ब्राउज़र के हर रीलोड पर एक जाँच चलाता है और नया रिलीज़ मिलने पर बैनर दिखाता है।",
+    "privacyNote": "जाँच आपके ब्राउज़र से सीधे api.github.com से संपर्क करती है। तैनाती का कोई डेटा नहीं भेजा जाता।",
+    "neverChecked": "अभी तक कोई जाँच नहीं की गई।",
+    "upToDate": "आप नवीनतम रिलीज़ ({{version}}) चला रहे हैं।",
+    "updateAvailable": "EDDI {{version}} उपलब्ध है",
+    "updateAvailableDetail": "आप {{installed}} चला रहे हैं।",
+    "ahead": "आप {{installed}} चला रहे हैं, जो नवीनतम रिलीज़ ({{version}}) से भी नया है।",
+    "unknownInstalled": "नवीनतम रिलीज़ {{version}} है। इंस्टॉल की गई वर्शन का पता नहीं चल सका, इसलिए तुलना संभव नहीं है।",
+    "publishedOn": "{{date}} को प्रकाशित",
+    "releaseNotes": "रिलीज़ नोट्स",
+    "allReleases": "सभी रिलीज़",
+    "howToUpdate": "अपडेट कैसे करें",
+    "howToUpdateCli": "eddi CLI (इंस्टॉलर द्वारा बनाई गई) के साथ:",
+    "howToUpdateManual": "CLI न हो तो अपनी इंस्टॉल डायरेक्ट्री (डिफ़ॉल्ट ~/.eddi) से:",
+    "howToUpdateNote": "-f फ़्लैग अपने सेटअप के अनुसार बदलें — Keycloak उपयोग करते हों तो -f docker-compose.auth.yml जोड़ें।"
   }
 }

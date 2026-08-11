@@ -3765,5 +3765,30 @@
   },
   "workforceWizard": {
     "title": "فريق جديد"
+  },
+  "updates": {
+    "title": "تحديثات EDDI",
+    "description": "تحقّق مما إذا كان هناك إصدار أحدث من EDDI. لا يُرسَل أي شيء حتى تطلب ذلك.",
+    "installed": "المثبَّت",
+    "latestRelease": "أحدث إصدار",
+    "unknownVersion": "غير معروف",
+    "checkNow": "تحقّق الآن",
+    "checking": "جارٍ التحقّق…",
+    "autoCheck": "التحقّق تلقائيًا عند كل تحميل للصفحة",
+    "autoCheckHint": "يُجري عملية تحقّق واحدة عند كل إعادة تحميل للمتصفح، ويعرض شريطًا عند توفّر إصدار أحدث.",
+    "privacyNote": "يتصل التحقّق بـ api.github.com مباشرةً من متصفحك. لا تُرسَل أي بيانات عن النشر.",
+    "neverChecked": "لم يتم إجراء أي تحقّق بعد.",
+    "upToDate": "أنت تستخدم أحدث إصدار ({{version}}).",
+    "updateAvailable": "الإصدار EDDI {{version}} متاح",
+    "updateAvailableDetail": "أنت تستخدم {{installed}}.",
+    "ahead": "أنت تستخدم {{installed}}، وهو أحدث من آخر إصدار منشور ({{version}}).",
+    "unknownInstalled": "أحدث إصدار هو {{version}}. تعذّر تحديد الإصدار المثبَّت، لذا لا يوجد ما تتم مقارنته.",
+    "publishedOn": "نُشر في {{date}}",
+    "releaseNotes": "ملاحظات الإصدار",
+    "allReleases": "كل الإصدارات",
+    "howToUpdate": "كيفية التحديث",
+    "howToUpdateCli": "باستخدام أداة eddi (التي ينشئها المثبِّت):",
+    "howToUpdateManual": "بدون الأداة، من دليل التثبيت (~/.eddi افتراضيًا):",
+    "howToUpdateNote": "عدِّل خيارات -f بما يناسب إعدادك — أضف -f docker-compose.auth.yml إذا كنت تستخدم Keycloak."
   }
 }

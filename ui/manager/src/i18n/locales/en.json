@@ -3675,5 +3675,30 @@
   },
   "workforceWizard": {
     "title": "New Team"
+  },
+  "updates": {
+    "title": "EDDI Updates",
+    "description": "Check whether a newer EDDI release is available. Nothing is sent until you ask.",
+    "installed": "Installed",
+    "latestRelease": "Latest release",
+    "unknownVersion": "Unknown",
+    "checkNow": "Check now",
+    "checking": "Checking…",
+    "autoCheck": "Check automatically on every page load",
+    "autoCheckHint": "Runs one check per browser reload and shows a banner when a newer release exists.",
+    "privacyNote": "Checks contact api.github.com directly from your browser. No deployment data is sent.",
+    "neverChecked": "No check run yet.",
+    "upToDate": "You are running the latest release ({{version}}).",
+    "updateAvailable": "EDDI {{version}} is available",
+    "updateAvailableDetail": "You are running {{installed}}.",
+    "ahead": "You are running {{installed}}, which is newer than the latest release ({{version}}).",
+    "unknownInstalled": "The latest release is {{version}}. The installed version could not be determined, so there is nothing to compare it against.",
+    "publishedOn": "Published {{date}}",
+    "releaseNotes": "Release notes",
+    "allReleases": "All releases",
+    "howToUpdate": "How to update",
+    "howToUpdateCli": "With the eddi CLI (created by the installer):",
+    "howToUpdateManual": "Without the CLI, from your install directory (~/.eddi by default):",
+    "howToUpdateNote": "Adjust the -f flags to match your setup — add -f docker-compose.auth.yml if you run Keycloak."
   }
 }
