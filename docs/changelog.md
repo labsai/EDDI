@@ -5,6 +5,26 @@
 
 ---
 
+## 🔒 feat(vault): allowedAgents is enforced instead of decorative (2026-08-10)
+
+**Repo:** EDDI (`feat/vault-grant-enforcement`)
+
+`SecretMetadata.allowedAgents` was documented as *"for visibility only — enforcement is via configuration authorship, not runtime resolution"*. That access model assumes a **human admin** authors agent configurations; `create_sub_agent` lets an LLM author one, so an operator who scoped a secret to a single agent got no enforcement at all.
+
+**Enforced at deployment, deliberately not at resolution.** `SecretResolver` sees only a string — no agent identity — and several of its ~12 call sites legitimately run outside any conversation, while `AgentSigningService` bypasses it entirely. Worse, `ChatModelRegistry` caches the built model keyed on the **unresolved** parameters, so two agents sharing a config share a cache entry: a check behind that cache runs for whichever agent built the model first and is silently skipped for every other one — enforcement that looks real and is not. The agent/secret binding is established in the agent's **configuration**, so that is where it is checked: completely, once, with no cache in the way, beside the existing deploy-time `lintInertHitlConfig`.
+
+`VaultGrantChecker` walks the agent's workflows → llm/apicalls/mcpcalls configs, serializes each and scans for `${vault:...}` references, then verifies each against `allowedAgents`. The scan **serializes rather than enumerating** known credential fields — enumeration is how this kind of check rots when a new credential field appears.
+
+The gate lives in **`AgentFactory.deployAgent`**, the one place every deployment funnels through — the scheduled poll, `RestAgentAdministration`'s explicit deploy (which is how `create_sub_agent` reaches production) and `ConversationService`'s deploy-on-demand. An earlier revision gated only the scheduled manager, which left the REST path — the one an LLM actually uses — completely unchecked.
+
+`eddi.vault.grant-enforcement` = `off` | `warn` (default) | `enforce`, parsed strictly — `enforced` silently meaning `warn` would turn one typo into a control that is off while appearing on, so an unusable value fails startup with the valid values named.
+
+**Uncertainty never becomes a violation:** unreadable metadata, a disabled vault, an unreadable workflow, and absent/empty/wildcard grants all allow. Every wizard-vaulted key carries `["*"]`, so stock deployments see no change. **Not a revocation mechanism** — an agent deployed before its grant was narrowed keeps resolving until redeployed.
+
++21 tests, covering the agent document itself, all four extension types (llm / apicalls / mcpcalls / rag) and every enforcement mode. 121 green.
+
+---
+
 ## 🔗 fix(agents): wire the deployment-wait machinery that only the ZIP importer ever used (2026-08-09)
 
 **Repo:** EDDI (`fix/deployment-wait-machinery`)
@@ -634,9 +654,9 @@ Suite at the environmental baseline (13,954 run; 8 failures / 294 errors, all lo
 
 **Repo:** EDDI (`chore/scorecard-pinned-deps-and-sast`)
 
-Two medium-weight checks sat at 9/10. Both were one-line causes.
+Follow-up to the Branch-Protection fix below. Two medium-weight checks sat at 9/10; both were one-line causes.
 
-**Pinned-Dependencies.** `src/main/docker/Dockerfile.demo` was never brought in line with the digest-pinning procedure in AGENTS.md that the production `Dockerfile` already follows — `maven:3.9-eclipse-temurin-25` (line 23) and `eclipse-temurin:25-jre` (line 46) were tag-only. Both now carry `@sha256:` digests. The digests were resolved directly from the Docker Hub registry API rather than copied from the Scorecard warning, and matched it exactly.
+**Pinned-Dependencies.** `src/main/docker/Dockerfile.demo` was never brought in line with the digest-pinning procedure in AGENTS.md that the production `Dockerfile` already follows — `maven:3.9-eclipse-temurin-25` (line 23) and `eclipse-temurin:25-jre` (line 46) were tag-only. Both now carry `@sha256:` digests. The digests were resolved directly from the Docker Hub registry API rather than copied from the Scorecard warning, and matched it exactly. The file header, which described the images as unpinned, was corrected to match — caught in review by both Copilot and CodeRabbit.
 
 **SAST.** `ci.yml` gated the CodeQL job behind `detect-changes`, on this premise:
 
@@ -644,9 +664,30 @@ Two medium-weight checks sat at 9/10. Both were one-line causes.
 
 That premise is wrong. Scorecard's SAST check reads check runs on the **PR head commit** — `checks/raw/sast.go` calls `ListCheckRunsForRef(pr.HeadSHA)` — so scanning `main` on push is invisible to it, and any docs-only PR that skipped CodeQL was counted as an unscanned commit. Hence `28 commits out of 30 are checked with a SAST tool`. The gate (and the now-unnecessary `needs: detect-changes`) is removed, so CodeQL runs on every PR.
 
-Impact is limited to `pull_request` events: CodeQL already ran unconditionally on pushes, and the `docker` job that lists `codeql` in its `needs` is push-only, so its gating is unaffected. The cost is a `mvnw compile -DskipTests` on docs-only PRs.
+Impact is limited to `pull_request` events: CodeQL already ran unconditionally on pushes, and the `docker` job that lists `codeql` in its `needs` is push-only, so its gating is unaffected. The cost is a `mvnw compile -DskipTests` on docs-only PRs. Note the SAST score will not jump immediately — the two unscanned commits stay inside Scorecard's 30-commit window until enough new PRs push them out.
 
 **Scoring note.** Both checks are Medium weight; each is worth ~0.05 on the aggregate. Deliberately *not* addressed: `Signed-Releases`, which is `-1` ("no releases found" — every release has zero attached assets). It is excluded from the aggregate while inconclusive, and a signed-but-unattested artifact scores only 8, which would *lower* the overall score. Only full SLSA provenance (10) would beat leaving it alone. Container signing does not count — the check inspects GitHub release assets, never a registry.
+
+---
+
+## 🛡️ fix(ci): unblock the OpenSSF Branch-Protection check on release branches (2026-08-05)
+
+**Repo:** EDDI (`fix/scorecard-branch-protection`)
+
+Scorecard reported `Branch-Protection: 0` with 22 warnings, one per `release/5.0.1`–`release/5.6.0` branch. Root cause is not a regression in our settings: the check builds its branch list from `release.target_commitish` over the **30 most recent releases** (`clients/githubrepo/releases.go` calls `ListReleases` with an empty `ListOptions`, so one page, no pagination). Our 30 newest releases are `6.2.0` down to `5.0.1` — the eight 6.x releases target `main`, the twenty-two 5.x ones still target the `release/x.y.z` branch they were cut from. The final score is a normalised sum across *every* branch in that set with no release-branch exemption, so `main` scoring well was averaged against 22 zeros.
+
+**The branches were kept, not deleted.** Deleting them would have scored better in one step (only `main` left in the set), and 21 of 22 tips are identical to their tag so nothing would have been lost — except `release/5.6.0`, which carries `cf82cc06 "fixed release build"` one commit past the `5.6.0` tag and covered by no tag at all. More importantly the old GitHub releases point at these branches, so they stay. Protection was applied instead, via repository settings (not in this repo):
+
+- a **classic wildcard rule** on `release/*` — deletion and force-push blocked, PRs required with 2 approvals, code-owner review, status checks `Build & Test` + `CodeQL Analysis`
+- a **ruleset** `Frozen release branches` on `refs/heads/release/*` with `deletion` + `non_fast_forward` and **zero bypass actors**, which is what makes `branchProtectionAppliesToAdmins` resolve true (`EnforceAdmins = asPtr(len(BypassActors.Nodes) == 0)`)
+
+**Classic protection was chosen over expressing everything as a ruleset, deliberately.** Rulesets surface the admin-only fields (`RequiresStrictStatusChecks`, `DismissesStaleReviews`, `RequireLastPushApproval`), which would then have to be *true* on every branch to score — dragging `main` into up-to-date-before-merge and stale-review dismissal. Classic protection exposes only `refUpdateRule`, giving the release branches the same probe-availability profile as `main`. That uniformity also matters because `computeFinalScore` uses `scores[0].maxes` — an arbitrary entry of a Go map — as the max template for all branches, so branches with mismatched availability produce a score that varies run to run.
+
+**Why the action bump is the actual code change here.** Applying the above made the check report `-1`: `error during GetBranch(release/5.6.0): Resource not accessible by integration`. The pinned `scorecard-action@v2.4.3` ships scorecard **v5.3.0**, whose `branchesHandler.setup()` tolerates the permission error for the *default* branch but whose `query()` — used for every non-default branch — has no tolerance at all, so classic protection on a non-default branch is fatal under the read-only `GITHUB_TOKEN`. v5.5.0 added the same `isPermissionsError` guard to `query()`, tolerating it whenever the repo has at least one ruleset. `scorecard-action@v2.4.4` ships v5.5.0, so the pin moves to `2d1146689b8cda280b9bc96326124645441f03bc`.
+
+**Deliberately left off:** "require branches to be up to date", "dismiss stale reviews" and "include administrators" on the release rule. Those map to admin-only GraphQL fields that our read-only token cannot see, so they are scored `NotAvailable` and excluded from the max — enabling them buys zero points and only adds friction.
+
+**Expected result: 8/10**, with `main`'s merge workflow completely unchanged (still 1 approval, no code-owner gate, no rebase treadmill). The remaining 2 points require `main` itself to move to 2 approvals + code-owner review; that is a two-person dependency rather than a two-approval one while `.github/CODEOWNERS` lists only `@ginccc` and `@rolandpickl`, and widening it was explicitly deferred. The check re-runs on its own — `scorecard.yml` triggers on `branch_protection_rule`.
 
 ---
 
