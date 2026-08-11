@@ -3578,7 +3578,8 @@
       },
       "blockedSelfTarget": "Ein Agent darf seine eigene Definition nicht ändern, und diese Anfrage betrifft den eigenen Agenten des Operators ({{agentId}}). Solange sie enthalten ist, kann der gesamte Stapel nicht genehmigt werden — lehnen Sie ab und nehmen Sie diese Änderung auf der Seite dieses Agenten vor.",
       "blockedGateCarrying": "Diese Anfrage schreibt eine LLM-Konfiguration, die ihr eigenes Freigabe-Gate (toolApprovals) setzt und damit das prüfende Gate ersetzen würde. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und ändern Sie das Gate auf der Seite des Agenten.",
-      "blockedGateUnverifiable": "Diese Anfrage schreibt eine LLM-Konfiguration, deren Inhalt zu groß ist, um vollständig angezeigt zu werden; es lässt sich daher nicht bestätigen, dass sie kein Freigabe-Gate überschreibt. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und nehmen Sie die Änderung auf der Seite des Agenten vor."
+      "blockedGateUnverifiable": "Diese Anfrage schreibt eine LLM-Konfiguration, deren Inhalt nicht vollständig lesbar ist — zu groß für die Anzeige oder kein gültiges JSON —, daher lässt sich nicht bestätigen, dass sie kein Freigabe-Gate überschreibt. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und nehmen Sie die Änderung auf der Seite des Agenten vor.",
+      "blockedGateUnpinned": "Diese Anfrage schreibt eine LLM-Konfiguration, ist aber nicht fixiert; was tatsächlich ausgeführt wird, kann daher vom hier Gezeigten abweichen und es lässt sich nicht bestätigen, dass kein Freigabe-Gate überschrieben wird. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und nehmen Sie die Änderung auf der Seite des Agenten vor."
     },
     "starters": {
       "whatsDeployed": "Was ist derzeit deployt?",

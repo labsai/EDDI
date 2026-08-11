@@ -3606,7 +3606,8 @@
       },
       "blockedSelfTarget": "Um agente não pode alterar a sua própria definição, e este pedido visa o próprio agente do operador ({{agentId}}). Enquanto estiver presente, todo o lote não pode ser aprovado — rejeite-o e faça esta alteração a partir da página desse agente.",
       "blockedGateCarrying": "Esta solicitação grava uma configuração de LLM que define o seu próprio portão de aprovação (toolApprovals), o que substituiria o portão que a está a rever. A aprovação fica indisponível para todo o lote enquanto estiver presente — rejeite e altere o portão a partir da página do próprio agente.",
-      "blockedGateUnverifiable": "Esta solicitação grava uma configuração de LLM cujo corpo é demasiado grande para ser mostrado por completo, pelo que não é possível confirmar que não substitui o portão de aprovação. A aprovação fica indisponível para todo o lote enquanto estiver presente — rejeite e faça esta alteração a partir da página do próprio agente."
+      "blockedGateUnverifiable": "Esta solicitação grava uma configuração de LLM cujo corpo não pode ser lido por completo — é demasiado grande para ser apresentado ou não é JSON válido —, pelo que não é possível confirmar que não substitui o portão de aprovação. A aprovação fica indisponível para todo o lote enquanto estiver presente — rejeite e faça esta alteração a partir da página do próprio agente.",
+      "blockedGateUnpinned": "Esta solicitação grava uma configuração de LLM mas não está fixada, pelo que o que é realmente executado pode diferir do que é mostrado aqui e não é possível confirmar que não substitui o portão de aprovação. A aprovação fica indisponível para todo o lote enquanto estiver presente — rejeite e faça esta alteração a partir da página do próprio agente."
     },
     "starters": {
       "whatsDeployed": "O que está implantado neste momento?",

@@ -39,6 +39,15 @@ import type { PendingToolCallView } from "@/lib/api/hitl";
  * document without it. That narrows one task's special protection; it never
  * produces an ungated agent, and a human still approves the whole document.
  *
+ * ## Why an unpinned request is refused
+ *
+ * `requestPinned` false means the preview is best-effort and the actual request
+ * can still change before it runs. Reading such a body and finding no
+ * `toolApprovals` establishes nothing about what will execute. Since this is a
+ * control rather than an advisory, "cannot be reasoned about" has to mean
+ * "refused" — otherwise the guard is bypassed by the one request shape it cannot
+ * see.
+ *
  * ## Why a truncated body is refused
  *
  * The preview body is capped at 8 KiB by the backend
@@ -62,8 +71,8 @@ import type { PendingToolCallView } from "@/lib/api/hitl";
  * removing the easy path, not as a boundary.
  */
 
-/** Why one call was refused. Distinguishes the two failure modes for the UI. */
-export type GateCarryingReason = "carries-gate" | "unverifiable-body";
+/** Why one call was refused. Distinguishes the failure modes for the UI. */
+export type GateCarryingReason = "carries-gate" | "unverifiable-body" | "unpinned-request";
 
 /** A call refused because its body could set, or might set, an approval gate. */
 export interface GateCarryingCall {
@@ -141,6 +150,19 @@ export function findGateCarryingCalls(
     // its own reasons; that is not this guard's business.)
     const body = preview.body;
     if (body == null || body.trim() === "") continue;
+
+    // An UNPINNED http call is previewed best-effort: per PendingToolCallView's
+    // own contract the request "can still change before it runs" (a call with
+    // pre-request property instructions). Inspecting that body proves nothing —
+    // a preview without `toolApprovals` can become a gate-carrying write between
+    // approval and execution, which is a bypass of this entire control rather
+    // than a gap in it. Only a pinned request is re-checked against its
+    // fingerprint immediately before execution, so only a pinned request can be
+    // reasoned about.
+    if (!call.requestPinned) {
+      found.push({ callId: call.callId, reason: "unpinned-request" });
+      continue;
+    }
 
     if (preview.bodyTruncated) {
       found.push({ callId: call.callId, reason: "unverifiable-body" });

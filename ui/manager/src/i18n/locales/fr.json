@@ -3606,7 +3606,8 @@
       },
       "blockedSelfTarget": "Un agent ne peut pas modifier sa propre définition, et cette requête vise l'agent de l'opérateur lui-même ({{agentId}}). Tant qu'elle est présente, l'ensemble du lot ne peut pas être approuvé — rejetez-la et effectuez cette modification depuis la page de cet agent.",
       "blockedGateCarrying": "Cette requête écrit une configuration LLM qui définit sa propre barrière d'approbation (toolApprovals), ce qui remplacerait la barrière qui l'examine. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et modifiez la barrière depuis la page de l'agent.",
-      "blockedGateUnverifiable": "Cette requête écrit une configuration LLM dont le corps est trop volumineux pour être affiché en entier ; on ne peut donc pas confirmer l'absence de remplacement de la barrière d'approbation. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et effectuez cette modification depuis la page de l'agent."
+      "blockedGateUnverifiable": "Cette requête écrit une configuration LLM dont le corps ne peut être lu intégralement — trop volumineux ou JSON invalide — ; on ne peut donc pas confirmer l'absence de remplacement de la barrière d'approbation. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et effectuez cette modification depuis la page de l'agent.",
+      "blockedGateUnpinned": "Cette requête écrit une configuration LLM mais n'est pas épinglée : ce qui s'exécute réellement peut différer de ce qui est affiché ici, et l'absence de remplacement de la barrière d'approbation ne peut être confirmée. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et effectuez cette modification depuis la page de l'agent."
     },
     "starters": {
       "whatsDeployed": "Qu'est-ce qui est déployé actuellement ?",

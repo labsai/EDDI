@@ -91,6 +91,30 @@ describe("findGateCarryingCalls", () => {
     expect(findGateCarryingCalls([call("c1", { body })])).toEqual([]);
   });
 
+  it("refuses an UNPINNED request — a best-effort preview can change before it runs", () => {
+    // PendingToolCallView's own contract: an unpinned http call is previewed
+    // best-effort and "can still change before it runs". A body inspected and
+    // found gate-free can therefore execute carrying toolApprovals — a bypass of
+    // this control, not a gap in it. Only a pinned request is re-checked against
+    // its fingerprint immediately before execution.
+    const unpinned = {
+      callId: "c1",
+      toolName: "http_put_llmstore",
+      source: "http",
+      argsTruncated: false,
+      requestPinned: false,
+      requestPreview: {
+        method: "PUT",
+        uri: "https://eddi.example/llmstore/llms/abc123",
+        queryParams: {},
+        headers: {},
+        body: llmBody({}),
+        bodyTruncated: false,
+      },
+    } as PendingToolCallView;
+    expect(findGateCarryingCalls([unpinned])).toEqual([{ callId: "c1", reason: "unpinned-request" }]);
+  });
+
   it("refuses a truncated body — not seeing the field is not the field being absent", () => {
     const found = findGateCarryingCalls([
       call("c1", { body: llmBody({}), bodyTruncated: true }),

@@ -3604,7 +3604,8 @@
       },
       "blockedSelfTarget": "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page.",
       "blockedGateCarrying": "This request writes an LLM configuration that sets its own approval gate (toolApprovals), which would replace the gate reviewing it. Approving is unavailable for the whole batch while it is present — reject, and change the gate from the agent's own page.",
-      "blockedGateUnverifiable": "This request writes an LLM configuration whose body is too large to show in full, so it cannot be confirmed free of an approval-gate override. Approving is unavailable for the whole batch while it is present — reject, and make this change from the agent's own page."
+      "blockedGateUnverifiable": "This request writes an LLM configuration whose body cannot be read in full — it is either too large to display or not valid JSON — so it cannot be confirmed free of an approval-gate override. Approving is unavailable for the whole batch while it is present — reject, and make this change from the agent's own page.",
+      "blockedGateUnpinned": "This request writes an LLM configuration but is not pinned, so what actually runs can differ from what is shown here and cannot be confirmed free of an approval-gate override. Approving is unavailable for the whole batch while it is present — reject, and make this change from the agent's own page."
     },
     "starters": {
       "whatsDeployed": "What's deployed right now?",

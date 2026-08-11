@@ -1,6 +1,6 @@
 import type { PendingToolCallView } from "@/lib/api/hitl";
 import { findSelfTargetedCalls } from "./self-guard";
-import { findGateCarryingCalls } from "./gate-guard";
+import { findGateCarryingCalls, type GateCarryingReason } from "./gate-guard";
 
 /**
  * Every hard refusal the Manager applies to a pending tool-call batch, in one
@@ -58,18 +58,30 @@ export function findBlockedCalls(
     ),
   }));
 
+  // One reason string per failure mode, not one for "everything that is not a
+  // confirmed gate". `unverifiable-body` covers a truncated body AND an
+  // unparseable one, so a message naming only size would misdiagnose a small
+  // malformed payload; `unpinned-request` is a different cause with a different
+  // remedy again. An approver acting on a wrong explanation is worse served than
+  // one given a vaguer but true one.
+  const gateReason: Record<GateCarryingReason, string> = {
+    "carries-gate": t(
+      "operator.approval.blockedGateCarrying",
+      "This request writes an LLM configuration that sets its own approval gate (toolApprovals), which would replace the gate reviewing it. Approving is unavailable for the whole batch while it is present — reject, and change the gate from the agent's own page.",
+    ),
+    "unverifiable-body": t(
+      "operator.approval.blockedGateUnverifiable",
+      "This request writes an LLM configuration whose body cannot be read in full — it is either too large to display or not valid JSON — so it cannot be confirmed free of an approval-gate override. Approving is unavailable for the whole batch while it is present — reject, and make this change from the agent's own page.",
+    ),
+    "unpinned-request": t(
+      "operator.approval.blockedGateUnpinned",
+      "This request writes an LLM configuration but is not pinned, so what actually runs can differ from what is shown here and cannot be confirmed free of an approval-gate override. Approving is unavailable for the whole batch while it is present — reject, and make this change from the agent's own page.",
+    ),
+  };
+
   const gateCarrying = findGateCarryingCalls(calls).map((hit) => ({
     callId: hit.callId,
-    reason:
-      hit.reason === "carries-gate"
-        ? t(
-            "operator.approval.blockedGateCarrying",
-            "This request writes an LLM configuration that sets its own approval gate (toolApprovals), which would replace the gate reviewing it. Approving is unavailable for the whole batch while it is present — reject, and change the gate from the agent's own page.",
-          )
-        : t(
-            "operator.approval.blockedGateUnverifiable",
-            "This request writes an LLM configuration whose body is too large to show in full, so it cannot be confirmed free of an approval-gate override. Approving is unavailable for the whole batch while it is present — reject, and make this change from the agent's own page.",
-          ),
+    reason: gateReason[hit.reason],
   }));
 
   return [...selfTargeted, ...gateCarrying];

@@ -189,13 +189,37 @@ export function useActivateOperator() {
 
       // Read the gate back from the document we just created — never trust that
       // sending hitlConfig means it landed. This is what actually proves
-      // isWriteScopeAvailable's "backend accepts hitlConfig" fact; a caught
-      // exception here still resolves (not throws) so a read_only activation
-      // that failed only its verification step is reported, not treated as a
-      // failed provision.
+      // isWriteScopeAvailable's "backend accepts hitlConfig" fact.
+      //
+      // For read_only this stays REPORTED, not enforced: a caught exception or a
+      // negative result means an operator that can only read is also unverified,
+      // which is useless rather than dangerous.
+      //
+      // For read_write it is ENFORCED, and that distinction is load-bearing.
+      // `isWriteScopeAvailable` no longer demands a gate verified on a PREVIOUS
+      // operator, on the stated grounds that activation proves the gate about the
+      // agent it actually creates — so this read-back has to be a gate rather
+      // than a status line, or that justification is false. Reporting it and
+      // proceeding would leave exactly the hole the old two-step bootstrap
+      // existed to close.
+      //
+      // The write canary below is NOT a substitute for this check. It provokes
+      // one endpoint (`PATCH /descriptorstore/descriptors/{id}`), so it proves
+      // the patch pattern pauses and says nothing about `http.post:*`,
+      // `http.put:*` or `http.delete:*`. A document whose gate covers only some
+      // write methods passes the canary while leaving the rest ungated;
+      // `gateLooksInstalled` is what inspects the whole pattern set. The two are
+      // complementary: this one checks the configuration is sound, the canary
+      // checks it is actually enforced at runtime.
       onStage?.("verifying-gate");
       const gate = await verifyGateInstalled(result.agentId);
       await reportOperatorGateStatus(gate.verified);
+      if (next.scope === "read_write" && !gate.verified) {
+        await rollBackUnsafeOperator(
+          next,
+          `The approval gate could not be verified on the operator's own agent document${gate.reason ? ` (${gate.reason})` : ""}.`,
+        );
+      }
 
       // A READY badge only proves the config loaded. Run one real read so a
       // deployed-but-unreachable operator is reported as such, not as success.
@@ -241,6 +265,39 @@ export function useActivateOperator() {
       qc.invalidateQueries({ queryKey: operatorKeys.all });
     },
   });
+}
+
+/**
+ * Tear down an operator that is already DEPLOYED but failed a safety check, and
+ * throw with the reason.
+ *
+ * Shares `enforceWriteCanaryGate`'s contract deliberately, because the situation
+ * is identical: provisioning deploys before any check runs, so by the time a
+ * check fails there are live write tools reachable right now. Reporting and
+ * moving on would leave them reachable. `resetOperator` (undeploy, delete, clear
+ * the config variable) rather than discarding the local object, because the
+ * caller already persisted the config — anything less leaves it pointing at an
+ * agent this just deleted.
+ *
+ * A failed rollback is called out explicitly rather than surfacing as a bare
+ * transport error, for the same reason as there: "Failed to fetch" reads as a
+ * retryable blip, and the admin would never learn a write-capable operator is
+ * still live.
+ */
+async function rollBackUnsafeOperator(config: OperatorConfig, failure: string): Promise<never> {
+  try {
+    await resetOperator(config);
+  } catch (rollbackError) {
+    const detail = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+    throw new Error(
+      `${failure} Rolling it back ALSO failed (${detail}). The operator is still deployed with ` +
+        "write tools and an unverified gate — remove it manually from the operator screen now.",
+    );
+  }
+  throw new Error(
+    `${failure} The operator has been deactivated and removed rather than left deployed ` +
+      "with write tools behind a gate that could not be verified.",
+  );
 }
 
 /**

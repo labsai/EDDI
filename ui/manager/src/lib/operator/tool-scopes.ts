@@ -218,15 +218,21 @@ export const READ_ENDPOINTS: readonly string[] = [
  *   diffing one they cannot see.
  *
  * Deliberately NOT here, regardless of how safe the request would look:
- * `PUT /agentstore/agents/{id}`, `PUT /groupstore/groups/{id}`, and every
- * `llmstore` write — the documents that carry a gate of their own
+ * `PUT /agentstore/agents/{id}` and `PUT /groupstore/groups/{id}` — the
+ * full-document updates that carry a gate of their own
  * (`AgentConfiguration.hitlConfig.toolApprovals`; `AgentGroupConfiguration
- * .hitlConfig` plus each `DiscussionPhase.requiresApproval`;
- * `LlmConfiguration.Task.toolApprovals`, which fully replaces the agent-level
- * gate). A create can be checked in isolation — "does this new document have a
- * gate" needs no prior state — but a full-document *update* cannot: "was the
- * gate just weakened" is a diff question, and nothing here has a prior version
- * to diff against.
+ * .hitlConfig` plus each `DiscussionPhase.requiresApproval`). A create can be
+ * checked in isolation — "does this new document have a gate" needs no prior
+ * state — but a full-document *update* cannot: "was the gate just weakened" is
+ * a diff question, and nothing here has a prior version to diff against.
+ *
+ * `llmstore` writes ARE granted, and are the one exception to that rule: its
+ * `Task.toolApprovals` carries a gate too, but the exception is bought by a
+ * separate control rather than by an argument. `gate-guard.ts` refuses any
+ * llmstore write that carries the field, or that cannot be shown not to —
+ * which converts "was the gate weakened" from an unanswerable diff question
+ * into an answerable property of the body alone. Do not grant `llmstore`
+ * without that guard, and do not weaken the guard while this stays granted.
  * `escalation-flags.ts` deliberately stays a pure function of the resolved
  * body alone (see its own doc comment), so it cannot answer that question
  * either — extending it to try would mean fetching and comparing prior state
