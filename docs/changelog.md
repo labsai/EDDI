@@ -7,6 +7,44 @@
 
 
 
+## 🔢 docs(mcp): the MCP tool catalogue was eight tools short, and a count sweep of both READMEs (2026-08-11)
+
+**Repo:** EDDI (`docs/group-collaboration-refresh`)
+
+`docs/mcp-server.md` claimed **76** tools and its twelve section headers summed to 76 — internally
+consistent and externally wrong. The code has **84** `@Tool` methods, and `McpToolFilter.MCP_TOOLS`
+whitelists exactly those 84, so the doc was the only artefact disagreeing. Two tables had silently
+stopped being updated:
+
+- **Group Conversation Tools: 11 → 18.** Missing `followup_with_member`,
+  `continue_group_discussion`, `close_group_conversation`, `add_team_task`, `list_team_backlog`,
+  `list_group_templates`, `create_group_from_template` — i.e. the whole of I10 (templates) and I13
+  (standing teams), plus the entire post-discussion lifecycle.
+- **HITL Tools: 9 → 10.** Missing `submit_group_human_input`, the one that lets a HUMAN member
+  actually speak (as opposed to approve) — the counterpart already documented on the REST side.
+
+Header now 84, the whitelist paragraph too, and every section header matches its own row count.
+Verified mechanically rather than by eye: each of the 84 names is now present in the page, and the
+whitelist and the `@Tool` set are in exact parity with no entry on either side alone.
+
+Also corrected: `describe_discussion_styles` was sold as covering "all 6 discussion styles". Six is
+what the tool's hardcoded text really covers — but the engine has **seven** built-in styles, so
+"all" was the false word. It now says six and names the gap (`NEGOTIATION`), pointing at the full
+table. **The tool's own output is still six** — a code fix, deliberately not made on a docs branch.
+
+**Count sweep of both READMEs.** Every numeric claim re-derived from source; all four hold, so no
+edit was needed: `7 built-in discussion styles` (7 + `CUSTOM`), `80+ MCP tools` (84), `50+
+Micrometer metrics` (127 distinct meter names), and the `tests-14,000+` badge (14,368 annotations).
+The badges are floors on purpose — that is what lets them survive a merge without a doc change.
+
+One neighbour did not hold: **`docs/langchain.md` claimed 12 providers and then listed ten**,
+omitting Google Vertex AI (`gemini-vertex`) — a registered builder in `LlmModule`, and one the same
+page's own JSON-format table refers to. The enumeration now names all eleven builders, so the
+sentence's arithmetic closes: eleven registered + any OpenAI-compatible endpoint via `baseUrl` = 12.
+
+---
+
+
 ## 🔎 docs: Copilot review on #647 — five findings, all confirmed against source (2026-08-11)
 
 **Repo:** EDDI (`docs/group-collaboration-refresh`)

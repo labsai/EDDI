@@ -10,7 +10,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | --------------------------- | ------------------------------------- |
 | `http://localhost:7070/mcp` | MCP server endpoint (default + admin) |
 
-## Available Tools (76)
+## Available Tools (84)
 
 ### Conversation Tools (11)
 
@@ -83,11 +83,11 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `fire_schedule_now`     | Manually trigger a schedule fire immediately. Useful for testing or one-off executions                                                                                                              |
 | `retry_failed_schedule` | Re-queue a dead-lettered schedule for another fire attempt after fixing the cause of failure                                                                                                        |
 
-### Group Conversation Tools (11)
+### Group Conversation Tools (18)
 
 | Tool                        | Description                                                                                                                                                |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `describe_discussion_styles` | Rich descriptions of all 6 discussion styles with phase flows, member roles, and use cases                                                                |
+| `describe_discussion_styles` | Rich descriptions of six discussion styles with phase flows, member roles, and use cases. **Note:** the engine now has seven built-in styles — this tool's text predates `NEGOTIATION` and does not cover it; see [Group Conversations](group-conversations.md#discussion-styles) for the full set |
 | `list_groups`               | List all group configurations with name, style, member count                                                                                               |
 | `read_group`                | Read a group configuration's full details                                                                                                                  |
 | `create_group`              | Create a group (members, moderator, style, roles, member types, tasks). Supports nested groups via `memberTypes=GROUP` and pre-configured TASK_FORCE tasks via `tasks` param |
@@ -98,6 +98,13 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `list_group_conversations`  | List past group discussions for a group, with state and timestamps                                                                                         |
 | `start_group_discussion`    | Start a discussion asynchronously (returns immediately with groupConversationId). Poll with `read_group_conversation`                                     |
 | `delete_group_conversation` | Delete a group conversation and cascade-delete all member conversations                                                                                    |
+| `followup_with_member`      | Ask one member a follow-up on a finished discussion. The agent retains its full context; question and answer are both recorded on the group transcript. Accepts an agent ID or a member's display name |
+| `continue_group_discussion` | Continue a finished discussion with a new question. Every member re-runs the phases retaining memory of prior rounds; the round counter increments        |
+| `close_group_conversation`  | Close a conversation permanently — ends member conversations and cleans up dynamically-created agents. No further follow-ups or continuations             |
+| `add_team_task`             | File a task on a standing team's backlog (I13). The backlog outlives any one discussion; cadences pull executable tasks from it into task-force runs      |
+| `list_team_backlog`         | List a standing team's backlog (I13) with each task's status, priority, assignee, and verification outcome                                                |
+| `list_group_templates`      | List the packaged group templates (I10), each naming the roles `create_group_from_template` expects                                                       |
+| `create_group_from_template` | Create a group from a template by assigning agents to its named roles (`roleAssignments` maps role → agent ID, or principal ID for HUMAN roles). Saves through the normal store path, so every save-time validation applies |
 
 See [Group Conversations](group-conversations.md) for full style details, custom phases, and nested groups.
 
@@ -110,7 +117,7 @@ Read EDDI's own documentation over MCP **tools** — the counterpart to the `edd
 | `list_docs` | List the documentation pages this deployment serves (one name per line, no `.md` suffix). Read this first — the runtime set is smaller than the repository's |
 | `read_docs` | Read one page as markdown by name, e.g. `architecture`. Distinguishes an invalid name from an absent page      |
 
-### HITL Tools (9)
+### HITL Tools (10)
 
 Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the REST HITL endpoints, at parity for both the regular (1:1) and group surfaces. Authorization mirrors REST exactly (per-conversation owner / `eddi-admin` / `eddi-approver` via the shared `HitlAccessGuard`); decisions are attributed server-side as `mcp:<principal>`. Mutating tools honour the `eddi.mcp.hitl.mutations.enabled` kill-switch and return structured errors (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST`).
 
@@ -124,6 +131,7 @@ Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the RES
 | `list_all_group_pending_approvals`| Cross-group HITL inbox across all groups (owner-scoped)                                                                        |
 | `get_group_approval_status`       | Read a paused group discussion's status (summary; `detail=full` returns the whole conversation)                               |
 | `approve_group_phase`             | Approve/reject a paused phase, with optional `taskApprovals` JSON for TASK granularity; returns the resumed discussion         |
+| `submit_group_human_input`        | Submit a HUMAN member's response for the turn an `AWAITING_HUMAN_INPUT` discussion is waiting on (I6). Recorded as that member's transcript entry; the discussion resumes from the next speaker. Only the pending member's own principal (or an admin) may submit — this is the member **speaking**, not approving |
 | `cancel_group_discussion`         | Cancel an in-progress or paused group discussion                                                                              |
 
 See [HITL](hitl.md#mcp-surface) for the full authority model, the kill-switch, and REST-endpoint parity.
@@ -593,7 +601,7 @@ eddi.docs.path=docs
 
 EDDI uses a **whitelist-based `ToolFilter`** (`McpToolFilter.java`) to control which tools are exposed via MCP.
 
-**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 76 intended tools — conversation, admin/resource/schedule/channel, setup, group, **HITL approvals** (`McpHitlTools`), **persistent user memory** (`McpMemoryTools`), **GDPR/CCPA** (`McpGdprTools`), and **docs** (`McpDocTools`).
+**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 84 intended tools — conversation, admin/resource/schedule/channel, setup, group, **HITL approvals** (`McpHitlTools`), **persistent user memory** (`McpMemoryTools`), **GDPR/CCPA** (`McpGdprTools`), and **docs** (`McpDocTools`).
 
 To add a new MCP tool: add its name to the `MCP_TOOLS` set in `McpToolFilter.java`. A quarkus-MCP `@Tool` has no other invocation path, so a tool that is *not* whitelisted is unreachable dead code. `McpToolFilterTest.test_allMcpToolMethods_areWhitelisted()` auto-discovers every `@Tool` in the `engine.mcp` package and fails the build if any is missing from the whitelist — so forgetting this step is caught by CI.
 
