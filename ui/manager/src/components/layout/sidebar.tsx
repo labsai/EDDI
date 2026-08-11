@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePendingApprovals } from "@/hooks/use-hitl";
 import {
@@ -35,6 +35,7 @@ import {
   Variable,
   HandMetal,
   Sparkles,
+  ArrowUpCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -89,6 +90,7 @@ const navSections = [
       { path: "/manage/orphans", icon: Link2Off, labelKey: "nav.orphans" },
       { path: "/manage/sync", icon: RefreshCw, labelKey: "nav.sync" },
       { path: "/manage/gdpr", icon: ShieldAlert, labelKey: "nav.gdpr" },
+      { path: "/manage/updates", icon: ArrowUpCircle, labelKey: "nav.updates", fallback: "Updates" },
     ],
   },
 ] as const;
@@ -119,6 +121,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const showUser = method === "keycloak" && user;
 
   const { data: serverVersion, isLoading } = useEddiVersion();
+
+  const versionLabel = isLoading
+    ? "Checking version..."
+    : serverVersion && serverVersion !== UNKNOWN_VERSION
+      ? `EDDI ${serverVersion}`
+      : `EDDI Demo ${__APP_VERSION__}`;
 
   // Shares its query key with the approvals page, so mounting this in the
   // sidebar adds an observer rather than a second poll. The endpoint allows
@@ -375,16 +383,25 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       {/* Version + Collapse toggle */}
       <div className="border-t border-sidebar-border p-1.5">
         {!collapsed && (
-          <p 
-            className="mb-1 px-3 text-center text-[10px] text-sidebar-foreground/30"
-            title={serverVersion === UNKNOWN_VERSION ? `Standalone Demo Mode fallback` : undefined}
+          // The version is where "am I current?" gets asked, and it is the only
+          // place in the app that already states which release you are on — so
+          // it links to the Updates page instead of sitting there inert. The
+          // nav entry is the last item of the last section; this is the shortcut.
+          <Link
+            to="/manage/updates"
+            className="mb-1 block px-3 text-center text-[10px] text-sidebar-foreground/30 transition-colors hover:text-sidebar-accent"
+            title={
+              serverVersion === UNKNOWN_VERSION
+                ? `Standalone Demo Mode fallback`
+                : t("updates.title", "EDDI Updates")
+            }
+            // The visible text is a version string, which says nothing about
+            // where the link goes.
+            aria-label={`${versionLabel} — ${t("updates.title", "EDDI Updates")}`}
+            data-testid="sidebar-version"
           >
-            {isLoading
-              ? "Checking version..."
-              : serverVersion && serverVersion !== UNKNOWN_VERSION
-                ? `EDDI ${serverVersion}`
-                : `EDDI Demo ${__APP_VERSION__}`}
-          </p>
+            {versionLabel}
+          </Link>
         )}
         <button
           onClick={onToggle}

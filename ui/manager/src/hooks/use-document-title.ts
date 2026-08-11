@@ -45,6 +45,7 @@ export function useDocumentTitle() {
       approvals: t("nav.approvals", "Approvals"),
       memories: t("nav.memories", "User Memory"),
       variables: t("nav.variables", "Variables"),
+      updates: t("nav.updates", "Updates"),
       "user-conversations": t("nav.userConversations", "User Conversations"),
       // Not under /manage, so it arrives here as the first segment verbatim.
       workforce: t("nav.workforce", "Workforce"),

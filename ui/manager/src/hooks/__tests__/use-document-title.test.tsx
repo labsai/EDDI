@@ -49,6 +49,7 @@ describe("useDocumentTitle", () => {
     ["/manage/variables", "Variables"],
     ["/manage/operator", "Platform Operator"],
     ["/manage/user-conversations", "User Conversations"],
+    ["/manage/updates", "Updates"],
     ["/workforce", "Workforce"],
   ])("titles %s as %s", (path, label) => {
     expect(titleFor(path)).toBe(`${label} — EDDI Manager`);

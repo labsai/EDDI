@@ -82,14 +82,27 @@ describe("UpdateBanner", () => {
     expect(await screen.findByTestId("update-banner")).toBeInTheDocument();
   });
 
-  it("links to the update instructions on the dashboard and to the release notes", async () => {
+  it("stays out of the way on the page it points at", async () => {
+    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
+    renderWithProviders(<UpdateBanner />, { initialRoute: "/manage/updates" });
+
+    // Everything the banner says is already on that page, and its "How to
+    // update" link would navigate to where the reader already is.
+    await waitFor(() => expect(screen.queryByTestId("update-banner")).not.toBeInTheDocument());
+
+    // Still shows everywhere else, so this is a route rule and not a mute.
+    renderWithProviders(<UpdateBanner />, { initialRoute: "/manage/agents" });
+    expect(await screen.findByTestId("update-banner")).toBeInTheDocument();
+  });
+
+  it("links to the Updates page and to the release notes", async () => {
     localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     renderWithProviders(<UpdateBanner />);
 
     const banner = await screen.findByTestId("update-banner");
     expect(within(banner).getByRole("link", { name: /How to update/ })).toHaveAttribute(
       "href",
-      "/manage#updates",
+      "/manage/updates",
     );
     expect(within(banner).getByTestId("update-banner-notes-link")).toHaveAttribute(
       "href",

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
-import { Link } from "react-router-dom";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders } from "@/test/test-utils";
 import { DashboardPage } from "@/pages/dashboard";
 
 // ─── Dynamic mocks ────────────────────────────────────────────────────────
@@ -611,47 +610,12 @@ describe("DashboardPage", () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════
-  // #updates deep link (the update banner's "How to update")
+  // Update check
   // ═══════════════════════════════════════════════════════════════════════
 
-  it("scrolls the update section into view for a #updates deep link", () => {
-    const scrollIntoView = vi.fn();
-    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+  it("does not carry the update check — that lives on /manage/updates", () => {
+    renderWithProviders(<DashboardPage />);
 
-    renderWithProviders(<DashboardPage />, { initialRoute: "/manage#updates" });
-
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
-  });
-
-  it("re-scrolls on a repeat navigation to the same hash", async () => {
-    // Regression: keyed on `hash` alone the effect never re-ran, because the
-    // second click leaves the hash at #updates — so the banner's "How to
-    // update" link scrolled once and then silently did nothing.
-    const scrollIntoView = vi.fn();
-    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
-
-    renderWithProviders(
-      <>
-        <Link to="/manage#updates">go</Link>
-        <DashboardPage />
-      </>,
-      { initialRoute: "/manage#updates" },
-    );
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
-
-    await userEvent.click(screen.getByRole("link", { name: "go" }));
-    expect(scrollIntoView).toHaveBeenCalledTimes(2);
-
-    await userEvent.click(screen.getByRole("link", { name: "go" }));
-    expect(scrollIntoView).toHaveBeenCalledTimes(3);
-  });
-
-  it("does not scroll when there is no hash", () => {
-    const scrollIntoView = vi.fn();
-    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
-
-    renderWithProviders(<DashboardPage />, { initialRoute: "/manage" });
-
-    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("update-check-card")).not.toBeInTheDocument();
   });
 });

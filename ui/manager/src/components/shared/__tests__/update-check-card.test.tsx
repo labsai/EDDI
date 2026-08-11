@@ -358,6 +358,31 @@ describe("UpdateCheckCard", () => {
     expect(screen.queryByTestId("update-instructions")).not.toBeInTheDocument();
   });
 
+  it("names CSP as the cause instead of sending the operator after a proxy", async () => {
+    // What a stock EDDI deployment does: `connect-src 'self'` refuses the
+    // request in the browser, so "check your network or outbound proxy" points
+    // at everything except the header that actually has to change.
+    server.use(
+      http.get(LATEST_URL, () => {
+        document.dispatchEvent(
+          Object.assign(new Event("securitypolicyviolation"), {
+            blockedURI: "https://api.github.com",
+            effectiveDirective: "connect-src",
+          }),
+        );
+        return HttpResponse.error();
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<UpdateCheckCard />);
+
+    await user.click(await screen.findByTestId("update-check-now"));
+
+    expect(await screen.findByText(/Content-Security-Policy/)).toBeInTheDocument();
+    expect(screen.getByText(/connect-src/)).toBeInTheDocument();
+    expect(screen.queryByText(/Could not reach api\.github\.com/)).not.toBeInTheDocument();
+  });
+
   it("starts with the automatic check off", async () => {
     renderWithProviders(<UpdateCheckCard />);
     expect(await screen.findByTestId("update-auto-check")).not.toBeChecked();

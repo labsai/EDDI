@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   LayoutDashboard,
   Bot,
@@ -39,7 +39,6 @@ import { useOnboarding } from "@/hooks/use-onboarding";
 import { parseConversationUri } from "@/lib/api/conversations";
 import { useAgentDescriptors } from "@/hooks/use-agents";
 import { useOperatorConfig } from "@/hooks/use-operator";
-import { UpdateCheckCard } from "@/components/shared/update-check-card";
 
 // ─── State badge color helper ────────────────────────────────────────────────
 
@@ -85,22 +84,6 @@ export function DashboardPage() {
     const timer = setTimeout(() => maybeAutoStart("dashboard"), 500);
     return () => clearTimeout(timer);
   }, [maybeAutoStart]);
-
-  // The update banner links here with `#updates`. React Router does not scroll
-  // to hash targets on its own, and the section sits below the fold.
-  //
-  // Keyed on `key` as well as `hash`: clicking the banner link a second time
-  // leaves the hash at `#updates`, so on hash alone the effect would not re-run
-  // and the link would work exactly once. React Router mints a fresh key per
-  // navigation — including the `replace` it performs when the target equals the
-  // current location — which is the only thing that changes on that second click.
-  const { hash, key } = useLocation();
-  useEffect(() => {
-    if (!hash) return;
-    const target = document.getElementById(hash.slice(1));
-    // `scrollIntoView` is unimplemented in jsdom — optional call keeps tests green.
-    target?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-  }, [hash, key]);
 
   const statCards = [
     {
@@ -442,9 +425,6 @@ export function DashboardPage() {
           </div>
         )}
       </div>
-
-      {/* Update check — maintenance, so it sits last */}
-      <UpdateCheckCard />
     </div>
   );
 }
