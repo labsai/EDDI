@@ -34,6 +34,22 @@ Two defects in `endOldConversationsWithOldAgents`, fixed together because fixing
 The second was masked by the first. Correcting only the arithmetic would have converted a mostly-inert sweep into an eager one that ENDs live conversations — so the age signal now comes from the conversation's own newest step timestamp (`Data` stamps every entry at construction), with the descriptor kept only as a fallback and the conversation skipped entirely when no age signal exists at all. "Cannot prove it is idle" must never end a conversation.
 
 Pinned by `recentConversationOnStaleAgentSurvives` (an hour-old conversation on a two-year-stale agent survives) and `noGapsAcrossMonthBoundaries` (every offset 30→400 days). +9 tests.
+## 🔎 fix(setup): create_sub_agent could never work, and a failed setup left orphans (2026-08-10)
+
+**Repo:** EDDI (`fix/sub-agent-setup-hardening`)
+
+`AgentSetupService` is what `create_sub_agent` calls, and it deploys to production from an LLM-controlled path.
+
+1. **`create_sub_agent` failed outright for every provider that needs an API key — including the default.** The tool passed `apiKey = null` with the comment "inherited from vault", and its `@P` docs promised the same. Nothing implemented it. `setupAgent` rejects a null key for any non-local provider and an omitted provider resolves to `anthropic`, so sub-agent creation only ever worked for `ollama`/`jlama`/`bedrock`/`oracle-genai`. `resolveParentLlmProfile` now walks parent agent → workflow → LLM task; `DynamicAgentConfig.inheritParentModel` (a config field nothing read) drives provider/model inheritance. **Only a vault REFERENCE is inherited, never a plaintext key** — `vaultApiKey` falls back to plaintext when the vault is unconfigured, and copying that would multiply the fallback's blast radius.
+   - The parent must be read at its **resolved current version**: `RestVersionInfo.read` does `checkNotNull(version)`, so `readAgent(id, null)` always threw and the catch swallowed it — inheritance silently returned null and the original error persisted.
+2. **The allow-lists were checked against the raw argument.** `allowedProviders` was skipped entirely when the caller omitted `provider`, which then resolved to the default — so a group restricting providers was bypassed by not passing the parameter. Now checked against the **effective** provider, with the default exposed as `AgentSetupService.DEFAULT_PROVIDER` so the two files cannot drift.
+3. **A model was judged against the wrong provider.** `allowedModels` maps a provider to *that provider's* models, but with no provider named the check accepted a model from any provider's list and then paired it with the default — a config restricting openai to `gpt-4o-mini` built an *anthropic* agent running it. An unnamed provider must now land on a provider the policy actually covers; a named provider keeps its documented "absent list = no restriction".
+4. **A failed setup orphaned every document created before the failing step.** Six to eight documents across as many stores, no transaction, and a wrap-and-rethrow failure path — on a path an LLM can retry in a loop. Best-effort compensating delete in reverse order, permanent and never cascading, isolated so it cannot mask the original failure. Applied to `createApiAgent` too.
+5. **No length bounds on `agentName`/`systemPrompt`**, both LLM-supplied and persisted. Bounded before any resource is created.
+
+**Not changed:** every auto-vaulted key carries `allowedAgents = ["*"]`. `VaultSecretProvider` documents that field as "NOT enforced at resolution time", so narrowing it here would imply an enforcement that does not exist — addressed separately by the deploy-time grant checker.
+
+Rebased onto current `main`, which had independently fixed the neighbouring lifecycle/guardrail findings; only the genuinely-missing work is carried over. 269 tests green, +12 new.
 
 ---
 
