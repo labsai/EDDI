@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { OperatorDrawer } from "@/components/operator/operator-drawer";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -66,12 +67,13 @@ export function WorkforceTopbar({
       {/* Spacer when no title */}
       {!title && <div className="flex-1" />}
 
-      {/* Right side: action slot */}
-      {rightContent && (
-        <div className="flex shrink-0 items-center gap-1">
-          {rightContent}
-        </div>
-      )}
+      {/* Right side: the page's own actions, then the Platform Operator.
+          The operator is last so its panel, which opens flush to the header's
+          end edge, is not offset by whatever the page put beside it. */}
+      <div className="flex shrink-0 items-center gap-1">
+        {rightContent}
+        <OperatorDrawer />
+      </div>
     </header>
   );
 }
