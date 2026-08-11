@@ -698,9 +698,9 @@ It is provisioned by EDDI-Manager (at `/manage/operator`) through `POST /adminis
 
 ### How It Works
 
-1. **Tool generation**: the Manager fetches EDDI's own OpenAPI spec and passes it to `setup-api` with an endpoint allow-list. `McpApiToolBuilder` turns each allow-listed operation into an `apicalls` tool, named by its `operationId`.
-2. **Provisioning**: `AgentSetupService.createApiAgent` creates the parser, behaviour rules, `apicalls` configs (grouped by tag), LLM config, workflow and agent — in that order, with compensating deletes if any step fails.
-3. **Gating**: the agent is created *with* its `hitlConfig` on v1, so the approval gate cannot be bypassed by redeploying an earlier version. The gate is `requireApproval: ["http:*"]` plus an explicit read-only exempt list derived from the same spec — so a write endpoint added later is gated by default rather than fail-open.
+1. **Tool generation**: the Manager fetches EDDI's own OpenAPI spec and passes it to `setup-api` with an endpoint allow-list. `McpApiToolBuilder` turns each allow-listed operation into an `apicalls` tool, named by its `operationId` (falling back to a `method_path` slug) and grouped by its first OpenAPI tag.
+2. **Provisioning**: `AgentSetupService.createApiAgent` creates the parser, behaviour rules, one `apicalls` config per group, LLM config, workflow and agent — in that order, with compensating deletes if any step fails.
+3. **Gating**: the agent is created *with* its `hitlConfig` on v1, so the approval gate cannot be bypassed by redeploying an earlier version. The gate requires approval by HTTP *method* — `http.post:*`, `http.put:*`, `http.patch:*`, `http.delete:*` — and exempts `http.get:*`. Gating by method rather than by an enumerated list of tool names is what keeps it fail-safe: a write endpoint granted later is covered the moment it exists, with nobody having to remember to add its name.
 4. **Operation**: the model calls a tool; `ToolApprovalGate` classifies it; a write pauses the conversation (`hitlPauseType: "TOOL_CALL"`) until a human approves the *resolved request*, which is fingerprinted at gate time and re-checked before execution.
 5. **Self-modification**: on approval, the tool call reaches EDDI's REST API and the new agent configuration is written.
 

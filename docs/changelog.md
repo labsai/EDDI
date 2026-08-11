@@ -31,9 +31,12 @@ Not in the operator's endpoint allow-list (`tool-scopes.ts`), so activation is u
 `docs/agent-configs/rule-based-reference/`, descriptors and intro text rebranded. Deleting it would
 have cost two things that have nothing to do with whether the agent ships: AGENTS.md §5.6's only
 worked example of `actionmatcher`+`inputmatcher`, property setters, httpcalls templating and quick
-replies; and the only complete multi-extension agent in the corpus that
-`StrictBoundaryShippedConfigsTest` and `RuleSetStoreShippedRulesetsTest` sweep — no other fixture
-carries a `.property.json` or `.httpcalls.json`. Post-rename the sweeps still report 32 configs and
+replies; and real coverage in the two sweeps that scan `docs/agent-configs`
+(`StrictBoundaryShippedConfigsTest`, `RuleSetStoreShippedRulesetsTest`). Precisely: it is the only
+fixture in either root supplying a `.agent.json`, a `.workflow.json` or a `.property.json` — the
+`src/test/resources/tests` corpus uses the legacy `.bot.json` / `.package.json` names, which
+`BY_SUFFIX` does not map, so those files are counted as *unmapped and skipped*. (`.httpcalls.json`
+is the exception: `tests/useCases` has one too.) Post-rename the sweeps still report 32 configs and
 7 rulesets checked. §5.6 now says explicitly that it is a fixture, not something that ships.
 
 **Installers point at the successor instead of a dead import.** `install.sh`, `install.ps1` and
@@ -53,7 +56,24 @@ gate reasoning that makes it safe. Scattered mentions rewritten in README, `gett
 mentions — they are dated records of what was true at the time, not live documentation.
 
 **Verified:** `clean compile` + `test-compile` green; the nine affected test classes green;
-`validate` (Checkstyle) clean.
+`validate` (Checkstyle) clean; all four shell/PowerShell scripts parse.
+
+**Review pass — four things the first cut got wrong, all fixed here:**
+
+- `install.sh` set `JQ_AVAILABLE` for the agent-count check and nothing else, so removing that check
+  orphaned the detection block. Removed. The Keycloak section does its own `command -v jq` test and
+  is unaffected.
+- `GroupTemplateService`'s Javadoc explained its index file as "the `initial-agents/` pattern" — a
+  pointer to a directory this change deletes. Replaced with the actual reason (a classpath directory
+  cannot be enumerated portably from inside a JAR), and the same dangling reference removed from
+  `planning/group-collaboration-improvements-plan.md`.
+- `architecture.md` described the operator's gate as `requireApproval: ["http:*"]` plus a
+  spec-derived exempt list. That is what `planning/operator-write-scope-plan.md` proposed — and that
+  plan is marked **superseded** at the top. The shipped `buildToolApprovals()` gates by method
+  (`http.post|put|patch|delete:*`, exempting `http.get:*`). Corrected against the code, which is
+  what AGENTS.md §2 rule 7 says to do in the first place.
+- The coverage claim above was overstated in the commit message (it named `.httpcalls.json`, which
+  `tests/useCases` also has). Narrowed to what is actually verifiable.
 
 ---
 

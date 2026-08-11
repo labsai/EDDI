@@ -322,13 +322,6 @@ check_prerequisites() {
     fail "curl is required but not found.\n     Install: apt install curl / brew install curl"
   fi
 
-  # jq (optional but used for agent count check)
-  if ! command -v jq &>/dev/null; then
-    JQ_AVAILABLE=false
-  else
-    JQ_AVAILABLE=true
-  fi
-
   # Docker
   if ! command -v docker &>/dev/null; then
     case "$PLATFORM" in

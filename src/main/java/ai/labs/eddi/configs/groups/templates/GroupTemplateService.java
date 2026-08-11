@@ -30,8 +30,9 @@ import java.util.Map;
  * each template against the save-time validators doubles as an integration test
  * of the whole Wave 1–3 config surface.
  * <p>
- * Templates live on the classpath under {@code group-templates/} (the
- * {@code initial-agents/} pattern: an index file naming each resource). A
+ * Templates live on the classpath under {@code group-templates/}, listed by an
+ * index file that names each resource — a classpath directory cannot be
+ * enumerated portably from inside a JAR, so the index is the manifest. A
  * template file carries a {@code manifest} (id, title, description,
  * requiredRoles) and a {@code config} — a complete, valid
  * {@link AgentGroupConfiguration} whose member {@code agentId}s (and
