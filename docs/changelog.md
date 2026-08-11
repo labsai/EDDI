@@ -45,6 +45,17 @@ the only artefact carrying the release number.
 Verified no `v`-prefixed tag command survives anywhere in tracked files; the only remaining `v6.x`
 strings in these two pages are the warnings about the prefix itself.
 
+**Review follow-up (CodeRabbit on #671).** Three findings, all on this change; the one flagged Major
+("the release guide still contains a `v`-prefixed tag") was raised against the first push and the
+bot itself closed it as addressed once the fix landed. The two real ones were markdownlint
+regressions introduced by the new warning blocks: **MD028** in both files, where the added blockquote
+sat directly beside an existing one separated by a blank line (fixed with a `>` continuation, so each
+pair is one quote with two paragraphs rather than two quotes sharing a gap), and **MD040** on a fence
+inside the edited region. For MD040 the flagged fence was fixed along with the other five plain-text
+fences in `release-versioning.md` — tagging one and leaving five would trade a lint warning for an
+inconsistency in the same file. `release-signing.md`'s two bare fences (lines 30, 93) are deliberately
+left: pre-existing, outside this change, and not worth churning a file touched by two lines.
+
 ---
 
 

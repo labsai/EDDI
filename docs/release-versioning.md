@@ -6,7 +6,7 @@
 
 EDDI follows [Semantic Versioning](https://semver.org/):
 
-```
+```text
 MAJOR.MINOR.PATCH[-PRERELEASE]
 ```
 
@@ -35,7 +35,7 @@ release.)
 
 ## Branching Model
 
-```
+```text
 main ─────────────────────────────────────── production
   ↑
   │  merge when ready
@@ -62,7 +62,7 @@ All images are pushed to [Docker Hub: `labsai/eddi`](https://hub.docker.com/r/la
 | Git tag `6.3.0` | `labsai/eddi:6.3.0` + `labsai/eddi:6.3` + `labsai/eddi:6` + `labsai/eddi:latest` | General availability release |
 
 > **Key rule:** `latest` is **only** pushed on tag-based releases (RC or GA), never on regular main builds. This ensures `docker pull labsai/eddi` always gives users a deliberately released version.
-
+>
 > **The `6.3` and `6` aliases are moving tags**, and only a *stable* release publishes them — CI
 > gates them on `^([0-9]+)\.([0-9]+)\.([0-9]+)$`, so an RC never claims them. They are a
 > convenience for "track the latest 6.x", not something to deploy from: pin the immutable
@@ -73,7 +73,7 @@ All images are pushed to [Docker Hub: `labsai/eddi`](https://hub.docker.com/r/la
 
 Every push to `main` produces a unique, immutable build tag:
 
-```
+```text
 labsai/eddi:6.3.0-b42
                   │  │
                   │  └── GitHub Actions run number (auto-incrementing)
@@ -141,7 +141,7 @@ This is the only trigger that publishes the moving `6.3` and `6` aliases alongsi
 
 For Red Hat-certified images, use the separate workflow:
 
-```
+```text
 GitHub → Actions → "Red Hat Certification Release" → Run workflow
 ```
 
@@ -173,7 +173,7 @@ This skips the Docker build and smoke test jobs, but **tests still run**.
 
 The entire pipeline lives in a single file: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
 
-```
+```text
 ┌──────────────────┐
 │  build-and-test  │  ← Always runs (push, PR, tag)
 │  mvnw verify     │     Tests + JaCoCo coverage
@@ -237,7 +237,7 @@ Requires Docker Desktop for Windows. The `preflight` tool runs inside a Docker c
 
 ## Version Lifecycle
 
-```
+```text
 Development                 Release Candidates          General Availability
 ─────────────────           ──────────────────          ────────────────────
 feature/version-6.3.0       tag 6.3.0-RC1               tag 6.3.0
