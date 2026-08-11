@@ -146,8 +146,22 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 }
             }
 
-            // Wait for all deployments to complete
-            CompletableFuture.allOf(deploymentFutures.toArray(new CompletableFuture[0])).join();
+            // Wait for all deployments to complete.
+            //
+            // Tolerant of a failure, and bounded: a registration now self-expires
+            // (DeploymentListener.REGISTRATION_TTL), so this can complete
+            // exceptionally where it previously could only block forever. One initial
+            // agent that never reports must not hang startup — log it and carry on
+            // with the ones that did deploy.
+            CompletableFuture.allOf(deploymentFutures.toArray(new CompletableFuture[0]))
+                    .handle((ignored, error) -> {
+                        if (error != null) {
+                            LOGGER.warnf("Not every initial agent reported a deployment event (%s) — continuing with those that did",
+                                    error.getMessage());
+                        }
+                        return null;
+                    })
+                    .join();
 
             LOGGER.info("Imported & Deployed Initial Agents");
             return restAgentAdministration.getDeploymentStatuses(production);

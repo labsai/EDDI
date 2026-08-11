@@ -225,4 +225,55 @@ class HitlTimeoutHandlerTest {
             verifyNoInteractions(groupConversationService);
         }
     }
+
+    // =========================================================================
+    // I6 — human-turn timeouts (surface group-human, OnHumanTimeout policies)
+    // =========================================================================
+
+    @Nested
+    @DisplayName("group-human surface (I6)")
+    class HumanTurnTimeouts {
+
+        @Test
+        @DisplayName("SKIP_TURN → skipHumanTurnOnTimeout, never the approval resume path")
+        void skipTurn_routesToSkipHumanTurn() {
+            var metadata = Map.<String, Object>of(
+                    "policy", "SKIP_TURN",
+                    "surface", "group-human",
+                    "conversationId", "gc-1");
+
+            handler.handleTimeout(metadata);
+
+            verify(groupConversationService).skipHumanTurnOnTimeout("gc-1");
+            verifyNoMoreInteractions(groupConversationService);
+            verifyNoInteractions(conversationService);
+        }
+
+        @Test
+        @DisplayName("ABORT → graceful cancel of the discussion")
+        void abort_cancelsDiscussion() throws Exception {
+            var metadata = Map.<String, Object>of(
+                    "policy", "ABORT",
+                    "surface", "group-human",
+                    "conversationId", "gc-1");
+
+            handler.handleTimeout(metadata);
+
+            verify(groupConversationService).cancelDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL);
+            verifyNoMoreInteractions(groupConversationService);
+        }
+
+        @Test
+        @DisplayName("an unknown human policy degrades to SKIP_TURN — a lost turn beats a stuck discussion")
+        void unknownHumanPolicy_degradesToSkip() {
+            var metadata = Map.<String, Object>of(
+                    "policy", "SOMETHING_NEW",
+                    "surface", "group-human",
+                    "conversationId", "gc-1");
+
+            assertDoesNotThrow(() -> handler.handleTimeout(metadata));
+
+            verify(groupConversationService).skipHumanTurnOnTimeout("gc-1");
+        }
+    }
 }

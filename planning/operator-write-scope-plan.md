@@ -1,5 +1,19 @@
 # Implementation Plan — Approval-Gated Write Capability for the Platform Operator
 
+> **Superseded, kept as historical record.** This plan scoped `WRITE_ENDPOINTS` to
+> four narrow operational verbs and explicitly excluded any agent-authoring
+> endpoint (§5) — correct reasoning for what existed at the time (no `hitlConfig`
+> support on the standard agent-setup path, no escalation-flag mechanism, no
+> request-pinning). Both landed later, and the operator now has real
+> create-and-modify capability over agents, agent groups, and every
+> workflow-extension store, each still individually approval-gated. The
+> authoritative reference for what is actually granted today is the doc comment
+> on `WRITE_ENDPOINTS` in `EDDI-Manager/src/lib/operator/tool-scopes.ts` — treat
+> this document as explaining the ORIGINAL reasoning, not the current state; §5's
+> stale exclusion is struck through below rather than silently deleted, since the
+> reasoning it once carried still explains why the later change was carefully
+> scoped rather than done casually.
+
 ## 0. Premise
 
 The HITL gate itself is complete and fires before execution (`AgentOrchestrator.java:1169-1253`; gated requests never reach `executeSingleToolCall`). Nothing in the gate needs changing. The blocker is **provisioning** plus **verification**: `setup-api` cannot install a gate, and `tool-scopes.ts` is a provisioning-time constant, not a runtime boundary — so "writes are gated" must be an *asserted, read-back fact*, not an assumption.
@@ -91,7 +105,7 @@ Because `requireApproval` is `["http:*"]`, **anything later added to `WRITE_ENDP
 
 ## 3. Pause UX
 
-**Where.** Inline in the operator chat (`components/operator/operator-chat.tsx`), after the last message — the precedent is `discussion-transcript.tsx:579-599`, which already renders `ApprovalBanner` inside a live transcript. Not the approvals page: `pages/approvals.tsx:332-344` deliberately refuses to decide `TOOL_CALL` pauses and links out instead. That page remains the correct *someone else's queue* fallback and needs no change.
+**Where.** Inline in the operator chat (`components/operator/operator-chat.tsx`), after the last message — the precedent is `discussion-transcript.tsx:579-599`, which already renders `ApprovalBanner` inside a live transcript. `pages/approvals.tsx` deliberately refused to decide `TOOL_CALL` pauses at the time this was written, for the same reason `WRITE_ENDPOINTS` stayed empty: the approver had nothing but a client-side `operationId` guess to review. That reason no longer holds once request pinning ships (§3 note below, and EDDI#627) — the inbox now expands a `TOOL_CALL` row in place into the same `ApprovalBanner`/`RequestPreview` the operator chat uses, so any `eddi-admin`, not only whoever is at the operator screen, can decide a gated write.
 
 **Detecting the pause.** There is no SSE pause event on the 1:1 surface (`RestAgentEngineStreaming.java:66-138`). Two paths, both already proven in `use-chat.ts`:
 1. `use-operator-chat.ts:218` currently does `if (event.type === "done") break;` and discards the payload. Parse it: `conversationState === "AWAITING_HUMAN"`, plus `hitlPauseType` and the names-only `hitlPendingToolCalls` (`ConversationMemoryUtilities.java:268-307`) which ride on the snapshot for free.
@@ -173,12 +187,12 @@ The gauge is the one worth alerting on: it is the machine-readable form of "writ
 
 ## 5. What I would NOT do
 
-- **Not populate `WRITE_ENDPOINTS` beyond the four.** Specifically never bind, regardless of approval: `setup-api`/`setup` (one call provisions a *new* agent with an arbitrary `endpoints` filter and no gate — complete escape from the allow-list); `POST /agents/{id}/resume` (self-approval — `HitlAccessGuard` has no "not the requester" check); `PATCH /agents/{id}/state` and `/cancel` (clears `AWAITING_HUMAN` under the gate); `PUT /variablestore/variables/...` (the operator's own config blob lives at key `platform.operator`, `operator.ts:74`); all `/secretstore` writes; `/backup/import*`; `apicallstore`/`mcpcallsstore`/`channelstore` writes; `/ragstore/.../ingest`; `usermemorystore` writes; `AgentTriggerStore` writes; `/administration/quotas`; `DELETE /administration/orphans`.
+- ~~Not populate `WRITE_ENDPOINTS` beyond the four. Specifically never bind, regardless of approval: `setup-api`/`setup` (one call provisions a *new* agent with an arbitrary `endpoints` filter and no gate — complete escape from the allow-list)~~ — superseded (see the banner at the top). `SetupAgentRequest` gained the same `hitlConfig` field `CreateApiAgentRequest` already had, both are now bound, and `escalation-flags.ts`'s `agentCreatedWithoutGate`/`agentCreatedWithBroadEndpoints` checks surface exactly the two risks named here (no gate; unbounded `endpoints`) to the approver above the raw JSON. `apicallstore`/`mcpcallsstore` writes are bound too, for the same "modify an existing agent's tool wiring" reason the other workflow-extension stores are — narrower than blanket "never," and still gated like everything else. `POST /agents/{id}/resume` (self-approval), `PATCH /agents/{id}/state` and `/cancel`, `PUT /variablestore/variables/...` (the operator's own config), all `/secretstore` writes, `/backup/import*`, `channelstore` writes, `/ragstore/.../ingest`, `usermemorystore` writes, `AgentTriggerStore` writes, `/administration/quotas`, and `DELETE /administration/orphans` remain excluded — this correction is scoped to exactly the two items it names, not a blanket reopening.
 - **Not upgrade an existing read-only operator in place.** Changing scope **re-provisions** a new agent (fresh `setup-api`, gate on v1) and resets the old one via `resetOperator`. An in-place `PUT` would leave an older, ungated version of the same agent that a bound `deployAgent` call could roll back to. This is why "every version carries the gate" is the read-back invariant rather than "the current version does".
 - **Not change backend `AUTO_APPROVE` semantics.** Explicit `toolApprovals.timeoutPolicy: AUTO_APPROVE` is honored (`ConversationService.java:2242-2247`) and existing agents may rely on it. Refuse it Manager-side for the operator only.
 - **Not enable Slack approvals for operator writes.** `SlackHitlSupport.java:69,75` truncates to 5 calls and 300 chars of arguments while keeping the same buttons — the realistic rubber-stamping surface.
 - **Not add `POST /agents/{id}/resume/stream`.** Real gap (`ConversationService.resumeConversation` already accepts a handler; only the REST adapter passes `null`), but a separate backend PR. A post-decision re-read is adequate.
-- **Not touch `pages/approvals.tsx`.** Its refusal to decide TOOL_CALL pauses is correct.
+- ~~Not touch `pages/approvals.tsx`.~~ Superseded once request pinning shipped — see §3.
 - **Not build "approve all".**
 - **Not treat `tool-scopes.ts` as a security boundary.** It is applied at provisioning time only. Say so in the file comment.
 

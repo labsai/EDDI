@@ -314,6 +314,21 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private Map<String, Double> toolPricing;
 
+        /**
+         * Input price per 1M tokens in USD for this task's model calls. Null =
+         * unpriced, contributing $0 to the tracked conversation cost. Applies to
+         * non-cascade calls; a cascade run prices its steps via {@code modelCascade}'s
+         * own {@code inputPricePer1M}/{@code outputPricePer1M} (steps may target
+         * different models, so task-level prices are not inherited).
+         */
+        private Double inputPricePer1M;
+
+        /**
+         * Output price per 1M tokens in USD. Same semantics as
+         * {@link #inputPricePer1M}.
+         */
+        private Double outputPricePer1M;
+
         /** Enable cost tracking */
         private Boolean enableCostTracking = true;
 
@@ -773,6 +788,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setToolPricing(Map<String, Double> toolPricing) {
             this.toolPricing = toolPricing;
+        }
+
+        public Double getInputPricePer1M() {
+            return inputPricePer1M;
+        }
+
+        public void setInputPricePer1M(Double inputPricePer1M) {
+            this.inputPricePer1M = inputPricePer1M;
+        }
+
+        public Double getOutputPricePer1M() {
+            return outputPricePer1M;
+        }
+
+        public void setOutputPricePer1M(Double outputPricePer1M) {
+            this.outputPricePer1M = outputPricePer1M;
         }
 
         public Boolean getEnableCostTracking() {

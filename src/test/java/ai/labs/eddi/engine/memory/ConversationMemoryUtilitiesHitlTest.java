@@ -199,6 +199,8 @@ class ConversationMemoryUtilitiesHitlTest {
         private static final String CANARY_SECRET = "sk-live-SECRET-9999";
         private static final String CANARY_ARGS = "{\"amount\":250,\"apiKey\":\"" + CANARY_SECRET + "\"}";
         private static final String CANARY_TRANSCRIPT = "[{\"type\":\"AI\",\"text\":\"" + CANARY_SECRET + "\"}]";
+        private static final String CANARY_FINGERPRINT = "sha256-request-fingerprint-CANARY";
+        private static final String CANARY_PREVIEW_URI = "https://eddi.internal/CANARY-should-not-leak/{id}";
 
         private ConversationMemorySnapshot toolPausedSnapshot() {
             var snapshot = buildMinimalSnapshot();
@@ -214,6 +216,12 @@ class ConversationMemoryUtilitiesHitlTest {
             call.setArgumentsRedacted(CANARY_ARGS);
             call.setArgsTruncated(false);
             call.setGateReason("http:transfer_*");
+            call.setRequestFingerprint(CANARY_FINGERPRINT);
+            var preview = new PendingToolCallBatch.ResolvedRequestPreview();
+            preview.setMethod("POST");
+            preview.setUri(CANARY_PREVIEW_URI);
+            preview.setBody(CANARY_ARGS);
+            call.setRequestPreview(preview);
 
             var batch = new PendingToolCallBatch();
             batch.setPauseEpoch("epoch-1");
@@ -261,6 +269,18 @@ class ConversationMemoryUtilitiesHitlTest {
                     "argumentsRaw value leaked into generic simple-snapshot JSON");
             assertFalse(json.contains("\"argumentsRedacted\":\""),
                     "argumentsRedacted value leaked into generic simple-snapshot JSON");
+            // The resolved-request preview (approver-facing detail — see
+            // RestAgentEngine#buildToolCallPauseDetails) and its fingerprint are
+            // materially more detail than "names only" and must not leak either,
+            // even though both are already-redacted, not raw secrets.
+            assertFalse(json.contains(CANARY_FINGERPRINT),
+                    "requestFingerprint value leaked into generic simple-snapshot JSON");
+            assertFalse(json.contains(CANARY_PREVIEW_URI),
+                    "requestPreview leaked into generic simple-snapshot JSON");
+            assertTrue(json.contains("\"requestFingerprint\":null"),
+                    "requestFingerprint must be projected to null in generic simple-snapshot JSON");
+            assertTrue(json.contains("\"requestPreview\":null"),
+                    "requestPreview must be projected to null in generic simple-snapshot JSON");
 
             // But the safe metadata the delegated/group/MCP consumers rely on MUST appear.
             assertTrue(json.contains("TOOL_CALL"), "pauseType must be present");

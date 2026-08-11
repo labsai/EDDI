@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.secrets.SecretResolver;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -27,6 +28,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -82,6 +84,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final SecretResolver secretResolver;
     private final CallerIdentityResolver callerIdentityResolver;
     private final CallerIdentityContext callerIdentityContext;
+    private final RequestRedactor requestRedactor;
     private final boolean ssrfProtectionEnabled;
     private final long defaultTimeoutInMillis;
     private final int defaultMaxResponseSizeInBytes;
@@ -89,7 +92,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     @Inject
     public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
             GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, CallerIdentityResolver callerIdentityResolver,
-            CallerIdentityContext callerIdentityContext,
+            CallerIdentityContext callerIdentityContext, RequestRedactor requestRedactor,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
             @ConfigProperty(name = "eddi.httpcalls.default-timeout-millis", defaultValue = "30000") long defaultTimeoutInMillis,
             @ConfigProperty(name = "eddi.httpcalls.default-max-response-size-bytes", defaultValue = "2000000") int defaultMaxResponseSizeInBytes) {
@@ -101,6 +104,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         this.secretResolver = secretResolver;
         this.callerIdentityResolver = callerIdentityResolver;
         this.callerIdentityContext = callerIdentityContext;
+        this.requestRedactor = requestRedactor;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.defaultTimeoutInMillis = defaultTimeoutInMillis;
         this.defaultMaxResponseSizeInBytes = defaultMaxResponseSizeInBytes;
@@ -142,11 +146,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     request = buildRequest(targetServerUrl, call, templateDataObjects);
                     var objectName = call.getName() + "Request";
                     var requestMap = request.toMap();
-                    // Scrub resolved secrets from request map before persisting to conversation
-                    // memory.
-                    // The actual request (with secrets) was already built — this only affects the
-                    // debug record.
-                    scrubSensitiveHeaders(requestMap);
+                    // Scrub resolved secrets — headers, query parameters and body — from
+                    // the request map before it is persisted to conversation memory. The
+                    // actual request was already built and still carries them; each entry
+                    // here is REPLACED with a redacted copy, so this only affects the debug
+                    // record. Shares RequestRedactor with the approval preview so the two
+                    // cannot disagree about what counts as a credential.
+                    requestRedactor.redactRequestMap(requestMap);
                     prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
                     response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
@@ -245,6 +251,149 @@ public class ApiCallExecutor implements IApiCallExecutor {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public ResolvedRequest resolve(ApiCall call, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl)
+            throws LifecycleException {
+        if (call == null) {
+            throw new IllegalArgumentException("call cannot be null");
+        }
+        if (memory == null) {
+            throw new IllegalArgumentException("memory cannot be null");
+        }
+        if (templateDataObjects == null) {
+            throw new IllegalArgumentException("templateDataObjects cannot be null");
+        }
+        if (targetServerUrl == null || targetServerUrl.trim().isEmpty()) {
+            throw new IllegalArgumentException("targetServerUrl cannot be null or empty");
+        }
+
+        try {
+            // Note the absence of executePreRequestPropertyInstructions: it writes
+            // to conversation memory, and previewing a call must not change the
+            // conversation. See IApiCallExecutor#resolve for what that costs.
+            var requestMap = buildRequest(targetServerUrl, call, templateDataObjects).toMap();
+            var headers = requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> h ? (Map<String, ?>) h : Map.<String, Object>of();
+            var queryParams = normalizeQueryParams(requestMap.get(IRequest.KEY_QUERY_PARAMS));
+            Object body = requestMap.get(IRequest.KEY_BODY);
+
+            // The RAW body goes in: ResolvedRequest redacts it for display itself,
+            // while fingerprinting what was actually resolved. Redacting here
+            // instead would fingerprint the redacted form and make two different
+            // credentials hash identically — see ResolvedRequest#of.
+            return ResolvedRequest.of(
+                    String.valueOf(requestMap.get(IRequest.KEY_METHOD)),
+                    String.valueOf(requestMap.get(IRequest.KEY_URI)),
+                    queryParams,
+                    requestRedactor.redactHeaders(headers),
+                    body == null ? null : body.toString(),
+                    !canExecuteDivergeFromResolve(call));
+        } catch (Exception e) {
+            // Deliberately NOT logged here — throw only. Unlike execute(), the sole
+            // caller of resolve() is the gate-time/pre-execution pinning path, which
+            // catches this and logs it with the severity the situation actually has:
+            // a WARN saying the call will be approved unpinned (a documented, benign
+            // degrade) or that execution is refused. An ERROR here would double every
+            // one of those lines and label a normal degrade as breakage.
+            //
+            // The message is generic and the cause is attached rather than unwrapped:
+            // a failure here comes out of template rendering or request building,
+            // whose messages quote the material being rendered — Jackson appends the
+            // offending source verbatim — so putting it in a log or an exception
+            // message would leak the credential from the very operation whose job is
+            // to show the approver a REDACTED request.
+            throw new LifecycleException(
+                    "could not resolve the request for ApiCall '" + LogSanitizer.sanitize(call.getName()) + "'", e);
+        }
+    }
+
+    /**
+     * Read the query parameters out of {@link IRequest#toMap()} without assuming
+     * their shape.
+     * <p>
+     * {@code HttpClientWrapper} accumulates repeats, so the values are lists —
+     * casting the map to {@code Map<String, String>} compiles, erases cleanly, and
+     * then throws a {@link ClassCastException} deep in the fingerprint
+     * canonicaliser. The gate-time caller catches that and approves the call
+     * <em>unpinned</em>, so the failure is silent and pinning simply stops applying
+     * to every endpoint that carries a query parameter. A single-valued map is
+     * still accepted, because this interface has other implementations and the
+     * contract has been ambiguous.
+     */
+    private static Map<String, List<String>> normalizeQueryParams(Object rawQueryParams) {
+        if (!(rawQueryParams instanceof Map<?, ?> params)) {
+            return Map.of();
+        }
+        var normalized = new LinkedHashMap<String, List<String>>();
+        for (var entry : params.entrySet()) {
+            String name = String.valueOf(entry.getKey());
+            Object value = entry.getValue();
+            if (value instanceof List<?> values) {
+                normalized.put(name, values.stream().map(v -> v == null ? "" : v.toString()).toList());
+            } else {
+                normalized.put(name, List.of(value == null ? "" : value.toString()));
+            }
+        }
+        return normalized;
+    }
+
+    /**
+     * Whether {@link #execute} can build a request this method's caller did not
+     * resolve — the question a fingerprint's soundness actually turns on.
+     * <p>
+     * It used to ask something narrower ("does this call have pre-request property
+     * instructions"), and the gap between the two questions was the fail-open in
+     * the pinning design. Each miss below produces a call that is PINNED, whose
+     * gate-time and pre-execution resolutions agree with each other — because both
+     * skip the divergence — while {@code execute} sends something else entirely.
+     * The guard then passes on a comparison that was never sound:
+     * <ul>
+     * <li><b>An empty-but-present {@code propertyInstructions} list.</b>
+     * {@code isNullOrEmpty} treated it as absent, but
+     * {@code PrePostUtils#executePreRequestPropertyInstructions} guards on
+     * {@code != null} — so it still re-runs {@code memoryItemConverter.convert},
+     * discarding the model arguments merged in for this call. Every {@code {arg}}
+     * then renders empty at execution and non-empty in the preview. Hence
+     * {@code != null}, matching the code that actually runs.</li>
+     * <li><b>{@code fireAndForget} with {@code preRequest.batchRequests}.</b>
+     * {@code execute} routes to {@code executeFireAndForgetCalls}, which calls
+     * {@code buildRequest} once PER iteration object — N distinct requests, none of
+     * them the single one {@code resolve} builds (the iteration variable renders
+     * empty there). {@code batchRequests} is a different field from
+     * {@code propertyInstructions}, so this was pinned, and an approver shown one
+     * request authorised N unreviewed ones.</li>
+     * </ul>
+     * Returning true here means unpinnable, not refused: the call still needs its
+     * approval, it is previewed best-effort, and only the fingerprint enforcement
+     * is skipped — which is the honest state for a request we genuinely cannot pin,
+     * rather than a pin we cannot honour.
+     */
+    private static boolean canExecuteDivergeFromResolve(ApiCall call) {
+        var preRequest = call.getPreRequest();
+        if (preRequest != null && preRequest.getPropertyInstructions() != null) {
+            return true;
+        }
+        // One resolved request cannot stand for N. Guarded on fireAndForget too
+        // because that is what selects the batching branch in execute().
+        if (Boolean.TRUE.equals(call.getFireAndForget()) && preRequest != null && preRequest.getBatchRequests() != null) {
+            return true;
+        }
+        // Same argument, different loop: buildRequest sits INSIDE execute()'s
+        // retry do-while, and between attempts the shared templateDataObjects
+        // map gains {responseObjectName}, …Error, …HttpCode and the response
+        // headers. A call whose path, body or headers template any of those
+        // sends attempts 2..N as requests that were never resolved, never
+        // previewed and never fingerprinted — while the approver saw only
+        // attempt 1. Keyed on the instruction being present and actually able
+        // to fire (maxRetries >= 1), which is exactly what retryCall() tests.
+        var postResponse = call.getPostResponse();
+        if (postResponse instanceof ai.labs.eddi.configs.apicalls.model.HttpPostResponse httpPostResponse) {
+            var retry = httpPostResponse.getRetryApiCallInstruction();
+            return retry != null && retry.getMaxRetries() >= 1;
+        }
+        return false;
     }
 
     private IResponse executeAndMeasureRequest(ApiCall call, IRequest request, boolean retryCall, int amountOfExecutions)
@@ -532,39 +681,4 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return request;
     }
 
-    /**
-     * Scrub sensitive header values from the request map before it is stored in
-     * conversation memory. This prevents resolved secrets (API keys, bearer tokens)
-     * from being persisted to the database.
-     * <p>
-     * Header-name matching only catches conventional names, so a resolved caller
-     * token is additionally matched by value — otherwise placing it in an
-     * arbitrarily named header would defeat the redaction.
-     */
-    @SuppressWarnings("unchecked")
-    private void scrubSensitiveHeaders(Map<String, Object> requestMap) {
-        Object headersObj = requestMap.get("headers");
-        if (headersObj instanceof Map) {
-            var headers = (Map<String, Object>) headersObj;
-            var scrubbed = new HashMap<>(headers);
-            for (var entry : scrubbed.entrySet()) {
-                // Locale.ROOT, not the default locale: under a Turkish locale
-                // "Authorization" lowercases to "authorızation" (dotless i), every
-                // name test below misses, and the header is persisted unredacted.
-                String headerName = entry.getKey().toLowerCase(Locale.ROOT);
-                if (headerName.contains("authorization") || headerName.contains("api-key") || headerName.contains("api_key")
-                        || headerName.contains("apikey") || headerName.contains("x-api-key") || headerName.contains("token")
-                        || headerName.contains("secret") || headerName.contains("credential")) {
-                    entry.setValue("<REDACTED>");
-                } else if (entry.getValue() instanceof String val && (val.contains("${vault:") || val.contains("${eddivault:"))) {
-                    entry.setValue("<REDACTED>");
-                } else if (entry.getValue() instanceof String val) {
-                    // Catches a caller token placed in an unconventionally named
-                    // header, which the name patterns above would miss.
-                    entry.setValue(callerIdentityResolver.redactCallerToken(val, "<REDACTED>"));
-                }
-            }
-            requestMap.put("headers", scrubbed);
-        }
-    }
 }

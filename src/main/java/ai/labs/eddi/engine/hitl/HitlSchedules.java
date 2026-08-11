@@ -32,6 +32,13 @@ public final class HitlSchedules {
 
     public static final String SURFACE_REGULAR = "regular";
     public static final String SURFACE_GROUP = "group";
+    /**
+     * A HUMAN group member's turn timeout (I6). Its {@link #METADATA_POLICY_KEY}
+     * carries {@code OnHumanTimeout} names (SKIP_TURN/ABORT), NOT a
+     * {@code HitlTimeoutPolicy} — the fire handler must branch on this surface
+     * BEFORE parsing the policy.
+     */
+    public static final String SURFACE_GROUP_HUMAN = "group-human";
 
     private static final String NAME_PREFIX_REGULAR = "hitl-timeout-";
     private static final String NAME_PREFIX_GROUP = "hitl-timeout-group-";

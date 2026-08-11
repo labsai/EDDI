@@ -1,0 +1,44 @@
+{
+  "manifest": {
+    "templateId": "ops-task-force",
+    "title": "Ops Task Force",
+    "description": "Plan → execute → verify with the planner decomposing the goal, bid-based task assignment (members bid blind, highest self-assessed confidence wins), agent-filed follow-up tasks, runtime recruitment of specialists, and a dollar ceiling per run.",
+    "requiredRoles": [
+      { "role": "operator1", "description": "First executing member" },
+      { "role": "operator2", "description": "Second executing member" },
+      { "role": "operator3", "description": "Third executing member" },
+      { "role": "moderator", "description": "Plans the task breakdown, verifies results, synthesizes" }
+    ]
+  },
+  "config": {
+    "name": "Ops Task Force",
+    "description": "Task-force operations with bid assignment, agent-filed tasks and recruitment",
+    "style": "TASK_FORCE",
+    "moderatorAgentId": "$moderator",
+    "members": [
+      { "agentId": "$operator1", "displayName": "Operator 1", "speakingOrder": 1 },
+      { "agentId": "$operator2", "displayName": "Operator 2", "speakingOrder": 2 },
+      { "agentId": "$operator3", "displayName": "Operator 3", "speakingOrder": 3 }
+    ],
+    "taskListConfig": {
+      "allowAgentTaskCreation": true,
+      "maxAgentAddedTasksPerDiscussion": 20,
+      "maxPerTurn": 3,
+      "assignmentMode": "BID"
+    },
+    "dynamicAgents": {
+      "enabled": true,
+      "allowRecruitment": true,
+      "maxRecruitedAgentsPerDiscussion": 3
+    },
+    "protocol": {
+      "agentTimeoutSeconds": 180,
+      "onAgentFailure": "SKIP",
+      "maxRetries": 2,
+      "onMemberUnavailable": "SKIP",
+      "maxTurns": 80,
+      "maxCostPerDiscussion": 10.0,
+      "onCostExceeded": "SYNTHESIZE_NOW"
+    }
+  }
+}

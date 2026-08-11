@@ -35,6 +35,46 @@ public interface IRequest {
 
     IResponse send() throws HttpRequestException;
 
+    /** Key of the fully-resolved target URI in {@link #toMap()}. */
+    String KEY_URI = "uri";
+    /** Key of the HTTP method name in {@link #toMap()}. */
+    String KEY_METHOD = "method";
+    /**
+     * Key of the headers map in {@link #toMap()}.
+     * <p>
+     * Read the values as {@code Object}, not {@code String}: the default
+     * implementation happens to store strings, but this interface has other
+     * implementations and nothing enforces it — which is why
+     * {@code RequestRedactor#redactHeaders} takes {@code Map<String, ?>} and
+     * coerces. The neighbouring {@link #KEY_QUERY_PARAMS} documented a narrower
+     * type than it delivered and that produced a real defect; this one is
+     * deliberately stated loosely rather than optimistically.
+     */
+    String KEY_HEADERS = "headers";
+    /**
+     * Key of the query parameters in {@link #toMap()}.
+     * <p>
+     * The value is a {@code Map<String, List<String>>}, not a
+     * {@code Map<String, String>}: a parameter may legitimately repeat
+     * ({@code ?tag=a&tag=b}) and the default implementation accumulates repeats
+     * into a list. Reading it back through a single-valued cast compiles and erases
+     * cleanly, then throws a {@link ClassCastException} at first use — see
+     * {@code ApiCallExecutor#normalizeQueryParams}, which tolerates both shapes
+     * rather than trusting either.
+     */
+    String KEY_QUERY_PARAMS = "queryParams";
+    /** Key of the request body in {@link #toMap()}; absent when there is none. */
+    String KEY_BODY = "body";
+    /** Key of the User-Agent header in {@link #toMap()}; absent when unset. */
+    String KEY_USER_AGENT = "userAgent";
+
+    /**
+     * The request as a plain map, keyed by the {@code KEY_*} constants above.
+     * <p>
+     * <b>Header values are live</b> — resolved secrets and bearer tokens included.
+     * Anything that persists or displays this must redact it first
+     * ({@code RequestRedactor}).
+     */
     Map<String, Object> toMap();
 
     void send(ICompleteListener completeListener) throws HttpRequestException;

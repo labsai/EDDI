@@ -72,7 +72,8 @@ class ApiCallExecutorTest {
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
         executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver,
-                callerIdentityResolver, callerIdentityContext, false, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
+                callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), false, DEFAULT_TIMEOUT_MILLIS,
+                DEFAULT_MAX_RESPONSE_SIZE);
 
         memory = mock(IConversationMemory.class);
         currentStep = mock(IWritableConversationStep.class);
@@ -319,7 +320,8 @@ class ApiCallExecutorTest {
         realContext.bind(new CallerIdentity("caller-jwt-value", "alice", "https://eddi.example:443"));
         var realResolver = new CallerIdentityResolver(realContext, true);
         var executorWithRealResolver = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, realResolver, realContext, false, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
+                secretResolver, realResolver, realContext, new RequestRedactor(realResolver), false, DEFAULT_TIMEOUT_MILLIS,
+                DEFAULT_MAX_RESPONSE_SIZE);
         try {
             ApiCall call = createSimpleApiCall("redact-call", false);
 
@@ -346,6 +348,244 @@ class ApiCallExecutorTest {
         } finally {
             realContext.clear();
         }
+    }
+
+    @Test
+    @DisplayName("a call carrying query parameters still pins — they arrive as List values, not Strings")
+    void resolve_withQueryParameters_stillProducesAFingerprint() throws Exception {
+        // HttpClientWrapper stores query params as Map<String, List<String>> (a
+        // param may legitimately repeat). Reading them back as Map<String, String>
+        // erases cleanly at the cast and then throws deep inside the fingerprint
+        // canonicaliser — which pinResolvedRequest catches and downgrades to
+        // "approved unpinned". The whole pinning guarantee would silently not
+        // apply to any endpoint with a query param, deploy?version=N included.
+        ApiCall call = createSimpleApiCall("query-call", false);
+
+        Map<String, Object> requestMap = new HashMap<>();
+        requestMap.put("uri", "http://example.com/administration/production/deploy/agent-1");
+        requestMap.put("method", "POST");
+        requestMap.put("headers", new LinkedHashMap<String, Object>());
+        Map<String, List<String>> queryParams = new LinkedHashMap<>();
+        queryParams.put("version", List.of("3"));
+        requestMap.put("queryParams", queryParams);
+        when(mockRequest.toMap()).thenReturn(requestMap);
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNotNull(resolved.fingerprint(), "a call with a query parameter must still be pinnable");
+        assertTrue(resolved.isPinned());
+        assertEquals("3", resolved.queryParams().get("version"));
+    }
+
+    @Test
+    @DisplayName("a repeated query parameter keeps both values distinguishable in the fingerprint")
+    void resolve_withRepeatedQueryParameter_doesNotCollapseValues() throws Exception {
+        ApiCall call = createSimpleApiCall("multi-query-call", false);
+
+        ResolvedRequest twoValues = resolveWithQuery(call, Map.of("tag", List.of("a", "b")));
+        ResolvedRequest oneValue = resolveWithQuery(call, Map.of("tag", List.of("a")));
+
+        assertNotEquals(twoValues.fingerprint(), oneValue.fingerprint(),
+                "dropping a repeated value changes what the request does and must change the hash");
+    }
+
+    private ResolvedRequest resolveWithQuery(ApiCall call, Map<String, List<String>> queryParams) throws Exception {
+        Map<String, Object> requestMap = new HashMap<>();
+        requestMap.put("uri", "http://example.com/x");
+        requestMap.put("method", "GET");
+        requestMap.put("headers", new LinkedHashMap<String, Object>());
+        requestMap.put("queryParams", new LinkedHashMap<>(queryParams));
+        when(mockRequest.toMap()).thenReturn(requestMap);
+        return executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+    }
+
+    /** A request map shaped like the one HttpClientWrapper hands back. */
+    private void stubRequestMap() {
+        Map<String, Object> requestMap = new HashMap<>();
+        requestMap.put("uri", "http://example.com/api/test");
+        requestMap.put("method", "POST");
+        requestMap.put("headers", new LinkedHashMap<String, Object>());
+        requestMap.put("queryParams", new LinkedHashMap<String, List<String>>());
+        when(mockRequest.toMap()).thenReturn(requestMap);
+    }
+
+    @Test
+    @DisplayName("an EMPTY preRequest.propertyInstructions list still makes the call unpinnable")
+    void resolve_withEmptyPropertyInstructions_isNotPinned() throws Exception {
+        // The fail-open this closes. The old predicate used isNullOrEmpty, so an
+        // empty list read as "absent" and the call was PINNED — while
+        // PrePostUtils guards on != null and therefore still re-runs
+        // memoryItemConverter.convert, discarding the model arguments merged in
+        // for this call. Gate time and resume time both skip that (both go
+        // through resolve), so they agreed with each other and the guard passed
+        // while execute() sent a request with every {arg} rendered empty.
+        ApiCall call = createSimpleApiCall("empty-instructions-call", false);
+        var preRequest = new HttpPreRequest();
+        preRequest.setPropertyInstructions(new java.util.ArrayList<>());
+        call.setPreRequest(preRequest);
+        stubRequestMap();
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNull(resolved.fingerprint(), "an empty-but-present instruction list must not be treated as absent");
+        assertFalse(resolved.isPinned());
+        // Unpinnable is not unreviewable: the approver still gets a preview.
+        assertNotNull(resolved.uri());
+    }
+
+    @Test
+    @DisplayName("fireAndForget with batchRequests is unpinnable — one resolved request cannot stand for N")
+    void resolve_withFireAndForgetBatch_isNotPinned() throws Exception {
+        // execute() routes these to executeFireAndForgetCalls, which calls
+        // buildRequest once PER iteration object. resolve() builds exactly one,
+        // with the iteration variable empty. batchRequests is a different field
+        // from propertyInstructions, so this used to be pinned: the approver saw
+        // one request, the re-check compared that same never-sent request, and N
+        // unapproved requests went out on a background thread.
+        ApiCall call = createSimpleApiCall("batch-call", false);
+        call.setFireAndForget(true);
+        var preRequest = new HttpPreRequest();
+        preRequest.setBatchRequests(new BatchRequestBuildingInstruction());
+        call.setPreRequest(preRequest);
+        stubRequestMap();
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNull(resolved.fingerprint(), "a batched fire-and-forget call must not claim a fingerprint");
+        assertFalse(resolved.isPinned());
+    }
+
+    @Test
+    @DisplayName("a retryable call is unpinnable — attempts 2..N are rebuilt from mutated template data")
+    void resolve_withRetryInstruction_isNotPinned() throws Exception {
+        // buildRequest sits INSIDE execute()'s retry do-while, and between
+        // attempts the shared templateDataObjects map gains the response object,
+        // its error, its httpCode and the response headers. A call templating any
+        // of those sends attempts 2..N as requests nobody resolved, previewed or
+        // fingerprinted — while the approver saw only attempt 1. Same "one
+        // resolved request cannot stand for N" argument as the batched
+        // fire-and-forget case.
+        ApiCall call = createSimpleApiCall("retry-call", false);
+        var postResponse = new HttpPostResponse();
+        var retry = new RetryApiCallInstruction();
+        retry.setMaxRetries(2);
+        postResponse.setRetryApiCallInstruction(retry);
+        call.setPostResponse(postResponse);
+        stubRequestMap();
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNull(resolved.fingerprint(), "a call that can retry must not claim a fingerprint");
+        assertFalse(resolved.isPinned());
+    }
+
+    @Test
+    @DisplayName("a retry instruction that cannot fire (maxRetries 0) stays pinned")
+    void resolve_withDisabledRetryInstruction_remainsPinned() throws Exception {
+        // Mirrors retryCall()'s own test (maxRetries >= 1), so a present-but-inert
+        // instruction does not needlessly unpin an otherwise verifiable call.
+        ApiCall call = createSimpleApiCall("no-retry-call", false);
+        var postResponse = new HttpPostResponse();
+        var retry = new RetryApiCallInstruction();
+        retry.setMaxRetries(0);
+        postResponse.setRetryApiCallInstruction(retry);
+        call.setPostResponse(postResponse);
+        stubRequestMap();
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNotNull(resolved.fingerprint(), "an inert retry instruction must not unpin the call");
+    }
+
+    @Test
+    @DisplayName("an ordinary call is still pinned — the divergence check is not a blanket opt-out")
+    void resolve_withOrdinaryCall_remainsPinned() throws Exception {
+        // The mirror direction. Widening the predicate must not quietly unpin
+        // everything, which would disable enforcement while every test above
+        // still passed.
+        ApiCall call = createSimpleApiCall("ordinary-call", false);
+        stubRequestMap();
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNotNull(resolved.fingerprint(), "an ordinary call must still be pinnable");
+        assertTrue(resolved.isPinned());
+    }
+
+    @Test
+    @DisplayName("fireAndForget WITHOUT batchRequests stays pinned — it sends exactly one request")
+    void resolve_withPlainFireAndForget_remainsPinned() throws Exception {
+        ApiCall call = createSimpleApiCall("plain-fnf-call", false);
+        call.setFireAndForget(true);
+        stubRequestMap();
+
+        ResolvedRequest resolved = executor.resolve(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNotNull(resolved.fingerprint(), "a single fire-and-forget request is still one request");
+    }
+
+    @Test
+    @DisplayName("a secret in the request BODY is scrubbed before persistence, not just headers")
+    void execute_secretInBody_isRedacted() throws Exception {
+        // Header-name matching cannot see into a body. A config write (create an
+        // agent, set a provider key) carries its credential there, and this map is
+        // persisted to the conversation document.
+        ApiCall call = createSimpleApiCall("body-secret-call", false);
+
+        Map<String, Object> requestMap = new HashMap<>();
+        requestMap.put("headers", new LinkedHashMap<String, Object>());
+        // Zero-entropy on purpose — see ResolvedRequestTest.BodyRedaction: the
+        // `sk-` shape is what the filter matches, the randomness is what trips
+        // the repo's secret scanner.
+        requestMap.put("body", "{\"apiKey\":\"sk-aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"name\":\"billing\"}");
+        when(mockRequest.toMap()).thenReturn(requestMap);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        var captor = ArgumentCaptor.forClass(Object.class);
+        verify(prePostUtils, atLeastOnce()).createMemoryEntry(
+                eq(currentStep), captor.capture(), contains("Request"), eq("httpCalls"));
+        @SuppressWarnings("unchecked")
+        var capturedMap = (Map<String, Object>) captor.getValue();
+        String persistedBody = String.valueOf(capturedMap.get("body"));
+        assertFalse(persistedBody.contains("sk-aaaaaaaaaaaaaaaaaaaaaaaaaa"), persistedBody);
+        assertTrue(persistedBody.contains("REDACTED"), persistedBody);
+        // Over-redaction would make the debug record useless — the rest survives.
+        assertTrue(persistedBody.contains("billing"), persistedBody);
+    }
+
+    @Test
+    @DisplayName("a credential in a QUERY parameter is scrubbed before persistence, and the live request is untouched")
+    void execute_secretInQueryParam_isRedactedWithoutCorruptingTheRequest() throws Exception {
+        ApiCall call = createSimpleApiCall("query-secret-call", false);
+
+        Map<String, Object> requestMap = new HashMap<>();
+        requestMap.put("headers", new LinkedHashMap<String, Object>());
+        // The live map RequestWrapper#toMap hands back by reference, not a copy.
+        Map<String, List<String>> liveQueryParams = new LinkedHashMap<>();
+        liveQueryParams.put("api_key", new ArrayList<>(List.of("super-secret-value")));
+        liveQueryParams.put("version", new ArrayList<>(List.of("3")));
+        requestMap.put("queryParams", liveQueryParams);
+        when(mockRequest.toMap()).thenReturn(requestMap);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        var captor = ArgumentCaptor.forClass(Object.class);
+        verify(prePostUtils, atLeastOnce()).createMemoryEntry(
+                eq(currentStep), captor.capture(), contains("Request"), eq("httpCalls"));
+        @SuppressWarnings("unchecked")
+        var capturedMap = (Map<String, Object>) captor.getValue();
+        String persisted = String.valueOf(capturedMap.get("queryParams"));
+        assertFalse(persisted.contains("super-secret-value"), persisted);
+        assertTrue(persisted.contains("<REDACTED>"), persisted);
+        assertTrue(persisted.contains("3"), "an ordinary parameter must survive: " + persisted);
+
+        // The entry is REPLACED, never rewritten in place — the request that was
+        // already sent still carries its real credential.
+        assertEquals(List.of("super-secret-value"), liveQueryParams.get("api_key"),
+                "redacting the debug record must not mutate the live request");
     }
 
     @Test
@@ -390,7 +630,8 @@ class ApiCallExecutorTest {
         realContext.bind(new CallerIdentity("caller-jwt-value", "alice", "https://eddi.example:443"));
         var realResolver = new CallerIdentityResolver(realContext, true);
         var executorWithRealResolver = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, realResolver, realContext, false, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
+                secretResolver, realResolver, realContext, new RequestRedactor(realResolver), false, DEFAULT_TIMEOUT_MILLIS,
+                DEFAULT_MAX_RESPONSE_SIZE);
         try {
             ApiCall call = createSimpleApiCall("path-ref-call", false);
             call.getRequest().setPath("/users/${caller:userId}/profile");
@@ -589,7 +830,8 @@ class ApiCallExecutorTest {
     @Test
     void execute_ssrfProtectionEnabled_blocksInternalUrl() {
         ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, callerIdentityResolver, callerIdentityContext, true, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
+                secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), true,
+                DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
         ApiCall call = createSimpleApiCall("ssrf-call", false);
         // 169.254.169.254 is a literal IP (no DNS) blocked by UrlValidationUtils.
         assertThrows(LifecycleException.class, () -> protectedExecutor.execute(call, memory, new HashMap<>(), "http://169.254.169.254"));
@@ -598,7 +840,8 @@ class ApiCallExecutorTest {
     @Test
     void execute_ssrfProtectionEnabled_disablesRedirectsOnPublicUrl() throws Exception {
         ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, callerIdentityResolver, callerIdentityContext, true, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
+                secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), true,
+                DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
         ApiCall call = createSimpleApiCall("redir-call", false);
         setupSuccessResponse(200, "ok", "text/plain");
         // 1.1.1.1 is a public literal IP — passes validation without a DNS lookup.

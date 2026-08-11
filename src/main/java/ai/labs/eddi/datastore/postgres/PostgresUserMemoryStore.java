@@ -74,7 +74,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
      * optional group clause, the closing parenthesis, an ORDER BY and a LIMIT.
      */
     private static final String VISIBILITY_SELECT = """
-            SELECT * FROM usermemories WHERE user_id = ? AND (
+            SELECT * FROM usermemories WHERE ((user_id = ? AND (
                 (visibility = 'self' AND source_agent_id = ?)
                 OR (visibility = 'global')
             """;
@@ -314,22 +314,46 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     }
 
     /**
-     * Visibility filter for a recall: self(agentId) OR group(groupIds) OR global.
+     * Visibility filter for a recall: the user's own scope — self(agentId) OR
+     * group(groupIds) OR global — plus, additively, the TEAM-OWNED scope (I8):
+     * entries whose owner is the synthetic {@code "group:"+groupId} user with
+     * {@code group} visibility. Mirrors the Mongo store's
+     * {@code buildVisibilityFilter} exactly; the two must not drift.
+     * Package-private static so the SQL shape is directly assertable.
+     * <p>
      * The {@code ??|} is the JDBC escape for PostgreSQL's {@code ?|} JSONB overlap
-     * operator — a single {@code ?} would be parsed as a bind parameter.
+     * operator — a single {@code ?} would be parsed as a bind parameter. Bind order
+     * (see {@code collectInto}): userId, agentId, then — only when groups are
+     * supplied — the group ids (user scope), the derived team owner ids, and the
+     * group ids again (team overlap).
      */
-    private String buildVisibilityQuery(List<String> groupIds) {
+    static String buildVisibilityQuery(List<String> groupIds) {
         StringBuilder sql = new StringBuilder(VISIBILITY_SELECT);
-        if (groupIds != null && !groupIds.isEmpty()) {
+        boolean hasGroups = groupIds != null && !groupIds.isEmpty();
+        if (hasGroups) {
             // `??|` is pgjdbc's escape for the jsonb `?|` overlap operator — a bare `?`
             // would be parsed by the driver as a bind placeholder.
             sql.append(" OR (visibility = 'group' AND group_ids ??| ARRAY[");
-            for (int i = 0; i < groupIds.size(); i++) {
-                sql.append(i > 0 ? ",?" : "?");
-            }
+            appendPlaceholders(sql, groupIds.size());
+            sql.append("])");
+        }
+        sql.append("))");
+        if (hasGroups) {
+            // I8: team-owned lessons. Owner ids are DERIVED from the supplied
+            // group ids at bind time, never caller-supplied strings.
+            sql.append(" OR (visibility = 'group' AND user_id IN (");
+            appendPlaceholders(sql, groupIds.size());
+            sql.append(") AND group_ids ??| ARRAY[");
+            appendPlaceholders(sql, groupIds.size());
             sql.append("])");
         }
         return sql.append(")").toString();
+    }
+
+    private static void appendPlaceholders(StringBuilder sql, int count) {
+        for (int i = 0; i < count; i++) {
+            sql.append(i > 0 ? ",?" : "?");
+        }
     }
 
     /**
@@ -397,7 +421,16 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             int paramIndex = 1;
             ps.setString(paramIndex++, userId);
             ps.setString(paramIndex++, agentId);
-            if (groupIds != null) {
+            if (groupIds != null && !groupIds.isEmpty()) {
+                // Bind order must mirror buildVisibilityQuery exactly: the user
+                // scope's group overlap, then the derived team owners (I8), then
+                // the team scope's group overlap.
+                for (String gid : groupIds) {
+                    ps.setString(paramIndex++, gid);
+                }
+                for (String gid : groupIds) {
+                    ps.setString(paramIndex++, IUserMemoryStore.TEAM_OWNER_PREFIX + gid);
+                }
                 for (String gid : groupIds) {
                     ps.setString(paramIndex++, gid);
                 }

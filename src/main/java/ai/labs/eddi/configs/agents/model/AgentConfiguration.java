@@ -324,11 +324,20 @@ public class AgentConfiguration {
             if (keys == null || keys.isEmpty()) {
                 return version == 0 ? publicKey : null;
             }
-            return keys.stream()
+            String versioned = keys.stream()
                     .filter(k -> k.version() == version)
                     .map(ai.labs.eddi.configs.agents.crypto.AgentPublicKey::publicKeyB64)
                     .findFirst()
                     .orElse(null);
+            // Version 0 means "signed before key versioning existed", so the legacy
+            // single publicKey field IS its key — even once a versioned list has been
+            // added. Without this, onboarding a keys list starting at v1 (the normal
+            // rotation path) made every pre-rotation entry resolve to null, and peer
+            // verification reported authentic entries as unverifiable. The old
+            // getKeyValidAt lookup ended `.orElse(publicKey)` and so never had the
+            // problem; the version-exact lookup that replaced it dropped the fallback
+            // along with the rotation-window bug it was fixing.
+            return versioned != null || version != 0 ? versioned : publicKey;
         }
 
         /**

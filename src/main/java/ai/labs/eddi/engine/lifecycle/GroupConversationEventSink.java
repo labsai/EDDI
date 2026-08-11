@@ -44,6 +44,44 @@ public final class GroupConversationEventSink {
      * member turn is recorded SKIPPED and its stranded pause is cancelled.
      */
     public static final String EVENT_MEMBER_PAUSE_SKIPPED = "member_pause_skipped";
+    /**
+     * A {@link GroupConversation.DecisionRecord} was set on the discussion (Wave 0,
+     * F3). No feature fires this yet — I3 (verdicts), I11 (agreements), I14 (votes)
+     * and I18 (awards) are the eventual producers.
+     */
+    public static final String EVENT_DECISION_REACHED = "decision_reached";
+    /**
+     * A convergence check ran after a phase repeat (I2). Fires on every check,
+     * converged or not, so an observer can see a phase approaching agreement rather
+     * than only the moment it stops.
+     */
+    public static final String EVENT_CONVERGENCE_CHECKED = "convergence_checked";
+    /**
+     * A phase stopped repeating early because its participants converged (I2).
+     * Always preceded by an {@link #EVENT_CONVERGENCE_CHECKED} for the same repeat.
+     */
+    public static final String EVENT_CONVERGENCE_REACHED = "convergence_reached";
+    /**
+     * A HUMAN group member's turn is up (I6): the discussion paused
+     * ({@code AWAITING_HUMAN_INPUT}) until that member submits their response — or
+     * the group's {@code humanMemberConfig} timeout policy resolves the turn.
+     * Distinct from {@link #EVENT_AWAITING_APPROVAL}: this is "you're up", not
+     * "approve/reject".
+     */
+    public static final String EVENT_HUMAN_INPUT_REQUESTED = "human_input_requested";
+    /**
+     * A RETRO phase harvested lessons into team-owned group memory (I8). Fires even
+     * with zero lessons stored — "the retro ran and found nothing durable" is
+     * itself signal for an observer.
+     */
+    public static final String EVENT_RETRO_RECORDED = "retro_recorded";
+    /**
+     * A member created or updated a shared artifact (I17). Fired by the turn
+     * executor after the turn that made the write — tools have no listener
+     * reference, so accepted writes ride the live discussion's artifact-change
+     * queue until the executor drains it.
+     */
+    public static final String EVENT_ARTIFACT_UPDATED = "artifact_updated";
 
     // --- Event payloads ---
 
@@ -103,11 +141,69 @@ public final class GroupConversationEventSink {
     }
 
     /**
+     * A HUMAN member's turn is up (I6). Carries identifiers only — the rendered
+     * prompt lives on the conversation's {@code pendingHumanInput}, which the
+     * member's UI reads; an SSE frame is the wrong place for a full transcript
+     * rendering.
+     */
+    public record HumanInputRequestedEvent(String memberId, String displayName, int phaseIndex, String phaseName) {
+    }
+
+    /**
      * Emitted when a member agent's private conversation requested human approval
      * (PAUSE_CONVERSATION) during its group turn. Member-level HITL is not
      * supported inside a group discussion in v1 — the turn is recorded SKIPPED and
      * the stranded member pause is cancelled.
      */
     public record MemberPauseSkippedEvent(String agentId, String displayName, int phaseIndex, String phaseName, String reason) {
+    }
+
+    /**
+     * Emitted when a {@link GroupConversation.DecisionRecord} is set on the
+     * discussion (Wave 0, F3).
+     */
+    public record DecisionReachedEvent(GroupConversation.DecisionRecord decision) {
+    }
+
+    /**
+     * A convergence check completed for one phase repeat (I2).
+     *
+     * @param agreementScore
+     *            the judge's 0..1 score, or {@code -1} when no judge ran (the
+     *            all-abstained path, or a parse failure)
+     * @param converged
+     *            whether this check ended the phase's repeats
+     * @param reason
+     *            one-line explanation, already display-ready
+     */
+    public record ConvergenceCheckedEvent(int phaseIndex, String phaseName, int repeat, double agreementScore,
+            boolean converged, String reason) {
+    }
+
+    /**
+     * A phase stopped repeating early because it converged (I2).
+     *
+     * @param repeatsSkipped
+     *            how many further repeats the phase was configured for but will not
+     *            run — the concrete saving
+     */
+    public record ConvergenceReachedEvent(int phaseIndex, String phaseName, int repeat, int repeatsSkipped, String reason) {
+    }
+
+    /** A RETRO phase stored lessons into team-owned group memory (I8). */
+    public record RetroRecordedEvent(String groupId, String phaseName, int lessonsStored) {
+    }
+
+    /**
+     * A member created or updated a shared artifact (I17). Carries metadata only,
+     * never the content — an SSE observer reads the artifact through the REST
+     * payload, and content can be a quarter megabyte.
+     *
+     * @param created
+     *            {@code true} for a fresh artifact (v1), {@code false} for an
+     *            accepted update
+     */
+    public record ArtifactUpdatedEvent(String artifactId, String name, String type, long version, String editorAgentId,
+            String status, boolean created) {
     }
 }

@@ -99,8 +99,8 @@ public interface IRestGroupConversation {
     @Operation(summary = "Start a group discussion with SSE streaming",
                description = "Starts a group discussion asynchronously and streams progress events "
                        + "(group_start, phase_start, speaker_start, speaker_complete, "
-                       + "phase_complete, synthesis_start, group_complete, group_error) "
-                       + "via Server-Sent Events.")
+                       + "phase_complete, synthesis_start, group_complete, group_error, "
+                       + "artifact_updated) via Server-Sent Events.")
     @APIResponse(responseCode = "200", description = "SSE event stream of discussion progress.")
     @APIResponse(responseCode = "400", description = "Missing/blank or oversized 'question', or an oversized attachment.")
     @APIResponse(responseCode = "404", description = "Group not found.")
@@ -184,7 +184,10 @@ public interface IRestGroupConversation {
                        + "Emits round_start (new round marker) followed by the same events as the "
                        + "initial stream (phase_start, speaker_start, speaker_complete, phase_complete, "
                        + "synthesis_start, group_complete, group_error), plus the HITL events "
-                       + "(awaiting_approval, hitl_resume, cancelled, member_pause_skipped). NOTE: "
+                       + "(awaiting_approval, hitl_resume, cancelled, member_pause_skipped, "
+                       + "human_input_requested). NOTE: "
+                       + "synthesis_start, group_complete, group_error, artifact_updated), plus the HITL "
+                       + "events (awaiting_approval, hitl_resume, cancelled, member_pause_skipped). NOTE: "
                        + "'attachments' are NOT supported on a continuation and are rejected with a "
                        + "terminal group_error event rather than silently ignored.")
     @APIResponse(responseCode = "200", description = "SSE event stream of continuation progress.")
@@ -246,6 +249,34 @@ public interface IRestGroupConversation {
                                     GroupApprovalRequest request,
                                     @Context SseEventSink eventSink,
                                     @Context Sse sse);
+
+    @POST
+    @Path("/{groupId}/conversations/{groupConversationId}/human-input")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
+    @Operation(summary = "Submit a human group member's turn (I6)",
+               description = "Records the pending HUMAN member's response as their transcript entry and resumes an "
+                       + "AWAITING_HUMAN_INPUT discussion from the next speaker. Only the pending member's own "
+                       + "principal (or an admin) may submit — this is a member SPEAKING, not an approval; the "
+                       + "approve endpoint never accepts free text and this endpoint never decides approvals.")
+    @APIResponse(responseCode = "200", description = "Input recorded; discussion resumed.")
+    @APIResponse(responseCode = "400", description = "Blank content, unknown member, or memberId not matching the pending turn.")
+    @APIResponse(responseCode = "403", description = "Caller is neither the pending member nor an admin.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    @APIResponse(responseCode = "409", description = "Not awaiting human input / concurrent modification conflict.")
+    Response submitHumanInput(@PathParam("groupId") String groupId,
+                              @PathParam("groupConversationId") String gcId,
+                              HumanInputRequest request);
+
+    /**
+     * Request body for {@link #submitHumanInput}: which HUMAN member is speaking,
+     * and what they said.
+     */
+    record HumanInputRequest(
+            @NotBlank(message = "'memberId' must not be blank") String memberId,
+            @NotBlank(message = "'content' must not be blank") String content) {
+    }
 
     @GET
     @Path("/{groupId}/conversations/{groupConversationId}/approval-status")

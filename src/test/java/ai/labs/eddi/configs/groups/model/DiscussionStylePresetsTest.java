@@ -9,9 +9,12 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
+import io.quarkus.qute.Engine;
+import io.quarkus.qute.ReflectionValueResolver;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -264,6 +267,48 @@ class DiscussionStylePresetsTest {
         assertEquals(PhaseType.SYNTHESIS, phases.get(3).type());
     }
 
+    // --- NEGOTIATION (I11) ---
+
+    @Test
+    void negotiation_produces5Phases_withTheProtocolShape() {
+        List<DiscussionPhase> phases = DiscussionStylePresets.expand(DiscussionStyle.NEGOTIATION, 3);
+
+        assertEquals(5, phases.size());
+
+        // ① Positions & Interests — PARALLEL and context-free: parties state
+        // genuine interests before anchoring on each other.
+        var positions = phases.get(0);
+        assertEquals(PhaseType.OPINION, positions.type());
+        assertEquals(TurnOrder.PARALLEL, positions.turnOrder());
+        assertEquals(ContextScope.NONE, positions.contextScope());
+
+        // ② Opening Proposals
+        var proposals = phases.get(1);
+        assertEquals(PhaseType.PROPOSAL, proposals.type());
+        assertEquals("ALL", proposals.participants());
+
+        // ③ Bargaining — repeats = maxRounds; the loop exits early on agreement.
+        var bargaining = phases.get(2);
+        assertEquals(PhaseType.BARGAIN, bargaining.type());
+        assertEquals(3, bargaining.repeats());
+        assertEquals(TurnOrder.SEQUENTIAL, bargaining.turnOrder());
+
+        // ④ Arbitration — MODERATOR, skipped entirely when agreement was reached,
+        // with its own template (the default SYNTHESIS asks for a balanced
+        // summary; an arbitrator DECIDES).
+        var arbitration = phases.get(3);
+        assertEquals(PhaseType.SYNTHESIS, arbitration.type());
+        assertEquals("MODERATOR", arbitration.participants());
+        assertEquals(AgentGroupConfiguration.PhaseSkipCondition.AGREEMENT_REACHED, arbitration.skipIf());
+        assertEquals(DiscussionStylePresets.TEMPLATE_ARBITRATION, arbitration.inputTemplate());
+
+        // ⑤ Synthesis
+        var synthesis = phases.get(4);
+        assertEquals(PhaseType.SYNTHESIS, synthesis.type());
+        assertEquals("MODERATOR", synthesis.participants());
+        assertNull(synthesis.skipIf(), "only the arbitration is conditional");
+    }
+
     @Test
     void taskForce_turnOrders() {
         List<DiscussionPhase> phases = DiscussionStylePresets.expand(DiscussionStyle.TASK_FORCE, 1);
@@ -289,5 +334,52 @@ class DiscussionStylePresetsTest {
         assertEquals("ALL", phases.get(1).participants()); // EXECUTE
         assertEquals("MODERATOR", phases.get(2).participants()); // VERIFY
         assertEquals("MODERATOR", phases.get(3).participants()); // SYNTHESIS
+    }
+
+    // =================================================================
+    // I3 — the judgment template must survive Qute
+    // =================================================================
+
+    @Test
+    void debateJudgmentTemplate_survivesQuteRendering() {
+        // Every other test in the I3 suite mocks ITemplatingEngine, so none of
+        // them would notice Qute eating the JSON contract out of this template —
+        // and the symptom would be a judge that never returns parseable output,
+        // i.e. the feature silently never working. The literal braces here are
+        // load-bearing and this is the only test that proves they survive.
+        //
+        // Formatting matters more than it looks: `{` immediately followed by `"`
+        // renders literally, but the same JSON pretty-printed across lines (a `{`
+        // followed by a newline) does NOT — Qute consumes it. Keep the contract
+        // line on one line.
+        var engine = Engine.builder().addDefaults().addValueResolver(new ReflectionValueResolver()).build();
+        var transcript = List.of(Map.of("speaker", "Pro", "content", "We should ship.", "phaseName", "Arguments"));
+
+        String rendered = engine.parse(DiscussionStylePresets.TEMPLATE_DEBATE_JUDGMENT)
+                .data("question", "Ship on Friday?")
+                .data("transcript", transcript)
+                .render();
+
+        assertTrue(rendered.contains("""
+                {"winner": "PRO" | "CON" | "TIE", "scores": {"PRO": <0-10>, "CON": <0-10>}, "reasoning": "<your full analysis>"}"""),
+                "the JSON contract must reach the judge verbatim, otherwise DebateVerdictParser can never parse a reply:\n" + rendered);
+        // The data bindings still work — a template that renders literally
+        // everywhere would be just as broken.
+        assertTrue(rendered.contains("Ship on Friday?"));
+        assertTrue(rendered.contains("We should ship."));
+    }
+
+    @Test
+    void debateJudgmentTemplate_scoresArgumentQualityNotAssertiveness() {
+        // The anti-sycophancy directive the plan requires. An LLM judge shown two
+        // sides reliably rewards the more forceful one; dropping this line turns
+        // the verdict into a measure of rhetoric.
+        String t = DiscussionStylePresets.TEMPLATE_DEBATE_JUDGMENT;
+        assertTrue(t.contains("FACTUAL SUPPORT"), t);
+        assertTrue(t.contains("do NOT reward assertiveness"), t);
+        assertTrue(t.contains("A tie is a legitimate verdict"), t);
+        // The reasoning is the discussion's answer, so a length cap here would
+        // quietly shorten the output of every existing DEBATE config.
+        assertFalse(t.contains("2-3 sentences"), "reasoning must stay uncapped: " + t);
     }
 }

@@ -215,7 +215,8 @@ public class ConverseWithAgentTool {
                         }
                     });
 
-            SimpleConversationMemorySnapshot snapshot = responseFuture.get(60, TimeUnit.SECONDS);
+            int timeoutSeconds = config.getDelegationTimeoutSeconds();
+            SimpleConversationMemorySnapshot snapshot = responseFuture.get(timeoutSeconds, TimeUnit.SECONDS);
 
             // Finding 25: the delegated conversation paused for human approval on
             // this turn. Return a structured, actionable result so the delegating
@@ -253,7 +254,7 @@ public class ConverseWithAgentTool {
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
             // Finding 25: re-invoking against an already-paused delegated
             // conversation. Report the pending approval instead of hanging on the
-            // 60s watchdog or surfacing a generic error.
+            // delegation watchdog or surfacing a generic error.
             LOGGER.debugf("[CONVERSE] Conversation '%s' with agent '%s' is awaiting approval",
                     conversationId, agentId);
             // Already-paused at submit — no snapshot available here, so we cannot
@@ -261,7 +262,11 @@ public class ConverseWithAgentTool {
             return pausedForApprovalMessage(conversationId, null);
         } catch (java.util.concurrent.TimeoutException e) {
             LOGGER.warnf("[CONVERSE] Timeout waiting for agent '%s' response", agentId);
-            return "⚠️ Timeout waiting for agent '%s' to respond (60s limit).".formatted(agentId);
+            // The number has to come from the same config the wait used, or the
+            // message tells the model a limit that was never applied — which is how
+            // a stale "(60s limit)" survived the timeout becoming configurable.
+            return "⚠️ Timeout waiting for agent '%s' to respond (%ds limit).".formatted(agentId,
+                    config.getDelegationTimeoutSeconds());
         } catch (Exception e) {
             LOGGER.errorf("[CONVERSE] Error conversing with agent '%s': %s", agentId, e.getMessage());
             return "❌ Error conversing with agent '%s': %s".formatted(agentId, e.getMessage());

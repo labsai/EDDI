@@ -35,6 +35,22 @@ public final class DiscussionStylePresets {
 
             As {displayName}, please share your professional perspective.""";
 
+    /**
+     * The anti-sycophancy directive (I4). Added only to the templates where a
+     * member can see what others said — {@link #TEMPLATE_OPINION_WITH_CONTEXT} and
+     * {@link #TEMPLATE_CRITIQUE}. {@link #TEMPLATE_OPINION_INDEPENDENT} shows no
+     * peers, so there is nobody to agree with, and
+     * {@link #TEMPLATE_OPINION_ANONYMOUS} already instructs independent judgment;
+     * adding it there would be noise that dilutes the instruction where it counts.
+     * <p>
+     * The failure it addresses is well documented in multi-agent LLM setups: shown
+     * prior responses, models converge on them regardless of merit, which turns a
+     * panel into an echo of whoever spoke first. That also silently degrades I2's
+     * convergence signal — agreement reached by deference looks identical to
+     * agreement reached by persuasion.
+     */
+    public static final String ANTI_SYCOPHANCY_DIRECTIVE = "State your genuine assessment; do not adjust your position merely to agree with prior speakers.";
+
     public static final String TEMPLATE_OPINION_WITH_CONTEXT = """
             The discussion continues.
 
@@ -43,7 +59,8 @@ public final class DiscussionStylePresets {
             — {entry.speaker}: "{entry.content}"
             {/for}
 
-            As {displayName}, please respond to the others' perspectives.""";
+            As {displayName}, please respond to the others' perspectives.
+            """ + ANTI_SYCOPHANCY_DIRECTIVE;
 
     public static final String TEMPLATE_CRITIQUE = """
             You are reviewing {targetName}'s perspective on:
@@ -52,7 +69,8 @@ public final class DiscussionStylePresets {
             Their response: "{targetResponse}"
 
             As {displayName}, provide constructive feedback — identify strengths, \
-            weaknesses, and suggestions for improvement.""";
+            weaknesses, and suggestions for improvement.
+            """ + ANTI_SYCOPHANCY_DIRECTIVE;
 
     public static final String TEMPLATE_REVISION = """
             You previously shared your perspective on:
@@ -129,6 +147,47 @@ public final class DiscussionStylePresets {
             {/for}
 
             Synthesize a balanced conclusion with a clear recommendation.""";
+
+    /**
+     * The DEBATE conclusion (I3). Unlike {@link #TEMPLATE_SYNTHESIS}, which asks
+     * for a balanced summary, a debate ends in a <em>judgment</em> — and a judgment
+     * expressed only as prose cannot be read by anything downstream: a caller
+     * wanting the winner has to parse English.
+     * <p>
+     * The scoring directive is the anti-sycophancy half. An LLM judge shown two
+     * sides reliably rewards the more assertive, more fluent, longer argument;
+     * saying so explicitly is the documented mitigation, and without it the verdict
+     * measures rhetoric rather than the case.
+     * <p>
+     * <b>{@code reasoning} is deliberately uncapped.</b> It becomes the
+     * discussion's {@code synthesizedAnswer} (rendered after the verdict line by
+     * {@code DebateVerdictParser}), so every REST/SSE/MCP caller — and every parent
+     * group consuming this one as a nested member — reads it in place of the
+     * balanced prose {@link #TEMPLATE_SYNTHESIS} used to produce. Asking for "2-3
+     * sentences" here would quietly shorten the output of every existing DEBATE
+     * config. A config that wants the old prose conclusion back sets the phase's
+     * {@code inputTemplate}, which suppresses the verdict path entirely.
+     */
+    public static final String TEMPLATE_DEBATE_JUDGMENT = """
+            You are judging a formal debate on the proposition:
+            "{question}"
+
+            Full transcript:
+            {#for entry in transcript}
+            [{entry.phaseName}] {entry.speaker}: "{entry.content}"
+            {/for}
+
+            Score each side on the QUALITY of its argument and the FACTUAL SUPPORT it
+            offered. Explicitly do NOT reward assertiveness, confidence, fluency, or
+            length — a calmly stated, well-evidenced case beats a forceful, unsupported
+            one. A tie is a legitimate verdict; do not manufacture a winner.
+
+            Respond with ONLY this JSON, no other text. Put your full analysis in
+            "reasoning" — which arguments carried, what evidence decided it, and where
+            the losing side came closest. That text is what the group's readers see as
+            the conclusion, so do not abbreviate it:
+            {"winner": "PRO" | "CON" | "TIE", "scores": {"PRO": <0-10>, "CON": <0-10>}, "reasoning": "<your full analysis>"}
+            """;
 
     public static final String TEMPLATE_OPINION_ANONYMOUS = """
             A panel of experts is discussing:
@@ -213,6 +272,105 @@ public final class DiscussionStylePresets {
             ]
             ```""";
 
+    /**
+     * The ballot prompt (I14). The JSON contract line is what
+     * {@code VoteTallyEngine}'s three-tier parse reads; the "vote independently"
+     * line is honesty, not the mechanism — independence is enforced structurally
+     * (PARALLEL + NONE scope + the pre-fan-out snapshot), so a model ignoring the
+     * instruction still cannot see any ballot cast this phase.
+     */
+    public static final String TEMPLATE_VOTE = """
+            The group must decide:
+            "{question}"
+
+            The options are:
+            {#for option in options}
+            - {option}
+            {/for}
+
+            As {displayName}, vote independently — you cannot see anyone else's ballot.
+            Respond with ONLY this JSON, no other text:
+            {ballotContract}""";
+
+    /**
+     * The opening offer (I11). The whole reply becomes the proposal's terms —
+     * deliberately prose, not JSON: an opening position is authored, not parsed.
+     */
+    public static final String TEMPLATE_PROPOSAL = """
+            A negotiation is underway on:
+            "{question}"
+
+            {#if previousResponses}
+            Positions and interests stated so far:
+            {#for entry in previousResponses}
+            — {entry.speaker}: "{entry.content}"
+            {/for}
+            {/if}
+
+            As {displayName}, state your OPENING PROPOSAL: concrete terms the \
+            others could accept. Your entire reply is the proposal.""";
+
+    /**
+     * The bargaining contract (I11). The baked-in rules are the anti-sycophancy
+     * mechanism: an acceptance must name a specific proposal id, and a concession
+     * that does not name what was received in return is not recorded. The current
+     * table (open proposals + concession ledger) is appended to this prompt by
+     * {@code NegotiationEngine.appendStateIfRelevant}.
+     */
+    public static final String TEMPLATE_BARGAIN = """
+            A negotiation is underway on:
+            "{question}"
+
+            As {displayName}, make your bargaining move. Reply with JSON in this exact shape \
+            (any field may be null/empty), followed by your free-text reasoning:
+            {"accept": "<proposalId>"|null, "proposal": {"terms": "..."}|null, "concessions": [{"gaveUp": "...", "inReturnFor": "..."}]}
+
+            Rules:
+            - Do not accept any proposal that fails your stated interests.
+            - Every concession must name what you received in return — unreciprocated concessions are not recorded.
+            - The ledger below is the record — it will be quoted in the outcome.""";
+
+    /**
+     * Arbitration (I11): bargaining ended without unanimous acceptance, so the
+     * moderator decides. Only rendered when the phase actually runs — an agreement
+     * skips it entirely ({@code skipIf=AGREEMENT_REACHED}).
+     */
+    public static final String TEMPLATE_ARBITRATION = """
+            You are arbitrating a negotiation on:
+            "{question}"
+
+            The parties bargained but did NOT reach unanimous agreement. The full \
+            transcript is your record:
+            {#for entry in transcript}
+            [{entry.phaseName}] {entry.speaker}: "{entry.content}"
+            {/for}
+
+            As the arbitrator, decide the outcome. Weigh the stated interests, the \
+            open proposals and the concession ledger (appended below); state your \
+            decision and its reasoning plainly.""";
+
+    /**
+     * The retrospective prompt (I8). The JSON contract line is what
+     * {@code RetroEngine}'s three-tier parse reads; the cap is quoted to the model
+     * AND enforced by the parser regardless.
+     */
+    public static final String TEMPLATE_RETRO = """
+            The discussion on the question below has concluded:
+            "{question}"
+
+            Full transcript:
+            {#for entry in transcript}
+            [{entry.phaseName}] {entry.speaker}: "{entry.content}"
+            {/for}
+
+            Review how this group worked. What worked, what failed, and what should
+            this group do differently next time? Distill LESSONS the group should
+            remember for future discussions — durable, actionable, not a summary of
+            this question's answer.
+
+            Respond with ONLY this JSON, no other text (max {maxLessonsPerRun} lessons):
+            {"lessons": [{"lesson": "<one sentence the group should remember>", "context": "<when it applies>"}]}""";
+
     // Template lookup by phase type
     private static final Map<PhaseType, String> DEFAULT_TEMPLATES = Map.ofEntries(
             Map.entry(PhaseType.OPINION, TEMPLATE_OPINION_INDEPENDENT),
@@ -225,7 +383,11 @@ public final class DiscussionStylePresets {
             Map.entry(PhaseType.SYNTHESIS, TEMPLATE_SYNTHESIS),
             Map.entry(PhaseType.PLAN, TEMPLATE_PLAN),
             Map.entry(PhaseType.EXECUTE, TEMPLATE_EXECUTE),
-            Map.entry(PhaseType.VERIFY, TEMPLATE_VERIFY));
+            Map.entry(PhaseType.VERIFY, TEMPLATE_VERIFY),
+            Map.entry(PhaseType.VOTE, TEMPLATE_VOTE),
+            Map.entry(PhaseType.PROPOSAL, TEMPLATE_PROPOSAL),
+            Map.entry(PhaseType.BARGAIN, TEMPLATE_BARGAIN),
+            Map.entry(PhaseType.RETRO, TEMPLATE_RETRO));
 
     /**
      * Returns the default template for a given phase type.
@@ -259,8 +421,35 @@ public final class DiscussionStylePresets {
             case DELPHI -> delphi(rounds);
             case DEBATE -> debate();
             case TASK_FORCE -> taskForce();
+            case NEGOTIATION -> negotiation(rounds);
             case CUSTOM -> List.of();
         };
+    }
+
+    // --- NEGOTIATION (I11) ---
+
+    /**
+     * ① Positions & Interests — PARALLEL and context-free, so parties state genuine
+     * interests before anchoring on each other (interests are what enable
+     * integrative trades). ② Opening Proposals. ③ Bargaining, repeated
+     * {@code rounds} times — the repeat loop exits early on unanimous acceptance. ④
+     * Arbitration — skipped entirely when an agreement was reached. ⑤ Synthesis —
+     * quotes the ledger.
+     */
+    private static List<DiscussionPhase> negotiation(int rounds) {
+        List<DiscussionPhase> phases = new ArrayList<>();
+        phases.add(new DiscussionPhase("Positions & Interests", PhaseType.OPINION, "ALL", TurnOrder.PARALLEL,
+                ContextScope.NONE, false, null, 1));
+        phases.add(new DiscussionPhase("Opening Proposals", PhaseType.PROPOSAL, "ALL", TurnOrder.SEQUENTIAL,
+                ContextScope.FULL, false, null, 1));
+        phases.add(new DiscussionPhase("Bargaining", PhaseType.BARGAIN, "ALL", TurnOrder.SEQUENTIAL,
+                ContextScope.FULL, false, null, rounds));
+        phases.add(new DiscussionPhase("Arbitration", PhaseType.SYNTHESIS, "MODERATOR", TurnOrder.SEQUENTIAL,
+                ContextScope.FULL, false, TEMPLATE_ARBITRATION, 1, false, null, false,
+                AgentGroupConfiguration.PhaseSkipCondition.AGREEMENT_REACHED));
+        phases.add(new DiscussionPhase("Synthesis", PhaseType.SYNTHESIS, "MODERATOR", TurnOrder.SEQUENTIAL,
+                ContextScope.FULL, false, null, 1));
+        return phases;
     }
 
     // --- ROUND_TABLE ---

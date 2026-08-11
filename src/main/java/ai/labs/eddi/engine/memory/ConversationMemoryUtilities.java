@@ -64,6 +64,10 @@ public class ConversationMemoryUtilities {
 
     private static ConversationMemorySnapshot getMemorySnapshot(IConversationMemory conversationMemory) {
         var snapshot = new ConversationMemorySnapshot();
+        // The field initialiser is the LEGACY sentinel so key-less stored documents
+        // read as legacy — a snapshot built from live memory is current by
+        // definition and must say so explicitly.
+        snapshot.setSchemaVersion(ConversationMemorySnapshot.CURRENT_SCHEMA_VERSION);
 
         if (conversationMemory.getUserId() != null) {
             snapshot.setUserId(conversationMemory.getUserId());
@@ -281,11 +285,15 @@ public class ConversationMemoryUtilities {
      * <p>
      * This copy therefore carries ONLY per-call {@code callId}/{@code toolName}/
      * {@code source}/{@code gateReason}/{@code argsTruncated} — never
-     * {@code argumentsRaw} or {@code argumentsRedacted} — and leaves
-     * {@code chatTranscriptJson}, {@code traceSoFar}, and {@code fingerprint} null.
-     * Consumers that read tool NAMES (delegated/group/MCP parity via
-     * {@code batch.getCalls().getToolName()}) keep working unchanged. Returns
-     * {@code null} when there is no batch.
+     * {@code argumentsRaw}, {@code argumentsRedacted}, {@code requestFingerprint},
+     * or {@code requestPreview} — and leaves {@code chatTranscriptJson},
+     * {@code traceSoFar}, and {@code fingerprint} null. {@code requestPreview} is
+     * excluded for the same reason as {@code argumentsRedacted}: both are already
+     * redacted at persistence time, so the exclusion is not about a fresh secret
+     * leak — it is that this view's whole contract is "names only", and a request
+     * preview is materially more detail than a name. Consumers that read tool NAMES
+     * (delegated/group/MCP parity via {@code batch.getCalls().getToolName()}) keep
+     * working unchanged. Returns {@code null} when there is no batch.
      */
     private static PendingToolCallBatch namesOnlyPendingToolCalls(PendingToolCallBatch source) {
         if (source == null) {
@@ -344,6 +352,61 @@ public class ConversationMemoryUtilities {
     public static ConversationMemorySnapshot redactRawPendingToolCallsForRead(ConversationMemorySnapshot snapshot) {
         if (snapshot != null && snapshot.getHitlPendingToolCalls() != null) {
             snapshot.setHitlPendingToolCalls(namesOnlyPendingToolCalls(snapshot.getHitlPendingToolCalls()));
+        }
+        return snapshot;
+    }
+
+    /**
+     * Stands in for a stripped fingerprint. A constant, so it carries none of the
+     * digest — but non-null, so {@code PendingToolCall#isRequestPinned()} (which
+     * derives from the field) keeps reporting the truth.
+     */
+    static final String REDACTED_FINGERPRINT = "<REDACTED>";
+
+    /**
+     * Strips the request fingerprints from a snapshot about to be returned in FULL
+     * to an approver.
+     * <p>
+     * {@code approval-status?detail=full} deliberately returns the whole snapshot —
+     * an approver needs the arguments and the request preview — so
+     * {@link #namesOnlyPendingToolCalls} is far too aggressive here. But
+     * {@code requestFingerprint} must not ride along: it is a SHA-256 over a
+     * canonical string that includes the RAW body and RAW query values, i.e.
+     * precisely the credential material {@code RequestRedactor} stripped out of the
+     * preview beside it. Handing an approver both the digest and everything that
+     * went into it except the secret is an offline guessing exercise, which is why
+     * {@code PendingToolCallBatch}, {@code ResolvedRequest} and
+     * {@code docs/hitl.md} all state it is never exposed. This is what makes that
+     * true on this path.
+     * <p>
+     * A read-time projection rather than {@code @JsonIgnore} on the getter:
+     * {@code SerializationCustomizer.configureObjectMapper} is shared with
+     * {@code PersistenceMapperProducer}, so ignoring the field would also drop it
+     * from the PERSISTED document — silently disabling pinning everywhere, since
+     * the fingerprint would no longer survive the pause it exists to guard.
+     * <p>
+     * Mutates the passed snapshot, matching
+     * {@link #redactRawPendingToolCallsForRead}: both operate on a snapshot freshly
+     * loaded for one request, never on shared state.
+     */
+    public static ConversationMemorySnapshot stripRequestFingerprintsForRead(ConversationMemorySnapshot snapshot) {
+        if (snapshot == null || snapshot.getHitlPendingToolCalls() == null
+                || snapshot.getHitlPendingToolCalls().getCalls() == null) {
+            return snapshot;
+        }
+        for (var call : snapshot.getHitlPendingToolCalls().getCalls()) {
+            if (call != null && call.getRequestFingerprint() != null) {
+                // A marker, NOT null. `isRequestPinned()` is derived from this
+                // field, and it is a documented contract field the approver's UI
+                // renders as "verified" vs "preview only". Nulling the digest
+                // therefore silently flipped every pinned call to
+                // requestPinned:false on this surface — telling the approver the
+                // request is NOT re-checked before execution when it is, and
+                // disagreeing with detail=summary about the same conversation.
+                // Replacing rather than clearing keeps the boolean honest while
+                // revealing nothing: the marker is a constant, not a digest.
+                call.setRequestFingerprint(REDACTED_FINGERPRINT);
+            }
         }
         return snapshot;
     }

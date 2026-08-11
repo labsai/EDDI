@@ -17,9 +17,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Deploy-time validation for {@link ModelCascadeConfig}. Runs from
- * {@code LlmTask.configure()} so misconfigurations surface at agent deployment
- * rather than per-turn mid-conversation.
+ * Deploy-time validation for {@link ModelCascadeConfig} and the task-level
+ * pricing fields. Runs from {@code LlmTask.configure()} so misconfigurations
+ * surface at agent deployment rather than per-turn mid-conversation.
  * <p>
  * <b>Backward compatibility:</b> conditions that older releases tolerated at
  * load (they still failed/degraded at runtime exactly as before — unknown
@@ -53,12 +53,18 @@ final class CascadeConfigValidator {
     }
 
     private static void validateTask(LlmConfiguration.Task task) throws WorkflowConfigurationException {
+        String taskId = task.getId() != null ? task.getId() : "<unnamed>";
+
+        // Task-level pricing is NEW (same rationale as the cascade pricing below:
+        // no stored config predating it can carry the field) — hard error on a
+        // negative value, cascade or not.
+        requireNonNegativeTaskPrice(taskId, "inputPricePer1M", task.getInputPricePer1M());
+        requireNonNegativeTaskPrice(taskId, "outputPricePer1M", task.getOutputPricePer1M());
+
         ModelCascadeConfig cascade = task.getModelCascade();
         if (cascade == null || !cascade.isEnabled()) {
             return;
         }
-
-        String taskId = task.getId() != null ? task.getId() : "<unnamed>";
 
         List<CascadeStep> steps = cascade.getSteps();
         if (steps == null || steps.isEmpty()) {
@@ -157,6 +163,12 @@ final class CascadeConfigValidator {
     private static void requireNonNegativePrice(String taskId, String what, Double price) throws WorkflowConfigurationException {
         if (price != null && price < 0) {
             throw fail(taskId, what + " must be >= 0");
+        }
+    }
+
+    private static void requireNonNegativeTaskPrice(String taskId, String what, Double price) throws WorkflowConfigurationException {
+        if (price != null && price < 0) {
+            throw new WorkflowConfigurationException("Invalid LLM task '" + taskId + "': " + what + " must be >= 0");
         }
     }
 
