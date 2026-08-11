@@ -68,11 +68,16 @@ public class PlaceholderSyntaxContractTest {
     }
 
     /**
-     * How a snippet with {@code templateEnabled=false} protects its content. Qute's
-     * unparsed block is <code>{|...|}</code>; the Jinja2 <code>{% raw %}</code>
-     * form that PromptSnippetService used to emit is doubly wrong — Qute leaves the
-     * tags in the prompt verbatim AND still resolves the markers they were meant to
+     * How generated text concatenated into a template's SOURCE is protected — the
+     * setup wizard's OpenAPI endpoint summary is the live case. Qute's unparsed
+     * block is <code>{|...|}</code>; the Jinja2 <code>{% raw %}</code> form that
+     * PromptSnippetService once emitted is doubly wrong — Qute leaves the tags in
+     * the prompt verbatim AND still resolves the markers they were meant to
      * protect.
+     * <p>
+     * Note this is the SOURCE case. A value arriving through the data map needs no
+     * protection and must not be wrapped; see
+     * {@code PromptSnippetServiceTest#rendersMarkersLiterallyWithoutLeakingDelimiters}.
      */
     @Test
     @DisplayName("Qute unparsed blocks protect content; Jinja2 raw tags do not")

@@ -100,9 +100,50 @@ the strict-engine one, whose original `contains("name")` would have passed vacuo
 message embeds a preview of the template, which itself contains `{name}`); it now asserts on the
 cause alone. The targeted sweep around the touched classes is otherwise green.
 
+**Review round (PR #673).** Three findings, two applied and one rejected with evidence.
+
+**1c. The snippet escaping was not just unnecessary, it was the leak.** Copilot pointed out that
+`PromptSnippetService` puts its wrapped content into the template DATA map, and Qute does not
+re-parse what an expression resolved to — so `{snippets.foo}` emitted the `{|…|}` delimiters
+verbatim into the system prompt, and no amount of fixing the engine's control-character pattern
+could help, because that scans the source template. Probed against the real engine, which settled
+it and went one better:
+
+```
+escaped-as-data   = [{|Use {properties.company_name} here|}]   ← delimiters leak
+unescaped-as-data = [Use {properties.company_name} here]       ← already literal, for free
+```
+
+The second line is the point: data substitution *already* gives `templateEnabled=false` exactly the
+guarantee it promises. The wrapping protected nothing and was the only thing putting `{|` in a
+prompt. Snippets are now stored raw, `TemplateEscaping` has one caller — the wizard's
+source-concatenation, which genuinely needs it — and both javadocs stop claiming otherwise. The
+corollary is documented rather than quietly left: `templateEnabled=true` does not make markers
+resolve either, so the flag is currently inert; honouring it would mean a second evaluation pass
+over data, which is a design decision with an injection surface, not a bug fix.
+
+**Copilot's other finding — no automated regression for the dangling `$ref` — was right, and is the
+one this changelog itself had papered over** by saying "verified by regenerating the spec". That was
+a *manual* check; reverting the field type would have left every test green.
+`InfrastructureIT.openApiSpecHasNoDanglingSchemaRefs` now sweeps the real generated document for
+`$ref`s with no matching schema, plus a named assertion on the property shape. Verified without
+being able to run ITs locally, by running the walker over the pre-fix spec captured from a live
+instance: it reports exactly `[IConversationProperties]` and nothing else. Format-agnostic (YAML or
+JSON) so it does not depend on a content negotiation it has no stake in.
+
+**Rejected: "exposing internal representation" on `getConversationProperties`.** Tried it — an
+unmodifiable getter throws `UnsupportedOperationException` at
+`ConversationMemoryUtilities:191`, the line the finding itself cites, because that line populates the
+snapshot *by mutating through the getter*, on the `readConversation` path. 10 test errors. It is also
+not a regression here (the previous interface type was equally mutable), the sibling snapshot has the
+identical shape, and a DTO serialised straight to JSON has no invariant to protect. Answered on the
+PR with the stack trace.
+
 **Not fixed here (different repo):** the Manager's canary reports a failed turn as *"there may be no
 agents on this platform to test against"*, which is a plausible-but-wrong guess — the stream had
-errored. Surfacing the actual stream error would have named all of this in one shot.
+errored. Worth noting the Manager already has the right branch (`streamError` wins over that
+fallback) and the deployed bundle contains it, so the real question is why a real stream error did
+not reach it; the wording is the second problem, not the first.
 
 ---
 
