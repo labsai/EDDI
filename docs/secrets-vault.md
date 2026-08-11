@@ -69,6 +69,24 @@ Vault references are resolved **at runtime** when the task executes, never store
 
 **Caching:** Successfully resolved secrets are cached in a Caffeine cache (configurable TTL). Failed resolutions are **never cached**, ensuring newly created secrets resolve immediately without waiting for cache expiry.
 
+### Agent grants
+
+`SecretMetadata.allowedAgents` lists which agents may use a secret (`["*"]` for any — the value every auto-vaulted key carries). It is enforced **at deployment**, not at resolution.
+
+That placement is deliberate. `SecretResolver` sees only a string and has no agent identity; several of its call sites legitimately run outside any conversation; and `ChatModelRegistry` caches the built model keyed on the *unresolved* parameters, so two agents sharing a config share a cache entry — a check behind that cache would run for whichever agent built the model first and be silently skipped for every other one. The agent-to-secret binding is established in the agent's **configuration**, so that is where it is checked: once, completely, with no cache in the way.
+
+On deploy, `VaultGrantChecker` scans the agent document itself (so a `dreamConfig` credential, which lives outside every workflow, is covered) and then walks the agent's workflows into their `llm`, `apicalls`/`httpcalls`, `mcpcalls` and `rag` configs. Each config is serialized and scanned for `${vault:...}` references as a whole, and every reference found is verified against that secret's `allowedAgents`. It serializes rather than enumerating known credential fields — enumeration is how this kind of check rots when a new credential field appears.
+
+| `eddi.vault.grant-enforcement` | Behaviour |
+| ------------------------------ | --------- |
+| `off` | No check runs |
+| `warn` *(default)* | Ungranted references are logged; deployment proceeds |
+| `enforce` | Deployment is **blocked**, naming the ungranted references |
+
+An unrecognised value fails startup rather than defaulting — `grant-enforcement=enforced` silently behaving as `warn` would turn one typo into a security control that is off while appearing on. A check that cannot run (unreadable config, store error) logs and allows: it must never block a deployment.
+
+> **Why this matters for dynamic agents.** The "enforcement is via configuration authorship" model assumes a human admin writes agent configs. `create_sub_agent` lets an LLM write one, so an operator who scoped a secret to a single agent otherwise got no enforcement at all.
+
 ## Encryption
 
 ### Envelope Encryption

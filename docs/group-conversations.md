@@ -428,7 +428,8 @@ claim/lease/retry/dead-letter; the executor branches on
 `teamCadenceType: "team_cadence"` exactly like Dream consolidation). Each fire:
 
 1. **Reconcile** — a finished previous run is written back first; one still in
-   flight (or paused at an HITL gate for days) skips the fire.
+   flight skips the fire. A run paused at an HITL gate is *not* terminal, so it
+   holds the claim — but only up to a TTL (see **Stale claims** below).
 2. **Pull** — top-N *executable* backlog tasks by priority; an empty pull
    skips, logged.
 3. **Claim** — a conditional store write on `runningDiscussionId`; two pods
@@ -445,6 +446,21 @@ assignee's `perMemberStats`; anything else returns to PENDING with the
 reviewer's feedback appended to the description — **the cross-run retry
 loop**. A FAILED/CANCELLED discussion returns every pulled task untouched.
 Retro lessons flow through I8 unchanged (no duplication).
+
+**Stale claims are reclaimed.** The default group HITL timeout policy is
+`WAIT_INDEFINITELY`, so a pause nobody resolves never reaches a terminal state:
+without a backstop the claim would be held forever, every subsequent fire
+skipped as "still running", and the pulled backlog tasks stuck `IN_PROGRESS`.
+A claim older than `eddi.groups.cadence.claim-ttl` (default `PT24H`) is
+reclaimed — the stranded discussion is cancelled and put through the *ordinary*
+failure writeback, so pulled tasks return to `PENDING` and the claim clears.
+Cancel happens before release, so a reclaimed run cannot keep spending against a
+budget nobody is tracking. Set the TTL non-positive to disable reclaiming, for
+an operator who would rather wedge than risk abandoning a pause; the counter is
+`eddi_team_cadence_claims_reclaimed_total`. Creating a cadence on a group that
+combines `requiresApproval` phases with `WAIT_INDEFINITELY` logs a warning —
+that combination is what makes the backstop reachable — but is not rejected: it
+is legitimate for a team whose approver really is always available.
 
 Per-member stats are reliability **recording only** — nothing routes or
 weights on them in v1. A *permanent* group deletion cascades to the workspace;
@@ -515,6 +531,30 @@ roles fail loudly, naming the template's real roles.
 | `ops-task-force` | TASK_FORCE | Bid-based assignment (I18), agent-filed tasks (I5), specialist recruitment (I7), ceiling |
 | `decision-board` | CUSTOM | Hybrid board with a HUMAN director (I6) deliberating and voting (I14); options distilled by the chair, ties to the chair |
 | `negotiation-table` | NEGOTIATION | Typed two-party bargaining with concession ledger (I11); the arbiter role may be a human principal |
+
+## Attachments
+
+A discussion can carry shared files. `POST /groups/{groupId}/conversations` (and the `/stream` variant) accepts an `attachments` array alongside `question`, in the same three shapes the single-agent API takes:
+
+```json
+{
+  "question": "Review the attached architecture proposal.",
+  "attachments": [
+    { "storageRef": "att_01J..." },
+    { "mimeType": "application/pdf", "url": "https://example.com/proposal.pdf" },
+    { "mimeType": "image/png", "fileName": "diagram.png", "base64Data": "iVBOR..." }
+  ]
+}
+```
+
+Inline `base64Data` is stored in the blob store owned by the group conversation, so it is granted to members and reaped with the conversation. Hosted `url` references and pre-uploaded `storageRef`s pass through as-is.
+
+**How members receive them.** On a member's **first** turn the orchestrator grants that member's private conversation access to the group's blobs and injects them as `attachment_*` context — from there the ordinary single-agent attachment path applies (multimodal forwarding for vision models, PDF/text extraction otherwise). On **later** turns the member's own conversation history carries them: `AttachmentForwarder` notes the earlier attachments and the `readAttachment` tool is auto-enabled for any conversation that has them, independently of `builtInToolsWhitelist`. A recruited member gets the same grant on its own first turn, and a nested `GROUP` member propagates the whole set down.
+
+**Bounds worth knowing:**
+
+- The per-turn forwarding cap (`eddi.attachments.max-per-turn`, default 5) applies to each member turn. A discussion sharing more than that will have the surplus dropped for that turn, reported in the member's `attachments:errors` — visible in that member's conversation, **not** in the group transcript.
+- `url`-only attachments are not blob-backed and are not re-hydrated after a HITL resume; blob-backed ones are.
 
 ## Nested Groups (Group-of-Groups)
 
@@ -651,7 +691,7 @@ a minority report exists to prevent.
 |---|---|
 | `NONE` | Only the question (independent) |
 | `FULL` | All previous transcript entries |
-| `LAST_PHASE` | Only the previous phase's entries |
+| `LAST_PHASE` | The previous phase's entries **and the current phase's so far** — in a sequential phase, that is what lets the second speaker react to the first |
 | `ANONYMOUS` | Previous entries with speaker names removed |
 | `OWN_FEEDBACK` | Only feedback addressed to this agent |
 | `TASK_ONLY` | Only this agent's assigned task from the plan |
@@ -818,18 +858,47 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `allowCreation` | `false` | Allow creating new agents (vs. only recruiting existing) |
 | `allowRecruitment` | `false` | Allow recruiting already-deployed agents into the discussion |
 | `allowDelegation` | `true` | Allow delegating sub-tasks to other agents |
-| `maxCreatedAgentsPerDiscussion` | `5` | Cap on new agents created per discussion |
+| `maxCreatedAgentsPerDiscussion` | `5` | Cap on new agents created per discussion — counted across **all** members, not per member; a torn-down agent frees its slot |
 | `maxRecruitedAgentsPerDiscussion` | `10` | Cap on recruited agents per discussion |
 | `delegationTimeoutSeconds` | `60` | How long a delegating agent waits for its delegate's turn. Non-positive falls back to the default |
 | `maxDelegationsPerTask` | `3` | Cap on delegations per task |
 | `maxDelegationDepth` | `3` | How deep a delegation chain may nest before it is refused |
 | `allowedDelegationTargets` | `null` (any deployed agent) | Whitelist of agent ids a member may delegate to |
 | `lifecyclePolicy` | `EPHEMERAL` | `EPHEMERAL`, `KEEP_DEPLOYED`, `UNDEPLOY_ONLY`, or `AGENT_DECIDES` |
-| `inheritParentModel` | `true` | Created agents inherit the parent agent's model |
+| `inheritParentModel` | `true` | Created agents inherit the parent's provider, model and API-key **reference** — see below |
 | `allowedProviders` | `null` (any) | Whitelist of LLM providers |
 | `allowedModels` | `null` (any) | Per-provider model whitelist |
 
 Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentIds`, and `retainedAgentIds`.
+
+#### Model and credential inheritance
+
+`createSubAgent` takes `provider` and `model` as optional arguments. What is not
+given is inherited from the creating agent, in this order:
+
+1. **Provider** — the parent's, when `inheritParentModel` is on.
+2. **Model** — the parent's, but only if the effective provider is *still* the
+   parent's. An anthropic parent creating an `ollama` sub-agent does not hand it
+   a Claude model name.
+3. **API key** — the parent's `${vault:...}` **reference**, again only when the
+   provider matches, because a vault reference names one provider's secret.
+
+**Only a vault reference is inherited, never a plaintext key.** When the vault is
+unconfigured, `vaultApiKey` falls back to storing the key in clear; copying such a
+value into a second config would multiply that fallback's blast radius. A parent
+whose key is plaintext therefore inherits nothing, and creation fails with the
+ordinary "API key is required" error.
+
+**The allow-lists are checked against the *effective* provider and model** — the
+values after inheritance and defaults are applied, not the raw arguments. Omitting
+`provider` does not skip `allowedProviders`. For `allowedModels`:
+
+- **Provider named** (or inherited): an absent or empty entry for that provider
+  means *no restriction for that provider*.
+- **No provider named**: the model is about to be paired with the default
+  provider, so that provider must itself appear in `allowedModels`. A config
+  restricting `openai` to `gpt-4o-mini` will not silently build an *anthropic*
+  agent running `gpt-4o-mini`.
 
 ### Tenant Quota Enforcement
 
@@ -871,6 +940,8 @@ to synthesis, so the caller still gets an answer for what was already spent;
 `ABORT` fails the discussion instead. Every LLM call in the discussion is
 attributed, including the facilitator's, the convergence judge's, and the
 summarizer's.
+
+> The defaults above apply when the `protocol` block is **omitted entirely**, not only when an individual setting is. Nothing backfills a stored config, so a group saved without a `protocol` block runs on exactly these values.
 
 > **Timeout guidance**: 180s covers thinking models (e.g. `claude-sonnet-5`) and synthesis phases comfortably. For tool-calling agents with multiple tool loops, consider `300`–`600`. The timeout is per agent turn, not per phase.
 
@@ -1006,10 +1077,28 @@ Configure trigger keywords in `ChannelIntegrationConfiguration` to route to spec
 
 After a discussion, users can reply in any agent's thread to ask follow-up questions. The system injects the agent's discussion context (contribution + peer feedback received) into the prompt for a contextual response.
 
+## Not yet supported
+
+Known bounds, so they are not discovered at runtime:
+
+| Area | Behaviour today |
+|---|---|
+| **Member-level tool approval** | A member agent's `hitlConfig.toolApprovals` does not gate inside a group. The framework auto-rejects the gated call (`system:group`) and the member produces a tool-less contribution — see [hitl.md → Group members](hitl.md#group-members). `inGroupTurns: "INBOX"` is reserved and rejected at save time. |
+| **Nested pauses** | A sub-group that pauses for approval or a human turn is cancelled and its member turn recorded `SKIPPED`. Nested HITL is not supported. |
+| **Groups over the OpenAI-compatible API** | `/v1` exposes deployed *agents* as models. A group is not addressable there; use the REST or MCP surfaces. |
+| **Groups over A2A** | An A2A peer can invoke an agent, not a group. |
+| **Cross-node tool availability** | The task, artifact and recruit tools resolve the running discussion from an in-process registry. Member turns always run in the same JVM as their orchestrator, so this holds — but a discussion is only "live" on the node running it. |
+
 ## Configuration
 
 ```properties
 # application.properties
-eddi.groups.max-depth=3    # Max recursion depth for nested groups
+eddi.groups.max-depth=3             # Max recursion depth for nested groups
+eddi.groups.cadence.claim-ttl=PT24H # Standing-team claim TTL; non-positive disables reclaiming
+eddi.attachments.max-per-turn=5     # Attachments forwarded per member turn
 ```
+
+Deploying an agent that references a vault secret it is not granted is governed
+by `eddi.vault.grant-enforcement` — see
+[secrets-vault.md → Agent grants](secrets-vault.md#agent-grants).
 

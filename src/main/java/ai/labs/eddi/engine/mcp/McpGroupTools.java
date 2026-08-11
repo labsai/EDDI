@@ -289,10 +289,13 @@ public class McpGroupTools {
                 }
             }
 
-            // Protocol with maxTurns safety cap
+            // Protocol with maxTurns safety cap. The timeout/retry figures come from
+            // ProtocolConfig's own defaults — hard-coding 60 here meant every
+            // MCP-created group silently ran at the value the 180s default was
+            // introduced to replace.
             int mt = parseIntOrDefault(maxTurns, 0);
-            config.setProtocol(new ProtocolConfig(60, ProtocolConfig.MemberFailurePolicy.SKIP, 2,
-                    ProtocolConfig.MemberUnavailablePolicy.SKIP, mt));
+            config.setProtocol(new ProtocolConfig(ProtocolConfig.DEFAULT_AGENT_TIMEOUT_SECONDS, ProtocolConfig.MemberFailurePolicy.SKIP,
+                    ProtocolConfig.DEFAULT_MAX_RETRIES, ProtocolConfig.MemberUnavailablePolicy.SKIP, mt));
 
             Response response = groupStore.createGroup(config);
             String location = response.getLocation() != null ? response.getLocation().toString() : "";

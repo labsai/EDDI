@@ -103,8 +103,13 @@ public class GroupConversationService implements IGroupConversationService {
      * {@code protocol.agentTimeoutSeconds}. 180s covers thinking models (e.g.
      * claude-sonnet-5) and synthesis phases comfortably. Was 60s, which caused
      * timeouts on synthesis with extended thinking.
+     * <p>
+     * Aliases {@link ProtocolConfig#DEFAULT_AGENT_TIMEOUT_SECONDS} rather than
+     * restating it: the value is also needed by writers of a default protocol
+     * outside this engine (the MCP {@code create_group} tool), and two independent
+     * literals is how they drifted apart in the first place.
      */
-    private static final int DEFAULT_AGENT_TIMEOUT_SECONDS = 180;
+    private static final int DEFAULT_AGENT_TIMEOUT_SECONDS = ProtocolConfig.DEFAULT_AGENT_TIMEOUT_SECONDS;
 
     /**
      * Default number of retries per member turn when not configured via
@@ -112,7 +117,7 @@ public class GroupConversationService implements IGroupConversationService {
      * {@code executeAgentTurn} and the batch budget a parallel phase derives from
      * it, so the two cannot drift apart.
      */
-    private static final int DEFAULT_MAX_RETRIES = 2;
+    private static final int DEFAULT_MAX_RETRIES = ProtocolConfig.DEFAULT_MAX_RETRIES;
 
     /**
      * Slack added on top of a member's own budget when a parallel phase arms its
@@ -1711,16 +1716,32 @@ public class GroupConversationService implements IGroupConversationService {
         conversationStore.update(gc);
     }
 
+    /**
+     * The protocol a discussion runs under, or the engine defaults when the group
+     * configured none.
+     * <p>
+     * The fallback timeout is {@link #DEFAULT_AGENT_TIMEOUT_SECONDS}, not the
+     * literal 60 it used to be. A group saved without a {@code protocol} block is
+     * the COMMON shape — nothing backfills one at save time — so that literal made
+     * 180 reachable only for the odd config that supplies a protocol with a
+     * non-positive timeout, i.e. essentially never. Both the constant's own
+     * rationale (thinking models time out at 60s during synthesis) and the
+     * published default in {@code docs/group-conversations.md} said 180; only this
+     * line disagreed.
+     */
     private ProtocolConfig resolveProtocol(AgentGroupConfiguration config) {
         return config.getProtocol() != null
                 ? config.getProtocol()
-                : new ProtocolConfig(60, ProtocolConfig.MemberFailurePolicy.SKIP, 2, ProtocolConfig.MemberUnavailablePolicy.SKIP);
+                : new ProtocolConfig(DEFAULT_AGENT_TIMEOUT_SECONDS, ProtocolConfig.MemberFailurePolicy.SKIP, DEFAULT_MAX_RETRIES,
+                        ProtocolConfig.MemberUnavailablePolicy.SKIP);
     }
 
     /**
      * Resolve the per-agent timeout (seconds) for a follow-up turn from the group's
      * protocol config, so follow-ups honor the same configurable limit as
-     * discussion turns. Defaults to 60 if the config cannot be loaded.
+     * discussion turns. Falls back to {@link #DEFAULT_AGENT_TIMEOUT_SECONDS} if the
+     * config cannot be loaded — a follow-up is an ordinary member turn and has no
+     * reason to get a tighter budget than one inside the discussion.
      * <p>
      * Public: called back from GroupLifecycleOps.followUpWithMember (Wave R, R1
      * step 8).
@@ -1741,7 +1762,7 @@ public class GroupConversationService implements IGroupConversationService {
             LOGGER.debugf("Could not resolve agent timeout for group %s, using default: %s",
                     LogSanitizer.sanitize(gc.getGroupId()), e.getMessage());
         }
-        return 60;
+        return DEFAULT_AGENT_TIMEOUT_SECONDS;
     }
 
     /**
@@ -2030,12 +2051,6 @@ public class GroupConversationService implements IGroupConversationService {
     private String resolveTaskAssignment(String assignToRole, List<GroupMember> members,
                                          String moderatorAgentId, int taskIndex) {
         return taskForceEngine.resolveTaskAssignment(assignToRole, members, moderatorAgentId, taskIndex);
-    }
-
-    private void recordTaskFailure(GroupConversation gc, TaskItem task, GroupMember member,
-                                   String errorMessage, int phaseIdx, DiscussionPhase phase,
-                                   List<GroupDiscussionException> errors, GroupDiscussionException ex) {
-        taskForceEngine.recordTaskFailure(gc, task, member, errorMessage, phaseIdx, phase, errors, ex);
     }
 
     private GroupMember findMember(List<GroupMember> members, String agentId) {

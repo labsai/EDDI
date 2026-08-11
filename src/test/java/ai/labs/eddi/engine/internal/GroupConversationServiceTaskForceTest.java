@@ -17,6 +17,10 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
+import ai.labs.eddi.engine.internal.groups.GroupSigningGuard;
+import ai.labs.eddi.engine.internal.groups.MemberTurnExecutor;
+import ai.labs.eddi.engine.internal.groups.TaskForceEngine;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
@@ -33,12 +37,12 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
-import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -74,6 +78,22 @@ class GroupConversationServiceTaskForceTest {
     private IJsonSerialization jsonSerialization;
 
     private GroupConversationService service;
+    /**
+     * The engine that actually owns these methods.
+     * <p>
+     * These tests used to reach them through
+     * {@code GroupConversationService.class.getDeclaredMethod(...)} on private
+     * delegators that had ZERO production callers — the facade kept them alive
+     * solely so this reflection kept resolving. That inverted the dependency: the
+     * tests pinned a shim, not the path {@code executeTaskPhase} actually takes, so
+     * the real call sites could drift and every assertion here would still pass.
+     * Calling the engine directly is the same coverage against the code that runs.
+     */
+    private TaskForceEngine taskForceEngine;
+    /**
+     * Same reasoning as {@link #taskForceEngine} — this is where the turn lives.
+     */
+    private MemberTurnExecutor memberTurnExecutor;
 
     private static final List<GroupMember> MEMBERS = List.of(
             new GroupMember("agent-1", "Analyst", 0, "RESEARCHER"),
@@ -87,6 +107,11 @@ class GroupConversationServiceTaskForceTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), null, null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
+        taskForceEngine = new TaskForceEngine(null, templatingEngine, jsonSerialization, null,
+                new CallerIdentityContext(null, null), new ConcurrentHashMap<>(), 180, 5);
+        memberTurnExecutor = new MemberTurnExecutor(conversationService, agentFactory,
+                new GroupSigningGuard(null, null, null, "default"),
+                new GroupContextBuilder(templatingEngine), service, new SimpleMeterRegistry().counter("test"), 180, 2);
     }
 
     // =================================================================
@@ -97,19 +122,9 @@ class GroupConversationServiceTaskForceTest {
     @DisplayName("resolveTaskAssignment (H3 fix)")
     class ResolveTaskAssignmentTests {
 
-        private Method resolveMethod;
-
-        @BeforeEach
-        void setUp() throws Exception {
-            resolveMethod = GroupConversationService.class.getDeclaredMethod(
-                    "resolveTaskAssignment", String.class, List.class, String.class, int.class);
-            resolveMethod.setAccessible(true);
-        }
-
         private String invoke(String assignToRole, List<GroupMember> members,
-                              String moderatorAgentId, int taskIndex)
-                throws Exception {
-            return (String) resolveMethod.invoke(service, assignToRole, members, moderatorAgentId, taskIndex);
+                              String moderatorAgentId, int taskIndex) {
+            return taskForceEngine.resolveTaskAssignment(assignToRole, members, moderatorAgentId, taskIndex);
         }
 
         @Test
@@ -182,20 +197,9 @@ class GroupConversationServiceTaskForceTest {
     @DisplayName("tryParseVerificationJson (H4 fix)")
     class VerificationJsonParserTests {
 
-        private Method parseMethod;
-
-        @BeforeEach
-        void setUp() throws Exception {
-            parseMethod = GroupConversationService.class.getDeclaredMethod(
-                    "tryParseVerificationJson", GroupConversation.class, List.class,
-                    String.class, GroupDiscussionEventListener.class);
-            parseMethod.setAccessible(true);
-        }
-
         private boolean invoke(GroupConversation gc, List<TaskItem> completedTasks,
-                               String content)
-                throws Exception {
-            return (boolean) parseMethod.invoke(service, gc, completedTasks, content, null);
+                               String content) {
+            return taskForceEngine.tryParseVerificationJson(gc, completedTasks, content, null);
         }
 
         private GroupConversation createGcWithTaskList() {
@@ -307,20 +311,9 @@ class GroupConversationServiceTaskForceTest {
     @DisplayName("handleTaskFailure (H6 fix)")
     class HandleTaskFailureTests {
 
-        private Method handleMethod;
-
-        @BeforeEach
-        void setUp() throws Exception {
-            // handleTaskFailure was split so the SSE listener callback is not made
-            // while holding the task-list monitor; recordTaskFailure is the
-            // document-mutating half these tests assert on.
-            handleMethod = GroupConversationService.class.getDeclaredMethod(
-                    "recordTaskFailure",
-                    GroupConversation.class, TaskItem.class, GroupMember.class,
-                    String.class, int.class, DiscussionPhase.class,
-                    List.class, GroupDiscussionException.class);
-            handleMethod.setAccessible(true);
-        }
+        // handleTaskFailure was split so the SSE listener callback is not made
+        // while holding the task-list monitor; recordTaskFailure is the
+        // document-mutating half these tests assert on.
 
         @Test
         @DisplayName("Marks task as FAILED, adds transcript entry, collects error")
@@ -343,7 +336,7 @@ class GroupConversationServiceTaskForceTest {
             var errors = new ArrayList<GroupDiscussionException>();
             var ex = new GroupDiscussionException("LLM timeout");
 
-            handleMethod.invoke(service, gc, task, member, "LLM timeout", 1, phase, errors, ex);
+            taskForceEngine.recordTaskFailure(gc, task, member, "LLM timeout", 1, phase, errors, ex);
 
             // Task should be FAILED
             assertEquals(TaskStatus.FAILED, gc.getTaskList().findById(task.id()).status());
@@ -378,7 +371,7 @@ class GroupConversationServiceTaskForceTest {
             var ex = new GroupDiscussionException("Second failure");
 
             // Should NOT throw even though task is already FAILED
-            assertDoesNotThrow(() -> handleMethod.invoke(service, gc, failedTask, member, "Second failure", 1, phase, errors, ex));
+            assertDoesNotThrow(() -> taskForceEngine.recordTaskFailure(gc, failedTask, member, "Second failure", 1, phase, errors, ex));
 
             // Error still collected
             assertEquals(1, errors.size());
@@ -430,12 +423,6 @@ class GroupConversationServiceTaskForceTest {
         @Test
         @DisplayName("QuotaExceededException from startConversation wraps as GroupDiscussionException")
         void startConversation_quotaExceeded_throwsGroupDiscussionException() throws Exception {
-            var method = GroupConversationService.class.getDeclaredMethod(
-                    "executeAgentTurn", GroupMember.class, GroupConversation.class,
-                    String.class, AgentGroupConfiguration.ProtocolConfig.class,
-                    int.class, DiscussionPhase.class, String.class,
-                    GroupDiscussionEventListener.class);
-            method.setAccessible(true);
 
             var member = new GroupMember("agent-1", "Agent One", 0, "MEMBER");
             var gc = new GroupConversation();
@@ -454,23 +441,16 @@ class GroupConversationServiceTaskForceTest {
             when(conversationService.startConversation(any(), eq("agent-1"), any(), any()))
                     .thenThrow(new QuotaExceededException("Conversation limit reached"));
 
-            var ex = assertThrows(java.lang.reflect.InvocationTargetException.class,
-                    () -> method.invoke(service, member, gc, "test input", protocol, 0, phase, null, null));
+            var ex = assertThrows(GroupDiscussionException.class,
+                    () -> memberTurnExecutor.executeAgentTurn(member, gc, "test input", protocol, 0, phase, null, null));
 
-            assertInstanceOf(GroupDiscussionException.class, ex.getCause());
-            assertTrue(ex.getCause().getMessage().contains("Tenant quota exceeded"));
-            assertInstanceOf(QuotaExceededException.class, ex.getCause().getCause());
+            assertTrue(ex.getMessage().contains("Tenant quota exceeded"));
+            assertInstanceOf(QuotaExceededException.class, ex.getCause());
         }
 
         @Test
         @DisplayName("QuotaExceededException from say() wraps as GroupDiscussionException")
         void say_quotaExceeded_throwsGroupDiscussionException() throws Exception {
-            var method = GroupConversationService.class.getDeclaredMethod(
-                    "executeAgentTurn", GroupMember.class, GroupConversation.class,
-                    String.class, AgentGroupConfiguration.ProtocolConfig.class,
-                    int.class, DiscussionPhase.class, String.class,
-                    GroupDiscussionEventListener.class);
-            method.setAccessible(true);
 
             var member = new GroupMember("agent-1", "Agent One", 0, "MEMBER");
             var gc = new GroupConversation();
@@ -493,23 +473,16 @@ class GroupConversationServiceTaskForceTest {
                     .when(conversationService).say(any(), eq("agent-1"), eq("existing-conv"),
                             any(), any(), any(), any(), anyBoolean(), any());
 
-            var ex = assertThrows(java.lang.reflect.InvocationTargetException.class,
-                    () -> method.invoke(service, member, gc, "test input", protocol, 0, phase, null, null));
+            var ex = assertThrows(GroupDiscussionException.class,
+                    () -> memberTurnExecutor.executeAgentTurn(member, gc, "test input", protocol, 0, phase, null, null));
 
-            assertInstanceOf(GroupDiscussionException.class, ex.getCause());
-            assertTrue(ex.getCause().getMessage().contains("Tenant quota exceeded"));
-            assertInstanceOf(QuotaExceededException.class, ex.getCause().getCause());
+            assertTrue(ex.getMessage().contains("Tenant quota exceeded"));
+            assertInstanceOf(QuotaExceededException.class, ex.getCause());
         }
 
         @Test
         @DisplayName("QuotaExceededException is NOT retried even with RETRY policy")
         void quota_notRetried_evenWithRetryPolicy() throws Exception {
-            var method = GroupConversationService.class.getDeclaredMethod(
-                    "executeAgentTurn", GroupMember.class, GroupConversation.class,
-                    String.class, AgentGroupConfiguration.ProtocolConfig.class,
-                    int.class, DiscussionPhase.class, String.class,
-                    GroupDiscussionEventListener.class);
-            method.setAccessible(true);
 
             var member = new GroupMember("agent-1", "Agent One", 0, "MEMBER");
             var gc = new GroupConversation();
@@ -530,10 +503,13 @@ class GroupConversationServiceTaskForceTest {
                     .when(conversationService).say(any(), eq("agent-1"), eq("existing-conv"),
                             any(), any(), any(), any(), anyBoolean(), any());
 
-            var ex = assertThrows(java.lang.reflect.InvocationTargetException.class,
-                    () -> method.invoke(service, member, gc, "test input", protocol, 0, phase, null, null));
+            var ex = assertThrows(GroupDiscussionException.class,
+                    () -> memberTurnExecutor.executeAgentTurn(member, gc, "test input", protocol, 0, phase, null, null));
 
-            assertInstanceOf(GroupDiscussionException.class, ex.getCause());
+            // ex IS the GroupDiscussionException now. This assertion used to read
+            // getCause() because ex was the reflective InvocationTargetException —
+            // i.e. it described how the test called the code, not what the code does.
+            assertInstanceOf(QuotaExceededException.class, ex.getCause());
             // Verify say() was called exactly once (no retries)
             verify(conversationService, times(1)).say(any(), eq("agent-1"), eq("existing-conv"),
                     any(), any(), any(), any(), anyBoolean(), any());

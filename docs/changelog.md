@@ -5,6 +5,226 @@
 
 ---
 
+
+## 🔀 docs: merge `main` into the documentation refresh and adapt to what landed since (2026-08-11)
+
+**Repo:** EDDI (`docs/group-collaboration-refresh`)
+
+The refresh branched at the group-collaboration merge (`d5294a60`); ten changes landed on `main`
+afterwards. Merged, with one conflict — `docs/changelog.md`, where both sides had added entries at
+the top; resolved by keeping both in date order, nothing dropped. `docs/group-conversations.md`
+auto-merged (main's attachments / protocol-defaults / not-yet-supported work versus the refresh's
+new sections and completed tables), and every overlapping region was re-read rather than trusted.
+
+Then each of main's changes was checked against what the refresh claims. Five claims were stale or
+missing; four checks came back clean and are recorded so they are not re-run:
+
+**Adapted:**
+
+- **Standing Teams cadence claims** (`group-conversations.md`) — step 1 said a run "paused at an
+  HITL gate for days" simply skips the fire, which was the wedge `fix/cadence-claim-expiry` closed.
+  New **Stale claims** paragraph: `eddi.groups.cadence.claim-ttl` (default `PT24H`), cancel-then-
+  ordinary-failure-writeback so pulled tasks return to `PENDING`, non-positive disables reclaiming,
+  and the save-time warning for `requiresApproval` + `WAIT_INDEFINITELY`.
+- **`inheritParentModel`** (`group-conversations.md`) — documented as working; it was a field
+  nothing read until `fix/sub-agent-setup-hardening`. New **Model and credential inheritance**
+  subsection: the provider → model → key order, model inherited only while the provider is still
+  the parent's, and **only a vault reference is ever inherited, never a plaintext key** (a parent
+  with a plaintext key inherits nothing and creation fails with "API key is required").
+- **`allowedProviders` / `allowedModels`** (`group-conversations.md`) — now checked against the
+  **effective** provider and model, so omitting the parameter no longer bypasses the allow-list;
+  and with no provider named, the default provider must itself be covered. Both documented,
+  including the deliberate asymmetry (named provider: absent entry = no restriction).
+- **Vault agent grants** (`secrets-vault.md`) — `feat/vault-grant-enforcement` added a user-visible
+  deployment failure mode with no documentation anywhere. New **Agent grants** section: what is
+  scanned (agent document first, for `dreamConfig`, then workflows into llm/apicalls/mcpcalls/rag),
+  why enforcement sits at deploy rather than at resolution (`SecretResolver` has no agent identity;
+  `ChatModelRegistry` caches on unresolved parameters, so a check behind it runs for whichever agent
+  built the model first), the three `eddi.vault.grant-enforcement` modes, and the two fail-safe
+  rules — unknown value fails startup, unrunnable check allows.
+- **Metrics** (`metrics.md`) — `eddi_team_cadence_claims_reclaimed_total` is new and had no home.
+  Added the Standing Team block (4 counters) and completed the group block, which listed 3 of 10.
+  Meter types verified against the registrations: `eddi_group_cost_dollars` is a gauge, and
+  `eddi_group_facilitator_moves_total` carries `move`/`outcome` tags.
+- Also: the group **Configuration** block gained `eddi.groups.cadence.claim-ttl` and
+  `eddi.attachments.max-per-turn` (main documented the latter in prose but never listed it), and a
+  pointer to the vault grant setting; `maxCreatedAgentsPerDiscussion` notes that a torn-down agent
+  frees its slot.
+
+**Verified unchanged, no edit needed:** the **SSE catalogue** still lists exactly the 23 events the
+sink emits; **no REST endpoint or MCP tool was added or removed** on `main`, so the completed tables
+and the 82-tool count hold; the "counted across **all** members" note on
+`maxCreatedAgentsPerDiscussion` is what `seedCreatedAgentIds` actually does; and the idle-sweep and
+deployment-wait fixes are internal — no doc asserted the behaviour they corrected.
+
+---
+
+
+## 🔒 feat(vault): allowedAgents is enforced instead of decorative (2026-08-10)
+
+**Repo:** EDDI (`feat/vault-grant-enforcement`)
+
+`SecretMetadata.allowedAgents` was documented as *"for visibility only — enforcement is via configuration authorship, not runtime resolution"*. That access model assumes a **human admin** authors agent configurations; `create_sub_agent` lets an LLM author one, so an operator who scoped a secret to a single agent got no enforcement at all.
+
+**Enforced at deployment, deliberately not at resolution.** `SecretResolver` sees only a string — no agent identity — and several of its ~12 call sites legitimately run outside any conversation, while `AgentSigningService` bypasses it entirely. Worse, `ChatModelRegistry` caches the built model keyed on the **unresolved** parameters, so two agents sharing a config share a cache entry: a check behind that cache runs for whichever agent built the model first and is silently skipped for every other one — enforcement that looks real and is not. The agent/secret binding is established in the agent's **configuration**, so that is where it is checked: completely, once, with no cache in the way, beside the existing deploy-time `lintInertHitlConfig`.
+
+`VaultGrantChecker` walks the agent's workflows → llm/apicalls/mcpcalls configs, serializes each and scans for `${vault:...}` references, then verifies each against `allowedAgents`. The scan **serializes rather than enumerating** known credential fields — enumeration is how this kind of check rots when a new credential field appears.
+
+The gate lives in **`AgentFactory.deployAgent`**, the one place every deployment funnels through — the scheduled poll, `RestAgentAdministration`'s explicit deploy (which is how `create_sub_agent` reaches production) and `ConversationService`'s deploy-on-demand. An earlier revision gated only the scheduled manager, which left the REST path — the one an LLM actually uses — completely unchecked.
+
+`eddi.vault.grant-enforcement` = `off` | `warn` (default) | `enforce`, parsed strictly — `enforced` silently meaning `warn` would turn one typo into a control that is off while appearing on, so an unusable value fails startup with the valid values named.
+
+**Uncertainty never becomes a violation:** unreadable metadata, a disabled vault, an unreadable workflow, and absent/empty/wildcard grants all allow. Every wizard-vaulted key carries `["*"]`, so stock deployments see no change. **Not a revocation mechanism** — an agent deployed before its grant was narrowed keeps resolving until redeployed.
+
++21 tests, covering the agent document itself, all four extension types (llm / apicalls / mcpcalls / rag) and every enforcement mode. 121 green.
+## 🔎 fix(runtime): the idle-conversation sweep aged conversations by the wrong clock (2026-08-10)
+
+**Repo:** EDDI (`fix/idle-conversation-sweep-age`)
+
+Two defects in `endOldConversationsWithOldAgents`, fixed together because fixing either alone is worse than fixing neither.
+
+1. **`isOlderThanDays` ignored `Period`'s months component.** It read only `getYears()` and `getDays()`, so for a 35-day-old date against a 30-day limit `Period.between(now, date)` is `P-1M-4D` and the test became `-4 <= -30` → "not old". Whole bands of ages between the limit and one year were never reaped; the ones that were passed by coincidence of where the month boundary fell.
+2. **The age came from the AGENT document's `lastModifiedOn`.** That is not a property of the conversation: every conversation on a given agent version shared one age, so a conversation the user was talking in an hour ago counted as idle whenever the agent config happened to be old.
+
+The second was masked by the first. Correcting only the arithmetic would have converted a mostly-inert sweep into an eager one that ENDs live conversations — so the age signal now comes from the conversation's own newest step timestamp (`Data` stamps every entry at construction), with the descriptor kept only as a fallback and the conversation skipped entirely when no age signal exists at all. "Cannot prove it is idle" must never end a conversation.
+
+Pinned by `recentConversationOnStaleAgentSurvives` (an hour-old conversation on a two-year-stale agent survives) and `noGapsAcrossMonthBoundaries` (every offset 30→400 days). +9 tests.
+## 🔎 fix(setup): create_sub_agent could never work, and a failed setup left orphans (2026-08-10)
+
+**Repo:** EDDI (`fix/sub-agent-setup-hardening`)
+
+`AgentSetupService` is what `create_sub_agent` calls, and it deploys to production from an LLM-controlled path.
+
+1. **`create_sub_agent` failed outright for every provider that needs an API key — including the default.** The tool passed `apiKey = null` with the comment "inherited from vault", and its `@P` docs promised the same. Nothing implemented it. `setupAgent` rejects a null key for any non-local provider and an omitted provider resolves to `anthropic`, so sub-agent creation only ever worked for `ollama`/`jlama`/`bedrock`/`oracle-genai`. `resolveParentLlmProfile` now walks parent agent → workflow → LLM task; `DynamicAgentConfig.inheritParentModel` (a config field nothing read) drives provider/model inheritance. **Only a vault REFERENCE is inherited, never a plaintext key** — `vaultApiKey` falls back to plaintext when the vault is unconfigured, and copying that would multiply the fallback's blast radius.
+   - The parent must be read at its **resolved current version**: `RestVersionInfo.read` does `checkNotNull(version)`, so `readAgent(id, null)` always threw and the catch swallowed it — inheritance silently returned null and the original error persisted.
+2. **The allow-lists were checked against the raw argument.** `allowedProviders` was skipped entirely when the caller omitted `provider`, which then resolved to the default — so a group restricting providers was bypassed by not passing the parameter. Now checked against the **effective** provider, with the default exposed as `AgentSetupService.DEFAULT_PROVIDER` so the two files cannot drift.
+3. **A model was judged against the wrong provider.** `allowedModels` maps a provider to *that provider's* models, but with no provider named the check accepted a model from any provider's list and then paired it with the default — a config restricting openai to `gpt-4o-mini` built an *anthropic* agent running it. An unnamed provider must now land on a provider the policy actually covers; a named provider keeps its documented "absent list = no restriction".
+4. **A failed setup orphaned every document created before the failing step.** Six to eight documents across as many stores, no transaction, and a wrap-and-rethrow failure path — on a path an LLM can retry in a loop. Best-effort compensating delete in reverse order, permanent and never cascading, isolated so it cannot mask the original failure. Applied to `createApiAgent` too.
+5. **No length bounds on `agentName`/`systemPrompt`**, both LLM-supplied and persisted. Bounded before any resource is created.
+
+**Not changed:** every auto-vaulted key carries `allowedAgents = ["*"]`. `VaultSecretProvider` documents that field as "NOT enforced at resolution time", so narrowing it here would imply an enforcement that does not exist — addressed separately by the deploy-time grant checker.
+
+Rebased onto current `main`, which had independently fixed the neighbouring lifecycle/guardrail findings; only the genuinely-missing work is carried over. 269 tests green, +12 new.
+
+---
+
+## 🔗 fix(agents): wire the deployment-wait machinery that only the ZIP importer ever used (2026-08-09)
+
+**Repo:** EDDI (`fix/deployment-wait-machinery`)
+
+Wave F of the Agent / Group Agent review. `AgentFactory.getAgent` has always had a branch for "the agent is deploying right now" — `waitForDeploymentCompletion`, which awaits a future from `DeploymentListener`. That future was only ever registered by **one** caller in all of `src/main`: `RestImportService`, the startup ZIP importer. Every ordinary deploy fired `onDeploymentEvent` but never registered, so `getRegisteredDeploymentEvent` returned `null`, the wait had nothing to await, and a caller racing a deployment simply got a null agent. The machinery was dead outside one flow while reading as live.
+
+- `RestAgentAdministration.deploy` now registers **before** starting the deployment. Ordering matters: `agentFactory.deployAgent` is what publishes the IN_PROGRESS placeholder a waiter can observe, so registering afterwards would leave exactly the window this closes.
+- `DeploymentListener.registerAgentDeployment` self-expires. The map was pruned only by an arriving `DeploymentEvent`, so a registration whose event never came — a rejected deployment callable, a process that died mid-deploy — stayed for the lifetime of the JVM. Registrations now carry a `REGISTRATION_TTL` (5 minutes, a leak bound rather than a deployment SLA) and remove themselves on *any* completion. Removal is `remove(key, future)`, not `remove(key)`, so a stale completion cannot evict a live registration for the same agent.
+- `RestImportService`'s `allOf(...).join()` is now tolerant. It could previously only block forever; with self-expiring registrations it can complete exceptionally, and one initial agent that never reports must not hang startup — it logs and continues with the agents that did deploy.
+
+Suites: 347 tests green across `DeploymentListener*`, `RestAgentAdministration*`, `AgentFactory*`, `RestImportService*`; 12 new.
+## 📚 docs(groups): attachments, protocol defaults, context scopes, and a "not yet supported" section (2026-08-09)
+
+**Repo:** EDDI (`docs/group-agent-accuracy`)
+
+Wave E of the Agent / Group Agent review — the documentation drifts the review turned up, each one a place where the docs and the code disagreed.
+
+1. **Attachments × groups were entirely undocumented.** `docs/group-conversations.md` had zero mentions of attachments and `docs/attachments-guide.md` had zero mentions of groups, while `POST /groups/{groupId}/conversations` accepts them and `GroupAttachmentBinder` is a whole subsystem. Both files now carry a section: the three input shapes, the first-turn grant, how later phases keep access (history + the auto-enabled `readAttachment` tool), and the two group-specific bounds — the per-turn cap applies per MEMBER turn, and anything dropped is reported in that member's `attachments:errors`, not in the group transcript.
+2. **The protocol table did not say the defaults apply to an absent block.** Nothing backfills a stored config, so "no `protocol` block" is the common shape and runs on exactly the tabled values — which is what made the 60-vs-180 drift fixed in #648 invisible.
+3. **`maxCreatedAgentsPerDiscussion` read as ambiguous.** Now explicitly "counted across **all** members, not per member" — the behaviour #649 delivers.
+4. **`LAST_PHASE` was documented as "only the previous phase's entries"**, but the filter is `phaseIndex >= currentPhaseIdx - 1`, which includes the running phase. The code is right — in a sequential phase, that inclusion is what lets the second speaker react to the first — so the doc and the enum's Javadoc were corrected, not the filter.
+5. **New "Not yet supported" section**, so these are not discovered at runtime: member-level tool approval inside a group, nested pauses, groups over the OpenAI-compatible `/v1` adapter, groups over A2A, and the per-node scope of the live-discussion registry.
+
+Also: an FQN sweep of `CreateSubAgentTool` (11 inline fully-qualified names, against `AGENTS.md` §4.7) and the orphaned Javadoc block in `LiveDiscussionRegistry`, where the paragraph documenting `get()` sat above `getForMember()` so both attached to the latter and `get()` had none.
+
+**Scoping note:** the FQN violation is repo-wide (~130 sites). This PR sweeps only files no other open PR touches; doing all of them here would collide with #648–#651 for no benefit. The rest is a follow-up once those land.
+## 🧪 chore(groups): retarget the TASK_FORCE characterization tests at the engine that owns them (2026-08-09)
+
+**Repo:** EDDI (`chore/retarget-group-characterization-tests`)
+
+Wave D of the Agent / Group Agent review, first slice. `GroupConversationService` carries ~27 private methods with **zero production callers** — pure delegators kept alive because ~34 `getDeclaredMethod` call sites across seven test classes resolve against them. That inverts the dependency: the tests pin a shim, not the path the engines actually take, so `PhaseExecutionEngine` or `TaskForceEngine` could change how they call the real method and every assertion would still pass.
+
+This slice retargets the TASK_FORCE surface — `GroupConversationServiceTaskForceTest` (all 20 tests) plus the two `recordTaskFailure` tests in `GroupConversationServiceHitlCoverage3Test` — at `TaskForceEngine` and `MemberTurnExecutor` directly, and deletes the `recordTaskFailure` delegator that pinning kept alive.
+
+Two things the retarget surfaced, both illustrating the point:
+
+- **Three assertions described the reflection wrapper, not the code.** They asserted `InvocationTargetException` and unwrapped one `getCause()` layer to reach the real exception. Called directly, the quota tests now assert `GroupDiscussionException` with a `QuotaExceededException` cause — the actual contract, which the reflective form had obscured.
+- **A grep for `recordTaskFailure(` finds one test file; there were two.** The second builds the name as a **string literal** for a file-local `method(name, params)` helper. `GroupConversationService`'s own comments warn about exactly this ("a plain grep for one calling convention isn't enough when sweeping for these") — and the sweep hit it. Deleting the delegator on the first grep's evidence broke the build; the string-literal site is now retargeted too.
+
+**Scope.** Deliberately one surface, not all seven test classes. The remaining reflection (the HITL cluster in `HitlCoverage`/`HitlCoverage2`/`HitlCoverage3`, the context-builder methods in `UncoveredBranchTest`, `resolveParticipants`/`extractResponse`/`failConversation` in `GroupConversationServiceTest`) is entangled with file-local helper indirection that a mechanical pass cannot safely rewrite — an attempt to regex through it produced a broken intermediate and was reverted. Each remaining class is its own follow-up, and the pattern established here (construct the real collaborator in `setUp`, keep the test bodies untouched) is what they should follow.
+
+Suites: 562 tests green across `GroupConversationService*` and `TaskForceEngine*`.
+## ⏱️ fix(groups): a paused cadence discussion no longer wedges a standing team forever (2026-08-09)
+
+**Repo:** EDDI (`fix/cadence-claim-expiry`)
+
+Wave C of the Agent / Group Agent review — a liveness defect in I13 Standing Teams, the newest part of the group subsystem.
+
+`TeamCadenceService.reconcile` releases a workspace's `runningDiscussionId` claim when its discussion reaches a terminal state. `AWAITING_APPROVAL` and `AWAITING_HUMAN_INPUT` are not terminal, so they fell into the `default -> false` ("still running") arm — correctly, for a discussion that will be approved. But the default group HITL timeout policy is `WAIT_INDEFINITELY`, so a pause that nobody resolves never becomes terminal either, and the claim was held **forever**: every subsequent cadence fire for that group was skipped as "still running", and the backlog tasks that run had pulled stayed `IN_PROGRESS`. There was no claim TTL and no reaper anywhere — out of character for a subsystem whose task-force half carries an explicit no-progress fingerprint guard precisely to guarantee termination.
+
+- `GroupWorkspace` gains a nullable `claimedAt` stamp, written next to `runningDiscussionId` and cleared next to it in `settle()` — the two are one fact. Nullable on purpose: documents written before the field existed have no stamp, and reclaiming those on a missing timestamp would be a guess, so they simply get one on their next claim.
+- `reconcile`'s non-terminal arm now routes through `reclaimIfStale`, which cancels the stranded discussion and runs the **ordinary failure writeback** — pulled tasks back to `PENDING`, claim cleared — rather than a bespoke path. Cancel before release, so a reclaimed run cannot keep spending against a budget nobody is tracking.
+- TTL is `eddi.groups.cadence.claim-ttl`, default `PT24H`. Deliberately generous: an approval arriving the next business morning must land on the discussion it belongs to, not on a reclaimed corpse. Non-positive disables reclaiming, for an operator who would rather wedge than risk abandoning a pause.
+- New counter `eddi_team_cadence_claims_reclaimed_total`, and a WARN naming the stranded discussion and how long the claim was held.
+- `POST /groupstore/groups/{id}/workspace/cadences` now warns when a group combines `requiresApproval` phases with `WAIT_INDEFINITELY` — that combination is what makes the backstop reachable, and the operator almost certainly wanted a finite `timeoutPolicy`. A warning, not a rejection: the combination is legitimate for a team whose approver really is always available, and rejecting it would break existing configs.
+
+Also: `cancelQuietly` now passes `ControlSignal.CANCEL_GRACEFUL` explicitly. `null` already resolved to graceful (only `CANCEL_IMMEDIATE` takes the other branch), but the method has a second caller now and "which cancel is this?" should not require reading `GroupHitlCoordinator`.
+
+Suites: 585 tests green across `TeamCadence*`, `GroupWorkspace*`, `RestGroupWorkspace*`, `GroupConversationService*`; 9 new.
+## 🔐 fix(agents): dynamic-agent guardrails — permissive fallback on resume, per-member caps, duplicate recruits, V7 (2026-08-09)
+
+**Repo:** EDDI (`fix/dynamic-agent-guardrails`)
+
+Wave B of the Agent / Group Agent review. These are the guardrails on the highest-blast-radius capability in the product — an LLM deploying agents to production — and they were the weakest-enforced things in the system.
+
+1. **CRITICAL — a group's `dynamicAgents` policy silently reverted to fully permissive on a resumed member turn.** `resolveDynamicAgentConfig` accepted only a *typed* `DynamicAgentConfig` out of the context value; every other consumer of context data in the codebase handles the deserialized shape. A `Context` whose value round-trips through the conversation store comes back as a raw `LinkedHashMap` (`ConversationMemoryStore` rebuilds it as `new Context(type, map.get("value"))`), so any turn running against a *reloaded* step missed the `instanceof` and fell through to `createDefaultDynamicConfig()` — creation, recruitment and delegation all **on**, for a group that may have disabled every one of them. The trigger is an ordinary group path: a member's gated tool call is auto-rejected by `MemberTurnExecutor#tryResolveMemberToolPause`, which resumes the member conversation, and `Conversation#resume` re-enters the same LlmTask at the same index against memory freshly loaded from the store. The orchestrator is still blocked in that call, so the discussion is also still live in `LiveDiscussionRegistry` and the group-gated tools are available too. Resolution is now three-state and **fails closed**: key absent → standalone → permissive default; key present and readable (typed *or* map) → the group's policy; key present but unreadable → every capability off. "The operator said something we cannot parse" must never resolve to "the operator said yes to everything".
+2. **`maxCreatedAgentsPerDiscussion` was enforced per member conversation, not per discussion.** `seedCreatedAgentIds` has always read a `dynamicCreatedAgentIds` context variable for the discussion-wide total, but nothing wrote it — so the cap bounded each member independently and a 5-member group with the default cap of 5 could deploy **25** agents to production, while both the field name and `docs/group-conversations.md` promised 5. `MemberTurnExecutor` now injects `gc.getCreatedAgentIds()` alongside the policy it already injects per turn.
+3. **`RecruitAgentTool` could re-recruit a configured member.** Its Javadoc claimed the configured roster counted, but `isAlreadyMember` checked only `recruitedAgentIds`, `dynamicMembers` and `memberConversationIds` — and the last holds an agent only once it has *spoken*. A member whose first turn had not come up yet could be "recruited" as a duplicate: the roster union de-duplicated so nobody spoke twice, but the recruitment cap was consumed, a misleading FACILITATION entry was written, and `addMemberDisplayName` **overwrote the operator-chosen display name with the raw agent id**. The tool now receives the configured roster (resolved the same way `ArtifactToolsProvider` resolves its artifact policy), and display-name recording became `putIfAbsent`.
+4. **Teardown never freed a creation slot, and a failed delete orphaned the agent.** `createdAgentIds.remove` ran *before* the delete, so a failed delete left the agent untracked and ephemeral cleanup never retried it — config and deployment record orphaned. And the removal was from a per-turn list that `seedCreatedAgentIds` rebuilds from every earlier step, so the id came straight back and the cap counted an agent that no longer exists forever. Teardown now records into `dynamic:torn_down_agent_ids`, which the seed subtracts and `propagateDynamicAgentTracking` applies to the group's own tracking; the tracking removal moved after the successful delete.
+5. **V7 resolved — an omitted `builtInToolsWhitelist` no longer skips the dynamic-agent tools.** `docs/langchain.md` states twice that omitting the whitelist enables all built-in tools, and `BuiltinToolsProvider` implements exactly that; this provider alone returned early. `collectAllBuiltInTools` now calls it unconditionally. **Deliberately narrower than "all" in one respect:** the omitted case is honoured only when a group policy governs the turn. `dynamicAgents` is a field on `AgentGroupConfiguration`, so a standalone conversation has no surface on which an operator could have declined — handing it unconfigurable, production-deploying capabilities because it omitted a list would be a worse defect than the asymmetry being fixed. Under a group policy the operator *has* that surface, which is what makes "all" safe to mean all.
+
+The three dynamic-agent tracking keys moved to `MemoryKeys` (`DYNAMIC_CREATED_AGENT_IDS`, `DYNAMIC_RETAINED_AGENT_IDS`, `DYNAMIC_TORN_DOWN_AGENT_IDS`) — the group layer reads them positionally out of a serialized snapshot, so both sides now name one constant instead of two string literals.
+
+**Behaviour changes, deliberate:** (a) a group whose policy cannot be read now gets no dynamic-agent capabilities instead of all of them; (b) an agent in a group with `enableBuiltInTools=true` and no whitelist now receives the dynamic-agent tools its group policy permits.
+
+**Final review round (model-independent second pass, PR #649).** One documentation-discipline finding: `tornDownAgentIds` is a persisted, resume-consumed field, and the schema-version comment's own rule says such fields bump the version. It deliberately rides v4 instead — the comment now records why: it fails soft in every skew direction (legacy documents default to an empty set; an older pod re-saving drops tombstones, after which the worst outcome is a dead agent re-occupying a cap slot and cleanup retrying a deletion that 404s harmlessly), unlike `runtimePhases`, whose skew corrupts resume bookmarks. A version bump signals "an old pod must not touch this document"; this field does not earn that. The second pass also re-verified the V7 wiring end to end: `collectEnabledTools` has no production caller, the live path is `buildToolSetup` → `contribute()`, and both paths carry the new semantics — no double-add.
+
+**Review round 1 (PR #649).** Seven findings from CodeRabbit; six fixed, one declined:
+- **Major, security — `teardown_agent` was not gated on the policy.** Its assembly branch checked only that the stores were present, and the tool itself takes no `DynamicAgentConfig`, so a group whose policy is disabled — or unreadable, which now resolves fail-closed — could still undeploy and **permanently delete** a tracked agent. A hole the V7 change widened, since an omitted whitelist now reaches this branch. Gated on `dynamicConfig.isEnabled()`.
+- **Major — an unreadable roster failed open.** `configuredMemberIds` returned an empty set for both "no members" and "could not read", so a store hiccup silently restored the duplicate-recruit defect the change exists to prevent. It now returns `Optional`, and an unavailable roster **withholds `recruit_agent`** for that turn — gate by absence, matching `ArtifactToolsProvider`.
+- **Major — stale snapshots could resurrect a torn-down agent.** Each member's tracking snapshot is one member's view: member B's turn can still name an agent member A tore down in between, and the merge re-added it. `GroupConversation` now carries a `tornDownAgentIds` tombstone, written before the merge by `recordTeardown` and consulted by it, so a teardown is final regardless of arrival order.
+- **Major — the created-agent merge was not atomic.** `CopyOnWriteArrayList` makes each `add` atomic but not `contains()`-then-`add()`, and merges run on one coordinator thread per member turn; two could both append the same id, after which the single `remove()` a teardown performs leaves a duplicate. The compound operation now runs under the list's monitor, the same pattern `RecruitAgentTool` uses for `recruitedAgentIds`.
+- **Major — `setMemberDisplayNames` installed a `LinkedHashMap`.** Every reload therefore dropped the concurrency guarantee the field declares, on a map written from member-turn threads and iterated by serialization — and `addMemberDisplayNameIfAbsent` depends on `putIfAbsent` being atomic. Now `ConcurrentHashMap` on both branches.
+- **Declined — atomic reservation of creation capacity before dispatch.** Correct that parallel member turns can each read a stale count and collectively overshoot the cap. That is the same accepted-overshoot shape this codebase already documents for the cost ceiling ("an in-flight turn may still push the total past the ceiling; that overshoot is accepted, not prevented" — `GroupCostLedger`), and closing it properly needs budget *reservation* at dispatch, which is a design change rather than a fix. The cap moves from unbounded-per-member to bounded-with-parallel-overshoot; the residue is recorded rather than silently fixed.
+
+**Review round 2 (PR #649).** One further finding, and a correct one: ordering the writes inside `recordTeardown` did not by itself close the race. A merge could read the tombstone set, find the id absent, be descheduled while a concurrent teardown recorded it, and then complete its own `add` — putting back an agent that no longer exists. The retained branch had the same shape and sat outside the monitor entirely. Check-tombstone-then-add and record-teardown are now mutually exclusive on a shared `dynamicTrackingMutex` (transient + `@JsonIgnore`, the `artifactAnnounceMutex` pattern), covering both the created and retained merges. Pinned by two 200-round interleaving tests, mutation-verified.
+
+Suites: 869 tests green across `GroupConversationService*`, `GroupLifecycleOps*`, `LlmTask*`, `ConversationHitl*`, `ConversationToolResume*`, plus 487 across the orchestrator/tool suites; 25 new tests in two classes.
+## 🔧 fix(agents): null-version undeploy no-op, deploy under a CHM bin lock, EXECUTE wave deadline, protocol defaults (2026-08-09)
+
+**Repo:** EDDI (`fix/agent-lifecycle-and-group-deadlines`)
+
+Wave A of a deep review of the Agent / Group Agent surface. The review's finding was that the *group feature layer* has been reviewed exhaustively while the *agent lifecycle layer it stands on* has not — four of the five fixes here come from `AgentFactory`, two of them from a single six-line method.
+
+1. **`undeployAgent(env, agentId, null)` was a silent no-op — ephemeral agents leaked.** `AgentFactory.AgentId` keys on `(id, version)`, so `new AgentId(id, null)` equals no key the environment map ever holds. Both dynamic-agent teardown paths pass null (`GroupLifecycleOps#cleanupEphemeralAgents` after *every* group discussion, and `TeardownAgentTool`), so `agentEnvironment.remove(...)` and `deployedAgents.remove(...)` both did nothing while the caller logged `"undeployed agent '%s'"` at INFO. `agentStore.deleteAllPermanently(agentId)` then ran anyway: the constructed agent stayed resolvable through `getLatestReadyAgent` **after its configuration had been deleted from the store**, and `eddi_agents_deployed` grew monotonically for the lifetime of the process. A null version now means *every* deployed version of that agent — the only reading that matches what the teardown callers mean. The REST/admin path passes a real version and stays exact. Pinned by `AgentFactoryUndeployVersionTest` (7 tests; 4 fail against the old behaviour — verified by mutation).
+2. **`deployAgent` ran store I/O and full workflow construction inside `ConcurrentHashMap.compute`.** `compute` holds the bin lock for the key while the mapping function runs, and `ConcurrentHashMap` documents that the function must be short and must not touch other mappings; this held a bin lock across multi-second I/O, and any re-entrant agent resolution during construction would have deadlocked. The claim is now a `putIfAbsent` of an IN_PROGRESS placeholder (atomic, no long hold) with the load outside the map. Side benefit: the placeholder is now actually *published*, which `compute` never did — the dummy was only ever returned on the failure path — so a concurrent `getAgent()` can observe "deployment in progress" instead of a bare null. An ERROR entry is re-claimed with `replace(key, expected, placeholder)` so two racing redeploys cannot both proceed.
+3. **`deployedAgents` was mutated unsynchronized.** `deployAgent` appended under `synchronized (deployedAgents)` while `undeployAgent` removed with no lock at all, and the Micrometer gauge reads `size()` from the metrics thread — three unordered accesses to a `LinkedList`. Now a `CopyOnWriteArrayList`, with `addIfAbsent` replacing a non-atomic `contains()`-then-`add()`.
+4. **The TASK_FORCE EXECUTE wave gave up before the turns it was waiting for could have.** The wave waited `agentTimeoutSeconds × maxTasksPerAgent`, which ignores retries — under `onAgentFailure=RETRY` a member legitimately gets `timeout × (maxRetries + 1)` — and carries no setup grace, so even a one-task no-retry wave could expire while the member was still inside its own budget (a member turn reaches its response wait only after agent lookup, conversation start and attachment grants). That is exactly what `PARALLEL_BATCH_GRACE_FLOOR_SECONDS` exists to prevent, and both the parallel debate batch and the bid round *in the same file* already sized themselves through `parallelBatchBudgetSeconds`. The wave now does too, via a new extracted `TaskForceEngine#waveBudgetSeconds` so the derivation is assertable without timing a real wave.
+5. **The documented 180s `agentTimeoutSeconds` default was unreachable on the common path.** `resolveProtocol`'s fallback handed out a literal `60`, and `McpGroupTools.create_group` hard-coded `60` — while the constant's own Javadoc, the four shipped templates and the published table in `docs/group-conversations.md` all said 180 (the value introduced *because* 60 timed out thinking models during synthesis). Since nothing backfills a `protocol` block at save time, a group saved without one — the common shape — ran at 60. The defaults now live on `ProtocolConfig` (`DEFAULT_AGENT_TIMEOUT_SECONDS`, `DEFAULT_MAX_RETRIES`) as the single source of truth, referenced by the engine, the MCP tool and the follow-up path (`resolveAgentTimeoutSeconds`, which had its own stray `return 60`).
+
+Also: removed an unreachable version comparison in `getAllLatestAgents` (it compared the result of `getLatestAgent`, which already returns the highest version, against itself), and downgraded `waitForDeploymentCompletion`'s "still IN_PROGRESS" ERROR to DEBUG when no deployment future was registered — with the placeholder now published that state is reachable and ordinary, not a failure. Wiring the registration properly is Wave F.
+
+**Final review round (model-independent second pass, PR #648).** Two further items:
+- **`waitForDeploymentCompletion` now waits with a timed `get()` and no longer mutates the shared registration future.** It previously armed `orTimeout(60s)` on that future, and `orTimeout` mutates the future it is called on — while `DeploymentListener` hands the same instance to every waiter and to whoever registered the deployment. Pre-#651 only the ZIP importer ever held one, so the mutation was near-unreachable; with #651 registering on every REST deploy, one impatient `getAgent` caller would, at its own 60s deadline, complete the shared future exceptionally for every other consumer and evict the registration before the real deployment event arrived. The timed `get()` waits without writing. The newly-reachable `InterruptedException` restores the interrupt flag, and a timeout logs at WARN as this caller's outcome rather than ERROR as the deployment's.
+- **The `eddi_agents_deployed` gauge counts READY deployments per environment, and its comment now says so.** The comment previously claimed the derived gauge "matched the old semantics", but one delta is real and deliberate: the old list keyed on (id, version) with no environment, so an agent deployed to both `production` and `test` counted once, whereas counting map entries counts it once per environment — that is, once per actual deployment. The comment and this entry now state that change directly.
+
+**Review round 1 (PR #648).** Four findings, all fixed:
+- **CodeRabbit (Major), and a genuine regression this PR introduced:** moving the store load out of `ConcurrentHashMap.compute` opened a window in which an `undeployAgent` for the same id could land mid-load, after which the unconditional `put` of the finished agent resurrected it — a deployment silently winning a race it started before the undeploy was even requested, and leaving the metric describing a registry that no longer held it. Publication is now `replace(key, OUR placeholder, agent)`, so an interleaved undeploy or competing redeploy keeps its outcome. The reviewer's further point — "coordinate the map and metric tracking together, do not only swap put for replace" — is addressed by **deleting the parallel structure entirely**: `deployedAgents` is gone and `eddi_agents_deployed` is now a `Gauge` derived from the environment maps (READY entries only, matching the old semantics). Two structures holding one fact could never be linearized against each other; one structure needs no linearization. Pinned by `undeployDuringLoadIsNotOverwritten`, which blocks the store lookup, undeploys, then releases — mutation-verified against a `put`.
+- **CodeQL (4× log injection):** the three claim-path `log.debug(String.format(...))` calls and the deploy-failure `log.error` interpolated an unsanitized `agentId`. All now go through `LogSanitizer.sanitize` (and the debug calls use `debugf` rather than pre-formatting).
+- **CodeRabbit (Minor):** `ProtocolConfig`'s `@param agentTimeoutSeconds` Javadoc still said "default: 60".
+- **Code-quality bot:** a redundant assertion in `TaskForceEngineWaveBudgetTest` (`budget > 30` is implied by `budget >= 90`) replaced with `assertNotEquals(30L, budget)`, which keeps the "not the old formula's output" intent without the always-true comparison.
+
+**Behaviour change, deliberate:** groups with no `protocol` block go from a 60s to a 180s per-turn timeout, and MCP-created groups likewise. This makes the code agree with the documentation rather than the reverse.
+
+Suites: `AgentFactory*`, `AgentDeploymentManagement*`, `TaskForceEngine*`, `GroupConversationService*`, `McpGroupTools*`, `AgentGroupConfiguration*`, `RestAgentAdministration*` — 820 tests green, plus 19 new.
+
+---
 ## 📚 docs: post-merge documentation refresh for the group-collaboration set (2026-08-08)
 
 **Repo:** EDDI (`docs/group-collaboration-refresh`)
@@ -574,6 +794,47 @@ The group-side chain (AUDIT_COST → `GroupCostLedger` → ceiling policies ABOR
 **One regression avoided by taking our side.** Main's `sourceForBuiltInTool` does not tag `RecruitAgentTool` as `dynamic`. Our `ToolObjectReflector` does — that is the I7 fix that stops a documented `requireApproval:["dynamic:*"]` missing it while `exempt:["builtin:*"]` un-gates it. Taking main's version would have silently reopened that approval-gate hole.
 
 Suite at the environmental baseline (13,954 run; 8 failures / 294 errors, all loopback/network/embedding — none in the merged surfaces). Checkstyle clean.
+
+---
+
+## 📌 chore(ci): close the last two OpenSSF gaps — pinned demo images, ungated CodeQL (2026-08-05)
+
+**Repo:** EDDI (`chore/scorecard-pinned-deps-and-sast`)
+
+Follow-up to the Branch-Protection fix below. Two medium-weight checks sat at 9/10; both were one-line causes.
+
+**Pinned-Dependencies.** `src/main/docker/Dockerfile.demo` was never brought in line with the digest-pinning procedure in AGENTS.md that the production `Dockerfile` already follows — `maven:3.9-eclipse-temurin-25` (line 23) and `eclipse-temurin:25-jre` (line 46) were tag-only. Both now carry `@sha256:` digests. The digests were resolved directly from the Docker Hub registry API rather than copied from the Scorecard warning, and matched it exactly. The file header, which described the images as unpinned, was corrected to match — caught in review by both Copilot and CodeRabbit.
+
+**SAST.** `ci.yml` gated the CodeQL job behind `detect-changes`, on this premise:
+
+> Always runs on push to main (OpenSSF Scorecard checks all default-branch commits).
+
+That premise is wrong. Scorecard's SAST check reads check runs on the **PR head commit** — `checks/raw/sast.go` calls `ListCheckRunsForRef(pr.HeadSHA)` — so scanning `main` on push is invisible to it, and any docs-only PR that skipped CodeQL was counted as an unscanned commit. Hence `28 commits out of 30 are checked with a SAST tool`. The gate (and the now-unnecessary `needs: detect-changes`) is removed, so CodeQL runs on every PR.
+
+Impact is limited to `pull_request` events: CodeQL already ran unconditionally on pushes, and the `docker` job that lists `codeql` in its `needs` is push-only, so its gating is unaffected. The cost is a `mvnw compile -DskipTests` on docs-only PRs. Note the SAST score will not jump immediately — the two unscanned commits stay inside Scorecard's 30-commit window until enough new PRs push them out.
+
+**Scoring note.** Both checks are Medium weight; each is worth ~0.05 on the aggregate. Deliberately *not* addressed: `Signed-Releases`, which is `-1` ("no releases found" — every release has zero attached assets). It is excluded from the aggregate while inconclusive, and a signed-but-unattested artifact scores only 8, which would *lower* the overall score. Only full SLSA provenance (10) would beat leaving it alone. Container signing does not count — the check inspects GitHub release assets, never a registry.
+
+---
+
+## 🛡️ fix(ci): unblock the OpenSSF Branch-Protection check on release branches (2026-08-05)
+
+**Repo:** EDDI (`fix/scorecard-branch-protection`)
+
+Scorecard reported `Branch-Protection: 0` with 22 warnings, one per `release/5.0.1`–`release/5.6.0` branch. Root cause is not a regression in our settings: the check builds its branch list from `release.target_commitish` over the **30 most recent releases** (`clients/githubrepo/releases.go` calls `ListReleases` with an empty `ListOptions`, so one page, no pagination). Our 30 newest releases are `6.2.0` down to `5.0.1` — the eight 6.x releases target `main`, the twenty-two 5.x ones still target the `release/x.y.z` branch they were cut from. The final score is a normalised sum across *every* branch in that set with no release-branch exemption, so `main` scoring well was averaged against 22 zeros.
+
+**The branches were kept, not deleted.** Deleting them would have scored better in one step (only `main` left in the set), and 21 of 22 tips are identical to their tag so nothing would have been lost — except `release/5.6.0`, which carries `cf82cc06 "fixed release build"` one commit past the `5.6.0` tag and covered by no tag at all. More importantly the old GitHub releases point at these branches, so they stay. Protection was applied instead, via repository settings (not in this repo):
+
+- a **classic wildcard rule** on `release/*` — deletion and force-push blocked, PRs required with 2 approvals, code-owner review, status checks `Build & Test` + `CodeQL Analysis`
+- a **ruleset** `Frozen release branches` on `refs/heads/release/*` with `deletion` + `non_fast_forward` and **zero bypass actors**, which is what makes `branchProtectionAppliesToAdmins` resolve true (`EnforceAdmins = asPtr(len(BypassActors.Nodes) == 0)`)
+
+**Classic protection was chosen over expressing everything as a ruleset, deliberately.** Rulesets surface the admin-only fields (`RequiresStrictStatusChecks`, `DismissesStaleReviews`, `RequireLastPushApproval`), which would then have to be *true* on every branch to score — dragging `main` into up-to-date-before-merge and stale-review dismissal. Classic protection exposes only `refUpdateRule`, giving the release branches the same probe-availability profile as `main`. That uniformity also matters because `computeFinalScore` uses `scores[0].maxes` — an arbitrary entry of a Go map — as the max template for all branches, so branches with mismatched availability produce a score that varies run to run.
+
+**Why the action bump is the actual code change here.** Applying the above made the check report `-1`: `error during GetBranch(release/5.6.0): Resource not accessible by integration`. The pinned `scorecard-action@v2.4.3` ships scorecard **v5.3.0**, whose `branchesHandler.setup()` tolerates the permission error for the *default* branch but whose `query()` — used for every non-default branch — has no tolerance at all, so classic protection on a non-default branch is fatal under the read-only `GITHUB_TOKEN`. v5.5.0 added the same `isPermissionsError` guard to `query()`, tolerating it whenever the repo has at least one ruleset. `scorecard-action@v2.4.4` ships v5.5.0, so the pin moves to `2d1146689b8cda280b9bc96326124645441f03bc`.
+
+**Deliberately left off:** "require branches to be up to date", "dismiss stale reviews" and "include administrators" on the release rule. Those map to admin-only GraphQL fields that our read-only token cannot see, so they are scored `NotAvailable` and excluded from the max — enabling them buys zero points and only adds friction.
+
+**Expected result: 8/10**, with `main`'s merge workflow completely unchanged (still 1 approval, no code-owner gate, no rebase treadmill). The remaining 2 points require `main` itself to move to 2 approvals + code-owner review; that is a two-person dependency rather than a two-approval one while `.github/CODEOWNERS` lists only `@ginccc` and `@rolandpickl`, and widening it was explicitly deferred. The check re-runs on its own — `scorecard.yml` triggers on `branch_protection_rule`.
 
 ---
 

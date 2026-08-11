@@ -1062,16 +1062,23 @@ class AgentOrchestrator implements IAgentOrchestrator {
                 addUserMemoryToolIfEnabled(tools, memory);
             if (whitelist.contains("conversationRecall"))
                 addConversationRecallToolIfEnabled(tools, task, memory);
-            // Dynamic agent tools (whitelist-gated, shared tracking lists) —
-            // extracted to DynamicAgentToolsProvider (R2 step 2). Constructed per
-            // call since deploymentStore is field-injected (see that class's Javadoc).
-            dynamicAgentToolsProvider().addDynamicAgentTools(tools, whitelist, memory);
         } else {
             // Auto-add user memory tool if agent has it enabled
             addUserMemoryToolIfEnabled(tools, memory);
             // Auto-add conversation recall tool if rolling summary is active
             addConversationRecallToolIfEnabled(tools, task, memory);
         }
+
+        // V7: outside the branch now, like the nine plain beans above. An omitted
+        // whitelist means "all built-in tools" per docs/langchain.md, and this call
+        // used to sit in the whitelist arm only — so an agent with
+        // enableBuiltInTools=true, no whitelist and dynamicAgents.enabled=true got
+        // none of the dynamic-agent tools. The provider itself decides what an
+        // omitted whitelist may unlock (it requires a governing group policy before
+        // honouring "all"); this method's job is only to stop skipping it.
+        // Constructed per call since deploymentStore is field-injected (see that
+        // class's Javadoc).
+        dynamicAgentToolsProvider().addDynamicAgentTools(tools, whitelist, memory);
 
         // Outside the whitelist branch on purpose: readAttachment is part of
         // attachment support, not a capability the built-in tools config governs.
@@ -1166,7 +1173,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
      */
     private DynamicAgentToolsProvider dynamicAgentToolsProvider() {
         return new DynamicAgentToolsProvider(agentSetupService, capabilityRegistryService, conversationService,
-                agentFactory, agentStore, deploymentStore, liveDiscussionRegistry);
+                agentFactory, agentStore, deploymentStore, liveDiscussionRegistry, agentGroupStore);
     }
 
     // Kept as declared delegators (not inlined) since tests reference them by

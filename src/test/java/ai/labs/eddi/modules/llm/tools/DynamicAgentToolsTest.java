@@ -141,7 +141,9 @@ class DynamicAgentToolsTest {
             String result = tool.createSubAgent("Test", "prompt", null, "unknown-model", null, null);
 
             assertTrue(result.contains("⚠️"));
-            assertTrue(result.contains("not in any provider"));
+            // Message changed with the semantics: the model is no longer judged against
+            // "any provider's list", because it can only ever be paired with one.
+            assertTrue(result.contains("without naming a provider"), result);
         }
 
         @Test
@@ -214,16 +216,87 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_modelAllowed_providerOmitted_positiveCase() throws Exception {
-            // Model exists in one of the provider lists — should be allowed
+            // BEHAVIOUR CHANGE (deliberate). This used to pass: a model appearing in ANY
+            // provider's list was accepted with no provider named, and then paired with
+            // the DEFAULT provider. Here that produced an *anthropic* agent running
+            // openai's "gpt-4o-mini" — a combination that fails at model load and that
+            // the operator, who restricted only openai, never authorised.
+            config.setAllowedModels(Map.of("openai", List.of("gpt-4o-mini")));
+
+            String result = tool.createSubAgent("Test", "prompt", null, "gpt-4o-mini", null, null);
+
+            assertTrue(result.contains("⚠️"), result);
+            assertTrue(result.contains("without naming a provider"), result);
+        }
+
+        @Test
+        @DisplayName("naming the provider makes the same model/provider pair succeed")
+        void createSubAgent_modelAllowed_providerNamed() throws Exception {
             config.setAllowedModels(Map.of("openai", List.of("gpt-4o-mini")));
 
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             null, "gpt-4o-mini", true, "ready", null, null, null, null, null));
 
-            String result = tool.createSubAgent("Test", "prompt", null, "gpt-4o-mini", null, null);
+            String result = tool.createSubAgent("Test", "prompt", "openai", "gpt-4o-mini", null, null);
 
-            assertTrue(result.contains("✅"));
+            assertTrue(result.contains("✅"), result);
+        }
+
+        @Test
+        @DisplayName("allowedProviders is enforced against the EFFECTIVE provider, not the requested one")
+        void createSubAgent_allowedProvidersNotBypassableByOmittingIt() {
+            // With inheritParentModel off and no provider argument, nothing is
+            // inherited and the requested provider stays null. Guarding that value
+            // skipped the check entirely, and AgentSetupService then substituted its
+            // default — so a group restricting allowedProviders was bypassed by simply
+            // omitting the parameter.
+            config.setInheritParentModel(false);
+            config.setAllowedProviders(List.of("ollama"));
+
+            String result = tool.createSubAgent("Test", "prompt", null, null, null, null);
+
+            assertTrue(result.contains("⚠️"), result);
+            assertTrue(result.contains("not allowed"), result);
+            assertTrue(result.contains(AgentSetupService.DEFAULT_PROVIDER), result);
+        }
+
+        @Test
+        @DisplayName("the parent's vault reference is not handed to a different provider")
+        void createSubAgent_credentialDoesNotCrossProviders() throws Exception {
+            // A vault reference names ONE provider's secret. Passing the parent's
+            // anthropic reference into an openai config both breaks the sub-agent at
+            // model load and stores a reference to the parent's secret in an unrelated
+            // config.
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-1").build());
+
+            tool.createSubAgent("Test", "prompt", "openai", "gpt-4o", null, null);
+
+            var captor = org.mockito.ArgumentCaptor.forClass(SetupAgentRequest.class);
+            verify(agentSetupService).setupAgent(captor.capture());
+            assertNull(captor.getValue().apiKey(), "the parent's anthropic vault reference must not reach an openai config");
+            assertEquals("openai", captor.getValue().provider());
+        }
+
+        @Test
+        @DisplayName("the parent's vault reference IS inherited when the provider matches")
+        void createSubAgent_credentialInheritedForSameProvider() throws Exception {
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-1").build());
+
+            tool.createSubAgent("Test", "prompt", null, null, null, null);
+
+            var captor = org.mockito.ArgumentCaptor.forClass(SetupAgentRequest.class);
+            verify(agentSetupService).setupAgent(captor.capture());
+            assertEquals("${vault:parent.apiKey}", captor.getValue().apiKey(),
+                    "inheritance is the whole point — create_sub_agent failed outright without it");
+            assertEquals("anthropic", captor.getValue().provider());
+            assertEquals("claude-sonnet-4-6", captor.getValue().model());
         }
 
         @Test
@@ -941,7 +1014,8 @@ class DynamicAgentToolsTest {
             deploymentStore = mock(IDeploymentStore.class);
             createdAgentIds = new CopyOnWriteArrayList<>(List.of("created-1", "created-2"));
             retainedAgentIds = ConcurrentHashMap.newKeySet();
-            tool = new TeardownAgentTool(agentFactory, agentStore, deploymentStore, createdAgentIds, retainedAgentIds);
+            tool = new TeardownAgentTool(agentFactory, agentStore, deploymentStore, createdAgentIds, retainedAgentIds,
+                    ConcurrentHashMap.newKeySet());
         }
 
         @Test
@@ -1096,7 +1170,7 @@ class DynamicAgentToolsTest {
         @Test
         void constructor_nullArgs_doesNotThrow() {
             // Null constructor args should produce safe fallback collections
-            var safeTool = new TeardownAgentTool(agentFactory, agentStore, null, null, null);
+            var safeTool = new TeardownAgentTool(agentFactory, agentStore, null, null, null, null);
             // teardownAgent with unknown agentId returns a warning (doesn't NPE)
             String result = safeTool.teardownAgent("non-existent", false);
             assertTrue(result.contains("⚠️"));
