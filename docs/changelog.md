@@ -23,6 +23,36 @@ No shipped agent configuration (initial-agents, docs/agent-configs) contains a v
 
 ---
 
+## 🛡️ fix(deps): clear the four OSV advisories dragging Scorecard's Vulnerabilities check to 6 (2026-08-11)
+
+**Repo:** EDDI (`fix/dependency-vulnerabilities`)
+
+OpenSSF Scorecard's `Vulnerabilities` check fell from 10 to 6 — `4 existing vulnerabilities detected`. Four advisories across **three** libraries; jackson-databind carries two of them.
+
+| Advisory | Package | Was | Now | Reached us via |
+| -------- | ------- | --- | --- | -------------- |
+| GHSA-5gvw-p9qm-jgwh (6.5) | jackson-databind | 2.22.0 | 2.22.1 | `quarkus-jackson:3.38.1` |
+| GHSA-5jmj-h7xm-6q6v (5.3) | jackson-databind | 2.22.0 | 2.22.1 | same |
+| GHSA-pmhh-3w7g-xqp8 (4.7) | jsoup | 1.22.2 | 1.23.1 | direct dependency |
+| GHSA-mx76-r943-rf8g | bcprov-lts8on | 2.73.10 | 2.73.12 | `io.nats:jnats:2.26.0` |
+
+**None of the four is reachable from our code**, checked against each advisory's stated precondition rather than assumed:
+
+- GHSA-5gvw needs `@JsonView` on an `@JsonUnwrapped` container — `@JsonView` appears in **zero** files under `src/main/java`.
+- GHSA-5jmj needs *per-property* `@JsonIgnoreProperties` **and** case-insensitive deserialization. All six usages are class-level `ignoreUnknown = true` with no property list, and `ACCEPT_CASE_INSENSITIVE_PROPERTIES` is enabled nowhere — every "case-insensitive" hit in the tree is `Pattern.CASE_INSENSITIVE` or a doc comment.
+- GHSA-pmhh is specific to jsoup's `Cleaner` sanitiser. `WebScraperTool` is the only jsoup consumer and calls **only `Jsoup.parse()`** — never `Cleaner`, `Safelist` or `clean()`.
+- GHSA-mx76 is a GCM chunking defect that throws a bad-tag exception on decryption — availability, not confidentiality — under the NATS client.
+
+They are fixed anyway because Scorecard counts advisories regardless of reachability, and because staying current is cheaper than re-litigating reachability every scan. This is score hygiene and dependency freshness, not an incident.
+
+**Why two of the three are `dependencyManagement` overrides.** jsoup is a direct dependency, so it is a version bump. jackson-databind is managed by the Quarkus BOM at 2.22.0, exactly like `jackson-core` — which this POM already pins to 2.22.1 for GHSA-r7wm-3cxj-wff9 — so the new entry follows that established pattern rather than importing `jackson-bom` ahead of the platform BOM. bcprov-lts8on needed a pin because the obvious alternative does not work: **`io.nats:jnats` 2.26.1 still declares 2.73.10**, verified by reading its POM, so bumping the parent would not have cleared it.
+
+**Known, pre-existing version skew.** databind and core now sit at 2.22.1 while the rest of the Jackson family (`datatype-jsr310`, `datatype-jdk8`, `module-parameter-names`, the `dataformat-*` set) stays at 2.22.0 and `jackson-annotations` at 2.22. That skew already existed for `jackson-core` alone; patch-level differences inside 2.22.x are binary-compatible. Aligning the whole family via `jackson-bom` would be tidier but moves more versions than Quarkus 3.38.1 was tested against, so it was deliberately not done here.
+
+Resolved versions confirmed with `dependency:tree` after the change, not inferred from the POM.
+
+---
+
 ## 🔒 feat(vault): allowedAgents is enforced instead of decorative (2026-08-10)
 
 **Repo:** EDDI (`feat/vault-grant-enforcement`)
