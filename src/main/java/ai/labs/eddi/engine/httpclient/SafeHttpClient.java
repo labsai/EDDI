@@ -31,7 +31,10 @@ import java.util.Set;
  * metadata, etc.)</li>
  * <li>Maximum redirect count is capped</li>
  * <li>Connect timeout is enforced per-hop</li>
- * <li>Overall wall-clock timeout is enforced across all hops</li>
+ * <li>Response timeout is enforced per-hop ({@link #DEFAULT_REQUEST_TIMEOUT}
+ * when the caller set none)</li>
+ * <li>Overall wall-clock budget is checked between hops, so a redirect chain
+ * cannot outlive it by more than one hop's timeout</li>
  * <li>On cross-origin redirects, Authorization/Cookie headers are stripped</li>
  * </ul>
  *
@@ -50,6 +53,16 @@ public class SafeHttpClient {
 
     /** Headers managed by HttpClient — must not be copied to redirect requests. */
     private static final Set<String> MANAGED_HEADERS = Set.of("host", "content-length", "connection");
+
+    /**
+     * Per-hop response timeout applied when the caller set none. The wall-clock
+     * budget below is only consulted BETWEEN hops, so without a per-request bound a
+     * single hop that accepts the connection and then trickles (or never completes)
+     * the response body hangs forever and the budget never gets a chance to fire.
+     * Every in-tree caller sets its own timeout; this is the backstop for the ones
+     * that do not.
+     */
+    private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(15);
 
     /** Security-sensitive headers stripped on cross-origin redirects. */
     private static final Set<String> SENSITIVE_HEADERS = Set.of("authorization", "cookie", "proxy-authorization");
@@ -87,7 +100,7 @@ public class SafeHttpClient {
      */
     public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
             throws IOException, InterruptedException {
-        return sendWithRedirects(request, bodyHandler, 0, Instant.now());
+        return sendWithRedirects(withDefaultTimeout(request), bodyHandler, 0, Instant.now());
     }
 
     /**
@@ -107,7 +120,35 @@ public class SafeHttpClient {
     public <T> HttpResponse<T> sendValidated(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
             throws IOException, InterruptedException {
         UrlValidationUtils.validateUrl(request.uri().toString());
-        return sendWithRedirects(request, bodyHandler, 0, Instant.now());
+        return sendWithRedirects(withDefaultTimeout(request), bodyHandler, 0, Instant.now());
+    }
+
+    /**
+     * Returns {@code request} unchanged when it already carries a timeout, else a
+     * copy bounded by {@link #DEFAULT_REQUEST_TIMEOUT}. {@link HttpRequest} is
+     * immutable, so the bound can only be applied by rebuilding.
+     */
+    private static HttpRequest withDefaultTimeout(HttpRequest request) {
+        if (request.timeout().isPresent()) {
+            return request;
+        }
+        HttpRequest.Builder builder = HttpRequest.newBuilder(request.uri())
+                .timeout(DEFAULT_REQUEST_TIMEOUT)
+                .method(request.method(), request.bodyPublisher().orElse(HttpRequest.BodyPublishers.noBody()));
+        request.headers().map().forEach((name, values) -> {
+            // Same exclusion as copyHeaders: HttpClient owns these and rejects
+            // an attempt to set them explicitly.
+            if (!MANAGED_HEADERS.contains(name.toLowerCase())) {
+                for (String value : values) {
+                    builder.header(name, value);
+                }
+            }
+        });
+        request.version().ifPresent(builder::version);
+        if (request.expectContinue()) {
+            builder.expectContinue(true);
+        }
+        return builder.build();
     }
 
     private <T> HttpResponse<T> sendWithRedirects(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler,
@@ -153,7 +194,7 @@ public class SafeHttpClient {
         boolean methodPreserved = (statusCode == 307 || statusCode == 308) && !"GET".equals(request.method());
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(resolvedUri)
-                .timeout(request.timeout().orElse(Duration.ofSeconds(15)));
+                .timeout(request.timeout().orElse(DEFAULT_REQUEST_TIMEOUT));
 
         // Copy headers from original request, with security-aware filtering
         boolean sameOrigin = isSameOrigin(request.uri(), resolvedUri);

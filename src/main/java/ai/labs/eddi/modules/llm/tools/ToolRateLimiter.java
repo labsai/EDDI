@@ -188,7 +188,12 @@ public class ToolRateLimiter {
                 return;
             }
             lastRefillNanos = now;
-            tokens = Math.min(limit, tokens + elapsedNanos * limit / WINDOW_NANOS);
+            // (double) on elapsedNanos: `elapsedNanos * limit` is long arithmetic and
+            // overflows once a bucket has been idle for ~107 days at the default
+            // limit of 1000. The wrapped negative would drive `tokens` below zero and
+            // tryAcquire would refuse every call from then on — a bucket that silently
+            // locks shut rather than refilling.
+            tokens = Math.min(limit, tokens + (double) elapsedNanos * limit / WINDOW_NANOS);
         }
 
         synchronized boolean tryAcquire() {

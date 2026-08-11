@@ -7,6 +7,84 @@
 
 
 
+## 🛡️ fix: the audit ledger could report itself as tampered, plus four smaller defects from a full-repo review (2026-08-12)
+
+**Repo:** EDDI (`fix/code-review-defects-and-docs`)
+
+A critical review of the whole repository. Most of what it looked for was not there — no swallowed
+exceptions, no non-thread-safe statics, no mutable state in the singleton lifecycle tasks, zero
+`@Disabled` tests across 14,301 of them — so the findings are few but one of them matters.
+
+**The audit ledger manufactured `ChainStatus.BROKEN` under load.** `AuditLedgerService` caps its
+sequence table at 50,000 conversations and used to `clear()` the whole thing on overflow, on the
+stated reasoning that re-seeding from `countByConversation` was *"correct, only slower"*. It is not.
+Entries sit in the in-memory queue for up to a flush interval (longer while a failing store is being
+retried), so a conversation with queued entries has consumed chain positions the store cannot see
+yet. Re-seeding from the store count therefore **hands the same position out twice** — and the
+verifier grades a duplicate exactly like a gap: *"Reporting INTACT here would hand an auditor a
+false assurance."* The `undelivered` table exists precisely so the ledger's own back-pressure cannot
+read as tampering, but it only exculpates **gaps**; duplicates had no such channel. On a busy
+deployment the queue is never empty, so essentially every overflow produced them.
+
+The fix replaces the wholesale `clear()` with an eviction that only drops counters whose positions
+are all accounted for somewhere a re-seed can see them — persisted in the store, or attributed in
+`undelivered`. Conversations still represented in the queue, in the in-flight flush batch, or in the
+undelivered table are retained. Three supporting changes make that sound rather than merely
+plausible:
+
+- A `ReentrantReadWriteLock` spans "position consumed" → "entry visible in the queue" on the
+  submit path (read lock — submitters never contend with each other) against eviction (write lock).
+  Without it, eviction could still read a conversation as idle while a submitter held a number for
+  it that nothing could see yet. The window was not theoretical: it contains HMAC and Ed25519
+  signing.
+- `flush()` publishes the batch it has polled but not yet persisted, because between the poll and a
+  successful append those positions exist in neither the queue nor the store. It is now
+  `synchronized` too — the scheduled writer and the `@PreDestroy` final flush could otherwise poll
+  interleaved halves of the queue into two batches.
+- When the table is *still* full after eviction (every counter genuinely in flight), new
+  conversations get `UNSEQUENCED` rather than a re-seeded collision. That degrades the window to
+  `UNAVAILABLE` — "the chain cannot be established" — which is honest, where a duplicate is an
+  accusation.
+
+One residual case is left deliberately: past `MAX_TRACKED_UNDELIVERED` the undelivered table stops
+recording, so a dead-lettered position may be reused. That window already reports `BROKEN` by the
+documented fail-strict rule, so the verdict is unchanged — only its reason is.
+
+Two regression tests, both mutation-checked. With the retain set emptied (simulating the old
+`clear()`), `sequenceEvictionKeepsQueuedConversationsUnique` fails with `expected <[0, 1]> but was
+<[0, 0]>` — the duplicate itself. Its counterpart pins the opposite direction, so the fix cannot
+"pass" by simply never evicting and stranding every later conversation on `UNSEQUENCED`.
+
+**`HUMAN_DECIDES` blamed a feature that ships.** `AgentGroupStore` rejected the tie policy with
+*"needs human group members (I6), which are not available yet"* — roughly 150 lines below its own
+"I6 save-time matrix for HUMAN members", which accepts them, validates their `displayName` and warns
+about HUMAN moderators. Humans as group members shipped in 10c; what is actually missing is the
+resume path a paused tie-break would need. The message now says that. The test pinned the word
+"I6", so it was rewritten to assert on the offered alternatives and to fail if the message ever
+claims HUMAN members are unavailable again.
+
+**`SafeHttpClient` documented a guarantee it did not provide.** The class claimed an "overall
+wall-clock timeout enforced across all hops", but the budget is only checked *between* hops, so a
+single hop that accepts the connection and then trickles its body hung indefinitely and the budget
+never fired. Redirect hops already had a 15 s fallback; the initial request had whatever the caller
+set, or nothing. Both are now bounded by one `DEFAULT_REQUEST_TIMEOUT`, and the Javadoc states what
+is actually true — a per-hop response timeout plus a budget checked between hops. Every in-tree
+caller already set its own timeout, so this is a backstop for the next one that does not.
+
+**A rate-limit bucket could lock shut permanently.** `ToolRateLimiter.refill()` computed
+`elapsedNanos * limit` in long arithmetic, which overflows after ~107 idle days at the default limit
+of 1000; the wrapped negative drives `tokens` below zero and `tryAcquire` refuses every subsequent
+call. One cast.
+
+**Hardening.** `ConversationStepRunner` registered the in-flight conversation one statement above
+the `try` whose `finally` unregisters it. Only an `Error` could strand the entry — the intervening
+call swallows `Exception` — but a stranded entry keeps a finished turn's memory reachable and makes
+a later cancel signal a dead pipeline, so the registration moved inside.
+
+---
+
+
+
 ## 🔢 docs(mcp): the MCP tool catalogue was eight tools short, and a count sweep of both READMEs (2026-08-11)
 
 **Repo:** EDDI (`docs/group-collaboration-refresh`)

@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -109,6 +110,79 @@ class AuditLedgerServiceTest {
 
         verify(auditStore).appendBatch(argThat(batch -> batch.size() == 2));
         assertEquals(0, service.getQueueSize());
+    }
+
+    // ==================== sequence-table eviction ====================
+
+    /**
+     * The table used to be {@code clear()}ed on overflow, on the reasoning that
+     * re-seeding from {@code countByConversation} was "correct, only slower". It is
+     * not: an entry that is still queued has consumed a position the store cannot
+     * see yet, so the re-seed hands the same number out twice — and the verifier
+     * grades a duplicate as {@code BROKEN}, i.e. the ledger reporting the
+     * deployment as tampered because its own bookkeeping wrapped around.
+     */
+    @Test
+    @DisplayName("sequence eviction — a conversation with queued entries is never re-seeded into a duplicate")
+    void sequenceEvictionKeepsQueuedConversationsUnique() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation(anyString())).thenReturn(0L);
+        service = createService(true, null);
+
+        // Consume position 0 for "live" and leave it sitting in the queue.
+        service.submit(entry("live-1", "live", "agent1"));
+
+        // Overflow the table. Nothing is flushed, so "live" is still queued when
+        // eviction runs — exactly the window the old clear() got wrong.
+        for (int i = 0; i < AuditLedgerService.MAX_TRACKED_CONVERSATIONS + 5; i++) {
+            service.submit(entry("fill-" + i, "filler-" + i, "agent1"));
+        }
+
+        service.submit(entry("live-2", "live", "agent1"));
+        service.flush();
+
+        var persisted = ArgumentCaptor.forClass(List.class);
+        verify(auditStore).appendBatch(persisted.capture());
+        @SuppressWarnings("unchecked")
+        List<Long> liveSequences = ((List<AuditEntry>) persisted.getValue()).stream()
+                .filter(e -> "live".equals(e.conversationId()))
+                .map(AuditEntry::sequence)
+                .toList();
+
+        assertEquals(List.of(0L, 1L), liveSequences,
+                "the second entry must continue the chain, not restart it at a position already taken");
+    }
+
+    /**
+     * The other half of the contract: once the queue has drained, those counters
+     * ARE safe to drop, so the table must actually shrink. Without this the fix
+     * could "pass" by simply never evicting, which would strand every later
+     * conversation on UNSEQUENCED.
+     */
+    @Test
+    @DisplayName("sequence eviction — fully-persisted conversations are evicted so new ones still chain")
+    void sequenceEvictionReclaimsPersistedConversations() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation(anyString())).thenReturn(0L);
+        service = createService(true, null);
+
+        for (int i = 0; i < AuditLedgerService.MAX_TRACKED_CONVERSATIONS + 5; i++) {
+            service.submit(entry("fill-" + i, "filler-" + i, "agent1"));
+        }
+        service.flush(); // everything is now durably in the store
+
+        service.submit(entry("fresh-1", "fresh", "agent1"));
+        service.flush();
+
+        var persisted = ArgumentCaptor.forClass(List.class);
+        verify(auditStore, times(2)).appendBatch(persisted.capture());
+        @SuppressWarnings("unchecked")
+        List<AuditEntry> lastBatch = (List<AuditEntry>) persisted.getValue();
+        var fresh = lastBatch.stream().filter(e -> "fresh".equals(e.conversationId())).findFirst().orElseThrow();
+
+        assertEquals(0L, fresh.sequence(),
+                "with the queue drained the table must have room again, so this chains normally");
+        assertNotEquals(AuditEntry.UNSEQUENCED, fresh.sequence());
     }
 
     @Test
@@ -256,7 +330,7 @@ class AuditLedgerServiceTest {
         svc.submit(entry("id-3", "conv-1", "agent-1")); // queued → must be sequence 1
         svc.flush();
 
-        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        var captor = ArgumentCaptor.forClass(List.class);
         verify(auditStore, times(2)).appendBatch(captor.capture());
         List<Long> writtenSequences = ((List<List<AuditEntry>>) (List<?>) captor.getAllValues()).stream().flatMap(List::stream)
                 .map(AuditEntry::sequence).toList();
@@ -360,7 +434,7 @@ class AuditLedgerServiceTest {
         service.submit(entry("id-3", "conv-b", "agent-1"));
         service.flush();
 
-        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        var captor = ArgumentCaptor.forClass(List.class);
         verify(auditStore).appendBatch(captor.capture());
         @SuppressWarnings("unchecked")
         List<AuditEntry> written = captor.getValue();
@@ -380,7 +454,7 @@ class AuditLedgerServiceTest {
         service.submit(entry("id-1", "conv-a", "agent-1"));
         service.flush();
 
-        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        var captor = ArgumentCaptor.forClass(List.class);
         verify(auditStore).appendBatch(captor.capture());
         @SuppressWarnings("unchecked")
         List<AuditEntry> written = captor.getValue();
@@ -400,7 +474,7 @@ class AuditLedgerServiceTest {
         service.submit(entry("id-1", "conv-a", "agent-1"));
         service.flush();
 
-        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        var captor = ArgumentCaptor.forClass(List.class);
         verify(auditStore).appendBatch(captor.capture());
         @SuppressWarnings("unchecked")
         List<AuditEntry> written = captor.getValue();
@@ -417,7 +491,7 @@ class AuditLedgerServiceTest {
         service.submit(entry("id-1", "conv-a", "agent-1"));
         service.flush();
 
-        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        var captor = ArgumentCaptor.forClass(List.class);
         verify(auditStore).appendBatch(captor.capture());
         @SuppressWarnings("unchecked")
         List<AuditEntry> written = captor.getValue();
@@ -442,7 +516,7 @@ class AuditLedgerServiceTest {
         service.submit(entry("id-1", "conv-a", "agent-1"));
         service.flush();
 
-        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        var captor = ArgumentCaptor.forClass(List.class);
         verify(auditStore).appendBatch(captor.capture());
         @SuppressWarnings("unchecked")
         List<AuditEntry> written = captor.getValue();
