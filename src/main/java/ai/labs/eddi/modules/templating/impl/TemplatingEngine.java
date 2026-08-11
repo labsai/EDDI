@@ -30,9 +30,19 @@ public class TemplatingEngine implements ITemplatingEngine {
 
     /**
      * Matches Qute control characters: {variable}, {#for}, {#if}, {/for}, {!
-     * comment !}
+     * comment !}, {|unparsed|}
+     * <p>
+     * The unparsed-block opener {@code {|} has to be on this list even though it
+     * introduces no <em>evaluation</em>: it is still syntax the renderer consumes,
+     * so a template whose ONLY marker was an unparsed block skipped processing
+     * entirely and shipped its literal {@code {|…|}} delimiters onward — visibly,
+     * into a system prompt. That made the escape work only by luck: it stripped
+     * cleanly whenever something else in the same template happened to trigger a
+     * render, and leaked whenever nothing did. Both callers of {@link
+     * ai.labs.eddi.modules.templating.TemplateEscaping} wrap generated text that
+     * may legitimately contain no other marker at all.
      */
-    private static final Pattern QUTE_CONTROL_PATTERN = Pattern.compile("\\{[a-zA-Z#/!]");
+    private static final Pattern QUTE_CONTROL_PATTERN = Pattern.compile("\\{[a-zA-Z#/!|]");
 
     /**
      * Upper bound for the recursive escaping of the template data model. Guards

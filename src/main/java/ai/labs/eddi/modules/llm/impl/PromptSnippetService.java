@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
+import ai.labs.eddi.modules.templating.TemplateEscaping;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.micrometer.core.instrument.Counter;
@@ -51,12 +52,6 @@ public class PromptSnippetService {
      * Qute's expression marker. Not "{{" — that is Jinja2 and Qute leaves it alone.
      */
     private static final String TEMPLATE_MARKER = "{";
-
-    /**
-     * Qute's unparsed-block delimiters: everything between them renders literally.
-     */
-    private static final String UNPARSED_START = "{|";
-    private static final String UNPARSED_END = "|}";
 
     private final IPromptSnippetStore snippetStore;
     private final IDocumentDescriptorStore descriptorStore;
@@ -168,21 +163,15 @@ public class PromptSnippetService {
     /**
      * Wrap content in a Qute unparsed block so its template markers are output
      * literally rather than resolved.
+     * <p>
+     * Delegates to {@link TemplateEscaping#unparsedBlock(String)}: a snippet is not
+     * the only EDDI-generated text concatenated into an agent's system prompt (the
+     * setup wizard's OpenAPI endpoint summary is another, and it shipped with the
+     * same defect), so the escape lives with the templating engine rather than
+     * being reimplemented per call site.
      */
     private static String escapeTemplateMarkers(String content) {
-        // Qute, not Jinja2. "{% raw %}" means nothing to Qute: it was emitted verbatim
-        // into the system prompt while the "{...}" markers it was supposed to protect
-        // were still resolved — the escape did the opposite of its job on both counts.
-        // Qute's own literal form is {| ... |}, which renders its contents unparsed.
-        //
-        // Content carrying the terminator itself would close the block early and hand
-        // the remainder back to the parser, reintroducing exactly the evaluation this
-        // is preventing. Verified: wrapping "a|} {properties.name} b" naively renders
-        // "a LEAKED b|}". So the pair is split across a block boundary — the "|" ends
-        // one unparsed block and the "}" opens the next — leaving neither block
-        // containing a terminator while the concatenated output is byte-identical.
-        String safe = content.replace(UNPARSED_END, "|" + UNPARSED_END + UNPARSED_START + "}");
-        return UNPARSED_START + safe + UNPARSED_END;
+        return TemplateEscaping.unparsedBlock(content);
     }
 
     /**

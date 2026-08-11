@@ -83,6 +83,26 @@ public class PlaceholderSyntaxContractTest {
     }
 
     /**
+     * An unparsed block must be recognised as worth rendering even when it is the
+     * <em>only</em> marker in the template.
+     * <p>
+     * {@code TemplatingEngine} short-circuits templates that contain no control
+     * characters, and its pattern originally required a letter, {@code #},
+     * {@code /} or {@code !} after the brace — none of which {@code {|} has. So a
+     * template whose sole marker was an unparsed block was returned untouched,
+     * delimiters and all. The escape therefore worked only when something else in
+     * the same template happened to trigger a render: wrapping generated text that
+     * contains no other marker (an OpenAPI summary with no path parameters, a
+     * plain-prose snippet) leaked {@code {|…|}} straight into the system prompt.
+     */
+    @Test
+    @DisplayName("an unparsed block is stripped even when it is the only marker")
+    void unparsedBlockIsStrippedWhenItIsTheOnlyMarker() throws Exception {
+        assertEquals("Available endpoints:\n- GET /pets: List pets", render("{|Available endpoints:\n- GET /pets: List pets|}"));
+        assertEquals("plain prose, no markers", render("{|plain prose, no markers|}"));
+    }
+
+    /**
      * The unparsed block is only safe while the content cannot close it. A naive
      * wrap of content containing the terminator resolves the expression that
      * follows it — the escape defeats itself.

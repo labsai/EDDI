@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -511,6 +512,25 @@ class AgentSetupServiceBranchCoverageTest {
                     false, null, null, null, false, false, null);
             var params = config.tasks().get(0).getParameters();
             assertNull(params.get("authToken"));
+        }
+
+        /**
+         * The wizard used to pin {@code temperature=0.3} into every config it wrote,
+         * for every provider and every model. Anthropic's current models reject the
+         * parameter outright ("`temperature` is deprecated for this model"), so the
+         * hard-coded value turned into a 400 on every turn of every agent created this
+         * way — including the Platform Operator, on the default model. Omitting it
+         * leaves the provider's own default in force; an agent designer who wants a
+         * specific temperature sets it explicitly on the generated config.
+         */
+        @Test
+        @DisplayName("no provider gets a hard-coded temperature")
+        void noHardCodedTemperature() {
+            for (String provider : List.of("anthropic", "openai", "ollama", "jlama", "bedrock", "azure-openai", "oracle-genai")) {
+                var config = service.createLlmConfig(provider, "some-model", "key", "prompt",
+                        false, null, null, null, false, false, null);
+                assertNull(config.tasks().get(0).getParameters().get("temperature"), provider + " must not pin a sampling temperature");
+            }
         }
 
         @Test
