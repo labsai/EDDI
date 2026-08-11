@@ -71,10 +71,22 @@ describe("UpdateCheckCard", () => {
     server.events.removeAllListeners();
   });
 
-  it("contacts GitHub and nothing else", async () => {
+  it("contacts GitHub and nothing else, even with hostile release notes", async () => {
     // The guard that keeps a relay from creeping back in. MSW runs with
     // `onUnhandledRequest: "error"`, so a request to any other host fails the
     // test on its own — this asserts the positive half: one host, one call.
+    //
+    // The notes carry both flavours of image, because markdown syntax and a raw
+    // tag reach the renderer by different routes and only one of them was ever
+    // covered.
+    server.use(
+      http.get(LATEST_URL, () =>
+        release(
+          "9.9.9",
+          'Notes ![a](https://tracker.example/a.png) and <img src="https://tracker.example/b.png">',
+        ),
+      ),
+    );
     const seen: string[] = [];
     server.events.on("request:start", ({ request }) => {
       const { host } = new URL(request.url);
@@ -85,9 +97,29 @@ describe("UpdateCheckCard", () => {
     renderWithProviders(<UpdateCheckCard />);
     await user.click(await screen.findByTestId("update-check-now"));
     await screen.findByText("EDDI 9.9.9 is available");
+    await user.click(screen.getByTestId("update-release-notes-toggle"));
 
     expect([...new Set(seen)]).toEqual(["api.github.com"]);
     server.events.removeAllListeners();
+  });
+
+  it("sends no referrer, so GitHub never learns this deployment's origin", async () => {
+    // `credentials: "omit"` covers cookies and auth but not the referrer, which
+    // the browser default would still populate with this deployment's origin.
+    let policy: string | undefined;
+    server.use(
+      http.get(LATEST_URL, ({ request }) => {
+        policy = request.referrerPolicy;
+        return release("9.9.9");
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<UpdateCheckCard />);
+    await user.click(await screen.findByTestId("update-check-now"));
+    await screen.findByText("EDDI 9.9.9 is available");
+
+    expect(policy).toBe("no-referrer");
   });
 
   it("reports an available update and how to get it when the button is pressed", async () => {
@@ -229,6 +261,29 @@ describe("UpdateCheckCard", () => {
     await user.click(await screen.findByTestId("update-release-notes-toggle"));
 
     expect(screen.getByText("This release has no notes.")).toBeInTheDocument();
+  });
+
+  it("never fetches an image a release body points at", async () => {
+    // Dropping rehypeRaw stops <img> tags but NOT markdown image syntax, which
+    // react-markdown renders as a real <img>. Whoever writes the notes would
+    // then choose a host the browser contacts on expand — a beacon, and a hole
+    // straight through the "api.github.com only" contract.
+    server.use(
+      http.get(LATEST_URL, () =>
+        release("9.9.9", "Look: ![pixel](https://tracker.example/pixel.png)"),
+      ),
+    );
+    const user = userEvent.setup();
+    const { container } = renderWithProviders(<UpdateCheckCard />);
+
+    await user.click(await screen.findByTestId("update-check-now"));
+    await user.click(await screen.findByTestId("update-release-notes-toggle"));
+
+    expect(container.querySelector("img")).toBeNull();
+    // Not dropped either — reachable, but only when a human chooses to.
+    const link = screen.getByTestId("update-notes-image-link");
+    expect(link).toHaveAttribute("href", "https://tracker.example/pixel.png");
+    expect(link).toHaveTextContent("pixel");
   });
 
   it("escapes raw HTML in release notes rather than injecting it", async () => {

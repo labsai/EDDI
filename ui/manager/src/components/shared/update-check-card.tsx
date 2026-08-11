@@ -284,6 +284,41 @@ export function UpdateCheckCard() {
 /* ─── Release notes ───────────────────────────────────────────────────────── */
 
 /**
+ * Markdown element overrides for release notes.
+ *
+ * Dropping `rehypeRaw` stops raw `<img>` tags, but **not** markdown image
+ * syntax — `![x](https://tracker.example/pixel.png)` is a first-class markdown
+ * node, and react-markdown renders it as a real `<img>` that the browser
+ * fetches the moment the notes are expanded. That is a beacon fired at an
+ * arbitrary host from a page whose stated contract is that api.github.com is
+ * the only one it ever contacts, and whoever writes the release notes chooses
+ * the host.
+ *
+ * So images become links: the URL stays visible and reachable, but nothing is
+ * fetched until a human clicks. Links are safe as-is — they do not load
+ * anything on render.
+ */
+const MARKDOWN_COMPONENTS = {
+  img: ({ src, alt, title }: { src?: string | Blob; alt?: string; title?: string }) => {
+    const href = typeof src === "string" ? src : undefined;
+    const label = alt?.trim() || href || "image";
+    if (!href) return <span className="text-muted-foreground italic">{label}</span>;
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={title ?? href}
+        className="text-primary underline underline-offset-2"
+        data-testid="update-notes-image-link"
+      >
+        {label}
+      </a>
+    );
+  },
+} as const;
+
+/**
  * The "what did I actually get" half of an update prompt.
  *
  * Collapsed by default — a version number is the answer to "should I update",
@@ -346,7 +381,9 @@ function ReleaseNotes({
                `[&_table]:block` is what keeps a wide GFM table scrolling inside
                its own box instead of stretching the card. */
             <div className="prose prose-sm dark:prose-invert max-h-96 max-w-none overflow-y-auto break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{preview.markdown}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+                {preview.markdown}
+              </ReactMarkdown>
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">

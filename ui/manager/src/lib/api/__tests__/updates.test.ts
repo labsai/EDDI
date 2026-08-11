@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
+import en from "@/i18n/locales/en.json";
 import {
   compareVersions,
   dockerImageFor,
@@ -14,6 +15,35 @@ import {
 } from "../updates";
 
 const LATEST_URL = "https://api.github.com/repos/labsai/EDDI/releases/latest";
+
+describe("updates i18n", () => {
+  /**
+   * Every `updates.*` key the UI asks for must exist in `en.json`.
+   *
+   * Locale-parity tests compare locales to English, so a key missing from
+   * English is invisible to them — it just renders its inline fallback and
+   * looks fine in development. Three of these (the failure messages) shipped
+   * that way: English by fallback, and English in all ten other locales
+   * precisely when the check failed.
+   */
+  it("defines every updates.* key the components reference", () => {
+    const KEYS_USED = [
+      "title", "description", "installed", "githubRelease", "dockerImage",
+      "unknownVersion", "checkNow", "checking", "autoCheck", "autoCheckHint",
+      "privacyNote", "neverChecked", "upToDate", "updateAvailable",
+      "updateAvailableDetail", "ahead", "unknownInstalled",
+      "errorRateLimited", "errorUnreachable", "errorFailed",
+      "publishedOn", "whatsNew", "fullNotes", "noNotes", "releaseNotes",
+      "allReleases", "howToUpdate", "howToUpdateCli", "howToUpdateManual",
+      "howToUpdateNote",
+    ];
+    const defined = Object.keys((en as { updates: Record<string, string> }).updates);
+
+    expect(KEYS_USED.filter((k) => !defined.includes(k))).toEqual([]);
+    // And nothing left behind: an orphan key is dead weight in 11 files.
+    expect(defined.filter((k) => !KEYS_USED.includes(k))).toEqual([]);
+  });
+});
 
 describe("updates", () => {
   describe("normalizeVersion", () => {

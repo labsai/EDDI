@@ -26,6 +26,11 @@ export function UpdateBanner() {
   return (
     <div
       className="relative flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-primary/10 px-10 py-1.5 text-xs font-medium text-foreground"
+      // The banner appears asynchronously, once the check resolves — well after
+      // the page has settled. Without a live region a screen reader user is
+      // simply never told, since nothing moves focus here.
+      role="status"
+      aria-live="polite"
       data-testid="update-banner"
     >
       {/* A release is a delivery, not an alarm — the icon should read that way. */}

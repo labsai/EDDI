@@ -169,6 +169,11 @@ async function getWithoutCredentials(url: string, accept: string): Promise<Respo
       headers: { Accept: accept },
       signal: controller.signal,
       credentials: "omit",
+      // `credentials: "omit"` drops cookies and auth, but not the referrer: the
+      // browser default (`strict-origin-when-cross-origin`) would still hand
+      // GitHub this deployment's origin. For a self-hosted instance that
+      // hostname *is* deployment data, and the card promises none is sent.
+      referrerPolicy: "no-referrer",
     });
   } catch {
     throw new UpdateCheckError("unreachable", `Could not reach ${new URL(url).host}`);

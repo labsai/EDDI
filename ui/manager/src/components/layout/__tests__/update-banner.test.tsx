@@ -43,6 +43,17 @@ describe("UpdateBanner", () => {
     await waitFor(() => expect(screen.queryByTestId("update-banner")).not.toBeInTheDocument());
   });
 
+  it("announces itself, since it appears long after the page has settled", async () => {
+    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
+    renderWithProviders(<UpdateBanner />);
+
+    const banner = await screen.findByTestId("update-banner");
+    // Nothing moves focus here, so without a live region a screen reader user
+    // is simply never told an update exists.
+    expect(banner).toHaveAttribute("role", "status");
+    expect(banner).toHaveAttribute("aria-live", "polite");
+  });
+
   it("can be dismissed", async () => {
     localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     const user = userEvent.setup();
