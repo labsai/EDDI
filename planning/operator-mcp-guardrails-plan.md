@@ -1,4 +1,6 @@
-# Plan: let EDDI agents (esp. the Platform Operator) use MCP tools with full HITL guardrails
+# Operator over MCP with full guardrails — Implementation Plan
+
+> **For agentic workers:** implement task-by-task; each phase is independently shippable. Do not skip to Phase 4 — earlier phases are what keep the operator from holding ungated write tools.
 
 **Status:** proposed, not started.
 **Audience:** a coding agent with no prior context on this thread. Everything needed is below or cited by exact file/symbol.

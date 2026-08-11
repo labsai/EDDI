@@ -220,7 +220,7 @@ The gate lives in the tool-execution loop (`AgentOrchestrator`), so it is **fail
 `toolApprovals` has two homes, both optional:
 
 - **Agent-level default** — `AgentConfiguration.hitlConfig.toolApprovals` (applies to every LLM task in the agent).
-- **Per-task override** — `LlmConfiguration.task[n].toolApprovals` (a langchain task). This is a **full replace**, not a merge: if a task defines `toolApprovals`, its block is used verbatim and the agent-level block is ignored for that task.
+- **Per-task override** — `LlmConfiguration.task[n].toolApprovals` (a langchain task). How it combines with the agent-level block is decided by `eddi.hitl.tool.task-approvals.mode`: under the default **`strict`** the task block can only *strengthen* the agent gate (patterns are united, task-level `exempt` is ignored, task-level `AUTO_APPROVE` is demoted); under **`replace`** it is a full replace and the agent-level block is ignored for that task — the pre-6.3.0 behavior. See [Precedence](#precedence) for the per-field rules.
 
 ```json
 {
