@@ -32,10 +32,10 @@ import java.util.regex.Pattern;
  * workflow. It is called <b>after</b> Qute template processing and
  * <b>before</b> the final API call (late-binding resolution).
  * <p>
- * <b>Access model:</b> Access control is via configuration authorship — the
- * admin who writes the agent config decides which vault references to include.
- * The resolver does NOT check agent permissions; it resolves any valid
- * reference that exists in the vault.
+ * <b>Access model:</b> the resolver does NOT check agent permissions; it
+ * resolves any valid reference that exists in the vault. Which agents may use a
+ * secret is governed by {@code SecretMetadata.allowedAgents} and checked when
+ * the agent is deployed, by {@link VaultGrantGate}.
  * <p>
  * Includes a Caffeine cache with configurable TTL to avoid repeated
  * decryption/vault calls. Cache is invalidated on secret rotation via

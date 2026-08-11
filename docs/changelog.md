@@ -5,6 +5,34 @@
 
 ---
 
+## 📖 docs(vault): document allowedAgents enforcement, and correct the javadoc that denies it (2026-08-11)
+
+**Repo:** EDDI (`docs/vault-grant-enforcement`)
+
+`allowedAgents` became enforced (#662) and enforcement became the default (#664), but `docs/secrets-vault.md` never mentioned `eddi.vault.grant-enforcement` at all — the only description of the feature lived in this changelog, which operators do not read. New **Agent Grants** section covering the three modes, the two parsing rules (unknown value fails startup, absent/blank resolves to `enforce`), what counts as granted, which configurations are scanned, and the upgrade step. The existing "Additional vault settings" properties block listed `cache-ttl-minutes` and `cache-max-size` but not `grant-enforcement`, so it now lists all three — an operator scanning that block for the available knobs would not have found the new one.
+
+**The javadoc was worse than missing — it was wrong.** Four places still told the reader the field is not enforced:
+
+| File | Said | Reality |
+| ---- | ---- | ------- |
+| `SecretMetadata` | "visibility only — enforcement is via configuration authorship, not runtime resolution" | Flatly wrong since #662 |
+| `VaultSecretProvider` | "stored for visibility/documentation but NOT enforced at resolution time" | True of *that class*, reads as "not enforced anywhere" |
+| `EncryptedSecret` | "for visibility/documentation only" (twice) | Same |
+| `AgentSetupService` | "Narrowing this list would imply an enforcement that does not exist" | The enforcement now exists |
+| `ISecretProvider`, `SecretReference`, `IRestSecretStore`, `SecretResolver` | "access control is via configuration authorship" | Found by grepping the phrase rather than fixing one file per review comment |
+
+`VaultGrantChecker` and its test quote the old wording deliberately — "was documented as…" — and keep it; that is history, not a stale claim.
+
+A review comment (CodeRabbit, #667) also caught that "a violation stops the agent coming up" is only true under `enforce`; `warn` logs and allows, `off` does not check. Every place asserting the blocking behavior now names `eddi.vault.grant-enforcement` as what decides it, including the doc's own lead paragraph.
+
+This is the same text that, earlier in this review, caused a proposed narrowing of `allowedAgents` to be reverted as security theater — the documentation was accurate then and became false when the behavior changed under it. Left alone it now misleads in the opposite direction.
+
+**`AgentSetupService` still writes `["*"]`, and that is still correct** — but for a different reason than the old comment gave. The wizard vaults the key *before* the agent exists (`vaultApiKey` at line 165; `agentId` extracted at line 209), and the method only ever receives `agentName`. Narrowing at that call site would mean guessing an ID that has not been assigned, and guessing wrong blocks the very agent the key was vaulted for. The comment now says that instead of citing an enforcement gap that has since closed.
+
+Documentation only — no behavior change, no new tests.
+
+---
+
 ## 🔒 chore(vault): default grant-enforcement to enforce (2026-08-11)
 
 **Repo:** EDDI (`chore/vault-grant-enforce`)

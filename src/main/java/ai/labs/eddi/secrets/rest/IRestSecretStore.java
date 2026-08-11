@@ -17,9 +17,10 @@ import java.util.List;
  * REST interface for managing secrets in the vault. Secrets are stored
  * encrypted; plaintext values are NEVER returned by any endpoint.
  * <p>
- * Secrets are scoped at the <b>tenant level</b> — identified by
- * {@code (tenantId, keyName)}. Access control is via configuration authorship
- * (the admin writes vault references into agent configs).
+ * Secrets are stored at the <b>tenant level</b> — identified by
+ * {@code (tenantId, keyName)}. Which agents may use a secret is governed by its
+ * {@code allowedAgents} list, checked when an agent is deployed; these
+ * endpoints are where an operator widens or narrows that grant.
  *
  * @author ginccc
  * @since 6.0.0
