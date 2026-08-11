@@ -5,6 +5,38 @@
 
 ---
 
+## 📋 docs(planning): SaaS connectors & outbound integration hardening plan (2026-08-11)
+
+**Repo:** EDDI (`docs/saas-connectors-plan`)
+
+New [`planning/saas-connectors-plan.md`](../planning/saas-connectors-plan.md) — the design record for connecting EDDI agents to third-party SaaS platforms (Jira, Amplitude, Google Drive, …) over REST, MCP, or A2A with real auth, including per-end-user OAuth. Planning only; no code changed.
+
+**What the investigation established** (all file:line claims spot-checked against source; see the plan's Verified header):
+- EDDI has **eleven outbound integration paths** with **five independent credential-resolution implementations**, all static-credential only. There is **zero OAuth client machinery** anywhere — no callback, no PKCE, no token exchange, no refresh — and **no per-user credential dimension** (`SecretReference` is `(tenantId, keyName)`; `autoVaultSecret` keys per-agent, so two users of one agent overwrite each other).
+- Vendor-hosted MCP servers (Atlassian, Amplitude) are unreachable: they require OAuth 2.1, and a 401 from an MCP server just trips the circuit breaker. The MCP client is streamable-HTTP-only; stdio is hard-rejected (though `StdioMcpTransport` ships in the pinned langchain4j-mcp jar).
+- Exposure findings that gate the work: `/mcp` (33 tools) is unauthenticated under the shipped `authorization.enabled=false` default and `AuthStartupGuard` effectively never fires (every shipped compose/k8s file sets the escape hatch); two REST endpoints take credentials as query params, one echoing the credential back in its response; tool results enter the LLM verbatim while only tool *descriptions* are sanitized; `SecretScrubber` misses array elements and URL-embedded credentials on export.
+
+**Plan shape** — six delivery phases (0–5) plus a deferred Phase 6: (0) close the exposure gap, (1) govern tool results + MCP/A2A approval pinning, (2) **unify** the five credential paths behind a new `ConnectionConfiguration` resource + `${connection:name}` reference with `SERVICE | PER_USER` binding, (3) stdio via sidecar bridge, (4) OAuth client-credentials + MCP RFC 9728 discovery, (5) per-user authorization-code + PKCE + Manager "Connect" flow; (6) deferred — native stdio behind an admin template catalog, A2A peer store, built-in tool credentials, NATS auth.
+
+**Design decisions worth remembering:**
+- Connection resolution deliberately does **not** live in `SecretResolver` — that would break the two properties the vault grant-enforcement design depends on (no identity in the resolver; `ChatModelRegistry` caches on unresolved params). Connections are a layer above the vault, not an extension of it.
+- The OAuth callback must be a `permit` path (`application-type=service` — no bearer on a browser redirect); single-use DB-persisted `state` is its only guard; PKCE mandatory.
+- **`PER_USER` connections refuse to deploy when `authorization.enabled=false`** — without verified identity, any caller claiming `userId=alice` would resolve Alice's tokens (the `/v1` adapter's `trust-user-headers` precedent shows exactly how). Same guard refuses OAuth connections when the vault is inert (no plaintext fallback for refresh tokens, ever).
+- Global `authorization.enabled` default stays untouched (per-surface guard pattern, per house precedent); the SSRF default flip is flagged as needing product sign-off because the `false` default is documented intent, not an oversight.
+
+**Rebased onto #668**, which landed two things the plan had to absorb: the MCP **resource bridge** (`exposeResources`) is a second untrusted-content surface on the existing MCP connection — same credential, so not a new connector path, but resource text is returned verbatim and the server-authored listing metadata is ungoverned, both now folded into G5 and covered by Phase 1.1's hook; and **strict task-level `toolApprovals`**, which closes the adjacent bypass where a task replaced the agent gate wholesale. The plan's "gate fails open on naming" constraint (C11) was re-checked against `ToolApprovalGate.classify` and still holds — #668's union semantics for `requireApproval` reinforce it rather than supersede it.
+
+**Review round (CodeRabbit, #669) — 14 findings, all valid, all applied.** Three changed the design rather than the prose:
+- **`/secretstore` has the same exposure as `/mcp`** (their only Critical, and correct). `IRestSecretStore` is `@RolesAllowed("eddi-admin")` with **no** path-specific policy, so it falls to the catch-all `authenticated` policy — and `DisabledAuthController` disables both under the shipped `authorization.enabled=false`. Vault writes, DEK rotation and `reset` are unauthenticated out of the box. The draft flagged `/mcp` and missed the credential store itself, in a plan about credentials. New Phase 0.8, gating Phase 2.
+- **Two TOCTOU races the draft got wrong.** Token refresh relied on a `version` CAS, which is checked at *write* time — after both replicas have already called the token endpoint and the provider has already rotated the refresh token. Now: an atomic cross-replica claim *before* the network call, CAS retained only as the final write guard. Same class in the OAuth callback: validate-then-consume let two callbacks both redeem one code; now a single conditional `SET consumedAt … WHERE consumedAt IS NULL`.
+- **`tokenUrl` was excluded from allowlisting** while receiving the vault-resolved `clientSecret` — a client-secret exfiltration path strictly worse than a misdirected access token. Credential endpoints now validate against their own trusted-provider allowlist, separate from `baseUrlAllowlist`, with one canonical origin format.
+
+Also applied: `StaticAuth` defined (it was referenced but never specified) with reference-only secret fields; `extraAuthParams` restricted to non-secret protocol parameters; the deprecated GET discovery routes lose the credential parameter entirely rather than rejecting it after it has already passed through proxies and access logs; RFC 9728 discovery constrained (same-origin metadata URL, `resource` match, authorization servers must be pre-approved — discovery may select among them, never introduce one); grant-lifecycle routes excluded from operator write scope alongside config writes; the complete `client_credentials` request contract specified; `publicBaseUrl` parsed rather than prefix-matched; the sidecar isolation claim qualified (it bounds blast radius, it does not remove process-execution or supply-chain risk); metric tags reduced to bounded categoricals (author-supplied connection names and server URLs were an unbounded-cardinality and tenant-disclosure vector); and six storage/authorization boundary tests added.
+
+**Next:** Phase 0 items (McpStartupGuard, `/secretstore` policy, credential-param removal, console redaction, scrubber holes) are independently shippable and gate everything else. Open questions in the plan's §13 — the group-conversation principal question (§13.1) must be answered before Phase 5.
+
+---
+
 ## 📚🔀🛡️ feat(docs+mcp+hitl): docs for agents on every surface, an MCP resource bridge, and strict task-level toolApprovals (2026-08-11)
 
 **Repo:** EDDI (`feat/agent-docs-and-hitl-strict`, branched from `main` @ 8dda2dab5). Four items, driven by the EDDI-Manager Platform Operator work (write-by-default + llmstore writes behind the Manager's gate-guard) and a critical rethink of each before building.
