@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import { UpdateCheckCard } from "@/components/shared/update-check-card";
+import { UpdateBanner } from "@/components/layout/update-banner";
 import { AUTO_UPDATE_CHECK_KEY } from "@/hooks/use-update-check";
 
 const LATEST_URL = "https://api.github.com/repos/labsai/EDDI/releases/latest";
@@ -41,6 +42,33 @@ describe("UpdateCheckCard", () => {
     expect(screen.getByTestId("update-latest-version")).toHaveTextContent("—");
     expect(screen.getByTestId("update-image-version")).toHaveTextContent("—");
     expect(github).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing off-origin on mount, with both surfaces up and default storage", async () => {
+    // The whole promise of the feature in one assertion: a fresh browser with
+    // no stored preference, both the banner and the card mounted, and not one
+    // byte leaves for a third-party host until a human asks.
+    const offOrigin: string[] = [];
+    server.events.on("request:start", ({ request }) => {
+      const { host } = new URL(request.url);
+      if (host !== "localhost:3000") offOrigin.push(host);
+    });
+
+    renderWithProviders(
+      <>
+        <UpdateBanner />
+        <UpdateCheckCard />
+      </>,
+    );
+    await screen.findByText("No check run yet.");
+    // Let anything queued on mount actually flush before declaring silence.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(offOrigin).toEqual([]);
+    expect(localStorage.getItem(AUTO_UPDATE_CHECK_KEY)).toBeNull();
+    server.events.removeAllListeners();
   });
 
   it("contacts GitHub and nothing else", async () => {
