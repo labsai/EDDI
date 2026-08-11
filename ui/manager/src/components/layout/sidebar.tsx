@@ -45,6 +45,12 @@ import { TOUR_CHAPTERS } from "@/components/onboarding/tour-chapters";
 import { useEddiVersion } from "@/hooks/use-update-check";
 import { UNKNOWN_VERSION } from "@/lib/api/system";
 import { ModeSwitcher } from "@/components/shared/mode-switcher";
+// Imported rather than referenced as "/logo_eddi.png" from public/: at 2 KB it
+// is under Vite's 4 KB assetsInlineLimit, so the app inlines it as a data URI
+// (same pixels, one fewer request) — and the design-system bundle, which cannot
+// ship public/ assets, inlines it too instead of rendering a broken image in
+// every design built with Sidebar.
+import logoEddi from "@/assets/logo_eddi.png";
 
 const navSections = [
   {
@@ -194,7 +200,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           // sidebar (dark mode) but invert to near-black on the white sidebar
           // (light mode) so it stays visible.
           <img
-            src="/logo_eddi.png"
+            src={logoEddi}
             alt="EDDI"
             className="h-7 w-auto invert dark:invert-0"
           />
@@ -339,7 +345,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             data-testid="sidebar-user"
           >
             {/* Avatar */}
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-xs font-bold text-sidebar">
+            {/* text-sidebar-accent-foreground is the token that pairs with
+                bg-sidebar-accent. Identical to the text-sidebar it replaces in light
+                mode (#ffffff), and one shade off in dark (#0c0a09 vs #09090b) — both
+                near-black on gold, so no visible change. It is also the app's only
+                use of the token: without it Tailwind tree-shakes it out of the
+                design-system bundle entirely (see .design-sync/NOTES.md). */}
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-xs font-bold text-sidebar-accent-foreground">
               {initials}
             </div>
             {!collapsed && (

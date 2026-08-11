@@ -36,6 +36,27 @@ but not all (e.g. `BackLink` only takes `to`/`label`) — check each component's
 - **Badge** — `variant`: `default` | `secondary` | `success` | `warning` | `destructive` | `outline`.
 - **Card** — compose `Card` > `CardHeader` (`CardTitle`, `CardDescription`) + `CardContent` + `CardFooter`.
 
+## App chrome — compose the shell, don't invent one
+
+The synced surface includes EDDI's real page chrome, so a full screen is composed from
+it rather than reimplemented:
+
+- **`Sidebar`** — `collapsed` / `onToggle`. The nav rail: brand mark, Manager/Workforce
+  switcher, collapsible sections, external links, version footer. It fills its parent's
+  height, so give it a height-constrained flex container.
+- **`TopBar`** — `onMenuClick` / `sidebarVisible`. Breadcrumb (derived from the router),
+  platform-status pill, and the theme/language controls.
+- **`PlatformStatus`**, **`PageLoader`**, **`MockDataBanner`** — the connectivity pill, a
+  route-level skeleton, and the demo-mode strip. All take no props.
+
+There is no `AppLayout` in the bundle — it is deliberately excluded. Build the frame as a
+full-height flex row: `Sidebar` beside a column of `TopBar` + your `<main>`, and give that
+main region `p-6` yourself (the app's layout supplies it, so pages never repeat it).
+
+Also available beyond the leaf components: **`DropdownMenu`** (Radix wrapper — compose
+`DropdownMenuTrigger` / `Content` / `Item` / `Separator` / `Label`), **`ModeSwitcher`**, and
+**`RefetchErrorNotice`** (inline "could not refresh" strip that keeps stale data on screen).
+
 ## Where the truth lives
 
 - `styles.css` (+ its `@import`ed `_ds_bundle.css` and token CSS) — the complete token + utility vocabulary. Read it before styling.

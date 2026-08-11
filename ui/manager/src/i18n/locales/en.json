@@ -3201,6 +3201,7 @@
     "restrictionTitle": "Processing Restriction (Art. 18)",
     "resultsTitle": "Erasure Complete",
     "statusActive": "Processing Active",
+    "statusUnknown": "Status unavailable",
     "statusRestricted": "Processing Restricted",
     "subtitle": "GDPR-compliant user data management — erasure (Art. 17), portability (Art. 15/20), and processing restriction (Art. 18)",
     "title": "Privacy & Compliance",

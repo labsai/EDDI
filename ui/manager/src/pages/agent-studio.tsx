@@ -7,6 +7,7 @@ import { getWorkflow } from "@/lib/api/workflows";
 import { PipelineRailroad } from "@/components/studio/pipeline-railroad";
 import { StudioEditorPanel, StudioEditorEmpty } from "@/components/studio/studio-editor-panel";
 import { ChatPanel } from "@/components/chat/chat-panel";
+import { ErrorState } from "@/components/shared/error-state";
 import {
   ArrowLeft,
   Bot,
@@ -37,7 +38,11 @@ export function AgentStudioPage() {
   const [mobileTab, setMobileTab] = useState<"pipeline" | "editor" | "chat">("pipeline");
 
   // Fetch agent descriptor for name — filter by ID to avoid fetching all agents
-  const { data: descriptors } = useQuery({
+  const {
+    data: descriptors,
+    isError: descriptorsError,
+    refetch: refetchDescriptors,
+  } = useQuery({
     queryKey: ["studio", "descriptors", agentId],
     queryFn: () => getAgentDescriptors(10, 0, agentId ?? ""),
     enabled: !!agentId,
@@ -59,7 +64,12 @@ export function AgentStudioPage() {
   }, [agentDescriptor]);
 
   // Fetch agent config — must pass version for the API to return data
-  const { data: agentConfig, isLoading: agentLoading } = useQuery({
+  const {
+    data: agentConfig,
+    isLoading: agentLoading,
+    isError: agentError,
+    refetch: refetchAgent,
+  } = useQuery({
     queryKey: ["studio", "agent", agentId, agentVersion],
     queryFn: () => getAgent(agentId!, agentVersion),
     enabled: !!agentId && !!agentDescriptor,
@@ -74,7 +84,11 @@ export function AgentStudioPage() {
     return { workflowId: parsed.id, workflowVersion: parsed.version };
   }, [workflowUri]);
 
-  const { data: workflowConfig } = useQuery({
+  const {
+    data: workflowConfig,
+    isError: workflowError,
+    refetch: refetchWorkflow,
+  } = useQuery({
     queryKey: ["studio", "workflow", workflowId],
     queryFn: () => getWorkflow(workflowId!, workflowVersion),
     enabled: !!workflowId,
@@ -93,6 +107,40 @@ export function AgentStudioPage() {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-muted-foreground">{t("studio.notFound", "Agent not found")}</p>
+      </div>
+    );
+  }
+
+  // Checked before the loading branch, and covering all three queries rather
+  // than just the agent one. Each is gated on the previous succeeding
+  // (`enabled: !!agentDescriptor`, `enabled: !!workflowId`), so a failed
+  // prerequisite leaves the next query *disabled* rather than errored — it
+  // never reports isLoading or isError. Without every branch here, a failed
+  // descriptor or workflow fetch falls through to the normal chrome with an
+  // empty pipeline, which is indistinguishable from an agent that has no
+  // workflow at all.
+  //
+  // Each error is additionally gated on its data being absent: TanStack Query
+  // keeps the last good result when a background refetch fails (window
+  // refocus, default retry), and unmounting the whole studio — including any
+  // in-progress editor state — over a blip while usable data exists would be
+  // strictly worse than continuing to show it.
+  const descriptorsBlocked = descriptorsError && !descriptors;
+  const agentBlocked = agentError && !agentConfig;
+  const workflowBlocked = workflowError && !workflowConfig;
+  if (descriptorsBlocked || agentBlocked || workflowBlocked) {
+    const retryFailed = descriptorsBlocked
+      ? refetchDescriptors
+      : agentBlocked
+        ? refetchAgent
+        : refetchWorkflow;
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <ErrorState
+          message={t("common.error", "Something went wrong")}
+          onRetry={() => retryFailed()}
+          retryLabel={t("common.retry", "Retry")}
+        />
       </div>
     );
   }

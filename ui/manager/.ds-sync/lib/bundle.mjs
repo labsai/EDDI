@@ -64,12 +64,23 @@ export const reactShim = {
     // second bundled copy breaks concurrent rendering.
     b.onResolve({ filter: /^scheduler(\/|$)/ }, () => ({ path: 'scheduler-shim', namespace: 'shim' }));
     b.onLoad({ filter: /^react-shim$/, namespace: 'shim' }, () => ({
-      // jsx(type, props, key) — key is the 3rd arg in the automatic runtime,
-      // NOT a child. createElement reads key from props, so merge it in.
+      // Automatic-runtime jsx/jsxs → createElement. Two invariants matter:
+      //  · key is the 3rd ARG, never in props — lift it into the createElement
+      //    config object.
+      //  · jsxs means "static children array": the compiler emits it for
+      //    <div><A/><B/></div> as jsxs("div",{children:[A,B]}). The real
+      //    react/jsx-runtime suppresses key validation for that array. We
+      //    must SPREAD it into createElement variadic args — passing the
+      //    array via props.children makes React's reconciler treat it as a
+      //    dynamic list and warn "missing key" on every component with 2+
+      //    static children. jsx (single child slot) keeps the child as one
+      //    arg so a runtime .map() array there is still key-validated.
       contents: `var R=window.React;
-function jsx(t,p,k){return R.createElement(t,k===void 0?p:Object.assign({key:k},p));}
+function np(p,k){var o={};for(var x in p)if(x!=="children")o[x]=p[x];if(k!==void 0)o.key=k;return o}
+function jsx(t,p,k){var c=p&&p.children;return c===void 0?R.createElement(t,np(p,k)):R.createElement(t,np(p,k),c)}
+function jsxs(t,p,k){return R.createElement.apply(R,[t,np(p,k)].concat(p.children))}
 module.exports=R;
-module.exports.jsx=jsx;module.exports.jsxs=jsx;module.exports.jsxDEV=jsx;
+module.exports.jsx=jsx;module.exports.jsxs=jsxs;module.exports.jsxDEV=function(t,p,k,s){return(s?jsxs:jsx)(t,p,k)};
 module.exports.Fragment=R.Fragment;`,
       loader: 'js',
     }));

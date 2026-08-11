@@ -3,8 +3,9 @@
 // EDDI-Manager has no library dist; its app CSS (dist/assets/index-<hash>.css)
 // is hash-named (not reproducible) and pulls in Monaco/VSCode CSS the synced
 // components never use. This regenerates src/index.css's tokens + ONLY the
-// Tailwind utilities used by src/components/ui + src/components/shared + the
-// authored previews, to a fixed path: .design-sync/.cache/compiled.css.
+// Tailwind utilities used by src/components/ui + src/components/shared +
+// src/components/layout + the authored previews, to a fixed path:
+// .design-sync/.cache/compiled.css.
 //
 // Wired as cfg.buildCmd so re-sync regenerates it before the converter runs.
 // Requires @tailwindcss/cli in .ds-sync/node_modules (staged converter deps).
@@ -26,8 +27,18 @@ const scoped = [
   '@import "tailwindcss" source(none);',
   '@source "../../src/components/ui";',
   '@source "../../src/components/shared";',
+  // Required, not cosmetic: Tailwind v4 tree-shakes @theme tokens, emitting one
+  // only if a scanned file uses a utility that reads it. Without this line the
+  // :root block carries just 2 of the 5 --color-sidebar* tokens (shared/mode-
+  // switcher is the only non-layout file touching them); with it, all 5. The
+  // other three — border-sidebar-border, fill-sidebar-accent and
+  // text-sidebar-accent-foreground — are used only in layout/sidebar.tsx.
+  '@source "../../src/components/layout";',
   '@source "../ds-entry.tsx";',
   '@source "../previews";',
+  // The operator-drawer stub the converter substitutes for TopBar's import —
+  // its launcher classes have to be emitted too or the button renders bare.
+  '@source "../stubs";',
 ].join("\n");
 if (!/@import\s+['"]tailwindcss['"]\s*;/.test(css)) {
   console.error("build-css: src/index.css has no `@import 'tailwindcss';` — aborting");
