@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 
+import java.util.Collection;
 import java.util.Map;
 
 /**
@@ -43,6 +44,32 @@ final class McpToolUtils {
         if (identity == null || identity.isAnonymous() || !identity.hasRole(role)) {
             throw new ForbiddenException("MCP operation requires role: " + role);
         }
+    }
+
+    /**
+     * As {@link #requireRole}, but satisfied by <em>any</em> of the given roles.
+     * <p>
+     * EDDI has no role hierarchy — {@code hasRole} is a literal check, so a
+     * single-role requirement of {@code eddi-viewer} would refuse an
+     * {@code eddi-admin}. A tool whose REST counterpart enumerates several roles
+     * (the docs endpoints, above all) needs the same enumeration here, or the two
+     * surfaces guard the same content differently.
+     *
+     * @throws ForbiddenException
+     *             if the caller holds none of the given roles
+     */
+    static void requireAnyRole(SecurityIdentity identity, boolean authEnabled, Collection<String> roles) {
+        if (!authEnabled) {
+            return;
+        }
+        if (identity != null && !identity.isAnonymous()) {
+            for (String role : roles) {
+                if (identity.hasRole(role)) {
+                    return;
+                }
+            }
+        }
+        throw new ForbiddenException("MCP operation requires one of roles: " + String.join(", ", roles));
     }
 
     /**

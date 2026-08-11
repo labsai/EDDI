@@ -24,9 +24,9 @@ import java.util.regex.Pattern;
  * means {@code docker.io/library/nginx}. Single-tenant deployments (the common
  * case) use the cleaner short form.
  * <p>
- * <b>Access model:</b> Access control is via configuration authorship — the
- * admin who writes the agent config decides which vault references to include.
- * See {@link SecretMetadata#allowedAgents()} for visibility/documentation.
+ * <b>Access model:</b> which agents may use a secret is governed by
+ * {@link SecretMetadata#allowedAgents()}, checked when an agent is deployed
+ * rather than when a reference is resolved.
  *
  * @param tenantId
  *            the tenant namespace (default: "default" for single-tenant)

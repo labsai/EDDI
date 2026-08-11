@@ -257,7 +257,7 @@ public class TenantQuotaService {
      * load.</li>
      * <li><em>A decision on where to meter.</em> The candidate seams are the
      * ChatResponse-holding call sites tracked as C5 in
-     * {@code docs/superpowers/specs/2026-07-21-manager-coverage-backend-design.md}.</li>
+     * {@code planning/manager-coverage-backend-design.md}.</li>
      * </ol>
      * <p>
      * Note: internally calls {@link ITenantQuotaStore#tryAddCost} which resets all

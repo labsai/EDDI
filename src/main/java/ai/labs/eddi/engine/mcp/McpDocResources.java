@@ -19,11 +19,12 @@ import java.util.List;
  * AI agents can browse and read the 40+ markdown docs via MCP resources/list
  * and resources/read.
  * <p>
- * Thin delegate over {@link DocsService}, which owns the filesystem access and
- * the path-traversal guard. The same doc set is served over REST at
- * {@code /administration/docs} — MCP <em>resources</em> only reach clients that
- * ask for them, and EDDI's own MCP client never does, so this surface alone
- * left EDDI's docs readable by a desktop client and not by an EDDI agent.
+ * Thin delegate over {@link DocsService}, which owns the filesystem access, the
+ * path-traversal guard, and the {@code eddi.docs.enabled} switch. The same doc
+ * set is served over REST at {@code /administration/docs} and as MCP
+ * <em>tools</em> ({@link McpDocTools}) — resources only reach clients that ask
+ * for them, and agentic MCP clients (EDDI's own included) never do, so this
+ * surface alone reached desktop clients and no agent.
  *
  * @author ginccc
  */

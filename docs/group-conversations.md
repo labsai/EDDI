@@ -1098,7 +1098,8 @@ eddi.groups.cadence.claim-ttl=PT24H # Standing-team claim TTL; non-positive disa
 eddi.attachments.max-per-turn=5     # Attachments forwarded per member turn
 ```
 
-Deploying an agent that references a vault secret it is not granted is governed
-by `eddi.vault.grant-enforcement` — see
-[secrets-vault.md → Agent grants](secrets-vault.md#agent-grants).
+A sub-agent that inherits a parent's vault reference must itself be granted that
+secret, or — under the default `eddi.vault.grant-enforcement=enforce` — it will
+not deploy. See
+[secrets-vault.md → Agent Grants](secrets-vault.md#agent-grants-allowedagents).
 

@@ -171,6 +171,35 @@ class McpToolsProvider implements ToolSourceProvider {
                     toolSpecs.add(spec);
                     executors.put(name, executor);
                 }
+
+                // Resource bridge — explicit opt-in per config, and deliberately NOT
+                // run through the whitelist above: that filter governs names the
+                // SERVER advertises, while these two are synthesized by EDDI (see
+                // resourceBridgeTools' own doc comment). Collision handling matches
+                // the loop above: first writer keeps the name, loudly.
+                if (Boolean.TRUE.equals(mcpCallsConfig.getExposeResources())) {
+                    try {
+                        var bridge = mcpToolProviderManager.resourceBridgeTools(serverConfig);
+                        for (ToolSpecification spec : bridge.toolSpecs()) {
+                            ToolExecutor executor = bridge.executors().get(spec.name());
+                            if (executor == null || executors.containsKey(spec.name())) {
+                                LOGGER.warnf("mcpcalls resource-bridge tool '%s' dropped (missing executor or name collision)",
+                                        spec.name());
+                                continue;
+                            }
+                            toolSpecs.add(spec);
+                            executors.put(spec.name(), executor);
+                        }
+                    } catch (IllegalArgumentException e) {
+                        // Same static-configuration rejection discoverTools reports for
+                        // the server's tools — surfaced the same way instead of thrown,
+                        // so a bad bridge config cannot take down the whole discovery.
+                        failures.add(new McpToolProviderManager.McpServerFailure(
+                                mcpCallsConfig.getName() != null ? mcpCallsConfig.getName() : mcpCallsConfig.getMcpServerUrl(),
+                                mcpCallsConfig.getMcpServerUrl(),
+                                McpToolProviderManager.McpFailureKind.INVALID_CONFIGURATION, e.getMessage()));
+                    }
+                }
             }
 
             LOGGER.info("Discovered " + toolSpecs.size() + " mcpcalls tools from workflow");

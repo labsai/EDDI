@@ -654,7 +654,7 @@ class ConversationHitlService {
      * Default max consecutive system auto-approvals per turn (mirrors
      * ToolApprovalsConfig doc).
      */
-    static final int DEFAULT_MAX_AUTO_APPROVALS_PER_TURN = 2;
+    static final int DEFAULT_MAX_AUTO_APPROVALS_PER_TURN = ToolApprovalsConfig.DEFAULT_MAX_AUTO_APPROVALS_PER_TURN;
 
     /**
      * Outcome of the no-progress guard, driving the onComplete persistence branch.

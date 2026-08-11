@@ -6,6 +6,7 @@
 ---
 
 
+
 ## 🔀 docs: merge `main` into the documentation refresh and adapt to what landed since (2026-08-11)
 
 **Repo:** EDDI (`docs/group-collaboration-refresh`)
@@ -15,6 +16,11 @@ afterwards. Merged, with one conflict — `docs/changelog.md`, where both sides 
 the top; resolved by keeping both in date order, nothing dropped. `docs/group-conversations.md`
 auto-merged (main's attachments / protocol-defaults / not-yet-supported work versus the refresh's
 new sections and completed tables), and every overlapping region was re-read rather than trusted.
+
+`main` then moved again before this branch was pushed, so it was merged a **second** time (PRs #664,
+#665, #667, #668). Two conflicts, both in docs: the changelog again — same resolution — and
+`secrets-vault.md`, where #667 had written the vault-grant documentation independently. That one is
+resolved in main's favour and is described under *Vault agent grants* below.
 
 Then each of main's changes was checked against what the refresh claims. Five claims were stale or
 missing; four checks came back clean and are recorded so they are not re-run:
@@ -35,13 +41,16 @@ missing; four checks came back clean and are recorded so they are not re-run:
   **effective** provider and model, so omitting the parameter no longer bypasses the allow-list;
   and with no provider named, the default provider must itself be covered. Both documented,
   including the deliberate asymmetry (named provider: absent entry = no restriction).
-- **Vault agent grants** (`secrets-vault.md`) — `feat/vault-grant-enforcement` added a user-visible
-  deployment failure mode with no documentation anywhere. New **Agent grants** section: what is
-  scanned (agent document first, for `dreamConfig`, then workflows into llm/apicalls/mcpcalls/rag),
-  why enforcement sits at deploy rather than at resolution (`SecretResolver` has no agent identity;
-  `ChatModelRegistry` caches on unresolved parameters, so a check behind it runs for whichever agent
-  built the model first), the three `eddi.vault.grant-enforcement` modes, and the two fail-safe
-  rules — unknown value fails startup, unrunnable check allows.
+- **Vault agent grants** — `feat/vault-grant-enforcement` added a user-visible deployment failure
+  mode with no documentation anywhere, so this branch wrote an **Agent grants** section for
+  `secrets-vault.md`. A second merge of `main` (below) then brought in #667, which had documented
+  the same thing independently and better, plus `chore(vault): default grant-enforcement to enforce`
+  — which made this branch's "`warn` *(default)*" row outright wrong. **Main's section is kept
+  whole and this branch's was dropped**, rather than interleaved: two overlapping explanations of
+  one control is how a doc starts contradicting itself. What survives here is the cross-reference
+  from the group docs, retargeted at main's anchor and rewritten to say the thing main's section
+  does not — that a sub-agent inheriting a parent's vault reference must itself be granted the
+  secret or, under the now-default `enforce`, will not deploy.
 - **Metrics** (`metrics.md`) — `eddi_team_cadence_claims_reclaimed_total` is new and had no home.
   Added the Standing Team block (4 counters) and completed the group block, which listed 3 of 10.
   Meter types verified against the registrations: `eddi_group_cost_dollars` is a gauge, and
@@ -59,6 +68,103 @@ deployment-wait fixes are internal — no doc asserted the behaviour they correc
 
 ---
 
+## 📚🔀🛡️ feat(docs+mcp+hitl): docs for agents on every surface, an MCP resource bridge, and strict task-level toolApprovals (2026-08-11)
+
+**Repo:** EDDI (`feat/agent-docs-and-hitl-strict`, branched from `main` @ 8dda2dab5). Four items, driven by the EDDI-Manager Platform Operator work (write-by-default + llmstore writes behind the Manager's gate-guard) and a critical rethink of each before building.
+
+**1. `list_docs`/`read_docs` MCP tools (`McpDocTools`).** `docs/mcp-server.md` has documented `toolsWhitelist: ["read_docs", "list_docs"]` — tools that did not exist; anyone copying the example got a silently tool-less server (a whitelist that matches nothing exposes nothing). The two tools now exist, delegating to the same `DocsService` as REST and the `eddi://docs/*` resources, with the REST role enumeration mirrored via a new `McpToolUtils.requireAnyRole` (EDDI has no role hierarchy, so any-of-five must be spelled out). Rationale for tools *alongside* resources: agentic MCP clients — EDDI's own `McpToolProviderManager` included — consume `tools/list` and never call `resources/read`, so resources alone reach desktop clients and no agent.
+
+**2. `eddi.docs.enabled` (default `true`).** One switch in `DocsService` turns every docs surface off together (REST list/read, MCP resources, MCP tools) — previously the only "off" was pointing `eddi.docs.path` at a nonexistent directory, which reads as a misconfiguration in every diagnostic. A policy deserves a switch, not a hack. Honest verdict from the rethink: low value, ~15 lines, kept because the cost is near-zero. Field initialized `= true` so plain-constructed instances (unit tests) match the CDI default.
+
+**3. MCP resource bridge (`exposeResources` on mcpcalls configs).** Opt-in per config: synthesizes `<name>_list_resources` and `<name>_read_resource` tools so an agent can reach ANY MCP server's resources — the protocol half tool-consuming agents otherwise never see. Design decisions from the rethink: construction is purely local (executors dial lazily through the shared credential-keyed client cache, so an unreachable server costs an error tool *result*, not a discovery failure); deliberately NOT subject to `toolsWhitelist` (that filter governs server-advertised names; this feature has its own opt-in, and a pre-existing whitelist must not silently disable it — nor may a server occupy the synthesized names); text capped at 64K chars, binary described rather than base64-dumped; same static-config rejections as `discoverTools`, surfaced as `INVALID_CONFIGURATION` failures.
+
+**4. Strict task-level `toolApprovals` (`eddi.hitl.tool.task-approvals.mode`, default `strict`).** The load-bearing one. A per-task `toolApprovals` used to FULLY REPLACE the agent-level gate (`task.getToolApprovals() != null ? task : agent`, duplicated in `LlmTask` + `ToolLoopResumer`) — so `requireApproval: []` buried in an llmstore document was a complete, reviewed-as-ordinary-config bypass. Under `strict`, a task block can only STRENGTHEN the agent gate; `replace` keeps the legacy wholesale override for designs that deliberately loosen one task.
+The merge semantics came out of the critical pass, and one instinct died there: **exempt lists must NOT be string-intersected.** A task exempting a strict *subset* of the agent's patterns (`http.get:conversations*` vs `http.get:*`) shares no strings with it — intersection would silently gate every read. Since exempt beats require (`ToolApprovalGate` P1) and any-match suffices (P2), the sound per-field rules are: `requireApproval` = union (string-level union IS semantically exact for an any-match OR; neutralizes the `[]` bypass since `[] ∪ agent = agent`); `exempt` = agent's verbatim, task's ignored (a task-added exemption is precisely the ungating vector); `timeoutPolicy` = task's, but task `AUTO_APPROVE` demoted to `WAIT_INDEFINITELY` unless the agent itself grants it (generalizing the existing inherited-AUTO_APPROVE demotion); `maxAutoApprovalsPerTurn` = min; rules = task rules first with `AUTO_APPROVE` demoted, then agent rules; cosmetics = task-first. Both resolution sites now share `TaskToolApprovalsResolver` (mode via `ConfigProvider`, precedented in `AgentOrchestrator`/`DeploymentContextCondition`, since `ToolLoopResumer` is not a CDI bean). `LlmStore` warns at save time about task `exempt`/`AUTO_APPROVE` that strict mode will not honour — visibility, not rejection, so stored configs never brick and `replace` mode still honours them.
+`LlmTaskCoverageTest.toolApprovals_taskOverrideUsed` deliberately updated: it pinned the replace semantics (`assertSame(override, effective)`); it now pins the strict merge threaded to the orchestrator, with the full contract (replace mode included) in `TaskToolApprovalsResolverTest` (16 tests).
+**Second critical pass caught one more loosening vector:** an unset agent-level `maxAutoApprovalsPerTurn` is not "no cap" — the runtime resolves it to `DEFAULT_MAX_AUTO_APPROVALS_PER_TURN` (2) — so a naive `min(null-as-absent, task)` let a task state 10 and raise the effective budget. Today the fixed `carried >= 2` no-progress hard threshold happens to bound the damage, but the resolver's "budget may only shrink" contract must not depend on a distant guard staying fixed. The default constant moved to `ToolApprovalsConfig` (single source; `ConversationHitlService` aliases it) and the strict merge clamps a stated task value to `min(task, agent ?? default)`.
+
+**Downstream (EDDI-Manager):** strict-by-default is what lets the Manager's `gate-guard.ts` eventually relax from "refuse any llmstore write carrying `toolApprovals`" to allowing it — the field would no longer be able to weaken anything. Not relaxed yet; the Manager guard stays until this ships.
+
+**Tests:** 76 in the touched areas green (16 resolver, 7 McpDocTools, 5 bridge, 5 RestDocs unchanged, 43 LlmTask coverage). Mass `Unable to establish loopback connection` errors in `A2AToolProviderManager*`/`Embedding*` tests are the documented sandbox socket limitation (AGENTS.md §Build & Test), not regressions — CI is the source of truth there.
+
+**Docs:** `mcp-server.md` (tool count 74→76, new "Docs Tools" section, `exposeResources` row), `hitl.md` (precedence row rewritten for the two modes), `application.properties` (both new properties documented inline).
+---
+
+## 📖 docs(vault): document allowedAgents enforcement, and correct the javadoc that denies it (2026-08-11)
+
+**Repo:** EDDI (`docs/vault-grant-enforcement`)
+
+`allowedAgents` became enforced (#662) and enforcement became the default (#664), but `docs/secrets-vault.md` never mentioned `eddi.vault.grant-enforcement` at all — the only description of the feature lived in this changelog, which operators do not read. New **Agent Grants** section covering the three modes, the two parsing rules (unknown value fails startup, absent/blank resolves to `enforce`), what counts as granted, which configurations are scanned, and the upgrade step. The existing "Additional vault settings" properties block listed `cache-ttl-minutes` and `cache-max-size` but not `grant-enforcement`, so it now lists all three — an operator scanning that block for the available knobs would not have found the new one.
+
+**The javadoc was worse than missing — it was wrong.** Four places still told the reader the field is not enforced:
+
+| File | Said | Reality |
+| ---- | ---- | ------- |
+| `SecretMetadata` | "visibility only — enforcement is via configuration authorship, not runtime resolution" | Flatly wrong since #662 |
+| `VaultSecretProvider` | "stored for visibility/documentation but NOT enforced at resolution time" | True of *that class*, reads as "not enforced anywhere" |
+| `EncryptedSecret` | "for visibility/documentation only" (twice) | Same |
+| `AgentSetupService` | "Narrowing this list would imply an enforcement that does not exist" | The enforcement now exists |
+| `ISecretProvider`, `SecretReference`, `IRestSecretStore`, `SecretResolver` | "access control is via configuration authorship" | Found by grepping the phrase rather than fixing one file per review comment |
+
+`VaultGrantChecker` and its test quote the old wording deliberately — "was documented as…" — and keep it; that is history, not a stale claim.
+
+A review comment (CodeRabbit, #667) also caught that "a violation stops the agent coming up" is only true under `enforce`; `warn` logs and allows, `off` does not check. Every place asserting the blocking behavior now names `eddi.vault.grant-enforcement` as what decides it, including the doc's own lead paragraph.
+
+This is the same text that, earlier in this review, caused a proposed narrowing of `allowedAgents` to be reverted as security theater — the documentation was accurate then and became false when the behavior changed under it. Left alone it now misleads in the opposite direction.
+
+**`AgentSetupService` still writes `["*"]`, and that is still correct** — but for a different reason than the old comment gave. The wizard vaults the key *before* the agent exists (`vaultApiKey` at line 165; `agentId` extracted at line 209), and the method only ever receives `agentName`. Narrowing at that call site would mean guessing an ID that has not been assigned, and guessing wrong blocks the very agent the key was vaulted for. The comment now says that instead of citing an enforcement gap that has since closed.
+
+Documentation only — no behavior change, no new tests.
+
+---
+
+## 🔒 chore(vault): default grant-enforcement to enforce (2026-08-11)
+
+**Repo:** EDDI (`chore/vault-grant-enforce`)
+
+`eddi.vault.grant-enforcement` now ships as `enforce` rather than `warn`, so an agent whose configuration names a vault secret its `allowedAgents` does not grant is blocked at deployment instead of merely logged.
+
+Safe as a shipped default for two reasons, both worth knowing before relying on it:
+1. **Inert without a master key.** `eddi.vault.master-key` is empty by default; with the vault disabled the checker returns "no violations" without looking at anything.
+2. **Wildcard grants.** Every key `AgentSetupService` vaults carries `allowedAgents = ["*"]`. Only a grant an operator has deliberately narrowed can produce a violation.
+
+The code fallback moved with it. `@ConfigProperty(defaultValue = ...)` and the absent/blank branch of `parseStrict` both resolve to `DEFAULT_MODE_NAME` — the same constant the bundled property uses. A property file saying `enforce` beside a code fallback saying `warn` would mean an external configuration that omits or blanks the key silently downgrades the control while every visible sign still says it is on. Turning enforcement down is now always explicit.
+
+**Operational note:** on a deployment that has *both* a master key and narrowed grants, run once on `warn` and confirm the log is free of `references vault secret(s) it is not granted` before enabling this. In `enforce` mode that condition is an ERROR that stops the agent deploying — there is no warning to notice first.
+
+No shipped agent configuration (initial-agents, docs/agent-configs) contains a vault reference, so nothing in the repo can trip the check.
+
+---
+
+## 🛡️ fix(deps): clear the four OSV advisories dragging Scorecard's Vulnerabilities check to 6 (2026-08-11)
+
+**Repo:** EDDI (`fix/dependency-vulnerabilities`)
+
+OpenSSF Scorecard's `Vulnerabilities` check fell from 10 to 6 — `4 existing vulnerabilities detected`. Four advisories across **three** libraries; jackson-databind carries two of them.
+
+| Advisory | Package | Was | Now | Reached us via |
+| -------- | ------- | --- | --- | -------------- |
+| GHSA-5gvw-p9qm-jgwh (6.5) | jackson-databind | 2.22.0 | 2.22.1 | `quarkus-jackson:3.38.1` |
+| GHSA-5jmj-h7xm-6q6v (5.3) | jackson-databind | 2.22.0 | 2.22.1 | same |
+| GHSA-pmhh-3w7g-xqp8 (4.7) | jsoup | 1.22.2 | 1.23.1 | direct dependency |
+| GHSA-mx76-r943-rf8g | bcprov-lts8on | 2.73.10 | 2.73.12 | `io.nats:jnats:2.26.0` |
+
+**None of the four is reachable from our code**, checked against each advisory's stated precondition rather than assumed:
+
+- GHSA-5gvw needs `@JsonView` on an `@JsonUnwrapped` container — `@JsonView` appears in **zero** files under `src/main/java`.
+- GHSA-5jmj needs *per-property* `@JsonIgnoreProperties` **and** case-insensitive deserialization. All six usages are class-level `ignoreUnknown = true` with no property list, and `ACCEPT_CASE_INSENSITIVE_PROPERTIES` is enabled nowhere — every "case-insensitive" hit in the tree is `Pattern.CASE_INSENSITIVE` or a doc comment.
+- GHSA-pmhh is specific to jsoup's `Cleaner` sanitiser. `WebScraperTool` is the only jsoup consumer and calls **only `Jsoup.parse()`** — never `Cleaner`, `Safelist` or `clean()`.
+- GHSA-mx76 is a GCM chunking defect that throws a bad-tag exception on decryption — availability, not confidentiality — under the NATS client.
+
+They are fixed anyway because Scorecard counts advisories regardless of reachability, and because staying current is cheaper than re-litigating reachability every scan. This is score hygiene and dependency freshness, not an incident.
+
+**Why two of the three are `dependencyManagement` overrides.** jsoup is a direct dependency, so it is a version bump. jackson-databind is managed by the Quarkus BOM at 2.22.0, exactly like `jackson-core` — which this POM already pins to 2.22.1 for GHSA-r7wm-3cxj-wff9 — so the new entry follows that established pattern rather than importing `jackson-bom` ahead of the platform BOM. bcprov-lts8on needed a pin because the obvious alternative does not work: **`io.nats:jnats` 2.26.1 still declares 2.73.10**, verified by reading its POM, so bumping the parent would not have cleared it.
+
+**Known, pre-existing version skew.** databind and core now sit at 2.22.1 while the rest of the Jackson family (`datatype-jsr310`, `datatype-jdk8`, `module-parameter-names`, the `dataformat-*` set) stays at 2.22.0 and `jackson-annotations` at 2.22. That skew already existed for `jackson-core` alone; patch-level differences inside 2.22.x are binary-compatible. Aligning the whole family via `jackson-bom` would be tidier but moves more versions than Quarkus 3.38.1 was tested against, so it was deliberately not done here.
+
+Resolved versions confirmed with `dependency:tree` after the change, not inferred from the POM.
+
+---
 
 ## 🔒 feat(vault): allowedAgents is enforced instead of decorative (2026-08-10)
 
@@ -764,7 +870,7 @@ First of the three pre-feature defects from `planning/group-collaboration-NEXT.m
 
 - **`LlmConfiguration.Task` gains `inputPricePer1M`/`outputPricePer1M`** — same names and nullable semantics as the cascade fields (null = unpriced, contributes $0), so nothing changes for anyone not setting prices. Config-driven per Golden Rule 1: no hardcoded provider price table — it would be wrong within weeks.
 - **The pricing arithmetic now lives once, in `TokenPricing.cost()`.** `CascadingModelExecutor.computeCost` (step→cascade price resolution) and `LlmTask.accumulateAuditEvidence` (task-level prices for plain calls) both delegate — the formula cannot drift between paths (§4.7 unification rule).
-- **Precedence is explicit, not accidental:** `accumulateAuditEvidence` discriminates on the presence of the `cascadeCostUsd` metadata key, which the cascade branch always writes. A cascade run is priced by its steps alone; task-level prices apply only to non-cascade calls — cascade steps may target entirely different models, so inheriting the task price would price the wrong model. (This matches the precedence concern pre-filed in `docs/superpowers/specs/2026-07-21-manager-coverage-backend-design.md`.) Pinned by a test with deliberately absurd task prices on a cascade turn.
+- **Precedence is explicit, not accidental:** `accumulateAuditEvidence` discriminates on the presence of the `cascadeCostUsd` metadata key, which the cascade branch always writes. A cascade run is priced by its steps alone; task-level prices apply only to non-cascade calls — cascade steps may target entirely different models, so inheriting the task price would price the wrong model. (This matches the precedence concern pre-filed in `planning/manager-coverage-backend-design.md`.) Pinned by a test with deliberately absurd task prices on a cascade turn.
 - **Validation:** negative task-level prices fail deployment (`CascadeConfigValidator`, same new-field hard-error rationale as cascade pricing; the validator now also runs its task-level block for cascade-less tasks).
 - **`GroupCostLedger`'s "Known gap (V1)" Javadoc** rewritten — the gap is closed; `totalCost` remains a lower bound only for members whose configs carry no prices.
 
@@ -4206,7 +4312,7 @@ Backlog item **D9**, part 3 of 3 — documentation only, no behaviour change.
 **Decision: keep the method, document the gap loudly — do not delete it, and do not wire it here.**
 
 - *Not deleted*, because removing it would take away the seam without taking away the gap: `checkCostBudget` stays wired, `ITenantQuotaStore.tryAddCost` stays on the interface, all three stores implement it, and it is now covered by `TenantQuotaStoreParityTest`. A reader would be left with a half-system and no marker.
-- *Not wired*, because there is nothing meaningful to meter yet. Built-in tool executions are priced at $0.00, and there is no token-cost metering for LLM turns at all — wiring today would add write load and record zeros. The candidate call sites are the `ChatResponse`-holding seams tracked as C5 in `docs/superpowers/specs/2026-07-21-manager-coverage-backend-design.md`, whose own notes named the Mongo E11000 (fixed in part 1 of this item) as its blocker. That blocker is now gone.
+- *Not wired*, because there is nothing meaningful to meter yet. Built-in tool executions are priced at $0.00, and there is no token-cost metering for LLM turns at all — wiring today would add write load and record zeros. The candidate call sites are the `ChatResponse`-holding seams tracked as C5 in `planning/manager-coverage-backend-design.md`, whose own notes named the Mongo E11000 (fixed in part 1 of this item) as its blocker. That blocker is now gone.
 
 Both `recordCost` and `checkCostBudget` carry javadoc saying this outright, including the two things that must land first.
 

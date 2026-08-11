@@ -10,7 +10,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | --------------------------- | ------------------------------------- |
 | `http://localhost:7070/mcp` | MCP server endpoint (default + admin) |
 
-## Available Tools (74)
+## Available Tools (76)
 
 ### Conversation Tools (11)
 
@@ -100,6 +100,15 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `delete_group_conversation` | Delete a group conversation and cascade-delete all member conversations                                                                                    |
 
 See [Group Conversations](group-conversations.md) for full style details, custom phases, and nested groups.
+
+### Docs Tools (2)
+
+Read EDDI's own documentation over MCP **tools** — the counterpart to the `eddi://docs/*` **resources** below, and the pair the `toolsWhitelist: ["read_docs", "list_docs"]` example further down consumes. Tools and resources serve different clients: agentic MCP clients (EDDI's own included) consume `tools/list` and never call `resources/read`, so before these existed EDDI's docs were readable by a desktop client and not by any agent consuming EDDI's MCP server. Role set mirrors the REST docs endpoints exactly (any of the five roles). Both delegate to `DocsService`, so `eddi.docs.enabled=false` switches this surface off together with REST and the resources.
+
+| Tool        | Description                                                                                                   |
+| ----------- | ------------------------------------------------------------------------------------------------------------- |
+| `list_docs` | List the documentation pages this deployment serves (one name per line, no `.md` suffix). Read this first — the runtime set is smaller than the repository's |
+| `read_docs` | Read one page as markdown by name, e.g. `architecture`. Distinguishes an invalid name from an absent page      |
 
 ### HITL Tools (9)
 
@@ -584,7 +593,7 @@ eddi.docs.path=docs
 
 EDDI uses a **whitelist-based `ToolFilter`** (`McpToolFilter.java`) to control which tools are exposed via MCP.
 
-**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 74 intended tools — conversation, admin/resource/schedule/channel, setup, group, **HITL approvals** (`McpHitlTools`), **persistent user memory** (`McpMemoryTools`), and **GDPR/CCPA** (`McpGdprTools`).
+**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 76 intended tools — conversation, admin/resource/schedule/channel, setup, group, **HITL approvals** (`McpHitlTools`), **persistent user memory** (`McpMemoryTools`), **GDPR/CCPA** (`McpGdprTools`), and **docs** (`McpDocTools`).
 
 To add a new MCP tool: add its name to the `MCP_TOOLS` set in `McpToolFilter.java`. A quarkus-MCP `@Tool` has no other invocation path, so a tool that is *not* whitelisted is unreachable dead code. `McpToolFilterTest.test_allMcpToolMethods_areWhitelisted()` auto-discovers every `@Tool` in the `engine.mcp` package and fails the build if any is missing from the whitelist — so forgetting this step is caught by CI.
 
@@ -675,6 +684,7 @@ External MCP servers are configured as **`mcpcalls` workflow extensions** — a 
 | `toolsWhitelist` | string[]   | No       | —         | If non-empty, only these tool names are exposed (names as returned by the server's `tools/list`)                          |
 | `toolsBlacklist` | string[]   | No       | —         | Tool names to exclude. Applied *after* the whitelist                                                                     |
 | `mcpCalls`       | object[]   | No       | —         | Deterministic, action-triggered tool bindings (see *Pipeline mode* below). Omit for agent-mode-only servers               |
+| `exposeResources` | boolean   | No       | `false`   | Opt-in bridge for the server's MCP **resources**: synthesizes `<name>_list_resources` and `<name>_read_resource` tools so the agent can list and read them (text capped at 64K chars, binary described, not returned). Independent of the whitelist/blacklist, which govern server-advertised names |
 
 #### How `create_api_agent` builds a write tool's body
 

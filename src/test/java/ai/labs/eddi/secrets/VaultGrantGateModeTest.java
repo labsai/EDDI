@@ -12,6 +12,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -40,8 +41,64 @@ class VaultGrantGateModeTest {
         assertEquals(Mode.OFF, Mode.parseStrict("off"));
         assertEquals(Mode.WARN, Mode.parseStrict("warn"));
         assertEquals(Mode.ENFORCE, Mode.parseStrict("  ENFORCE "));
-        assertEquals(Mode.WARN, Mode.parseStrict(null));
-        assertEquals(Mode.WARN, Mode.parseStrict("   "));
+        // null/blank are covered by absentMeansShippedDefault — they resolve to the
+        // shipped default, not to a fixed mode named here.
+    }
+
+    /**
+     * Absent or blank must resolve to the SHIPPED default, never to something
+     * weaker. A bundled {@code application.properties} saying {@code enforce}
+     * beside a code fallback saying {@code warn} means an external configuration
+     * that omits or blanks the key runs with the control off while every visible
+     * sign still says it is on.
+     */
+    @Test
+    @DisplayName("absent or blank resolves to the shipped default, never to something weaker")
+    void absentMeansShippedDefault() {
+        Mode shipped = Mode.valueOf(VaultGrantGate.DEFAULT_MODE_NAME.toUpperCase());
+
+        assertEquals(shipped, Mode.parseStrict(null));
+        assertEquals(shipped, Mode.parseStrict(""));
+        assertEquals(shipped, Mode.parseStrict("   "));
+        // Pinned concretely as well as relatively: asserting only "equals the
+        // constant" would still pass if the constant itself were weakened to warn.
+        assertEquals(Mode.ENFORCE, shipped, "the shipped default must be enforce");
+    }
+
+    /**
+     * The bundled property and the code fallback are two definitions of one fact,
+     * and the whole finding here was that they had drifted apart.
+     * <p>
+     * Read from {@code src/main/resources} on disk rather than the classpath:
+     * {@code src/test/resources/application.properties} shadows the shipped file
+     * during tests and does NOT set this key, so a classpath read would assert
+     * against the wrong file — and, being absent there, would assert nothing at
+     * all. (That shadowing is also why the drift this test guards was invisible in
+     * the test environment: tests take the code fallback, which is exactly the
+     * value that had diverged.)
+     */
+    @Test
+    @DisplayName("the bundled application.properties matches the code fallback")
+    void bundledPropertyMatchesTheCodeFallback() throws Exception {
+        var shippedProperties = java.nio.file.Path.of("src", "main", "resources", "application.properties");
+        assertTrue(java.nio.file.Files.exists(shippedProperties), "expected the shipped application.properties at " + shippedProperties);
+
+        var configured = java.nio.file.Files.readAllLines(shippedProperties).stream()
+                .map(String::trim)
+                .filter(line -> line.startsWith("eddi.vault.grant-enforcement="))
+                .map(line -> line.substring(line.indexOf('=') + 1).trim())
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("eddi.vault.grant-enforcement is not set in application.properties"));
+
+        assertEquals(VaultGrantGate.DEFAULT_MODE_NAME, configured,
+                "the bundled property and DEFAULT_MODE_NAME must not drift — that drift IS the vulnerability");
+    }
+
+    @Test
+    @DisplayName("turning enforcement down is explicit, never implicit")
+    void weakeningIsExplicit() {
+        assertEquals(Mode.WARN, Mode.parseStrict("warn"));
+        assertEquals(Mode.OFF, Mode.parseStrict("off"));
     }
 
     /**

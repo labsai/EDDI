@@ -69,23 +69,59 @@ Vault references are resolved **at runtime** when the task executes, never store
 
 **Caching:** Successfully resolved secrets are cached in a Caffeine cache (configurable TTL). Failed resolutions are **never cached**, ensuring newly created secrets resolve immediately without waiting for cache expiry.
 
-### Agent grants
+## Agent Grants (`allowedAgents`)
 
-`SecretMetadata.allowedAgents` lists which agents may use a secret (`["*"]` for any — the value every auto-vaulted key carries). It is enforced **at deployment**, not at resolution.
+Every stored secret carries an `allowedAgents` list — the agent IDs permitted to use it, or `["*"]` for all agents. It is checked **when an agent is deployed**, not when a secret is resolved. What a violation costs is set by [the enforcement mode](#modes) — blocked, logged, or not checked at all.
 
-That placement is deliberate. `SecretResolver` sees only a string and has no agent identity; several of its call sites legitimately run outside any conversation; and `ChatModelRegistry` caches the built model keyed on the *unresolved* parameters, so two agents sharing a config share a cache entry — a check behind that cache would run for whichever agent built the model first and be silently skipped for every other one. The agent-to-secret binding is established in the agent's **configuration**, so that is where it is checked: once, completely, with no cache in the way.
+### Why deploy time, not resolution time
 
-On deploy, `VaultGrantChecker` scans the agent document itself (so a `dreamConfig` credential, which lives outside every workflow, is covered) and then walks the agent's workflows into their `llm`, `apicalls`/`httpcalls`, `mcpcalls` and `rag` configs. Each config is serialized and scanned for `${vault:...}` references as a whole, and every reference found is verified against that secret's `allowedAgents`. It serializes rather than enumerating known credential fields — enumeration is how this kind of check rots when a new credential field appears.
+Blocking at resolution would fail in the middle of a live conversation, after the agent is already serving users, and the operator would learn about the misconfiguration from a broken turn. The deploy-time check runs once, before any user is affected: in `enforce` mode a misconfigured agent simply does not come up, and the reason is a single ERROR line.
 
-| `eddi.vault.grant-enforcement` | Behaviour |
-| ------------------------------ | --------- |
-| `off` | No check runs |
-| `warn` *(default)* | Ungranted references are logged; deployment proceeds |
-| `enforce` | Deployment is **blocked**, naming the ungranted references |
+The gate lives in `AgentFactory.deployAgent` — the one boundary every deployment path funnels through (REST administration, conversation-triggered deployment, the scheduled deployment poller). Placing it there rather than at each caller means it cannot be bypassed by reaching deployment through a different entry point.
 
-An unrecognised value fails startup rather than defaulting — `grant-enforcement=enforced` silently behaving as `warn` would turn one typo into a security control that is off while appearing on. A check that cannot run (unreadable config, store error) logs and allows: it must never block a deployment.
+### Modes
 
-> **Why this matters for dynamic agents.** The "enforcement is via configuration authorship" model assumes a human admin writes agent configs. `create_sub_agent` lets an LLM write one, so an operator who scoped a secret to a single agent otherwise got no enforcement at all.
+Configured with `eddi.vault.grant-enforcement`:
+
+| Mode      | Behavior                                                            |
+| --------- | ------------------------------------------------------------------- |
+| `off`     | No check at all — the checker is never consulted                    |
+| `warn`    | Violations logged at WARN, deployment proceeds                       |
+| `enforce` | **Default.** Violations logged at ERROR, deployment is **blocked**   |
+
+Two parsing rules, both deliberate:
+
+- **An unrecognized value fails startup** rather than falling back to a default. `grant-enforcement=enforced` silently behaving as `warn` would turn one typo into a security control that is off while appearing on.
+- **Absent or blank resolves to `enforce`**, the shipped default — never to something weaker. Turning enforcement down is always explicit.
+
+### What counts as granted
+
+The check answers "is this provably ungranted?", and anything short of proof is treated as granted. An agent is allowed when its `allowedAgents` list:
+
+- contains the agent's ID, or
+- contains the `*` wildcard, or
+- is `null` or empty — an unset list means unrestricted, not "deny all"
+
+Uncertainty likewise never becomes a violation: unreadable metadata, a disabled vault, or a secret that does not exist all resolve to *allowed*. A check that cannot run must not be able to take agents down.
+
+### What is scanned
+
+The agent document itself plus each workflow's LLM, HTTP-call, MCP-call, and RAG configurations are serialized and scanned for `${vault:...}` references. Each reference found is resolved to its secret metadata and tested against the deploying agent's ID.
+
+### Upgrading to enforcement
+
+On most deployments this control is inert, for two reasons worth confirming rather than assuming:
+
+1. **No master key, no check.** With `eddi.vault.master-key` unset the vault is disabled and the checker reports no violations without looking at anything.
+2. **Auto-vaulted keys are unrestricted.** Every key the setup wizard vaults is stored with `allowedAgents = ["*"]`.
+
+The deployments that *are* affected have **both** a master key and a grant an operator has deliberately narrowed. There, enforcement is a behavior change with no warning phase — the first symptom is an agent refusing to deploy. Before enabling it, run once with `warn` and confirm the log is free of:
+
+```text
+references vault secret(s) it is not granted
+```
+
+Then set `enforce`. To widen a grant instead, add the agent ID to the secret's `allowedAgents` via the [REST API](#rest-api) — or remove the reference from the agent's configuration.
 
 ## Encryption
 
@@ -152,6 +188,10 @@ Additional vault settings in `application.properties`:
 # Cache for resolved secrets (avoids repeated decryption)
 eddi.vault.cache-ttl-minutes=5
 eddi.vault.cache-max-size=1000
+
+# Whether an agent referencing a secret it is not granted may deploy:
+# off | warn | enforce (default). See "Agent Grants" above.
+eddi.vault.grant-enforcement=enforce
 ```
 
 > **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file.
