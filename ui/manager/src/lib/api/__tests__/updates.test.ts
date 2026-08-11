@@ -3,10 +3,9 @@ import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import {
   compareVersions,
+  dockerImageFor,
   dockerTagUrl,
-  fetchLatestDockerImage,
   fetchLatestEddiRelease,
-  getImageStatus,
   getUpdateStatus,
   normalizeVersion,
   parseVersion,
@@ -15,7 +14,6 @@ import {
 } from "../updates";
 
 const LATEST_URL = "https://api.github.com/repos/labsai/EDDI/releases/latest";
-const DOCKER_URL = "https://img.shields.io/docker/v/labsai/eddi.json";
 
 describe("updates", () => {
   describe("normalizeVersion", () => {
@@ -134,81 +132,29 @@ describe("updates", () => {
     });
   });
 
-  describe("getImageStatus", () => {
-    it("is ready once the image matches or leads the release", () => {
-      expect(getImageStatus("6.3.0", "6.3.0")).toBe("ready");
-      expect(getImageStatus("6.3.0", "6.4.0")).toBe("ready");
-    });
-
-    it("is pending while the release exists but its image does not", () => {
-      expect(getImageStatus("6.3.0", "6.2.0")).toBe("pending");
-    });
-
-    it("stays unknown rather than guessing when either side is missing", () => {
-      expect(getImageStatus("6.3.0", undefined)).toBe("unknown");
-      expect(getImageStatus(undefined, "6.3.0")).toBe("unknown");
-      expect(getImageStatus("6.3.0", "nightly")).toBe("unknown");
-    });
-  });
-
   describe("dockerTagUrl", () => {
     it("deep-links to the tag on Docker Hub", () => {
       expect(dockerTagUrl("6.3.0")).toBe(
         "https://hub.docker.com/r/labsai/eddi/tags?name=6.3.0",
       );
     });
+
+    it("escapes anything that would otherwise break out of the query string", () => {
+      expect(dockerTagUrl("6.3.0 rc&x")).toBe(
+        "https://hub.docker.com/r/labsai/eddi/tags?name=6.3.0%20rc%26x",
+      );
+    });
   });
 
-  describe("fetchLatestDockerImage", () => {
-    it("maps the shields.io payload onto a pullable reference", async () => {
-      server.use(http.get(DOCKER_URL, () => HttpResponse.json({ value: "v6.3.0" })));
-
-      await expect(fetchLatestDockerImage()).resolves.toEqual({
+  describe("dockerImageFor", () => {
+    it("derives the pullable reference from the release version", () => {
+      // EDDI's CI (`release` needs `docker`) pushes the image before it cuts the
+      // release, so the release version is the published tag by construction.
+      expect(dockerImageFor("6.3.0")).toEqual({
         version: "6.3.0",
         reference: "labsai/eddi:6.3.0",
         url: "https://hub.docker.com/r/labsai/eddi/tags?name=6.3.0",
       });
-    });
-
-    it("falls back to the message field when value is absent", async () => {
-      server.use(http.get(DOCKER_URL, () => HttpResponse.json({ message: "6.3.0" })));
-
-      await expect(fetchLatestDockerImage()).resolves.toMatchObject({ version: "6.3.0" });
-    });
-
-    it("sends no Authorization header", async () => {
-      let sawAuth: string | null = "not-called";
-      server.use(
-        http.get(DOCKER_URL, ({ request }) => {
-          sawAuth = request.headers.get("authorization");
-          return HttpResponse.json({ value: "v6.3.0" });
-        }),
-      );
-
-      await fetchLatestDockerImage();
-      expect(sawAuth).toBeNull();
-    });
-
-    it("rejects shields.io's in-band error messages instead of printing them as a tag", async () => {
-      // shields.io answers its own failures with 200 and prose in `message`.
-      for (const value of ["repo not found", "inaccessible", "invalid"]) {
-        server.use(http.get(DOCKER_URL, () => HttpResponse.json({ value })));
-        await expect(fetchLatestDockerImage()).rejects.toMatchObject({ reason: "failed" });
-      }
-    });
-
-    it("reports a network failure as unreachable", async () => {
-      server.use(http.get(DOCKER_URL, () => HttpResponse.error()));
-
-      const error = await fetchLatestDockerImage().catch((e: unknown) => e);
-      expect(error).toBeInstanceOf(UpdateCheckError);
-      expect(error).toMatchObject({ reason: "unreachable" });
-    });
-
-    it("reports a non-2xx as a failure", async () => {
-      server.use(http.get(DOCKER_URL, () => HttpResponse.json({}, { status: 502 })));
-
-      await expect(fetchLatestDockerImage()).rejects.toMatchObject({ reason: "failed" });
     });
   });
 

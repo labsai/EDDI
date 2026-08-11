@@ -7,7 +7,6 @@ import { UpdateCheckCard } from "@/components/shared/update-check-card";
 import { AUTO_UPDATE_CHECK_KEY } from "@/hooks/use-update-check";
 
 const LATEST_URL = "https://api.github.com/repos/labsai/EDDI/releases/latest";
-const DOCKER_URL = "https://img.shields.io/docker/v/labsai/eddi.json";
 
 /** Count outbound hits so "nothing is sent by default" can be asserted, not assumed. */
 function countCalls(url: string, response: () => Response) {
@@ -30,12 +29,10 @@ const release = (version: string, body = "## Highlights\n\n- Mock release note o
     body,
   });
 
-const dockerTag = (version: string) => HttpResponse.json({ value: `v${version}` });
 
 describe("UpdateCheckCard", () => {
   it("checks nothing until asked", async () => {
     const github = countCalls(LATEST_URL, () => release("9.9.9"));
-    const docker = countCalls(DOCKER_URL, () => dockerTag("9.9.9"));
     renderWithProviders(<UpdateCheckCard />);
 
     expect(await screen.findByText("No check run yet.")).toBeInTheDocument();
@@ -44,7 +41,25 @@ describe("UpdateCheckCard", () => {
     expect(screen.getByTestId("update-latest-version")).toHaveTextContent("—");
     expect(screen.getByTestId("update-image-version")).toHaveTextContent("—");
     expect(github).not.toHaveBeenCalled();
-    expect(docker).not.toHaveBeenCalled();
+  });
+
+  it("contacts GitHub and nothing else", async () => {
+    // The guard that keeps a relay from creeping back in. MSW runs with
+    // `onUnhandledRequest: "error"`, so a request to any other host fails the
+    // test on its own — this asserts the positive half: one host, one call.
+    const seen: string[] = [];
+    server.events.on("request:start", ({ request }) => {
+      const { host } = new URL(request.url);
+      if (host !== "localhost:3000") seen.push(host);
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<UpdateCheckCard />);
+    await user.click(await screen.findByTestId("update-check-now"));
+    await screen.findByText("EDDI 9.9.9 is available");
+
+    expect([...new Set(seen)]).toEqual(["api.github.com"]);
+    server.events.removeAllListeners();
   });
 
   it("reports an available update and how to get it when the button is pressed", async () => {
@@ -63,7 +78,7 @@ describe("UpdateCheckCard", () => {
     );
   });
 
-  it("reports the Docker image separately, with its own link", async () => {
+  it("shows the Docker image separately, derived from the release, with its own link", async () => {
     const user = userEvent.setup();
     renderWithProviders(<UpdateCheckCard />);
 
@@ -71,84 +86,32 @@ describe("UpdateCheckCard", () => {
 
     const cell = await screen.findByTestId("update-image-version");
     await waitFor(() => expect(cell).toHaveTextContent("9.9.9"));
-    expect(within(cell).getByRole("link")).toHaveAttribute(
-      "href",
-      "https://hub.docker.com/r/labsai/eddi/tags?name=9.9.9",
-    );
-    // Ready image, so no warning about pulling something that is not there.
-    expect(screen.queryByTestId("update-image-pending")).not.toBeInTheDocument();
+
+    const link = within(cell).getByRole("link");
+    expect(link).toHaveAttribute("href", "https://hub.docker.com/r/labsai/eddi/tags?name=9.9.9");
+    // The full pullable reference, so the claim is inspectable without a click.
+    expect(link).toHaveAttribute("title", "labsai/eddi:9.9.9");
   });
 
-  it("warns when the release is out but its image has not been published", async () => {
-    server.use(http.get(DOCKER_URL, () => dockerTag("9.9.8")));
-    const user = userEvent.setup();
+  it("shows no image until a release is known", async () => {
     renderWithProviders(<UpdateCheckCard />);
 
-    await user.click(await screen.findByTestId("update-check-now"));
-
-    const warning = await screen.findByTestId("update-image-pending");
-    expect(warning).toHaveTextContent(
-      "The 9.9.9 image is not on Docker Hub yet — a pull right now would still fetch 9.9.8.",
-    );
-  });
-
-  it("keeps the release answer when only the Docker lookup fails", async () => {
-    server.use(http.get(DOCKER_URL, () => HttpResponse.error()));
-    const user = userEvent.setup();
-    renderWithProviders(<UpdateCheckCard />);
-
-    await user.click(await screen.findByTestId("update-check-now"));
-
-    expect(await screen.findByText("EDDI 9.9.9 is available")).toBeInTheDocument();
-    const failed = await screen.findByTestId("update-image-failed");
-    expect(failed).toBeInTheDocument();
-    // A dead end needs a way out: the row itself offers the tag list.
-    expect(within(failed).getByRole("link")).toHaveAttribute(
-      "href",
-      "https://hub.docker.com/r/labsai/eddi/tags",
-    );
-    // No false "pending" claim off a lookup that never answered.
-    expect(screen.queryByTestId("update-image-pending")).not.toBeInTheDocument();
-  });
-
-  it("does not dress a missing Docker version up as a link", async () => {
-    server.use(http.get(DOCKER_URL, () => HttpResponse.error()));
-    const user = userEvent.setup();
-    renderWithProviders(<UpdateCheckCard />);
-
-    await user.click(await screen.findByTestId("update-check-now"));
-    await screen.findByTestId("update-image-failed");
-
-    const cell = screen.getByTestId("update-image-version");
+    const cell = await screen.findByTestId("update-image-version");
     expect(cell).toHaveTextContent("—");
     expect(within(cell).queryByRole("link")).not.toBeInTheDocument();
   });
 
-  it("stays quiet about a lagging registry when there is nothing to pull", async () => {
-    // Installed == released == 6.0.0-demo, but the image tag trails behind.
-    server.use(
-      http.get(LATEST_URL, () => release("6.0.0-demo")),
-      http.get(DOCKER_URL, () => dockerTag("5.0.0")),
-    );
+  it("claims no image when the release lookup failed", async () => {
+    server.use(http.get(LATEST_URL, () => HttpResponse.error()));
     const user = userEvent.setup();
     renderWithProviders(<UpdateCheckCard />);
 
     await user.click(await screen.findByTestId("update-check-now"));
+    await screen.findByText(/Could not reach api\.github\.com/);
 
-    expect(await screen.findByText(/You are running the latest release/)).toBeInTheDocument();
-    expect(screen.queryByTestId("update-image-pending")).not.toBeInTheDocument();
-  });
-
-  it("announces the image warning in the same live region as the verdict", async () => {
-    server.use(http.get(DOCKER_URL, () => dockerTag("9.9.8")));
-    const user = userEvent.setup();
-    renderWithProviders(<UpdateCheckCard />);
-
-    await user.click(await screen.findByTestId("update-check-now"));
-
-    const live = await screen.findByTestId("update-check-result");
-    expect(live).toHaveAttribute("aria-live", "polite");
-    expect(within(live).getByTestId("update-image-pending")).toBeInTheDocument();
+    const cell = screen.getByTestId("update-image-version");
+    expect(cell).toHaveTextContent("—");
+    expect(within(cell).queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("renders the publication date unambiguously, on its own line", async () => {
@@ -204,19 +167,6 @@ describe("UpdateCheckCard", () => {
     expect(notes).toHaveTextContent("The summary paragraph.");
     expect(notes).not.toHaveTextContent("Section 199");
     expect(screen.getByTestId("update-full-notes-link")).toBeInTheDocument();
-  });
-
-  it("keeps the Docker answer when only the GitHub lookup fails", async () => {
-    server.use(http.get(LATEST_URL, () => HttpResponse.error()));
-    const user = userEvent.setup();
-    renderWithProviders(<UpdateCheckCard />);
-
-    await user.click(await screen.findByTestId("update-check-now"));
-
-    expect(await screen.findByText(/Could not reach api\.github\.com/)).toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.getByTestId("update-image-version")).toHaveTextContent("9.9.9"),
-    );
   });
 
   it("keeps release notes collapsed until asked, then renders them as markdown", async () => {
@@ -331,9 +281,8 @@ describe("UpdateCheckCard", () => {
     expect(localStorage.getItem(AUTO_UPDATE_CHECK_KEY)).toBeNull();
   });
 
-  it("persists the automatic check preference and checks both sources when enabled", async () => {
+  it("persists the automatic check preference and checks immediately when enabled", async () => {
     const github = countCalls(LATEST_URL, () => release("9.9.9"));
-    const docker = countCalls(DOCKER_URL, () => dockerTag("9.9.9"));
     const user = userEvent.setup();
     renderWithProviders(<UpdateCheckCard />);
 
@@ -342,20 +291,17 @@ describe("UpdateCheckCard", () => {
     expect(screen.getByTestId("update-auto-check")).toBeChecked();
     expect(localStorage.getItem(AUTO_UPDATE_CHECK_KEY)).toBe("true");
     await waitFor(() => expect(github).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(docker).toHaveBeenCalledTimes(1));
   });
 
   it("checks once when the preference is already on, not once per render", async () => {
     localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     const github = countCalls(LATEST_URL, () => release("9.9.9"));
-    const docker = countCalls(DOCKER_URL, () => dockerTag("9.9.9"));
     const { rerender } = renderWithProviders(<UpdateCheckCard />);
 
     expect(await screen.findByText("EDDI 9.9.9 is available")).toBeInTheDocument();
     rerender(<UpdateCheckCard />);
 
     await waitFor(() => expect(github).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(docker).toHaveBeenCalledTimes(1));
   });
 
   it("turning the preference off stops later automatic checks", async () => {

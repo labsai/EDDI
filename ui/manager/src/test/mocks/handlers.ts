@@ -1342,11 +1342,10 @@ export const handlers = [
     });
   }),
 
-  // Docker Hub's published tag, read through shields.io (Docker's own API sends
-  // no CORS headers). Matches the GitHub release by default, i.e. image ready.
-  http.get("https://img.shields.io/docker/v/labsai/eddi.json", () => {
-    return HttpResponse.json({ label: "version", message: "v9.9.9", value: "v9.9.9" });
-  }),
+  // There is deliberately no second outbound handler here. The update check
+  // contacts exactly one host, and `onUnhandledRequest: "error"` in the test
+  // setup means reintroducing a relay (shields.io or otherwise) fails the suite
+  // rather than passing quietly.
 
   // OpenAPI endpoint discovery
   http.get("*/apicallstore/apicalls/discover-endpoints", ({ request }) => {

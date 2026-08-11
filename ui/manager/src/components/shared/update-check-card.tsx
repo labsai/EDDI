@@ -49,10 +49,8 @@ export function UpdateCheckCard() {
     latest,
     status,
     image,
-    imageStatus,
     isChecking,
     errorReason,
-    imageLookupFailed,
     hasChecked,
     checkNow,
   } = useUpdateCheck();
@@ -115,12 +113,16 @@ export function UpdateCheckCard() {
             {latest ? latest.version : "—"}
           </VersionCell>
 
+          {/* Derived from the release, not fetched — EDDI's CI pushes the image
+              before it cuts the release, so the tag is the release version. The
+              link is the audit trail: one click confirms it on Docker Hub. */}
           <VersionCell
             icon={Container}
             label={t("updates.dockerImage", "Docker image")}
             // Only linked when there is a version to link to — a bare em-dash
             // wearing an external-link icon is a link to nothing.
             href={image?.url}
+            title={image?.reference}
             testId="update-image-version"
           >
             {image ? image.version : "—"}
@@ -219,34 +221,6 @@ export function UpdateCheckCard() {
               </span>
             </ResultRow>
           ) : null}
-
-          {/* Inside the live region, not after it: this is the most actionable
-              thing the card can say, so it has to be announced too.
-
-              Only while an update is pending — a lagging registry is trivia
-              when there is nothing to pull. */}
-          {updateAvailable && imageStatus === "pending" && latest && image && (
-            <ResultRow tone="warning" icon={AlertTriangle} testId="update-image-pending">
-              <span>
-                {t(
-                  "updates.imagePending",
-                  "The {{version}} image is not on Docker Hub yet — a pull right now would still fetch {{available}}.",
-                  { version: latest.version, available: image.version },
-                )}
-              </span>
-            </ResultRow>
-          )}
-          {imageLookupFailed && !errorReason && (
-            <ResultRow tone="muted" icon={Info} testId="update-image-failed">
-              <span className="flex flex-wrap items-center gap-x-2">
-                {t(
-                  "updates.imageLookupFailed",
-                  "The published Docker tag could not be read. Check the image tags directly.",
-                )}
-                <ExternalLinkText href={EDDI_DOCKER_TAGS_URL}>Docker Hub</ExternalLinkText>
-              </span>
-            </ResultRow>
-          )}
         </div>
 
         {/* Release notes */}
@@ -299,7 +273,7 @@ export function UpdateCheckCard() {
             <p className="text-xs text-muted-foreground">
               {t(
                 "updates.privacyNote",
-                "Checks contact api.github.com and img.shields.io directly from your browser. No deployment data is sent.",
+                "Checks contact api.github.com directly from your browser — no other host, and no deployment data is sent.",
               )}
             </p>
           </div>
@@ -481,12 +455,14 @@ function VersionCell({
   icon: Icon,
   label,
   href,
+  title,
   testId,
   children,
 }: {
   icon: typeof Info;
   label: string;
   href?: string;
+  title?: string;
   testId?: string;
   children: React.ReactNode;
 }) {
@@ -505,6 +481,7 @@ function VersionCell({
             href={href}
             target="_blank"
             rel="noopener noreferrer"
+            title={title}
             className="inline-flex items-center gap-1 hover:text-primary hover:underline"
           >
             {children}

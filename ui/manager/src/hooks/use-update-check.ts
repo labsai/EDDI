@@ -2,14 +2,12 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getEddiVersion } from "@/lib/api/system";
 import {
-  fetchLatestDockerImage,
+  dockerImageFor,
   fetchLatestEddiRelease,
-  getImageStatus,
   getUpdateStatus,
   UpdateCheckError,
   type DockerImage,
   type EddiRelease,
-  type ImageStatus,
   type UpdateCheckErrorReason,
   type UpdateStatus,
 } from "@/lib/api/updates";
@@ -18,7 +16,6 @@ import {
 export const AUTO_UPDATE_CHECK_KEY = "eddi-auto-update-check";
 
 export const UPDATE_CHECK_QUERY_KEY = ["eddi-update-check"] as const;
-export const DOCKER_IMAGE_QUERY_KEY = ["eddi-docker-image"] as const;
 export const EDDI_VERSION_QUERY_KEY = ["eddi-version"] as const;
 
 // ─── Auto-check preference (shared external store) ───────────────────────────
@@ -95,30 +92,16 @@ export interface UpdateCheckResult {
   installedVersionLoading: boolean;
   latest: EddiRelease | undefined;
   status: UpdateStatus;
-  /** Highest published Docker tag, or `undefined` if that lookup failed. */
+  /** The image that release is published as — derived, not a second request. */
   image: DockerImage | undefined;
-  /** Whether the released version can actually be pulled yet. */
-  imageStatus: ImageStatus;
   isChecking: boolean;
-  /** `undefined` unless the GitHub lookup failed. */
+  /** `undefined` unless the last check failed. */
   errorReason: UpdateCheckErrorReason | undefined;
-  /** True when the Docker lookup failed but GitHub may still have answered. */
-  imageLookupFailed: boolean;
   /** True once a check has produced either a result or an error this session. */
   hasChecked: boolean;
   /** Force a fresh check now, regardless of the auto-check preference. */
   checkNow: () => void;
 }
-
-/** Both lookups are opt-in, cached for the page's lifetime, and never retried. */
-const CHECK_QUERY_OPTIONS = {
-  staleTime: Infinity,
-  gcTime: Infinity,
-  refetchOnWindowFocus: false,
-  refetchOnReconnect: false,
-  refetchOnMount: false,
-  retry: false,
-} as const;
 
 /**
  * Opt-in check for a newer EDDI release.
@@ -126,15 +109,15 @@ const CHECK_QUERY_OPTIONS = {
  * Two ways in, one shared cache, so the button and the checkbox can never
  * disagree about what the latest release is:
  *
- * - **Manual** — `checkNow()` refetches even while the queries are disabled.
- * - **Automatic** — with the preference on, the queries are enabled and
- *   `staleTime: Infinity` holds each to exactly one request for the lifetime of
+ * - **Manual** — `checkNow()` refetches even while the query is disabled.
+ * - **Automatic** — with the preference on, the query is enabled and
+ *   `staleTime: Infinity` holds it to exactly one request for the lifetime of
  *   the QueryClient, which is the lifetime of the page. That is what "check
  *   once per reload" means: a reload builds a new client and checks again.
  *
- * The two sources are separate queries rather than one combined fetch so that
- * Docker Hub being unreachable still leaves the release answer intact — the
- * release is the part that decides whether an update exists at all.
+ * Exactly one host is ever contacted, api.github.com. The Docker image is
+ * derived from the release rather than looked up — see `updates.ts` for why
+ * that is accurate rather than a shortcut.
  *
  * With the preference off and no button press, nothing is ever sent.
  */
@@ -142,40 +125,37 @@ export function useUpdateCheck(): UpdateCheckResult {
   const [autoCheck, setAutoCheck] = useAutoUpdateCheck();
   const { data: installedVersion, isLoading: installedVersionLoading } = useEddiVersion();
 
-  const releaseQuery = useQuery({
+  const query = useQuery({
     queryKey: UPDATE_CHECK_QUERY_KEY,
     queryFn: fetchLatestEddiRelease,
     enabled: autoCheck,
-    ...CHECK_QUERY_OPTIONS,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
+    retry: false,
   });
 
-  const imageQuery = useQuery({
-    queryKey: DOCKER_IMAGE_QUERY_KEY,
-    queryFn: fetchLatestDockerImage,
-    enabled: autoCheck,
-    ...CHECK_QUERY_OPTIONS,
-  });
-
-  const { refetch: refetchRelease } = releaseQuery;
-  const { refetch: refetchImage } = imageQuery;
+  const { refetch } = query;
   const checkNow = useCallback(() => {
-    void refetchRelease();
-    void refetchImage();
-  }, [refetchRelease, refetchImage]);
+    void refetch();
+  }, [refetch]);
 
   const status = useMemo(
-    () => getUpdateStatus(installedVersion, releaseQuery.data?.version),
-    [installedVersion, releaseQuery.data?.version],
+    () => getUpdateStatus(installedVersion, query.data?.version),
+    [installedVersion, query.data?.version],
   );
 
-  const imageStatus = useMemo(
-    () => getImageStatus(releaseQuery.data?.version, imageQuery.data?.version),
-    [releaseQuery.data?.version, imageQuery.data?.version],
+  const releaseVersion = query.data?.version;
+  const image = useMemo(
+    () => (releaseVersion ? dockerImageFor(releaseVersion) : undefined),
+    [releaseVersion],
   );
 
-  const errorReason = releaseQuery.error
-    ? releaseQuery.error instanceof UpdateCheckError
-      ? releaseQuery.error.reason
+  const errorReason = query.error
+    ? query.error instanceof UpdateCheckError
+      ? query.error.reason
       : "failed"
     : undefined;
 
@@ -184,18 +164,12 @@ export function useUpdateCheck(): UpdateCheckResult {
     setAutoCheck,
     installedVersion,
     installedVersionLoading,
-    latest: releaseQuery.data,
+    latest: query.data,
     status,
-    image: imageQuery.data,
-    imageStatus,
-    isChecking: releaseQuery.isFetching || imageQuery.isFetching,
+    image,
+    isChecking: query.isFetching,
     errorReason,
-    imageLookupFailed: imageQuery.isError,
-    hasChecked:
-      releaseQuery.data !== undefined ||
-      releaseQuery.isError ||
-      imageQuery.data !== undefined ||
-      imageQuery.isError,
+    hasChecked: query.data !== undefined || query.isError,
     checkNow,
   };
 }

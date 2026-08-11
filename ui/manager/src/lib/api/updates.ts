@@ -1,46 +1,44 @@
 /**
  * EDDI update check — "is a newer EDDI released than the one this Manager talks to?"
  *
- * ## Two sources, because they answer different questions
+ * ## One network call, to GitHub only
  *
- * EDDI ships from GitHub *and* Docker Hub, and they can disagree for a while:
+ * EDDI ships from GitHub *and* Docker Hub, and the running deployment pulls
+ * from Docker Hub — so the obvious design reads both, to catch the window where
+ * a release is cut but its image has not landed and `docker compose pull` would
+ * find nothing.
  *
- * - **GitHub releases** say what has been *released* — with a version, a date
- *   and the notes that make the number mean something.
- * - **Docker Hub** says what can actually be *pulled*. This is the one the
- *   running deployment consumes, and for the minutes-to-hours after a release
- *   is cut, `docker compose pull` can still find nothing.
+ * That window does not exist. EDDI's own pipeline forbids it: in
+ * `.github/workflows/ci.yml` the `release` job declares `needs: docker`, so the
+ * image is pushed to Docker Hub *before* the GitHub release is created, every
+ * time. A published release therefore implies a published image, and the tag is
+ * the release version — which is also what the release body tells people to
+ * pull. Reading Docker Hub could only ever confirm something already implied.
  *
- * Reporting them separately lets the card say "6.3.0 is out, but its image has
- * not landed yet" instead of sending someone to run a pull that does nothing.
+ * So the Docker image shown alongside the release is **derived**, not fetched.
+ * That is not a workaround: it is the accurate model of how EDDI is published,
+ * and it costs one network call instead of two.
  *
- * ## Why Docker Hub is read through shields.io
- *
- * Every first-party Docker endpoint is unreachable from a browser — verified,
- * not assumed: `hub.docker.com/v2`, `auth.docker.io` and `registry-1.docker.io`
- * all answer 200 to a request carrying `Origin` while sending no
- * `Access-Control-Allow-Origin`, and Docker Hub rejects the preflight with 405
- * (`allow: GET, HEAD`). So a direct call fails CORS in production no matter how
- * it is written. `img.shields.io` sends `access-control-allow-origin: *`, is
- * built to be called from pages, and its `docker/v` endpoint also does the
- * filtering we would otherwise have to guess at: the repo carries ~123 tags,
- * almost all CI builds like `6.2.0-b980`, and `?sort=semver` reduces that to
- * the real `6.2.0`.
- *
- * The cost is a third party in the path. It is a fixed, public query that says
- * nothing about this deployment, the whole check is opt-in, and a failure
- * degrades to the plain Docker Hub link rather than breaking the card — but if
- * that trade stops being acceptable, the fix is a same-origin proxy on the EDDI
- * backend, and only `fetchLatestDockerImage` has to change.
+ * It also sidesteps a wall worth recording, so nobody spends the afternoon
+ * rediscovering it. Every first-party Docker endpoint is unreachable from a
+ * browser — measured, not assumed: `hub.docker.com/v2`,
+ * `registry.hub.docker.com/v2`, `index.docker.io/v1`, `auth.docker.io` and
+ * `registry-1.docker.io` all answer a request carrying `Origin` while sending
+ * **no** `Access-Control-Allow-Origin`, and Docker Hub rejects the preflight
+ * with 405 (`allow: GET, HEAD`). A direct call is CORS-blocked in production
+ * however it is written; anything that appears to work is a third party
+ * relaying it, which this deliberately does not do. If a *live* Docker check is
+ * ever genuinely needed, the only first-party route is a same-origin proxy on
+ * the EDDI backend.
  *
  * ## Why this file does not use `ApiClient`
  *
  * `ApiClient` resolves against `window.location.origin` and injects the
- * Keycloak bearer token. Both are wrong here: the requests go to third parties,
- * and sending this deployment's access token to them would leak it. These raw
- * `fetch` calls deliberately send **no** credentials — do not "fix" them by
- * spreading `api.getAuthHeader()` the way `AGENTS.md` requires for same-origin
- * raw fetches.
+ * Keycloak bearer token. Both are wrong here: the request goes to a third
+ * party, and sending this deployment's access token to github.com would leak
+ * it. This raw `fetch` deliberately sends **no** credentials — do not "fix" it
+ * by spreading `api.getAuthHeader()` the way `AGENTS.md` requires for
+ * same-origin raw fetches.
  */
 
 export const EDDI_REPO = "labsai/EDDI";
@@ -52,11 +50,33 @@ export const EDDI_DOCKER_URL = `https://hub.docker.com/r/${EDDI_DOCKER_IMAGE}`;
 export const EDDI_DOCKER_TAGS_URL = `${EDDI_DOCKER_URL}/tags`;
 
 const LATEST_RELEASE_API = `https://api.github.com/repos/${EDDI_REPO}/releases/latest`;
-const LATEST_DOCKER_TAG_API = `https://img.shields.io/docker/v/${EDDI_DOCKER_IMAGE}.json?sort=semver`;
 
 /** Deep-link to one tag on Docker Hub, so "is the image there?" is one click. */
 export function dockerTagUrl(version: string): string {
   return `${EDDI_DOCKER_TAGS_URL}?name=${encodeURIComponent(version)}`;
+}
+
+/**
+ * The image a given release is published as.
+ *
+ * Derived rather than looked up — see the file header: EDDI's CI pushes the
+ * image before it creates the release, so the release version *is* the tag.
+ *
+ * Checked against reality, not just against the workflow file: of the 49
+ * published releases, 48 have a matching tag in the registry. The one that does
+ * not is `6.0.0-RC1`, a prerelease — and `releases/latest`, the only endpoint
+ * this module calls, is defined as the newest **non-prerelease, non-draft**
+ * release. So the derivation holds for every release this card can ever show.
+ *
+ * The link still goes to Docker Hub, so the claim is one click from being
+ * checked rather than something the user has to take on trust.
+ */
+export function dockerImageFor(releaseVersion: string): DockerImage {
+  return {
+    version: releaseVersion,
+    reference: `${EDDI_DOCKER_IMAGE}:${releaseVersion}`,
+    url: dockerTagUrl(releaseVersion),
+  };
 }
 
 /** Give up rather than leave a spinner running against an unreachable host. */
@@ -78,21 +98,13 @@ export interface EddiRelease {
 }
 
 export interface DockerImage {
-  /** Highest published semver tag, e.g. `6.2.0`. */
+  /** Published tag, which for EDDI is the release version verbatim. */
   version: string;
   /** What you would actually pull, e.g. `labsai/eddi:6.2.0`. */
   reference: string;
   /** Deep link to that tag on Docker Hub. */
   url: string;
 }
-
-/**
- * Whether the image for the latest release can actually be pulled yet.
- *
- * `pending` is the state worth having a second source for: the release exists,
- * the image does not, and a `docker compose pull` right now is a no-op.
- */
-export type ImageStatus = "ready" | "pending" | "unknown";
 
 export type UpdateCheckErrorReason =
   /** GitHub's anonymous 60-requests-per-hour budget is spent for this IP. */
@@ -199,45 +211,6 @@ export async function fetchLatestEddiRelease(): Promise<EddiRelease> {
     url: typeof body.html_url === "string" && body.html_url ? body.html_url : EDDI_RELEASES_URL,
     publishedAt: typeof body.published_at === "string" ? body.published_at : null,
     notes: typeof body.body === "string" ? body.body.trim() : "",
-  };
-}
-
-/**
- * Fetch the highest semver tag published for the `labsai/eddi` image.
- *
- * Answers "can this actually be pulled yet?", which the GitHub release cannot.
- * Read through shields.io because Docker's own endpoints are CORS-blocked from
- * a browser — see the file header for the measurement behind that claim.
- *
- * @throws {UpdateCheckError} on any outcome that is not a usable version.
- */
-export async function fetchLatestDockerImage(): Promise<DockerImage> {
-  const res = await getWithoutCredentials(LATEST_DOCKER_TAG_API, "application/json");
-
-  if (!res.ok) {
-    throw new UpdateCheckError("failed", `Docker tag lookup responded ${res.status}`);
-  }
-
-  let body: { value?: unknown; message?: unknown };
-  try {
-    body = (await res.json()) as { value?: unknown; message?: unknown };
-  } catch {
-    throw new UpdateCheckError("failed", "Docker tag lookup returned a malformed response");
-  }
-
-  // shields.io reports its own failures in-band as a 200 with a prose message
-  // ("repo not found", "inaccessible"), so the version has to be validated
-  // rather than trusted — otherwise the card would print an error as a tag.
-  const raw = typeof body.value === "string" ? body.value : body.message;
-  const candidate = typeof raw === "string" ? normalizeVersion(raw) : "";
-  if (!parseVersion(candidate)) {
-    throw new UpdateCheckError("failed", "Docker tag lookup returned no usable version");
-  }
-
-  return {
-    version: candidate,
-    reference: `${EDDI_DOCKER_IMAGE}:${candidate}`,
-    url: dockerTagUrl(candidate),
   };
 }
 
@@ -377,21 +350,4 @@ export function getUpdateStatus(
   if (diff < 0) return "update-available";
   if (diff > 0) return "ahead";
   return "up-to-date";
-}
-
-/**
- * Has the image for the released version been published yet?
- *
- * `unknown` whenever either lookup is missing or unparseable — the point of
- * this check is to stop someone running a pull that cannot succeed, and a guess
- * would do the opposite.
- */
-export function getImageStatus(
-  releaseVersion: string | undefined | null,
-  imageVersion: string | undefined | null,
-): ImageStatus {
-  if (!releaseVersion || !imageVersion) return "unknown";
-  const diff = compareVersions(imageVersion, releaseVersion);
-  if (diff === null) return "unknown";
-  return diff >= 0 ? "ready" : "pending";
 }
