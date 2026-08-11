@@ -28,6 +28,7 @@ describe("filter-utils", () => {
       expect(styleLabel("DEVIL_ADVOCATE")).toBe("Devil's Advocate");
       expect(styleLabel("DELPHI")).toBe("Anonymous Rounds");
       expect(styleLabel("TASK_FORCE")).toBe("Task Force");
+      expect(styleLabel("NEGOTIATION")).toBe("Negotiation");
       expect(styleLabel("CUSTOM")).toBe("Custom Flow");
     });
 
