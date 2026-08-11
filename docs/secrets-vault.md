@@ -188,6 +188,10 @@ Additional vault settings in `application.properties`:
 # Cache for resolved secrets (avoids repeated decryption)
 eddi.vault.cache-ttl-minutes=5
 eddi.vault.cache-max-size=1000
+
+# Whether an agent referencing a secret it is not granted may deploy:
+# off | warn | enforce (default). See "Agent Grants" above.
+eddi.vault.grant-enforcement=enforce
 ```
 
 > **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file.

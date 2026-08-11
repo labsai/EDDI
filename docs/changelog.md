@@ -9,7 +9,7 @@
 
 **Repo:** EDDI (`docs/vault-grant-enforcement`)
 
-`allowedAgents` became enforced (#662) and enforcement became the default (#664), but `docs/secrets-vault.md` never mentioned `eddi.vault.grant-enforcement` at all — the only description of the feature lived in this changelog, which operators do not read. New **Agent Grants** section covering the three modes, the two parsing rules (unknown value fails startup, absent/blank resolves to `enforce`), what counts as granted, which configurations are scanned, and the upgrade step.
+`allowedAgents` became enforced (#662) and enforcement became the default (#664), but `docs/secrets-vault.md` never mentioned `eddi.vault.grant-enforcement` at all — the only description of the feature lived in this changelog, which operators do not read. New **Agent Grants** section covering the three modes, the two parsing rules (unknown value fails startup, absent/blank resolves to `enforce`), what counts as granted, which configurations are scanned, and the upgrade step. The existing "Additional vault settings" properties block listed `cache-ttl-minutes` and `cache-max-size` but not `grant-enforcement`, so it now lists all three — an operator scanning that block for the available knobs would not have found the new one.
 
 **The javadoc was worse than missing — it was wrong.** Four places still told the reader the field is not enforced:
 
