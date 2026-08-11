@@ -7,6 +7,49 @@
 
 
 
+## 🔖 chore(release): bump EDDI version 6.2.0 → 6.3.0 (2026-08-11)
+
+**Repo:** EDDI (`chore/eddi-version-6-3-0`)
+
+Straight version bump across every artefact that carries the release number. The file set was taken
+from the two previous bumps (`c0835c98d` 6.1.0 → 6.2.0, `036faa32a` 6.0.2 → 6.1.0) rather than from
+a grep, so nothing that those touched is silently skipped:
+
+- **Build/runtime:** `pom.xml` `<version>`, `application.properties`
+  (`systemRuntime.projectVersion` — the value `BaseRuntime` and the `HttpClientWrapper` User-Agent
+  read at runtime — plus `smallrye-openapi.info-version` and `container-image.additional-tags`),
+  `OpenApiConfig` `@Info(version)`, and the `EDDI_VERSION` build arg backing the Red Hat
+  certification `version` label in the Dockerfile.
+- **Deployment:** `helm/eddi/Chart.yaml` `appVersion` and `helm/eddi/values.yaml` `eddi.image.tag`,
+  `k8s/base/eddi-deployment.yaml` and `k8s/quickstart.yaml` (both the `app.kubernetes.io/version`
+  labels and the pinned `labsai/eddi:` tag, including the cosign/crane comment examples), and the
+  `redhat-certify.yml` workflow input default.
+- **Bundled agent:** `Agent+Father-6.2.0.zip` → `Agent+Father-6.3.0.zip` with the matching line in
+  `available_agents.txt`, which `RestImportService` reads to seed initial agents. Verified in
+  `target/classes` that the manifest still names a file that exists — a rename that desynchronises
+  those two fails at first startup, not at compile time.
+- **Docs:** only the two pages using the current tag in copy-pasteable commands
+  (`build-reproducibility.md`, `redhat-openshift.md`). The per-page `**Version:**` headers did not
+  need touching — the previous docs refresh replaced all twelve with a dynamic shields.io release
+  badge precisely so a bump would stop having to sweep them.
+
+**Deliberately left at 6.2.0:** `@since 6.2.0` Javadoc, the "pre-6.2.0"/"before 6.2.0"
+compatibility comments in `AgentOrchestrator`/`VertexGeminiLanguageModelBuilder`/
+`ConversationMemorySnapshot`, `*Since 6.2.0.*` in `httpcalls.md`, and the changelog. Those are
+historical minimum-version facts, not statements about the current release; rewriting them would
+assert that features shipped in 6.3.0 when they did not. Same reasoning the docs refresh used to
+keep `**Version: ≥6.0.0**` in `security.md` out of the dynamic-badge conversion.
+
+`docs/hitl.md` already referred to "the pre-6.3.0 behavior" for the
+`eddi.hitl.tool.task-approvals.mode` default flip, so 6.3.0 was already the assumed next release —
+that page is now consistent with the version the build actually reports.
+
+`./mvnw compile` green; no formatter drift in the working tree.
+
+---
+
+
+
 ## 🔢 docs(mcp): the MCP tool catalogue was eight tools short, and a count sweep of both READMEs (2026-08-11)
 
 **Repo:** EDDI (`docs/group-collaboration-refresh`)
