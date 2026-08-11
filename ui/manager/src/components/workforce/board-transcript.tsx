@@ -439,14 +439,16 @@ function BoardTranscript({
   // `header` is in the deps because it renders INSIDE the scroll box: an
   // insight panel appearing mid-discussion changes scrollHeight without
   // touching any transcript field, so without it a user pinned to the bottom
-  // silently drifts up by the panel's height and misses new turns.
+  // silently drifts up by the panel's height and misses new turns. `decision`
+  // and `convergence` are in for the same reason: both add content on an event
+  // that changes no transcript field.
   const lastContent = transcript[transcript.length - 1]?.content ?? null;
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && isNearBottomRef.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [transcript.length, lastContent, synthesizedAnswer, isLive, header, decision]);
+  }, [transcript.length, lastContent, synthesizedAnswer, isLive, header, decision, convergence]);
 
   // Check if transcript already contains a SYNTHESIS entry
   const hasSynthesisEntry = transcript.some((e) => e.type === "SYNTHESIS");

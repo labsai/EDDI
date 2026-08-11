@@ -621,6 +621,14 @@ function ConversationViewer({
       lines.push("");
       if (d.winner) lines.push(`**Winner:** ${d.winner}`);
       if (d.outcome) lines.push(`**Outcome:** ${d.outcome}`);
+      // See export-menu: a NONE decision with `raw` is an unparsed judgment,
+      // not an absent one.
+      if (d.type === "NONE" && d.raw?.trim()) {
+        lines.push("");
+        lines.push("### Unparsed judgment");
+        lines.push("");
+        lines.push(d.raw);
+      }
       if (d.tally && Object.keys(d.tally).length > 0) {
         lines.push("");
         for (const [key, value] of Object.entries(d.tally)) {

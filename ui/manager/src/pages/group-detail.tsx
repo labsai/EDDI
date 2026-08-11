@@ -30,7 +30,7 @@ import { BackLink } from "@/components/shared/back-link";
 import { ErrorState } from "@/components/shared/error-state";
 import { cn } from "@/lib/utils";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
-import { styleInfo as localizedStyleInfo } from "@/lib/discussion-styles";
+import { styleDisplay } from "@/lib/discussion-styles";
 import {
   followupGroupMember,
   closeGroupConversation,
@@ -396,7 +396,7 @@ export function GroupDetailPage() {
     );
   }
 
-  const styleInfo = localizedStyleInfo(groupConfig.style, t) ?? localizedStyleInfo("ROUND_TABLE", t)!;
+  const styleInfo = styleDisplay(groupConfig.style, t);
   const styleTheme = STYLE_THEME[groupConfig.style as DiscussionStyle] ?? STYLE_THEME.ROUND_TABLE;
 
   // Normalize: ensure members is always an array so downstream components

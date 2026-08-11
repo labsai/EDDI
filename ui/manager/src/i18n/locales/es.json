@@ -2551,9 +2551,9 @@
     "retroRecordedBadge_many": "{{phase}}: {{count}} lecciónes guardadas en la memoria del equipo",
     "retroRecordedBadge_one": "{{phase}}: {{count}} lección guardadas en la memoria del equipo",
     "retroRecordedBadge_other": "{{phase}}: {{count}} lecciónes guardadas en la memoria del equipo",
-    "artifactRevisions_many": "{{count}} revisiónes anteriores",
+    "artifactRevisions_many": "{{count}} revisiones anteriores",
     "artifactRevisions_one": "{{count}} revisión anterior",
-    "artifactRevisions_other": "{{count}} revisiónes anteriores",
+    "artifactRevisions_other": "{{count}} revisiones anteriores",
     "styles": {
       "ROUND_TABLE": {
         "label": "Mesa redonda",

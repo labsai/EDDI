@@ -64,6 +64,15 @@ function generateMarkdown(
     lines.push(``);
     if (d.winner) lines.push(`**Winner:** ${d.winner}`);
     if (d.outcome) lines.push(`**Outcome:** ${d.outcome}`);
+    // A NONE decision that carries `raw` means a judgment WAS produced but
+    // could not be parsed — the card shows it verbatim, so the export must too
+    // or the section is an empty heading.
+    if (d.type === "NONE" && d.raw?.trim()) {
+      lines.push(``);
+      lines.push(`### Unparsed judgment`);
+      lines.push(``);
+      lines.push(d.raw);
+    }
     if (d.tally && Object.keys(d.tally).length > 0) {
       lines.push(``);
       for (const [key, value] of Object.entries(d.tally)) {

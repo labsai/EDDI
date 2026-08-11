@@ -102,6 +102,31 @@ describe("BoardTranscript — structured decision", () => {
     expect(screen.getByTestId("decision-record")).toBeInTheDocument();
   });
 
+  it("shows a NONE decision that carries an unparsed judgment", () => {
+    renderWithProviders(
+      <BoardTranscript
+        transcript={[entry("SYNTHESIS", "Prose only")]}
+        boardId="g1"
+        decision={{
+          type: "NONE",
+          winner: null,
+          outcome: null,
+          method: null,
+          tally: null,
+          dissents: [],
+          decidedAtPhase: null,
+          raw: "The judge replied in an unreadable shape.",
+        }}
+      />,
+    );
+    // `raw` means a judgment WAS produced but could not be parsed — hiding it
+    // would turn a real failure into a blank space.
+    expect(screen.getByTestId("decision-record")).toBeInTheDocument();
+    expect(
+      screen.getByText("The judge replied in an unreadable shape."),
+    ).toBeInTheDocument();
+  });
+
   it("hides an empty NONE decision (prose-only conclusion is the normal case)", () => {
     renderWithProviders(
       <BoardTranscript

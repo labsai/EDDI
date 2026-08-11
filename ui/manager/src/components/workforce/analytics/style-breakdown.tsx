@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { StyleCount } from "@/hooks/use-workforce-analytics";
-import { styleInfo } from "@/lib/discussion-styles";
+import { styleDisplay } from "@/lib/discussion-styles";
 import type { DiscussionStyle } from "@/lib/api/groups";
 
 interface StyleBreakdownProps {
@@ -27,7 +27,7 @@ function StyleBreakdown({ data, selected, onSelect }: StyleBreakdownProps) {
       ) : (
         <div className="space-y-3">
           {data.map((item) => {
-            const info = styleInfo(item.style, t);
+            const info = styleDisplay(item.style, t);
             const pct = Math.round((item.count / max) * 100);
             return (
               <button

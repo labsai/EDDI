@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { type DiscussionStyle } from "@/lib/api/groups";
-import { styleInfo } from "@/lib/discussion-styles";
+import { styleDisplay } from "@/lib/discussion-styles";
 import type { MemberSlot } from "./team-builder";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -232,11 +232,11 @@ function ReviewLaunch({
             {boardDescription}
           </p>
         )}
-        {style && styleInfo(style, t) && (
+        {style && (
           <div className="mt-3">
             <Badge variant="secondary">
-              <span className="me-1">{styleInfo(style, t)!.icon}</span>
-              {styleInfo(style, t)!.label}
+              <span className="me-1">{styleDisplay(style, t).icon}</span>
+              {styleDisplay(style, t).label}
             </Badge>
           </div>
         )}

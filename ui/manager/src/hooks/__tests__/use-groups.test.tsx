@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { server } from "@/test/mocks/server";
 import { type ReactNode } from "react";
 import { http, HttpResponse } from "msw";
+import { DISCUSSION_STYLES } from "@/lib/api/groups";
 import {
   useGroupDescriptors,
   useEnrichedGroupDescriptors,
@@ -112,7 +113,7 @@ describe("useAvailableStyles", () => {
     );
   });
 
-  it("appends backend-only styles with their backend label", async () => {
+  it("never offers a backend-only style, but reports its label for display", async () => {
     server.use(
       http.get("*/groupstore/groups/styles", () => {
         return HttpResponse.json({
@@ -124,38 +125,48 @@ describe("useAvailableStyles", () => {
     const { result } = renderHook(() => useAvailableStyles(), {
       wrapper: createWrapper(),
     });
-    await waitFor(() =>
-      expect(result.current.styles).toEqual(["ROUND_TABLE", "FISHBOWL"]),
-    );
+    // Not selectable: nothing in this build can describe or configure it.
+    await waitFor(() => expect(result.current.styles).toEqual(["ROUND_TABLE"]));
+    // But a group already saved with it still gets a real name.
     expect(result.current.backendLabels["FISHBOWL"]).toBe("Fishbowl Panel");
   });
 
-  it("falls back to the full static list while loading or on error", async () => {
+  it("falls back to the full static list when the request fails", async () => {
+    let requested = false;
     server.use(
       http.get("*/groupstore/groups/styles", () => {
+        requested = true;
         return HttpResponse.json({ message: "boom" }, { status: 500 });
       }),
     );
     const { result } = renderHook(() => useAvailableStyles(), {
       wrapper: createWrapper(),
     });
-    // Immediately (loading) and after the error settles: the static list.
-    expect(result.current.styles).toContain("ROUND_TABLE");
-    expect(result.current.styles).toContain("NEGOTIATION");
-    expect(result.current.styles).toContain("CUSTOM");
-    await waitFor(() => expect(result.current.styles.length).toBeGreaterThan(6));
+    // Wait for the failing request to actually land, so this asserts the error
+    // path rather than the pre-request state that looks identical.
+    await waitFor(() => expect(requested).toBe(true));
+    await waitFor(() =>
+      expect(result.current.styles).toEqual([...DISCUSSION_STYLES]),
+    );
   });
 
   it("ignores a response that shares no style with this build", async () => {
+    let requested = false;
     server.use(
       http.get("*/groupstore/groups/styles", () => {
+        requested = true;
         return HttpResponse.json({ SOMETHING_ELSE: { label: "?", phases: [] } });
       }),
     );
     const { result } = renderHook(() => useAvailableStyles(), {
       wrapper: createWrapper(),
     });
-    await waitFor(() => expect(result.current.styles).toContain("ROUND_TABLE"));
+    await waitFor(() => expect(requested).toBe(true));
+    // A response with nothing in common is a contract change, not a backend
+    // with zero presets — the static list stands rather than blanking pickers.
+    await waitFor(() =>
+      expect(result.current.styles).toEqual([...DISCUSSION_STYLES]),
+    );
     expect(result.current.styles).not.toContain("SOMETHING_ELSE");
   });
 });

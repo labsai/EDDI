@@ -297,6 +297,14 @@ function WorkforceBoard() {
     streamIsForCurrentView &&
     !persistedTaskList &&
     !streamState.taskPlan;
+  /**
+   * Whether ANY task board wants to render. The transcript component owns the
+   * scroll box and everything above it, so with an empty transcript the board
+   * would otherwise be swapped out for the "Ready for discussion" placeholder —
+   * exactly during the stream-start gap the placeholder board exists to cover.
+   */
+  const showAnyTaskBoard =
+    showPersistedTaskBoard || showLiveTaskBoard || showTaskBoardPlaceholder;
 
   // ─── Ongoing-discussion signals ───────────────────────────────
   // Two ways a discussion can be running: this tab holds the SSE connection
@@ -626,7 +634,7 @@ function WorkforceBoard() {
         <div className="flex flex-1 min-h-0 flex-col">
           {/* Transcript area — BoardTranscript owns the scroll box so it can
               keep itself pinned to the newest message while streaming. */}
-          {displayTranscript.length > 0 ? (
+          {displayTranscript.length > 0 || showAnyTaskBoard ? (
             <BoardTranscript
               transcript={displayTranscript}
               boardId={boardId}

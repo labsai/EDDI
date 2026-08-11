@@ -18,7 +18,7 @@ import {
   type DiscussionStyle,
   type GroupMember,
 } from "@/lib/api/groups";
-import { styleInfo as localizedStyleInfo } from "@/lib/discussion-styles";
+import { styleDisplay } from "@/lib/discussion-styles";
 
 // ─── Style color map ─────────────────────────────────────────────
 
@@ -113,7 +113,7 @@ function WorkforceCard({
   const duplicateGroup = useDuplicateGroup();
   const deleteGroup = useDeleteGroup();
 
-  const styleInfo = style ? localizedStyleInfo(style, t) : null;
+  const styleInfo = style ? styleDisplay(style, t) : null;
   const styleColor =
     STYLE_COLORS[style ?? ""] ?? STYLE_COLORS.CUSTOM!;
 

@@ -140,6 +140,57 @@ describe("ConversationViewer — structured outcomes", () => {
     ).toBeTruthy();
   });
 
+  it("keeps an unparsed judgment in the Markdown export", async () => {
+    server.use(
+      http.get("*/groups/:groupId/conversations/:convId", () =>
+        HttpResponse.json(
+          conversation({
+            decision: {
+              type: "NONE",
+              winner: null,
+              outcome: null,
+              method: null,
+              tally: null,
+              dissents: [],
+              decidedAtPhase: null,
+              raw: "Unreadable judgment body.",
+            },
+          }),
+        ),
+      ),
+    );
+
+    // Capture what the export writes instead of downloading it.
+    let exported = "";
+    const originalCreate = URL.createObjectURL;
+    URL.createObjectURL = ((blob: Blob) => {
+      // Blob.text() is async; the export path is sync, so read the parts we
+      // were handed via the constructor spy below instead.
+      void blob;
+      return "blob:mock";
+    }) as typeof URL.createObjectURL;
+    const OriginalBlob = globalThis.Blob;
+    globalThis.Blob = class extends OriginalBlob {
+      constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
+        super(parts, options);
+        if (parts) exported = parts.join("");
+      }
+    } as typeof Blob;
+
+    try {
+      renderWithProviders(
+        <ConversationViewer groupId="group1" conversationId="gconv-rich" />,
+      );
+      const exportBtn = await screen.findByLabelText("Export");
+      exportBtn.click();
+      await waitFor(() => expect(exported).toContain("## Decision (NONE)"));
+      expect(exported).toContain("Unreadable judgment body.");
+    } finally {
+      URL.createObjectURL = originalCreate;
+      globalThis.Blob = OriginalBlob;
+    }
+  });
+
   it("shows neither panel for a plain conversation", async () => {
     renderWithProviders(
       <ConversationViewer groupId="group1" conversationId="gconv1" />,

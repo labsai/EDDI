@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn, hashColor, getInitials, formatUsd } from "@/lib/utils";
 import type { AgentGroupConfiguration, DiscussionStyle, DiscussionPhase } from "@/lib/api/groups";
 import { normalizeLifecyclePolicy } from "@/lib/api/groups";
-import { styleInfo as localizedStyleInfo } from "@/lib/discussion-styles";
+import { styleDisplay } from "@/lib/discussion-styles";
 import {
   effectiveDelegationDepth,
   effectiveDelegationTimeout,
@@ -55,7 +55,7 @@ const CONTEXT_SCOPE_FALLBACKS: Record<string, string> = {
 export function GroupConfigPanel({ config, groupId, groupVersion, className }: GroupConfigPanelProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const styleInfo = localizedStyleInfo(config.style, t) ?? localizedStyleInfo("ROUND_TABLE", t)!;
+  const styleInfo = styleDisplay(config.style, t);
   const styleColors = PANEL_STYLE_COLORS[config.style as DiscussionStyle] || PANEL_STYLE_COLORS.ROUND_TABLE;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<"group" | "all" | null>(null);
   // Mutually exclusive on purpose. Both editors write the whole config from

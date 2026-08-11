@@ -5,7 +5,7 @@ import { Users, Bot, Copy, Trash2, MoreVertical, ExternalLink } from "lucide-rea
 import { Badge } from "@/components/ui/badge";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { type DiscussionStyle } from "@/lib/api/groups";
-import { styleInfo as localizedStyleInfo } from "@/lib/discussion-styles";
+import { styleDisplay } from "@/lib/discussion-styles";
 
 interface GroupCardProps {
   group: {
@@ -33,7 +33,7 @@ export function GroupCard({
 }: GroupCardProps) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const styleInfo = style ? localizedStyleInfo(style, t) : null;
+  const styleInfo = style ? styleDisplay(style, t) : null;
   const effectiveTimestamp = group.lastModifiedOn || group.createdOn || 0;
   const timeAgo = formatRelativeTime(effectiveTimestamp);
   const effectiveMemberCount = members.length > 0 ? members.length : memberCount;

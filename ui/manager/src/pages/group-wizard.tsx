@@ -31,7 +31,7 @@ import { toast } from "sonner";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { useCreateGroup, useAvailableStyles } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
-import { styleInfo as localizedStyleInfo, styleLabel, styleDisplay } from "@/lib/discussion-styles";
+import { styleLabel, styleDisplay } from "@/lib/discussion-styles";
 import { uncoveredRolePhases } from "@/lib/group-config";
 import {
   type DiscussionStyle,
@@ -601,7 +601,7 @@ function TemplateStep({
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2" data-testid="template-grid">
         {getGroupTemplates(t).map((tmpl) => {
-          const styleInfo = localizedStyleInfo(tmpl.style, t);
+          const styleInfo = styleDisplay(tmpl.style, t);
           return (
             <button
               key={tmpl.key}
@@ -1769,7 +1769,7 @@ function ReviewStep({
   state: WizardState;
 }) {
   const { t } = useTranslation();
-  const styleInfo = localizedStyleInfo(state.style, t);
+  const styleInfo = styleDisplay(state.style, t);
   // `?? CUSTOM`: pickers may offer a backend-only style with no color entry.
   const colors = STYLE_COLORS[state.style] ?? STYLE_COLORS.CUSTOM;
 

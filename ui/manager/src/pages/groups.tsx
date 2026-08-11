@@ -6,7 +6,7 @@ import { Boxes, Search, Plus, ExternalLink, Copy, Trash2, ArrowUp, ArrowDown, Ar
 import { toast } from "sonner";
 import { useEnrichedGroupDescriptors, useDeleteGroup, useDuplicateGroup } from "@/hooks/use-groups";
 import { GroupCard } from "@/components/groups/group-card";
-import { styleInfo } from "@/lib/discussion-styles";
+import { styleDisplay } from "@/lib/discussion-styles";
 import { CreateGroupDialog } from "@/components/groups/create-group-dialog";
 import { CreateOrWizardDialog } from "@/components/shared/create-or-wizard-dialog";
 import { Button } from "@/components/ui/button";
@@ -308,7 +308,7 @@ export function GroupsPage() {
                       </td>
                       <td className="px-5 py-3">
                         {(() => {
-                          const info = group.style ? styleInfo(group.style, t) : null;
+                          const info = group.style ? styleDisplay(group.style, t) : null;
                           return info ? (
                             <span
                               className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"

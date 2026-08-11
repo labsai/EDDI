@@ -2551,9 +2551,9 @@
     "retroRecordedBadge_many": "{{phase}}: {{count}} liçãoões guardadas na memória da equipa",
     "retroRecordedBadge_one": "{{phase}}: {{count}} lição guardada na memória da equipa",
     "retroRecordedBadge_other": "{{phase}}: {{count}} liçãoões guardadas na memória da equipa",
-    "artifactRevisions_many": "{{count}} revisãoões anteriores",
+    "artifactRevisions_many": "{{count}} revisões anteriores",
     "artifactRevisions_one": "{{count}} revisão anterior",
-    "artifactRevisions_other": "{{count}} revisãoões anteriores",
+    "artifactRevisions_other": "{{count}} revisões anteriores",
     "styles": {
       "ROUND_TABLE": {
         "label": "Mesa redonda",
@@ -2929,11 +2929,11 @@
     "taskForce": "Força-tarefa",
     "taskForceDesc": "O moderador divide a meta em tarefas, os membros as executam em paralelo e ele verifica e combina os resultados.",
     "roles": {
-      "marketingExpert": "Marketing Expert",
-      "techLead": "Tech Lead",
-      "financeDirector": "Finance Director",
-      "legalCounsel": "Legal Counsel",
-      "strategyConsultant": "Strategy Consultant",
+      "marketingExpert": "Especialista em marketing",
+      "techLead": "Líder técnico",
+      "financeDirector": "Diretor financeiro",
+      "legalCounsel": "Consultor jurídico",
+      "strategyConsultant": "Consultor de estratégia",
       "substanceReviewer": "Revisor de conteúdo",
       "structureReviewer": "Revisor de estrutura",
       "riskReviewer": "Revisor de riscos",

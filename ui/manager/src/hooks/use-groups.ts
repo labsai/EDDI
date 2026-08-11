@@ -67,8 +67,10 @@ export interface AvailableStyles {
   /** The styles a picker should offer, in canonical order. */
   styles: DiscussionStyle[];
   /**
-   * Backend-supplied display label per style — the fallback name for a style
-   * this build has no localized entry for.
+   * Backend-supplied display label per style, including styles this build does
+   * not know. Read as the fallback name when a group was SAVED with a style the
+   * UI has no localized entry for (created through the API, or by a newer
+   * build) — such a style is still displayed, just never newly selectable.
    */
   backendLabels: Record<string, string>;
 }
@@ -77,15 +79,18 @@ export interface AvailableStyles {
  * The discussion styles this UI should offer, reconciled with what the backend
  * actually supports (`GET /groupstore/groups/styles`).
  *
- * The static `DISCUSSION_STYLES` list was the only source before, which broke in
- * both directions: a style the backend dropped (or an older backend never had)
- * was still offered and failed at save time, and a style the backend added
- * simply never appeared. While the request is in flight — or fails — the static
+ * The static `DISCUSSION_STYLES` list was the only source before, so a style the
+ * backend dropped (or an older backend never had) was still offered and then
+ * failed at save time. While the request is in flight — or fails — the static
  * list stands, so pickers never render empty.
  *
- * Backend-only styles are widened to `DiscussionStyle`: the wire format is a
- * plain string, and every consumer treats an unknown value with fallbacks
- * (`styleInfo` → undefined, colors → CUSTOM/default).
+ * Deliberately narrowed to styles this build KNOWS: everything that makes a
+ * style usable — its localized name and flow text, phase expansion for the HITL
+ * approval picker, the wizard hint, the transcript breadcrumb — is keyed off
+ * `DiscussionStyle`, so offering a name the UI cannot describe or configure
+ * would hand the user an option that half-works. A backend-only style is
+ * therefore reported through `backendLabels` (so an already-saved one still
+ * renders with its real name) but never newly selectable.
  */
 export function useAvailableStyles(): AvailableStyles {
   const { data } = useDiscussionStyles();
@@ -100,9 +105,6 @@ export function useAvailableStyles(): AvailableStyles {
     // change than a backend with zero presets — don't blank every picker over it.
     if (known.length === 0) return fallback;
 
-    const knownSet = new Set<string>(DISCUSSION_STYLES);
-    const unknown = backendKeys.filter((k) => !knownSet.has(k)) as DiscussionStyle[];
-
     const backendLabels: Record<string, string> = {};
     for (const key of backendKeys) {
       const entry = (data as Record<string, unknown>)[key];
@@ -111,7 +113,7 @@ export function useAvailableStyles(): AvailableStyles {
       }
     }
 
-    return { styles: [...known, ...unknown], backendLabels };
+    return { styles: known, backendLabels };
   }, [data]);
 }
 
