@@ -285,9 +285,10 @@ export function useOperatorCanary() {
  * any other deployment-level change) can be flipped after activation and
  * nothing else would report it. `staleTime: 0` makes every mount — i.e. every
  * time the operator page is opened — re-check rather than serve a cached
- * "verified" from a stale mount. A failed or inconclusive result must drop any
- * write-scope offer; this hook only reports the fact, callers are responsible
- * for failing closed on it (see `isWriteScopeAvailable`).
+ * "verified" from a stale mount. This is a MONITORING surface (the status
+ * panel's gate badge, plus the metrics gauge the docs' alert watches) — it no
+ * longer gates offering write scope, which activation itself enforces via the
+ * gate read-back and the write canary's rollback.
  */
 export function useVerifyOperatorGate(config: OperatorConfig | null | undefined) {
   const agentId = config?.agentId ?? "";

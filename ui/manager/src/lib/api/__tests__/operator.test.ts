@@ -24,6 +24,7 @@ import {
 import { safetyPreambleForScope } from "@/lib/operator/system-prompt";
 import {
   READ_ENDPOINTS,
+  WRITE_ENDPOINTS,
   buildToolApprovals,
   buildEndpointFilter,
 } from "@/lib/operator/tool-scopes";
@@ -234,7 +235,9 @@ describe("provisionOperator", () => {
       spec: fetchedSpec(),
     });
     const prompt = String(captured?.systemPrompt);
-    expect(prompt.startsWith(safetyPreambleForScope("read_only"))).toBe(true);
+    // The default scope is read_write, so the default preamble is the
+    // approval-gated write one.
+    expect(prompt.startsWith(safetyPreambleForScope("read_write"))).toBe(true);
     expect(prompt).toContain("Custom body.");
   });
 
@@ -258,13 +261,26 @@ describe("provisionOperator", () => {
     expect(JSON.parse(String(captured?.openApiSpec))).toEqual(specBody);
   });
 
-  it("scopes tools to the read allow-list", async () => {
-    await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test", spec: fetchedSpec() });
+  it("scopes a read_only config's tools to the read allow-list", async () => {
+    await provisionOperator({
+      agentName: "Op",
+      config: config({ scope: "read_only" }),
+      apiKey: "sk-test",
+      spec: fetchedSpec(),
+    });
     const endpoints = String(captured?.endpoints);
     for (const entry of READ_ENDPOINTS) {
       expect(endpoints).toContain(entry);
     }
     expect(endpoints).not.toMatch(/\b(POST|PUT|DELETE|PATCH)\b/);
+  });
+
+  it("grants the write allow-list for the default (read_write) config", async () => {
+    await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test", spec: fetchedSpec() });
+    const endpoints = String(captured?.endpoints);
+    for (const entry of [...READ_ENDPOINTS, ...WRITE_ENDPOINTS]) {
+      expect(endpoints).toContain(entry);
+    }
   });
 
   it("bakes no credential into the tools in 'none' mode", async () => {

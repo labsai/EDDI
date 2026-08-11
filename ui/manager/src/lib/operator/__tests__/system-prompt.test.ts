@@ -172,6 +172,18 @@ describe("buildOperatorPromptBody", () => {
     }
   });
 
+  it("teaches the versioning model in BOTH branches — read-only diagnosis needs it too", () => {
+    // "My change did nothing" is a read-only question whose answer is the
+    // version chain (agent -> workflow -> config, nothing edited in place).
+    // Without this background a read-only operator reads the latest config
+    // version, sees the change, and wrongly reports it live.
+    for (const body of [buildOperatorPromptBody(READ_ENDPOINTS), buildOperatorPromptBody(WITH_A_WRITE)]) {
+      expect(body).toContain("How this platform is structured:");
+      expect(body).toContain("Nothing changes in place");
+      expect(body).toContain("compare the version chain");
+    }
+  });
+
   it("describes what it can author, and hands agent authoring to the wizard", () => {
     // "Create an agent" is the obvious next ask of something that can create a
     // group. Without this the operator improvises with the tools it does have.
@@ -199,21 +211,21 @@ describe("buildOperatorPromptBody", () => {
       expect(body).not.toContain("Agents → New agent");
     });
 
-    it("describes real agent-modification capability", () => {
-      expect(body).toContain("You can change an existing agent's behavior rules");
+    it("describes real agent-modification capability, prompt and model included", () => {
+      expect(body).toContain("You can change an existing agent's system prompt");
+      expect(body).toContain("behavior rules");
     });
 
-    it("says plainly that the prompt and model are NOT among what it can change", () => {
-      // The llmstore document carries a per-task gate that fully replaces the
-      // agent's, so it is deliberately unwritable (see WRITABLE_EXTENSION_STORES).
-      // The prompt must not imply otherwise, or the operator will keep proposing
-      // a change it has no tool to make.
-      expect(body).toContain("You CANNOT change an existing agent's system prompt or model");
-      expect(body).not.toContain("You can change an existing agent's system prompt");
+    it("tells it never to write toolApprovals, which is what makes the llmstore grant safe", () => {
+      // gate-guard.ts refuses such a write outright, so an operator that does
+      // not know this burns an approval round-trip on every prompt edit. The
+      // guard is the control; this is what keeps it from firing constantly.
+      expect(body).toContain('NEVER include a "toolApprovals" field');
+      expect(body).toContain("gate continues to apply");
     });
 
     it("still states the boundary: no gate, memory/session, or top-level workflow changes", () => {
-      expect(body).toContain("You also cannot change an agent's own approval gate");
+      expect(body).toContain("You cannot change an agent's own approval gate");
     });
   });
 
@@ -228,7 +240,7 @@ describe("buildOperatorPromptBody", () => {
   it("shows only modification text when modification is granted but creation is not", () => {
     const endpoints = [...READ_ENDPOINTS, "PUT /rulestore/rulesets/{id}"];
     const body = buildOperatorPromptBody(endpoints);
-    expect(body).toContain("You can change an existing agent's behavior rules");
+    expect(body).toContain("You can change an existing agent's system prompt");
     expect(body).not.toContain("You can create a whole new agent");
     expect(body).not.toContain("You CANNOT create or edit an agent");
   });

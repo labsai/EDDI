@@ -1172,7 +1172,7 @@
     "cascadeInAgent": "Also use cascade in Agent Mode (with tools)",
     "cascadeSteps": "Cascade Steps (cheap → expensive)",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted (set confidence to empty).",
-    "cascadeModelName": "e.g. claude-sonnet-4-6",
+    "cascadeModelName": "e.g. claude-sonnet-5",
     "cascadeConfidence": "Min. Confidence (0–1)",
     "cascadeConfidencePlaceholder": "empty = always accept",
     "cascadeTimeout": "Timeout (ms)",
@@ -3463,12 +3463,12 @@
     "configError": "Couldn't load the operator configuration",
     "empty": {
       "title": "The Platform Operator is off",
-      "description": "Turn it on to chat with an agent that can inspect your agents, workflows, conversations, deployments and logs — and explain what it finds. It is read-only and cannot change anything.",
+      "description": "Turn it on to chat with an agent that can inspect your agents, workflows, conversations, deployments and logs — and, with your approval of each change, operate them for you.",
       "action": "Activate the Platform Operator"
     },
     "discovery": {
       "title": "Meet your Platform Operator",
-      "description": "An assistant that inspects and explains this deployment. Off by default, read-only, one click to activate.",
+      "description": "An assistant that inspects and operates this deployment. Off by default; every change it makes pauses for your approval.",
       "action": "Activate"
     },
     "activation": {
@@ -3489,6 +3489,7 @@
       "authNoneBlocked": "This deployment has authentication enabled, so unauthenticated tool calls would be rejected. The operator would deploy successfully and then fail every lookup. Choose \"Your identity\" instead.",
       "scope": {
         "label": "Capability",
+        "default": "Default",
         "hint": "What the operator is allowed to do. Every write still pauses for your approval — see the safety rules below.",
         "readOnly": {
           "label": "Read-only",
@@ -3498,8 +3499,6 @@
           "label": "Read & write",
           "description": "Also lets it create and modify agents and agent groups, deploy, undeploy, disable a runaway schedule, and edit an agent's descriptor — each one paused for your approval first."
         },
-        "unavailableNotVerified": "Not available yet — this operator's approval gate has not been verified as sound. Check connection on the status panel, or choose \"Your identity\" below, then reconfigure.",
-        "unavailableFirstActivation": "Not available on first activation. Activate read-only first to prove the approval gate is sound, then reconfigure to grant write access.",
         "writeWarning": "Activating will run a write canary: a real, harmless test write that must pause for approval before this deployment finishes. If it does not pause, activation is refused and the operator is removed rather than left deployed with an unverified write gate."
       },
       "safetyPreamble": "Safety rules (not editable)",
@@ -3603,7 +3602,9 @@
         "agentCreatedWithExternalTools": "This agent is being created with every tool an external MCP server offers. That server decides what those are, and can change them later.",
         "unchecked": "The body was too long to scan for capability grants — read it in full before approving."
       },
-      "blockedSelfTarget": "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page."
+      "blockedSelfTarget": "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page.",
+      "blockedGateCarrying": "This request writes an LLM configuration that sets its own approval gate (toolApprovals), which would replace the gate reviewing it. Approving is unavailable for the whole batch while it is present — reject, and change the gate from the agent's own page.",
+      "blockedGateUnverifiable": "This request writes an LLM configuration whose body is too large to show in full, so it cannot be confirmed free of an approval-gate override. Approving is unavailable for the whole batch while it is present — reject, and make this change from the agent's own page."
     },
     "starters": {
       "whatsDeployed": "What's deployed right now?",

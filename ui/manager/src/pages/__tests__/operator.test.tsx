@@ -110,14 +110,15 @@ describe("OperatorPage", () => {
   });
 
   describe("when the operator is active", () => {
-    it("shows the chat, the read-only chip and the model", async () => {
-      serveConfig(activeConfig({ model: "claude-sonnet-4-6" }));
+    it("shows the chat, the scope chip and the model", async () => {
+      serveConfig(activeConfig({ model: "claude-sonnet-5" }));
       serveDeploymentStatus("READY");
       renderWithProviders(<OperatorPage />);
 
       expect(await screen.findByTestId("operator-input")).toBeInTheDocument();
-      expect(screen.getAllByText(/read-only/i).length).toBeGreaterThan(0);
-      expect(screen.getByText("claude-sonnet-4-6")).toBeInTheDocument();
+      // Default scope is read_write now; the chip must say so.
+      expect(screen.getAllByText(/read & write/i).length).toBeGreaterThan(0);
+      expect(screen.getByText("claude-sonnet-5")).toBeInTheDocument();
     });
 
     it("offers starter prompts before any message is sent", async () => {
