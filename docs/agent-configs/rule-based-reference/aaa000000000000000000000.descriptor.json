@@ -1,6 +1,6 @@
 {
   "resource" : "eddi://ai.labs.agent/agentstore/agents/aaa000000000000000000000?version=1",
   "name" : "Rule-Based Reference Agent",
-  "description" : "EDDI's built-in agent creation wizard. Creates and deploys fully working AI agents through a guided conversation. Supports 12 LLM providers (Anthropic, OpenAI, Gemini, Ollama, Mistral, and more). API keys are auto-encrypted in the vault.\nv6.0.0",
+  "description" : "Reference config: a rule-based wizard that provisions and deploys another agent through a guided conversation, via EDDI's own setup API. Kept as a worked example and test fixture — not shipped or deployed. Supports 12 LLM providers (Anthropic, OpenAI, Gemini, Ollama, Mistral, and more); the receiving setup API vaults submitted keys.",
   "deleted" : false
 }

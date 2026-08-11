@@ -1041,7 +1041,8 @@ class RestImportServiceUncoveredBranchTest {
     private static RestImportService createMinimalInstance() throws Exception {
         var constructor = RestImportService.class.getDeclaredConstructors()[0];
         constructor.setAccessible(true);
-        return (RestImportService) constructor.newInstance(
-                null, null, null, null, null, null, null, null, null);
+        // One null per parameter, derived from the constructor rather than
+        // hardcoded, so a signature change cannot break this at runtime again.
+        return (RestImportService) constructor.newInstance(new Object[constructor.getParameterCount()]);
     }
 }

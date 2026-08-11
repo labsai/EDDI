@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class RestImportServiceHelpersTest {
 
     // Use reflection to invoke private methods on RestImportService
-    // Note: we can't construct a full RestImportService (9 CDI deps) but we can
+    // Note: we can't construct a full RestImportService (7 CDI deps) but we can
     // test
     // static-like helpers by invoking them on a null-arg-constructed instance or
     // via
@@ -359,8 +359,9 @@ class RestImportServiceHelpersTest {
     private static RestImportService createMinimalInstance() throws Exception {
         var constructor = RestImportService.class.getDeclaredConstructors()[0];
         constructor.setAccessible(true);
-        // All 9 parameters are null — the helpers we test don't use them
-        return (RestImportService) constructor.newInstance(
-                null, null, null, null, null, null, null, null, null);
+        // One null per constructor parameter — the helpers we test don't use
+        // them. Derived from the constructor rather than hardcoded so the next
+        // signature change cannot break this at runtime again.
+        return (RestImportService) constructor.newInstance(new Object[constructor.getParameterCount()]);
     }
 }

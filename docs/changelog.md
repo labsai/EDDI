@@ -75,6 +75,25 @@ mentions — they are dated records of what was true at the time, not live docum
 - The coverage claim above was overstated in the commit message (it named `.httpcalls.json`, which
   `tests/useCases` also has). Narrowed to what is actually verifiable.
 
+**PR #672 follow-up — one CI failure and two Copilot nitpicks:**
+
+- **CI: `Build & Test` failed on two test classes the constructor narrowing missed.**
+  `RestImportServiceHelpersTest` and `RestImportServiceUncoveredBranchTest` both build the service
+  **via reflection** (`getDeclaredConstructors()[0].newInstance(null × 9)`), so a grep for
+  `new RestImportService(` could never find them, the compiler had nothing to say, and every test in
+  both classes errored at runtime with `wrong number of arguments: 9 expected: 7`. Fixed by deriving
+  the argument array from the constructor itself (`new Object[constructor.getParameterCount()]`) so
+  the *next* signature change cannot re-break them. Lesson for the next constructor change: sweep
+  tests for `getDeclaredConstructor` reflection too, and never trust an exit-0 test run whose output
+  shows no `Tests run:` lines.
+- **Copilot (suppressed comments, both real): the rebrand changed descriptor `name`s but not
+  `description`s.** The agent descriptor still called the fixture "EDDI's built-in agent creation
+  wizard" — the exact shipped-product claim this PR removes — and the property descriptor said
+  "auto-vault for API keys" when the property setter deliberately uses `scope: "conversation"` and
+  delegates vaulting to the receiving setup API (AGENTS.md §5.6). Both rewritten. The wizard's own
+  *conversation* line ("auto-encrypted in the vault when available") is accurate — it describes the
+  receiving setup API's behavior, caveat included — and stays.
+
 ---
 
 
