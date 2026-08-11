@@ -46,9 +46,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <b>Key rotation:</b> Supports both DEK rotation (per-tenant, re-encrypts all
  * secrets) and KEK rotation (re-encrypts all DEKs with a new master key).
  * <p>
- * <b>Access model:</b> The admin who writes the agent config decides which
- * vault references to include. The {@code allowedAgents} field is stored for
- * visibility/documentation but NOT enforced at resolution time.
+ * <b>Access model:</b> {@code allowedAgents} is not consulted here — this class
+ * resolves secrets and does not police who asked. It is enforced one level up,
+ * when an agent is deployed, by {@link ai.labs.eddi.secrets.VaultGrantGate}.
+ * "Not enforced at resolution time" is a statement about this class, not about
+ * the field.
  * <p>
  * The KEK (Master Key) is supplied via the {@code EDDI_VAULT_MASTER_KEY}
  * environment variable. If not set, the provider is disabled and all operations

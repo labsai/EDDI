@@ -69,6 +69,60 @@ Vault references are resolved **at runtime** when the task executes, never store
 
 **Caching:** Successfully resolved secrets are cached in a Caffeine cache (configurable TTL). Failed resolutions are **never cached**, ensuring newly created secrets resolve immediately without waiting for cache expiry.
 
+## Agent Grants (`allowedAgents`)
+
+Every stored secret carries an `allowedAgents` list — the agent IDs permitted to use it, or `["*"]` for all agents. It is enforced **when an agent is deployed**, not when a secret is resolved.
+
+### Why deploy time, not resolution time
+
+Blocking at resolution would fail in the middle of a live conversation, after the agent is already serving users, and the operator would learn about the misconfiguration from a broken turn. The deploy-time check runs once, before any user is affected: a misconfigured agent simply does not come up, and the reason is a single ERROR line.
+
+The gate lives in `AgentFactory.deployAgent` — the one boundary every deployment path funnels through (REST administration, conversation-triggered deployment, the scheduled deployment poller). Placing it there rather than at each caller means it cannot be bypassed by reaching deployment through a different entry point.
+
+### Modes
+
+Configured with `eddi.vault.grant-enforcement`:
+
+| Mode      | Behavior                                                            |
+| --------- | ------------------------------------------------------------------- |
+| `off`     | No check at all — the checker is never consulted                    |
+| `warn`    | Violations logged at WARN, deployment proceeds                       |
+| `enforce` | **Default.** Violations logged at ERROR, deployment is **blocked**   |
+
+Two parsing rules, both deliberate:
+
+- **An unrecognized value fails startup** rather than falling back to a default. `grant-enforcement=enforced` silently behaving as `warn` would turn one typo into a security control that is off while appearing on.
+- **Absent or blank resolves to `enforce`**, the shipped default — never to something weaker. Turning enforcement down is always explicit.
+
+### What counts as granted
+
+The check answers "is this provably ungranted?", and anything short of proof is treated as granted. An agent is allowed when its `allowedAgents` list:
+
+- contains the agent's ID, or
+- contains the `*` wildcard, or
+- is `null` or empty — an unset list means unrestricted, not "deny all"
+
+Uncertainty likewise never becomes a violation: unreadable metadata, a disabled vault, or a secret that does not exist all resolve to *allowed*. A check that cannot run must not be able to take agents down.
+
+### What is scanned
+
+The agent document itself plus each workflow's LLM, HTTP-call, MCP-call, and RAG configurations are serialized and scanned for `${vault:...}` references. Each reference found is resolved to its secret metadata and tested against the deploying agent's ID.
+
+### Upgrading to enforcement
+
+On most deployments this control is inert, for two reasons worth confirming rather than assuming:
+
+1. **No master key, no check.** With `eddi.vault.master-key` unset the vault is disabled and the checker reports no violations without looking at anything.
+2. **Auto-vaulted keys are unrestricted.** Every key the setup wizard vaults is stored with `allowedAgents = ["*"]`.
+
+The deployments that *are* affected have **both** a master key and a grant an operator has deliberately narrowed. There, enforcement is a behavior change with no warning phase — the first symptom is an agent refusing to deploy. Before enabling it, run once with `warn` and confirm the log is free of:
+
+```text
+references vault secret(s) it is not granted
+```
+
+Then set `enforce`. To widen a grant instead, add the agent ID to the secret's `allowedAgents` via the [REST API](#rest-api) — or remove the reference from the agent's configuration.
+
 ## Encryption
 
 ### Envelope Encryption
