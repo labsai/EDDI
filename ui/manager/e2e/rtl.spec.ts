@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 
 test.describe("RTL Layout", () => {
   test("switches to RTL when Arabic is selected", async ({ page }) => {
@@ -54,19 +54,43 @@ test.describe("RTL Layout", () => {
  * `/manage/agents` are checked as representatives.
  */
 test.describe("RTL horizontal overflow", () => {
+  const DESKTOP = { label: "desktop", width: 1280, height: 900 };
+
   const VIEWPORTS = [
     { label: "mobile", width: 375, height: 812 },
     { label: "tablet", width: 768, height: 1024 },
-    { label: "desktop", width: 1280, height: 900 },
+    DESKTOP,
   ];
 
   const ROUTES = ["/manage", "/manage/agents"];
 
-  /** Force Arabic before any app script runs, so the first paint is RTL. */
-  const startInArabic = async (page: import("@playwright/test").Page) => {
+  /**
+   * Force Arabic before any app script runs, navigate, and wait for real page
+   * content. Gating on the heading rather than just the layout shell matters:
+   * these tests assert an *absence* of overflow, so they would pass vacuously
+   * against a still-loading skeleton.
+   */
+  const gotoInArabic = async (
+    page: Page,
+    route: string,
+    viewport: { width: number; height: number },
+  ) => {
+    await page.setViewportSize(viewport);
     await page.addInitScript(() =>
       window.localStorage.setItem("i18nextLng", "ar"),
     );
+    await page.goto(route);
+
+    await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+    await expect(page.getByTestId("app-layout")).toBeVisible();
+    await expect(page.locator("main h1")).toBeVisible();
+  };
+
+  /** `boundingBox()` is nullable; fail loudly rather than assert-then-`!`. */
+  const boundingBoxOf = async (locator: Locator, what: string) => {
+    const box = await locator.boundingBox();
+    if (!box) throw new Error(`Expected ${what} to have a bounding box`);
+    return box;
   };
 
   for (const vp of VIEWPORTS) {
@@ -74,12 +98,7 @@ test.describe("RTL horizontal overflow", () => {
       test(`${route} does not overflow horizontally in Arabic at ${vp.label} (${vp.width}px)`, async ({
         page,
       }) => {
-        await page.setViewportSize({ width: vp.width, height: vp.height });
-        await startInArabic(page);
-        await page.goto(route);
-
-        await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
-        await expect(page.getByTestId("app-layout")).toBeVisible();
+        await gotoInArabic(page, route, vp);
 
         const metrics = await page.evaluate(() => {
           const de = document.documentElement;
@@ -112,23 +131,24 @@ test.describe("RTL horizontal overflow", () => {
     test(`.${gridClass} columns truncate rather than overflow their container`, async ({
       page,
     }) => {
-      await page.setViewportSize({ width: 1280, height: 900 });
-      await startInArabic(page);
-      await page.goto("/manage");
-      await expect(page.getByTestId("app-layout")).toBeVisible();
+      await gotoInArabic(page, "/manage", DESKTOP);
 
       const probe = await page.evaluate((cls) => {
-        // First child of <main> carries `@container/main`, so the container
-        // queries driving these grids resolve exactly as they do in the app.
+        // The first child of <main> carries `@container/main`, so the
+        // container queries driving these grids resolve exactly as they do in
+        // the app. Mounting the probe anywhere else would measure nothing.
         const host = document.querySelector("main > div");
-        if (!host) return null;
+        if (!host) throw new Error("`@container/main` host (main > div) missing");
 
+        // Long enough that a `minmax(auto, 1fr)` column would be many times
+        // the container's width, so the assertion cannot pass by luck.
+        const overlongHeading = "لوحة التحكم ".repeat(30);
         const grid = document.createElement("div");
         grid.className = cls;
         grid.innerHTML = Array.from(
           { length: 4 },
           () =>
-            `<div class="rounded-xl border"><h3 class="truncate">${"لوحة التحكم ".repeat(30)}</h3></div>`,
+            `<div class="rounded-xl border"><h3 class="truncate">${overlongHeading}</h3></div>`,
         ).join("");
 
         host.appendChild(grid);
@@ -140,40 +160,34 @@ test.describe("RTL horizontal overflow", () => {
         return measured;
       }, gridClass);
 
-      expect(probe).not.toBeNull();
-      expect(probe!.scrollWidth).toBe(probe!.clientWidth);
+      expect(probe.scrollWidth).toBe(probe.clientWidth);
     });
   }
 
   test("skip-to-main link stays on-canvas and centres when focused in RTL", async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await startInArabic(page);
-    await page.goto("/manage");
-
-    await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+    await gotoInArabic(page, "/manage", DESKTOP);
     const skip = page.locator(".skip-to-main");
 
     // Hidden but never parked off-canvas — that is what inflated scrollWidth.
-    const hidden = await skip.boundingBox();
-    expect(hidden).not.toBeNull();
-    expect(hidden!.x).toBeGreaterThanOrEqual(0);
-    expect(hidden!.x + hidden!.width).toBeLessThanOrEqual(1280);
+    const hidden = await boundingBoxOf(skip, "the hidden skip link");
+    expect(hidden.x).toBeGreaterThanOrEqual(0);
+    expect(hidden.x + hidden.width).toBeLessThanOrEqual(DESKTOP.width);
 
     // On focus it reveals itself, horizontally centred, still within the
     // viewport and still creating no overflow.
     await skip.focus();
     await expect(skip).toBeVisible();
 
-    const focused = await skip.boundingBox();
-    expect(focused).not.toBeNull();
-    expect(focused!.x).toBeGreaterThan(0);
-    expect(focused!.x + focused!.width).toBeLessThanOrEqual(1280);
+    const focused = await boundingBoxOf(skip, "the focused skip link");
+    expect(focused.x).toBeGreaterThan(0);
+    expect(focused.x + focused.width).toBeLessThanOrEqual(DESKTOP.width);
     // Centre of the link sits on the centre of the viewport (±2px rounding).
-    expect(Math.abs(focused!.x + focused!.width / 2 - 640)).toBeLessThanOrEqual(
-      2,
+    const centreOffset = Math.abs(
+      focused.x + focused.width / 2 - DESKTOP.width / 2,
     );
+    expect(centreOffset).toBeLessThanOrEqual(2);
 
     const overflow = await page.evaluate(() => {
       const de = document.documentElement;
