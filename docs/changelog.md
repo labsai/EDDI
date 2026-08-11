@@ -15,6 +15,8 @@ Safe as a shipped default for two reasons, both worth knowing before relying on 
 1. **Inert without a master key.** `eddi.vault.master-key` is empty by default; with the vault disabled the checker returns "no violations" without looking at anything.
 2. **Wildcard grants.** Every key `AgentSetupService` vaults carries `allowedAgents = ["*"]`. Only a grant an operator has deliberately narrowed can produce a violation.
 
+The code fallback moved with it. `@ConfigProperty(defaultValue = ...)` and the absent/blank branch of `parseStrict` both resolve to `DEFAULT_MODE_NAME` — the same constant the bundled property uses. A property file saying `enforce` beside a code fallback saying `warn` would mean an external configuration that omits or blanks the key silently downgrades the control while every visible sign still says it is on. Turning enforcement down is now always explicit.
+
 **Operational note:** on a deployment that has *both* a master key and narrowed grants, run once on `warn` and confirm the log is free of `references vault secret(s) it is not granted` before enabling this. In `enforce` mode that condition is an ERROR that stops the agent deploying — there is no warning to notice first.
 
 No shipped agent configuration (initial-agents, docs/agent-configs) contains a vault reference, so nothing in the repo can trip the check.

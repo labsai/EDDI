@@ -28,6 +28,17 @@ public class VaultGrantGate {
 
     private static final Logger LOGGER = Logger.getLogger(VaultGrantGate.class);
 
+    /**
+     * The mode applied when the property is absent or blank.
+     * <p>
+     * Deliberately the SAME value the bundled {@code application.properties} ships.
+     * When the two disagree — a property saying {@code enforce} and a code fallback
+     * saying {@code warn} — an external configuration that omits or blanks the key
+     * silently downgrades the control while every visible sign still says it is on.
+     * Fail closed, and keep the two definitions in one place.
+     */
+    public static final String DEFAULT_MODE_NAME = "enforce";
+
     /** Enforcement modes for {@code eddi.vault.grant-enforcement}. */
     public enum Mode {
         OFF, WARN, ENFORCE;
@@ -36,10 +47,14 @@ public class VaultGrantGate {
          * Strict parse — an unrecognised value is rejected, never defaulted.
          * {@code grant-enforcement=enforced} silently behaving as {@code warn} would
          * turn one typo into a security control that is off while appearing on.
+         * <p>
+         * Absent or blank resolves to {@link #DEFAULT_MODE_NAME}, not to a weaker mode:
+         * an operator who blanks the value gets the shipped behaviour, never a quieter
+         * one. Turning enforcement down has to be explicit.
          */
         public static Mode parseStrict(String value) {
             if (value == null || value.isBlank()) {
-                return WARN;
+                return valueOf(DEFAULT_MODE_NAME.toUpperCase());
             }
             for (Mode mode : values()) {
                 if (mode.name().equalsIgnoreCase(value.trim())) {
@@ -56,10 +71,10 @@ public class VaultGrantGate {
 
     @Inject
     public VaultGrantGate(VaultGrantChecker checker,
-            @ConfigProperty(name = "eddi.vault.grant-enforcement", defaultValue = "warn") String grantEnforcement) {
+            @ConfigProperty(name = "eddi.vault.grant-enforcement", defaultValue = DEFAULT_MODE_NAME) String grantEnforcement) {
         this.checker = checker;
         // Parsed in the constructor so an unusable value fails bean creation, i.e.
-        // startup, rather than silently degrading to warn.
+        // startup, rather than silently degrading.
         this.mode = Mode.parseStrict(grantEnforcement);
     }
 

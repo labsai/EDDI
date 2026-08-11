@@ -40,8 +40,8 @@ class VaultGrantGateModeTest {
         assertEquals(Mode.OFF, Mode.parseStrict("off"));
         assertEquals(Mode.WARN, Mode.parseStrict("warn"));
         assertEquals(Mode.ENFORCE, Mode.parseStrict("  ENFORCE "));
-        assertEquals(Mode.WARN, Mode.parseStrict(null));
-        assertEquals(Mode.WARN, Mode.parseStrict("   "));
+        // null/blank are covered by absentMeansShippedDefault — they resolve to the
+        // shipped default, not to a fixed mode named here.
     }
 
     /**
