@@ -1992,6 +1992,7 @@ export const handlers = [
       DELPHI: { label: "Expert Forecast", phases: ["OPINION", "REVISION", "SYNTHESIS"] },
       DEBATE: { label: "Structured Deliberation", phases: ["ARGUE", "REBUTTAL", "SYNTHESIS"] },
       TASK_FORCE: { label: "Operational Task Force", phases: ["PLAN", "EXECUTE", "VERIFY", "SYNTHESIS"] },
+      NEGOTIATION: { label: "Negotiation Table", phases: ["OPINION", "PROPOSAL", "BARGAIN", "SYNTHESIS"] },
       CUSTOM: { label: "Custom Framework", phases: [] },
     });
   }),

@@ -3,7 +3,7 @@ import { Bookmark, Users, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useTemplates, type DiscussionTemplate } from "@/hooks/use-templates";
-import { STYLE_INFO } from "@/lib/api/groups";
+import { styleLabel } from "@/lib/discussion-styles";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -77,7 +77,7 @@ export function TemplatesPanel({ onUseTemplate }: TemplatesPanelProps) {
 
               {/* Style badge */}
               <Badge variant="outline" className="mt-2 text-xs">
-                {STYLE_INFO[template.style]?.label ?? template.style}
+                {styleLabel(template.style, t)}
               </Badge>
 
               {/* Member count */}

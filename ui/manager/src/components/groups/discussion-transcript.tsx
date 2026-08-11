@@ -8,17 +8,17 @@ import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { HumanTurnBanner } from "./human-turn-banner";
 import { DiscussionInsights } from "./discussion-insights";
 import { AgentResponseCard } from "./agent-response-card";
-import { TaskBoard } from "./task-board";
+import { TaskBoard, PersistedTaskBoard } from "./task-board";
 import { DecisionRecordCard } from "./decision-record-card";
 import { hasDisplayableDecision } from "@/lib/group-config";
 import { parseTranscriptContent, safeFormatDate } from "./group-utils";
-import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, SharedTaskList, TaskDefinition } from "@/lib/api/groups";
+import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@/lib/api/groups";
 import type { HitlVerdict } from "@/lib/api/hitl";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
 import { cn, formatUsd } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { STYLE_INFO } from "@/lib/api/groups";
+import { styleInfo as localizedStyleInfo } from "@/lib/discussion-styles";
 
 interface DiscussionTranscriptProps {
   conversation: GroupConversation | null;
@@ -264,7 +264,7 @@ export function DiscussionTranscript({
   // Resolve theme colors
   const style = discussionStyle || "ROUND_TABLE";
   const theme = STYLE_THEME[style] || STYLE_THEME.ROUND_TABLE;
-  const styleInfo = STYLE_INFO[style];
+  const styleInfo = localizedStyleInfo(style, t);
 
   // Determine the effective data source: streaming or static
   const isStreaming = !!streamState && (streamState.isStreaming || streamState.state !== "CREATED");
@@ -519,12 +519,13 @@ export function DiscussionTranscript({
             isStreaming={true}
           />
         )}
-        {/* Also show task board for completed TASK_FORCE conversations loaded from API */}
-        {style === "TASK_FORCE" && !isStreaming && conversation?.taskList && (
-          <MemoizedApiTaskBoard
-            taskList={conversation.taskList}
-            memberDisplayNames={conversation.memberDisplayNames}
-            t={t}
+        {/* Persisted task list — NOT gated on TASK_FORCE: any style can carry
+            agent-filed tasks (I5) once `taskListConfig.allowAgentTaskCreation`
+            is on, and the old style gate hid exactly those. */}
+        {!isStreaming && (conversation?.taskList?.tasks?.length ?? 0) > 0 && (
+          <PersistedTaskBoard
+            taskList={conversation!.taskList!}
+            memberDisplayNames={conversation!.memberDisplayNames}
           />
         )}
 
@@ -754,73 +755,14 @@ function formatMemberCostBreakdown(
   return rows.length ? rows.join("\n") : undefined;
 }
 
-/** Memoized wrapper for API-loaded task boards to avoid re-creating Set/Map on every render */
-function MemoizedApiTaskBoard({
-  taskList,
-  memberDisplayNames,
-  t,
-}: {
-  taskList: SharedTaskList;
-  /** agentId → display name, so a filed-by attribution is a name and not a hex id. */
-  memberDisplayNames?: Record<string, string>;
-  t: (key: string, fallback: string) => string;
-}) {
-  const taskPlan = useMemo(
-    () => taskList.tasks.map(task => ({
-      id: task.id,
-      subject: task.subject,
-      assignedTo: task.assignedDisplayName || task.assignedAgentId || t("taskBoard.unassigned", "Unassigned"),
-      priority: task.priority,
-      // Only the persisted task list carries this; the live `task_plan_created`
-      // event predates agent-filed tasks and describes the PLAN phase's output,
-      // which by definition has no filer.
-      filedBy: memberDisplayNames?.[task.createdByAgentId ?? ""] ?? task.createdByAgentId ?? null,
-      // Only present for a BID-mode task that received at least one bid — a
-      // BID-mode task nobody bid on falls back to ROLE assignment and is
-      // indistinguishable here from one configured as ROLE from the start.
-      awardedBid: taskList.awardedBids?.[task.id] ?? null,
-    })),
-    [taskList, t, memberDisplayNames],
-  );
-  const tasksInProgress = useMemo(
-    () => new Set(taskList.tasks.filter(task => task.status === "IN_PROGRESS").map(task => task.id)),
-    [taskList],
-  );
-  const tasksCompleted = useMemo(
-    () => new Set(taskList.tasks.filter(task => task.status === "COMPLETED").map(task => task.id)),
-    [taskList],
-  );
-  const taskVerifications = useMemo(
-    () => new Map(
-      taskList.tasks
-        .filter(task => task.status === "VERIFIED" || task.verificationNote != null)
-        .map(task => [task.id, { passed: task.verified, feedback: task.verificationNote || "" }] as const),
-    ),
-    [taskList],
-  );
-  // Tasks paused for per-task human approval — so the "Awaiting Approval" column
-  // populates on a persisted TASK-granularity pause (undefined when none, to
-  // preserve non-HITL behavior).
-  const tasksAwaitingApproval = useMemo(() => {
-    const s = new Set(
-      taskList.tasks.filter(task => task.status === "AWAITING_APPROVAL").map(task => task.id),
-    );
-    return s.size ? s : undefined;
-  }, [taskList]);
-
-  return (
-    <TaskBoard
-      taskPlan={taskPlan}
-      tasksInProgress={tasksInProgress}
-      tasksCompleted={tasksCompleted}
-      taskVerifications={taskVerifications}
-      tasksAwaitingApproval={tasksAwaitingApproval}
-      isStreaming={false}
-    />
-  );
-}
-
-/** Phase flow steps per discussion style for the breadcrumb indicator */
+/**
+ * Phase flow steps per discussion style for the breadcrumb indicator.
+ *
+ * These mirror the phase names the engine actually emits (`getStylePhases`), so
+ * they stay in the backend's English like every other phase name in the
+ * transcript. NEGOTIATION was missing here, which left the newest style with an
+ * empty breadcrumb while every older style showed one.
+ */
 const STYLE_INFO_FLOW: Record<string, string[]> = {
   ROUND_TABLE: ["Opinion", "Discussion", "Synthesis"],
   PEER_REVIEW: ["Opinion", "Critique", "Revision", "Synthesis"],
@@ -828,6 +770,7 @@ const STYLE_INFO_FLOW: Record<string, string[]> = {
   DELPHI: ["Independent", "Anonymous Sharing", "Revised", "Synthesis"],
   DEBATE: ["Pro Opening", "Con Opening", "Rebuttals", "Judgment"],
   TASK_FORCE: ["Plan", "Execute", "Verify", "Synthesize"],
+  NEGOTIATION: ["Positions", "Proposals", "Bargaining", "Synthesis"],
 };
 
 // Re-export for use in group-detail

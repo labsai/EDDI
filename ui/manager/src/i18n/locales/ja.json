@@ -2377,6 +2377,7 @@
     "agentFiledCaps": "上限",
     "agentFiledCapsValue": "{{perDiscussion}} / 議論 · {{perTurn}} / ターン",
     "moderatorlessWarning": "このグループに存在しないモデレーターに限定されています: {{phases}}。発言順の最初のメンバーが代行します。",
+    "roleCoverageWarning": "ロール「{{role}}」を持つメンバーがいません。{{phases}} は発言者なしで実行されます。",
     "delegationDepth": "最大深度",
     "delegationTimeout": "委任タイムアウト",
     "secondsShort": "{{seconds}}秒",
@@ -2527,7 +2528,41 @@
     "retroRecordedBadge_other": "{{phase}}: {{count}} 件の学びをチームメモリに保存しました",
     "retroRecordedBadge_one": "{{phase}}: {{count}} 件の学びをチームメモリに保存しました",
     "artifactRevisions_other": "以前のリビジョン {{count}} 件",
-    "artifactRevisions_one": "以前のリビジョン {{count}} 件"
+    "artifactRevisions_one": "以前のリビジョン {{count}} 件",
+    "styles": {
+      "ROUND_TABLE": {
+        "label": "ラウンドテーブル",
+        "flow": "全員が意見を述べ、複数ラウンドにわたって互いの意見を踏まえて議論します"
+      },
+      "PEER_REVIEW": {
+        "label": "相互レビュー",
+        "flow": "各自が個別に回答し、互いに批評したうえで修正します"
+      },
+      "DEVIL_ADVOCATE": {
+        "label": "悪魔の代弁者",
+        "flow": "1 人がグループの立場に反論し、ほかのメンバーがそれを擁護します"
+      },
+      "DELPHI": {
+        "label": "匿名ラウンド",
+        "flow": "全員が匿名で回答し、ラウンドごとに修正するため、最初の発言に引きずられません"
+      },
+      "DEBATE": {
+        "label": "賛否ディベート",
+        "flow": "一方が賛成、もう一方が反対の立場で論じ、反論を経て判定します"
+      },
+      "TASK_FORCE": {
+        "label": "タスクフォース",
+        "flow": "モデレーターが計画し、メンバーが並行してタスクを実行し、結果を検証します"
+      },
+      "NEGOTIATION": {
+        "label": "交渉",
+        "flow": "当事者が合意に達するまで提案を交わし、まとまらない場合のみ調停者が裁定します"
+      },
+      "CUSTOM": {
+        "label": "カスタムフロー",
+        "flow": "自分で定義するフェーズ"
+      }
+    }
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -2819,6 +2854,9 @@
     "hintDevilAdvocate": "少なくとも1名のメンバーに DEVIL_ADVOCATE の役割を割り当てます。グループの合意に異議を唱えます。",
     "hintPeerReview": "各メンバーが他の全メンバーの作業を個別に批評し、受け取ったフィードバックに基づいて修正します。",
     "hintDelphi": "全メンバーが独立かつ匿名で回答します。各ラウンド後、匿名の結果を確認して調整できます。最大ターン数が匿名反復回数を制御します。",
+    "hintNegotiation": "メンバーが利害を示し、提案を出し合って交渉します。「最大ラウンド数」は交渉ラウンドの回数を決めます。合意に至らない場合にのみモデレーターが裁定します。",
+    "roleCoverageWarning": "ロール「{{role}}」を持つメンバーがいません",
+    "roleCoverageHint": "{{phases}} は発言者なしで実行されます。「メンバー」に戻ってロール欄を設定してください。",
     "hintTaskForce": "モデレーターがタスク計画を作成し、エージェントに並列で作業を割り当て、結果を検証・統合します。",
     "hintCustom": "独自のフェーズを手動で定義します。カスタムフェーズは作成後にAPIで設定できます。",
     "hintRoundTable": "全メンバーが意見を共有し、複数ラウンドにわたって互いの見解を議論した後、モデレーターが統合します。",
@@ -2851,27 +2889,29 @@
     "memberTypeHuman": "人間"
   },
   "groupTemplates": {
-    "advisoryBoard": "Advisory Board",
-    "advisoryBoardDesc": "A panel of expert advisors consulting on strategic decisions.",
-    "codeReview": "Code Review Panel",
-    "codeReviewDesc": "Structured code review with independent opinions, peer critique, and revision.",
-    "riskAssessment": "Risk Assessment",
-    "riskAssessmentDesc": "A panel with a devil's advocate who challenges assumptions.",
-    "forecasting": "Forecasting Panel",
-    "forecastingDesc": "Delphi-style anonymous deliberation for unbiased estimates.",
-    "proCon": "Pro/Con Debate",
-    "proConDesc": "Formal debate with pro and con teams arguing their positions.",
+    "advisoryBoard": "アドバイザリーボード",
+    "advisoryBoardDesc": "マーケティング・技術・財務・法務・戦略の 5 つの視点が同じ問いに意見を述べ、最後にモデレーターがまとめます。",
+    "peerReview": "相互レビュー パネル",
+    "peerReviewDesc": "レビュー担当者が持ち込まれた素材（草案・計画・提案など）を評価し、互いの評価を批評して修正したうえで、モデレーターが統合します。",
+    "riskAssessment": "リスク評価",
+    "riskAssessmentDesc": "各自が見解を示し、1 人があえて反対の立場から盲点を突き、ほかのメンバーが反論したうえで、モデレーターが残った論点をまとめます。",
+    "forecasting": "独立した見積もり",
+    "forecastingDesc": "メンバーは複数ラウンドにわたり匿名で回答し、その間は匿名化された結果しか見ないため、最初の発言に引きずられません。",
+    "proCon": "賛否ディベート",
+    "proConDesc": "2 人が提案に賛成、2 人が反対の立場で論じ、反論を経てモデレーターが判定します。",
+    "negotiation": "交渉",
+    "negotiationDesc": "2 者が利害を示し、提案を出してラウンドごとに譲歩を交わします。合意に至らない場合にのみモデレーターが裁定します。",
     "taskForce": "タスクフォース",
-    "taskForceDesc": "目標指向のタスクオーケストレーション。エージェントが計画、並行実行、結果検証、発見の統合を行います。",
+    "taskForceDesc": "モデレーターが目標をタスクに分割し、メンバーが並行して進め、モデレーターが検証してまとめます。",
     "roles": {
       "marketingExpert": "Marketing Expert",
       "techLead": "Tech Lead",
       "financeDirector": "Finance Director",
       "legalCounsel": "Legal Counsel",
       "strategyConsultant": "Strategy Consultant",
-      "seniorEngineer": "Senior Engineer",
-      "architect": "Architect",
-      "securityReviewer": "Security Reviewer",
+      "substanceReviewer": "内容レビュアー",
+      "structureReviewer": "構成レビュアー",
+      "riskReviewer": "リスクレビュアー",
       "riskAnalyst": "Risk Analyst",
       "domainExpert": "Domain Expert",
       "devilsAdvocate": "Devil's Advocate",
@@ -2883,6 +2923,8 @@
       "proAdvocate2": "Pro Advocate 2",
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2",
+      "partyA": "当事者 A",
+      "partyB": "当事者 B",
       "projectLead": "プロジェクトリーダー",
       "researcher": "研究者",
       "implementer": "実装者",

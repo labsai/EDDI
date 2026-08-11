@@ -22,6 +22,7 @@ import { ExportMenu } from "@/components/workforce/export-menu";
 import { DiscussionActions } from "@/components/groups/discussion-actions";
 import { DiscussionInsights } from "@/components/groups/discussion-insights";
 import { HumanTurnBanner } from "@/components/groups/human-turn-banner";
+import { TaskBoard, PersistedTaskBoard } from "@/components/groups/task-board";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GroupConfigPanel } from "@/components/groups/group-config-panel";
@@ -262,7 +263,40 @@ function WorkforceBoard() {
     ? streamState.synthesizedAnswer
     : selectedConversation?.synthesizedAnswer ?? null;
 
+  // Structured conclusion (F3): the live stream learns it from
+  // `decision_reached`; a browsed/reloaded conversation carries it on the
+  // document. Same resolution the Manager transcript uses.
+  const displayDecision = viewingStream
+    ? streamState.decision
+    : selectedConversation?.decision ?? null;
+
   const members = groupConfig?.members ?? [];
+  const style = groupConfig?.style;
+
+  // ─── Task board (TASK_FORCE, or any style with agent-filed tasks) ──
+  // Two sources with different strengths: while this tab is actively streaming,
+  // the SSE-fed plan carries statuses in real time and wins; once the run
+  // pauses or settles, the persisted `taskList` wins — it is the richer record
+  // (filed-by attribution, awarded bids, AWAITING_APPROVAL statuses) and the
+  // stream stops updating anyway.
+  const persistedTaskList =
+    (selectedConversation?.taskList?.tasks?.length ?? 0) > 0
+      ? selectedConversation!.taskList
+      : null;
+  // Live also covers the gap right after a stream settles, before the refetched
+  // conversation (with its persisted list) has landed.
+  const showLiveTaskBoard =
+    viewingStream && !!streamState.taskPlan && (streamState.isStreaming || !persistedTaskList);
+  const showPersistedTaskBoard = !!persistedTaskList && !showLiveTaskBoard;
+  // TASK_FORCE runs open on an empty board while the moderator is still
+  // planning, so the surface never looks like an ordinary chat that later
+  // sprouts a board.
+  const showTaskBoardPlaceholder =
+    style === "TASK_FORCE" &&
+    isStreaming &&
+    streamIsForCurrentView &&
+    !persistedTaskList &&
+    !streamState.taskPlan;
 
   // ─── Ongoing-discussion signals ───────────────────────────────
   // Two ways a discussion can be running: this tab holds the SSE connection
@@ -599,16 +633,47 @@ function WorkforceBoard() {
               synthesizedAnswer={displaySynthesis}
               isLive={isOngoing}
               className="flex-1 min-h-0 ps-4 pe-4 pt-4 pb-4"
-              // Artifacts / negotiation ledger / windowing summary, plus the
-              // live retro + artifact-write badges. Same shared component the
-              // Manager transcript and history viewer use. Passed as a header
-              // so it scrolls with the transcript rather than sitting pinned.
+              // Debate verdict / vote tally / agreement, with minority report.
+              decision={displayDecision}
+              // Per-phase convergence checks (I2) — live-stream state only.
+              convergence={viewingStream ? streamState.convergence : undefined}
+              // Task board + artifacts / negotiation ledger / windowing summary,
+              // plus the live retro + artifact-write badges. Same shared
+              // components the Manager transcript and history viewer use. Passed
+              // as a header so it scrolls with the transcript rather than
+              // sitting pinned.
               header={
-                <DiscussionInsights
-                  conversation={selectedConversation}
-                  retroRecorded={isStreaming ? streamState.retroRecorded : undefined}
-                  artifactUpdates={isStreaming ? streamState.artifactUpdates : undefined}
-                />
+                <>
+                  {showPersistedTaskBoard && (
+                    <PersistedTaskBoard
+                      taskList={persistedTaskList!}
+                      memberDisplayNames={selectedConversation?.memberDisplayNames}
+                    />
+                  )}
+                  {showLiveTaskBoard && (
+                    <TaskBoard
+                      taskPlan={streamState.taskPlan}
+                      tasksInProgress={streamState.tasksInProgress}
+                      tasksCompleted={streamState.tasksCompleted}
+                      taskVerifications={streamState.taskVerifications}
+                      isStreaming={isStreaming}
+                    />
+                  )}
+                  {showTaskBoardPlaceholder && (
+                    <TaskBoard
+                      taskPlan={null}
+                      tasksInProgress={new Set<string>()}
+                      tasksCompleted={new Set<string>()}
+                      taskVerifications={new Map()}
+                      isStreaming={true}
+                    />
+                  )}
+                  <DiscussionInsights
+                    conversation={selectedConversation}
+                    retroRecorded={isStreaming ? streamState.retroRecorded : undefined}
+                    artifactUpdates={isStreaming ? streamState.artifactUpdates : undefined}
+                  />
+                </>
               }
             />
           ) : (

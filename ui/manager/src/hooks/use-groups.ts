@@ -1,5 +1,8 @@
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  DISCUSSION_STYLES,
+  type DiscussionStyle,
   getGroupDescriptors,
   getEnrichedGroupDescriptors,
   getGroup,
@@ -58,6 +61,58 @@ export function useDiscussionStyles() {
     queryFn: () => getDiscussionStyles(),
     staleTime: Infinity,
   });
+}
+
+export interface AvailableStyles {
+  /** The styles a picker should offer, in canonical order. */
+  styles: DiscussionStyle[];
+  /**
+   * Backend-supplied display label per style — the fallback name for a style
+   * this build has no localized entry for.
+   */
+  backendLabels: Record<string, string>;
+}
+
+/**
+ * The discussion styles this UI should offer, reconciled with what the backend
+ * actually supports (`GET /groupstore/groups/styles`).
+ *
+ * The static `DISCUSSION_STYLES` list was the only source before, which broke in
+ * both directions: a style the backend dropped (or an older backend never had)
+ * was still offered and failed at save time, and a style the backend added
+ * simply never appeared. While the request is in flight — or fails — the static
+ * list stands, so pickers never render empty.
+ *
+ * Backend-only styles are widened to `DiscussionStyle`: the wire format is a
+ * plain string, and every consumer treats an unknown value with fallbacks
+ * (`styleInfo` → undefined, colors → CUSTOM/default).
+ */
+export function useAvailableStyles(): AvailableStyles {
+  const { data } = useDiscussionStyles();
+  return useMemo(() => {
+    const fallback: AvailableStyles = { styles: [...DISCUSSION_STYLES], backendLabels: {} };
+    if (!data || typeof data !== "object") return fallback;
+    const backendKeys = Object.keys(data);
+    if (backendKeys.length === 0) return fallback;
+
+    const known = DISCUSSION_STYLES.filter((s) => backendKeys.includes(s));
+    // A response with none of the known styles is far more likely a contract
+    // change than a backend with zero presets — don't blank every picker over it.
+    if (known.length === 0) return fallback;
+
+    const knownSet = new Set<string>(DISCUSSION_STYLES);
+    const unknown = backendKeys.filter((k) => !knownSet.has(k)) as DiscussionStyle[];
+
+    const backendLabels: Record<string, string> = {};
+    for (const key of backendKeys) {
+      const entry = (data as Record<string, unknown>)[key];
+      if (entry && typeof entry === "object" && typeof (entry as { label?: unknown }).label === "string") {
+        backendLabels[key] = (entry as { label: string }).label;
+      }
+    }
+
+    return { styles: [...known, ...unknown], backendLabels };
+  }, [data]);
 }
 
 export function useCreateGroup() {

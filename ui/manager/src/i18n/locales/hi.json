@@ -2377,6 +2377,7 @@
     "agentFiledCaps": "सीमाएँ",
     "agentFiledCapsValue": "{{perDiscussion}} / चर्चा · {{perTurn}} / बारी",
     "moderatorlessWarning": "ऐसे मॉडरेटर तक सीमित जो इस समूह में नहीं है: {{phases}}। बोलने के क्रम में पहला सदस्य स्थान लेगा।",
+    "roleCoverageWarning": "किसी सदस्य के पास \"{{role}}\" भूमिका नहीं है — {{phases}} बिना वक्ताओं के चलेगा।",
     "delegationDepth": "अधिकतम गहराई",
     "delegationTimeout": "प्रतिनिधि समय-सीमा",
     "secondsShort": "{{seconds}} सेकंड",
@@ -2527,7 +2528,41 @@
     "retroRecordedBadge_one": "{{phase}}: {{count}} सबक टीम मेमोरी में सहेजे गए",
     "retroRecordedBadge_other": "{{phase}}: {{count}} सबक टीम मेमोरी में सहेजे गए",
     "artifactRevisions_one": "{{count}} पूर्व संशोधन",
-    "artifactRevisions_other": "{{count}} पूर्व संशोधन"
+    "artifactRevisions_other": "{{count}} पूर्व संशोधन",
+    "styles": {
+      "ROUND_TABLE": {
+        "label": "गोलमेज़",
+        "flow": "हर सदस्य अपनी राय रखता है, फिर कई दौर में एक-दूसरे की बात आगे बढ़ाता है"
+      },
+      "PEER_REVIEW": {
+        "label": "सहकर्मी समीक्षा",
+        "flow": "सभी पहले अलग-अलग जवाब देते हैं, एक-दूसरे की समीक्षा करते हैं, फिर सुधार करते हैं"
+      },
+      "DEVIL_ADVOCATE": {
+        "label": "विरोधी पक्ष",
+        "flow": "एक सदस्य समूह के रुख़ पर हमला करता है, बाक़ी उसका बचाव करते हैं"
+      },
+      "DELPHI": {
+        "label": "गुमनाम दौर",
+        "flow": "सभी गुमनाम रूप से जवाब देते हैं और हर दौर में सुधार करते हैं, ताकि कोई पहले बोलने वाले से प्रभावित न हो"
+      },
+      "DEBATE": {
+        "label": "पक्ष/विपक्ष बहस",
+        "flow": "एक पक्ष समर्थन में और दूसरा विरोध में तर्क देता है, फिर प्रत्युत्तर और निर्णय"
+      },
+      "TASK_FORCE": {
+        "label": "टास्क फ़ोर्स",
+        "flow": "मॉडरेटर काम की योजना बनाता है, सदस्य समानांतर में काम करते हैं, नतीजों की जाँच होती है"
+      },
+      "NEGOTIATION": {
+        "label": "बातचीत",
+        "flow": "पक्ष तब तक प्रस्ताव बदलते हैं जब तक सहमति न बने; न बनने पर ही मध्यस्थ फ़ैसला करता है"
+      },
+      "CUSTOM": {
+        "label": "अपना प्रवाह",
+        "flow": "वे चरण जो आप ख़ुद तय करते हैं"
+      }
+    }
   },
   "taskBoard": {
     "title": "कार्य बोर्ड",
@@ -2819,6 +2854,9 @@
     "hintDevilAdvocate": "कम से कम एक सदस्य को DEVIL_ADVOCATE भूमिका सौंपें। वे समूह की सहमति को चुनौती देंगे।",
     "hintPeerReview": "प्रत्येक सदस्य व्यक्तिगत रूप से हर दूसरे सदस्य के काम की समीक्षा करता है, फिर प्राप्त प्रतिक्रिया के आधार पर संशोधन करता है।",
     "hintDelphi": "सभी सदस्य स्वतंत्र और गुमनाम रूप से जवाब देते हैं। प्रत्येक दौर के बाद, वे गुमनाम परिणाम देखते हैं और समायोजित कर सकते हैं। अधिकतम मोड़ गुमनाम पुनरावृत्तियों की संख्या नियंत्रित करता है।",
+    "hintNegotiation": "सदस्य अपने हित बताते हैं, प्रस्ताव रखते हैं और फिर मोल-भाव करते हैं — «अधिकतम दौर» तय करता है कि कितने मोल-भाव के दौर चलेंगे। सहमति न बनने पर ही मॉडरेटर मध्यस्थता करता है।",
+    "roleCoverageWarning": "किसी सदस्य के पास \"{{role}}\" भूमिका नहीं है",
+    "roleCoverageHint": "{{phases}} बिना वक्ताओं के चलेगा। «सदस्य» पर वापस जाकर भूमिका फ़ील्ड भरें।",
     "hintTaskForce": "मॉडरेटर एक कार्य योजना बनाता है, एजेंटों को समानांतर में काम सौंपता है, फिर परिणामों की जांच करता है और उन्हें संश्लेषित करता है।",
     "hintCustom": "अपने स्वयं के चरण मैन्युअल रूप से परिभाषित करें। कस्टम चरण बनाने के बाद API के माध्यम से कॉन्फ़िगर किए जा सकते हैं।",
     "hintRoundTable": "सभी सदस्य अपनी राय साझा करते हैं, फिर कई दौरों में एक-दूसरे के विचारों पर चर्चा करते हैं, इसके बाद मॉडरेटर संश्लेषण करता है।",
@@ -2851,27 +2889,29 @@
     "memberTypeHuman": "मानव"
   },
   "groupTemplates": {
-    "advisoryBoard": "Advisory Board",
-    "advisoryBoardDesc": "A panel of expert advisors consulting on strategic decisions.",
-    "codeReview": "Code Review Panel",
-    "codeReviewDesc": "Structured code review with independent opinions, peer critique, and revision.",
-    "riskAssessment": "Risk Assessment",
-    "riskAssessmentDesc": "A panel with a devil's advocate who challenges assumptions.",
-    "forecasting": "Forecasting Panel",
-    "forecastingDesc": "Delphi-style anonymous deliberation for unbiased estimates.",
-    "proCon": "Pro/Con Debate",
-    "proConDesc": "Formal debate with pro and con teams arguing their positions.",
-    "taskForce": "कार्य दल",
-    "taskForceDesc": "लक्ष्य-उन्मुख कार्य समन्वय जहां एजेंट योजना बनाते हैं, समानांतर में कार्य निष्पादित करते हैं, परिणाम सत्यापित करते हैं और निष्कर्ष संश्लेषित करते हैं।",
+    "advisoryBoard": "सलाहकार मंडल",
+    "advisoryBoardDesc": "मार्केटिंग, इंजीनियरिंग, वित्त, क़ानून और रणनीति — पाँच कारोबारी नज़रिये एक ही सवाल पर राय देते हैं, फिर मॉडरेटर सार प्रस्तुत करता है।",
+    "peerReview": "सहकर्मी समीक्षा पैनल",
+    "peerReviewDesc": "समीक्षक आपकी दी हुई सामग्री — मसौदा, योजना या प्रस्ताव — का आकलन करते हैं, एक-दूसरे के आकलन की समीक्षा कर सुधार करते हैं, और मॉडरेटर नतीजा जोड़ता है।",
+    "riskAssessment": "जोखिम आकलन",
+    "riskAssessmentDesc": "हर सदस्य अपनी राय देता है, एक सदस्य जान-बूझकर उलटा पक्ष रखकर अनदेखी कमियाँ उजागर करता है, बाक़ी जवाब देते हैं, फिर मॉडरेटर टिकी हुई बातों का सार देता है।",
+    "forecasting": "स्वतंत्र अनुमान",
+    "forecastingDesc": "सदस्य कई दौर तक गुमनाम रूप से जवाब देते हैं और बीच में केवल गुमनाम नतीजे देखते हैं, इसलिए कोई पहले बोलने वाले से प्रभावित नहीं होता।",
+    "proCon": "पक्ष/विपक्ष बहस",
+    "proConDesc": "दो सदस्य प्रस्ताव के समर्थन में और दो विरोध में तर्क देते हैं, फिर प्रत्युत्तर और मॉडरेटर का निर्णय।",
+    "negotiation": "बातचीत",
+    "negotiationDesc": "दो पक्ष अपने हित बताते हैं, प्रस्ताव रखते हैं और हर दौर में रियायतों का आदान-प्रदान करते हैं; सहमति न बनने पर ही मॉडरेटर मध्यस्थता करता है।",
+    "taskForce": "टास्क फ़ोर्स",
+    "taskForceDesc": "मॉडरेटर लक्ष्य को कामों में बाँटता है, सदस्य उन्हें समानांतर में करते हैं, और मॉडरेटर नतीजों की जाँच कर उन्हें जोड़ता है।",
     "roles": {
       "marketingExpert": "Marketing Expert",
       "techLead": "Tech Lead",
       "financeDirector": "Finance Director",
       "legalCounsel": "Legal Counsel",
       "strategyConsultant": "Strategy Consultant",
-      "seniorEngineer": "Senior Engineer",
-      "architect": "Architect",
-      "securityReviewer": "Security Reviewer",
+      "substanceReviewer": "विषय-वस्तु समीक्षक",
+      "structureReviewer": "संरचना समीक्षक",
+      "riskReviewer": "जोखिम समीक्षक",
       "riskAnalyst": "Risk Analyst",
       "domainExpert": "Domain Expert",
       "devilsAdvocate": "Devil's Advocate",
@@ -2883,6 +2923,8 @@
       "proAdvocate2": "Pro Advocate 2",
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2",
+      "partyA": "पक्ष A",
+      "partyB": "पक्ष B",
       "projectLead": "परियोजना प्रमुख",
       "researcher": "शोधकर्ता",
       "implementer": "कार्यान्वयनकर्ता",

@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { getGroupTemplates, type GroupTemplate } from "@/lib/group-templates";
-import { STYLE_INFO } from "@/lib/api/groups";
+import { styleInfo as localizedStyleInfo } from "@/lib/discussion-styles";
 
 // ─── How It Works Step ───────────────────────────────────────────
 
@@ -92,7 +92,7 @@ function TemplateCard({
   hasAgents: boolean;
 }) {
   const { t } = useTranslation();
-  const styleInfo = STYLE_INFO[template.style];
+  const styleInfo = localizedStyleInfo(template.style, t);
 
   return (
     <Link

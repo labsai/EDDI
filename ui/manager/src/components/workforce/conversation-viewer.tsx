@@ -11,6 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { parseTranscriptContent, truncateContent } from "@/components/groups/group-utils";
 import { DiscussionInsights } from "@/components/groups/discussion-insights";
+import { PersistedTaskBoard } from "@/components/groups/task-board";
+import { DecisionRecordCard } from "@/components/groups/decision-record-card";
+import { hasDisplayableDecision } from "@/lib/group-config";
 import {
   entryTypeInfo,
   type TranscriptEntry,
@@ -608,6 +611,33 @@ function ConversationViewer({
       }
     }
 
+    // Structured decision (F3) — the machine-readable outcome belongs in the
+    // export too, or "who won" survives only as prose.
+    if (hasDisplayableDecision(conversation.decision)) {
+      const d = conversation.decision;
+      lines.push("---");
+      lines.push("");
+      lines.push(`## Decision (${d.type})`);
+      lines.push("");
+      if (d.winner) lines.push(`**Winner:** ${d.winner}`);
+      if (d.outcome) lines.push(`**Outcome:** ${d.outcome}`);
+      if (d.tally && Object.keys(d.tally).length > 0) {
+        lines.push("");
+        for (const [key, value] of Object.entries(d.tally)) {
+          lines.push(`- ${key}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`);
+        }
+      }
+      const dissents = d.dissents ?? [];
+      if (dissents.length > 0) {
+        lines.push("");
+        lines.push("**Minority report:**");
+        for (const dis of dissents) {
+          lines.push(`- ${dis.displayName || dis.agentId}: ${dis.position}`);
+        }
+      }
+      lines.push("");
+    }
+
     // Final synthesized answer (if present and not already in transcript)
     if (
       conversation.synthesizedAnswer?.trim() &&
@@ -692,6 +722,29 @@ function ConversationViewer({
     (e) => e.type === "SYNTHESIS",
   );
 
+  // Structured decision (F3) — rendered directly before the prose synthesis,
+  // because the synthesis body is the judge's reasoning and the finding it
+  // argues for has to come first (same placement as the Manager transcript and
+  // the live board). Anchored to the LAST synthesis entry; trails the
+  // transcript when there is no synthesis element at all.
+  const showDecision = hasDisplayableDecision(conversation.decision);
+  let lastSynthesisIdx = -1;
+  if (showDecision) {
+    for (let i = conversation.transcript.length - 1; i >= 0; i--) {
+      if (conversation.transcript[i]!.type === "SYNTHESIS") {
+        lastSynthesisIdx = i;
+        break;
+      }
+    }
+  }
+  const decisionCard = showDecision ? (
+    <DecisionRecordCard decision={conversation.decision!} />
+  ) : null;
+  const showSynthesisFooter =
+    !!conversation.synthesizedAnswer &&
+    !!parseTranscriptContent(conversation.synthesizedAnswer).trim() &&
+    !hasSynthesisEntry;
+
   return (
     <div className={cn("flex flex-col h-full", className)}>
       {/* ── Header ─────────────────────────────────────────────── */}
@@ -756,6 +809,17 @@ function ConversationViewer({
         aria-label={t("Workforce.history.transcript", "Conversation transcript")}
         className="flex-1 overflow-y-auto ps-5 pe-5 py-4 space-y-3"
       >
+        {/* Persisted task board (TASK_FORCE plans and agent-filed tasks, I5/I18)
+            — the same component the Manager transcript and the live board
+            render. Placed first, like the Manager, so a task-force session
+            opens on WHAT was done before the discussion of it. */}
+        {(conversation.taskList?.tasks?.length ?? 0) > 0 && (
+          <PersistedTaskBoard
+            taskList={conversation.taskList!}
+            memberDisplayNames={conversation.memberDisplayNames}
+          />
+        )}
+
         {/* Shared artifacts, negotiation ledger and windowing summary
             (I17/I11/I9) — the same component the Manager transcript and the
             live board render, so every surface showing a group discussion
@@ -785,8 +849,9 @@ function ConversationViewer({
 
             case "SYNTHESIS":
               return (
-                <div key={`syn-${idx}`}>
+                <div key={`syn-${idx}`} className="space-y-3">
                   {phaseHeader}
+                  {idx === lastSynthesisIdx && decisionCard}
                   <SynthesisEntryCard entry={entry} index={idx} />
                 </div>
               );
@@ -817,11 +882,15 @@ function ConversationViewer({
           }
         })}
 
+        {/* Structured decision when no synthesis element exists to anchor it */}
+        {lastSynthesisIdx < 0 && !showSynthesisFooter && decisionCard}
+
         {/* ── Footer: Synthesized Answer ──────────────────────── */}
-        {conversation.synthesizedAnswer &&
-          parseTranscriptContent(conversation.synthesizedAnswer).trim() &&
-          !hasSynthesisEntry && (
-          <SynthesizedAnswerFooter content={conversation.synthesizedAnswer} />
+        {showSynthesisFooter && (
+          <>
+            {lastSynthesisIdx < 0 && decisionCard}
+            <SynthesizedAnswerFooter content={conversation.synthesizedAnswer!} />
+          </>
         )}
 
         {/* Empty transcript */}

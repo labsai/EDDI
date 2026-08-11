@@ -2,11 +2,14 @@ import { useRef, useEffect, useLayoutEffect, useMemo, useCallback, useState } fr
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronDown, ChevronUp, Copy, CheckCircle2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, CheckCircle2, GitMerge } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { AdvisorResponseCard } from "@/components/workforce/advisor-response-card";
-import type { TranscriptEntry, TranscriptEntryType } from "@/lib/api/groups";
+import { DecisionRecordCard } from "@/components/groups/decision-record-card";
+import { hasDisplayableDecision } from "@/lib/group-config";
+import type { DecisionRecord, TranscriptEntry, TranscriptEntryType } from "@/lib/api/groups";
 import { entryTypeInfo } from "@/lib/api/groups";
+import type { ConvergenceProgress } from "@/hooks/use-group-discussion-stream";
 import { formatMarkdownText } from "@/components/groups/group-utils";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -22,9 +25,22 @@ interface BoardTranscriptProps {
    * Rendered above the first entry, INSIDE the scroll box — this component owns
    * the scroll container, so anything the caller wants to scroll with the
    * transcript (rather than sit pinned above it) has to come through here.
-   * Used for the shared discussion-insights panels.
+   * Used for the shared discussion-insights panels and the task board.
    */
   header?: React.ReactNode;
+  /**
+   * Structured conclusion (EDDI F3) — a debate verdict, vote tally or
+   * negotiation agreement, with its minority report. Rendered directly BEFORE
+   * the prose synthesis, because for a DEBATE the synthesis body IS the judge's
+   * reasoning: the finding it argues for has to come first. The Manager
+   * transcript places it the same way.
+   */
+  decision?: DecisionRecord | null;
+  /**
+   * Live convergence checks per phase index (I2, DELPHI-style repeats). Stream
+   * state only — no persisted field carries it — so history views pass nothing.
+   */
+  convergence?: Map<number, ConvergenceProgress> | null;
 
   className?: string;
 }
@@ -140,23 +156,28 @@ function QuestionBubble({ content, delay }: { content: string | null; delay: num
 function PhaseHeader({
   phaseName,
   phaseType,
+  convergence,
   delay,
 }: {
   phaseName: string | null;
   phaseType?: string;
+  convergence?: ConvergenceProgress;
   delay: number;
 }) {
   const { t } = useTranslation();
   const icon = getPhaseIcon(phaseType);
 
   return (
+    // role="separator" sits on the pill, NOT this container: a separator's
+    // descendants are presentational to assistive tech, and the convergence
+    // badge below is content a screen-reader user needs read out.
     <div
-      role="separator"
-      aria-label={phaseName ?? phaseType ?? t("Workforce.board.phase", "Phase")}
-      className="flex justify-center my-4"
+      className="flex flex-col items-center my-4 gap-1"
       style={{ animation: "br-message-in 250ms ease-out both", animationDelay: `${delay}ms` }}
     >
       <div
+        role="separator"
+        aria-label={phaseName ?? phaseType ?? t("Workforce.board.phase", "Phase")}
         className={cn(
           "flex items-center gap-1.5 ps-3 pe-3 py-1.5 rounded-full",
           "text-[11px] uppercase tracking-wider font-medium",
@@ -166,6 +187,42 @@ function PhaseHeader({
         <span>{icon}</span>
         <span>{phaseName ?? phaseType ?? t("Workforce.board.phase", "Phase")}</span>
       </div>
+      {/* Convergence result (I2) — same i18n keys as the Manager's phase header,
+          so both surfaces describe an early stop with the same words. */}
+      {convergence && (
+        <div
+          className={cn(
+            "flex items-center gap-1.5 rounded-full ps-2.5 pe-2.5 py-0.5 text-[10px]",
+            convergence.converged
+              ? "border border-violet-500/30 bg-violet-500/5 text-violet-600 dark:text-violet-400"
+              : "border border-border/30 bg-secondary/20 text-muted-foreground",
+          )}
+          data-testid={`board-phase-convergence-${convergence.phaseIndex}`}
+        >
+          <GitMerge className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+          <span className="font-medium">
+            {convergence.converged
+              ? t("groups.convergenceReached", "Converged")
+              : t("groups.convergenceChecked", "Convergence check")}
+          </span>
+          {convergence.agreementScore != null && (
+            <span className="tabular-nums">
+              {t("groups.convergenceScore", "agreement {{score}}", {
+                score: convergence.agreementScore.toFixed(2),
+              })}
+            </span>
+          )}
+          {convergence.repeatsSkipped != null && convergence.repeatsSkipped > 0 && (
+            <span>
+              {t("groups.convergenceSkipped", {
+                defaultValue: "· {{count}} further round skipped",
+                defaultValue_other: "· {{count}} further rounds skipped",
+                count: convergence.repeatsSkipped,
+              })}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -360,6 +417,8 @@ function BoardTranscript({
   synthesizedAnswer,
   isLive = false,
   header,
+  decision,
+  convergence,
   className,
 }: BoardTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -387,10 +446,27 @@ function BoardTranscript({
     if (el && isNearBottomRef.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [transcript.length, lastContent, synthesizedAnswer, isLive, header]);
+  }, [transcript.length, lastContent, synthesizedAnswer, isLive, header, decision]);
 
   // Check if transcript already contains a SYNTHESIS entry
   const hasSynthesisEntry = transcript.some((e) => e.type === "SYNTHESIS");
+
+  // Where the structured decision card goes: immediately before the LAST
+  // synthesis element (the judge's reasoning argues FOR the finding, so the
+  // finding comes first). With no synthesis on screen yet — mid-stream, or a
+  // style that never synthesizes — it trails the entries instead.
+  const showDecision = hasDisplayableDecision(decision);
+  // No findLastIndex — the build targets ES2022.
+  let lastSynthesisIdx = -1;
+  if (showDecision) {
+    for (let i = transcript.length - 1; i >= 0; i--) {
+      if (transcript[i]!.type === "SYNTHESIS") {
+        lastSynthesisIdx = i;
+        break;
+      }
+    }
+  }
+  const decisionCard = showDecision ? <DecisionRecordCard decision={decision!} /> : null;
 
   const processedEntries = useMemo(() => {
     let lastPhase = -1;
@@ -420,6 +496,7 @@ function BoardTranscript({
             key={`phase-${entry.phaseIndex}`}
             phaseName={entry.phaseName}
             phaseType={inferPhaseType(entry)}
+            convergence={convergence?.get(entry.phaseIndex)}
             delay={delay}
           />
         ) : null;
@@ -444,8 +521,9 @@ function BoardTranscript({
 
           case "SYNTHESIS":
             return (
-              <div key={`syn-${idx}`}>
+              <div key={`syn-${idx}`} className="space-y-2">
                 {phaseHeader}
+                {idx === lastSynthesisIdx && decisionCard}
                 <SynthesisCard content={entry.content ?? ""} delay={delay} />
               </div>
             );
@@ -464,9 +542,15 @@ function BoardTranscript({
         }
       })}
 
+      {/* Structured decision when no synthesis element exists to anchor it */}
+      {lastSynthesisIdx < 0 && !(synthesizedAnswer && !hasSynthesisEntry) && decisionCard}
+
       {/* Trailing synthesis from synthesizedAnswer prop */}
       {synthesizedAnswer && !hasSynthesisEntry && (
-        <SynthesisCard content={synthesizedAnswer} delay={Math.min(transcript.length * 60, 600)} />
+        <>
+          {lastSynthesisIdx < 0 && decisionCard}
+          <SynthesisCard content={synthesizedAnswer} delay={Math.min(transcript.length * 60, 600)} />
+        </>
       )}
 
       {isLive && <LiveRow />}

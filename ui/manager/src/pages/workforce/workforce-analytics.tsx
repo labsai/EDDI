@@ -166,7 +166,7 @@ function WorkforceAnalytics() {
     if (filters.style) {
       list.push({
         type: "style",
-        label: styleLabel(filters.style),
+        label: styleLabel(filters.style, t),
         value: filters.style,
       });
     }

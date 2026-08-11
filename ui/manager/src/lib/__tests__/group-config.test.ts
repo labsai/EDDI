@@ -9,6 +9,7 @@ import {
   hasDisplayableDecision,
   isValidCostCeiling,
   moderatorlessPhaseNames,
+  uncoveredRolePhases,
   normalizeConvergence,
   normalizeGroupTaskConfig,
 } from "../group-config";
@@ -178,5 +179,99 @@ describe("hasDisplayableDecision", () => {
         decision({ dissents: [{ agentId: "a", displayName: "A", position: "no" }] }),
       ),
     ).toBe(true);
+  });
+});
+
+describe("uncoveredRolePhases", () => {
+  const member = (role: string | null) => ({ role });
+
+  it("is silent when every ROLE:-restricted phase has a member carrying it", () => {
+    expect(
+      uncoveredRolePhases({
+        members: [member("PRO"), member("CON")],
+        phases: null,
+        style: "DEBATE",
+        maxRounds: 1,
+      }),
+    ).toEqual([]);
+  });
+
+  it("reports every DEBATE phase a missing CON would silence", () => {
+    const gaps = uncoveredRolePhases({
+      members: [member("PRO"), member("PRO")],
+      phases: null,
+      style: "DEBATE",
+      maxRounds: 1,
+    });
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]!.role).toBe("CON");
+    // Both CON-addressed preset phases, so the warning names the actual damage.
+    expect(gaps[0]!.phaseNames).toEqual(["Opening Arguments (Con)", "Rebuttal (Con)"]);
+  });
+
+  it("reports a DEVIL_ADVOCATE group without the advocate", () => {
+    const gaps = uncoveredRolePhases({
+      members: [member("Risk"), member("Domain")],
+      phases: null,
+      style: "DEVIL_ADVOCATE",
+      maxRounds: 1,
+    });
+    expect(gaps.map((g) => g.role)).toEqual(["DEVIL_ADVOCATE"]);
+    expect(gaps[0]!.phaseNames).toEqual(["Devil's Challenge"]);
+  });
+
+  it("matches roles case-insensitively and trimmed", () => {
+    expect(
+      uncoveredRolePhases({
+        members: [member(" pro "), member("con")],
+        phases: null,
+        style: "DEBATE",
+        maxRounds: 1,
+      }),
+    ).toEqual([]);
+  });
+
+  it("ignores members with blank roles without crashing", () => {
+    const gaps = uncoveredRolePhases({
+      members: [member(null), member("   ")],
+      phases: null,
+      style: "DEVIL_ADVOCATE",
+      maxRounds: 1,
+    });
+    expect(gaps.map((g) => g.role)).toEqual(["DEVIL_ADVOCATE"]);
+  });
+
+  it("checks explicit phases instead of the preset when stored", () => {
+    const gaps = uncoveredRolePhases({
+      members: [member("PRO")],
+      phases: [
+        {
+          name: "Custom Round",
+          type: "OPINION",
+          participants: "ROLE:REVIEWER",
+          turnOrder: "SEQUENTIAL",
+          contextScope: "FULL",
+          targetEachPeer: false,
+          inputTemplate: null,
+          repeats: 1,
+          requiresApproval: false,
+          convergence: null,
+          allowAbstention: false,
+          skipIf: null,
+        },
+      ],
+      style: "DEBATE",
+      maxRounds: 1,
+    });
+    // The stored phase list wins: DEBATE's PRO/CON phases are not consulted.
+    expect(gaps.map((g) => g.role)).toEqual(["REVIEWER"]);
+  });
+
+  it("has nothing to say for styles without ROLE: phases", () => {
+    for (const style of ["ROUND_TABLE", "PEER_REVIEW", "DELPHI", "TASK_FORCE", "NEGOTIATION"] as const) {
+      expect(
+        uncoveredRolePhases({ members: [], phases: null, style, maxRounds: 2 }),
+      ).toEqual([]);
+    }
   });
 });

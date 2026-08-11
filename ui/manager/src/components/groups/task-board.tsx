@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import type { AwardedBid } from "@/lib/api/groups";
+import type { AwardedBid, SharedTaskList } from "@/lib/api/groups";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -555,5 +555,86 @@ export function TaskBoard({
       </div>
       )}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Persisted variant                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * TaskBoard fed from a conversation's persisted `taskList` rather than live SSE
+ * state — for reloaded/completed discussions, and for surfaces that never hold
+ * the stream (the Workforce board browsing history, the history viewer).
+ *
+ * One component rather than per-surface mappings: the status → column
+ * derivation, the filed-by attribution and the awarded-bid lookup all have
+ * details that are easy to drop when copied (the Manager had all three; the
+ * Workforce surfaces had none of them — they showed no board at all).
+ */
+export function PersistedTaskBoard({
+  taskList,
+  memberDisplayNames,
+}: {
+  taskList: SharedTaskList;
+  /** agentId → display name, so a filed-by attribution is a name and not a hex id. */
+  memberDisplayNames?: Record<string, string>;
+}) {
+  const { t } = useTranslation();
+  const taskPlan = useMemo(
+    () =>
+      taskList.tasks.map((task) => ({
+        id: task.id,
+        subject: task.subject,
+        assignedTo:
+          task.assignedDisplayName || task.assignedAgentId || t("taskBoard.unassigned", "Unassigned"),
+        priority: task.priority,
+        // Only the persisted task list carries this; the live `task_plan_created`
+        // event predates agent-filed tasks and describes the PLAN phase's output,
+        // which by definition has no filer.
+        filedBy: memberDisplayNames?.[task.createdByAgentId ?? ""] ?? task.createdByAgentId ?? null,
+        // Only present for a BID-mode task that received at least one bid — a
+        // BID-mode task nobody bid on falls back to ROLE assignment and is
+        // indistinguishable here from one configured as ROLE from the start.
+        awardedBid: taskList.awardedBids?.[task.id] ?? null,
+      })),
+    [taskList, t, memberDisplayNames],
+  );
+  const tasksInProgress = useMemo(
+    () => new Set(taskList.tasks.filter((task) => task.status === "IN_PROGRESS").map((task) => task.id)),
+    [taskList],
+  );
+  const tasksCompleted = useMemo(
+    () => new Set(taskList.tasks.filter((task) => task.status === "COMPLETED").map((task) => task.id)),
+    [taskList],
+  );
+  const taskVerifications = useMemo(
+    () =>
+      new Map(
+        taskList.tasks
+          .filter((task) => task.status === "VERIFIED" || task.verificationNote != null)
+          .map((task) => [task.id, { passed: task.verified, feedback: task.verificationNote || "" }] as const),
+      ),
+    [taskList],
+  );
+  // Tasks paused for per-task human approval — so the "Awaiting Approval" column
+  // populates on a persisted TASK-granularity pause (undefined when none, to
+  // preserve non-HITL behavior).
+  const tasksAwaitingApproval = useMemo(() => {
+    const s = new Set(
+      taskList.tasks.filter((task) => task.status === "AWAITING_APPROVAL").map((task) => task.id),
+    );
+    return s.size ? s : undefined;
+  }, [taskList]);
+
+  return (
+    <TaskBoard
+      taskPlan={taskPlan}
+      tasksInProgress={tasksInProgress}
+      tasksCompleted={tasksCompleted}
+      taskVerifications={taskVerifications}
+      tasksAwaitingApproval={tasksAwaitingApproval}
+      isStreaming={false}
+    />
   );
 }

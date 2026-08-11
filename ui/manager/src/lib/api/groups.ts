@@ -1691,49 +1691,61 @@ export async function getEnrichedGroupDescriptors(
   return enriched;
 }
 
-/** Style display info */
+/**
+ * Style display info — icons plus the English fallbacks for
+ * `groups.styles.<STYLE>.label` / `.flow`.
+ *
+ * This is the LAST resort, not the display path: render sites resolve the
+ * localized strings through {@link getStyleInfo} (see `@/lib/discussion-styles`).
+ *
+ * Each label names the *shape of the conversation* the engine actually runs —
+ * the phases in `getStylePhases` — and nothing beyond it. Earlier labels
+ * ("Quality Review", "Expert Forecast", "Stress Test") named an outcome the
+ * group cannot promise: every style, whatever its name, is agents writing text
+ * at each other in a fixed turn order.
+ */
 export const STYLE_INFO: Record<
   DiscussionStyle,
   { label: string; flow: string; icon: string }
 > = {
   ROUND_TABLE: {
-    label: "Collaborative Council",
-    flow: "All experts contribute perspectives in structured rounds",
+    label: "Round Table",
+    flow: "Everyone gives their view, then builds on the others over several rounds",
     icon: "🗣️",
   },
   PEER_REVIEW: {
-    label: "Quality Review",
-    flow: "Specialists review and refine each other's analysis",
+    label: "Peer Review",
+    flow: "Members answer on their own, critique each other, then revise",
     icon: "🔍",
   },
   DEVIL_ADVOCATE: {
-    label: "Stress Test",
-    flow: "A challenger rigorously questions every assumption",
+    label: "Devil's Advocate",
+    flow: "One member attacks the group's position, the rest defend it",
     icon: "😈",
   },
   DELPHI: {
-    label: "Expert Forecast",
-    flow: "Independent analysts converge on predictions through rounds",
+    label: "Anonymous Rounds",
+    flow: "Members answer anonymously and revise each round, so nobody anchors on the first speaker",
     icon: "🔮",
   },
   DEBATE: {
-    label: "Structured Deliberation",
-    flow: "Balanced pro/con arguments before critical decisions",
+    label: "Pro/Con Debate",
+    flow: "One side argues for, one against, then rebuttals and a verdict",
     icon: "⚖️",
   },
   TASK_FORCE: {
-    label: "Operational Task Force",
-    flow: "Agents plan, execute, and verify together",
+    label: "Task Force",
+    flow: "The moderator plans the work, members run tasks in parallel, results get verified",
     icon: "🎯",
   },
   NEGOTIATION: {
-    label: "Negotiation Table",
-    flow: "Named parties trade concessions to a deal; an arbiter steps in only if bargaining fails",
+    label: "Negotiation",
+    flow: "Parties trade proposals until they agree; an arbiter steps in only if they do not",
     icon: "🤝",
   },
   CUSTOM: {
-    label: "Custom Framework",
-    flow: "Define your own discussion phases",
+    label: "Custom Flow",
+    flow: "Phases you define yourself",
     icon: "🛠️",
   },
 };

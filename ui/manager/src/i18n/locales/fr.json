@@ -2398,6 +2398,7 @@
     "agentFiledCaps": "Limites",
     "agentFiledCapsValue": "{{perDiscussion}} / discussion · {{perTurn}} / tour",
     "moderatorlessWarning": "Réservé à un modérateur que ce groupe n'a pas : {{phases}}. Le premier membre par ordre de parole prendra le relais.",
+    "roleCoverageWarning": "Aucun membre ne porte le rôle « {{role}} » — {{phases}} se déroulerait sans intervenant.",
     "delegationDepth": "Profondeur max.",
     "delegationTimeout": "Délai du délégué",
     "secondsShort": "{{seconds}}s",
@@ -2552,7 +2553,41 @@
     "retroRecordedBadge_other": "{{phase}} : {{count}} enseignements enregistrés dans la mémoire d'équipe",
     "artifactRevisions_many": "{{count}} révisions précédentes",
     "artifactRevisions_one": "{{count}} révision précédente",
-    "artifactRevisions_other": "{{count}} révisions précédentes"
+    "artifactRevisions_other": "{{count}} révisions précédentes",
+    "styles": {
+      "ROUND_TABLE": {
+        "label": "Table ronde",
+        "flow": "Chacun donne son point de vue, puis s'appuie sur les autres au fil des tours"
+      },
+      "PEER_REVIEW": {
+        "label": "Revue par les pairs",
+        "flow": "Chacun répond seul, critique les autres, puis révise sa réponse"
+      },
+      "DEVIL_ADVOCATE": {
+        "label": "Avocat du diable",
+        "flow": "Un membre attaque la position du groupe, les autres la défendent"
+      },
+      "DELPHI": {
+        "label": "Tours anonymes",
+        "flow": "Chacun répond anonymement et révise à chaque tour, sans se caler sur le premier intervenant"
+      },
+      "DEBATE": {
+        "label": "Débat pour/contre",
+        "flow": "Un camp plaide pour, l'autre contre, puis viennent les répliques et le verdict"
+      },
+      "TASK_FORCE": {
+        "label": "Groupe de travail",
+        "flow": "Le modérateur planifie, les membres traitent les tâches en parallèle, les résultats sont vérifiés"
+      },
+      "NEGOTIATION": {
+        "label": "Négociation",
+        "flow": "Les parties échangent des propositions jusqu'à l'accord ; un arbitre n'intervient qu'à défaut"
+      },
+      "CUSTOM": {
+        "label": "Déroulé personnalisé",
+        "flow": "Des phases que vous définissez vous-même"
+      }
+    }
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -2844,6 +2879,9 @@
     "hintDevilAdvocate": "Attribuez le rôle DEVIL_ADVOCATE à au moins un membre. Il contestera le consensus du groupe.",
     "hintPeerReview": "Chaque membre critique individuellement le travail de tous les autres, puis révise en fonction des retours reçus.",
     "hintDelphi": "Tous les membres répondent de manière indépendante et anonyme. Après chaque tour, ils voient les résultats anonymes et peuvent ajuster. Tours max. contrôle le nombre d'itérations anonymes.",
+    "hintNegotiation": "Les membres exposent leurs intérêts, déposent des propositions puis négocient : « Tours max » fixe le nombre de tours de marchandage. Le modérateur n'arbitre que faute d'accord.",
+    "roleCoverageWarning": "Aucun membre n'a le rôle « {{role}} »",
+    "roleCoverageHint": "{{phases}} se déroulerait sans intervenant. Revenez à « Membres » et renseignez le champ rôle.",
     "hintTaskForce": "Le modérateur crée un plan de tâches, assigne le travail aux agents en parallèle, puis vérifie et synthétise les résultats.",
     "hintCustom": "Définissez vos propres phases manuellement. Les phases personnalisées peuvent être configurées via l'API après la création.",
     "hintRoundTable": "Tous les membres partagent leurs opinions, puis discutent des points de vue des autres sur plusieurs tours avant que le modérateur ne synthétise.",
@@ -2876,27 +2914,29 @@
     "memberTypeHuman": "Humain"
   },
   "groupTemplates": {
-    "advisoryBoard": "Conseil consultatif",
-    "advisoryBoardDesc": "Un panel de conseillers experts pour les décisions stratégiques.",
-    "codeReview": "Panel de revue de code",
-    "codeReviewDesc": "Revue de code structurée avec opinions indépendantes et critique par les pairs.",
+    "advisoryBoard": "Comité consultatif",
+    "advisoryBoardDesc": "Cinq perspectives métier — marketing, technique, finance, juridique, stratégie — se prononcent sur la même question, puis le modérateur fait la synthèse.",
+    "peerReview": "Comité de relecture",
+    "peerReviewDesc": "Les relecteurs évaluent ce que vous soumettez — un brouillon, un plan, une proposition —, critiquent l'évaluation des autres, révisent, et le modérateur assemble le résultat.",
     "riskAssessment": "Évaluation des risques",
-    "riskAssessmentDesc": "Panel avec un avocat du diable qui remet en question les hypothèses.",
-    "forecasting": "Panel de prévision",
-    "forecastingDesc": "Délibération anonyme de style Delphi pour des estimations impartiales.",
+    "riskAssessmentDesc": "Chacun donne sa lecture, un membre défend la position inverse pour révéler les angles morts, les autres répondent, puis le modérateur résume ce qui a tenu.",
+    "forecasting": "Estimations indépendantes",
+    "forecastingDesc": "Les membres répondent anonymement sur plusieurs tours et ne voient entre-temps que des résultats anonymisés : personne ne se cale sur le premier intervenant.",
     "proCon": "Débat pour/contre",
-    "proConDesc": "Débat structuré avec équipes pour et contre, suivi de réfutations.",
+    "proConDesc": "Deux membres plaident pour la proposition et deux contre, suivis de répliques et du verdict du modérateur.",
+    "negotiation": "Négociation",
+    "negotiationDesc": "Deux parties exposent leurs intérêts, déposent des propositions et échangent des concessions tour après tour ; le modérateur n'arbitre que faute d'accord.",
     "taskForce": "Groupe de travail",
-    "taskForceDesc": "Orchestration orientée objectif où les agents planifient, exécutent des tâches en parallèle, vérifient les résultats et synthétisent les conclusions.",
+    "taskForceDesc": "Le modérateur découpe l'objectif en tâches, les membres les traitent en parallèle, puis il vérifie et assemble les résultats.",
     "roles": {
       "marketingExpert": "Expert marketing",
       "techLead": "Lead technique",
       "financeDirector": "Directeur financier",
       "legalCounsel": "Conseiller juridique",
       "strategyConsultant": "Consultant en stratégie",
-      "seniorEngineer": "Ingénieur senior",
-      "architect": "Architecte",
-      "securityReviewer": "Réviseur sécurité",
+      "substanceReviewer": "Relecteur du fond",
+      "structureReviewer": "Relecteur de la structure",
+      "riskReviewer": "Relecteur des risques",
       "riskAnalyst": "Analyste risques",
       "domainExpert": "Expert domaine",
       "devilsAdvocate": "Avocat du diable",
@@ -2908,6 +2948,8 @@
       "proAdvocate2": "Avocat pour 2",
       "conAdvocate1": "Avocat contre 1",
       "conAdvocate2": "Avocat contre 2",
+      "partyA": "Partie A",
+      "partyB": "Partie B",
       "projectLead": "Chef de projet",
       "researcher": "Chercheur",
       "implementer": "Développeur",

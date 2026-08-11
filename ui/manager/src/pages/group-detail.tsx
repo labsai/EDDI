@@ -30,8 +30,8 @@ import { BackLink } from "@/components/shared/back-link";
 import { ErrorState } from "@/components/shared/error-state";
 import { cn } from "@/lib/utils";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
+import { styleInfo as localizedStyleInfo } from "@/lib/discussion-styles";
 import {
-  STYLE_INFO,
   followupGroupMember,
   closeGroupConversation,
   type DiscussionStyle,
@@ -396,7 +396,7 @@ export function GroupDetailPage() {
     );
   }
 
-  const styleInfo = STYLE_INFO[groupConfig.style] ?? STYLE_INFO.ROUND_TABLE;
+  const styleInfo = localizedStyleInfo(groupConfig.style, t) ?? localizedStyleInfo("ROUND_TABLE", t)!;
   const styleTheme = STYLE_THEME[groupConfig.style as DiscussionStyle] ?? STYLE_THEME.ROUND_TABLE;
 
   // Normalize: ensure members is always an array so downstream components

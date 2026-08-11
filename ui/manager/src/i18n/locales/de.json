@@ -2377,6 +2377,7 @@
     "agentFiledCaps": "Grenzen",
     "agentFiledCapsValue": "{{perDiscussion}} / Diskussion · {{perTurn}} / Zug",
     "moderatorlessWarning": "Auf einen Moderator beschränkt, den diese Gruppe nicht hat: {{phases}}. Das erste Mitglied nach Sprechreihenfolge springt ein.",
+    "roleCoverageWarning": "Kein Mitglied trägt die Rolle „{{role}}“ – {{phases}} würde ohne Sprecher ablaufen.",
     "delegationDepth": "Max. Tiefe",
     "delegationTimeout": "Delegations-Timeout",
     "secondsShort": "{{seconds}}s",
@@ -2527,7 +2528,41 @@
     "retroRecordedBadge_one": "{{phase}}: {{count}} Erkenntnis im Team-Gedächtnis gespeichert",
     "retroRecordedBadge_other": "{{phase}}: {{count}} Erkenntnisse im Team-Gedächtnis gespeichert",
     "artifactRevisions_one": "{{count}} frühere Revision",
-    "artifactRevisions_other": "{{count}} frühere Revisionen"
+    "artifactRevisions_other": "{{count}} frühere Revisionen",
+    "styles": {
+      "ROUND_TABLE": {
+        "label": "Gesprächsrunde",
+        "flow": "Alle äußern ihre Sicht und bauen über mehrere Runden aufeinander auf"
+      },
+      "PEER_REVIEW": {
+        "label": "Gegenseitige Prüfung",
+        "flow": "Alle antworten zunächst allein, kritisieren sich gegenseitig und überarbeiten dann"
+      },
+      "DEVIL_ADVOCATE": {
+        "label": "Advocatus Diaboli",
+        "flow": "Ein Mitglied greift die Position der Gruppe an, die anderen verteidigen sie"
+      },
+      "DELPHI": {
+        "label": "Anonyme Runden",
+        "flow": "Alle antworten anonym und überarbeiten in jeder Runde – niemand richtet sich nach dem ersten Beitrag"
+      },
+      "DEBATE": {
+        "label": "Pro/Contra-Debatte",
+        "flow": "Eine Seite argumentiert dafür, eine dagegen, danach folgen Erwiderungen und ein Urteil"
+      },
+      "TASK_FORCE": {
+        "label": "Einsatzgruppe",
+        "flow": "Die Moderation plant die Arbeit, die Mitglieder erledigen Aufgaben parallel, die Ergebnisse werden geprüft"
+      },
+      "NEGOTIATION": {
+        "label": "Verhandlung",
+        "flow": "Die Parteien tauschen Vorschläge aus, bis sie sich einigen; nur andernfalls entscheidet eine Schlichtung"
+      },
+      "CUSTOM": {
+        "label": "Eigener Ablauf",
+        "flow": "Phasen, die Sie selbst festlegen"
+      }
+    }
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -2627,6 +2662,9 @@
     "hintDevilAdvocate": "Weisen Sie mindestens einem Mitglied die Rolle DEVIL_ADVOCATE zu. Es wird den Konsens der Gruppe hinterfragen.",
     "hintPeerReview": "Jedes Mitglied kritisiert individuell die Arbeit aller anderen und überarbeitet dann basierend auf dem erhaltenen Feedback.",
     "hintDelphi": "Alle Mitglieder antworten unabhängig und anonym. Nach jeder Runde sehen sie die anonymen Ergebnisse und können anpassen. Max. Runden steuert die Anzahl der anonymen Iterationen.",
+    "hintNegotiation": "Die Mitglieder nennen ihre Interessen, legen Vorschläge vor und feilschen dann – „Max. Runden“ legt fest, wie viele Verhandlungsrunden laufen. Die Moderation schlichtet nur, wenn keine Einigung zustande kommt.",
+    "roleCoverageWarning": "Kein Mitglied hat die Rolle „{{role}}“",
+    "roleCoverageHint": "{{phases}} würde ohne Sprecher ablaufen. Gehen Sie zurück zu „Mitglieder“ und setzen Sie das Rollenfeld.",
     "hintTaskForce": "Der Moderator erstellt einen Aufgabenplan, weist Arbeit parallel an Agenten zu, überprüft dann die Ergebnisse und fasst sie zusammen.",
     "hintCustom": "Definieren Sie Ihre eigenen Phasen manuell. Benutzerdefinierte Phasen können nach der Erstellung über die API konfiguriert werden.",
     "hintRoundTable": "Alle Mitglieder teilen ihre Meinungen, diskutieren dann die Ansichten der anderen über mehrere Runden, bevor der Moderator zusammenfasst.",
@@ -2660,26 +2698,28 @@
   },
   "groupTemplates": {
     "advisoryBoard": "Beratungsgremium",
-    "advisoryBoardDesc": "Ein Expertengremium für strategische Entscheidungen. Jeder Agent vertritt eine andere Geschäftsfunktion.",
-    "codeReview": "Code-Review-Panel",
-    "codeReviewDesc": "Strukturiertes Code-Review mit unabhängigen Meinungen, Peer-Kritik, Überarbeitung und Gesamtbewertung.",
+    "advisoryBoardDesc": "Fünf Geschäftsperspektiven – Marketing, Technik, Finanzen, Recht, Strategie – beurteilen dieselbe Frage, danach fasst die Moderation zusammen.",
+    "peerReview": "Peer-Review-Runde",
+    "peerReviewDesc": "Die Prüfenden beurteilen, was Sie einbringen – Entwurf, Plan oder Vorschlag –, kritisieren die Beurteilungen der anderen, überarbeiten sie, und die Moderation führt alles zusammen.",
     "riskAssessment": "Risikobewertung",
-    "riskAssessmentDesc": "Panel mit einem Advocatus Diaboli, der Annahmen hinterfragt und blinde Flecken aufdeckt.",
-    "forecasting": "Prognosepanel",
-    "forecastingDesc": "Anonyme Delphi-Beratung zur Vermeidung von Gruppendenken und für unvoreingenommene Einschätzungen.",
+    "riskAssessmentDesc": "Alle geben ihre Einschätzung ab, ein Mitglied vertritt bewusst die Gegenposition, die anderen halten dagegen, danach fasst die Moderation zusammen, was standgehalten hat.",
+    "forecasting": "Unabhängige Schätzungen",
+    "forecastingDesc": "Die Mitglieder antworten über mehrere Runden anonym und sehen dazwischen nur anonymisierte Ergebnisse – niemand richtet sich nach dem ersten Beitrag.",
     "proCon": "Pro/Contra-Debatte",
-    "proConDesc": "Formale Debatte mit Pro- und Contra-Teams, gefolgt von Erwiderungen und einem Urteil.",
+    "proConDesc": "Zwei Mitglieder argumentieren für den Vorschlag, zwei dagegen, danach folgen Erwiderungen und ein Urteil der Moderation.",
+    "negotiation": "Verhandlung",
+    "negotiationDesc": "Zwei Parteien nennen ihre Interessen, legen Vorschläge vor und tauschen Runde für Runde Zugeständnisse aus; die Moderation schlichtet nur, wenn keine Einigung zustande kommt.",
     "taskForce": "Einsatzgruppe",
-    "taskForceDesc": "Zielorientierte Aufgabenorchestrierung, bei der Agenten planen, Aufgaben parallel ausführen, Ergebnisse überprüfen und Erkenntnisse zusammenfassen.",
+    "taskForceDesc": "Die Moderation zerlegt das Ziel in Aufgaben, die Mitglieder bearbeiten sie parallel, danach prüft und verbindet die Moderation die Ergebnisse.",
     "roles": {
       "marketingExpert": "Marketing-Experte",
       "techLead": "Tech-Lead",
       "financeDirector": "Finanzdirektor",
       "legalCounsel": "Rechtsberater",
       "strategyConsultant": "Strategieberater",
-      "seniorEngineer": "Senior-Ingenieur",
-      "architect": "Architekt",
-      "securityReviewer": "Sicherheitsprüfer",
+      "substanceReviewer": "Inhaltsprüfer",
+      "structureReviewer": "Strukturprüfer",
+      "riskReviewer": "Risikoprüfer",
       "riskAnalyst": "Risikoanalyst",
       "domainExpert": "Fachexperte",
       "devilsAdvocate": "Advocatus Diaboli",
@@ -2691,6 +2731,8 @@
       "proAdvocate2": "Pro-Vertreter 2",
       "conAdvocate1": "Contra-Vertreter 1",
       "conAdvocate2": "Contra-Vertreter 2",
+      "partyA": "Partei A",
+      "partyB": "Partei B",
       "projectLead": "Projektleiter",
       "researcher": "Forscher",
       "implementer": "Umsetzer",

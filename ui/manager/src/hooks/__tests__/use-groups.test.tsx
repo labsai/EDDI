@@ -9,6 +9,7 @@ import {
   useEnrichedGroupDescriptors,
   useGroup,
   useDiscussionStyles,
+  useAvailableStyles,
   useCreateGroup,
   useUpdateGroup,
   useDeleteGroup,
@@ -89,6 +90,73 @@ describe("useDiscussionStyles", () => {
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toBeDefined();
+  });
+});
+
+describe("useAvailableStyles", () => {
+  it("filters the picker list to what the backend reports", async () => {
+    server.use(
+      http.get("*/groupstore/groups/styles", () => {
+        return HttpResponse.json({
+          ROUND_TABLE: { label: "Collaborative Council", phases: [] },
+          DEBATE: { label: "Structured Deliberation", phases: [] },
+          CUSTOM: { label: "Custom Framework", phases: [] },
+        });
+      }),
+    );
+    const { result } = renderHook(() => useAvailableStyles(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() =>
+      expect(result.current.styles).toEqual(["ROUND_TABLE", "DEBATE", "CUSTOM"]),
+    );
+  });
+
+  it("appends backend-only styles with their backend label", async () => {
+    server.use(
+      http.get("*/groupstore/groups/styles", () => {
+        return HttpResponse.json({
+          ROUND_TABLE: { label: "Collaborative Council", phases: [] },
+          FISHBOWL: { label: "Fishbowl Panel", phases: [] },
+        });
+      }),
+    );
+    const { result } = renderHook(() => useAvailableStyles(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() =>
+      expect(result.current.styles).toEqual(["ROUND_TABLE", "FISHBOWL"]),
+    );
+    expect(result.current.backendLabels["FISHBOWL"]).toBe("Fishbowl Panel");
+  });
+
+  it("falls back to the full static list while loading or on error", async () => {
+    server.use(
+      http.get("*/groupstore/groups/styles", () => {
+        return HttpResponse.json({ message: "boom" }, { status: 500 });
+      }),
+    );
+    const { result } = renderHook(() => useAvailableStyles(), {
+      wrapper: createWrapper(),
+    });
+    // Immediately (loading) and after the error settles: the static list.
+    expect(result.current.styles).toContain("ROUND_TABLE");
+    expect(result.current.styles).toContain("NEGOTIATION");
+    expect(result.current.styles).toContain("CUSTOM");
+    await waitFor(() => expect(result.current.styles.length).toBeGreaterThan(6));
+  });
+
+  it("ignores a response that shares no style with this build", async () => {
+    server.use(
+      http.get("*/groupstore/groups/styles", () => {
+        return HttpResponse.json({ SOMETHING_ELSE: { label: "?", phases: [] } });
+      }),
+    );
+    const { result } = renderHook(() => useAvailableStyles(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.styles).toContain("ROUND_TABLE"));
+    expect(result.current.styles).not.toContain("SOMETHING_ELSE");
   });
 });
 

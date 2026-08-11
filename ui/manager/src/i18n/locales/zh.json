@@ -2377,6 +2377,7 @@
     "agentFiledCaps": "上限",
     "agentFiledCapsValue": "{{perDiscussion}} / 讨论 · {{perTurn}} / 轮次",
     "moderatorlessWarning": "限定由本组未指定的主持人执行：{{phases}}。将由发言顺序中的第一位成员代替。",
+    "roleCoverageWarning": "没有成员承担“{{role}}”角色——{{phases}} 将在无人发言的情况下进行。",
     "delegationDepth": "最大深度",
     "delegationTimeout": "委派超时",
     "secondsShort": "{{seconds}}秒",
@@ -2527,7 +2528,41 @@
     "retroRecordedBadge_other": "{{phase}}：已将 {{count}} 条经验保存到团队记忆",
     "retroRecordedBadge_one": "{{phase}}：已将 {{count}} 条经验保存到团队记忆",
     "artifactRevisions_other": "{{count}} 个先前版本",
-    "artifactRevisions_one": "{{count}} 个先前版本"
+    "artifactRevisions_one": "{{count}} 个先前版本",
+    "styles": {
+      "ROUND_TABLE": {
+        "label": "圆桌讨论",
+        "flow": "每位成员先各自表态，再在多轮中相互补充"
+      },
+      "PEER_REVIEW": {
+        "label": "同行评审",
+        "flow": "成员各自作答，互相点评，然后修改"
+      },
+      "DEVIL_ADVOCATE": {
+        "label": "唱反调",
+        "flow": "一位成员反驳小组的立场，其余成员为其辩护"
+      },
+      "DELPHI": {
+        "label": "匿名轮次",
+        "flow": "成员匿名作答并逐轮修改，不受第一位发言者影响"
+      },
+      "DEBATE": {
+        "label": "正反辩论",
+        "flow": "一方赞成、一方反对，随后进行反驳并给出裁定"
+      },
+      "TASK_FORCE": {
+        "label": "专项小组",
+        "flow": "主持人制定计划，成员并行执行任务，结果随后接受核验"
+      },
+      "NEGOTIATION": {
+        "label": "谈判",
+        "flow": "各方来回提出方案直到达成一致；谈不拢时才由仲裁者裁决"
+      },
+      "CUSTOM": {
+        "label": "自定义流程",
+        "flow": "由你自行定义的阶段"
+      }
+    }
   },
   "taskBoard": {
     "title": "任务看板",
@@ -2819,6 +2854,9 @@
     "hintDevilAdvocate": "至少为一名成员分配 DEVIL_ADVOCATE 角色。他们将挑战小组的共识。",
     "hintPeerReview": "每位成员独立评审其他所有成员的工作，然后根据收到的反馈进行修订。",
     "hintDelphi": "所有成员独立且匿名地回应。每轮结束后，他们可以看到匿名结果并进行调整。最大轮次控制匿名迭代的次数。",
+    "hintNegotiation": "成员先说明各自诉求，提出方案，然后展开磋商；“最大轮数”决定磋商进行几轮。只有谈不拢时，主持人才会出面裁决。",
+    "roleCoverageWarning": "没有成员承担“{{role}}”角色",
+    "roleCoverageHint": "{{phases}} 将在无人发言的情况下进行。请返回“成员”并填写角色字段。",
     "hintTaskForce": "主持人创建任务计划，将工作并行分配给代理，然后验证并综合结果。",
     "hintCustom": "手动定义您自己的阶段。自定义阶段可以在创建后通过 API 进行配置。",
     "hintRoundTable": "所有成员分享意见，然后在多轮中讨论彼此的观点，最后由主持人进行综合。",
@@ -2851,27 +2889,29 @@
     "memberTypeHuman": "人类"
   },
   "groupTemplates": {
-    "advisoryBoard": "Advisory Board",
-    "advisoryBoardDesc": "A panel of expert advisors consulting on strategic decisions.",
-    "codeReview": "Code Review Panel",
-    "codeReviewDesc": "Structured code review with independent opinions, peer critique, and revision.",
-    "riskAssessment": "Risk Assessment",
-    "riskAssessmentDesc": "A panel with a devil's advocate who challenges assumptions.",
-    "forecasting": "Forecasting Panel",
-    "forecastingDesc": "Delphi-style anonymous deliberation for unbiased estimates.",
-    "proCon": "Pro/Con Debate",
-    "proConDesc": "Formal debate with pro and con teams arguing their positions.",
-    "taskForce": "任务小组",
-    "taskForceDesc": "面向目标的任务编排，代理进行规划、并行执行任务、验证结果并综合发现。",
+    "advisoryBoard": "顾问团",
+    "advisoryBoardDesc": "市场、技术、财务、法务、战略五种视角针对同一个问题发表看法，最后由主持人汇总。",
+    "peerReview": "同行评审小组",
+    "peerReviewDesc": "评审者评估你提供的材料——草稿、计划或提案，互相点评彼此的评估并修改，最后由主持人整合。",
+    "riskAssessment": "风险评估",
+    "riskAssessmentDesc": "每位成员先给出判断，一位成员刻意提出相反意见以暴露盲点，其余成员回应，最后由主持人总结站得住的结论。",
+    "forecasting": "独立估计",
+    "forecastingDesc": "成员分多轮匿名作答，其间只看到匿名结果，因此不会受第一位发言者影响。",
+    "proCon": "正反辩论",
+    "proConDesc": "两位成员支持该提案、两位反对，随后进行反驳并由主持人给出裁定。",
+    "negotiation": "谈判",
+    "negotiationDesc": "双方说明各自诉求，提出方案并逐轮交换让步；只有谈不拢时，主持人才会出面裁决。",
+    "taskForce": "专项小组",
+    "taskForceDesc": "主持人将目标拆成任务，成员并行完成，再由主持人核验并汇总结果。",
     "roles": {
       "marketingExpert": "Marketing Expert",
       "techLead": "Tech Lead",
       "financeDirector": "Finance Director",
       "legalCounsel": "Legal Counsel",
       "strategyConsultant": "Strategy Consultant",
-      "seniorEngineer": "Senior Engineer",
-      "architect": "Architect",
-      "securityReviewer": "Security Reviewer",
+      "substanceReviewer": "内容评审",
+      "structureReviewer": "结构评审",
+      "riskReviewer": "风险评审",
       "riskAnalyst": "Risk Analyst",
       "domainExpert": "Domain Expert",
       "devilsAdvocate": "Devil's Advocate",
@@ -2883,6 +2923,8 @@
       "proAdvocate2": "Pro Advocate 2",
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2",
+      "partyA": "甲方",
+      "partyB": "乙方",
       "projectLead": "项目负责人",
       "researcher": "研究员",
       "implementer": "执行者",
