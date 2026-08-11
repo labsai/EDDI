@@ -22,7 +22,7 @@ Typically, Behavior Rules decide **when** to make an API call by triggering an a
 - **Business workflows**: Processing payments, sending notifications, triggering events
 - **Multi-step APIs**: First call gets auth token, second call uses it to access protected resources
 - **Analytics**: Sending conversation data to external analytics platforms
-- **Self-modification**: The Platform Operator uses HttpCalls — generated from EDDI's own OpenAPI spec — to create other agents via EDDI's own API
+- **Self-modification**: The Platform Operator calls EDDI's own API to create other agents, through configs generated from EDDI's OpenAPI spec by `McpApiToolBuilder`. Those are the same documents this page describes: the store and URI call them `apicalls`, the workflow step and file extension say `httpcalls` (see AGENTS.md §5.5)
 
 ### Key Features
 

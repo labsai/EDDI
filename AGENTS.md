@@ -624,7 +624,7 @@ When designing any new feature, always consider these before finalizing the desi
 | `docs/`                                     | Markdown documentation, published at docs.labs.ai           |
 | `docker-compose.yml`                        | EDDI + MongoDB local setup                                  |
 | `mise.toml`                                 | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
-| `docs/agent-configs/`                       | Worked agent config sources — reference for AI, and swept by two unit tests (§5.6) |
+| `docs/agent-configs/`                       | Worked agent config sources — reference for AI; partially swept by two unit tests (scope in §5.6) |
 | `src/main/java/.../httpclient/SafeHttpClient.java` | Centralized SSRF-safe HTTP client wrapper              |
 | `src/main/java/.../security/AuthStartupGuard.java` | Production auth enforcement guard                      |
 | `.env.example`                              | Docker Compose env var reference (copy to `.env`; optional for basic local dev) |
@@ -936,9 +936,9 @@ Always use v6 canonical URIs in new configs:
 - Property setter capturing free-text input via `{memory.current.input}` (it uses `scope: "conversation"` throughout and delegates secret vaulting to the receiving `create_agent` HTTP call — the wizard pattern from §5.4, deliberately **not** `scope: "secret"`)
 - HTTP call template syntax
 - Output with quick replies
-- Provider-aware branching (local vs. cloud LLM providers)
+- Provider-aware branching (local vs. cloud LLM providers). Its chooser offers 11 options, which is not the same as the "12 providers" quoted elsewhere — the two are counted differently (the chooser splits `gemini` / `gemini_vertex`; the platform figure folds in OpenAI-compatible endpoints such as DeepSeek and Cohere). Don't reconcile them by editing this fixture: it is a worked example, not a provider catalogue. `docs/langchain.md` is the source of truth for what EDDI supports.
 
-Both `StrictBoundaryShippedConfigsTest` and `RuleSetStoreShippedRulesetsTest` sweep `docs/agent-configs`, so this config is validated on every unit run — keep it parseable and save-time-valid.
+Two unit tests sweep `docs/agent-configs`, so breaking this config fails the plain unit run — but mind what they actually check. `StrictBoundaryShippedConfigsTest` parses only files whose suffix is in its `BY_SUFFIX` map (descriptors, patches and unmapped names are counted as *skipped*, not passed), and `RuleSetStoreShippedRulesetsTest` validates only documents containing `behaviorGroups`. Neither opens a ZIP. So a green sweep means "the config documents this fixture supplies still parse and still save", not "every file here is valid".
 
 ---
 

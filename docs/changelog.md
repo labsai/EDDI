@@ -94,6 +94,44 @@ mentions — they are dated records of what was true at the time, not live docum
   *conversation* line ("auto-encrypted in the vault when available") is accurate — it describes the
   receiving setup API's behavior, caveat included — and stays.
 
+**CodeRabbit review on #672 — 13 findings, 7 fixed, 6 declined as pre-existing:**
+
+Fixed, all genuinely introduced or worsened by this PR:
+
+- **`README.md` still promised a starter agent in two places I had missed** — the Cloud-Native
+  feature bullet said the installer "sets up EDDI + database + starter agent via Docker". Neither
+  string contains "Agent Father", which is why the original sweep did not catch them: a removal
+  sweep has to grep for what the thing *did*, not only what it was called.
+- **`README.md` gained a duplicate Human-in-the-Loop row.** Replacing the deleted deep-dive link
+  with `docs/hitl.md` created a second entry; line 456 already had one, with a better description.
+  The row is dropped rather than reworded.
+- **The descriptor claimed 12 LLM providers; the fixture's chooser offers 11.** Corrected, and
+  AGENTS.md §5.6 now explains *why the two numbers differ* rather than just restating one — the
+  chooser splits `gemini` / `gemini_vertex` while the platform figure folds in OpenAI-compatible
+  endpoints (DeepSeek, Cohere). A first draft of that note asserted the fixture "predates one
+  provider"; that was invented, and was removed before commit.
+- **AGENTS.md overstated what the sweeps guarantee.** "Validated on every unit run — keep it
+  parseable and save-time-valid" is not what the tests do: `StrictBoundaryShippedConfigsTest` parses
+  only `BY_SUFFIX`-mapped names (its own output reads "32 configs checked, **24 skipped**"),
+  `RuleSetStoreShippedRulesetsTest` only touches documents containing `behaviorGroups`, and neither
+  opens a ZIP. Reworded to say what a green sweep actually means.
+- **`docs/httpcalls.md` mixed the two names for one thing.** Now states the duality explicitly
+  (`apicalls` in the store and URI, `httpcalls` in the workflow step and file extension) instead of
+  picking one and leaving `architecture.md` looking like it describes something else.
+- **Both reflection helpers still took `getDeclaredConstructors()[0]`.** Deriving the *arity*
+  dynamically fixed the crash but not the selection: an added overload could pick the wrong
+  constructor. Both now assert exactly one declared constructor first, so that failure is a clear
+  message rather than a confusing instantiation.
+
+Declined — all in the fixture this PR only *renamed*, none authored here: a missing free-text
+fallback in the provider-selection rules; the plaintext `apiKey` held in conversation scope (the
+deliberate, documented §5.4 pattern, and §5.6 already says so); retry configured on a
+non-idempotent `POST /setup`; no `${caller:token}` header on a call to EDDI's own API (which §5.4
+does recommend); and unescaped property interpolation in a hand-assembled JSON body. Plus
+`install.ps1` lacking a UTF-8 BOM while containing 16 emoji — real, but true on `main` too, and
+this PR *removed* two of those emoji rather than adding any. These deserve their own pass: the
+rename arguably raises the stakes, since the config is now explicitly the canonical reference.
+
 ---
 
 

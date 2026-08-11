@@ -410,7 +410,7 @@ EDDI implements open standards — not proprietary APIs:
 
 ### 🚀 Cloud-Native & Observable
 
-- 🐳 **One-Command Install** — Interactive wizard sets up EDDI + database + starter agent via Docker
+- 🐳 **One-Command Install** — Interactive wizard sets up EDDI + database via Docker
 - ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, HPA, PDB, NetworkPolicy
 - 📊 **Prometheus & Grafana** — 50+ Micrometer metrics at `/q/metrics` (tools, vault, memory, scheduling, conversations). Pre-built [Grafana dashboard](docs/monitoring/eddi-grafana-dashboard.json) included
 - 🔭 **OpenTelemetry Tracing** — Per-task distributed traces via OTLP (Jaeger, Tempo, Datadog). Every pipeline task emits spans with `task.id`, `task.type`, `conversation.id`, and `agent.id`
@@ -466,7 +466,6 @@ EDDI implements open standards — not proprietary APIs:
 | **[Kubernetes](docs/kubernetes.md)**                         | Deploy with Kustomize or Helm                      |
 | **[Monitoring & Tracing](docs/monitoring/monitoring-guide.md)** | Prometheus, Grafana, OpenTelemetry, alerting     |
 | **[Red Hat & OpenShift](docs/redhat-openshift.md)**          | RHEL support, certified container, automated release |
-| **[Human-in-the-Loop](docs/hitl.md)**                        | Approval gates for turns and individual tool calls  |
 | **[Full Documentation](https://docs.labs.ai/)**              | Complete documentation site                        |
 
 ---
