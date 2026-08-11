@@ -641,4 +641,8 @@ Developer tests:
 
 ## Sample Agent
 
-Download the [Weather Agent v2 (Postman collection)](.gitbook/assets/weather_bot_v2.zip) to try the full example.
+> **Run it yourself.** The GitBook-hosted Postman collections that used to be linked here
+> were lost in the migration. You do not need them: every request is shown inline above,
+> and Postman can import EDDI's own spec directly — **Import → Link →**
+> `http://localhost:7070/openapi`, which is generated from the running build and so is
+> never out of date. The same spec is browsable at `/q/swagger-ui`.

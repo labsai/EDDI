@@ -33,6 +33,7 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -129,7 +130,7 @@ class ConversationServiceCoverageTest {
     private ConversationMemorySnapshot createSnapshotWithSteps(int stepCount) {
         var snapshot = createSnapshot();
         var steps = new ArrayList<ConversationStepSnapshot>();
-        var outputs = new ArrayList<ai.labs.eddi.engine.memory.model.ConversationOutput>();
+        var outputs = new ArrayList<ConversationOutput>();
         for (int i = 0; i < stepCount; i++) {
             var step = new ConversationStepSnapshot();
             var workflowRun = new WorkflowRunSnapshot();
@@ -137,7 +138,7 @@ class ConversationServiceCoverageTest {
             workflowRun.setLifecycleTasks(List.of(result));
             step.setWorkflows(List.of(workflowRun));
             steps.add(step);
-            outputs.add(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+            outputs.add(new ConversationOutput());
         }
         snapshot.setConversationSteps(steps);
         snapshot.setConversationOutputs(outputs);

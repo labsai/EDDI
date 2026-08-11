@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.gdpr;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
@@ -26,6 +27,7 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.engine.triggermanagement.rest.RestUserConversationStore;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
@@ -459,7 +461,7 @@ class GdprComplianceServiceTest {
         when(userConversationStore.getAllForUser(USER_ID))
                 .thenReturn(List.of());
 
-        var auditEntry = new ai.labs.eddi.engine.audit.model.AuditEntry(
+        var auditEntry = new AuditEntry(
                 "ae-1", "conv-1", "agent-1", 1, USER_ID, "unrestricted",
                 0, "ai.labs.llm", "llm", 0, 150L,
                 java.util.Map.of(), java.util.Map.of(),
@@ -537,7 +539,7 @@ class GdprComplianceServiceTest {
         // Given — restriction exists
         var entry = new UserMemoryEntry(
                 "entry-id", USER_ID, "_gdpr_processing_restricted", "true",
-                "gdpr", ai.labs.eddi.configs.properties.model.Property.Visibility.global,
+                "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
                 java.time.Instant.now(), java.time.Instant.now());
         when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
@@ -579,7 +581,7 @@ class GdprComplianceServiceTest {
         // Given
         var entry = new UserMemoryEntry(
                 "entry-id", USER_ID, "_gdpr_processing_restricted", "true",
-                "gdpr", ai.labs.eddi.configs.properties.model.Property.Visibility.global,
+                "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
                 java.time.Instant.now(), java.time.Instant.now());
         when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
@@ -604,7 +606,7 @@ class GdprComplianceServiceTest {
         // Given — value stored as Boolean true instead of String "true"
         var entry = new UserMemoryEntry(
                 "entry-id", USER_ID, "_gdpr_processing_restricted", Boolean.TRUE,
-                "gdpr", ai.labs.eddi.configs.properties.model.Property.Visibility.global,
+                "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
                 java.time.Instant.now(), java.time.Instant.now());
         when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
@@ -629,7 +631,7 @@ class GdprComplianceServiceTest {
         // Given — value is "false" not "true"
         var entry = new UserMemoryEntry(
                 "entry-id", USER_ID, "_gdpr_processing_restricted", "false",
-                "gdpr", ai.labs.eddi.configs.properties.model.Property.Visibility.global,
+                "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
                 java.time.Instant.now(), java.time.Instant.now());
         when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))

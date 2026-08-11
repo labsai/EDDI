@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
@@ -690,7 +691,7 @@ class DynamicAgentToolsTest {
             doAnswer(invocation -> {
                 // Don't invoke the handler — but we can't wait 60s.
                 // Instead, let's directly throw to simulate the scenario via the outer catch.
-                throw new java.util.concurrent.TimeoutException("Simulated timeout");
+                throw new TimeoutException("Simulated timeout");
             }).when(conversationService).say(
                     any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
 
@@ -1246,8 +1247,8 @@ class DynamicAgentToolsTest {
 
         @Test
         void addDynamicMember_threadSafe() {
-            var gc = new ai.labs.eddi.configs.groups.model.GroupConversation();
-            var member = new ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember(
+            var gc = new GroupConversation();
+            var member = new AgentGroupConfiguration.GroupMember(
                     "dynamic-1", "Dynamic Agent", 99, "specialist");
 
             gc.addDynamicMember(member);
@@ -1258,7 +1259,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void createdAgentIds_tracking() {
-            var gc = new ai.labs.eddi.configs.groups.model.GroupConversation();
+            var gc = new GroupConversation();
 
             gc.getCreatedAgentIds().add("agent-a");
             gc.getCreatedAgentIds().add("agent-b");
@@ -1269,7 +1270,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void retainedAgentIds_tracking() {
-            var gc = new ai.labs.eddi.configs.groups.model.GroupConversation();
+            var gc = new GroupConversation();
 
             gc.getRetainedAgentIds().add("agent-a");
 
@@ -1279,7 +1280,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void setDynamicMembers_null_safe() {
-            var gc = new ai.labs.eddi.configs.groups.model.GroupConversation();
+            var gc = new GroupConversation();
             gc.setDynamicMembers(null);
             assertNotNull(gc.getDynamicMembers());
             assertTrue(gc.getDynamicMembers().isEmpty());
@@ -1287,7 +1288,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void setCreatedAgentIds_null_safe() {
-            var gc = new ai.labs.eddi.configs.groups.model.GroupConversation();
+            var gc = new GroupConversation();
             gc.setCreatedAgentIds(null);
             assertNotNull(gc.getCreatedAgentIds());
             assertTrue(gc.getCreatedAgentIds().isEmpty());
@@ -1295,7 +1296,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void setRetainedAgentIds_null_safe() {
-            var gc = new ai.labs.eddi.configs.groups.model.GroupConversation();
+            var gc = new GroupConversation();
             gc.setRetainedAgentIds(null);
             assertNotNull(gc.getRetainedAgentIds());
             assertTrue(gc.getRetainedAgentIds().isEmpty());

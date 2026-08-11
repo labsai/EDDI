@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ConversationSummaryConfig;
@@ -634,7 +635,7 @@ class LlmTaskCoverage2Test {
     void cascadeEnabled_auditMetadataStored() throws Exception {
         wireStandardMemory(List.of("action1"));
         when(chatModel.chat(anyList())).thenReturn(chatResponse("cascade answer"));
-        when(memory.getAuditCollector()).thenReturn(mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class));
+        when(memory.getAuditCollector()).thenReturn(mock(IAuditEntryCollector.class));
 
         var cascade = new ModelCascadeConfig();
         cascade.setEnabled(true);
@@ -815,7 +816,7 @@ class LlmTaskCoverage2Test {
         // non-empty tokenUsage map, which the cascade result then surfaces.
         when(chatModel.chat(anyList())).thenReturn(ChatResponse.builder().aiMessage(aiMessage("cascade answer"))
                 .metadata(ChatResponseMetadata.builder().tokenUsage(new TokenUsage(120, 30)).build()).build());
-        when(memory.getAuditCollector()).thenReturn(mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class));
+        when(memory.getAuditCollector()).thenReturn(mock(IAuditEntryCollector.class));
         var templateData = new HashMap<String, Object>();
         when(memoryItemConverter.convert(memory)).thenReturn(templateData);
 

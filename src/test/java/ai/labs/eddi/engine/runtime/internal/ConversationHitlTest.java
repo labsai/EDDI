@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.runtime.internal;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.configs.properties.model.Property;
 
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.IConversation.ConversationNotReadyException;
@@ -14,7 +17,10 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -126,8 +132,8 @@ class ConversationHitlTest {
             memory.setConversationState(ConversationState.READY);
             // A step-scoped property that postConversationLifecycleTasks would purge
             memory.getConversationProperties().put("stepProp",
-                    new ai.labs.eddi.configs.properties.model.Property("stepProp", "value",
-                            ai.labs.eddi.configs.properties.model.Property.Scope.step));
+                    new Property("stepProp", "value",
+                            Property.Scope.step));
 
             doThrow(new ConversationPauseException("wf1", 1, "human review"))
                     .when(lifecycleManager).executeLifecycle(any(), any());
@@ -148,18 +154,18 @@ class ConversationHitlTest {
             memory.setConversationState(ConversationState.READY);
 
             // Agent-level default present on memory (what the pre-fix path read only).
-            var agentLevel = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var agentLevel = new ToolApprovalsConfig();
             agentLevel.setPendingMessage("AGENT default for {toolNames}");
             memory.setAgentToolApprovalsConfig(agentLevel);
 
             // The batch carries the task-scoped override that actually gated the call.
-            var taskOverride = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var taskOverride = new ToolApprovalsConfig();
             taskOverride.setPendingMessage("TASK review pending for {toolNames}");
 
             doAnswer(inv -> {
-                var call = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+                var call = new PendingToolCallBatch.PendingToolCall();
                 call.setToolName("delete_record");
-                var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+                var batch = new PendingToolCallBatch();
                 batch.setCalls(List.of(call));
                 batch.setEffectiveToolApprovals(taskOverride);
                 memory.setHitlPendingToolCalls(batch);
@@ -171,7 +177,7 @@ class ConversationHitlTest {
             conv.say("delete it", Map.of());
 
             var output = memory.getCurrentStep().getConversationOutput();
-            String rendered = output.get(ai.labs.eddi.engine.memory.MemoryKeys.OUTPUT_PREFIX).toString();
+            String rendered = output.get(MemoryKeys.OUTPUT_PREFIX).toString();
             assertTrue(rendered.contains("TASK review pending for delete_record"),
                     "the batch's task-scoped pendingMessage must win over the agent-level default; got: " + rendered);
             assertFalse(rendered.contains("AGENT default"),
@@ -183,14 +189,14 @@ class ConversationHitlTest {
         void toolPauseLegacyBatchFallsBackToAgentLevel() throws Exception {
             memory.setConversationState(ConversationState.READY);
 
-            var agentLevel = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var agentLevel = new ToolApprovalsConfig();
             agentLevel.setPendingMessage("AGENT default for {toolNames}");
             memory.setAgentToolApprovalsConfig(agentLevel);
 
             doAnswer(inv -> {
-                var call = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+                var call = new PendingToolCallBatch.PendingToolCall();
                 call.setToolName("delete_record");
-                var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+                var batch = new PendingToolCallBatch();
                 batch.setCalls(List.of(call));
                 // No effectiveToolApprovals — legacy batch.
                 memory.setHitlPendingToolCalls(batch);
@@ -202,7 +208,7 @@ class ConversationHitlTest {
             conv.say("delete it", Map.of());
 
             var output = memory.getCurrentStep().getConversationOutput();
-            String rendered = output.get(ai.labs.eddi.engine.memory.MemoryKeys.OUTPUT_PREFIX).toString();
+            String rendered = output.get(MemoryKeys.OUTPUT_PREFIX).toString();
             assertTrue(rendered.contains("AGENT default for delete_record"),
                     "a legacy batch must fall back to the agent-level pendingMessage; got: " + rendered);
         }
@@ -215,21 +221,21 @@ class ConversationHitlTest {
             // the end user actually sees the endpoint-specific wording.
             memory.setConversationState(ConversationState.READY);
 
-            var agentLevel = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var agentLevel = new ToolApprovalsConfig();
             agentLevel.setPendingMessage("AGENT default for {toolNames}");
             memory.setAgentToolApprovalsConfig(agentLevel);
 
-            var taskOverride = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var taskOverride = new ToolApprovalsConfig();
             taskOverride.setPendingMessage("TASK review pending for {toolNames}");
 
-            var rule = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig.ApprovalRule();
+            var rule = new ToolApprovalsConfig.ApprovalRule();
             rule.setMatch("http.post:/agentstore/agents");
             rule.setPendingMessage("RULE creating an agent via {toolNames}");
 
             doAnswer(inv -> {
-                var call = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+                var call = new PendingToolCallBatch.PendingToolCall();
                 call.setToolName("createAgent");
-                var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+                var batch = new PendingToolCallBatch();
                 batch.setCalls(List.of(call));
                 batch.setEffectiveToolApprovals(taskOverride);
                 batch.setEffectiveRule(rule);
@@ -242,7 +248,7 @@ class ConversationHitlTest {
             conv.say("create an agent", Map.of());
 
             var output = memory.getCurrentStep().getConversationOutput();
-            String rendered = output.get(ai.labs.eddi.engine.memory.MemoryKeys.OUTPUT_PREFIX).toString();
+            String rendered = output.get(MemoryKeys.OUTPUT_PREFIX).toString();
             assertTrue(rendered.contains("RULE creating an agent via createAgent"),
                     "the governing rule's pendingMessage must win over both scalar levels; got: " + rendered);
             assertFalse(rendered.contains("TASK review pending"),
@@ -256,17 +262,17 @@ class ConversationHitlTest {
             // not blank out the message the designer wrote at the level above.
             memory.setConversationState(ConversationState.READY);
 
-            var taskOverride = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var taskOverride = new ToolApprovalsConfig();
             taskOverride.setPendingMessage("TASK review pending for {toolNames}");
 
-            var rule = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig.ApprovalRule();
+            var rule = new ToolApprovalsConfig.ApprovalRule();
             rule.setMatch("http.delete:*");
-            rule.setTimeoutPolicy(ai.labs.eddi.configs.hitl.HitlTimeoutPolicy.WAIT_INDEFINITELY);
+            rule.setTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
 
             doAnswer(inv -> {
-                var call = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+                var call = new PendingToolCallBatch.PendingToolCall();
                 call.setToolName("deleteAgent");
-                var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+                var batch = new PendingToolCallBatch();
                 batch.setCalls(List.of(call));
                 batch.setEffectiveToolApprovals(taskOverride);
                 batch.setEffectiveRule(rule);
@@ -279,7 +285,7 @@ class ConversationHitlTest {
             conv.say("delete it", Map.of());
 
             var output = memory.getCurrentStep().getConversationOutput();
-            String rendered = output.get(ai.labs.eddi.engine.memory.MemoryKeys.OUTPUT_PREFIX).toString();
+            String rendered = output.get(MemoryKeys.OUTPUT_PREFIX).toString();
             assertTrue(rendered.contains("TASK review pending for deleteAgent"),
                     "a rule silent on pendingMessage must inherit the scalar; got: " + rendered);
         }
@@ -289,8 +295,8 @@ class ConversationHitlTest {
         void normalTurnPurgesStepProperties() throws Exception {
             memory.setConversationState(ConversationState.READY);
             memory.getConversationProperties().put("stepProp",
-                    new ai.labs.eddi.configs.properties.model.Property("stepProp", "value",
-                            ai.labs.eddi.configs.properties.model.Property.Scope.step));
+                    new Property("stepProp", "value",
+                            Property.Scope.step));
 
             var conv = createConversation();
             conv.say("normal turn", Map.of());
@@ -346,7 +352,7 @@ class ConversationHitlTest {
             memory.setHitlPausedAbsoluteTaskIndex(1);
             // The paused turn's actions (incl. PAUSE_CONVERSATION) are restored
             // into the current step on resume — they must not survive re-entry.
-            memory.getCurrentStep().storeData(new ai.labs.eddi.engine.memory.model.Data<>(
+            memory.getCurrentStep().storeData(new Data<>(
                     "actions", List.of("delete_account", IConversation.PAUSE_CONVERSATION)));
 
             var conv = createConversation();
@@ -507,7 +513,7 @@ class ConversationHitlTest {
             memory.setHitlPausedAbsoluteTaskIndex(1);
             // The paused turn's ACTIONS (incl. PAUSE_CONVERSATION) are restored on
             // resume — the REJECTED branch must strip the gate action just like APPROVED.
-            memory.getCurrentStep().storeData(new ai.labs.eddi.engine.memory.model.Data<>(
+            memory.getCurrentStep().storeData(new Data<>(
                     "actions", List.of("delete_account", IConversation.PAUSE_CONVERSATION)));
 
             var conv = createConversation();
@@ -518,7 +524,7 @@ class ConversationHitlTest {
             var output = memory.getCurrentStep().getConversationOutput();
             @SuppressWarnings("unchecked")
             var outputList = (List<Object>) output.get(
-                    ai.labs.eddi.engine.memory.MemoryKeys.OUTPUT_PREFIX);
+                    MemoryKeys.OUTPUT_PREFIX);
             assertNotNull(outputList, "REJECTED must publish an output entry");
             assertTrue(outputList.stream().anyMatch(o -> o.toString().contains("rejected by a human reviewer")),
                     "output must carry the rejection message, got: " + outputList);

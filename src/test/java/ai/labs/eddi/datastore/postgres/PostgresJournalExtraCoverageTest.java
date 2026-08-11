@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.datastore.postgres;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
@@ -246,7 +247,7 @@ class PostgresJournalExtraCoverageTest {
         @Test
         @DisplayName("requireGroupConversationHitlAccess: null groupId skips the group-match check")
         void requireGroup_nullGroupId_skipsMatch() throws Exception {
-            ai.labs.eddi.configs.groups.model.GroupConversation gc = mock(ai.labs.eddi.configs.groups.model.GroupConversation.class);
+            GroupConversation gc = mock(GroupConversation.class);
             when(gc.getUserId()).thenReturn("owner1");
             when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
 

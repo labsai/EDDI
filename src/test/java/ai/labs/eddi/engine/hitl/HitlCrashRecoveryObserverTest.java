@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
@@ -329,9 +330,9 @@ class HitlCrashRecoveryObserverTest {
             // AgentOrchestratorResumeToolLoopTest#journalExecutedReplays.)
             var snapshot = pausedSnapshot("WAIT_INDEFINITELY", null, Instant.now().minus(1, ChronoUnit.HOURS));
             snapshot.setHitlPauseType("TOOL_CALL");
-            var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+            var batch = new PendingToolCallBatch();
             batch.setPauseEpoch("epoch-crash-1");
-            var call = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+            var call = new PendingToolCallBatch.PendingToolCall();
             call.setCallId("call-1");
             call.setToolName("chargeCard");
             batch.setCalls(List.of(call));
@@ -416,7 +417,7 @@ class HitlCrashRecoveryObserverTest {
             // EXECUTION_INTERRUPTED; it must also clear the stray batch.
             var snapshot = new ConversationMemorySnapshot();
             snapshot.setAgentId("agent-1"); // no hitlPausedAt — the "unknown interrupted" branch
-            var orphanBatch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+            var orphanBatch = new PendingToolCallBatch();
             orphanBatch.setPauseEpoch("orphan-epoch");
             snapshot.setHitlPendingToolCalls(orphanBatch);
             when(memStore.findConversationIdsByState(ConversationState.IN_PROGRESS))

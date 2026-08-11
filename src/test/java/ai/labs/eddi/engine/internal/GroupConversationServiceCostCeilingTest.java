@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -45,6 +46,7 @@ import org.mockito.MockitoAnnotations;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -142,10 +144,10 @@ class GroupConversationServiceCostCeilingTest {
         // Without a deployed agent every member turn short-circuits to a SKIPPED
         // "Agent not deployed" entry and never reaches say() — so no cost would ever
         // accumulate and the ceiling could never trip.
-        doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class)).when(agentFactory).getLatestReadyAgent(any(), anyString());
+        doReturn(mock(IAgent.class)).when(agentFactory).getLatestReadyAgent(any(), anyString());
         doReturn(new IConversationService.ConversationResult("member-conv", null))
                 .when(conversationService).startConversation(any(), any(), any(), any());
-        var counter = new java.util.concurrent.atomic.AtomicInteger();
+        var counter = new AtomicInteger();
         doAnswer(inv -> {
             IConversationService.ConversationResponseHandler handler = inv.getArgument(8);
             if (handler != null) {

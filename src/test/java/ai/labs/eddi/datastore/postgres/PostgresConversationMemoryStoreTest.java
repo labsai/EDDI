@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -42,7 +43,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
         var dsInstance = createDataSourceInstance();
         ds = dsInstance.get();
         IJsonSerialization json = new JsonSerialization(
-                ai.labs.eddi.datastore.serialization.SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
+                SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
         store = new PostgresConversationMemoryStore(dsInstance, json);
     }
 

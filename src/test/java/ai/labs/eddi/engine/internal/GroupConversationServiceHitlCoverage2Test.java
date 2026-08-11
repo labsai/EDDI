@@ -30,8 +30,10 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -162,7 +164,7 @@ class GroupConversationServiceHitlCoverage2Test {
     private SimpleConversationMemorySnapshot snapshot(ConversationState state, String text) {
         var snap = new SimpleConversationMemorySnapshot();
         snap.setConversationState(state);
-        var output = new ai.labs.eddi.engine.memory.model.ConversationOutput();
+        var output = new ConversationOutput();
         output.put("output", List.of(text));
         snap.setConversationOutputs(new java.util.ArrayList<>(List.of(output)));
         return snap;
@@ -998,7 +1000,7 @@ class GroupConversationServiceHitlCoverage2Test {
                 AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy.ABORT, 2,
                 AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy.SKIP);
 
-        assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException.class,
+        assertThrows(IGroupConversationService.GroupDiscussionException.class,
                 () -> invoke(m, member(), 0, phase(PhaseType.OPINION), protocol,
                         new RuntimeException("fail"), "Agent failed", null));
     }

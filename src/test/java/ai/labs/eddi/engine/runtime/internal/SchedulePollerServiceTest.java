@@ -17,6 +17,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -223,8 +226,8 @@ class SchedulePollerServiceTest {
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
         when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
 
-        var release = new java.util.concurrent.CountDownLatch(1);
-        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var entered = new CountDownLatch(1);
         when(fireExecutor.fire(any(), any(), anyInt())).thenAnswer(inv -> {
             entered.countDown();
             // Block until released, ignoring interruption entirely — the poll cycle
@@ -232,7 +235,7 @@ class SchedulePollerServiceTest {
             boolean released = false;
             while (!released) {
                 try {
-                    released = release.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                    released = release.await(30, TimeUnit.SECONDS);
                 } catch (InterruptedException ignored) {
                     // swallow — this is the non-interruptible case under test
                 }
@@ -315,7 +318,7 @@ class SchedulePollerServiceTest {
         });
 
         // markFailed behaves like the sync Mongo driver: refuses to run interrupted.
-        var markFailedCompleted = new java.util.concurrent.atomic.AtomicBoolean(false);
+        var markFailedCompleted = new AtomicBoolean(false);
         doAnswer(inv -> {
             if (Thread.currentThread().isInterrupted()) {
                 throw new IllegalStateException("interrupted during connection checkout");

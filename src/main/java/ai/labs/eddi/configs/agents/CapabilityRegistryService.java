@@ -191,7 +191,7 @@ public class CapabilityRegistryService {
                 // Support comma-separated lists: "en,de,fr" matches "de"
                 var items = java.util.Arrays.stream(attrValue.split(","))
                         .map(String::trim)
-                        .collect(java.util.stream.Collectors.toSet());
+                        .collect(Collectors.toSet());
                 if (!items.contains(req.getValue())) {
                     return false;
                 }

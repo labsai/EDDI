@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -173,7 +174,7 @@ class AbstractBackupServiceTest {
                     "eddi://ai.labs.rag/ragstore/rags/x6?version=1");
         }
 
-        private void assertUriExtraction(java.util.regex.Pattern pattern, String uri) throws Exception {
+        private void assertUriExtraction(Pattern pattern, String uri) throws Exception {
             String json = "{\"uri\":\"" + uri + "\"}";
             List<URI> result = service.extractResourcesUris(json, pattern);
             assertEquals(1, result.size(), "Pattern should match " + uri);

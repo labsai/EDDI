@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.hitl.tools;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.JournalEntry;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.Status;
@@ -294,8 +295,8 @@ class HitlJournalCodecCoverageTest {
             return dev.langchain4j.agent.tool.ToolExecutionRequest.builder().id(id).name(name).arguments("{}").build();
         }
 
-        private static ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig cfg(List<String> require, List<String> exempt) {
-            var c = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+        private static ToolApprovalsConfig cfg(List<String> require, List<String> exempt) {
+            var c = new ToolApprovalsConfig();
             c.setRequireApproval(require);
             c.setExempt(exempt);
             return c;

@@ -36,6 +36,7 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -348,7 +349,7 @@ class ConversationServiceDeepBranchTest {
             when(stepStack.size()).thenReturn(0);
             when(conversationMemory.getAllSteps()).thenReturn(stepStack);
             when(conversationMemory.getConversationOutputs()).thenReturn(new ArrayList<>());
-            var conversationProperties = mock(ai.labs.eddi.engine.memory.model.ConversationProperties.class);
+            var conversationProperties = mock(ConversationProperties.class);
             doReturn(new java.util.HashSet<>()).when(conversationProperties).entrySet();
             when(conversationMemory.getConversationProperties()).thenReturn(conversationProperties);
             when(mockAgent.startConversation(any(), any(), any(), any())).thenReturn(conversation);

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.httpclient;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.*;
@@ -212,7 +213,7 @@ class SafeHttpClientTest {
         // file:// URIs are rejected by both Java's HttpRequest.Builder AND
         // UrlValidationUtils. We test the validation layer directly here.
         assertThrows(IllegalArgumentException.class,
-                () -> ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl("file:///etc/passwd"),
+                () -> UrlValidationUtils.validateUrl("file:///etc/passwd"),
                 "file:// scheme should be blocked by URL validation");
     }
 

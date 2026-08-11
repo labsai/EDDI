@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -272,7 +273,7 @@ class McpSetupToolsTest {
                 null, null, null, null, false, null);
 
         // Verify the API key was stored in the vault
-        var refCaptor = ArgumentCaptor.forClass(ai.labs.eddi.secrets.model.SecretReference.class);
+        var refCaptor = ArgumentCaptor.forClass(SecretReference.class);
         verify(vaultProvider).store(refCaptor.capture(), eq("sk-live-secret"), contains("Vault Agent"), any());
         assertTrue(refCaptor.getValue().keyName().startsWith("setup.vault-agent."),
                 "Vault key should start with 'setup.<sanitized-name>.'");

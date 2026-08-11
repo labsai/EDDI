@@ -25,16 +25,20 @@ import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
@@ -1140,7 +1144,7 @@ public class ConversationService implements IConversationService {
 
     @Override
     public CancelOutcome cancelConversation(String conversationId,
-                                            ai.labs.eddi.engine.lifecycle.model.ControlSignal mode,
+                                            ControlSignal mode,
                                             String cancelledBy)
             throws ResourceStoreException {
         return conversationHitlService.cancelConversation(conversationId, mode, cancelledBy);
@@ -1148,26 +1152,26 @@ public class ConversationService implements IConversationService {
 
     @Override
     public void resumeConversation(String conversationId,
-                                   ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                                   HitlDecision decision,
                                    ConversationResponseHandler handler)
             throws ResourceStoreException, ResourceNotFoundException {
         conversationHitlService.resumeConversation(conversationId, decision, handler);
     }
 
     @Override
-    public ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
+    public ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
             throws ResourceStoreException, ResourceNotFoundException {
         return conversationHitlService.getConversationMemorySnapshot(conversationId);
     }
 
     @Override
-    public java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(int limit)
+    public java.util.List<PendingApprovalSummary> listPendingApprovals(int limit)
             throws ResourceStoreException {
         return conversationHitlService.listPendingApprovals(limit);
     }
 
     @Override
-    public java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
+    public java.util.List<PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
             throws ResourceStoreException {
         return conversationHitlService.listPendingApprovals(ownerUserId, limit);
     }

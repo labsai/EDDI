@@ -24,12 +24,15 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -42,6 +45,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -430,7 +434,7 @@ class GroupHitlCoordinatorTest {
         var coordinator = coordinator();
         when(conversationStore.read(GC_ID)).thenReturn(gc(GroupConversationState.COMPLETED));
 
-        assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException.class,
+        assertThrows(IGroupConversationService.GroupDiscussionException.class,
                 () -> coordinator.submitHumanInput(GC_ID, "h-1", "text", "h-1", null));
     }
 
@@ -460,7 +464,7 @@ class GroupHitlCoordinatorTest {
         when(groupStore.read(GROUP_ID, 1)).thenReturn(config);
         when(groupConversationService.effectivePhases(any(), eq(config))).thenReturn(List.of(opinionPhase()));
 
-        assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException.class,
+        assertThrows(IGroupConversationService.GroupDiscussionException.class,
                 () -> coordinator.submitHumanInput(GC_ID, "h-1", "text", "h-1", null));
 
         assertTrue(gc.getTranscript().isEmpty(), "drift refuses BEFORE any mutation — no rollback needed");
@@ -628,11 +632,11 @@ class GroupHitlCoordinatorTest {
             // The racing cancel: lands after the fresh token was registered but
             // before the rollback runs — exactly the dropped window.
             activeTokens.get(GC_ID).setSignal(ControlSignal.CANCEL_GRACEFUL);
-            throw new java.util.concurrent.RejectedExecutionException("saturated");
+            throw new RejectedExecutionException("saturated");
         });
-        var decision = new ai.labs.eddi.engine.lifecycle.model.HitlDecision();
-        decision.setVerdict(ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.APPROVED);
-        var request = new ai.labs.eddi.engine.internal.GroupApprovalRequest();
+        var decision = new HitlDecision();
+        decision.setVerdict(HitlDecision.HitlVerdict.APPROVED);
+        var request = new GroupApprovalRequest();
         request.setDecision(decision);
 
         assertThrows(IResourceStore.ResourceStoreException.class,

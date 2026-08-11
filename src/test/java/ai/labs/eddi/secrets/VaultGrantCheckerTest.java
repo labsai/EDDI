@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.secrets;
+import ai.labs.eddi.configs.agents.IAgentStore;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
@@ -10,6 +11,7 @@ import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -55,7 +57,7 @@ class VaultGrantCheckerTest {
     private ILlmStore llmStore;
     private IApiCallsStore apiCallsStore;
     private IMcpCallsStore mcpCallsStore;
-    private ai.labs.eddi.configs.agents.IAgentStore agentStore;
+    private IAgentStore agentStore;
     private VaultGrantChecker checker;
 
     @BeforeEach
@@ -68,9 +70,9 @@ class VaultGrantCheckerTest {
         apiCallsStore = mock(IApiCallsStore.class);
         mcpCallsStore = mock(IMcpCallsStore.class);
 
-        agentStore = mock(ai.labs.eddi.configs.agents.IAgentStore.class);
+        agentStore = mock(IAgentStore.class);
         checker = new VaultGrantChecker(secretProvider, agentStore, workflowStore, llmStore, apiCallsStore, mcpCallsStore,
-                mock(ai.labs.eddi.configs.rag.IRagStore.class));
+                mock(IRagStore.class));
     }
 
     /**

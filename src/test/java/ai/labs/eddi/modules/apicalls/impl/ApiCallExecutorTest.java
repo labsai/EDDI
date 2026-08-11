@@ -26,6 +26,11 @@ import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -973,11 +978,11 @@ class ApiCallExecutorTest {
         preRequest.setDelayBeforeExecutingInMillis(100);
         call.setPreRequest(preRequest);
 
-        var scheduledExecutor = mock(java.util.concurrent.ScheduledExecutorService.class);
+        var scheduledExecutor = mock(ScheduledExecutorService.class);
         @SuppressWarnings("unchecked")
-        var future = mock(java.util.concurrent.ScheduledFuture.class);
+        var future = mock(ScheduledFuture.class);
         when(future.get()).thenReturn(mockResponse);
-        when(scheduledExecutor.schedule(any(java.util.concurrent.Callable.class), eq(100L), eq(java.util.concurrent.TimeUnit.MILLISECONDS)))
+        when(scheduledExecutor.schedule(any(Callable.class), eq(100L), eq(TimeUnit.MILLISECONDS)))
                 .thenReturn(future);
         when(runtime.getScheduledExecutorService()).thenReturn(scheduledExecutor);
 
@@ -985,7 +990,7 @@ class ApiCallExecutorTest {
 
         executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
-        verify(scheduledExecutor).schedule(any(java.util.concurrent.Callable.class), eq(100L), eq(java.util.concurrent.TimeUnit.MILLISECONDS));
+        verify(scheduledExecutor).schedule(any(Callable.class), eq(100L), eq(TimeUnit.MILLISECONDS));
     }
 
     // ==================== Retry with Exponential Backoff Tests
@@ -1002,13 +1007,13 @@ class ApiCallExecutorTest {
         postResponse.setRetryApiCallInstruction(retryInstruction);
         call.setPostResponse(postResponse);
 
-        var scheduledExecutor = mock(java.util.concurrent.ScheduledExecutorService.class);
+        var scheduledExecutor = mock(ScheduledExecutorService.class);
         @SuppressWarnings("unchecked")
-        var future = mock(java.util.concurrent.ScheduledFuture.class);
+        var future = mock(ScheduledFuture.class);
         when(runtime.getScheduledExecutorService()).thenReturn(scheduledExecutor);
 
         // Use a flag to switch from 503 to 200; toggled when the scheduler is invoked.
-        var retried = new java.util.concurrent.atomic.AtomicBoolean(false);
+        var retried = new AtomicBoolean(false);
         when(mockResponse.getHttpCode()).thenAnswer(inv -> retried.get() ? 200 : 503);
         when(mockResponse.getContentAsString()).thenAnswer(inv -> retried.get() ? "ok" : "retry");
         when(mockResponse.getHttpCodeMessage()).thenAnswer(inv -> retried.get() ? "OK" : "Service Unavailable");
@@ -1019,17 +1024,17 @@ class ApiCallExecutorTest {
         doAnswer(inv -> {
             retried.set(true);
             @SuppressWarnings("unchecked")
-            java.util.concurrent.Callable<IResponse> callable = inv.getArgument(0);
+            Callable<IResponse> callable = inv.getArgument(0);
             IResponse result = callable.call();
             when(future.get()).thenReturn(result);
             return future;
-        }).when(scheduledExecutor).schedule(any(java.util.concurrent.Callable.class), anyLong(), any());
+        }).when(scheduledExecutor).schedule(any(Callable.class), anyLong(), any());
 
         executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
         verify(scheduledExecutor, times(1)).schedule(
-                any(java.util.concurrent.Callable.class), eq(50L),
-                eq(java.util.concurrent.TimeUnit.MILLISECONDS));
+                any(Callable.class), eq(50L),
+                eq(TimeUnit.MILLISECONDS));
     }
 
     // ==================== Null PostResponse RetryInstruction Tests
@@ -1060,7 +1065,7 @@ class ApiCallExecutorTest {
 
         executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
-        verify(mockRequest).setTimeout(DEFAULT_TIMEOUT_MILLIS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        verify(mockRequest).setTimeout(DEFAULT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
         verify(mockRequest).setMaxResponseSize(ApiCallExecutor.MAX_TRANSPORT_RESPONSE_SIZE_BYTES);
     }
 
@@ -1073,7 +1078,7 @@ class ApiCallExecutorTest {
 
         executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
-        verify(mockRequest).setTimeout(1_500L, java.util.concurrent.TimeUnit.MILLISECONDS);
+        verify(mockRequest).setTimeout(1_500L, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -1137,9 +1142,9 @@ class ApiCallExecutorTest {
     @Test
     void execute_requestSendThrowsException_wrapsInLifecycleException() throws Exception {
         ApiCall call = createSimpleApiCall("err-call", false);
-        when(mockRequest.send()).thenThrow(new ai.labs.eddi.engine.httpclient.IRequest.HttpRequestException("Connection refused"));
+        when(mockRequest.send()).thenThrow(new IRequest.HttpRequestException("Connection refused"));
 
-        assertThrows(ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException.class,
+        assertThrows(LifecycleException.class,
                 () -> executor.execute(call, memory, new HashMap<>(), "http://example.com"));
     }
 }

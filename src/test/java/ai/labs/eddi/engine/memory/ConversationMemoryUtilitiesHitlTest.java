@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
@@ -232,7 +233,7 @@ class ConversationMemoryUtilitiesHitlTest {
             batch.setCalls(List.of(call));
             // Fix #1: the batch carries the effective tool-approval config — it must NOT
             // enter the fix-#4 names-only projection (config, not user data).
-            var effective = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var effective = new ToolApprovalsConfig();
             effective.setPendingMessage("Awaiting review for {toolNames}");
             batch.setEffectiveToolApprovals(effective);
             snapshot.setHitlPendingToolCalls(batch);

@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.model;
 
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -502,7 +503,7 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * FULLY REPLACES the agent-level {@code hitlConfig.toolApprovals} for this task
          * (no list merging). Absent = inherit the agent-level default.
          */
-        private ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals;
+        private ToolApprovalsConfig toolApprovals;
 
         // === Helper Methods ===
 
@@ -558,11 +559,11 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.id = id;
         }
 
-        public ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig getToolApprovals() {
+        public ToolApprovalsConfig getToolApprovals() {
             return toolApprovals;
         }
 
-        public void setToolApprovals(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals) {
+        public void setToolApprovals(ToolApprovalsConfig toolApprovals) {
             this.toolApprovals = toolApprovals;
         }
 

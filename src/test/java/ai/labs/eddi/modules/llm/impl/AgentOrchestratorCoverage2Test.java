@@ -12,7 +12,9 @@ import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -397,7 +399,7 @@ class AgentOrchestratorCoverage2Test {
         var gatedReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(gatedReq));
 
-        assertThrows(ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException.class,
+        assertThrows(ToolApprovalRequiredException.class,
                 () -> orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")),
                         task, memory, gateCalculate(), 0));
 
@@ -412,7 +414,7 @@ class AgentOrchestratorCoverage2Test {
         // takes the null-result arm -> count 0 -> pauses.
         var task = twoToolTask();
         @SuppressWarnings("unchecked")
-        ai.labs.eddi.engine.memory.IData<Integer> data = mock(ai.labs.eddi.engine.memory.IData.class);
+        IData<Integer> data = mock(IData.class);
         when(data.getResult()).thenReturn(null);
         doReturn(data).when(currentStep).getLatestData("hitl:tool_pause_count");
 
@@ -420,7 +422,7 @@ class AgentOrchestratorCoverage2Test {
         var gatedReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(gatedReq));
 
-        assertThrows(ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException.class,
+        assertThrows(ToolApprovalRequiredException.class,
                 () -> orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")),
                         task, memory, gateCalculate(), 0));
 

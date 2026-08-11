@@ -5,11 +5,13 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -253,7 +255,7 @@ class McpApiToolBuilderTest {
 
         assertEquals("A path id", call.getParameters().get("requestBody"), "the path parameter keeps the name");
         // Every variable the body template references must still be declared.
-        var matcher = java.util.regex.Pattern.compile("\\{([A-Za-z0-9_]+)}").matcher(call.getRequest().getBody());
+        var matcher = Pattern.compile("\\{([A-Za-z0-9_]+)}").matcher(call.getRequest().getBody());
         assertTrue(matcher.find());
         assertTrue(call.getParameters().containsKey(matcher.group(1)),
                 "the body variable was renamed to " + matcher.group(1) + " and must be declared");
@@ -334,7 +336,7 @@ class McpApiToolBuilderTest {
         assertNotNull(createPet.getParameters(), "a call with a body must declare parameters");
         // Every variable the template references must be declared — that is the
         // invariant, whatever shape the template takes.
-        var matcher = java.util.regex.Pattern.compile("\\{([A-Za-z0-9_]+)}").matcher(createPet.getRequest().getBody());
+        var matcher = Pattern.compile("\\{([A-Za-z0-9_]+)}").matcher(createPet.getRequest().getBody());
         int found = 0;
         while (matcher.find()) {
             found++;
@@ -501,8 +503,8 @@ class McpApiToolBuilderTest {
         // (internal OpenAPI discovery must keep working). The scheme gate accepts
         // them — only a subsequent fetch/parse can fail, never the URL check itself.
         assertTrue(McpApiToolBuilder.looksLikeInlineSpec("http://10.0.0.5/openapi.json") == false);
-        assertTrue(ai.labs.eddi.modules.llm.tools.UrlValidationUtils.isValidHttpUrl("http://169.254.169.254/latest/meta-data/"));
-        assertTrue(ai.labs.eddi.modules.llm.tools.UrlValidationUtils.isValidHttpUrl("http://internal-svc.cluster.local/spec.json"));
+        assertTrue(UrlValidationUtils.isValidHttpUrl("http://169.254.169.254/latest/meta-data/"));
+        assertTrue(UrlValidationUtils.isValidHttpUrl("http://internal-svc.cluster.local/spec.json"));
     }
 
     @Test

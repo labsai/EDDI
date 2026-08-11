@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,11 +60,11 @@ class ConverseWithAgentToolHitlTest {
         // Task 13: a nested TOOL_CALL pause must additively surface pauseType and
         // the gated tool NAMES (names only — never arguments) in the delegated-tool
         // text message.
-        var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
-        var call1 = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+        var batch = new PendingToolCallBatch();
+        var call1 = new PendingToolCallBatch.PendingToolCall();
         call1.setToolName("delete_production_db");
         call1.setArgumentsRaw("{\"secret\":\"nuke\"}");
-        var call2 = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+        var call2 = new PendingToolCallBatch.PendingToolCall();
         call2.setToolName("wire_transfer");
         batch.setCalls(java.util.List.of(call1, call2));
 

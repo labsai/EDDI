@@ -802,12 +802,12 @@ class PostgresResourceStorageTest {
         when(resultSet.getString("id")).thenReturn("id1");
         when(resultSet.getInt("version")).thenReturn(1);
 
-        var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("name", "test.*");
-        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
+        var filter = new IResourceFilter.QueryFilter("name", "test.*");
+        var queryFilters = new IResourceFilter.QueryFilters(
                 java.util.List.of(filter));
 
         var results = storage.findResources(
-                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                new IResourceFilter.QueryFilters[]{queryFilters},
                 "name", 0, 10);
 
         assertEquals(1, results.size());
@@ -817,12 +817,12 @@ class PostgresResourceStorageTest {
     void findResources_zeroLimit_meansUnlimitedUpToCeiling() throws Exception {
         when(resultSet.next()).thenReturn(false);
 
-        var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("name", "test.*");
-        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
+        var filter = new IResourceFilter.QueryFilter("name", "test.*");
+        var queryFilters = new IResourceFilter.QueryFilters(
                 java.util.List.of(filter));
 
         storage.findResources(
-                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                new IResourceFilter.QueryFilters[]{queryFilters},
                 "name", 0, 0);
 
         var sql = ArgumentCaptor.forClass(String.class);
@@ -836,12 +836,12 @@ class PostgresResourceStorageTest {
     void findResources_oversizedLimit_clampedToCeiling() throws Exception {
         when(resultSet.next()).thenReturn(false);
 
-        var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("name", "test.*");
-        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
+        var filter = new IResourceFilter.QueryFilter("name", "test.*");
+        var queryFilters = new IResourceFilter.QueryFilters(
                 java.util.List.of(filter));
 
         storage.findResources(
-                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                new IResourceFilter.QueryFilters[]{queryFilters},
                 "name", 0, IResourceStorage.MAX_RESULT_LIMIT * 2);
 
         var sql = ArgumentCaptor.forClass(String.class);
@@ -854,12 +854,12 @@ class PostgresResourceStorageTest {
     void findResources_withBooleanFilter() throws Exception {
         when(resultSet.next()).thenReturn(false);
 
-        var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("enabled", true);
-        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
+        var filter = new IResourceFilter.QueryFilter("enabled", true);
+        var queryFilters = new IResourceFilter.QueryFilters(
                 java.util.List.of(filter));
 
         var results = storage.findResources(
-                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                new IResourceFilter.QueryFilters[]{queryFilters},
                 null, 0, 5);
 
         assertTrue(results.isEmpty());
@@ -870,12 +870,12 @@ class PostgresResourceStorageTest {
         when(resultSet.next()).thenReturn(false);
 
         // Integer filter — goes through the else branch (toString)
-        var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("count", 42);
-        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
+        var filter = new IResourceFilter.QueryFilter("count", 42);
+        var queryFilters = new IResourceFilter.QueryFilters(
                 java.util.List.of(filter));
 
         var results = storage.findResources(
-                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                new IResourceFilter.QueryFilters[]{queryFilters},
                 null, 0, 0); // limit < 1 should default to 20
 
         assertTrue(results.isEmpty());
@@ -885,14 +885,14 @@ class PostgresResourceStorageTest {
     void findResources_withOrConnector() throws Exception {
         when(resultSet.next()).thenReturn(false);
 
-        var filter1 = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("name", "a");
-        var filter2 = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("name", "b");
-        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
-                ai.labs.eddi.datastore.IResourceFilter.QueryFilters.ConnectingType.OR,
+        var filter1 = new IResourceFilter.QueryFilter("name", "a");
+        var filter2 = new IResourceFilter.QueryFilter("name", "b");
+        var queryFilters = new IResourceFilter.QueryFilters(
+                IResourceFilter.QueryFilters.ConnectingType.OR,
                 java.util.List.of(filter1, filter2));
 
         var results = storage.findResources(
-                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                new IResourceFilter.QueryFilters[]{queryFilters},
                 "name", 5, 10);
 
         assertTrue(results.isEmpty());
@@ -902,11 +902,11 @@ class PostgresResourceStorageTest {
     void findResources_sqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeQuery()).thenThrow(new SQLException("DB error"));
 
-        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(java.util.List.of());
+        var queryFilters = new IResourceFilter.QueryFilters(java.util.List.of());
 
         assertThrows(RuntimeException.class,
                 () -> storage.findResources(
-                        new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                        new IResourceFilter.QueryFilters[]{queryFilters},
                         null, 0, 10));
     }
 

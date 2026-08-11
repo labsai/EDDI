@@ -5,6 +5,7 @@
 package ai.labs.eddi.secrets.impl;
 
 import ai.labs.eddi.secrets.ISecretProvider.SecretProviderException;
+import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import ai.labs.eddi.secrets.model.*;
@@ -304,7 +305,7 @@ class VaultSecretProviderBranchTest {
 
             when(persistence.findSecret(TENANT_ID, KEY_NAME)).thenReturn(Optional.empty());
 
-            assertThrows(ai.labs.eddi.secrets.ISecretProvider.SecretNotFoundException.class,
+            assertThrows(ISecretProvider.SecretNotFoundException.class,
                     () -> provider.resolve(new SecretReference(TENANT_ID, KEY_NAME)));
         }
     }

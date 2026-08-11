@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
@@ -17,6 +18,7 @@ import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
@@ -57,7 +59,7 @@ class RestAgentEngineHitlTest {
     @Mock
     private Principal principal;
     @Mock
-    private ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore hitlToolJournalStore;
+    private IHitlToolJournalStore hitlToolJournalStore;
 
     private RestAgentEngine restAgentEngine;
 
@@ -80,7 +82,7 @@ class RestAgentEngineHitlTest {
         // that logic end-to-end through the delegating REST endpoint.
         var hitlAccessGuard = new HitlAccessGuard(
                 identity, ownershipValidator, conversationDescriptorStore, conversationService,
-                mock(ai.labs.eddi.engine.api.IGroupConversationService.class));
+                mock(IGroupConversationService.class));
         var conversationAccessGuard = new ConversationAccessGuard(
                 identity, ownershipValidator, conversationDescriptorStore);
         restAgentEngine = new RestAgentEngine(
@@ -226,8 +228,8 @@ class RestAgentEngineHitlTest {
         @Test
         @DisplayName("decision note longer than 4096 chars → 400, service never called")
         void oversizedNoteRejected() throws Exception {
-            var decision = new ai.labs.eddi.engine.lifecycle.model.HitlDecision();
-            decision.setVerdict(ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.APPROVED);
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlDecision.HitlVerdict.APPROVED);
             decision.setNote("x".repeat(4097));
 
             Response response = restAgentEngine.resumeConversation(CONVERSATION_ID, decision);
@@ -239,8 +241,8 @@ class RestAgentEngineHitlTest {
         @Test
         @DisplayName("note of exactly 4096 chars is accepted")
         void maxLengthNoteAccepted() throws Exception {
-            var decision = new ai.labs.eddi.engine.lifecycle.model.HitlDecision();
-            decision.setVerdict(ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.APPROVED);
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlDecision.HitlVerdict.APPROVED);
             decision.setNote("x".repeat(4096));
 
             Response response = restAgentEngine.resumeConversation(CONVERSATION_ID, decision);
@@ -252,7 +254,7 @@ class RestAgentEngineHitlTest {
         @Test
         @DisplayName("missing verdict → 400, service never called")
         void missingVerdictRejected() throws Exception {
-            var decision = new ai.labs.eddi.engine.lifecycle.model.HitlDecision();
+            var decision = new HitlDecision();
 
             Response response = restAgentEngine.resumeConversation(CONVERSATION_ID, decision);
 

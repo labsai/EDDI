@@ -25,6 +25,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @ApplicationScoped
 public class HttpClientWrapper implements IHttpClient {
@@ -188,7 +189,7 @@ public class HttpClientWrapper implements IHttpClient {
                 // block indefinitely
                 // if the callback never fires (though Vert.x should handle the timeout).
                 return future.get(currentTimeout + 1000, TimeUnit.MILLISECONDS);
-            } catch (java.util.concurrent.TimeoutException e) {
+            } catch (TimeoutException e) {
                 throw new HttpRequestException("Request timed out while waiting for response", e);
             } catch (InterruptedException | ExecutionException e) {
                 if (e instanceof InterruptedException) {

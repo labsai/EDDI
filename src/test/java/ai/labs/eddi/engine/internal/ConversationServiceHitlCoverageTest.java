@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -53,6 +54,7 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -136,10 +138,10 @@ class ConversationServiceHitlCoverageTest {
                     try {
                         Object result = callable.call();
                         listener.onComplete(result);
-                        return java.util.concurrent.CompletableFuture.completedFuture(result);
+                        return CompletableFuture.completedFuture(result);
                     } catch (Exception e) {
                         listener.onFailure(e);
-                        return java.util.concurrent.CompletableFuture.failedFuture(e);
+                        return CompletableFuture.failedFuture(e);
                     }
                 });
         lenient().when(conversationMemoryStore.storeConversationMemorySnapshotIfState(any(), any()))
@@ -546,7 +548,7 @@ class ConversationServiceHitlCoverageTest {
         void presentToolApprovals_populatesCarrier() throws Exception {
             var agentConfig = new AgentConfiguration();
             var hitl = new AgentConfiguration.HitlConfig();
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             hitl.setToolApprovals(toolApprovals);
             agentConfig.setHitlConfig(hitl);
             doReturn(agentConfig).when(agentStore).read(AGENT_ID, AGENT_VERSION);
@@ -561,7 +563,7 @@ class ConversationServiceHitlCoverageTest {
         void pinnedReadThrows_fallsBackToCurrent() throws Exception {
             var agentConfig = new AgentConfiguration();
             var hitl = new AgentConfiguration.HitlConfig();
-            hitl.setToolApprovals(new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig());
+            hitl.setToolApprovals(new ToolApprovalsConfig());
             agentConfig.setHitlConfig(hitl);
             // pinned read throws → fallback path
             doThrow(new ResourceStoreException("pinned gone")).when(agentStore).read(AGENT_ID, AGENT_VERSION);

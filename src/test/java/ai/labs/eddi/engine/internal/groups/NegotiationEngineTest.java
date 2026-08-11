@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.Proposal;
@@ -345,7 +346,7 @@ class NegotiationEngineTest {
     void agreement_groupMemberNotRequired() {
         var gc = gc();
         var nestedGroup = new GroupMember("g1", "Sub Team", 3, null,
-                ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType.GROUP);
+                AgentGroupConfiguration.MemberType.GROUP);
         NegotiationEngine.applyRepeat(gc, List.of(proposal("a1", "50/50")), 0, 0);
         NegotiationEngine.applyRepeat(gc, List.of(bargain("a2", "{\"accept\": \"p1\"}")), 1, 1);
 

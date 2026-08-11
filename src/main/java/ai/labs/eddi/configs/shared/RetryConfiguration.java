@@ -3,11 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.configs.shared;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import org.jboss.logging.Logger;
 
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Shared retry configuration and execution utility.
@@ -113,7 +115,7 @@ public class RetryConfiguration {
                 // travel up UNCHANGED — it is not a retryable failure. Rethrow before
                 // any retry/backoff or LifecycleException wrapping so the pause signal
                 // reaches LifecycleManager intact. Applies to LLM and MCP callers.
-                if (e instanceof ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException tare) {
+                if (e instanceof ToolApprovalRequiredException tare) {
                     throw tare;
                 }
                 lastException = e;
@@ -183,7 +185,7 @@ public class RetryConfiguration {
         while (current != null) {
             // 1. Typed exception matching
             if (current instanceof java.net.SocketTimeoutException
-                    || current instanceof java.util.concurrent.TimeoutException
+                    || current instanceof TimeoutException
                     || current instanceof java.net.ConnectException
                     || current instanceof java.net.UnknownHostException) {
                 return true;

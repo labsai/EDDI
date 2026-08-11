@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,7 +33,7 @@ class ScheduleFireExecutorTest {
 
     private IConversationService conversationService;
     private IScheduleStore scheduleStore;
-    private ai.labs.eddi.engine.internal.HitlTimeoutHandler hitlTimeoutHandler;
+    private HitlTimeoutHandler hitlTimeoutHandler;
     private DreamService dreamService;
     private TeamCadenceService teamCadenceService;
     private ScheduleFireExecutor executor;
@@ -41,7 +42,7 @@ class ScheduleFireExecutorTest {
     void setUp() {
         conversationService = mock(IConversationService.class);
         scheduleStore = mock(IScheduleStore.class);
-        hitlTimeoutHandler = mock(ai.labs.eddi.engine.internal.HitlTimeoutHandler.class);
+        hitlTimeoutHandler = mock(HitlTimeoutHandler.class);
         dreamService = mock(DreamService.class);
         teamCadenceService = mock(TeamCadenceService.class);
 

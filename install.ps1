@@ -535,7 +535,8 @@ function Get-ComposeFiles {
             "docs/monitoring/prometheus.yml",
             "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml",
             "docs/monitoring/grafana-provisioning/datasources/datasources.yml",
-            "docs/monitoring/eddi-grafana-dashboard.json"
+            "docs/monitoring/eddi-grafana-dashboard.json",
+            "docs/monitoring/eddi-operations-dashboard.json"
         )
         foreach ($mf in $monitoringFiles) {
             $mfTarget = Join-Path -Path $EddiDir -ChildPath $mf

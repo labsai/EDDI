@@ -199,7 +199,7 @@ class RestImportServiceUncoveredBranchTest {
         @SuppressWarnings("unchecked")
         private List<URI> invokeExtractResourcesUris(String input, Pattern pattern) throws Exception {
             Method method = AbstractBackupService.class.getDeclaredMethod(
-                    "extractResourcesUris", String.class, java.util.regex.Pattern.class);
+                    "extractResourcesUris", String.class, Pattern.class);
             method.setAccessible(true);
             return (List<URI>) method.invoke(service, input, pattern);
         }
@@ -894,9 +894,9 @@ class RestImportServiceUncoveredBranchTest {
         }
 
         @SuppressWarnings("unchecked")
-        private List<URI> extractUris(String input, java.util.regex.Pattern pattern) throws Exception {
+        private List<URI> extractUris(String input, Pattern pattern) throws Exception {
             Method method = AbstractBackupService.class.getDeclaredMethod(
-                    "extractResourcesUris", String.class, java.util.regex.Pattern.class);
+                    "extractResourcesUris", String.class, Pattern.class);
             method.setAccessible(true);
             return (List<URI>) method.invoke(service, input, pattern);
         }

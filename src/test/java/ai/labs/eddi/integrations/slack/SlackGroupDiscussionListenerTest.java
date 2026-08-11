@@ -7,6 +7,7 @@ package ai.labs.eddi.integrations.slack;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.Dissent;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -289,7 +290,7 @@ class SlackGroupDiscussionListenerTest {
     void awaitCompletion_returnsTrueAfterGroupComplete() {
         initExpanded();
         listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
-                ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState.COMPLETED, null));
+                GroupConversation.GroupConversationState.COMPLETED, null));
 
         assertTrue(listener.awaitCompletion(1, TimeUnit.SECONDS));
     }
@@ -317,7 +318,7 @@ class SlackGroupDiscussionListenerTest {
                 .thenReturn("ts-synth");
 
         listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
-                ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState.COMPLETED,
+                GroupConversation.GroupConversationState.COMPLETED,
                 "Final synthesis answer"));
 
         verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Synthesis"));
@@ -334,7 +335,7 @@ class SlackGroupDiscussionListenerTest {
 
         // Now onGroupComplete also has a synthesis — should NOT post again
         listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
-                ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState.COMPLETED,
+                GroupConversation.GroupConversationState.COMPLETED,
                 "Duplicate synthesis"));
 
         // Only one synthesis header posted

@@ -27,11 +27,14 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -44,6 +47,7 @@ import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -141,12 +145,12 @@ class GroupConversationServiceHitlCoverageTest {
     }
 
     @SuppressWarnings("unchecked")
-    private java.util.concurrent.ConcurrentHashMap<String, DiscussionControlToken> activeTokens(
-                                                                                                GroupConversationService svc)
+    private ConcurrentHashMap<String, DiscussionControlToken> activeTokens(
+                                                                           GroupConversationService svc)
             throws Exception {
         var field = GroupConversationService.class.getDeclaredField("activeTokens");
         field.setAccessible(true);
-        return (java.util.concurrent.ConcurrentHashMap<String, DiscussionControlToken>) field.get(svc);
+        return (ConcurrentHashMap<String, DiscussionControlToken>) field.get(svc);
     }
 
     private GroupApprovalRequest approvedRequest() {
@@ -363,8 +367,8 @@ class GroupConversationServiceHitlCoverageTest {
     }
 
     private void stubAgentSay() throws Exception {
-        var snapshot = new ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot();
-        var output = new ai.labs.eddi.engine.memory.model.ConversationOutput();
+        var snapshot = new SimpleConversationMemorySnapshot();
+        var output = new ConversationOutput();
         output.put("output", List.of("Test response"));
         snapshot.setConversationOutputs(new java.util.ArrayList<>(List.of(output)));
         doAnswer(inv -> {
@@ -477,7 +481,7 @@ class GroupConversationServiceHitlCoverageTest {
 
     /** The listener parameter type used by the private convert overload. */
     private Class<?> IGroupConversationServiceListenerType() {
-        return ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener.class;
+        return IGroupConversationService.GroupDiscussionEventListener.class;
     }
 
     @Test

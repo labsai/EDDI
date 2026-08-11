@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.ConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.Data;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -313,7 +314,7 @@ class LifecycleManagerTest {
             when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
             when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.HashSet<>());
             when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
-            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+            when(currentStep.getConversationOutput()).thenReturn(new ConversationOutput());
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
 
@@ -353,7 +354,7 @@ class LifecycleManagerTest {
             when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
             when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.HashSet<>());
             when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
-            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+            when(currentStep.getConversationOutput()).thenReturn(new ConversationOutput());
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
 
@@ -767,7 +768,7 @@ class LifecycleManagerTest {
             when(task.getId()).thenReturn(new TaskId("llm_task"));
             when(task.getType()).thenReturn("langchain");
 
-            var conversationOutput = new ai.labs.eddi.engine.memory.model.ConversationOutput();
+            var conversationOutput = new ConversationOutput();
             // Pre-existing key that should survive rollback
             conversationOutput.put("existingKey", "existingValue");
 
@@ -839,7 +840,7 @@ class LifecycleManagerTest {
             when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
             // After failure: step contains the overwritten entry
             when(currentStep.getAllElements()).thenReturn(new java.util.LinkedList<>(List.of(overwrittenData)));
-            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+            when(currentStep.getConversationOutput()).thenReturn(new ConversationOutput());
 
             doThrow(new LifecycleException("fail"))
                     .when(task).execute(any(), any());
@@ -900,7 +901,7 @@ class LifecycleManagerTest {
             when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
             when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
             when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
-            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+            when(currentStep.getConversationOutput()).thenReturn(new ConversationOutput());
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
 
@@ -941,7 +942,7 @@ class LifecycleManagerTest {
             when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
             when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
             when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
-            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+            when(currentStep.getConversationOutput()).thenReturn(new ConversationOutput());
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
 
@@ -983,7 +984,7 @@ class LifecycleManagerTest {
             when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
             when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
             when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
-            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+            when(currentStep.getConversationOutput()).thenReturn(new ConversationOutput());
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
 
@@ -1029,7 +1030,7 @@ class LifecycleManagerTest {
             when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
             when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
             when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
-            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+            when(currentStep.getConversationOutput()).thenReturn(new ConversationOutput());
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
 
@@ -1079,7 +1080,7 @@ class LifecycleManagerTest {
             when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
             when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
             when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
-            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+            when(currentStep.getConversationOutput()).thenReturn(new ConversationOutput());
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
 
@@ -1684,7 +1685,7 @@ class LifecycleManagerTest {
             when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
             when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
             when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
-            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+            when(currentStep.getConversationOutput()).thenReturn(new ConversationOutput());
 
             when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
 
@@ -1717,7 +1718,7 @@ class LifecycleManagerTest {
             when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
             // After failure: step contains the new entry
             when(currentStep.getAllElements()).thenReturn(new java.util.LinkedList<>(List.of(newData)));
-            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+            when(currentStep.getConversationOutput()).thenReturn(new ConversationOutput());
 
             doThrow(new LifecycleException("timeout"))
                     .when(task).execute(any(), any());

@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
 import ai.labs.eddi.configs.migration.V6QuteMigration;
@@ -20,7 +21,11 @@ import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.readiness.IAgentsReadiness;
@@ -361,7 +366,7 @@ class AgentDeploymentManagementTest {
             when(agentStore.read("agent1", 1)).thenReturn(agentConfiguration);
             when(workflowStore.read("aaaaaaaaaaaaaaaaaaaaaaaa", 1)).thenReturn(behaviorWorkflow(ruleSetUri));
             when(ruleSetStore.read("bbbbbbbbbbbbbbbbbbbbbbbb", 1))
-                    .thenReturn(ruleSetWithActions(ai.labs.eddi.engine.lifecycle.IConversation.PAUSE_CONVERSATION));
+                    .thenReturn(ruleSetWithActions(IConversation.PAUSE_CONVERSATION));
 
             management.checkDeployments();
 
@@ -373,7 +378,7 @@ class AgentDeploymentManagementTest {
         @DisplayName("hitlConfig set with requireApproval configured -> no ruleset lookup needed to avoid the warning, deploy proceeds")
         void requireApprovalConfiguredStillDeploys() throws Exception {
             stubDeploymentOf("agent1", 1);
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             toolApprovals.setRequireApproval(List.of("mcp:*"));
             var hitlConfig = new AgentConfiguration.HitlConfig();
             hitlConfig.setToolApprovals(toolApprovals);
@@ -429,7 +434,7 @@ class AgentDeploymentManagementTest {
         @Test
         @DisplayName("skips AWAITING_HUMAN conversations (no raw ENDED write)")
         void skipsPausedConversations() throws Exception {
-            var paused = snapshot("conv-paused", ai.labs.eddi.engine.memory.model.ConversationState.AWAITING_HUMAN);
+            var paused = snapshot("conv-paused", ConversationState.AWAITING_HUMAN);
 
             when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent1", 1))
                     .thenReturn(List.of(paused));
@@ -447,9 +452,9 @@ class AgentDeploymentManagementTest {
         @DisplayName("Task 14/3: skips a PENDING TOOL_CALL pause identically — the spare check only reads "
                 + "ConversationState, never hitlPauseType, so undeploy is allowed the same way for both pause flavors")
         void skipsPausedToolCallConversation() throws Exception {
-            var toolPaused = snapshot("conv-tool-paused", ai.labs.eddi.engine.memory.model.ConversationState.AWAITING_HUMAN);
+            var toolPaused = snapshot("conv-tool-paused", ConversationState.AWAITING_HUMAN);
             toolPaused.setHitlPauseType("TOOL_CALL");
-            var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+            var batch = new PendingToolCallBatch();
             batch.setPauseEpoch("epoch-undeploy-sweep");
             toolPaused.setHitlPendingToolCalls(batch);
 
@@ -467,10 +472,10 @@ class AgentDeploymentManagementTest {
         }
     }
 
-    private static ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot snapshot(
-                                                                                        String id,
-                                                                                        ai.labs.eddi.engine.memory.model.ConversationState state) {
-        var s = new ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot();
+    private static ConversationMemorySnapshot snapshot(
+                                                       String id,
+                                                       ConversationState state) {
+        var s = new ConversationMemorySnapshot();
         s.setId(id);
         s.setAgentId("agent1");
         s.setAgentVersion(1);

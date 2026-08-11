@@ -10,11 +10,13 @@ import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -22,6 +24,7 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
@@ -201,7 +204,7 @@ class AgentOrchestratorResumeToolLoopTest {
         List<ChatMessage> transcript = new ArrayList<>();
         transcript.add(UserMessage.from("do the thing"));
         transcript.add(AiMessage.from(aiRequests));
-        var codec = new ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec();
+        var codec = new ChatTranscriptCodec();
         var res = codec.serialize(transcript, PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT);
         batch.setChatTranscriptJson(res.json());
         batch.setTranscriptOmitted(res.omitted());
@@ -232,8 +235,8 @@ class AgentOrchestratorResumeToolLoopTest {
     }
 
     @SuppressWarnings("unchecked")
-    private ai.labs.eddi.engine.memory.IData<Integer> dataOfInt(int v) {
-        var d = mock(ai.labs.eddi.engine.memory.IData.class);
+    private IData<Integer> dataOfInt(int v) {
+        var d = mock(IData.class);
         when(d.getResult()).thenReturn(v);
         return d;
     }
@@ -355,7 +358,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var batch = batchWith(0, List.of(gated), List.of(r1));
 
         // Re-resolution now yields a DIFFERENT fingerprint — the tamper case.
-        ToolRequestResolver movedResolver = req -> ai.labs.eddi.modules.apicalls.impl.ResolvedRequest.of("POST",
+        ToolRequestResolver movedResolver = req -> ResolvedRequest.of("POST",
                 "https://eddi.example/agentstore/agents/attacker-choice", Map.of(), Map.of(), "{}", true);
         var spied = spy(orchestrator);
         doAnswer(invocation -> {
@@ -393,7 +396,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
         var gated = gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}");
 
-        ToolRequestResolver stableResolver = req -> ai.labs.eddi.modules.apicalls.impl.ResolvedRequest.of("POST",
+        ToolRequestResolver stableResolver = req -> ResolvedRequest.of("POST",
                 "https://eddi.example/agentstore/agents/a1", Map.of(), Map.of(), "{}", true);
         // Pin it to whatever that resolver actually produces, so gate time and
         // resume time genuinely agree.

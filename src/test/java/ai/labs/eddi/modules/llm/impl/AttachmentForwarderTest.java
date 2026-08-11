@@ -6,10 +6,13 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Attachment;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor;
 import dev.langchain4j.data.message.*;
@@ -545,18 +548,18 @@ class AttachmentForwarderTest {
         // attachments:extracts / attachments:errors keys. A prefix read of
         // "attachments" would return one of those List<String> entries and forward
         // nothing; the exact-match read must still find the List<Attachment>.
-        var realMemory = new ai.labs.eddi.engine.memory.ConversationMemory("agent-1", 1, "user-1");
+        var realMemory = new ConversationMemory("agent-1", 1, "user-1");
         var step = realMemory.getCurrentStep();
         Attachment att = new Attachment();
         att.setMimeType("image/png");
         att.setBase64Data(Base64.getEncoder().encodeToString("png".getBytes()));
-        step.storeData(new ai.labs.eddi.engine.memory.model.Data<>(ATTACHMENTS.key(), List.of(att)));
+        step.storeData(new Data<>(ATTACHMENTS.key(), List.of(att)));
         // Inserted AFTER attachments — this is what a prefix reverse-scan would return
         // first.
-        step.storeData(new ai.labs.eddi.engine.memory.model.Data<>(
-                ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENT_ERRORS.key(), List.of("earlier error")));
-        step.storeData(new ai.labs.eddi.engine.memory.model.Data<>(
-                ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENT_EXTRACTS.key(), List.of("doc: earlier extract")));
+        step.storeData(new Data<>(
+                MemoryKeys.ATTACHMENT_ERRORS.key(), List.of("earlier error")));
+        step.storeData(new Data<>(
+                MemoryKeys.ATTACHMENT_EXTRACTS.key(), List.of("doc: earlier extract")));
 
         List<ChatMessage> messages = messages(UserMessage.from("look"));
         forwarder.forward(messages, realMemory, "openai", "gpt-4o");

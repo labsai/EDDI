@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.openai;
 
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import java.util.function.Consumer;
 
 /**
  * Shared fixtures for the OpenAI adapter tests.
@@ -28,7 +29,7 @@ final class OpenAiTestFixtures {
         });
     }
 
-    static OpenAiCompatConfig config(java.util.function.Consumer<ConfigBuilder> customizer) {
+    static OpenAiCompatConfig config(Consumer<ConfigBuilder> customizer) {
         ConfigBuilder builder = new ConfigBuilder();
         customizer.accept(builder);
         return builder.build();

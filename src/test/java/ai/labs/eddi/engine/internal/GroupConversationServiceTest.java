@@ -26,6 +26,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -901,7 +902,7 @@ class GroupConversationServiceTest {
 
             // Specific subtype so REST can map an unknown member to 404 (not a 409
             // conflict).
-            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupMemberNotFoundException.class,
+            assertThrows(IGroupConversationService.GroupMemberNotFoundException.class,
                     () -> service.followUpWithMember("gc-1", "ghost", "hello"));
             verify(conversationService, never())
                     .say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
@@ -918,7 +919,7 @@ class GroupConversationServiceTest {
             doThrow(new RuntimeException("provider 500")).when(conversationService)
                     .say(any(), eq("agentA"), any(), any(), any(), any(), any(), anyBoolean(), any());
 
-            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException.class,
+            assertThrows(IGroupConversationService.GroupExecutionException.class,
                     () -> service.followUpWithMember("gc-1", "agentA", "hello"));
         }
 

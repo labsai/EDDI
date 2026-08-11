@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.groups.templates.GroupTemplateService;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -41,8 +42,8 @@ class McpGroupToolsTest {
     private IGroupWorkspaceStore workspaceStore;
     private McpGroupTools tools;
 
-    private static ai.labs.eddi.configs.groups.templates.GroupTemplateService templateService() {
-        var service = new ai.labs.eddi.configs.groups.templates.GroupTemplateService(
+    private static GroupTemplateService templateService() {
+        var service = new GroupTemplateService(
                 new com.fasterxml.jackson.databind.ObjectMapper());
         service.loadTemplates();
         return service;

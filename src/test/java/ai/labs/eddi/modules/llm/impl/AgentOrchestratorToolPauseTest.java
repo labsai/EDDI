@@ -20,6 +20,9 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
@@ -106,7 +109,7 @@ class AgentOrchestratorToolPauseTest {
     @Mock
     private IConversationMemory.IWritableConversationStep currentStep;
     @Mock
-    private ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore journalStore;
+    private IHitlToolJournalStore journalStore;
 
     private AgentOrchestrator orchestrator;
 
@@ -319,7 +322,7 @@ class AgentOrchestratorToolPauseTest {
         doReturn(dataOfInt(1)).when(currentStep).getLatestData("hitl:tool_pause_count");
 
         // Audit context present — Task 10 records the guard through the collector.
-        var collected = new java.util.ArrayList<ai.labs.eddi.engine.audit.model.AuditEntry>();
+        var collected = new java.util.ArrayList<AuditEntry>();
         when(memory.getUserId()).thenReturn("user-1");
         when(memory.getAuditCollector()).thenReturn(collected::add);
 
@@ -329,7 +332,7 @@ class AgentOrchestratorToolPauseTest {
                 .filter(e -> "hitl.tool.pause_cap".equals(e.taskId()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("expected a hitl.tool.pause_cap guard audit entry, got: "
-                        + collected.stream().map(ai.labs.eddi.engine.audit.model.AuditEntry::taskId).toList()));
+                        + collected.stream().map(AuditEntry::taskId).toList()));
         assertEquals("pause_cap", guard.output().get("guard"));
         assertNotNull(guard.output().get("fingerprint"), "guard audit carries the gated fingerprint");
         assertEquals(true, guard.output().get("automated"));
@@ -377,8 +380,8 @@ class AgentOrchestratorToolPauseTest {
     }
 
     @SuppressWarnings("unchecked")
-    private ai.labs.eddi.engine.memory.IData<Integer> dataOfInt(int v) {
-        var d = mock(ai.labs.eddi.engine.memory.IData.class);
+    private IData<Integer> dataOfInt(int v) {
+        var d = mock(IData.class);
         when(d.getResult()).thenReturn(v);
         return d;
     }

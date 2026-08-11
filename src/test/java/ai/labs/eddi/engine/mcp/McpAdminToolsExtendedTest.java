@@ -35,6 +35,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
+import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -1438,9 +1439,9 @@ class McpAdminToolsExtendedTest {
 
     @Test
     void createAgentTrigger_missingIntentInConfig_returnsError() throws IOException {
-        var config = new ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration();
+        var config = new AgentTriggerConfiguration();
         config.setIntent(null);
-        when(jsonSerialization.deserialize(anyString(), eq(ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration.class)))
+        when(jsonSerialization.deserialize(anyString(), eq(AgentTriggerConfiguration.class)))
                 .thenReturn(config);
 
         String result = tools.createAgentTrigger("{\"agentDeployments\":[]}");
@@ -1451,7 +1452,7 @@ class McpAdminToolsExtendedTest {
 
     @Test
     void createAgentTrigger_handlesException() throws IOException {
-        when(jsonSerialization.deserialize(anyString(), eq(ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration.class)))
+        when(jsonSerialization.deserialize(anyString(), eq(AgentTriggerConfiguration.class)))
                 .thenThrow(new RuntimeException("parse error"));
 
         String result = tools.createAgentTrigger("{\"bad json\"}");
@@ -1484,7 +1485,7 @@ class McpAdminToolsExtendedTest {
 
     @Test
     void updateAgentTrigger_handlesException() throws IOException {
-        when(jsonSerialization.deserialize(anyString(), eq(ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration.class)))
+        when(jsonSerialization.deserialize(anyString(), eq(AgentTriggerConfiguration.class)))
                 .thenThrow(new RuntimeException("update error"));
 
         String result = tools.updateAgentTrigger("support", "{}");

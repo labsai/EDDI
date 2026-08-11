@@ -8,9 +8,13 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -57,10 +61,10 @@ class RestGroupConversationHitlTest {
 
         // Real guard wired with the same mocks + real OwnershipValidator, so the group
         // HITL ownership + listing assertions still exercise that logic end-to-end.
-        var hitlAccessGuard = new ai.labs.eddi.engine.hitl.HitlAccessGuard(
+        var hitlAccessGuard = new HitlAccessGuard(
                 identity, ownershipValidator,
-                mock(ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore.class),
-                mock(ai.labs.eddi.engine.api.IConversationService.class),
+                mock(IConversationDescriptorStore.class),
+                mock(IConversationService.class),
                 groupService);
         restGroupConversation = new RestGroupConversation(
                 groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard);
@@ -307,8 +311,8 @@ class RestGroupConversationHitlTest {
     @DisplayName("Pending approvals listing")
     class PendingApprovalsListing {
 
-        private ai.labs.eddi.engine.model.PendingApprovalSummary summaryOwnedBy(String gcId, String ownerId) {
-            var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
+        private PendingApprovalSummary summaryOwnedBy(String gcId, String ownerId) {
+            var summary = new PendingApprovalSummary(
                     gcId, null, ownerId, java.time.Instant.now(), "needs review", "WAIT_INDEFINITELY");
             summary.setGroupId(GROUP_ID);
             return summary;

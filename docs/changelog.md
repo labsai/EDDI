@@ -7,6 +7,91 @@
 
 
 
+## 🧹 chore: close the gaps outside the build — installer CI, link rot, dead code, 366 inline FQNs (2026-08-12)
+
+**Repo:** EDDI (`fix/code-review-defects-and-docs`)
+
+The second half of the repository review. The pattern in it is worth naming: the engineering
+*inside* the pipeline is strong, and nearly every problem found sat in something no automated check
+covered.
+
+**`install.sh` and `install.ps1` had no verification of any kind.** 95 KB of shipped script, the
+README's headline `curl … | bash` path, and they were in **no** path filter — so a PR touching only
+the installer skipped the entire pipeline, and a skipped required check still satisfies branch
+protection. There was no shellcheck, no lint, not even a syntax parse anywhere in `.github/`. A new
+`shell-lint` job now runs `bash -n`, ShellCheck (`--severity=warning`, using the runner's own
+binary rather than adding a third-party action to pin), a PowerShell **parse-only** check, and
+PSScriptAnalyzer. A `scripts` path filter drives it, so installer-only PRs get CI instead of a free
+pass. Verified rather than assumed: `install.sh` is already clean at warning severity, so the gate
+lands green and any regression is the script's own.
+
+**The auto-approve workflow treated an absent check as a passing one.** It required every check-run
+present on the head commit to be green, but never asserted the gating jobs had *run*. A
+merge-conflicted PR never triggers CI/CD at all, so the loop saw only CodeQL et al., found nothing
+failing, and would have approved with a body asserting "all CI checks passed" on a commit that was
+never built. It now requires `Build & Test` and `Integration Tests` to be present by name. Note this
+deliberately still auto-approves docs-only PRs: a job skipped by its `if` still reports a check-run,
+so absence means *CI did not run*, not *CI had nothing to do*.
+
+**A 1.4 MB SQLite file, and a dashboard nobody could see.** The top-level `grafana-data/` was left
+over from a bind-mount era — the monitoring stack has since moved to a named Docker volume
+provisioned from `docs/monitoring/`, so nothing referenced the directory at all. It held
+`grafana.db` (runtime state, committed), superseded provisioning copies, and
+`eddi-operations.json`: a genuinely different, richer dashboard ("Operations Command Center", 21
+panels) that was being maintained while being provisioned by nothing. Deleting it would have thrown
+away the useful part, so it moved to `docs/monitoring/eddi-operations-dashboard.json`, is mounted
+alongside the existing dashboard (the provider globs the directory, so no provisioning change), and
+is downloaded by both installers. The rest is gone and the path is now git-ignored.
+
+**Dead code.** `CannotExecuteException` had no reference anywhere in main or test. `ILogoutEndpoint`
+was a JAX-RS interface declaring `/user/isAuthenticated` and `/user/securityType` with **no
+implementing class** — the only `@Path("/user")` in the codebase, so those endpoints were advertised
+to OpenAPI and served by nothing. Both removed.
+
+**366 inline fully-qualified names across 168 files**, against AGENTS.md §4.7's own rule. These were
+not the permitted disambiguation case — `PendingApprovalSummary`, `HitlDecision`,
+`ToolApprovalsConfig`, `ConversationMemorySnapshot` and `ControlSignal` each resolve to exactly one
+class, and `IConversationService` imported `java.util.List` on line 17 while writing
+`java.util.List<…>` on line 355. The two genuine cases — `mongo.HistorizedResourceStore extends
+datastore.HistorizedResourceStore` and its Modifiable twin — were detected and left alone. Verified
+with a **clean** `test-compile`, since an incremental build reuses stale classes and hides exactly
+this kind of break.
+
+**Link rot: 38 broken links, now zero.** Every `planning/*.md` file computed `../` and `../../` as
+though it lived under `docs/planning/`, but the directory is at the repo root — so `../../AGENTS.md`
+pointed outside the repository. That one mistake accounted for 32 of them; two more were genuinely
+stale paths (`LifecycleManager` moved to `lifecycle/internal/`, and a `WebScraperToolSsrfTest` that
+no longer exists). The `.gitbook/assets/` directory referenced by the tutorials does not exist at
+all, which broke the **onboarding** path specifically: the "creating your first agent" pages linked
+to a Postman collection, and `conversations.md`/`httpcalls.md` to sample agents. Rather than
+re-point at files that are gone, those now tell the reader to import EDDI's own `/openapi` into
+Postman — generated from the running build, so it cannot go stale the way a committed collection
+did. The first diagram a new user meets was a broken image; it is now a Mermaid diagram of the
+actual config-and-pipeline model (Mermaid already renders in `docs/architecture.md`).
+
+`docs/SUMMARY.md` was missing `security-review.md` and `release-notes-6.0.2.md`; every page under
+`docs/` is now in the table of contents. The PR template's two `CONTRIBUTING.md` links resolve
+correctly in a rendered PR body but 404 in the file's own blob view — neither relative form is right
+in both, so they are absolute now.
+
+**Smaller items.** `.githooks/**` gained a `text eol=lf` attribute: `*.sh` does not match an
+extensionless hook, so the force-push guard was LF-in-repo by luck, and a CRLF hook does not merely
+look untidy — it fails to execute on Linux and macOS, silently disarming itself. Three
+`new Random()` allocations on request paths in application-scoped beans became
+`ThreadLocalRandom.current()`.
+
+**And the guard that guards the guard.** `McpToolFilterCoverageTest` pins both directions of the MCP
+allowlist, but both start from a hand-maintained `TOOL_CLASSES` list — so a brand-new `Mcp*Tools`
+class nobody added would have its tools invisible *and* leave every assertion green, which is the
+exact failure mode the file exists to prevent, one level up. The file documented this as the one
+thing it could not check. It can: the compiled classes are already on disk next to the ones under
+test, so counting them needs no indexing dependency. Mutation-checked by dropping `McpDocTools` from
+the list — the new test fails, and it names the missing class.
+
+---
+
+
+
 ## 🛡️ fix: the audit ledger could report itself as tampered, plus four smaller defects from a full-repo review (2026-08-12)
 
 **Repo:** EDDI (`fix/code-review-defects-and-docs`)

@@ -130,7 +130,7 @@ class DreamServiceTest {
 
     @Test
     void process_shouldHandleStoreException() throws Exception {
-        when(store.getAllEntries("user-1")).thenThrow(new ai.labs.eddi.datastore.IResourceStore.ResourceStoreException("DB down"));
+        when(store.getAllEntries("user-1")).thenThrow(new IResourceStore.ResourceStoreException("DB down"));
 
         var result = dreamService.process("user-1", "agent-1", dreamConfig);
 

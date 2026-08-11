@@ -32,6 +32,8 @@ import ai.labs.eddi.engine.internal.groups.TaskForceEngine;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -47,6 +49,7 @@ import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -561,11 +564,11 @@ class GroupConversationServiceHitlCoverage3Test {
         var g = gc("gc-taskphase-default");
         var m = method("executeTaskPhase", GroupConversation.class, AgentGroupConfiguration.class,
                 List.class, DiscussionPhase.class, ProtocolConfig.class, String.class, int.class,
-                GroupDiscussionEventListener.class, java.util.concurrent.atomic.AtomicInteger.class, int.class);
+                GroupDiscussionEventListener.class, AtomicInteger.class, int.class);
         // OPINION is not a task phase — routed to default arm which just logs
         assertDoesNotThrow(() -> invoke(m, g, buildConfig(List.of()), List.of(member()),
                 phase(PhaseType.OPINION), defaultProtocol(), "Q?", 0, null,
-                new java.util.concurrent.atomic.AtomicInteger(0), 50));
+                new AtomicInteger(0), 50));
     }
 
     // =================================================================
@@ -579,10 +582,10 @@ class GroupConversationServiceHitlCoverage3Test {
         g.setTaskList(null);
         var m = method("executeTaskExecutionPhase", GroupConversation.class, AgentGroupConfiguration.class,
                 List.class, DiscussionPhase.class, ProtocolConfig.class, String.class, int.class,
-                GroupDiscussionEventListener.class, java.util.concurrent.atomic.AtomicInteger.class, int.class);
+                GroupDiscussionEventListener.class, AtomicInteger.class, int.class);
         assertDoesNotThrow(() -> invoke(m, g, buildConfig(List.of()), List.of(member()),
                 phase(PhaseType.EXECUTE), defaultProtocol(), "Q?", 0, null,
-                new java.util.concurrent.atomic.AtomicInteger(0), 50));
+                new AtomicInteger(0), 50));
     }
 
     @Test
@@ -592,10 +595,10 @@ class GroupConversationServiceHitlCoverage3Test {
         g.setTaskList(new SharedTaskList());
         var m = method("executeTaskExecutionPhase", GroupConversation.class, AgentGroupConfiguration.class,
                 List.class, DiscussionPhase.class, ProtocolConfig.class, String.class, int.class,
-                GroupDiscussionEventListener.class, java.util.concurrent.atomic.AtomicInteger.class, int.class);
+                GroupDiscussionEventListener.class, AtomicInteger.class, int.class);
         assertDoesNotThrow(() -> invoke(m, g, buildConfig(List.of()), List.of(member()),
                 phase(PhaseType.EXECUTE), defaultProtocol(), "Q?", 0, null,
-                new java.util.concurrent.atomic.AtomicInteger(0), 50));
+                new AtomicInteger(0), 50));
     }
 
     // =================================================================
@@ -605,7 +608,7 @@ class GroupConversationServiceHitlCoverage3Test {
     private Method verifyPhaseMethod() throws NoSuchMethodException {
         return method("executeTaskVerificationPhase", GroupConversation.class, AgentGroupConfiguration.class,
                 List.class, DiscussionPhase.class, ProtocolConfig.class, String.class, int.class,
-                GroupDiscussionEventListener.class, java.util.concurrent.atomic.AtomicInteger.class, int.class);
+                GroupDiscussionEventListener.class, AtomicInteger.class, int.class);
     }
 
     @Test
@@ -615,7 +618,7 @@ class GroupConversationServiceHitlCoverage3Test {
         g.setTaskList(null);
         assertDoesNotThrow(() -> invoke(verifyPhaseMethod(), g, buildConfig(List.of()), List.of(member()),
                 phase(PhaseType.VERIFY), defaultProtocol(), "Q?", 0, null,
-                new java.util.concurrent.atomic.AtomicInteger(0), 50));
+                new AtomicInteger(0), 50));
     }
 
     @Test
@@ -627,7 +630,7 @@ class GroupConversationServiceHitlCoverage3Test {
         g.setTaskList(taskList);
         invoke(verifyPhaseMethod(), g, buildConfig(List.of()), List.of(member()),
                 phase(PhaseType.VERIFY), defaultProtocol(), "Q?", 0, null,
-                new java.util.concurrent.atomic.AtomicInteger(0), 50);
+                new AtomicInteger(0), 50);
         assertTrue(g.getTranscript().stream()
                 .anyMatch(e -> e.type() == TranscriptEntryType.VERIFICATION),
                 "a VERIFICATION 'no completed tasks' note is recorded");
@@ -647,7 +650,7 @@ class GroupConversationServiceHitlCoverage3Test {
         // empty speakers → no verifier
         assertDoesNotThrow(() -> invoke(verifyPhaseMethod(), g, buildConfig(List.of()), List.of(),
                 phase(PhaseType.VERIFY), defaultProtocol(), "Q?", 0, null,
-                new java.util.concurrent.atomic.AtomicInteger(0), 50));
+                new AtomicInteger(0), 50));
     }
 
     // =================================================================
@@ -993,9 +996,9 @@ class GroupConversationServiceHitlCoverage3Test {
     @Test
     @DisplayName("extractResponse: metadata-only snapshot (no outputs) → empty string, never null")
     void extractResponseEmpty() throws Exception {
-        var snap = new ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot();
+        var snap = new SimpleConversationMemorySnapshot();
         var m = method("extractResponse",
-                ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.class);
+                SimpleConversationMemorySnapshot.class);
         Object result = invoke(m, snap);
         assertEquals("", result, "null extraction is coerced to empty string for GCS callers");
     }
@@ -1111,7 +1114,7 @@ class GroupConversationServiceHitlCoverage3Test {
                 .when(conversationStore).read("gc-cancel-missing");
         assertThrows(IResourceStore.ResourceNotFoundException.class,
                 () -> service.cancelDiscussion("gc-cancel-missing",
-                        ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL));
+                        ControlSignal.CANCEL_GRACEFUL));
     }
 
     // =================================================================
