@@ -36,6 +36,9 @@ const scoped = [
   '@source "../../src/components/layout";',
   '@source "../ds-entry.tsx";',
   '@source "../previews";',
+  // The operator-drawer stub the converter substitutes for TopBar's import —
+  // its launcher classes have to be emitted too or the button renders bare.
+  '@source "../stubs";',
 ].join("\n");
 if (!/@import\s+['"]tailwindcss['"]\s*;/.test(css)) {
   console.error("build-css: src/index.css has no `@import 'tailwindcss';` — aborting");

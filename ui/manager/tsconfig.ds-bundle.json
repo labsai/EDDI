@@ -1,0 +1,30 @@
+{
+  // Path map for the design-system bundler, and the single source of it:
+  // tsconfig.design-sync.json extends this file, so tsc and the converter can
+  // never disagree about where an import resolves.
+  //
+  // KEEP THIS FILE FREE OF SLASH-STAR AND STAR-SLASH SEQUENCES.
+  // The converter parses it with a regex stripper
+  // (.ds-sync/lib/bundle.mjs, tsconfigPathsPlugin) that removes everything
+  // between a slash-star and the next star-slash. The "@/(star)" key below
+  // already contains a slash-star, so the first star-slash anywhere after it
+  // silently deletes the whole paths object -- and a paths-less parse makes the
+  // plugin return null, dropping alias resolution for the entire bundle rather
+  // than failing loudly. That is why this file carries no include globs: a
+  // pattern like ".design-sync/star-star/star.ts" would supply the closing
+  // delimiter. tsconfig-parse.test.ts pins this.
+  //
+  // ORDER MATTERS. The converter's resolver walks these entries in declaration
+  // order and returns the first match, so exact keys must sit above the
+  // wildcard. TypeScript prefers the more specific pattern regardless.
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/components/operator/operator-drawer": [
+        "./.design-sync/stubs/operator-drawer.tsx"
+      ],
+      "@/*": ["./src/*"],
+      "eddi-manager": ["./.design-sync/ds-entry.tsx"]
+    }
+  }
+}

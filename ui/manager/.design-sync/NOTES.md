@@ -11,16 +11,37 @@ the first two pull Monaco into the bundle, and `ThemeProvider` is a provider rat
 visual component (it is already used by `ds-providers`). Compose `Sidebar` + `TopBar` by
 hand instead of reaching for `AppLayout`.
 
-> **`TopBar` now drags the operator drawer in.** `refactor(operator): move the launcher
-> from a floating FAB into both shells' headers` (main, PR #137) moved `OperatorDrawer`
-> out of `AppLayout` and into `top-bar.tsx` as a static import. Since `TopBar` is a synced
-> component, the bundle grew **4.00 MB → 4.17 MB (+179 KB)** and now contains the operator
-> tool-scope allow-list (`tool-scopes`, `WRITE_ENDPOINTS`). Monaco is still out — that was
-> always the expensive half — but this is exactly the creep the scoped entry exists to
-> prevent. Options if it matters: lazy-load `OperatorDrawer` behind `React.lazy` in
-> `TopBar` (keeps both the header launcher and the lean bundle), or drop `TopBar` from the
-> synced surface (loses the chrome this sync exists to provide). Measure with the esbuild
-> command in "Verifying the surface" below before and after any such change.
+**`TopBar` imports the operator drawer; the converter substitutes a stub.**
+`refactor(operator): move the launcher from a floating FAB into both shells' headers`
+(main, PR #137) moved `OperatorDrawer` out of `AppLayout` and into `top-bar.tsx` as a
+static import. `TopBar` is synced, so that dragged the whole operator subsystem — the
+tool-scope allow-list (`WRITE_ENDPOINTS`), activation flow and operator chat — into
+`_ds_bundle.js`: **+99 KB** and exactly the creep the scoped entry exists to prevent.
+
+`cfg.tsconfig` therefore points at `tsconfig.ds-bundle.json`, whose `paths` map
+`@/components/operator/operator-drawer` to `.design-sync/stubs/operator-drawer.tsx`.
+Measured through the converter's own resolver: `tool-scopes`, `WRITE_ENDPOINTS`,
+`operator-activation` and `useOperatorChat` all drop to **0**, bundle 4.36 → 4.26 MB.
+`tsconfig.design-sync.json` **extends** that file, so `tsc -b` type-checks the stub against
+`TopBar`'s real usage — verified by giving the stub a required prop and watching
+`top-bar.tsx:208` fail with TS2741.
+
+**Lazy-loading is not an alternative, and this was tested rather than assumed.** The
+converter emits `format: 'iife'`, which esbuild cannot code-split, so a
+`React.lazy(() => import(…))` is inlined into the same file — a probe entry doing nothing
+but that still carried `tool-scopes` and `WRITE_ENDPOINTS`. `OperatorDrawer` also renders
+the launcher button itself, so it is mounted on every page and would load immediately
+regardless.
+
+> ⚠️ **Never put a `/`+`*` or `*`+`/` sequence in `tsconfig.ds-bundle.json`.**
+> `tsconfigPathsPlugin` strips comments with a regex and `JSON.parse`s the result; on any
+> throw it returns `null`, which drops alias resolution for the **entire bundle** instead
+> of failing loudly. The `"@/*"` key already contains an opening sequence, so one stray
+> closer deletes the whole paths object. This is not hypothetical — it is why the converter
+> reads a dedicated glob-free file rather than `tsconfig.design-sync.json`, whose
+> `include` patterns supply exactly that closer. `src/__tests__/design-sync-tsconfig.test.ts`
+> pins all of it, including that the exact stub key stays ahead of the wildcard (the
+> resolver returns the first match in declaration order).
 
 ## How the build is wired (non-obvious — read before re-syncing)
 
@@ -30,7 +51,9 @@ hand instead of reaching for `AppLayout`.
   only this surface + its deps land in `_ds_bundle.js` — not Monaco/editors/etc.
   **To add/remove a synced component: edit ds-entry.tsx AND `cfg.componentSrcMap`.**
 - `componentSrcMap` pins all 29 src paths because there is no shipped `.d.ts`.
-- `cfg.tsconfig = tsconfig.app.json` so esbuild resolves the `@/* → ./src/*` alias.
+- `cfg.tsconfig = tsconfig.ds-bundle.json` so esbuild resolves the `@/*` alias — and, via
+  one exact entry ahead of the wildcard, swaps the operator drawer for a stub. See the
+  boxed warning above before editing that file.
 - **Provider chain** `.design-sync/ds-providers.tsx` (`DesignSyncProvider`, used as
   `cfg.provider`): MemoryRouter + QueryClientProvider + ThemeProvider(light) + Radix
   TooltipProvider, and a side-effect `import "@/i18n/config"`. It previews through an
@@ -133,7 +156,10 @@ node .ds-sync/node_modules/esbuild/bin/esbuild .design-sync/ds-entry.tsx \
   --outfile=/tmp/ds-bundle.js
 
 # 2. Nothing heavy leaked in. All of these must print 0.
-grep -oc 'monaco\|vscode\|codicon\|JsonEditor' /tmp/ds-bundle.js
+#    NOTE: this plain esbuild call does NOT apply cfg.tsconfig's paths, so it will
+#    still show the operator subsystem. To measure what the converter actually
+#    produces, drive it through tsconfigPathsPlugin from .ds-sync/lib/bundle.mjs.
+grep -oc 'monaco\|vscode\|codicon\|JsonEditor\|tool-scopes' /tmp/ds-bundle.js
 
 # 3. The tokens actually ship. build-css minifies, so match inside the :root block
 #    rather than grepping line-wise.
