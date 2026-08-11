@@ -30,9 +30,15 @@ instance *is* deployment data, reaches GitHub. Nothing is requested until an ope
 *Check now* or opts into the per-reload check. **The Swagger UI policy is untouched**: it never
 calls GitHub, and widening it would be pure surface.
 
-Both halves are now pinned by `InfrastructureIT`, which previously asserted only `script-src` and
-would have stayed green if the source were dropped again — or pasted into the Swagger policy. The
-application path must carry the source; the Swagger path must not.
+Both halves are now pinned, in two places for one reason. `InfrastructureIT` asserts them over HTTP
+— the real proof — and previously checked only `script-src`, so it would have stayed green if the
+source were dropped again or pasted into the Swagger policy. But its Swagger case is guarded by an
+`Assumptions.assumeFalse` and skips whenever the profile does not serve Swagger UI, which is every
+integration run today (11 run, 1 skipped) — so the half that says *do not widen this one* was
+asserted nowhere that executes. `CspPolicyTest` therefore reads the two configured headers straight
+from `application.properties`, with no container and no assumption: the application policy must
+carry the source, the Swagger policy must not, and neither may reach it through `default-src` or
+`script-src`. Mutation-checked — removing the source turns it red.
 
 Verified in a browser, serving the Manager's production bundle behind this exact header: with
 `connect-src 'self'` the check is blocked and reports CSP; with the source added it completes and
