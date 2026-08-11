@@ -3694,5 +3694,37 @@
   },
   "workforceWizard": {
     "title": "新建团队"
+  },
+  "updates": {
+    "title": "EDDI 更新",
+    "description": "检查是否有更新的 EDDI 版本。在你发起检查之前不会发送任何请求。",
+    "installed": "已安装",
+    "githubRelease": "GitHub 发布",
+    "dockerImage": "Docker 镜像",
+    "unknownVersion": "未知",
+    "checkNow": "立即检查",
+    "checking": "检查中…",
+    "autoCheck": "每次加载页面时自动检查",
+    "autoCheckHint": "每次浏览器重新加载执行一次检查，发现更新版本时显示提示条。",
+    "privacyNote": "检查仅会从你的浏览器直接访问 api.github.com，不会访问其他主机，也不会发送任何部署数据。",
+    "neverChecked": "尚未执行检查。",
+    "upToDate": "你正在运行最新版本（{{version}}）。",
+    "updateAvailable": "EDDI {{version}} 已发布",
+    "updateAvailableDetail": "你当前运行的是 {{installed}}。",
+    "ahead": "你当前运行的是 {{installed}}，比最新发布版本（{{version}}）更新。",
+    "unknownInstalled": "最新版本是 {{version}}。无法确定已安装的版本，因此无法比较。",
+    "errorRateLimited": "已达到 GitHub 对未认证请求的速率限制。请稍后重试，或打开发布页面。",
+    "errorUnreachable": "无法访问 api.github.com。请检查网络或出站代理。",
+    "errorFailed": "更新检查失败。请打开发布页面手动查看。",
+    "publishedOn": "发布于 {{date}}",
+    "whatsNew": "{{version}} 的新变化",
+    "fullNotes": "在 GitHub 上查看完整版本说明",
+    "noNotes": "此版本没有说明。",
+    "releaseNotes": "版本说明",
+    "allReleases": "全部版本",
+    "howToUpdate": "如何更新",
+    "howToUpdateCli": "使用 eddi 命令行工具（由安装程序创建）：",
+    "howToUpdateManual": "若没有该命令行工具，请在安装目录（默认 ~/.eddi）中执行：",
+    "howToUpdateNote": "根据你的部署调整 -f 参数——如果使用 Keycloak，请添加 -f docker-compose.auth.yml。"
   }
 }

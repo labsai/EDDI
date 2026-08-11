@@ -3694,5 +3694,37 @@
   },
   "workforceWizard": {
     "title": "新しいチーム"
+  },
+  "updates": {
+    "title": "EDDI のアップデート",
+    "description": "より新しい EDDI リリースがあるか確認します。実行するまで何も送信されません。",
+    "installed": "インストール済み",
+    "githubRelease": "GitHub リリース",
+    "dockerImage": "Docker イメージ",
+    "unknownVersion": "不明",
+    "checkNow": "今すぐ確認",
+    "checking": "確認中…",
+    "autoCheck": "ページを読み込むたびに自動で確認する",
+    "autoCheckHint": "ブラウザの再読み込みごとに 1 回確認し、新しいリリースがあればバナーを表示します。",
+    "privacyNote": "確認はブラウザから api.github.com にのみ直接アクセスします。他のホストへの接続やデプロイ情報の送信は一切ありません。",
+    "neverChecked": "まだ確認していません。",
+    "upToDate": "最新リリース（{{version}}）を使用しています。",
+    "updateAvailable": "EDDI {{version}} が利用可能です",
+    "updateAvailableDetail": "現在 {{installed}} を使用しています。",
+    "ahead": "現在 {{installed}} を使用しており、最新リリース（{{version}}）より新しいバージョンです。",
+    "unknownInstalled": "最新リリースは {{version}} です。インストール済みのバージョンを特定できなかったため、比較できません。",
+    "errorRateLimited": "GitHub の未認証リクエストのレート制限に達しました。しばらくしてから再試行するか、リリースページを開いてください。",
+    "errorUnreachable": "api.github.com に接続できませんでした。ネットワークまたは送信プロキシをご確認ください。",
+    "errorFailed": "アップデートの確認に失敗しました。リリースページで手動でご確認ください。",
+    "publishedOn": "公開日 {{date}}",
+    "whatsNew": "{{version}} の新機能",
+    "fullNotes": "GitHub で全リリースノートを見る",
+    "noNotes": "このリリースにノートはありません。",
+    "releaseNotes": "リリースノート",
+    "allReleases": "すべてのリリース",
+    "howToUpdate": "アップデート方法",
+    "howToUpdateCli": "eddi CLI（インストーラーが作成）を使う場合:",
+    "howToUpdateManual": "CLI がない場合、インストールディレクトリ（既定は ~/.eddi）で:",
+    "howToUpdateNote": "-f フラグは構成に合わせて調整してください。Keycloak を使う場合は -f docker-compose.auth.yml を追加します。"
   }
 }

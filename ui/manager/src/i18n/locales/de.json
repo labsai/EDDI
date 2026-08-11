@@ -3694,5 +3694,37 @@
   },
   "workforceWizard": {
     "title": "Neues Team"
+  },
+  "updates": {
+    "title": "EDDI-Updates",
+    "description": "Prüfen, ob eine neuere EDDI-Version verfügbar ist. Es wird nichts gesendet, bevor Sie es anfordern.",
+    "installed": "Installiert",
+    "githubRelease": "GitHub-Release",
+    "dockerImage": "Docker-Image",
+    "unknownVersion": "Unbekannt",
+    "checkNow": "Jetzt prüfen",
+    "checking": "Wird geprüft…",
+    "autoCheck": "Bei jedem Seitenaufruf automatisch prüfen",
+    "autoCheckHint": "Führt pro Browser-Neuladen eine Prüfung durch und zeigt einen Hinweis, wenn eine neuere Version vorliegt.",
+    "privacyNote": "Die Prüfung kontaktiert ausschließlich api.github.com direkt aus Ihrem Browser. Es werden keine Daten der Installation übertragen.",
+    "neverChecked": "Noch keine Prüfung durchgeführt.",
+    "upToDate": "Sie verwenden die neueste Version ({{version}}).",
+    "updateAvailable": "EDDI {{version}} ist verfügbar",
+    "updateAvailableDetail": "Sie verwenden {{installed}}.",
+    "ahead": "Sie verwenden {{installed}} — neuer als die neueste Veröffentlichung ({{version}}).",
+    "unknownInstalled": "Die neueste Version ist {{version}}. Die installierte Version konnte nicht ermittelt werden, ein Vergleich ist daher nicht möglich.",
+    "errorRateLimited": "Das Anfragelimit von GitHub für nicht authentifizierte Zugriffe ist erreicht. Versuchen Sie es später erneut oder öffnen Sie die Releases-Seite.",
+    "errorUnreachable": "api.github.com ist nicht erreichbar. Prüfen Sie Ihr Netzwerk oder einen ausgehenden Proxy.",
+    "errorFailed": "Die Update-Prüfung ist fehlgeschlagen. Öffnen Sie die Releases-Seite, um manuell nachzusehen.",
+    "publishedOn": "Veröffentlicht am {{date}}",
+    "whatsNew": "Neu in {{version}}",
+    "fullNotes": "Vollständige Release Notes auf GitHub",
+    "noNotes": "Zu dieser Version gibt es keine Notizen.",
+    "releaseNotes": "Release Notes",
+    "allReleases": "Alle Versionen",
+    "howToUpdate": "So aktualisieren Sie",
+    "howToUpdateCli": "Mit dem eddi-CLI (vom Installer angelegt):",
+    "howToUpdateManual": "Ohne CLI, im Installationsverzeichnis (standardmäßig ~/.eddi):",
+    "howToUpdateNote": "Passen Sie die -f-Flags an Ihr Setup an — mit Keycloak zusätzlich -f docker-compose.auth.yml."
   }
 }

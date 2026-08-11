@@ -77,7 +77,9 @@ export default defineConfig({
     format: "es",
   },
   server: {
-    port: 3000,
+    // Honour PORT so two worktrees can run dev servers side by side; 3000 stays
+    // the default, which is what the proxy notes and docs assume.
+    port: Number(process.env.PORT) || 3000,
     proxy: {
       "/agentstore": p(),
       "/workflowstore": p(),
