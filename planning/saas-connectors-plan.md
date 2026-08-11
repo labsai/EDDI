@@ -326,6 +326,13 @@ public record ConnectionConfiguration(
         OAuthConfig oauth,                 // authType OAUTH2_*
         List<String> baseUrlAllowlist,     // origins this connection's credential may be sent to
         Integer timeoutMs) { }
+
+public record StaticAuth(
+        String headerName,                 // e.g. "Authorization", "X-Api-Key" — non-secret
+        String valueTemplate,              // e.g. "Bearer ${vault:jira-token}" — see rule below
+        String username,                   // BASIC only; non-secret
+        String passwordRef) { }            // BASIC only; MUST be a ${vault:...} reference
+
 ```
 
 `binding` is the field that makes Amplitude and Google Drive the same system:
@@ -340,19 +347,43 @@ public record OAuthConfig(
         String clientId,
         String clientSecret,               // MUST be a ${vault:...} reference (C4)
         List<String> scopes,
-        Map<String, String> extraAuthParams,
+        Map<String, String> extraAuthParams,   // NON-SECRET protocol params only (prompt, audience, …)
         boolean usePkce,                   // forced true for AUTHORIZATION_CODE
         String discoveryUrl) { }           // optional RFC 8414 / 9728 metadata URL
 ```
 
-`validate()` rejects: blank `name`; a `clientSecret` that is not a `${vault:`
-reference; `AUTHORIZATION_CODE` without `authorizationUrl`; `PER_USER` binding on
-any `authType` other than `AUTHORIZATION_CODE`; an allowlist entry that is not a
-bare origin. The allowlist is a **list** because one provider's credential
-legitimately spans hosts (Google: `www.googleapis.com`, `drive.googleapis.com`, …)
-and the token endpoint's origin routinely differs from the API's (Atlassian:
-`auth.atlassian.com` vs `api.atlassian.com` — the token URL does not need to be in
-the allowlist at all; only API targets do).
+**Every secret-bearing field is reference-only.** `validate()` rejects any value
+in `clientSecret`, `passwordRef`, or a `valueTemplate`'s interpolated segment
+that is not a `${vault:...}` (or `${vars:...}`) reference, and rejects
+`extraAuthParams` keys matching the credential-shaped denylist
+(`SecretScrubber.SECRET_FIELD_NAMES`). Without this, a plaintext key in
+`StaticAuth` or `extraAuthParams` would sit in the connection document, bypassing
+C4, export scrubbing, and `VaultGrantChecker`'s `${vault:}` scan in one move —
+`extraAuthParams` in particular is an arbitrary string map and would otherwise be
+the obvious place for an author to paste one.
+
+**Canonical origin format, applied to two separate allowlists.** Every allowlist
+entry is a bare origin — `scheme://host[:port]`, lowercase scheme and host, no
+path, query, fragment, userinfo, or trailing slash — parsed with `URI.create` and
+re-serialized, never string-compared. `validate()` rejects anything else, so
+`api.atlassian.com` (no scheme) fails loudly rather than silently never matching.
+
+- **`baseUrlAllowlist`** governs where the *access token* may be sent. It is a
+  list because one provider's credential legitimately spans hosts (Google:
+  `https://www.googleapis.com`, `https://drive.googleapis.com`, …).
+- **Credential endpoints** — `tokenUrl`, `authorizationUrl`, `discoveryUrl` — are
+  validated **separately**, against their own trusted-provider allowlist. An
+  earlier draft of this plan said the token URL "does not need to be in the
+  allowlist at all"; that was wrong. The vault-resolved `clientSecret` is sent to
+  `tokenUrl`, so an unvalidated `tokenUrl` is a direct client-secret exfiltration
+  path — a strictly worse leak than a misdirected access token. Their origins
+  routinely differ from the API's (Atlassian: `auth.atlassian.com` vs
+  `api.atlassian.com`), which is why they need their own list rather than being
+  folded into `baseUrlAllowlist`.
+
+`validate()` also rejects: blank `name`; `AUTHORIZATION_CODE` without
+`authorizationUrl`; `PER_USER` binding on any `authType` other than
+`AUTHORIZATION_CODE`.
 
 ### 5.2 The grant store
 
@@ -432,11 +463,27 @@ conversations hitting an expired grant simultaneously both call the token endpoi
 with rotating refresh tokens (Google, Atlassian) the second call invalidates the
 first, and the user is silently logged out.
 
-**Design: single-flight per grant, with optimistic locking.** A refresh acquires
-the grant row by `version`; the losing writer re-reads and uses the winner's token
-rather than refreshing again. In-process, a `ConcurrentHashMap<GrantKey,
-CompletableFuture<Token>>` collapses concurrent refreshes; across the cluster the
-`version` CAS is the backstop. Failure semantics distinguish the OAuth error from
+**Design: a cross-replica claim taken *before* the token call, with optimistic
+locking as the final write guard.** Ordering is the whole point — an earlier
+draft of this plan relied on a `version` CAS alone, which is checked at *write*
+time, i.e. after both replicas have already called the token endpoint and the
+provider has already rotated the refresh token out from under one of them. The
+CAS would then dutifully serialize two writes, one of which carries a token the
+provider has already invalidated. Correct order:
+
+1. **Claim** — atomic conditional update on the grant row
+   (`refreshInProgress IS NULL OR refreshLeaseExpiresAt < now`), setting a lease
+   with a short TTL. This is the cross-replica gate and it happens *before* any
+   network call.
+2. **Claimant refreshes**; non-claimants poll the row for the new token until the
+   lease expires, then retry the claim rather than refreshing blind.
+3. **Write** guarded by the `version` CAS, and clear the lease.
+
+The lease TTL must exceed the token endpoint timeout, or a slow provider frees
+the lease while the claimant is still in flight and reintroduces the double
+refresh. In-process, a `ConcurrentHashMap<GrantKey, CompletableFuture<Token>>`
+still collapses concurrent callers before they contend on the row — an
+optimization on top of the claim, not a substitute for it. Failure semantics distinguish the OAuth error from
 the transport error: `invalid_grant` (revoked/expired refresh token) is terminal →
 `REFRESH_FAILED`, surfaced as "reconnect required"; a network timeout or 5xx from
 the token endpoint is **not** terminal — the grant stays `ACTIVE`/`EXPIRED` and the
@@ -452,9 +499,23 @@ if telemetry shows cold-start latency matters.
 
 ### 6.1 Service account — `client_credentials` (Phase 4)
 
-Straight-line: POST `tokenUrl` with `client_id` + `client_secret` (vault-resolved)
-+ `scope`, cache the access token against `expiresAt` in the grant store under
-principal `__service__`, refresh lazily. No callback, no browser, no user
+The request contract, spelled out because a plan meant to be implemented cold
+should not leave it to inference (RFC 6749 §3.2.1, §4.4.2):
+
+- `POST tokenUrl`, body `application/x-www-form-urlencoded`, containing
+  `grant_type=client_credentials` and `scope` (space-delimited).
+- **Client authentication defaults to HTTP Basic** (`client_id:client_secret`,
+  base64) — the method RFC 6749 §2.3.1 says servers MUST support — with
+  `client_secret_post` (credentials in the form body) as a per-connection
+  opt-in, since some providers only accept that. The choice is a
+  `clientAuthMethod` field on `OAuthConfig`, not a guess at runtime.
+- Response parsed for `access_token`, `token_type`, `expires_in`; a missing
+  `expires_in` is treated as a short fixed TTL rather than "never expires".
+- Sent via `SafeHttpClient.sendValidated` (C2), to a `tokenUrl` already validated
+  against the credential-endpoint allowlist (§5.1).
+
+Cache the access token against `expiresAt` in the grant store under principal
+`__service__`, refresh lazily. No callback, no browser, no user
 interaction. This is what Atlassian and Amplitude service integrations need, and it
 is the phase that proves the whole `ConnectionConfiguration` machinery end-to-end
 with a fraction of Phase 5's surface.
@@ -475,9 +536,11 @@ The flow, with the three decisions that matter:
 2. Browser → provider → user consents → provider redirects to
    GET /connections/callback?code=…&state=…                (PERMIT path — see below)
 
-3. Server validates state (exists, unexpired, unconsumed), exchanges code +
+3. Server ATOMICALLY CLAIMS the state row — conditional update
+   `SET consumedAt = now WHERE state = ? AND consumedAt IS NULL AND expiresAt > now`,
+   proceeding only if it updated exactly one row — then exchanges code +
    code_verifier at tokenUrl, encrypts and stores the grant under `principal`,
-   consumes the state, redirects to a Manager success page
+   redirects to a Manager success page
 
 4. Agent turn → ConnectionResolver → grant for (tenant, connection, callerUserId)
    → access token, refreshed if expired
@@ -499,6 +562,11 @@ quarkus.http.auth.permission.oauth-callback.policy=permit
 quarkus.http.auth.permission.oauth-callback.methods=GET
 ```
 
+The claim in step 3 must be the *first* thing the callback does, and it must be a
+single conditional write rather than a read-then-write: validating the row and
+then marking it consumed lets two concurrent callbacks both observe it unconsumed
+and both redeem the code.
+
 **Decision 2 — PKCE is mandatory, not configurable.** `usePkce` is forced true for
 `AUTHORIZATION_CODE` at validate time. A public redirect endpoint without PKCE is
 an authorization-code interception vector, and there is no legacy provider in scope
@@ -514,8 +582,17 @@ if (connectionsEnabled && publicBaseUrl.isBlank()) {
     throw new IllegalStateException(
         "eddi.connections.enabled=true requires eddi.connections.public-base-url");
 }
-if (connectionsEnabled && !publicBaseUrl.startsWith("https://") && !launchMode.isDevOrTest()) {
-    throw new IllegalStateException("OAuth redirect URI must be HTTPS outside dev");
+// Parse, do not prefix-match: startsWith("https://") accepts paths, queries,
+// fragments, userinfo and malformed authorities, any of which yields a
+// redirect_uri that will not match the provider's exact registration.
+URI base = URI.create(publicBaseUrl);            // throws on malformed
+if (connectionsEnabled && !launchMode.isDevOrTest()
+        && (!"https".equals(base.getScheme()) || base.getUserInfo() != null
+            || base.getQuery() != null || base.getFragment() != null
+            || (base.getPath() != null && !base.getPath().isEmpty() && !"/".equals(base.getPath())))) {
+    throw new IllegalStateException(
+        "eddi.connections.public-base-url must be a bare https origin "
+      + "(scheme://host[:port]) — got: " + publicBaseUrl);
 }
 ```
 
@@ -559,6 +636,23 @@ a precise "this server needs connection X" error to the Manager. Dynamic client
 registration (RFC 7591) is **out of scope** — an admin registers the client once and
 stores the ID/secret in a connection.
 
+**Discovery input is attacker-influenced and must be treated as such.** The
+`resource_metadata` URL arrives in a header from the very server we are failing
+to authenticate against, and the document it returns names the authorization
+server. Three rules, none optional:
+
+1. Every discovery fetch goes through **`SafeHttpClient.sendValidated`** (C2) —
+   URL validation, `Redirect.NEVER`, cross-origin credential stripping. This is
+   the one new outbound path in the plan, so it starts compliant rather than
+   joining the four existing bypasses at `security-hardening-remaining.md:104-107`.
+2. The `resource_metadata` URL must share an origin with the MCP server that
+   returned it. A server may not redirect discovery to a host of its choosing.
+3. RFC 9728 §3.3: the metadata's `resource` value must match the MCP server URL
+   being accessed, and any `authorization_servers` entry must be on the
+   credential-endpoint allowlist (§5.1) before a token is requested from it.
+   Discovery may *select* among pre-approved authorization servers; it may never
+   *introduce* one.
+
 The circuit breaker must learn to distinguish `401 → needs auth` from
 `connection refused → server down`; today both increment the same counter
 (`:362-367`).
@@ -577,9 +671,20 @@ everything around it.
 Document and ship a compose example running `mcp-proxy` / `supergateway` as a
 sidecar that bridges stdio → streamable HTTP. EDDI talks to it over the transport
 it already has. The child process stays in its own container with its own limits
-and its own image; EDDI gains no RCE surface, no interpreter in the runtime image,
-and no process lifecycle code. **This unlocks the majority of vendor MCP servers
-for a docs page.**
+and its own image; **EDDI's** process gains no code-execution surface, no
+interpreter in its runtime image, and no process lifecycle code. **This unlocks
+the majority of vendor MCP servers for a docs page.**
+
+To be precise about what this does and does not buy, since "sidecar" is easy to
+over-read as "solved": the MCP server binary still executes, and it still speaks
+to EDDI over a network channel. Container separation bounds the blast radius; it
+removes neither process-execution nor supply-chain risk — a malicious
+`npx some-mcp-server` is still malicious, just contained. The docs page must
+therefore cover: image provenance and pinning (digest, not tag — the same rule
+`AGENTS.md` already applies to the EDDI base image), non-root execution,
+CPU/memory limits, a network policy restricting the sidecar's egress to the
+provider it needs, and authentication on the bridge itself, so the stdio server
+is not reachable by anything else on the pod network.
 
 Also in 3a, cheaply: fix the `sse` inconsistency by adding it to
 `SUPPORTED_TRANSPORTS` (`McpCallsConfiguration.java:80`) as a deprecated alias, so
@@ -623,12 +728,13 @@ Preconditions for everything else. Nothing here is connector work.
 | Item | Change |
 |---|---|
 | **0.1** | `McpStartupGuard`, mirroring `OpenAiStartupGuard.isUnprotected()` (`:74-76`): refuse `NORMAL` launch when `/mcp` is reachable with `authorization.enabled=false` unless an explicit `eddi.mcp.allow-unauthenticated=true` opt-out is set. Add the matching path-policy entry. **Do not touch the global default** (C1). |
-| **0.2** | `discover-tools` and `discover-endpoints` → `POST` with a request body; credential moves to a `@HeaderParam` following `IRestImportService.java:65`. Stop returning `apiAuth` inside generated ApiCall headers (`RestApiCallsStore.java:97` puts `configsByGroup` — each containing the pasted credential via `McpApiToolBuilder.java:250-251` — straight into the response body). **Manager lockstep required:** the endpoint's own Javadoc says "Used by the Manager UI for selective API call import", so the Manager's discovery calls must switch to POST in the same release. Keep the GET forms for one release, deprecated and rejecting a non-empty credential param. |
+| **0.2** | `discover-tools` and `discover-endpoints` → `POST` with a request body; credential moves to a `@HeaderParam` following `IRestImportService.java:65`. Stop returning `apiAuth` inside generated ApiCall headers (`RestApiCallsStore.java:97` puts `configsByGroup` — each containing the pasted credential via `McpApiToolBuilder.java:250-251` — straight into the response body). **Manager lockstep required:** the endpoint's own Javadoc says "Used by the Manager UI for selective API call import", so the Manager's discovery calls must switch to POST in the same release. **The GET forms lose the credential parameter entirely** — an earlier draft kept them for one release "rejecting a non-empty credential param", which does not remove the leak: by the time the handler rejects it, the value has already been through ingress, any reverse proxy, access logs, browser history, and APM traces. The deprecated GET either serves credential-free discovery (public specs) or 410s with a pointer to POST; the parameter does not survive the release. |
 | **0.3** | `LogCaptureFilter` redacts in place, or a console formatter wraps `SecretRedactionFilter`, so stdout matches the ring buffer. |
 | **0.4** | Stop returning raw `e.getMessage()` to HTTP callers (`RestMcpCallsStore.java:161`); log the exception class only on the outbound-failure paths, following the discipline already used at `HttpCallToolsProvider.java:252-262`. |
 | **0.5** | `SecretScrubber`: recurse into array elements (`:134`), add an `x-*`/`*-token`/`*-key` header-name rule, and scrub URL-embedded credentials by reusing `RequestRedactor.redactUri`'s logic rather than the whole-string `KEY_LIKE_PATTERN`. |
 | **0.6** | Apply `governDescription` to A2A agent-card and skill descriptions (`A2AToolProviderManager.java:152-175`). One call site, closes an asymmetry with MCP. |
 | **0.7** | SSRF protection: **needs an explicit product decision, not a silent flip.** The `false` default is documented intent, not an oversight — the comment at `application.properties:341-343` says *"Default OFF to preserve calls to internal/private APIs in self-hosted deployments — enable for multi-tenant / internet-facing."* Flipping `%prod` to `true` breaks every self-hosted agent that calls an internal API. Proposed resolution: keep the global default, but have `eddi.connections.enabled=true` force SSRF protection on (connections by definition target third parties, and Phase 5 stores tokens worth stealing via `discover-tools`'s echo primitive), plus a release-notes migration note. Sign-off required either way. |
+| **0.8** | **Protect `/secretstore` — the credential store has the same exposure as `/mcp`.** `IRestSecretStore` is `@RolesAllowed("eddi-admin")` but has **no path-specific policy**, so it falls to the catch-all `authenticated` policy at `application.properties:396-398` — and `DisabledAuthController` disables *both* under the shipped `authorization.enabled=false`. Vault writes, DEK rotation and `reset` are unauthenticated out of the box. Add a `/secretstore/*` path policy and extend the Phase 0.1 guard to cover it. **This must land before Phase 2**, and arguably before anything: a plan about storing credentials cannot leave the existing credential store open. (Caught in review — the original draft flagged `/mcp` and missed this.) |
 
 ### Phase 1 — Govern what comes back (~4-5 days) · P0
 
@@ -647,7 +753,12 @@ resolution chains (§5.3). `BASIC` finally gives Jira and Amplitude first-class
 support — today you must vault a pre-base64-encoded blob because nothing encodes
 for you.
 
-Also: register connection writes in the operator write-scope exclusion list (C6),
+Also: register connection **configuration writes and grant-lifecycle routes**
+in the operator write-scope exclusion list (C6). Both, not just the first —
+`POST /connections/{id}/authorize` and the disconnect/revoke routes create and
+destroy credentials without touching a connection *document*, so an exclusion
+written against config writes alone would leave the operator able to mint or
+delete grants. Each excluded route gets its own authorization test (§11),
 and add the store to `VaultGrantChecker`'s traversal so a connection's
 `${vault:}` client secret participates in deploy-time grant enforcement.
 
@@ -731,17 +842,24 @@ None. All changes are additive; existing `apiKey` fields keep working.
 Required for new features per the repo guideline (`operator-write-scope-plan.md:173-181`).
 Micrometer, exposed at `/q/metrics`.
 
-| Metric | Type | Tags |
+**Tags are bounded categoricals only.** Connection names and MCP server URLs are
+author-supplied and unbounded, so tagging with them would let a config author
+mint Micrometer series without limit (a cardinality-explosion DoS on the metrics
+backend) and would publish tenant and provider names to anyone who can read
+`/q/metrics` — which, per G7, is anyone at all by default. The specific
+identifier belongs in a sanitized log line or an exemplar, never a tag.
+
+| Metric | Type | Tags (all bounded) |
 |---|---|---|
-| `connection.resolve.count` | Counter | `connection`, `binding`, `outcome` |
-| `connection.resolve.time` | Timer | `connection` |
-| `connection.grant.missing.count` | Counter | `connection`, `binding` — the per-user "not connected yet" signal |
-| `connection.oauth.authorize.count` | Counter | `connection`, `outcome` |
-| `connection.oauth.callback.count` | Counter | `connection`, `outcome` (`success`/`bad_state`/`expired_state`/`exchange_failed`) |
-| `connection.token.refresh.count` | Counter | `connection`, `outcome` |
-| `connection.token.refresh.singleflight.collapsed` | Counter | `connection` — validates §5.4 |
+| `connection.resolve.count` | Counter | `authType`, `binding`, `outcome` |
+| `connection.resolve.time` | Timer | `authType`, `binding` |
+| `connection.grant.missing.count` | Counter | `binding` — the per-user "not connected yet" signal |
+| `connection.oauth.authorize.count` | Counter | `authType`, `outcome` |
+| `connection.oauth.callback.count` | Counter | `outcome` (`success`/`bad_state`/`expired_state`/`replayed`/`exchange_failed`) |
+| `connection.token.refresh.count` | Counter | `authType`, `outcome` (incl. `invalid_grant` vs `transient`, §5.4) |
+| `connection.token.refresh.claim.count` | Counter | `outcome` (`claimed`/`awaited`/`lease_expired`) — validates the §5.4 claim |
 | `connection.grant.status` | Gauge | `status` |
-| `mcp.auth.challenge.count` | Counter | `server`, `outcome` — 4b |
+| `mcp.auth.challenge.count` | Counter | `outcome` — 4b (`server` deliberately omitted: URLs are unbounded) |
 | `guardrail.toolresult.count` | Counter | `action`, `source` — 1.2 |
 
 ---
@@ -775,8 +893,33 @@ fail:
   falling back to the service grant; a target origin outside `baseUrlAllowlist` is
   refused.
 - **§5.4** — two concurrent resolves of an expired grant produce exactly one token
-  request (assert on the collapsed counter), and the optimistic-lock loser adopts
-  the winner's token.
+  request (assert on the claim counter), the non-claimant adopts the claimant's
+  token, and — the case the in-process map cannot cover — two *separate* resolver
+  instances contending on the same row still yield one token request, proving the
+  claim is the cross-replica gate and not just a local optimization. Plus: an
+  expired lease is reclaimable, and `invalid_grant` marks `REFRESH_FAILED` while a
+  timeout does not.
+- **§6.2 step 3** — two concurrent callbacks with the same valid `state` result in
+  exactly one code exchange; the loser gets a clean error, not a second redemption.
+
+**Storage and authorization boundaries** — one behavioral test each, all required
+before Phase 2 (first four) and Phase 5 (rest) can be called done. These pin
+declared invariants that are otherwise only prose:
+
+- A connection grant never appears in an agent export ZIP, under any `authType`,
+  including when the grant store is populated.
+- `VaultGrantChecker` traverses connection configs and reports a `${vault:}`
+  client secret the agent is not granted — the serialize-and-scan path, not an
+  enumerated field list (C-changelog 2026-08-10).
+- Connection **configuration** writes are outside operator write scope.
+- Connection **grant-lifecycle** routes (`authorize`, disconnect/revoke) are
+  outside operator write scope — asserted per route, since these mutate
+  credentials without touching a config document.
+- Tenant isolation holds in **both** persistence backends: a grant written under
+  tenant A is not readable under tenant B, tested against Mongo and Postgres
+  rather than one and assumed for the other.
+- `/secretstore/*` and `/mcp` reject unauthenticated access once their Phase 0
+  policies are in place (0.1, 0.8).
 - **§6.2** — a replayed `state` is refused; an expired `state` is refused; a
   `state` for user A cannot install a grant for user B; a `state` issued by
   replica 1 is honoured by replica 2 (persistent state store).
