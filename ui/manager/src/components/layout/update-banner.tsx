@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { ArrowUpCircle, X } from "lucide-react";
+import { ExternalLink, Gift, X } from "lucide-react";
 import { useUpdateCheck } from "@/hooks/use-update-check";
 
 /**
@@ -28,7 +28,8 @@ export function UpdateBanner() {
       className="relative flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-primary/10 px-10 py-1.5 text-xs font-medium text-foreground"
       data-testid="update-banner"
     >
-      <ArrowUpCircle className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+      {/* A release is a delivery, not an alarm — the icon should read that way. */}
+      <Gift className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
       <span>
         {t("updates.updateAvailable", "EDDI {{version}} is available", {
           version: latest.version,
@@ -45,6 +46,17 @@ export function UpdateBanner() {
       <Link to="/manage#updates" className="underline underline-offset-2 hover:no-underline">
         {t("updates.howToUpdate", "How to update")}
       </Link>
+      <a
+        href={latest.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 underline underline-offset-2 hover:no-underline"
+        data-testid="update-banner-notes-link"
+      >
+        {t("updates.releaseNotes", "Release notes")}
+        <ExternalLink className="h-3 w-3" aria-hidden="true" />
+        <span className="sr-only">({t("common.opensNewTab", "opens in new tab")})</span>
+      </a>
       <button
         onClick={() => setDismissed(true)}
         className="absolute inset-e-2 top-1/2 -translate-y-1/2 rounded p-0.5 transition-colors hover:bg-primary/20"

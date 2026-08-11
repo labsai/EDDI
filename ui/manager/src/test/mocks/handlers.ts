@@ -1338,8 +1338,14 @@ export const handlers = [
       name: "9.9.9",
       html_url: "https://github.com/labsai/EDDI/releases/tag/9.9.9",
       published_at: "2026-01-15T10:00:00Z",
-      body: "Mock release notes",
+      body: "## Highlights\n\n- Mock release note one\n- Mock release note two",
     });
+  }),
+
+  // Docker Hub's published tag, read through shields.io (Docker's own API sends
+  // no CORS headers). Matches the GitHub release by default, i.e. image ready.
+  http.get("https://img.shields.io/docker/v/labsai/eddi.json", () => {
+    return HttpResponse.json({ label: "version", message: "v9.9.9", value: "v9.9.9" });
   }),
 
   // OpenAPI endpoint discovery

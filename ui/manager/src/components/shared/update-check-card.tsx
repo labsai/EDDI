@@ -1,17 +1,25 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   ArrowUpCircle,
   CheckCircle2,
+  ChevronDown,
+  Container,
   ExternalLink,
   AlertTriangle,
+  Gift,
+  Github,
   RefreshCw,
   Info,
+  Server,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUpdateCheck } from "@/hooks/use-update-check";
-import { EDDI_RELEASES_URL } from "@/lib/api/updates";
+import { EDDI_DOCKER_TAGS_URL, EDDI_RELEASES_URL } from "@/lib/api/updates";
 import { cn } from "@/lib/utils";
 
 /** The exact commands EDDI's own README documents for an upgrade. */
@@ -38,8 +46,11 @@ export function UpdateCheckCard() {
     installedVersionLoading,
     latest,
     status,
+    image,
+    imageStatus,
     isChecking,
     errorReason,
+    imageLookupFailed,
     hasChecked,
     checkNow,
   } = useUpdateCheck();
@@ -68,36 +79,42 @@ export function UpdateCheckCard() {
       </CardHeader>
 
       <CardContent className="space-y-4 pt-4">
-        {/* Versions + trigger */}
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {t("updates.installed", "Installed")}
-            </p>
-            <p className="text-sm font-medium tabular-nums" data-testid="update-installed-version">
-              {installedVersionLoading ? (
-                <Skeleton className="my-0.5 block h-4 w-20" />
-              ) : (
-                (knownInstalled ?? t("updates.unknownVersion", "Unknown"))
-              )}
-            </p>
-          </div>
+        {/* The three versions that matter, each from its own source */}
+        <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
+          <VersionCell icon={Server} label={t("updates.installed", "Installed")}>
+            {installedVersionLoading ? (
+              <Skeleton className="my-0.5 block h-4 w-20" />
+            ) : (
+              <span data-testid="update-installed-version">
+                {knownInstalled ?? t("updates.unknownVersion", "Unknown")}
+              </span>
+            )}
+          </VersionCell>
 
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {t("updates.latestRelease", "Latest release")}
-            </p>
-            <p className="text-sm font-medium tabular-nums" data-testid="update-latest-version">
-              {latest ? latest.version : "—"}
-            </p>
-          </div>
+          <VersionCell
+            icon={Github}
+            label={t("updates.githubRelease", "GitHub release")}
+            href={latest?.url}
+            testId="update-latest-version"
+          >
+            {latest ? latest.version : "—"}
+          </VersionCell>
+
+          <VersionCell
+            icon={Container}
+            label={t("updates.dockerImage", "Docker image")}
+            href={image?.url ?? (hasChecked ? EDDI_DOCKER_TAGS_URL : undefined)}
+            testId="update-image-version"
+          >
+            {image ? image.version : "—"}
+          </VersionCell>
 
           <Button
             variant="outline"
             size="sm"
             onClick={checkNow}
             disabled={isChecking}
-            className="ms-auto"
+            className="ms-auto mt-4"
             data-testid="update-check-now"
           >
             <RefreshCw className={cn("h-4 w-4", isChecking && "animate-spin")} aria-hidden="true" />
@@ -183,6 +200,33 @@ export function UpdateCheckCard() {
           ) : null}
         </div>
 
+        {/* The reason for reading both sources: a release whose image is not
+            published yet cannot be pulled, however current the tag looks. */}
+        {imageStatus === "pending" && latest && image && (
+          <ResultRow tone="warning" icon={AlertTriangle} testId="update-image-pending">
+            <span>
+              {t(
+                "updates.imagePending",
+                "The {{version}} image is not on Docker Hub yet — a pull right now would still fetch {{available}}.",
+                { version: latest.version, available: image.version },
+              )}
+            </span>
+          </ResultRow>
+        )}
+        {imageLookupFailed && !errorReason && (
+          <ResultRow tone="muted" icon={Info} testId="update-image-failed">
+            <span>
+              {t(
+                "updates.imageLookupFailed",
+                "The published Docker tag could not be read. Check the image tags directly.",
+              )}
+            </span>
+          </ResultRow>
+        )}
+
+        {/* Release notes */}
+        {latest && <ReleaseNotes release={latest} highlight={updateAvailable} />}
+
         {/* Update instructions — only once there is something to update to */}
         {updateAvailable && <UpdateInstructions />}
 
@@ -210,29 +254,106 @@ export function UpdateCheckCard() {
           </label>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-            <a
+            <ExternalLinkText
               href={latest?.url ?? EDDI_RELEASES_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
-              data-testid="update-release-notes-link"
+              testId="update-release-notes-link"
             >
               {latest
                 ? t("updates.releaseNotes", "Release notes")
                 : t("updates.allReleases", "All releases")}
-              <ExternalLink className="h-3 w-3" aria-hidden="true" />
-              <span className="sr-only">({t("common.opensNewTab", "opens in new tab")})</span>
-            </a>
+            </ExternalLinkText>
+            {/* Brand name, deliberately not an i18n key: it is the same in
+                every locale, and a key would read to the debt ratchet as ten
+                untranslated strings. */}
+            <ExternalLinkText
+              href={image?.url ?? EDDI_DOCKER_TAGS_URL}
+              testId="update-docker-hub-link"
+            >
+              Docker Hub
+            </ExternalLinkText>
             <p className="text-xs text-muted-foreground">
               {t(
                 "updates.privacyNote",
-                "Checks contact api.github.com directly from your browser. No deployment data is sent.",
+                "Checks contact api.github.com and img.shields.io directly from your browser. No deployment data is sent.",
               )}
             </p>
           </div>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/* ─── Release notes ───────────────────────────────────────────────────────── */
+
+/**
+ * The "what did I actually get" half of an update prompt.
+ *
+ * Collapsed by default — a version number is the answer to "should I update",
+ * the notes are the answer to "why", and only one of those belongs on a
+ * dashboard unprompted.
+ */
+function ReleaseNotes({
+  release,
+  highlight,
+}: {
+  release: { version: string; url: string; notes: string };
+  highlight: boolean;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border",
+        highlight ? "border-primary/30 bg-primary/5" : "border-border bg-muted/40",
+      )}
+      data-testid="update-release-notes"
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="flex w-full items-center gap-2.5 p-3 text-start text-sm"
+        aria-expanded={open}
+        aria-controls="update-release-notes-body"
+        data-testid="update-release-notes-toggle"
+      >
+        <Gift
+          className={cn("h-4 w-4 shrink-0", highlight ? "text-primary" : "text-muted-foreground")}
+          aria-hidden="true"
+        />
+        <span className="font-medium">
+          {t("updates.whatsNew", "What's new in {{version}}", { version: release.version })}
+        </span>
+        <ChevronDown
+          className={cn(
+            "ms-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
+          aria-hidden="true"
+        />
+      </button>
+
+      {open && (
+        <div id="update-release-notes-body" className="space-y-3 border-t border-border/60 p-3">
+          {release.notes ? (
+            /* Deliberately NO rehypeRaw: release notes are third-party text, so
+               raw HTML stays escaped rather than being injected live. */
+            <div className="prose prose-sm dark:prose-invert max-h-80 max-w-none overflow-y-auto break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{release.notes}</ReactMarkdown>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {t("updates.noNotes", "This release has no notes.")}
+            </p>
+          )}
+          <ExternalLinkText href={release.url} testId="update-full-notes-link">
+            {t("updates.fullNotes", "Full release notes on GitHub")}
+          </ExternalLinkText>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -284,6 +405,76 @@ function CommandBlock({ command }: { command: string }) {
   );
 }
 
+/* ─── Small pieces ────────────────────────────────────────────────────────── */
+
+function VersionCell({
+  icon: Icon,
+  label,
+  href,
+  testId,
+  children,
+}: {
+  icon: typeof Info;
+  label: string;
+  href?: string;
+  testId?: string;
+  children: React.ReactNode;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div>
+      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <Icon className="h-3 w-3" aria-hidden="true" />
+        {label}
+      </p>
+      {/* A div, not a p: the loading state renders a Skeleton, which is a div. */}
+      <div className="text-sm font-medium tabular-nums" data-testid={testId}>
+        {href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 hover:text-primary hover:underline"
+          >
+            {children}
+            <ExternalLink className="h-3 w-3 opacity-50" aria-hidden="true" />
+            <span className="sr-only">({t("common.opensNewTab", "opens in new tab")})</span>
+          </a>
+        ) : (
+          children
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ExternalLinkText({
+  href,
+  testId,
+  children,
+}: {
+  href: string;
+  testId?: string;
+  children: React.ReactNode;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+      data-testid={testId}
+    >
+      {children}
+      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+      <span className="sr-only">({t("common.opensNewTab", "opens in new tab")})</span>
+    </a>
+  );
+}
+
 /* ─── Result row ──────────────────────────────────────────────────────────── */
 
 type ResultTone = "accent" | "success" | "warning" | "muted";
@@ -304,15 +495,20 @@ const TONE_STYLES: Record<ResultTone, { wrapper: string; icon: string }> = {
 function ResultRow({
   tone,
   icon: Icon,
+  testId,
   children,
 }: {
   tone: ResultTone;
   icon: typeof Info;
+  testId?: string;
   children: React.ReactNode;
 }) {
   const styles = TONE_STYLES[tone];
   return (
-    <div className={cn("flex items-start gap-2.5 rounded-lg border p-3 text-sm", styles.wrapper)}>
+    <div
+      className={cn("flex items-start gap-2.5 rounded-lg border p-3 text-sm", styles.wrapper)}
+      data-testid={testId}
+    >
       <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", styles.icon)} aria-hidden="true" />
       <div className="min-w-0 text-muted-foreground">{children}</div>
     </div>
