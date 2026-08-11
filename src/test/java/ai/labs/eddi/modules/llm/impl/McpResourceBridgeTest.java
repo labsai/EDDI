@@ -100,7 +100,11 @@ class McpResourceBridgeTest {
         // Port 9 (discard) is about as reliably closed as it gets. Construction
         // must succeed; only executing the tool reports the error, as text the
         // model can read and act on.
-        var bridge = manager.resourceBridgeTools(config("dead", "http://127.0.0.1:9/mcp"));
+        var dead = config("dead", "http://127.0.0.1:9/mcp");
+        // Explicit short timeout: the default is 30s, and a CI host that black-holes
+        // rather than refuses would otherwise turn this into a 30s test.
+        dead.setTimeoutMs(500L);
+        var bridge = manager.resourceBridgeTools(dead);
         var request = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
                 .name("dead_list_resources").arguments("{}").build();
         String result = bridge.executors().get("dead_list_resources").execute(request, null);

@@ -94,9 +94,19 @@ public final class TaskToolApprovalsResolver {
      * constructor injection has no single home here.
      */
     public static ToolApprovalsConfig resolve(ToolApprovalsConfig agentLevel, ToolApprovalsConfig taskLevel) {
-        Mode mode = Mode.parse(ConfigProvider.getConfig()
+        return resolve(agentLevel, taskLevel, configuredMode());
+    }
+
+    /**
+     * The deployment's configured mode. Public so a caller that merely wants to
+     * <em>describe</em> the semantics — {@code LlmStore}'s save-time warnings — can
+     * say what this deployment will actually do, rather than asserting the default.
+     * Warning that a setting is ignored on a deployment that honours it is worse
+     * than silence: it trains authors to disregard the warning.
+     */
+    public static Mode configuredMode() {
+        return Mode.parse(ConfigProvider.getConfig()
                 .getOptionalValue(MODE_PROPERTY, String.class).orElse("strict"));
-        return resolve(agentLevel, taskLevel, mode);
     }
 
     /** Pure overload — the whole contract, testable without a config source. */

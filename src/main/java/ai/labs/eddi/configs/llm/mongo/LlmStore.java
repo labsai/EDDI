@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -71,11 +72,14 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
      * save time, not from a pause that never lifts.
      */
     private static void warnStrictModeImplications(ToolApprovalsConfig cfg, String fieldPath) {
-        if (cfg == null) {
+        if (cfg == null || TaskToolApprovalsResolver.configuredMode() != TaskToolApprovalsResolver.Mode.STRICT) {
+            // In `replace` mode these settings ARE honoured verbatim — warning that
+            // they are ignored would be flatly wrong, and a warning authors learn to
+            // disregard is worse than none.
             return;
         }
         if (cfg.getExempt() != null && !cfg.getExempt().isEmpty()) {
-            LOGGER.warnf("%s.exempt is IGNORED under eddi.hitl.tool.task-approvals.mode=strict (the default): "
+            LOGGER.warnf("%s.exempt is IGNORED under eddi.hitl.tool.task-approvals.mode=strict: "
                     + "task-level exemptions cannot loosen the agent-level gate. Set the mode to 'replace' if this "
                     + "task is deliberately looser than its agent.", fieldPath);
         }
