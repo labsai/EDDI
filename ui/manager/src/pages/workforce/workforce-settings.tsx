@@ -520,9 +520,11 @@ function WorkforceSettings() {
     [members, config?.phases, style, maxRounds],
   );
 
-  // Styles the backend supports. The group's CURRENT style is always kept in
-  // the list — dropping it would silently rewrite the select to another value.
-  const { styles: availableStyles, backendLabels } = useAvailableStyles();
+  // Styles the backend supports. Unlike the creation paths, this edits an
+  // EXISTING group: its saved style stays in the list even when unsupported,
+  // because dropping it would silently rewrite the select to another value and
+  // save that on the next submit.
+  const availableStyles = useAvailableStyles();
   const styleOptions = useMemo(
     () => (availableStyles.includes(style) ? availableStyles : [...availableStyles, style]),
     [availableStyles, style],
@@ -695,12 +697,12 @@ function WorkforceSettings() {
             >
               {styleOptions.map((s) => (
                 <option key={s} value={s}>
-                  {styleDisplay(s, t, backendLabels[s]).icon} {styleDisplay(s, t, backendLabels[s]).label}
+                  {styleDisplay(s, t).icon} {styleDisplay(s, t).label}
                 </option>
               ))}
             </select>
             <p className="text-xs text-muted-foreground mt-1">
-              {styleDisplay(style, t, backendLabels[style]).flow}
+              {styleDisplay(style, t).flow}
             </p>
           </FormField>
 
@@ -818,7 +820,7 @@ function WorkforceSettings() {
                   <p className="text-xs text-muted-foreground">
                     {t(
                       "groups.roleCoverageWarning",
-                      'No member carries the role "{{role}}" — {{phases}} would run with no speakers.',
+                      'No member carries the role "{{role}}" — every member will speak in {{phases}} instead.',
                       { role: gap.role, phases: gap.phaseNames.join(", ") },
                     )}
                   </p>

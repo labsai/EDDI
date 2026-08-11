@@ -5,7 +5,12 @@ import { X, ChevronRight, ChevronLeft, Users, Plus, Trash2, AlertTriangle, Check
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { useCreateGroup, useEnrichedGroupDescriptors, useAvailableStyles } from "@/hooks/use-groups";
+import {
+  useCreateGroup,
+  useEnrichedGroupDescriptors,
+  useAvailableStyles,
+  isStyleSupported,
+} from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import {
   type DiscussionStyle,
@@ -40,7 +45,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
   );
 
   // What the backend actually supports — see useAvailableStyles.
-  const { styles: availableStyles, backendLabels } = useAvailableStyles();
+  const availableStyles = useAvailableStyles();
   const [step, setStep] = useState<Step>(initialTemplate ? "basics" : "template");
   const [, setSelectedTemplate] = useState<GroupTemplate | null>(initialTemplate ?? null);
   const [name, setName] = useState(initialTemplate?.name ?? "");
@@ -168,9 +173,12 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
 
   const steps: Step[] = ["template", "basics", "members", "review"];
   const stepIdx = steps.indexOf(step);
+  // A style the running backend does not offer would fail at save time, so it
+  // blocks progression rather than being silently carried to Create.
+  const styleSupported = isStyleSupported(style, availableStyles);
   const canNext =
     step === "template" ||
-    (step === "basics" && name.trim()) ||
+    (step === "basics" && name.trim() && styleSupported) ||
     (step === "members" && members.length >= 2) ||
     step === "review";
 
@@ -292,13 +300,11 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                   {t("groups.discussionStyle", "Discussion Style")}
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1">
-                  {/* Current selection is always offered — a template may have
-                      set a style the backend list (still loading, or older)
-                      does not carry. */}
-                  {(availableStyles.includes(style)
-                    ? availableStyles
-                    : [...availableStyles, style]
-                  ).map((s) => (
+                  {/* Only styles the backend supports. This is a CREATION
+                      path, so an unsupported one must not stay selectable: the
+                      save would fail after the fact. A template that preselected
+                      one is flagged below instead. */}
+                  {availableStyles.map((s) => (
                     <button
                       key={s}
                       onClick={() => setStyle(s)}
@@ -309,11 +315,30 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                           : "border-border hover:border-primary/30"
                       )}
                     >
-                      <span className="text-sm">{styleDisplay(s, t, backendLabels[s]).icon}</span>{" "}
-                      <span className="font-medium">{styleDisplay(s, t, backendLabels[s]).label}</span>
+                      <span className="text-sm">{styleDisplay(s, t).icon}</span>{" "}
+                      <span className="font-medium">{styleDisplay(s, t).label}</span>
                     </button>
                   ))}
                 </div>
+                {/* A template can preselect a style the running backend does
+                    not have. Saying so here — and blocking Create — beats a 400
+                    after the user has filled in the whole form. */}
+                {!styleSupported && (
+                  <div
+                    className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2 mt-2"
+                    data-testid="unsupported-style-warning"
+                  >
+                    <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-muted-foreground">
+                      {t(
+                        "groups.unsupportedStyle",
+                        "This server does not support {{style}}. Pick another framework to continue.",
+                        { style: styleDisplay(style, t).label },
+                      )}
+                    </p>
+                  </div>
+                )}
+
                 {/* Style-specific hints */}
                 {style === "ROUND_TABLE" && (
                   <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2 mt-2">
@@ -744,7 +769,7 @@ function ReviewStep({
               <p className="text-xs text-muted-foreground">
                 {t(
                   "groups.roleCoverageWarning",
-                  'No member carries the role "{{role}}" — {{phases}} would run with no speakers.',
+                  'No member carries the role "{{role}}" — every member will speak in {{phases}} instead.',
                   { role: gap.role, phases: gap.phaseNames.join(", ") },
                 )}
               </p>

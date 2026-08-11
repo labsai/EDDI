@@ -59,11 +59,12 @@ export interface RoleCoverageGap {
  * Phases restricted to a `ROLE:<name>` that no member actually carries.
  *
  * DEBATE addresses `ROLE:PRO`/`ROLE:CON` and DEVIL_ADVOCATE addresses
- * `ROLE:DEVIL_ADVOCATE`; custom phases can address any role. A phase whose role
- * matches nobody simply has no speakers — the discussion runs, the phase
- * contributes nothing, and the author finds out from a hollow transcript.
- * Nothing validated this before: both wizards let a debate be created with
- * every member role blank.
+ * `ROLE:DEVIL_ADVOCATE`; custom phases can address any role. When no member
+ * carries the role, `GroupConversationService.resolveParticipants` logs a
+ * warning and falls back to ALL members — so the phase is not skipped, it is
+ * answered by everyone. A debate with no CON role therefore has the PRO members
+ * arguing the CON side too, and the judge rules on that. Nothing validated this
+ * before: both wizards let a debate be created with every member role blank.
  *
  * Same expansion rule as {@link moderatorlessPhaseNames}: a preset-style group
  * stores NO phases, so the check must expand the preset or it is inert for

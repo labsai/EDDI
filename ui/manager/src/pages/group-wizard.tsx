@@ -29,7 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
-import { useCreateGroup, useAvailableStyles } from "@/hooks/use-groups";
+import { useCreateGroup, useAvailableStyles, isStyleSupported } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { styleLabel, styleDisplay } from "@/lib/discussion-styles";
 import { uncoveredRolePhases } from "@/lib/group-config";
@@ -209,6 +209,9 @@ export function GroupWizardPage() {
   const [isBatchCreating, setIsBatchCreating] = useState(false);
 
   const createMutation = useCreateGroup();
+  // Gate progression on it here too: ConfigStep only renders the warning, and
+  // this wizard provisions agents before saving.
+  const availableStyles = useAvailableStyles();
 
   const isCreating = createMutation.isPending || isBatchCreating;
   const step = STEPS[currentStep];
@@ -237,7 +240,11 @@ export function GroupWizardPage() {
       case "template":
         return true;
       case "config":
-        return state.name.trim().length > 0 && isHitlConfigValid(state);
+        return (
+          state.name.trim().length > 0 &&
+          isHitlConfigValid(state) &&
+          isStyleSupported(state.style, availableStyles)
+        );
       case "members": {
         if (state.members.length < 2) return false;
         // Every member must have a displayName, plus an identity appropriate to
@@ -589,6 +596,12 @@ function TemplateStep({
   onSkip: () => void;
 }) {
   const { t } = useTranslation();
+  // Only templates whose style the backend supports — picking one the server
+  // cannot run would fail at save, after every member agent was provisioned.
+  const availableStyles = useAvailableStyles();
+  const templates = getGroupTemplates(t).filter((tpl) =>
+    availableStyles.includes(tpl.style),
+  );
 
   return (
     <div>
@@ -600,7 +613,7 @@ function TemplateStep({
       </p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2" data-testid="template-grid">
-        {getGroupTemplates(t).map((tmpl) => {
+        {templates.map((tmpl) => {
           const styleInfo = styleDisplay(tmpl.style, t);
           return (
             <button
@@ -674,14 +687,12 @@ function ConfigStep({
   onChange: (patch: Partial<WizardState>) => void;
 }) {
   const { t } = useTranslation();
-  // What the backend actually supports — a style it lacks would fail at save
-  // time, and one it added would otherwise never appear here. The CURRENT
-  // selection is always kept in the list (a template may have set it before the
-  // styles response arrived) so the picker never hides its own selection.
-  const { styles: availableStyles, backendLabels } = useAvailableStyles();
-  const styleChoices = availableStyles.includes(state.style)
-    ? availableStyles
-    : [...availableStyles, state.style];
+  // What the backend actually supports. This wizard PROVISIONS AGENTS before it
+  // saves the group, so letting an unsupported style through would burn real
+  // agent creations on a save that then 400s — it is flagged and blocks Next
+  // instead of being carried along.
+  const availableStyles = useAvailableStyles();
+  const styleSupported = isStyleSupported(state.style, availableStyles);
 
   return (
     <div>
@@ -732,8 +743,8 @@ function ConfigStep({
             {t("groups.discussionStyle", "Discussion Style")}
           </label>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {styleChoices.filter((s) => s !== "CUSTOM").map((s) => {
-              const info = styleDisplay(s, t, backendLabels[s]);
+            {availableStyles.filter((s) => s !== "CUSTOM").map((s) => {
+              const info = styleDisplay(s, t);
               const colors = STYLE_COLORS[s] ?? STYLE_COLORS.CUSTOM;
               const selected = state.style === s;
               return (
@@ -765,6 +776,24 @@ function ConfigStep({
             })}
           </div>
         </div>
+
+        {/* A template can preselect a style the running backend does not have —
+            say so before any agent is provisioned for it. */}
+        {!styleSupported && (
+          <div
+            className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3"
+            data-testid="gw-unsupported-style"
+          >
+            <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "groups.unsupportedStyle",
+                "This server does not support {{style}}. Pick another framework to continue.",
+                { style: styleDisplay(state.style, t).label },
+              )}
+            </p>
+          </div>
+        )}
 
         {/* Max Rounds */}
         <div>
@@ -1885,7 +1914,7 @@ function ReviewStep({
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {t(
                       "groupWizard.roleCoverageHint",
-                      "{{phases}} would run with no speakers. Go back to Members and set the role field.",
+                      "The server falls back to letting every member speak in {{phases}}, so both sides get argued by the same people. Go back to Members and set the role field.",
                       { phases: gap.phaseNames.join(", ") },
                     )}
                   </p>

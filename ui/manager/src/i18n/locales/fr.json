@@ -2398,7 +2398,7 @@
     "agentFiledCaps": "Limites",
     "agentFiledCapsValue": "{{perDiscussion}} / discussion · {{perTurn}} / tour",
     "moderatorlessWarning": "Réservé à un modérateur que ce groupe n'a pas : {{phases}}. Le premier membre par ordre de parole prendra le relais.",
-    "roleCoverageWarning": "Aucun membre ne porte le rôle « {{role}} » — {{phases}} se déroulerait sans intervenant.",
+    "roleCoverageWarning": "Aucun membre ne porte le rôle « {{role}} » : dans {{phases}}, tous les membres prendront la parole.",
     "delegationDepth": "Profondeur max.",
     "delegationTimeout": "Délai du délégué",
     "secondsShort": "{{seconds}}s",
@@ -2587,7 +2587,8 @@
         "label": "Déroulé personnalisé",
         "flow": "Des phases que vous définissez vous-même"
       }
-    }
+    },
+    "unsupportedStyle": "Ce serveur ne prend pas en charge {{style}}. Choisissez un autre cadre pour continuer."
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -2881,7 +2882,7 @@
     "hintDelphi": "Tous les membres répondent de manière indépendante et anonyme. Après chaque tour, ils voient les résultats anonymes et peuvent ajuster. Tours max. contrôle le nombre d'itérations anonymes.",
     "hintNegotiation": "Les membres exposent leurs intérêts, déposent des propositions puis négocient : « Tours max » fixe le nombre de tours de marchandage. Le modérateur n'arbitre que faute d'accord.",
     "roleCoverageWarning": "Aucun membre n'a le rôle « {{role}} »",
-    "roleCoverageHint": "{{phases}} se déroulerait sans intervenant. Revenez à « Membres » et renseignez le champ rôle.",
+    "roleCoverageHint": "Le serveur se rabat sur la prise de parole de tous les membres dans {{phases}}, si bien que les mêmes personnes défendent les deux camps. Revenez à « Membres » et renseignez le champ rôle.",
     "hintTaskForce": "Le modérateur crée un plan de tâches, assigne le travail aux agents en parallèle, puis vérifie et synthétise les résultats.",
     "hintCustom": "Définissez vos propres phases manuellement. Les phases personnalisées peuvent être configurées via l'API après la création.",
     "hintRoundTable": "Tous les membres partagent leurs opinions, puis discutent des points de vue des autres sur plusieurs tours avant que le modérateur ne synthétise.",

@@ -124,6 +124,42 @@ describe("wave-3 parity across group-discussion surfaces", () => {
     expect(templates).toContain('"NEGOTIATION"');
   });
 
+  // The styles endpoint returns an ARRAY of descriptors. Reading it as a map
+  // keyed by the enum type-checks, passes a map-shaped mock, and silently
+  // matches nothing against the real backend — so the whole capability check
+  // becomes dead code. Pin the array read.
+  it("reads the styles endpoint as an array of descriptors", () => {
+    const hook = read("hooks/use-groups.ts");
+    expect(hook).toContain("Array.isArray(data)");
+    expect(hook).toMatch(/entry\.style/);
+    expect(hook).not.toContain("Object.keys(data)");
+  });
+
+  // Creation paths provision agents BEFORE saving the group, so an unsupported
+  // style must block rather than fail after the fact. Editing an existing group
+  // is different and deliberately keeps its saved style.
+  const creationGates: [label: string, file: string][] = [
+    ["Manager group wizard", "pages/group-wizard.tsx"],
+    ["Manager create dialog", "components/groups/create-group-dialog.tsx"],
+  ];
+  for (const [label, file] of creationGates) {
+    it(`${label} blocks an unsupported style`, () => {
+      expect(read(file)).toContain("isStyleSupported");
+    });
+  }
+
+  it("every template gallery filters by backend-supported styles", () => {
+    for (const file of [
+      "components/workforce/wizard/template-picker.tsx",
+      "components/workforce/onboarding-hero.tsx",
+      "pages/workforce/workforce-wizard.tsx",
+      "pages/group-wizard.tsx",
+    ]) {
+      expect(read(file), `${file} offers templates the backend may not run`)
+        .toContain("useAvailableStyles");
+    }
+  });
+
   it("the Workforce board can answer a human turn without leaving the surface", () => {
     const source = read("pages/workforce/workforce-board.tsx");
     // Submitting your own turn is participation, not governance — unlike the

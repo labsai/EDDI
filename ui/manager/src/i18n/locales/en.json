@@ -2422,7 +2422,7 @@
     "agentFiledCaps": "Caps",
     "agentFiledCapsValue": "{{perDiscussion}} / discussion · {{perTurn}} / turn",
     "moderatorlessWarning": "Restricted to a moderator this group does not have: {{phases}}. The first member by speaking order will stand in.",
-    "roleCoverageWarning": "No member carries the role \"{{role}}\" — {{phases}} would run with no speakers.",
+    "roleCoverageWarning": "No member carries the role \"{{role}}\" — every member will speak in {{phases}} instead.",
     "delegationDepth": "Max Depth",
     "delegationTimeout": "Delegate Timeout",
     "secondsShort": "{{seconds}}s",
@@ -2607,7 +2607,8 @@
         "label": "Custom Flow",
         "flow": "Phases you define yourself"
       }
-    }
+    },
+    "unsupportedStyle": "This server does not support {{style}}. Pick another framework to continue."
   },
   "taskBoard": {
     "title": "Task Board",
@@ -2709,7 +2710,7 @@
     "hintDelphi": "All members respond independently and anonymously. After each round, they see anonymous results and can adjust. Max Rounds controls the number of anonymous iterations.",
     "hintNegotiation": "Members state their interests, table proposals, then bargain — Max Rounds sets how many bargaining rounds run. The moderator arbitrates only if no agreement is reached.",
     "roleCoverageWarning": "No member has the role \"{{role}}\"",
-    "roleCoverageHint": "{{phases}} would run with no speakers. Go back to Members and set the role field.",
+    "roleCoverageHint": "The server falls back to letting every member speak in {{phases}}, so both sides get argued by the same people. Go back to Members and set the role field.",
     "hintTaskForce": "The moderator creates a task plan, assigns work to agents in parallel, then verifies and synthesizes the results.",
     "hintCustom": "Define your own phases manually. Custom phases can be configured via the API after creation.",
     "hintRoundTable": "All members share their opinions, then discuss each other's views across multiple rounds before the moderator synthesizes.",

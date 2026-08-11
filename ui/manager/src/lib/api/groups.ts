@@ -1051,8 +1051,23 @@ export function duplicateGroup(
   );
 }
 
-export function getDiscussionStyles(): Promise<Record<string, unknown>> {
-  return api.get<Record<string, unknown>>("/groupstore/groups/styles");
+/**
+ * One entry of `GET /groupstore/groups/styles`.
+ *
+ * The endpoint returns a JSON ARRAY (see `RestAgentGroupStore.readDiscussionStyles`),
+ * one object per `DiscussionStyle` the running backend knows — NOT a map keyed
+ * by the enum, and with no display label. `description` is the backend's own
+ * English sentence about the style; the UI shows its localized `flow` text
+ * instead, so this is read for capability detection, not for display.
+ */
+export interface DiscussionStyleDescriptor {
+  style: string;
+  phases: string[];
+  description: string;
+}
+
+export function getDiscussionStyles(): Promise<DiscussionStyleDescriptor[]> {
+  return api.get<DiscussionStyleDescriptor[]>("/groupstore/groups/styles");
 }
 
 export function getGroupJsonSchema(): Promise<Record<string, unknown>> {

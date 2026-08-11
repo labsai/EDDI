@@ -770,7 +770,10 @@ const STYLE_INFO_FLOW: Record<string, string[]> = {
   DELPHI: ["Independent", "Anonymous Sharing", "Revised", "Synthesis"],
   DEBATE: ["Pro Opening", "Con Opening", "Rebuttals", "Judgment"],
   TASK_FORCE: ["Plan", "Execute", "Verify", "Synthesize"],
-  NEGOTIATION: ["Positions", "Proposals", "Bargaining", "Synthesis"],
+  // Arbitration is `skipIf: AGREEMENT_REACHED` — part of the advertised flow,
+  // just not always run. Omitting it made the breadcrumb disagree with the
+  // phases the engine emits.
+  NEGOTIATION: ["Positions", "Proposals", "Bargaining", "Arbitration", "Synthesis"],
 };
 
 // Re-export for use in group-detail

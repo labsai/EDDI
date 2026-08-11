@@ -1984,17 +1984,21 @@ export const handlers = [
     return HttpResponse.json(groups);
   }),
 
+  // Mirrors `RestAgentGroupStore.readDiscussionStyles`: a JSON ARRAY of
+  // {style, phases, description}, one entry per DiscussionStyle the backend
+  // knows. Not a map keyed by the enum, and no display label — the mock claimed
+  // both, which let a hook that could never match the real payload look correct.
   http.get("*/groupstore/groups/styles", () => {
-    return HttpResponse.json({
-      ROUND_TABLE: { label: "Collaborative Council", phases: ["OPINION", "SYNTHESIS"] },
-      PEER_REVIEW: { label: "Quality Review", phases: ["OPINION", "CRITIQUE", "REVISION", "SYNTHESIS"] },
-      DEVIL_ADVOCATE: { label: "Stress Test", phases: ["OPINION", "CHALLENGE", "DEFENSE", "SYNTHESIS"] },
-      DELPHI: { label: "Expert Forecast", phases: ["OPINION", "REVISION", "SYNTHESIS"] },
-      DEBATE: { label: "Structured Deliberation", phases: ["ARGUE", "REBUTTAL", "SYNTHESIS"] },
-      TASK_FORCE: { label: "Operational Task Force", phases: ["PLAN", "EXECUTE", "VERIFY", "SYNTHESIS"] },
-      NEGOTIATION: { label: "Negotiation Table", phases: ["OPINION", "PROPOSAL", "BARGAIN", "SYNTHESIS"] },
-      CUSTOM: { label: "Custom Framework", phases: [] },
-    });
+    return HttpResponse.json([
+      { style: "ROUND_TABLE", phases: ["Initial Opinions", "Discussion", "Synthesis"], description: "Open discussion with multiple opinion rounds and moderator synthesis" },
+      { style: "PEER_REVIEW", phases: ["Initial Opinions", "Peer Critique", "Revision", "Synthesis"], description: "Each member gives an opinion, then critiques every peer, then revises" },
+      { style: "DEVIL_ADVOCATE", phases: ["Initial Opinions", "Devil's Challenge", "Defense", "Synthesis"], description: "One designated challenger argues against the group consensus" },
+      { style: "DELPHI", phases: ["Round 1 (Independent)", "Round 2 (Anonymous)", "Synthesis"], description: "Anonymous opinion rounds to reduce groupthink and achieve convergence" },
+      { style: "DEBATE", phases: ["Opening Arguments (Pro)", "Opening Arguments (Con)", "Rebuttal (Pro)", "Rebuttal (Con)", "Judgment"], description: "Structured pro/con argumentation with rebuttal and judge" },
+      { style: "TASK_FORCE", phases: ["Task Planning", "Task Execution", "Result Verification", "Final Synthesis"], description: "Collaborative task accomplishment: plan, execute in parallel, verify, synthesize" },
+      { style: "NEGOTIATION", phases: ["Positions & Interests", "Opening Proposals", "Bargaining", "Arbitration", "Synthesis"], description: "Trade, not win/lose: positions, opening proposals, bargaining with a concession ledger, arbitration only if no agreement, synthesis" },
+      { style: "CUSTOM", phases: [], description: "User-defined phases for full control over the discussion flow" },
+    ]);
   }),
 
   http.get("*/groupstore/groups/jsonSchema", () => {

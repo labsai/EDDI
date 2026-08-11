@@ -2398,7 +2398,7 @@
     "agentFiledCaps": "Limites",
     "agentFiledCapsValue": "{{perDiscussion}} / discussão · {{perTurn}} / turno",
     "moderatorlessWarning": "Restrito a um moderador que este grupo não possui: {{phases}}. O primeiro membro por ordem de fala assumirá.",
-    "roleCoverageWarning": "Nenhum membro tem o papel “{{role}}” — {{phases}} seria executada sem oradores.",
+    "roleCoverageWarning": "Nenhum membro tem o papel “{{role}}” — em {{phases}} todos os membros falarão.",
     "delegationDepth": "Profundidade máx.",
     "delegationTimeout": "Tempo do delegado",
     "secondsShort": "{{seconds}}s",
@@ -2587,7 +2587,8 @@
         "label": "Fluxo personalizado",
         "flow": "Fases que você mesmo define"
       }
-    }
+    },
+    "unsupportedStyle": "Este servidor não oferece suporte a {{style}}. Escolha outro formato para continuar."
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
@@ -2881,7 +2882,7 @@
     "hintDelphi": "Todos os membros respondem de forma independente e anônima. Após cada rodada, veem os resultados anônimos e podem ajustar. Turnos máx. controla o número de iterações anônimas.",
     "hintNegotiation": "Os membros expõem seus interesses, apresentam propostas e então negociam — «Máx. de rodadas» define quantas rodadas de barganha acontecem. O moderador arbitra apenas se não houver acordo.",
     "roleCoverageWarning": "Nenhum membro tem o papel “{{role}}”",
-    "roleCoverageHint": "{{phases}} seria executada sem oradores. Volte a “Membros” e preencha o campo de papel.",
+    "roleCoverageHint": "O servidor recorre a deixar todos os membros falarem em {{phases}}, então as mesmas pessoas defendem os dois lados. Volte a “Membros” e preencha o campo de papel.",
     "hintTaskForce": "O moderador cria um plano de tarefas, atribui trabalho aos agentes em paralelo, depois verifica e sintetiza os resultados.",
     "hintCustom": "Defina suas próprias fases manualmente. Fases personalizadas podem ser configuradas via API após a criação.",
     "hintRoundTable": "Todos os membros compartilham suas opiniões, depois discutem os pontos de vista uns dos outros em várias rodadas antes que o moderador sintetize.",

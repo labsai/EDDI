@@ -63,18 +63,6 @@ export function useDiscussionStyles() {
   });
 }
 
-export interface AvailableStyles {
-  /** The styles a picker should offer, in canonical order. */
-  styles: DiscussionStyle[];
-  /**
-   * Backend-supplied display label per style, including styles this build does
-   * not know. Read as the fallback name when a group was SAVED with a style the
-   * UI has no localized entry for (created through the API, or by a newer
-   * build) — such a style is still displayed, just never newly selectable.
-   */
-  backendLabels: Record<string, string>;
-}
-
 /**
  * The discussion styles this UI should offer, reconciled with what the backend
  * actually supports (`GET /groupstore/groups/styles`).
@@ -84,37 +72,42 @@ export interface AvailableStyles {
  * failed at save time. While the request is in flight — or fails — the static
  * list stands, so pickers never render empty.
  *
- * Deliberately narrowed to styles this build KNOWS: everything that makes a
- * style usable — its localized name and flow text, phase expansion for the HITL
- * approval picker, the wizard hint, the transcript breadcrumb — is keyed off
- * `DiscussionStyle`, so offering a name the UI cannot describe or configure
- * would hand the user an option that half-works. A backend-only style is
- * therefore reported through `backendLabels` (so an already-saved one still
- * renders with its real name) but never newly selectable.
+ * Narrowed to styles this build KNOWS: everything that makes a style usable —
+ * its localized name and flow text, phase expansion for the HITL approval
+ * picker, the wizard hint, the transcript breadcrumb — is keyed off
+ * `DiscussionStyle`, so a backend-only name would be an option the UI cannot
+ * describe or configure. Such a style is simply not offered; one already SAVED
+ * on a group still renders, via `styleDisplay`'s raw-value fallback.
  */
-export function useAvailableStyles(): AvailableStyles {
+export function useAvailableStyles(): DiscussionStyle[] {
   const { data } = useDiscussionStyles();
   return useMemo(() => {
-    const fallback: AvailableStyles = { styles: [...DISCUSSION_STYLES], backendLabels: {} };
-    if (!data || typeof data !== "object") return fallback;
-    const backendKeys = Object.keys(data);
-    if (backendKeys.length === 0) return fallback;
+    const fallback = [...DISCUSSION_STYLES];
+    // The wire format is an array of descriptors, so read each entry's `style`
+    // field. Treating the payload as a map keyed by the enum — as this hook
+    // first did — yields the array indices "0", "1", "2"… instead, matches
+    // nothing, and silently disables the whole check against the real API.
+    if (!Array.isArray(data)) return fallback;
+    const supported = new Set(
+      data
+        .map((entry) => (entry && typeof entry === "object" ? entry.style : null))
+        .filter((style): style is string => typeof style === "string"),
+    );
+    if (supported.size === 0) return fallback;
 
-    const known = DISCUSSION_STYLES.filter((s) => backendKeys.includes(s));
+    const known = DISCUSSION_STYLES.filter((s) => supported.has(s));
     // A response with none of the known styles is far more likely a contract
     // change than a backend with zero presets — don't blank every picker over it.
-    if (known.length === 0) return fallback;
-
-    const backendLabels: Record<string, string> = {};
-    for (const key of backendKeys) {
-      const entry = (data as Record<string, unknown>)[key];
-      if (entry && typeof entry === "object" && typeof (entry as { label?: unknown }).label === "string") {
-        backendLabels[key] = (entry as { label: string }).label;
-      }
-    }
-
-    return { styles: known, backendLabels };
+    return known.length > 0 ? known : fallback;
   }, [data]);
+}
+
+/** Whether a style can still be created against the running backend. */
+export function isStyleSupported(
+  style: DiscussionStyle | null | undefined,
+  supported: readonly DiscussionStyle[],
+): boolean {
+  return !style || supported.includes(style);
 }
 
 export function useCreateGroup() {

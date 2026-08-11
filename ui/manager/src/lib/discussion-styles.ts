@@ -59,18 +59,19 @@ export function getStyleInfo(t?: TFunction): Record<DiscussionStyle, StyleInfo> 
 }
 
 /**
- * Display info that never comes back empty — for pickers that may offer a
- * backend-only style this build has no localized entry for. `backendLabel` is
- * the label the styles endpoint reported for it, when one exists.
+ * Display info that never comes back empty.
+ *
+ * A group can be SAVED with a style this build has no entry for — created
+ * through the API, or by a newer build — and every surface that renders a
+ * stored style has to show something. The raw enum value is the honest
+ * fallback: the styles endpoint carries no display label, so there is nothing
+ * better to show, and inventing one (the old "default to Round Table") labels
+ * the group as something it is not.
  */
-export function styleDisplay(
-  style: DiscussionStyle | string,
-  t?: TFunction,
-  backendLabel?: string,
-): StyleInfo {
+export function styleDisplay(style: DiscussionStyle | string, t?: TFunction): StyleInfo {
   return (
     styleInfo(style, t) ?? {
-      label: backendLabel ?? String(style),
+      label: String(style),
       flow: "",
       icon: "💬",
     }

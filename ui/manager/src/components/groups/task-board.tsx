@@ -586,6 +586,9 @@ export function PersistedTaskBoard({
       taskList.tasks.map((task) => ({
         id: task.id,
         subject: task.subject,
+        // TaskCard renders this; dropping it in the mapping showed persisted
+        // boards as bare subjects with the instructions hidden.
+        description: task.description,
         assignedTo:
           task.assignedDisplayName || task.assignedAgentId || t("taskBoard.unassigned", "Unassigned"),
         priority: task.priority,

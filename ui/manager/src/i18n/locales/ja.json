@@ -2377,7 +2377,7 @@
     "agentFiledCaps": "上限",
     "agentFiledCapsValue": "{{perDiscussion}} / 議論 · {{perTurn}} / ターン",
     "moderatorlessWarning": "このグループに存在しないモデレーターに限定されています: {{phases}}。発言順の最初のメンバーが代行します。",
-    "roleCoverageWarning": "ロール「{{role}}」を持つメンバーがいません。{{phases}} は発言者なしで実行されます。",
+    "roleCoverageWarning": "ロール「{{role}}」を持つメンバーがいないため、{{phases}} では全メンバーが発言します。",
     "delegationDepth": "最大深度",
     "delegationTimeout": "委任タイムアウト",
     "secondsShort": "{{seconds}}秒",
@@ -2562,7 +2562,8 @@
         "label": "カスタムフロー",
         "flow": "自分で定義するフェーズ"
       }
-    }
+    },
+    "unsupportedStyle": "このサーバーは {{style}} に対応していません。別の形式を選んでください。"
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -2856,7 +2857,7 @@
     "hintDelphi": "全メンバーが独立かつ匿名で回答します。各ラウンド後、匿名の結果を確認して調整できます。最大ターン数が匿名反復回数を制御します。",
     "hintNegotiation": "メンバーが利害を示し、提案を出し合って交渉します。「最大ラウンド数」は交渉ラウンドの回数を決めます。合意に至らない場合にのみモデレーターが裁定します。",
     "roleCoverageWarning": "ロール「{{role}}」を持つメンバーがいません",
-    "roleCoverageHint": "{{phases}} は発言者なしで実行されます。「メンバー」に戻ってロール欄を設定してください。",
+    "roleCoverageHint": "サーバーは代わりに {{phases}} で全メンバーを発言させるため、同じ人が両方の立場を論じることになります。「メンバー」に戻ってロール欄を設定してください。",
     "hintTaskForce": "モデレーターがタスク計画を作成し、エージェントに並列で作業を割り当て、結果を検証・統合します。",
     "hintCustom": "独自のフェーズを手動で定義します。カスタムフェーズは作成後にAPIで設定できます。",
     "hintRoundTable": "全メンバーが意見を共有し、複数ラウンドにわたって互いの見解を議論した後、モデレーターが統合します。",

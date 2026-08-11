@@ -6,7 +6,7 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useSetupAgent } from "@/hooks/use-agent-setup";
-import { useCreateGroup } from "@/hooks/use-groups";
+import { useCreateGroup, useAvailableStyles } from "@/hooks/use-groups";
 import { useTemplates } from "@/hooks/use-templates";
 import {
   getGroupTemplates,
@@ -79,7 +79,13 @@ function WorkforceWizard() {
     CreationProgressItem[]
   >([]);
 
-  const templates = useMemo(() => getGroupTemplates(t), [t]);
+  // Filtered by backend support — see TemplatePicker. Resolved here as well so
+  // a `?template=` deep link cannot apply a template the picker is hiding.
+  const availableStyles = useAvailableStyles();
+  const templates = useMemo(
+    () => getGroupTemplates(t).filter((tpl) => availableStyles.includes(tpl.style)),
+    [t, availableStyles],
+  );
 
   // ─── Derived ────────────────────────────────────────────────────────────
 

@@ -380,7 +380,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
           <p className="text-[10px] leading-relaxed text-muted-foreground">
             {t(
               "groups.roleCoverageWarning",
-              'No member carries the role "{{role}}" — {{phases}} would run with no speakers.',
+              'No member carries the role "{{role}}" — every member will speak in {{phases}} instead.',
               { role: gap.role, phases: gap.phaseNames.join(", ") },
             )}
           </p>

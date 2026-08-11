@@ -2377,7 +2377,7 @@
     "agentFiledCaps": "上限",
     "agentFiledCapsValue": "{{perDiscussion}} / 讨论 · {{perTurn}} / 轮次",
     "moderatorlessWarning": "限定由本组未指定的主持人执行：{{phases}}。将由发言顺序中的第一位成员代替。",
-    "roleCoverageWarning": "没有成员承担“{{role}}”角色——{{phases}} 将在无人发言的情况下进行。",
+    "roleCoverageWarning": "没有成员承担“{{role}}”角色——{{phases}} 将改由全体成员发言。",
     "delegationDepth": "最大深度",
     "delegationTimeout": "委派超时",
     "secondsShort": "{{seconds}}秒",
@@ -2562,7 +2562,8 @@
         "label": "自定义流程",
         "flow": "由你自行定义的阶段"
       }
-    }
+    },
+    "unsupportedStyle": "此服务器不支持 {{style}}。请选择其他框架以继续。"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -2856,7 +2857,7 @@
     "hintDelphi": "所有成员独立且匿名地回应。每轮结束后，他们可以看到匿名结果并进行调整。最大轮次控制匿名迭代的次数。",
     "hintNegotiation": "成员先说明各自诉求，提出方案，然后展开磋商；“最大轮数”决定磋商进行几轮。只有谈不拢时，主持人才会出面裁决。",
     "roleCoverageWarning": "没有成员承担“{{role}}”角色",
-    "roleCoverageHint": "{{phases}} 将在无人发言的情况下进行。请返回“成员”并填写角色字段。",
+    "roleCoverageHint": "服务器会退而让全体成员在 {{phases}} 中发言，于是同一批人同时论证正反两方。请返回“成员”并填写角色字段。",
     "hintTaskForce": "主持人创建任务计划，将工作并行分配给代理，然后验证并综合结果。",
     "hintCustom": "手动定义您自己的阶段。自定义阶段可以在创建后通过 API 进行配置。",
     "hintRoundTable": "所有成员分享意见，然后在多轮中讨论彼此的观点，最后由主持人进行综合。",

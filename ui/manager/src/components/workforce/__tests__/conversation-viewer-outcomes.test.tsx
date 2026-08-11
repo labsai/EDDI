@@ -61,6 +61,7 @@ describe("ConversationViewer — structured outcomes", () => {
                 {
                   id: "t1",
                   subject: "Provision EU cluster",
+                  description: "Stand up eu-west-1 and verify GDPR residency.",
                   assignedAgentId: "agent-4",
                   assignedDisplayName: "Tech Lead",
                   priority: 1,
@@ -103,6 +104,11 @@ describe("ConversationViewer — structured outcomes", () => {
     // keeps both in the DOM) — so cards appear twice by test id.
     expect(screen.getAllByTestId("task-card-t1").length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("task-card-t2").length).toBeGreaterThan(0);
+    // The persisted mapping dropped `description`, so boards showed bare
+    // subjects with the instructions hidden.
+    expect(
+      screen.getAllByText("Stand up eu-west-1 and verify GDPR residency.").length,
+    ).toBeGreaterThan(0);
   });
 
   it("renders the decision card before the synthesis", async () => {

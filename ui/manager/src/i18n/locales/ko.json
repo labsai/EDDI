@@ -2377,7 +2377,7 @@
     "agentFiledCaps": "상한",
     "agentFiledCapsValue": "{{perDiscussion}} / 토론 · {{perTurn}} / 턴",
     "moderatorlessWarning": "이 그룹에 없는 진행자로 제한됨: {{phases}}. 발언 순서상 첫 번째 구성원이 대신합니다.",
-    "roleCoverageWarning": "\"{{role}}\" 역할을 가진 구성원이 없습니다. {{phases}} 단계가 발언자 없이 진행됩니다.",
+    "roleCoverageWarning": "\"{{role}}\" 역할을 가진 구성원이 없어 {{phases}} 단계에서는 모든 구성원이 발언합니다.",
     "delegationDepth": "최대 깊이",
     "delegationTimeout": "위임 제한 시간",
     "secondsShort": "{{seconds}}초",
@@ -2562,7 +2562,8 @@
         "label": "사용자 지정 흐름",
         "flow": "직접 정의하는 단계"
       }
-    }
+    },
+    "unsupportedStyle": "이 서버는 {{style}}을(를) 지원하지 않습니다. 다른 형식을 선택하세요."
   },
   "taskBoard": {
     "title": "작업 보드",
@@ -2856,7 +2857,7 @@
     "hintDelphi": "모든 멤버가 독립적이고 익명으로 응답합니다. 각 라운드 후 익명 결과를 확인하고 조정할 수 있습니다. 최대 턴 수가 익명 반복 횟수를 제어합니다.",
     "hintNegotiation": "구성원이 각자의 이해관계를 밝히고 제안을 내놓은 뒤 협상합니다. '최대 라운드'는 협상 라운드 횟수를 정합니다. 합의에 이르지 못할 때만 모더레이터가 중재합니다.",
     "roleCoverageWarning": "\"{{role}}\" 역할을 가진 구성원이 없습니다",
-    "roleCoverageHint": "{{phases}} 단계가 발언자 없이 진행됩니다. '구성원'으로 돌아가 역할 필드를 설정하세요.",
+    "roleCoverageHint": "서버는 대신 {{phases}} 단계에서 모든 구성원이 발언하도록 하므로 같은 사람들이 양쪽 입장을 모두 주장하게 됩니다. '구성원'으로 돌아가 역할 필드를 설정하세요.",
     "hintTaskForce": "모더레이터가 작업 계획을 생성하고, 에이전트에게 병렬로 작업을 할당한 후, 결과를 검증하고 종합합니다.",
     "hintCustom": "자체 단계를 수동으로 정의합니다. 사용자 정의 단계는 생성 후 API를 통해 구성할 수 있습니다.",
     "hintRoundTable": "모든 멤버가 의견을 공유하고, 여러 라운드에 걸쳐 서로의 관점을 토론한 후 모더레이터가 종합합니다.",
