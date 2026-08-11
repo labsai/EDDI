@@ -12,11 +12,20 @@ import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.mcp.McpToolProvider;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.mcp.client.DefaultMcpClient;
+import dev.langchain4j.mcp.client.McpBlobResourceContents;
 import dev.langchain4j.mcp.client.McpCallContext;
 import dev.langchain4j.mcp.client.McpClient;
+import dev.langchain4j.mcp.client.McpReadResourceResult;
+import dev.langchain4j.mcp.client.McpResource;
+import dev.langchain4j.mcp.client.McpResourceContents;
+import dev.langchain4j.mcp.client.McpResourceTemplate;
+import dev.langchain4j.mcp.client.McpTextResourceContents;
 import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.mcp.client.transport.http.StreamableHttpMcpTransport;
+import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.service.tool.ToolProviderResult;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -414,6 +423,227 @@ public class McpToolProviderManager {
         McpToolProvider toolProvider = McpToolProvider.builder().mcpClients(List.of(client)).build();
 
         return toolProvider.provideTools(null);
+    }
+
+    /* ___ MCP resource bridge ___________________________________________ */
+
+    /**
+     * Character cap for one bridged tool result. Resource contents are authored by
+     * the remote server and land verbatim in the model's context; without a cap a
+     * single oversized resource dominates or overflows the prompt.
+     */
+    static final int RESOURCE_CONTENT_MAX_CHARS = 65_536;
+
+    private static final ObjectMapper RESOURCE_ARGS_MAPPER = new ObjectMapper();
+
+    /** The two synthesized tools bridging one server's MCP resources. */
+    public record McpResourceBridge(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) {
+    }
+
+    /**
+     * Synthesize {@code <server>_list_resources} and {@code <server>_read_resource}
+     * tools for one MCP server, so its MCP <em>resources</em> - the half of the
+     * protocol tool-consuming agents otherwise never see - become reachable as
+     * ordinary tools.
+     * <p>
+     * Construction is purely local: no server round-trip happens here. The
+     * executors dial lazily via the shared, credential-keyed client cache, so an
+     * unreachable server costs an error tool <em>result</em> at call time rather
+     * than failing discovery - deliberately unlike {@code tools/list}, which must
+     * dial ahead to learn what exists.
+     * <p>
+     * Deliberately NOT subject to a config's {@code toolsWhitelist}: the whitelist
+     * governs names the <em>server</em> advertises, these two names are synthesized
+     * by EDDI, and the feature has its own explicit opt-in ({@code exposeResources}
+     * on the mcpcalls config). A whitelist written before this feature existed must
+     * not silently disable it, nor may a server occupy the synthesized names.
+     *
+     * @throws IllegalArgumentException
+     *             for an invalid URL, transport, or caller-bound key - the same
+     *             static-configuration rejections {@link #discoverTools} applies,
+     *             so the caller reports them identically
+     */
+    public McpResourceBridge resourceBridgeTools(McpServerConfig serverConfig) {
+        String url = serverConfig.getUrl();
+        if (isNullOrEmpty(url)) {
+            throw new IllegalArgumentException("MCP server URL must not be empty");
+        }
+        validateServerUrl(url);
+        validateTransport(serverConfig.getTransport());
+        validateCallerBoundKey(serverConfig);
+
+        String serverName = serverConfig.getName() != null ? serverConfig.getName() : url;
+        String prefix = toolNamePrefix(serverName, url);
+
+        String listName = prefix + "_list_resources";
+        String readName = prefix + "_read_resource";
+
+        ToolSpecification listSpec = ToolSpecification.builder().name(listName)
+                .description("List the resources (and resource templates) exposed by the MCP server '" + serverName
+                        + "'. Returns one resource per line: uri, name, mimeType, description. "
+                        + "Read one with " + readName + ".")
+                .build();
+        ToolSpecification readSpec = ToolSpecification.builder().name(readName)
+                .description("Read one resource from the MCP server '" + serverName
+                        + "' by its exact uri, as returned by " + listName + ". Text content is returned verbatim "
+                        + "(truncated past " + RESOURCE_CONTENT_MAX_CHARS + " characters); binary content is described, not returned.")
+                .parameters(JsonObjectSchema.builder()
+                        .addStringProperty("uri", "The resource uri exactly as listed, e.g. eddi://docs/architecture")
+                        .required("uri").build())
+                .build();
+
+        ToolExecutor listExecutor = (request, memoryId) -> {
+            try {
+                return renderResourceList(getOrCreateClient(serverConfig));
+            } catch (Exception e) {
+                LOGGER.warnf("MCP list_resources failed for '%s': %s", sanitize(serverName), e.getMessage());
+                return "Error listing resources from MCP server '" + serverName + "': " + e.getMessage();
+            }
+        };
+        ToolExecutor readExecutor = (request, memoryId) -> {
+            String uri = resourceUriArgument(request);
+            if (isNullOrEmpty(uri)) {
+                return "Error: the 'uri' argument is required - call " + listName + " for the available uris.";
+            }
+            try {
+                return renderResourceContents(getOrCreateClient(serverConfig).readResource(uri), uri);
+            } catch (Exception e) {
+                LOGGER.warnf("MCP read_resource failed for '%s' uri '%s': %s", sanitize(serverName), sanitize(uri), e.getMessage());
+                return "Error reading resource '" + uri + "' from MCP server '" + serverName + "': " + e.getMessage();
+            }
+        };
+
+        return new McpResourceBridge(List.of(listSpec, readSpec),
+                Map.of(listName, listExecutor, readName, readExecutor));
+    }
+
+    /** The {@code uri} argument of a read_resource call, or null. */
+    private static String resourceUriArgument(ToolExecutionRequest request) {
+        try {
+            var node = RESOURCE_ARGS_MAPPER.readTree(request.arguments() == null ? "{}" : request.arguments());
+            var uriNode = node.get("uri");
+            return uriNode == null || uriNode.isNull() ? null : uriNode.asText();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** One line per resource/template; capped like resource contents. */
+    private static String renderResourceList(McpClient client) {
+        var sb = new StringBuilder();
+        List<McpResource> resources = client.listResources();
+        if (resources == null || resources.isEmpty()) {
+            sb.append("No resources.\n");
+        } else {
+            sb.append("Resources (").append(resources.size()).append("):\n");
+            for (McpResource resource : resources) {
+                sb.append("- ").append(resource.uri());
+                if (!isNullOrEmpty(resource.name())) {
+                    sb.append(" | ").append(resource.name());
+                }
+                if (!isNullOrEmpty(resource.mimeType())) {
+                    sb.append(" | ").append(resource.mimeType());
+                }
+                if (!isNullOrEmpty(resource.description())) {
+                    sb.append(" | ").append(resource.description());
+                }
+                sb.append('\n');
+                if (sb.length() > RESOURCE_CONTENT_MAX_CHARS) {
+                    sb.append("... [list truncated]\n");
+                    return sb.toString();
+                }
+            }
+        }
+        // Templates are parameterised uris (e.g. eddi://docs/{name}) - listed so
+        // the model knows the shape, even though only concrete uris can be read.
+        List<McpResourceTemplate> templates = safeListTemplates(client);
+        if (templates != null && !templates.isEmpty()) {
+            sb.append("Resource templates (").append(templates.size()).append("):\n");
+            for (McpResourceTemplate template : templates) {
+                sb.append("- ").append(template.uriTemplate());
+                if (!isNullOrEmpty(template.name())) {
+                    sb.append(" | ").append(template.name());
+                }
+                if (!isNullOrEmpty(template.description())) {
+                    sb.append(" | ").append(template.description());
+                }
+                sb.append('\n');
+                if (sb.length() > RESOURCE_CONTENT_MAX_CHARS) {
+                    sb.append("... [list truncated]\n");
+                    return sb.toString();
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Templates are optional in the protocol and some servers reject the call
+     * outright - that must not fail a listing whose resources half succeeded.
+     */
+    private static List<McpResourceTemplate> safeListTemplates(McpClient client) {
+        try {
+            return client.listResourceTemplates();
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /**
+     * Text contents verbatim (capped); binary contents described rather than dumped
+     * - base64 in model context is expensive noise it cannot use.
+     */
+    private static String renderResourceContents(McpReadResourceResult result, String uri) {
+        if (result == null || result.contents() == null || result.contents().isEmpty()) {
+            return "Resource '" + uri + "' has no content.";
+        }
+        var sb = new StringBuilder();
+        for (McpResourceContents contents : result.contents()) {
+            if (contents instanceof McpTextResourceContents text) {
+                String body = text.text() == null ? "" : text.text();
+                int remaining = RESOURCE_CONTENT_MAX_CHARS - sb.length();
+                if (remaining <= 0) {
+                    sb.append("\n... [content truncated at ").append(RESOURCE_CONTENT_MAX_CHARS).append(" characters]");
+                    break;
+                }
+                if (body.length() > remaining) {
+                    sb.append(body, 0, remaining)
+                            .append("\n... [content truncated at ").append(RESOURCE_CONTENT_MAX_CHARS).append(" characters]");
+                    break;
+                }
+                sb.append(body);
+            } else if (contents instanceof McpBlobResourceContents blob) {
+                sb.append("[binary content: ").append(blob.uri());
+                if (!isNullOrEmpty(blob.mimeType())) {
+                    sb.append(", ").append(blob.mimeType());
+                }
+                sb.append(" - base64 omitted]\n");
+            }
+        }
+        return sb.isEmpty() ? "Resource '" + uri + "' has no readable content." : sb.toString();
+    }
+
+    /**
+     * Tool-name prefix for one server: its configured name, sanitized to the
+     * tool-name alphabet; falls back to the URL host when no name is set. Capped so
+     * the synthesized names stay well under provider tool-name limits.
+     */
+    private static String toolNamePrefix(String serverName, String url) {
+        String base = serverName;
+        if (isNullOrEmpty(base) || base.equals(url)) {
+            try {
+                String host = URI.create(url).getHost();
+                base = isNullOrEmpty(host) ? "mcp" : host;
+            } catch (Exception e) {
+                base = "mcp";
+            }
+        }
+        String sanitized = base.toLowerCase().replaceAll("[^a-z0-9_]", "_")
+                .replaceAll("_+", "_").replaceAll("^_|_$", "");
+        if (sanitized.isEmpty()) {
+            sanitized = "mcp";
+        }
+        return sanitized.length() > 40 ? sanitized.substring(0, 40) : sanitized;
     }
 
     /**

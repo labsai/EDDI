@@ -73,6 +73,21 @@ public class McpCallsConfiguration {
     private List<McpCall> mcpCalls;
 
     /**
+     * Opt-in bridge for the server's MCP <em>resources</em>. When true, two
+     * synthesized tools — {@code <name>_list_resources} and
+     * {@code <name>_read_resource} — let the agent list and read the server's
+     * resources, the half of the MCP protocol a tool-consuming client otherwise
+     * never sees (EDDI's MCP client, like most agentic clients, only calls
+     * {@code tools/list}). Off by default: resources can be large, and a config
+     * written before this existed must not silently grow two tools.
+     * <p>
+     * Deliberately independent of {@code toolsWhitelist}/{@code toolsBlacklist},
+     * which govern names the server advertises — this flag is the explicit opt-in
+     * for the two names EDDI synthesizes.
+     */
+    private Boolean exposeResources = false;
+
+    /**
      * Transport tokens this engine actually implements. Anything else used to be
      * accepted, propagated, logged, and then silently served over StreamableHTTP
      * (finding I3) — it is now rejected instead of ignored.
@@ -117,6 +132,14 @@ public class McpCallsConfiguration {
     }
 
     // --- Getters and Setters ---
+
+    public Boolean getExposeResources() {
+        return exposeResources;
+    }
+
+    public void setExposeResources(Boolean exposeResources) {
+        this.exposeResources = exposeResources;
+    }
 
     public String getMcpServerUrl() {
         return mcpServerUrl;
