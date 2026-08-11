@@ -88,13 +88,19 @@ export function DashboardPage() {
 
   // The update banner links here with `#updates`. React Router does not scroll
   // to hash targets on its own, and the section sits below the fold.
-  const { hash } = useLocation();
+  //
+  // Keyed on `key` as well as `hash`: clicking the banner link a second time
+  // leaves the hash at `#updates`, so on hash alone the effect would not re-run
+  // and the link would work exactly once. React Router mints a fresh key per
+  // navigation — including the `replace` it performs when the target equals the
+  // current location — which is the only thing that changes on that second click.
+  const { hash, key } = useLocation();
   useEffect(() => {
     if (!hash) return;
     const target = document.getElementById(hash.slice(1));
     // `scrollIntoView` is unimplemented in jsdom — optional call keeps tests green.
     target?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-  }, [hash]);
+  }, [hash, key]);
 
   const statCards = [
     {

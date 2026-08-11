@@ -10,6 +10,7 @@ import {
   getUpdateStatus,
   normalizeVersion,
   parseVersion,
+  previewReleaseNotes,
   UpdateCheckError,
 } from "../updates";
 
@@ -90,6 +91,46 @@ describe("updates", () => {
       expect(getUpdateStatus("Unknown", "6.2.0")).toBe("unknown");
       expect(getUpdateStatus(undefined, "6.2.0")).toBe("unknown");
       expect(getUpdateStatus("6.2.0", null)).toBe("unknown");
+    });
+  });
+
+  describe("previewReleaseNotes", () => {
+    it("leaves short notes exactly as they are", () => {
+      expect(previewReleaseNotes("## Hi\n\nAll of it.")).toEqual({
+        markdown: "## Hi\n\nAll of it.",
+        truncated: false,
+      });
+    });
+
+    it("cuts on a paragraph boundary so a table is never sliced mid-row", () => {
+      const notes = ["Intro paragraph.", "| a | b |\n| - | - |\n| 1 | 2 |", "Tail."].join("\n\n");
+      const { markdown, truncated } = previewReleaseNotes(notes, 30);
+
+      expect(truncated).toBe(true);
+      expect(markdown).toBe("Intro paragraph.\n\n…");
+      expect(markdown).not.toContain("| a |");
+    });
+
+    it("backs off past an unclosed code fence", () => {
+      const notes = ["Intro.", "```bash\neddi update\n```", "```bash\nsomething long here", "Tail."].join(
+        "\n\n",
+      );
+      const { markdown } = previewReleaseNotes(notes, 50);
+
+      // Whatever it kept, the fences must balance or the rest renders as code.
+      expect(markdown.split("```").length - 1).toBe(2);
+      expect(markdown).not.toContain("something long here");
+    });
+
+    it("still cuts when there is no paragraph break to cut on", () => {
+      const { markdown, truncated } = previewReleaseNotes("x".repeat(200), 50);
+
+      expect(truncated).toBe(true);
+      expect(markdown).toBe(`${"x".repeat(50)}\n\n…`);
+    });
+
+    it("treats whitespace-only notes as empty", () => {
+      expect(previewReleaseNotes("   \n\n  ")).toEqual({ markdown: "", truncated: false });
     });
   });
 

@@ -100,10 +100,110 @@ describe("UpdateCheckCard", () => {
     await user.click(await screen.findByTestId("update-check-now"));
 
     expect(await screen.findByText("EDDI 9.9.9 is available")).toBeInTheDocument();
-    expect(await screen.findByTestId("update-image-failed")).toBeInTheDocument();
-    expect(screen.getByTestId("update-image-version")).toHaveTextContent("—");
+    const failed = await screen.findByTestId("update-image-failed");
+    expect(failed).toBeInTheDocument();
+    // A dead end needs a way out: the row itself offers the tag list.
+    expect(within(failed).getByRole("link")).toHaveAttribute(
+      "href",
+      "https://hub.docker.com/r/labsai/eddi/tags",
+    );
     // No false "pending" claim off a lookup that never answered.
     expect(screen.queryByTestId("update-image-pending")).not.toBeInTheDocument();
+  });
+
+  it("does not dress a missing Docker version up as a link", async () => {
+    server.use(http.get(DOCKER_URL, () => HttpResponse.error()));
+    const user = userEvent.setup();
+    renderWithProviders(<UpdateCheckCard />);
+
+    await user.click(await screen.findByTestId("update-check-now"));
+    await screen.findByTestId("update-image-failed");
+
+    const cell = screen.getByTestId("update-image-version");
+    expect(cell).toHaveTextContent("—");
+    expect(within(cell).queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("stays quiet about a lagging registry when there is nothing to pull", async () => {
+    // Installed == released == 6.0.0-demo, but the image tag trails behind.
+    server.use(
+      http.get(LATEST_URL, () => release("6.0.0-demo")),
+      http.get(DOCKER_URL, () => dockerTag("5.0.0")),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<UpdateCheckCard />);
+
+    await user.click(await screen.findByTestId("update-check-now"));
+
+    expect(await screen.findByText(/You are running the latest release/)).toBeInTheDocument();
+    expect(screen.queryByTestId("update-image-pending")).not.toBeInTheDocument();
+  });
+
+  it("announces the image warning in the same live region as the verdict", async () => {
+    server.use(http.get(DOCKER_URL, () => dockerTag("9.9.8")));
+    const user = userEvent.setup();
+    renderWithProviders(<UpdateCheckCard />);
+
+    await user.click(await screen.findByTestId("update-check-now"));
+
+    const live = await screen.findByTestId("update-check-result");
+    expect(live).toHaveAttribute("aria-live", "polite");
+    expect(within(live).getByTestId("update-image-pending")).toBeInTheDocument();
+  });
+
+  it("renders the publication date unambiguously, on its own line", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UpdateCheckCard />);
+
+    await user.click(await screen.findByTestId("update-check-now"));
+
+    // A named month, because this app ships both month-first and day-first
+    // locales and a numeric date means different days in each.
+    const published = await screen.findByText(/^Published /);
+    expect(published).toHaveTextContent("Published Jan 15, 2026");
+    expect(published).not.toHaveTextContent("You are running");
+  });
+
+  it("copies a command to the clipboard and confirms it did", async () => {
+    // user-event installs its own clipboard stub in setup(), so this asserts
+    // through the real API rather than a hand-rolled spy it would overwrite.
+    const user = userEvent.setup();
+    renderWithProviders(<UpdateCheckCard />);
+
+    await user.click(await screen.findByTestId("update-check-now"));
+    await screen.findByTestId("update-instructions");
+
+    const [cliCopy, manualCopy] = screen.getAllByTestId("update-copy-command");
+    expect(cliCopy).toHaveAccessibleName("Copy");
+
+    await user.click(cliCopy!);
+    expect(await navigator.clipboard.readText()).toBe("eddi update");
+    await waitFor(() => expect(cliCopy).toHaveAccessibleName("Copied"));
+
+    // The manual block copies all three lines, not just the one under the cursor.
+    await user.click(manualCopy!);
+    expect(await navigator.clipboard.readText()).toBe(
+      [
+        "cd ~/.eddi",
+        "docker compose --env-file .env -f docker-compose.yml pull",
+        "docker compose --env-file .env -f docker-compose.yml up -d",
+      ].join("\n"),
+    );
+  });
+
+  it("shows only the opening of very long release notes, and links out for the rest", async () => {
+    const long = ["The summary paragraph.", ...Array.from({ length: 200 }, (_, i) => `Section ${i} body text that goes on.`)].join("\n\n");
+    server.use(http.get(LATEST_URL, () => release("9.9.9", long)));
+    const user = userEvent.setup();
+    renderWithProviders(<UpdateCheckCard />);
+
+    await user.click(await screen.findByTestId("update-check-now"));
+    await user.click(await screen.findByTestId("update-release-notes-toggle"));
+
+    const notes = screen.getByTestId("update-release-notes");
+    expect(notes).toHaveTextContent("The summary paragraph.");
+    expect(notes).not.toHaveTextContent("Section 199");
+    expect(screen.getByTestId("update-full-notes-link")).toBeInTheDocument();
   });
 
   it("keeps the Docker answer when only the GitHub lookup fails", async () => {

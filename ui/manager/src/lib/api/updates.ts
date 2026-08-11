@@ -241,6 +241,53 @@ export async function fetchLatestDockerImage(): Promise<DockerImage> {
   };
 }
 
+// ─── Release notes ───────────────────────────────────────────────────────────
+
+/**
+ * How much of a release body to show inline, in characters.
+ *
+ * EDDI's notes run to ~23 KB. Pouring that into a nested scroll box on a
+ * dashboard traps the page scroll for dozens of screens to say something a
+ * link says better, so the card shows the opening — which is where these notes
+ * put their summary — and hands off to GitHub for the rest.
+ */
+export const RELEASE_NOTES_PREVIEW_CHARS = 1500;
+
+export interface ReleaseNotesPreview {
+  markdown: string;
+  truncated: boolean;
+}
+
+/**
+ * Cut release notes down to a preview without leaving broken markdown behind.
+ *
+ * Cuts on a blank line so a table or list is never sliced mid-row, and backs
+ * off past an unclosed code fence — a body ending inside ``` would otherwise
+ * swallow the rest of the panel into one code block.
+ */
+export function previewReleaseNotes(
+  notes: string,
+  budget = RELEASE_NOTES_PREVIEW_CHARS,
+): ReleaseNotesPreview {
+  const trimmed = notes.trim();
+  if (trimmed.length <= budget) return { markdown: trimmed, truncated: false };
+
+  const paragraphBreak = trimmed.lastIndexOf("\n\n", budget);
+  // A body with no blank line before the budget still has to be cut somewhere.
+  let cut = paragraphBreak > 0 ? trimmed.slice(0, paragraphBreak) : trimmed.slice(0, budget);
+
+  if (countFences(cut) % 2 !== 0) {
+    const lastFence = cut.lastIndexOf("```");
+    cut = cut.slice(0, lastFence).trimEnd();
+  }
+
+  return { markdown: `${cut.trimEnd()}\n\n…`, truncated: true };
+}
+
+function countFences(text: string): number {
+  return text.split("```").length - 1;
+}
+
 // ─── Version comparison ──────────────────────────────────────────────────────
 
 /** Strip a leading `v`, as GitHub tags carry it in some repos and not others. */

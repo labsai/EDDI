@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ArrowUpCircle,
+  Check,
   CheckCircle2,
   ChevronDown,
   Container,
+  Copy,
   ExternalLink,
   AlertTriangle,
   Gift,
@@ -19,7 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUpdateCheck } from "@/hooks/use-update-check";
-import { EDDI_DOCKER_TAGS_URL, EDDI_RELEASES_URL } from "@/lib/api/updates";
+import { EDDI_DOCKER_TAGS_URL, EDDI_RELEASES_URL, previewReleaseNotes } from "@/lib/api/updates";
 import { cn } from "@/lib/utils";
 
 /** The exact commands EDDI's own README documents for an upgrade. */
@@ -59,6 +61,16 @@ export function UpdateCheckCard() {
   const knownInstalled =
     !!installedVersion && installedVersion !== "Unknown" ? installedVersion : null;
 
+  // `dateStyle: "medium"` over the bare numeric default: this app ships both
+  // month-first and day-first locales, and "3/4/2026" is a different day in
+  // each. A named month is the same day everywhere.
+  const publishedOn = useMemo(() => {
+    if (!latest?.publishedAt) return null;
+    const parsed = new Date(latest.publishedAt);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toLocaleDateString(i18n.language, { dateStyle: "medium" });
+  }, [latest?.publishedAt, i18n.language]);
+
   return (
     <Card
       id="updates"
@@ -81,6 +93,9 @@ export function UpdateCheckCard() {
       <CardContent className="space-y-4 pt-4">
         {/* The three versions that matter, each from its own source */}
         <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
+          {/* testid on the value rather than the cell, unlike the two below:
+              it must not exist while the skeleton is up, or a findByTestId
+              resolves against an empty element mid-load. */}
           <VersionCell icon={Server} label={t("updates.installed", "Installed")}>
             {installedVersionLoading ? (
               <Skeleton className="my-0.5 block h-4 w-20" />
@@ -103,7 +118,9 @@ export function UpdateCheckCard() {
           <VersionCell
             icon={Container}
             label={t("updates.dockerImage", "Docker image")}
-            href={image?.url ?? (hasChecked ? EDDI_DOCKER_TAGS_URL : undefined)}
+            // Only linked when there is a version to link to — a bare em-dash
+            // wearing an external-link icon is a link to nothing.
+            href={image?.url}
             testId="update-image-version"
           >
             {image ? image.version : "—"}
@@ -123,7 +140,8 @@ export function UpdateCheckCard() {
         </div>
 
         {/* Result */}
-        <div data-testid="update-check-result" aria-live="polite">
+        {/* space-y-3: the verdict and the image warning can both be present. */}
+        <div className="space-y-3" data-testid="update-check-result" aria-live="polite">
           {errorReason ? (
             <ResultRow tone="warning" icon={AlertTriangle}>
               <span>
@@ -155,18 +173,21 @@ export function UpdateCheckCard() {
                     version: latest.version,
                   })}
                 </p>
-                <p>
-                  {knownInstalled
-                    ? t("updates.updateAvailableDetail", "You are running {{installed}}.", {
-                        installed: knownInstalled,
-                      })
-                    : null}{" "}
-                  {latest.publishedAt
-                    ? t("updates.publishedOn", "Published {{date}}", {
-                        date: new Date(latest.publishedAt).toLocaleDateString(i18n.language),
-                      })
-                    : null}
-                </p>
+                {knownInstalled && (
+                  <p>
+                    {t("updates.updateAvailableDetail", "You are running {{installed}}.", {
+                      installed: knownInstalled,
+                    })}
+                  </p>
+                )}
+                {/* Its own line rather than trailing the sentence above: a date
+                    is metadata, and glued on it needed punctuation that would
+                    differ per locale. */}
+                {publishedOn && (
+                  <p className="text-xs">
+                    {t("updates.publishedOn", "Published {{date}}", { date: publishedOn })}
+                  </p>
+                )}
               </div>
             </ResultRow>
           ) : status === "up-to-date" && latest ? (
@@ -198,31 +219,35 @@ export function UpdateCheckCard() {
               </span>
             </ResultRow>
           ) : null}
-        </div>
 
-        {/* The reason for reading both sources: a release whose image is not
-            published yet cannot be pulled, however current the tag looks. */}
-        {imageStatus === "pending" && latest && image && (
-          <ResultRow tone="warning" icon={AlertTriangle} testId="update-image-pending">
-            <span>
-              {t(
-                "updates.imagePending",
-                "The {{version}} image is not on Docker Hub yet — a pull right now would still fetch {{available}}.",
-                { version: latest.version, available: image.version },
-              )}
-            </span>
-          </ResultRow>
-        )}
-        {imageLookupFailed && !errorReason && (
-          <ResultRow tone="muted" icon={Info} testId="update-image-failed">
-            <span>
-              {t(
-                "updates.imageLookupFailed",
-                "The published Docker tag could not be read. Check the image tags directly.",
-              )}
-            </span>
-          </ResultRow>
-        )}
+          {/* Inside the live region, not after it: this is the most actionable
+              thing the card can say, so it has to be announced too.
+
+              Only while an update is pending — a lagging registry is trivia
+              when there is nothing to pull. */}
+          {updateAvailable && imageStatus === "pending" && latest && image && (
+            <ResultRow tone="warning" icon={AlertTriangle} testId="update-image-pending">
+              <span>
+                {t(
+                  "updates.imagePending",
+                  "The {{version}} image is not on Docker Hub yet — a pull right now would still fetch {{available}}.",
+                  { version: latest.version, available: image.version },
+                )}
+              </span>
+            </ResultRow>
+          )}
+          {imageLookupFailed && !errorReason && (
+            <ResultRow tone="muted" icon={Info} testId="update-image-failed">
+              <span className="flex flex-wrap items-center gap-x-2">
+                {t(
+                  "updates.imageLookupFailed",
+                  "The published Docker tag could not be read. Check the image tags directly.",
+                )}
+                <ExternalLinkText href={EDDI_DOCKER_TAGS_URL}>Docker Hub</ExternalLinkText>
+              </span>
+            </ResultRow>
+          )}
+        </div>
 
         {/* Release notes */}
         {latest && <ReleaseNotes release={latest} highlight={updateAvailable} />}
@@ -302,6 +327,7 @@ function ReleaseNotes({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const preview = useMemo(() => previewReleaseNotes(release.notes), [release.notes]);
 
   return (
     <div
@@ -316,7 +342,9 @@ function ReleaseNotes({
         onClick={() => setOpen((prev) => !prev)}
         className="flex w-full items-center gap-2.5 p-3 text-start text-sm"
         aria-expanded={open}
-        aria-controls="update-release-notes-body"
+        // Only while the panel exists — aria-controls pointing at an absent id
+        // is a dangling reference.
+        aria-controls={open ? "update-release-notes-body" : undefined}
         data-testid="update-release-notes-toggle"
       >
         <Gift
@@ -337,11 +365,16 @@ function ReleaseNotes({
 
       {open && (
         <div id="update-release-notes-body" className="space-y-3 border-t border-border/60 p-3">
-          {release.notes ? (
+          {preview.markdown ? (
             /* Deliberately NO rehypeRaw: release notes are third-party text, so
-               raw HTML stays escaped rather than being injected live. */
-            <div className="prose prose-sm dark:prose-invert max-h-80 max-w-none overflow-y-auto break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{release.notes}</ReactMarkdown>
+               raw HTML stays escaped rather than being injected live. EDDI's
+               notes rely on that — they write `<conversationId>` and `<tool>`
+               as prose placeholders, which a raw-HTML pass would swallow.
+
+               `[&_table]:block` is what keeps a wide GFM table scrolling inside
+               its own box instead of stretching the card. */
+            <div className="prose prose-sm dark:prose-invert max-h-96 max-w-none overflow-y-auto break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{preview.markdown}</ReactMarkdown>
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
@@ -397,11 +430,48 @@ function UpdateInstructions() {
   );
 }
 
+/**
+ * A command with a copy button.
+ *
+ * These lines exist to be run, and the longest is wider than a phone — without
+ * copy, following this on mobile means horizontally scrolling a code block and
+ * retyping a `docker compose` invocation by hand.
+ */
 function CommandBlock({ command }: { command: string }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+
+  const copy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard blocked (insecure context or denied) — the text stays selectable */
+    }
+  }, [command]);
+
   return (
-    <pre className="overflow-x-auto rounded-md bg-background p-2.5 text-xs" dir="ltr">
-      <code className="font-mono text-foreground">{command}</code>
-    </pre>
+    <div className="relative">
+      {/* dir=ltr: a shell command is not prose and must not mirror in RTL. */}
+      <pre className="overflow-x-auto rounded-md bg-background p-2.5 pe-10 text-xs" dir="ltr">
+        <code className="font-mono text-foreground">{command}</code>
+      </pre>
+      <button
+        type="button"
+        onClick={copy}
+        className="absolute end-1 top-1 rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        aria-label={copied ? t("common.copied", "Copied") : t("common.copy", "Copy")}
+        title={copied ? t("common.copied", "Copied") : t("common.copy", "Copy")}
+        data-testid="update-copy-command"
+      >
+        {copied ? (
+          <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+        ) : (
+          <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+        )}
+      </button>
+    </div>
   );
 }
 
