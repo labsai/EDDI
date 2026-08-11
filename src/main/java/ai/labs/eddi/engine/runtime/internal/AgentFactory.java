@@ -14,7 +14,9 @@ import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.client.agents.IAgentStoreClientLibrary;
+import ai.labs.eddi.engine.runtime.model.DeploymentEvent;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.secrets.VaultGrantGate;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -35,6 +37,20 @@ public class AgentFactory implements IAgentFactory {
     private final Map<Deployment.Environment, ConcurrentHashMap<AgentId, IAgent>> environments;
     private final IAgentStoreClientLibrary agentStoreClientLibrary;
     private final IDeploymentListener deploymentListener;
+
+    /**
+     * Deploy-time vault-grant gate, applied HERE because this is the one place
+     * every deployment funnels through — {@code AgentDeploymentManagement}'s
+     * scheduled poll, {@code RestAgentAdministration}'s explicit deploy (which is
+     * how {@code create_sub_agent} reaches production) and
+     * {@code ConversationService}'s deploy-on-demand all call this method. Gating
+     * any single caller leaves the others as a way round it.
+     * <p>
+     * Field-injected and null-checked so the many tests that construct this factory
+     * directly keep working and simply skip the gate.
+     */
+    @Inject
+    VaultGrantGate vaultGrantGate;
 
     private static final Logger log = Logger.getLogger(AgentFactory.class);
 
@@ -241,6 +257,19 @@ public class AgentFactory implements IAgentFactory {
                         version);
                 return;
             }
+        }
+
+        if (vaultGrantGate != null && !vaultGrantGate.mayDeploy(agentId, version)) {
+            // Refused: the agent names a vault secret it is not granted. Release the
+            // placeholder we just claimed so the key does not stay IN_PROGRESS, and
+            // report ERROR so the caller does not record a successful deployment.
+            var refused = createInProgressDummyAgent(agentId, version);
+            refused.setDeploymentStatus(Deployment.Status.ERROR);
+            agentEnvironment.replace(id, placeholder, refused);
+            finalDeploymentProcess.completed(Deployment.Status.ERROR);
+            logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
+            deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, Deployment.Status.ERROR));
+            return;
         }
 
         logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.IN_PROGRESS);
