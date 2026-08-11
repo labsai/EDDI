@@ -230,9 +230,18 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     }
 
     /**
-     * Visibility filter for a recall: self(agentId) OR group(groupIds) OR global.
+     * Visibility filter for a recall: the user's own scope — self(agentId) OR
+     * group(groupIds) OR global, always constrained to the user's own entries —
+     * plus, additively, the TEAM-OWNED scope (I8): entries whose owner is the
+     * synthetic {@code "group:"+groupId} user with {@code group} visibility.
+     * Package-private static so the filter's shape is directly assertable.
+     * <p>
+     * The team branch is deliberately narrow: it matches ONLY synthetic team owners
+     * derived from the supplied group ids, with group visibility, with a group-id
+     * overlap — never another human user's entries. The user's own branch is
+     * untouched, so personal recall behaves exactly as before.
      */
-    private Bson buildVisibilityFilter(String userId, String agentId, List<String> groupIds) {
+    static Bson buildVisibilityFilter(String userId, String agentId, List<String> groupIds) {
         List<Bson> visibilityFilters = new ArrayList<>();
 
         // Self: entries created by this agent for this user
@@ -246,7 +255,18 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         // Global: all global entries for this user
         visibilityFilters.add(eq(FIELD_VISIBILITY, Visibility.global.name()));
 
-        return and(eq(FIELD_USER_ID, userId), or(visibilityFilters));
+        Bson userScope = and(eq(FIELD_USER_ID, userId), or(visibilityFilters));
+        if (groupIds == null || groupIds.isEmpty()) {
+            return userScope;
+        }
+
+        // I8: team-owned lessons. Owner ids are DERIVED from the supplied group
+        // ids, never caller-supplied strings — a caller cannot name an arbitrary
+        // owner this way.
+        List<String> teamOwners = groupIds.stream().map(gid -> IUserMemoryStore.TEAM_OWNER_PREFIX + gid).toList();
+        Bson teamScope = and(in(FIELD_USER_ID, teamOwners), eq(FIELD_VISIBILITY, Visibility.group.name()),
+                in(FIELD_GROUP_IDS, groupIds));
+        return or(userScope, teamScope);
     }
 
     /**

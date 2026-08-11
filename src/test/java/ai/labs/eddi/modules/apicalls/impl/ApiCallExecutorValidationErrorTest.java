@@ -77,9 +77,10 @@ class ApiCallExecutorValidationErrorTest {
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
+        CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
         executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver,
-                mock(CallerIdentityResolver.class), new CallerIdentityContext(null, null), false, DEFAULT_TIMEOUT_MILLIS,
-                DEFAULT_MAX_RESPONSE_SIZE);
+                callerIdentityResolver, new CallerIdentityContext(null, null), new RequestRedactor(callerIdentityResolver), false,
+                DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
 
         memory = mock(IConversationMemory.class);
         currentStep = mock(IWritableConversationStep.class);

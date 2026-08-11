@@ -116,8 +116,13 @@ public interface IUserMemoryStore {
     // === Queries ===
 
     /**
-     * Returns entries visible to the given agent in the given groups. Combines:
-     * self(agentId) + group(groupIds) + global.
+     * Returns entries visible to the given agent in the given groups. Combines the
+     * user's own scope — self(agentId) + group(groupIds) + global — with,
+     * additively, TEAM-OWNED entries (I8): lessons stored under the synthetic owner
+     * {@link #TEAM_OWNER_PREFIX}{@code +groupId} with {@code group} visibility, for
+     * each supplied group. The team branch never widens the user's own scope — a
+     * personal entry of another human user is unreachable through it, because team
+     * owner ids are derived from the supplied group ids, not caller-supplied.
      *
      * @param recallOrder
      *            "most_recent" (updatedAt DESC) or "most_accessed" (accessCount
@@ -127,6 +132,14 @@ public interface IUserMemoryStore {
      */
     List<UserMemoryEntry> getVisibleEntries(String userId, String agentId, List<String> groupIds, String recallOrder, int maxEntries)
             throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Owner prefix for TEAM-OWNED memory (I8): a group's retro lessons are stored
+     * under the synthetic user {@code "group:"+groupId} so they belong to the team,
+     * not to whichever human happened to run the discussion — and survive that
+     * human's GDPR erasure without carrying their identity.
+     */
+    String TEAM_OWNER_PREFIX = "group:";
 
     /**
      * Text filter across keys and values (v1: regex, v2: semantic search).

@@ -5,6 +5,631 @@
 
 ---
 
+## 🔗 fix(agents): wire the deployment-wait machinery that only the ZIP importer ever used (2026-08-09)
+
+**Repo:** EDDI (`fix/deployment-wait-machinery`)
+
+Wave F of the Agent / Group Agent review. `AgentFactory.getAgent` has always had a branch for "the agent is deploying right now" — `waitForDeploymentCompletion`, which awaits a future from `DeploymentListener`. That future was only ever registered by **one** caller in all of `src/main`: `RestImportService`, the startup ZIP importer. Every ordinary deploy fired `onDeploymentEvent` but never registered, so `getRegisteredDeploymentEvent` returned `null`, the wait had nothing to await, and a caller racing a deployment simply got a null agent. The machinery was dead outside one flow while reading as live.
+
+- `RestAgentAdministration.deploy` now registers **before** starting the deployment. Ordering matters: `agentFactory.deployAgent` is what publishes the IN_PROGRESS placeholder a waiter can observe, so registering afterwards would leave exactly the window this closes.
+- `DeploymentListener.registerAgentDeployment` self-expires. The map was pruned only by an arriving `DeploymentEvent`, so a registration whose event never came — a rejected deployment callable, a process that died mid-deploy — stayed for the lifetime of the JVM. Registrations now carry a `REGISTRATION_TTL` (5 minutes, a leak bound rather than a deployment SLA) and remove themselves on *any* completion. Removal is `remove(key, future)`, not `remove(key)`, so a stale completion cannot evict a live registration for the same agent.
+- `RestImportService`'s `allOf(...).join()` is now tolerant. It could previously only block forever; with self-expiring registrations it can complete exceptionally, and one initial agent that never reports must not hang startup — it logs and continues with the agents that did deploy.
+
+Suites: 347 tests green across `DeploymentListener*`, `RestAgentAdministration*`, `AgentFactory*`, `RestImportService*`; 12 new.
+## 📚 docs(groups): attachments, protocol defaults, context scopes, and a "not yet supported" section (2026-08-09)
+
+**Repo:** EDDI (`docs/group-agent-accuracy`)
+
+Wave E of the Agent / Group Agent review — the documentation drifts the review turned up, each one a place where the docs and the code disagreed.
+
+1. **Attachments × groups were entirely undocumented.** `docs/group-conversations.md` had zero mentions of attachments and `docs/attachments-guide.md` had zero mentions of groups, while `POST /groups/{groupId}/conversations` accepts them and `GroupAttachmentBinder` is a whole subsystem. Both files now carry a section: the three input shapes, the first-turn grant, how later phases keep access (history + the auto-enabled `readAttachment` tool), and the two group-specific bounds — the per-turn cap applies per MEMBER turn, and anything dropped is reported in that member's `attachments:errors`, not in the group transcript.
+2. **The protocol table did not say the defaults apply to an absent block.** Nothing backfills a stored config, so "no `protocol` block" is the common shape and runs on exactly the tabled values — which is what made the 60-vs-180 drift fixed in #648 invisible.
+3. **`maxCreatedAgentsPerDiscussion` read as ambiguous.** Now explicitly "counted across **all** members, not per member" — the behaviour #649 delivers.
+4. **`LAST_PHASE` was documented as "only the previous phase's entries"**, but the filter is `phaseIndex >= currentPhaseIdx - 1`, which includes the running phase. The code is right — in a sequential phase, that inclusion is what lets the second speaker react to the first — so the doc and the enum's Javadoc were corrected, not the filter.
+5. **New "Not yet supported" section**, so these are not discovered at runtime: member-level tool approval inside a group, nested pauses, groups over the OpenAI-compatible `/v1` adapter, groups over A2A, and the per-node scope of the live-discussion registry.
+
+Also: an FQN sweep of `CreateSubAgentTool` (11 inline fully-qualified names, against `AGENTS.md` §4.7) and the orphaned Javadoc block in `LiveDiscussionRegistry`, where the paragraph documenting `get()` sat above `getForMember()` so both attached to the latter and `get()` had none.
+
+**Scoping note:** the FQN violation is repo-wide (~130 sites). This PR sweeps only files no other open PR touches; doing all of them here would collide with #648–#651 for no benefit. The rest is a follow-up once those land.
+## 🧪 chore(groups): retarget the TASK_FORCE characterization tests at the engine that owns them (2026-08-09)
+
+**Repo:** EDDI (`chore/retarget-group-characterization-tests`)
+
+Wave D of the Agent / Group Agent review, first slice. `GroupConversationService` carries ~27 private methods with **zero production callers** — pure delegators kept alive because ~34 `getDeclaredMethod` call sites across seven test classes resolve against them. That inverts the dependency: the tests pin a shim, not the path the engines actually take, so `PhaseExecutionEngine` or `TaskForceEngine` could change how they call the real method and every assertion would still pass.
+
+This slice retargets the TASK_FORCE surface — `GroupConversationServiceTaskForceTest` (all 20 tests) plus the two `recordTaskFailure` tests in `GroupConversationServiceHitlCoverage3Test` — at `TaskForceEngine` and `MemberTurnExecutor` directly, and deletes the `recordTaskFailure` delegator that pinning kept alive.
+
+Two things the retarget surfaced, both illustrating the point:
+
+- **Three assertions described the reflection wrapper, not the code.** They asserted `InvocationTargetException` and unwrapped one `getCause()` layer to reach the real exception. Called directly, the quota tests now assert `GroupDiscussionException` with a `QuotaExceededException` cause — the actual contract, which the reflective form had obscured.
+- **A grep for `recordTaskFailure(` finds one test file; there were two.** The second builds the name as a **string literal** for a file-local `method(name, params)` helper. `GroupConversationService`'s own comments warn about exactly this ("a plain grep for one calling convention isn't enough when sweeping for these") — and the sweep hit it. Deleting the delegator on the first grep's evidence broke the build; the string-literal site is now retargeted too.
+
+**Scope.** Deliberately one surface, not all seven test classes. The remaining reflection (the HITL cluster in `HitlCoverage`/`HitlCoverage2`/`HitlCoverage3`, the context-builder methods in `UncoveredBranchTest`, `resolveParticipants`/`extractResponse`/`failConversation` in `GroupConversationServiceTest`) is entangled with file-local helper indirection that a mechanical pass cannot safely rewrite — an attempt to regex through it produced a broken intermediate and was reverted. Each remaining class is its own follow-up, and the pattern established here (construct the real collaborator in `setUp`, keep the test bodies untouched) is what they should follow.
+
+Suites: 562 tests green across `GroupConversationService*` and `TaskForceEngine*`.
+## ⏱️ fix(groups): a paused cadence discussion no longer wedges a standing team forever (2026-08-09)
+
+**Repo:** EDDI (`fix/cadence-claim-expiry`)
+
+Wave C of the Agent / Group Agent review — a liveness defect in I13 Standing Teams, the newest part of the group subsystem.
+
+`TeamCadenceService.reconcile` releases a workspace's `runningDiscussionId` claim when its discussion reaches a terminal state. `AWAITING_APPROVAL` and `AWAITING_HUMAN_INPUT` are not terminal, so they fell into the `default -> false` ("still running") arm — correctly, for a discussion that will be approved. But the default group HITL timeout policy is `WAIT_INDEFINITELY`, so a pause that nobody resolves never becomes terminal either, and the claim was held **forever**: every subsequent cadence fire for that group was skipped as "still running", and the backlog tasks that run had pulled stayed `IN_PROGRESS`. There was no claim TTL and no reaper anywhere — out of character for a subsystem whose task-force half carries an explicit no-progress fingerprint guard precisely to guarantee termination.
+
+- `GroupWorkspace` gains a nullable `claimedAt` stamp, written next to `runningDiscussionId` and cleared next to it in `settle()` — the two are one fact. Nullable on purpose: documents written before the field existed have no stamp, and reclaiming those on a missing timestamp would be a guess, so they simply get one on their next claim.
+- `reconcile`'s non-terminal arm now routes through `reclaimIfStale`, which cancels the stranded discussion and runs the **ordinary failure writeback** — pulled tasks back to `PENDING`, claim cleared — rather than a bespoke path. Cancel before release, so a reclaimed run cannot keep spending against a budget nobody is tracking.
+- TTL is `eddi.groups.cadence.claim-ttl`, default `PT24H`. Deliberately generous: an approval arriving the next business morning must land on the discussion it belongs to, not on a reclaimed corpse. Non-positive disables reclaiming, for an operator who would rather wedge than risk abandoning a pause.
+- New counter `eddi_team_cadence_claims_reclaimed_total`, and a WARN naming the stranded discussion and how long the claim was held.
+- `POST /groupstore/groups/{id}/workspace/cadences` now warns when a group combines `requiresApproval` phases with `WAIT_INDEFINITELY` — that combination is what makes the backstop reachable, and the operator almost certainly wanted a finite `timeoutPolicy`. A warning, not a rejection: the combination is legitimate for a team whose approver really is always available, and rejecting it would break existing configs.
+
+Also: `cancelQuietly` now passes `ControlSignal.CANCEL_GRACEFUL` explicitly. `null` already resolved to graceful (only `CANCEL_IMMEDIATE` takes the other branch), but the method has a second caller now and "which cancel is this?" should not require reading `GroupHitlCoordinator`.
+
+Suites: 585 tests green across `TeamCadence*`, `GroupWorkspace*`, `RestGroupWorkspace*`, `GroupConversationService*`; 9 new.
+## 🔐 fix(agents): dynamic-agent guardrails — permissive fallback on resume, per-member caps, duplicate recruits, V7 (2026-08-09)
+
+**Repo:** EDDI (`fix/dynamic-agent-guardrails`)
+
+Wave B of the Agent / Group Agent review. These are the guardrails on the highest-blast-radius capability in the product — an LLM deploying agents to production — and they were the weakest-enforced things in the system.
+
+1. **CRITICAL — a group's `dynamicAgents` policy silently reverted to fully permissive on a resumed member turn.** `resolveDynamicAgentConfig` accepted only a *typed* `DynamicAgentConfig` out of the context value; every other consumer of context data in the codebase handles the deserialized shape. A `Context` whose value round-trips through the conversation store comes back as a raw `LinkedHashMap` (`ConversationMemoryStore` rebuilds it as `new Context(type, map.get("value"))`), so any turn running against a *reloaded* step missed the `instanceof` and fell through to `createDefaultDynamicConfig()` — creation, recruitment and delegation all **on**, for a group that may have disabled every one of them. The trigger is an ordinary group path: a member's gated tool call is auto-rejected by `MemberTurnExecutor#tryResolveMemberToolPause`, which resumes the member conversation, and `Conversation#resume` re-enters the same LlmTask at the same index against memory freshly loaded from the store. The orchestrator is still blocked in that call, so the discussion is also still live in `LiveDiscussionRegistry` and the group-gated tools are available too. Resolution is now three-state and **fails closed**: key absent → standalone → permissive default; key present and readable (typed *or* map) → the group's policy; key present but unreadable → every capability off. "The operator said something we cannot parse" must never resolve to "the operator said yes to everything".
+2. **`maxCreatedAgentsPerDiscussion` was enforced per member conversation, not per discussion.** `seedCreatedAgentIds` has always read a `dynamicCreatedAgentIds` context variable for the discussion-wide total, but nothing wrote it — so the cap bounded each member independently and a 5-member group with the default cap of 5 could deploy **25** agents to production, while both the field name and `docs/group-conversations.md` promised 5. `MemberTurnExecutor` now injects `gc.getCreatedAgentIds()` alongside the policy it already injects per turn.
+3. **`RecruitAgentTool` could re-recruit a configured member.** Its Javadoc claimed the configured roster counted, but `isAlreadyMember` checked only `recruitedAgentIds`, `dynamicMembers` and `memberConversationIds` — and the last holds an agent only once it has *spoken*. A member whose first turn had not come up yet could be "recruited" as a duplicate: the roster union de-duplicated so nobody spoke twice, but the recruitment cap was consumed, a misleading FACILITATION entry was written, and `addMemberDisplayName` **overwrote the operator-chosen display name with the raw agent id**. The tool now receives the configured roster (resolved the same way `ArtifactToolsProvider` resolves its artifact policy), and display-name recording became `putIfAbsent`.
+4. **Teardown never freed a creation slot, and a failed delete orphaned the agent.** `createdAgentIds.remove` ran *before* the delete, so a failed delete left the agent untracked and ephemeral cleanup never retried it — config and deployment record orphaned. And the removal was from a per-turn list that `seedCreatedAgentIds` rebuilds from every earlier step, so the id came straight back and the cap counted an agent that no longer exists forever. Teardown now records into `dynamic:torn_down_agent_ids`, which the seed subtracts and `propagateDynamicAgentTracking` applies to the group's own tracking; the tracking removal moved after the successful delete.
+5. **V7 resolved — an omitted `builtInToolsWhitelist` no longer skips the dynamic-agent tools.** `docs/langchain.md` states twice that omitting the whitelist enables all built-in tools, and `BuiltinToolsProvider` implements exactly that; this provider alone returned early. `collectAllBuiltInTools` now calls it unconditionally. **Deliberately narrower than "all" in one respect:** the omitted case is honoured only when a group policy governs the turn. `dynamicAgents` is a field on `AgentGroupConfiguration`, so a standalone conversation has no surface on which an operator could have declined — handing it unconfigurable, production-deploying capabilities because it omitted a list would be a worse defect than the asymmetry being fixed. Under a group policy the operator *has* that surface, which is what makes "all" safe to mean all.
+
+The three dynamic-agent tracking keys moved to `MemoryKeys` (`DYNAMIC_CREATED_AGENT_IDS`, `DYNAMIC_RETAINED_AGENT_IDS`, `DYNAMIC_TORN_DOWN_AGENT_IDS`) — the group layer reads them positionally out of a serialized snapshot, so both sides now name one constant instead of two string literals.
+
+**Behaviour changes, deliberate:** (a) a group whose policy cannot be read now gets no dynamic-agent capabilities instead of all of them; (b) an agent in a group with `enableBuiltInTools=true` and no whitelist now receives the dynamic-agent tools its group policy permits.
+
+**Final review round (model-independent second pass, PR #649).** One documentation-discipline finding: `tornDownAgentIds` is a persisted, resume-consumed field, and the schema-version comment's own rule says such fields bump the version. It deliberately rides v4 instead — the comment now records why: it fails soft in every skew direction (legacy documents default to an empty set; an older pod re-saving drops tombstones, after which the worst outcome is a dead agent re-occupying a cap slot and cleanup retrying a deletion that 404s harmlessly), unlike `runtimePhases`, whose skew corrupts resume bookmarks. A version bump signals "an old pod must not touch this document"; this field does not earn that. The second pass also re-verified the V7 wiring end to end: `collectEnabledTools` has no production caller, the live path is `buildToolSetup` → `contribute()`, and both paths carry the new semantics — no double-add.
+
+**Review round 1 (PR #649).** Seven findings from CodeRabbit; six fixed, one declined:
+- **Major, security — `teardown_agent` was not gated on the policy.** Its assembly branch checked only that the stores were present, and the tool itself takes no `DynamicAgentConfig`, so a group whose policy is disabled — or unreadable, which now resolves fail-closed — could still undeploy and **permanently delete** a tracked agent. A hole the V7 change widened, since an omitted whitelist now reaches this branch. Gated on `dynamicConfig.isEnabled()`.
+- **Major — an unreadable roster failed open.** `configuredMemberIds` returned an empty set for both "no members" and "could not read", so a store hiccup silently restored the duplicate-recruit defect the change exists to prevent. It now returns `Optional`, and an unavailable roster **withholds `recruit_agent`** for that turn — gate by absence, matching `ArtifactToolsProvider`.
+- **Major — stale snapshots could resurrect a torn-down agent.** Each member's tracking snapshot is one member's view: member B's turn can still name an agent member A tore down in between, and the merge re-added it. `GroupConversation` now carries a `tornDownAgentIds` tombstone, written before the merge by `recordTeardown` and consulted by it, so a teardown is final regardless of arrival order.
+- **Major — the created-agent merge was not atomic.** `CopyOnWriteArrayList` makes each `add` atomic but not `contains()`-then-`add()`, and merges run on one coordinator thread per member turn; two could both append the same id, after which the single `remove()` a teardown performs leaves a duplicate. The compound operation now runs under the list's monitor, the same pattern `RecruitAgentTool` uses for `recruitedAgentIds`.
+- **Major — `setMemberDisplayNames` installed a `LinkedHashMap`.** Every reload therefore dropped the concurrency guarantee the field declares, on a map written from member-turn threads and iterated by serialization — and `addMemberDisplayNameIfAbsent` depends on `putIfAbsent` being atomic. Now `ConcurrentHashMap` on both branches.
+- **Declined — atomic reservation of creation capacity before dispatch.** Correct that parallel member turns can each read a stale count and collectively overshoot the cap. That is the same accepted-overshoot shape this codebase already documents for the cost ceiling ("an in-flight turn may still push the total past the ceiling; that overshoot is accepted, not prevented" — `GroupCostLedger`), and closing it properly needs budget *reservation* at dispatch, which is a design change rather than a fix. The cap moves from unbounded-per-member to bounded-with-parallel-overshoot; the residue is recorded rather than silently fixed.
+
+**Review round 2 (PR #649).** One further finding, and a correct one: ordering the writes inside `recordTeardown` did not by itself close the race. A merge could read the tombstone set, find the id absent, be descheduled while a concurrent teardown recorded it, and then complete its own `add` — putting back an agent that no longer exists. The retained branch had the same shape and sat outside the monitor entirely. Check-tombstone-then-add and record-teardown are now mutually exclusive on a shared `dynamicTrackingMutex` (transient + `@JsonIgnore`, the `artifactAnnounceMutex` pattern), covering both the created and retained merges. Pinned by two 200-round interleaving tests, mutation-verified.
+
+Suites: 869 tests green across `GroupConversationService*`, `GroupLifecycleOps*`, `LlmTask*`, `ConversationHitl*`, `ConversationToolResume*`, plus 487 across the orchestrator/tool suites; 25 new tests in two classes.
+## 🔧 fix(agents): null-version undeploy no-op, deploy under a CHM bin lock, EXECUTE wave deadline, protocol defaults (2026-08-09)
+
+**Repo:** EDDI (`fix/agent-lifecycle-and-group-deadlines`)
+
+Wave A of a deep review of the Agent / Group Agent surface. The review's finding was that the *group feature layer* has been reviewed exhaustively while the *agent lifecycle layer it stands on* has not — four of the five fixes here come from `AgentFactory`, two of them from a single six-line method.
+
+1. **`undeployAgent(env, agentId, null)` was a silent no-op — ephemeral agents leaked.** `AgentFactory.AgentId` keys on `(id, version)`, so `new AgentId(id, null)` equals no key the environment map ever holds. Both dynamic-agent teardown paths pass null (`GroupLifecycleOps#cleanupEphemeralAgents` after *every* group discussion, and `TeardownAgentTool`), so `agentEnvironment.remove(...)` and `deployedAgents.remove(...)` both did nothing while the caller logged `"undeployed agent '%s'"` at INFO. `agentStore.deleteAllPermanently(agentId)` then ran anyway: the constructed agent stayed resolvable through `getLatestReadyAgent` **after its configuration had been deleted from the store**, and `eddi_agents_deployed` grew monotonically for the lifetime of the process. A null version now means *every* deployed version of that agent — the only reading that matches what the teardown callers mean. The REST/admin path passes a real version and stays exact. Pinned by `AgentFactoryUndeployVersionTest` (7 tests; 4 fail against the old behaviour — verified by mutation).
+2. **`deployAgent` ran store I/O and full workflow construction inside `ConcurrentHashMap.compute`.** `compute` holds the bin lock for the key while the mapping function runs, and `ConcurrentHashMap` documents that the function must be short and must not touch other mappings; this held a bin lock across multi-second I/O, and any re-entrant agent resolution during construction would have deadlocked. The claim is now a `putIfAbsent` of an IN_PROGRESS placeholder (atomic, no long hold) with the load outside the map. Side benefit: the placeholder is now actually *published*, which `compute` never did — the dummy was only ever returned on the failure path — so a concurrent `getAgent()` can observe "deployment in progress" instead of a bare null. An ERROR entry is re-claimed with `replace(key, expected, placeholder)` so two racing redeploys cannot both proceed.
+3. **`deployedAgents` was mutated unsynchronized.** `deployAgent` appended under `synchronized (deployedAgents)` while `undeployAgent` removed with no lock at all, and the Micrometer gauge reads `size()` from the metrics thread — three unordered accesses to a `LinkedList`. Now a `CopyOnWriteArrayList`, with `addIfAbsent` replacing a non-atomic `contains()`-then-`add()`.
+4. **The TASK_FORCE EXECUTE wave gave up before the turns it was waiting for could have.** The wave waited `agentTimeoutSeconds × maxTasksPerAgent`, which ignores retries — under `onAgentFailure=RETRY` a member legitimately gets `timeout × (maxRetries + 1)` — and carries no setup grace, so even a one-task no-retry wave could expire while the member was still inside its own budget (a member turn reaches its response wait only after agent lookup, conversation start and attachment grants). That is exactly what `PARALLEL_BATCH_GRACE_FLOOR_SECONDS` exists to prevent, and both the parallel debate batch and the bid round *in the same file* already sized themselves through `parallelBatchBudgetSeconds`. The wave now does too, via a new extracted `TaskForceEngine#waveBudgetSeconds` so the derivation is assertable without timing a real wave.
+5. **The documented 180s `agentTimeoutSeconds` default was unreachable on the common path.** `resolveProtocol`'s fallback handed out a literal `60`, and `McpGroupTools.create_group` hard-coded `60` — while the constant's own Javadoc, the four shipped templates and the published table in `docs/group-conversations.md` all said 180 (the value introduced *because* 60 timed out thinking models during synthesis). Since nothing backfills a `protocol` block at save time, a group saved without one — the common shape — ran at 60. The defaults now live on `ProtocolConfig` (`DEFAULT_AGENT_TIMEOUT_SECONDS`, `DEFAULT_MAX_RETRIES`) as the single source of truth, referenced by the engine, the MCP tool and the follow-up path (`resolveAgentTimeoutSeconds`, which had its own stray `return 60`).
+
+Also: removed an unreachable version comparison in `getAllLatestAgents` (it compared the result of `getLatestAgent`, which already returns the highest version, against itself), and downgraded `waitForDeploymentCompletion`'s "still IN_PROGRESS" ERROR to DEBUG when no deployment future was registered — with the placeholder now published that state is reachable and ordinary, not a failure. Wiring the registration properly is Wave F.
+
+**Final review round (model-independent second pass, PR #648).** Two further items:
+- **`waitForDeploymentCompletion` now waits with a timed `get()` and no longer mutates the shared registration future.** It previously armed `orTimeout(60s)` on that future, and `orTimeout` mutates the future it is called on — while `DeploymentListener` hands the same instance to every waiter and to whoever registered the deployment. Pre-#651 only the ZIP importer ever held one, so the mutation was near-unreachable; with #651 registering on every REST deploy, one impatient `getAgent` caller would, at its own 60s deadline, complete the shared future exceptionally for every other consumer and evict the registration before the real deployment event arrived. The timed `get()` waits without writing. The newly-reachable `InterruptedException` restores the interrupt flag, and a timeout logs at WARN as this caller's outcome rather than ERROR as the deployment's.
+- **The `eddi_agents_deployed` gauge counts READY deployments per environment, and its comment now says so.** The comment previously claimed the derived gauge "matched the old semantics", but one delta is real and deliberate: the old list keyed on (id, version) with no environment, so an agent deployed to both `production` and `test` counted once, whereas counting map entries counts it once per environment — that is, once per actual deployment. The comment and this entry now state that change directly.
+
+**Review round 1 (PR #648).** Four findings, all fixed:
+- **CodeRabbit (Major), and a genuine regression this PR introduced:** moving the store load out of `ConcurrentHashMap.compute` opened a window in which an `undeployAgent` for the same id could land mid-load, after which the unconditional `put` of the finished agent resurrected it — a deployment silently winning a race it started before the undeploy was even requested, and leaving the metric describing a registry that no longer held it. Publication is now `replace(key, OUR placeholder, agent)`, so an interleaved undeploy or competing redeploy keeps its outcome. The reviewer's further point — "coordinate the map and metric tracking together, do not only swap put for replace" — is addressed by **deleting the parallel structure entirely**: `deployedAgents` is gone and `eddi_agents_deployed` is now a `Gauge` derived from the environment maps (READY entries only, matching the old semantics). Two structures holding one fact could never be linearized against each other; one structure needs no linearization. Pinned by `undeployDuringLoadIsNotOverwritten`, which blocks the store lookup, undeploys, then releases — mutation-verified against a `put`.
+- **CodeQL (4× log injection):** the three claim-path `log.debug(String.format(...))` calls and the deploy-failure `log.error` interpolated an unsanitized `agentId`. All now go through `LogSanitizer.sanitize` (and the debug calls use `debugf` rather than pre-formatting).
+- **CodeRabbit (Minor):** `ProtocolConfig`'s `@param agentTimeoutSeconds` Javadoc still said "default: 60".
+- **Code-quality bot:** a redundant assertion in `TaskForceEngineWaveBudgetTest` (`budget > 30` is implied by `budget >= 90`) replaced with `assertNotEquals(30L, budget)`, which keeps the "not the old formula's output" intent without the always-true comparison.
+
+**Behaviour change, deliberate:** groups with no `protocol` block go from a 60s to a 180s per-turn timeout, and MCP-created groups likewise. This makes the code agree with the documentation rather than the reverse.
+
+Suites: `AgentFactory*`, `AgentDeploymentManagement*`, `TaskForceEngine*`, `GroupConversationService*`, `McpGroupTools*`, `AgentGroupConfiguration*`, `RestAgentAdministration*` — 820 tests green, plus 19 new.
+
+---
+
+## 🔎 fix(groups): pre-merge deep review — facilitator HITL bypass, CALL_VOTE guards, metric cardinality, template honesty (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i10-templates`)
+
+Final pre-merge review (20-agent workflow: 6 focused reviewers over the facilitator subsystem — which never received an external bot review (#643 rate-limited) — the I10 templates and the merge seams; every non-minor finding independently double-verified). Six confirmed findings, all fixed:
+
+1. **CRITICAL — facilitator escalation bypassed the phase-boundary HITL gate.** A deferred EACH_REPEAT `ESCALATE_HUMAN` at a phase's final repeat returned from inside the repeat loop before the `requiresApproval` gate: the phase's mandatory human approval (and the TASK-granularity awaiting-task pause) never fired, and the escalation answerer has no REJECT path — a silent compliance bypass. Now the boundary gate supersedes the escalation: when the just-completed phase's gate will pause, the escalation is suppressed with a FACILITATION entry that preserves the facilitator's question for the approver, and control falls through to the normal gate. Mid-phase escalations are unaffected (no gate is owed yet). Pinned by `escalate_atTheBoundaryOfAnApprovalGatedPhase_theApprovalGateWins`.
+2. **CALL_VOTE could clobber a recorded decision.** Unlike END_PHASE/EXTEND_PHASE it had no `phaseEndedBySignal` guard, and the inserted vote's tally unconditionally replaces `gc.decision` — destroying a signed AGREEMENT (breaking `skipIf=AGREEMENT_REACHED`) or a debate VERDICT (resurfacing the raw-judgment-JSON defect). CALL_VOTE is now rejected when the phase ended by signal or a DecisionRecord already exists.
+3. **Unbounded metric label cardinality.** `recordRejection` used the raw LLM-authored move string as the `move` tag of `eddi_group_facilitator_moves_total` — every hallucinated name a new Prometheus time series for the JVM's lifetime (and injectable via transcript content echoed in the briefing). The tag is bounded to enum names + `UNKNOWN`; `rawMove` is also length-capped at parse.
+4. **The deferred EACH_REPEAT branch was untested.** ESCALATE/CALL_VOTE were e2e-tested only at EACH_PHASE; the mid-phase resume arithmetic (same phase, repeat+1) and the boundary arm (phase+1, repeat 0) had zero coverage. Three e2e tests added.
+5. **negotiation-table.json promised a human-arbiter mode that does not exist** — a human principal as arbiter would neither warn at save nor pause synthesis (the arbiter is only `moderatorAgentId`, never a HUMAN roster member); phases would be silently SKIPPED. The manifest now states the arbiter must be a deployed agent and points to decision-board / hitlConfig for human decision-makers.
+6. **research-pod.json silently degraded its context window** — `summarizeOverflow` defaults true but no summarizer model is named, tripping the save-time warning on a SHIPPED template and truncating instead of summarizing at runtime. Now explicitly `false` (honest truncation).
+
+Minor also fixed: the human-input 409 body no longer misstates config-drift as "not awaiting human input" — the two static drift messages pass through so the operator learns the config changed instead of retrying forever.
+
+Suites: FacilitatorEngineTest 42 (+3), Facilitator e2e 12 (+3), templates/REST/HITL 96 — all green.
+
+---
+
+
+## 🔎 fix(groups): I8 review round 3 — retro ceilings + creation-ordered FIFO (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i8-retro-memory`)
+
+Two accepted CodeRabbit findings, one rebutted:
+
+1. **RetroConfig ceilings (major)** — the compact ctor accepted any positive int, so `Integer.MAX_VALUE` unbounded the per-run write count and the retained-lesson set. Hard ceilings: `CEILING_MAX_PER_RUN` 20, `CEILING_MAX_STORED` 500 (clamped, not rejected — same normalization style as the rest of the record).
+2. **FIFO vs reharvest (major)** — eviction used the `most_recent` recall order (sorted by `updatedAt`); reharvesting an existing lesson refreshes `updatedAt`, so an old-but-reharvested lesson could shield itself while a later-CREATED lesson got evicted. Eviction now sorts by `createdAt` (which the store `setOnInsert`s — the stable insertion stamp), nulls oldest-first. Regression test reharvests an old lesson before exceeding the cap and asserts the oldest-created is the one evicted.
+3. **Rebutted: RETRO entries lost on mid-repeat HITL resume** — on this branch nothing ever creates a speaker-level `ResumePoint` (producers are I6 human turns and I12 escalations, on other branches), so a RETRO phase cannot resume mid-repeat here. On the integration branch, where producers exist, the I6 `pausedRepeatSliceBase` fix restores the true repeat base at top-of-repeat before `repeatEntries` is sliced — the RETRO harvest reads that same slice, so pre-pause lessons are preserved (pinned by the HumanPauseRepeatSlice tests).
+## 🔎 fix(groups): I13 review round 3 — revision parse guard, convergence limit, test pins (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams`)
+
+Six findings from the CodeRabbit/CodeQL round on the round-2 push, all accepted:
+
+1. **NumberFormatException in casRevision (CodeQL, both #644 and #645)** — `Long.parseLong` on a persisted value; a corrupt revision surfaced as an uncaught runtime exception (bare 500 at REST). Guarded: non-numeric revision throws the method's declared `ResourceStoreException` with the value named; the instance keeps the corrupt value for diagnosis.
+2. **Convergence limit (major)** — `findWorkspaceIds` fetched at most 2 ids; with 3+ concurrent creators, different racers could see different subsets and compute different survivors, never converging. Limit raised to 50 so every realistic racer set fits one query.
+3. **Javadoc detachment (minor)** — `casRevision` was inserted between `casRunningDiscussion`'s Javadoc and its declaration, silently detaching it. Reordered; the claim Javadoc is re-attached.
+4. **Legacy null-revision window (minor)** — documented on `IGroupWorkspaceStore.casRevision`: one unconditional stamp per pre-revision document, CAS'd forever after.
+5. **Deletion-order pin (minor)** — the schedule-retirement test now uses `InOrder`, protecting the crash-recoverable order (schedules before workspace), not just the calls.
+6. **Write-path pins (minor)** — the backlog rejection tests assert `never().casRevision(any())` (the actual write path) alongside the legacy `update` pin; the lost-settle test uses `verifyNoMoreInteractions` so the failed conditional release is provably the ONLY store interaction.
+
+---
+
+## 🔎 fix(groups): I13 review round 2 — workspace concurrency + schedule lifecycle (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams`)
+
+Five accepted findings from the CodeRabbit/CodeQL round on PR #644:
+
+1. **Atomic backlog adds (major)** — both backlog-add surfaces (REST `addBacklogTask`, MCP `add_team_task`) validated the cap/duplicate rules against their own snapshot and then issued a whole-document `update`, so two concurrent adds could both pass under the cap and the later write dropped the earlier task. New optimistic-concurrency primitive: `GroupWorkspace.revision` (string stamp) + `IGroupWorkspaceStore.casRevision` (revision-conditional store via `storeIfFieldEquals`, bump-in-write, loser restores its stamp). Both surfaces run a 3-attempt read-validate-mutate-CAS loop; exhaustion is an honest 409/error telling the caller to retry. Pre-revision documents get stamped by one plain write, then CAS'd forever after.
+2. **Duplicate workspace documents (major)** — `readOrCreate` read-then-inserted with no unique constraint (the storage abstraction has none), so concurrent creators could each insert a document and split subsequent writes. Now: after inserting, re-query; every racer that does not hold the deterministic survivor (lexicographically smallest id = earliest ObjectId) deletes its own insert and adopts the survivor. `find()` picks the same survivor when duplicates linger, so readers and racers always agree.
+3. **Orphaned schedule on failed cadence write (major)** — `addCadence` created the `ScheduleConfiguration` before the workspace write; a failed write left an enabled schedule no cadence names, firing "cadence no longer exists" forever with no delete path. The failed write now compensates by deleting the schedule.
+4. **Group deletion left cadence schedules behind (major)** — permanent group deletion removed only the workspace; enabled schedules kept firing "No workspace exists". `RestAgentGroupStore` now retires every cadence's schedule BEFORE deleting the workspace (crash between the two leaves the recoverable order).
+5. **Log sanitization (minor + CodeQL 478/480)** — the run-claim disappearance warning sanitizes `groupId`; the same treatment in the new casRevision path.
+
+Tests: GroupWorkspaceStoreTest (new, 5: CAS bump/restore/legacy-stamp, duplicate convergence in readOrCreate and find), RestGroupWorkspaceTest 14 (+2: lost-CAS retry/exhaustion, schedule cleanup on failed write), McpGroupToolsTest 53 (+1 retry/exhaustion), RestAgentGroupStoreTest (+1 schedule retirement). All green.
+
+---
+
+## 🔎 fix(groups): I8 review round 2 — retro cap semantics + event contract (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i8-retro-memory`)
+
+Four accepted findings from the CodeRabbit round on the stacked PR (#644, which carries this branch):
+
+1. **Template quoted the wrong cap (major)** — the RETRO prompt always rendered `DEFAULT_MAX_PER_RUN` (3), so a group configured above it could never obtain its configured number of lessons. `buildPhaseInput` gained a `RetroConfig` parameter (config-less overloads keep the default); all three agent-turn call sites in `PhaseExecutionEngine` pass `config.getRetroConfig()`. RetroEngine's parse-time enforcement is unchanged and remains the server-side limit.
+2. **Per-entry cap multiplied (major)** — `harvest` applied `maxLessonsPerRun` to each RETRO transcript entry, so a multi-speaker or multi-repeat retro could store `cap × entries`. Now a per-harvest `remaining` allowance shared across entries.
+3. **Missing zero-count event (minor)** — the null-memory-store branch returned before `retro_recorded`; it now fires the event with `lessonsStored = 0`, honoring the contract that a RETRO phase always emits it.
+4. **Fixture didn't cross users (minor)** — `personalEntriesNeverCrossUsers` built its "other user's" entry with the shared helper that stamps USER; it now genuinely belongs to `user-2`.
+
+Tests: RetroEngineTest 8 (+2: per-harvest cap, null-store zero event), GroupContextBuilderTest 41 (+1: configured cap quoted, default fallback), PhaseExecutionEngineTest stub widened to the new arity. All green.
+## 🔎 fix(groups): I6 review round — schema bump, approver full-view scope, persist-time assertion (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i6-human-members`)
+
+Three accepted CodeRabbit findings on PR #640 (all against the pausedRepeatSliceBase fix commit):
+
+1. **Schema version (major)** — `pausedRepeatSliceBase` is persisted state the resumed leg depends on, but `CURRENT_SCHEMA_VERSION` stayed 3. Bumped to 4 (no migration entry: Jackson defaults legacy documents to -1, the exact pre-v4 behavior). On the integration branch v4 is the release shape shared with I11's `negotiationState` and I12's `runtimePhases`.
+2. **Approver transcript scope (major, security)** — the `detail=full` gate used the shared `paused` predicate, which also covers `AWAITING_HUMAN_INPUT`; an `eddi-approver` could read the full transcript of a discussion merely waiting on a human member's turn. Both surfaces (REST `getGroupApprovalStatus`, MCP `get_group_approval_status`) now gate the approver window on a dedicated `awaitingApproval` predicate; summary fields keep the wider one. Regression tests on both surfaces (approver + human-turn pause → 403/FORBIDDEN).
+3. **Persist-time assertion (minor)** — the mid-repeat pause test asserted only the in-memory instance; a captor would hold the same mutable object, so the test now records `pausedRepeatSliceBase` inside the `update()` stub at persist time and asserts the last persisted value.
+
+---
+## 🔎 fix(groups): I13 + HITL fixes from the final cross-branch review (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams`)
+
+Fixes from the 23-agent final review (5 dimensions, every non-minor finding adversarially double-verified; 9 confirmed across all branches — the four below are the ones on this branch's surface):
+
+1. **Settle race (major/concurrency)** — `TeamCadenceService.settle()` released the claim with an **unconditional** `update()`, so a writeback racing a concurrent reconcile (schedule fire on another pod, or the REST read-repair) could clobber a *newer* claim, orphaning that discussion's outcomes. Now conditional: `settle(workspace, gc, settledDiscussionId)` releases via `casRunningDiscussion(workspace, settledDiscussionId)`; both writebacks capture the id before clearing and return the verdict; a lost race drops the caller's mutations (`writeback_lostSettleRace_dropsMutations` pins it). Reconcile propagates the verdict so a losing caller treats the workspace as busy.
+2. **Cost ceiling lost on HITL resume (major/cost-bounds)** — `GroupConversation.inheritedCostCeiling` was `@JsonIgnore transient`, so a cadence run that paused for approval resumed with **no ceiling**. Now a persisted field (documented as a review finding in the Javadoc).
+3. **Backlog write caps bypassed (major/security)** — REST `addBacklogTask` and MCP `add_team_task` skipped the caps the agent tool surface enforces: subject ≤ `MAX_AGENT_TASK_SUBJECT_LENGTH` (200), description ≤ `MAX_AGENT_TASK_DESCRIPTION_LENGTH` (4000), and duplicate subjects (case-insensitive) now 409/error — writeback matches outcomes **by subject**, so duplicates made outcome attribution ambiguous. Plus two bound minors: cadence count capped at 20/workspace, `inputTemplate` ≤ 4000 chars.
+4. **Unbounded failure-feedback growth (major/cost-bounds)** — the COMPLETED writeback appended each failed run's **entire agent output** to the persisted task description every run. New `appendFeedbackBounded`: 500-char per-run slice, total trimmed from the front (oldest first) to the shared 4000-char description cap.
+
+Also on this branch's surface: the **claim-CAS exception path** now cancels the just-started discussion before rethrowing (previously it leaked an unclaimed discussion running to completion with outcomes no writeback collects), the template-failure log sanitizes the exception message, and `GroupHitlCoordinator`'s executor-saturated resume rollback uses remove-and-recheck (`removeTokenAndConvertIfSignalled`) like every sibling rollback path — a cancel signalled between token registration and the rollback was silently dropped, leaving a "cancelled" discussion stuck AWAITING_APPROVAL (regression test added, mutation-verified: reverting the fix fails it).
+
+**Rebutted (deliberate, not fixed):** MCP `list_team_backlog` requiring `eddi-viewer` while REST listing requires editor — consistent with the read_group/list_groups viewer convention across all MCP group read tools.
+
+**Tests:** TeamCadenceServiceTest 17 (+3), RestGroupWorkspaceTest 12 (+3), McpGroupToolsTest 52 (+2), GroupHitlCoordinatorTest 16 (+1). All green.
+
+---
+## 🔎 fix(groups): I12 final-review findings — checkpoint runs before the decision block (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i12-facilitator`)
+
+Two confirmed MAJORs from the final multi-agent review pass, one root cause: the EACH_REPEAT facilitator checkpoint sat AFTER the last-repeat decision block.
+
+- **END_PHASE skipped the decisions:** it fired only mid-phase (where `lastRepeat` is false) and took a plain `break` past the block — a VOTE phase it ended never tallied its cast ballots; verdicts, dissent rounds and retro harvests were skipped the same way.
+- **EXTEND_PHASE at a final repeat re-ran them:** the block had already fired for that repeat, and the extension made the next repeat "final" again — duplicate dissent rounds, `decision_reached` twice, the tally overwritten.
+
+**Fix:** the consult now runs after convergence but BEFORE `lastRepeat` is computed, with effects split by kind — END_PHASE folds into the phase outcome (the block sees a real phase end and records everything), EXTEND_PHASE applies immediately (deferring the block to the true final repeat), and INSERT_VOTE/ESCALATE are stashed and applied after the block, so an escalation on a final repeat cannot skip that repeat's decisions on its way out. Two new mutation-check E2Es: END_PHASE on a VOTE phase still tallies (fails against the old `break`), and always-EXTEND on a dissent-recording SYNTHESIS runs exactly one dissent round (fails against the old ordering).
+## 🔎 fix(groups): I11 final-review finding — negotiation state survives into round 2 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i11-negotiation`)
+
+Confirmed MAJOR from the final multi-agent review pass: `continueDiscussion` clears every other round-scoped conclusion (`synthesizedAnswer`, `decision`) with an explicit rationale, but not the persisted negotiation table — so round 2 of a NEGOTIATION group ran against round 1's proposals, and one fresh acceptance could reach "unanimous agreement" on signatures cast for a DIFFERENT question, with `tally.signedAcceptances` pointing at round 1's transcript entries. Fixed: `setNegotiation(null)` at round start, mutation-checked (the continuation test seeds a signed round-1 proposal and asserts it does not survive).
+## 🔎 fix(groups): I6 final-review finding — mid-repeat pause loses the repeat slice (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i6-human-members`)
+
+Confirmed CRITICAL from the final multi-agent review pass (2 independent verifiers traced it): a human turn pauses MID-repeat, after other speakers already appended this repeat's entries — but the resumed leg recomputed `transcriptSizeBeforeRepeat` from the current transcript size, so the repeat slice covered only post-pause entries. Every consumer of that slice silently lost the pre-pause contributions: the convergence check on this branch, and (on the integration tree) VOTE tallies missing every agent ballot cast before the human's — a wrong election, reported as legitimate.
+
+**Fix:** new persisted `pausedRepeatSliceBase` on `GroupConversation` (−1 = unset; legacy documents keep the old recompute), written when the human-turn pause commits (the catch site has the true base in scope) and consumed exactly once with the same read-and-clear discipline as the speaker bookmark. Tests: the pause persists the base pointing at the top of the repeat (fails without the write), and a resumed leg consumes it exactly once (fails without the consume).
+## 🧩 feat(groups): I10 — preset templates on the all-features integration branch (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i10-templates` — the integration branch: I14+I6+I12 base, merged with I11, I18, I8+I13, I17 and the pre-feature defects branch (N1/N2/N3/I9))
+
+Final queue item, shipped last by design so templates only reference features that exist. This branch is ALSO the proof the user story demanded: every feature branch merged into one tree, compiled clean, full suites green.
+
+- **Integration merges, verified per the big-merge memory:** 5 sequential merges with a clean compile + suite run after each. Real semantic resolutions: `DiscussionPhase` unified to 13 components (`voteConfig` 12th + `skipIf` 13th) with BOTH 12-arg compat ctors kept so each branch's call sites compile unchanged; `PhaseType` unions to 15 (VOTE + PROPOSAL + BARGAIN + RETRO — pins updated); schema v4's Javadoc now names BOTH resume-critical fields (I12 `runtimePhases`, I11 `negotiationState`); the SYNTHESIS decision block runs debate verdicts AND I11 arbitration with one late `decision_reached` firing after the dissent round (an `arbitrated` flag is true only when THIS call set the decision, so the event never re-announces an earlier phase's); `AgentGroupStore.create/update` runs all five validators; every listener/SSE/Slack surface carries all events. 3880 tests, 0 failures (27 known environmental SlackWebApiClient socket errors).
+- **Cross-branch defect the integration run caught (the reason this branch exists):** I9's windowing overload (defects branch) and I6's human-turn prompt render (human-members branch) had never met — merged, agents got windowed context while a HUMAN member's rendered prompt silently used the unwindowed compat overload, breaking I6's "the human sees exactly what an agent speaker would" contract. Both human-prompt sites now pass `config.getContextWindow()`; the I6 blindness tests verify the windowing overload. The same resolution applies when #636 and #640 merge to main.
+- **Templates:** `src/main/resources/group-templates/` (index + 5 JSONs, the initial-agents classpath pattern): `research-pod` (DELPHI-style + convergence + retro + windowing + ceiling), `editorial-team` (shared artifact + CAS updates + dissents), `ops-task-force` (BID assignment + agent-filed tasks + recruitment), `decision-board` (HUMAN director deliberates and votes; ties to the chair — **deviation upheld:** `HUMAN_DECIDES` tie-breaking stays save-time rejected; its resume machinery (a pending ballot the human's answer must parse back into the tally) is real work, not the "small follow-up" the I14 note hoped, and shipping a silently-degrading enum value would be a lie), `negotiation-table` (typed bargaining; human-arbiter option documented). Placeholder mechanism is deliberately minimal: member `agentId`s are `$role` markers, substitution is the ONLY templating — what you read is what the store validates.
+- **`GroupTemplateService`**: classpath loading (one bad template logs loudly and skips, never breaks startup), manifest listing, `instantiate(templateId, name, roleAssignments)` failing loudly and completely on missing/unknown roles BEFORE building anything. **REST** `/groupstore/templates` (list/read/instantiate → `RestAgentGroupStore.createGroup`, the normal path — a template earns no validation bypass). **MCP** `list_group_templates` + `create_group_from_template` (whitelisted).
+- Store validators (`validateVotePhases`, `humanMemberProblems`, `validateFacilitator`) widened to public — they are now the cross-package save-time validation surface the template integration test exercises.
+
+**Tests (+13):** every template loads, instantiates with dummy assignments and passes the ENTIRE save-time matrix (HITL + vote + human + facilitator + artifact validators) — the plan's designated integration test of all Wave 1–3 config surfaces; placeholder-free rosters; decision-board's HUMAN member survives; negotiation preset expands; missing/unknown/unknown-template errors name what is wrong; REST instantiation captured through the store path with 400s saving nothing; MCP filter pins green.
+
+
+## 🔎 fix(groups): I12 PR #643 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i12-facilitator`)
+
+All 5 findings (CodeQL ×4 incl. 1 high, code-quality ×1) accepted and fixed:
+
+- **TOCTOU (high):** the briefing's task summary called `taskList.getTasks()` twice — an emptiness check then a re-read, each under its own monitor acquisition. One snapshot, streamed once.
+- **`facilitatorExtensions` encapsulated** (the NegotiationState treatment): the getter returns an unmodifiable view; mutation goes through `recordFacilitatorExtension`/`clearFacilitatorExtensions`/`facilitatorExtensionCount` — the extension caps cannot be edited behind the conversation's back. Engine, service, lifecycle-ops and tests rewired.
+- **Log injection ×3:** the two budget-skip debug logs and the END_PHASE info log sanitize their caller-influenced values (conversation id, groupId, phase name).
+
+Suites: facilitator + service + conversation tests (154) green.
+
+---
+
+## 🎛️ feat(groups): I12 — facilitator with bounded moves (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i12-facilitator` — stacked: I14 branch + merge of I6, because the moves ARE those features)
+
+Eighth queue item. The plan's resolution of "adaptive orchestration" vs deterministic governance: a facilitator agent is briefed at checkpoints and **selects from config-enumerated moves** — validated, capped, audit-logged; every failure degrades to CONTINUE.
+
+- **Integration merge first (big-merge memory applied):** merged `feat/group-i6-human-members` into a branch cut from `feat/group-i14-voting`; 5 conflicted files resolved by keeping both sides (AgentGroupStore create/update now run vote + human + facilitator validation; Slack listener keeps tally block AND human notice; both test blocks; both doc sections; both changelog entries). Verified per the memory: clean compile, 2912 tests green across `engine.internal`+`configs.groups`+`engine.hitl`+`engine.mcp`, hot files (GroupConversationService/PhaseExecutionEngine/AgentGroupConfiguration) spot-checked for both features, enum pins consistent (PhaseType 12, MemberType 3, DiscussionStyle 7 — no NEGOTIATION here, that's I11's branch).
+- **Config:** `FacilitatorConfig {enabled=false, agentId (required when enabled), allowedMoves (default [CONTINUE] — an enabled-but-unconfigured facilitator is a pure observer), checkAfter=EACH_PHASE|EACH_REPEAT, maxMovesPerDiscussion=10 (non-CONTINUE only), escalateTo}`. Save-time matrix (`AgentGroupStore.validateFacilitator`): enabled needs agentId; END_PHASE/EXTEND_PHASE + EACH_PHASE rejected (they act on remaining repeats — a boundary checkpoint has none, the config could only produce noise); ESCALATE_HUMAN needs escalateTo; cap ≤ 100.
+- **`FacilitatorEngine` (new R1-style collaborator):** compact briefing (position, budget arithmetic, roster, per-type entry counts, capped excerpts — bounded-by-construction, asserted in a test with a 50k-char transcript); the consult runs under the judge precedent (own `__facilitator` conversation key, skipped at either budget, counts a turn, cost on the I1 ledger); three-tier parse mirroring VoteTallyEngine; per-move context validation (a convergence exit is never overruled). Executed → peer-hidden FACILITATION entry + `group.facilitator` audit event + `eddi_group_facilitator_moves_total{move,outcome}`; rejected → CONTINUE + WARN + FACILITATION entry recording the attempt (never consumes the budget); null reply/exception → CONTINUE with no entry (nothing was tried).
+- **Moves:** END_PHASE breaks the repeat loop; EXTEND_PHASE rewrites the phase record with repeats+1 (≤2/phase, persisted in `facilitatorExtensions` so a pause can't refill it); CALL_VOTE builds the vote phase to I14's enforced PARALLEL+NONE shape and inserts at `phaseIdx+1`; RECRUIT mirrors RecruitAgentTool's full matrix (already-member incl. config roster, `maxRecruitedAgentsPerDiscussion`, deployed-and-ready, synchronized double-check commit); ESCALATE_HUMAN rides I6's machinery whole — new `commitFacilitatorEscalationPause` bookmarks the RESUME point (next repeat mid-phase / next phase at a boundary) with `speakerIdx=-1` so the shared `+1` advance lands at speaker 0, and the answer records as peer-visible FOLLOW_UP.
+- **Runtime phase divergence (F6 bump 3→4):** the loop iterates a runtime copy; on divergence it persists to `gc.runtimePhases`, and EVERY resume surface (`resumeDiscussion`, `resolveHumanTurn` — which submissions AND timeout skips share) now resolves `effectivePhases(gc, config)` so bookmarks and drift checks compare against the list the pause was taken from. v4 is load-bearing: an older pod resuming a diverged doc would mis-index every bookmark — exactly what the newer-than-current refusal exists for (no migration entry needed; identity default). Divergence is one-off: completion clears it, and `continueDiscussion` clears defensively.
+- **Checkpoint placement, both deliberate:** EACH_REPEAT after the repeat's own bookkeeping (briefing describes a settled repeat) and before the outcome break (context flags carry how it ended); EACH_PHASE AFTER the HITL gate — a gated phase's approval must never be silently skipped because a facilitator escalated first (the reverse — one missed checkpoint — is the harmless direction).
+
+**Tests (+39 engine, +5 store, +4 config pins/defaults, +2 coordinator, +7 service E2E; suites green):** parse tiers; every move happy/disallowed/malformed/invalid-in-context; move cap; extension cap (E2E: repeats=1 + always-extend runs exactly 3 rounds — the cap is what stops the loop); budget gates never call the model; briefing boundedness (<5k chars against a 100k transcript, no full entry content); mutation-check: un-listed move degrades to CONTINUE with zero effect and a rejection record; CALL_VOTE E2E proves the runtime insertion ran (ballots + VOTE DecisionRecord from a config with no vote phase) and completion clears `runtimePhases`; escalation E2E (pause shape on the configured principal) + coordinator submit test proving the drift check passes ONLY because effectivePhases returns the runtime list; facilitator-unavailable and CONTINUE-everywhere leave the discussion untouched. 3 existing coordinator stubs re-pointed `resolvePhases`→`effectivePhases`.
+
+**Files:** `AgentGroupConfiguration` (FacilitatorConfig/FacilitatorMove/FacilitatorCheckpoint), `GroupConversation` (schema v4, runtimePhases, facilitatorMoveCount, facilitatorExtensions), `FacilitatorEngine` (new), `GroupConversationService` (runtime phase list, two checkpoint sites, effectivePhases, completion clear), `GroupHitlCoordinator` (escalation pause, effectivePhases at both resume surfaces), `GroupLifecycleOps` (round-start clear), `AgentGroupStore` (validateFacilitator), `docs/group-conversations.md`, 5 test classes.
+
+---
+
+## 🔎 fix(groups): I14 PR #638 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i14-voting`)
+
+All 14 review comments (CodeQL ×6, code-quality ×1, CodeRabbit ×6, + enum-count CI failure) triaged; every one accepted and fixed:
+
+- **CI failure**: `AgentGroupConfigurationTest.phaseType_allValues` pins the enum size at 11; VOTE is the 12th. Fixed here (and the same pin fixed for RETRO on the I8 branch — the local targeted regressions missed this class; noted for future enum-touching branches).
+- **The moderator tiebreak is now budget-gated** (the one real architecture defect): it is an LLM turn, and it ran unguarded after `maxTurns` was exhausted or the cost ceiling fired — the only extra call in `PhaseExecutionEngine` without the gate `checkConvergence` and `runDissentRound` both carry. `recordVoteDecision` now takes `(turnCounter, maxTurns)`, blocks the tiebreak on either budget (keeping the honest NO_DECISION), and counts the turn it does spend.
+- **Losing-side dissents survive a tie-policy resolution**: the unresolved tally's record necessarily has no dissents, and `moderatorTiebreak` reused it — so the minority report vanished for exactly the closest votes. `TallyOutcome` now carries the parsed ballots; the tiebreak computes `losingDissents(ballots, chosenOption)` against ITS choice.
+- **Weighted-total ties compare with an epsilon** (1e-9), not `==`: totals are sums of non-representable doubles, so 0.1+0.2 vs 0.3 — a genuine tie — silently crowned one side on the last bit.
+- **Ballot weights must be finite**: NaN passes every `<` comparison and poisons the totals; infinity decides every vote alone. Save-time rejection alongside the existing `>= 0`.
+- **Slack tally lines are width-bounded** (`buildPreview`, 120 chars): a LAST_SYNTHESIS option can be a paragraph, and six of those pushed the whole decision message past Slack's limit — `postSafe` then swallowed the loss, winner and all.
+- **CodeQL log injection ×6** in `PhaseExecutionEngine` sanitized (`LogSanitizer` on conversation/phase/outcome/exception values); the flagged useless null check in `moderatorTiebreak` removed (control flow guarantees non-null there).
+
+**Tests:** +6 (floating-point tie; outcome-carries-ballots + dissent-vs-choice; NaN/∞ weight rejection ×2 scenarios; tiebreak blocked at budget spends nothing; tiebreak within budget counts its turn AND carries the loser's dissent — the last one fails against the pre-fix code on both the counter and the dissent assertions). `engine.internal` + `configs.groups` suites: 1711 green; checkstyle clean.
+
+---
+
+## 🗳️ feat(groups): I14 — voting with structural ballot independence (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i14-voting`)
+
+Second Wave 2 queue item. A `VOTE` phase collects explicit ballots; the deliverable is the **auditable process artifact** (weighted tally, raw ballots, losing-side dissents), not epistemics — LLM ballots are correlated and the plan says so out loud.
+
+- **Model:** `PhaseType.VOTE` (the new enum value flushed every exhaustive switch at compile time — `mapPhaseToEntryType` now maps to F4's existing `TranscriptEntryType.VOTE`, so commit-reveal peer-hiding worked before any new code ran); `VoteConfig` (MAJORITY|APPROVAL, EXPLICIT|LAST_SYNTHESIS options, quorum, per-agent weights, `weightByConfidence` — default off with the correlated-self-report caveat in its Javadoc — and `tiePolicy`) as a 12th `DiscussionPhase` component with the usual compat constructor.
+- **Independence is enforced, not advised:** `AgentGroupStore.validateVotePhases` HARD-rejects a VOTE phase that is not PARALLEL + `ContextScope.NONE` (plus: `targetEachPeer`, EXPLICIT with <2 options, negative weights). `HUMAN_DECIDES` is **save-time rejected until I6 ships human members** — the plan sequences I14 before I6, so shipping a silently-degrading enum value would be a lie; the queue's I6 item wires it. Deviation recorded here.
+- **`VoteTallyEngine`:** three-tier ballot parse mirroring `DebateVerdictParser` (strict JSON with `FAIL_ON_TRAILING_TOKENS` → embedded JSON → exactly-one-option text scan; out-of-contract votes are non-ballots, never write-ins), `Option A:` line extraction from the newest synthesis, weighted tally, quorum with abstentions/garbage counting against the denominator, dissents from losing statements.
+- **Wiring:** the discussion loop tallies on the VOTE phase's last repeat; `PhaseExecutionEngine.recordVoteDecision` applies the tie policy — `MODERATOR_DECIDES` runs one moderator turn under `__vote_tiebreak` (the judge's separate-conversation-key rule: a "reply with ONLY the option" prompt must not become the moderator's recent history), resolved by the same exact-scan rule as a ballot.
+- **`decision_reached` finally fires (the §4 gap, folded in as planned):** `fireDecisionReached` runs for vote decisions AND for I3 debate verdicts — after the dissent round, so the event's record carries the merged dissents. Slack renders a bounded tally block for VOTE records (instanceof-guarded — the tally map crossed serialization).
+
+**Tests (121 across the touched classes green; full `engine.internal` suite green; checkstyle clean):** parse tiers incl. ambiguous-two-options and out-of-contract refusals; label voting ("Option B" → positional); LAST_SYNTHESIS extraction (newest synthesis, colon and dash forms); weighted majority; exact tie → unresolved (never a winner by list position); confidence weighting on/off flips a tie; quorum arithmetic pinned to the "2 of 5" message; dissents + raw-ballot audit; tiebreak choice resolution; save-time validation matrix (PARALLEL/NONE/options/weights/HUMAN_DECIDES); service-level E2E: majority vote records the decision and fires `decision_reached` with the winner; tie + MODERATOR_DECIDES resolves via one tiebreak turn with method `vote+moderator-tiebreak`; tie + NO_DECISION records an honest NONE and the discussion does not fail; ballots land as VOTE entries. Slack tally block + malformed-tally no-throw.
+
+**Files:** `AgentGroupConfiguration` (VOTE + VoteConfig/VoteMethod/OptionsSource/TiePolicy), `AgentGroupStore`, `DiscussionStylePresets` (TEMPLATE_VOTE), `GroupContextBuilder` (VOTE branch + entry-type mapping), `VoteTallyEngine` (new), `PhaseExecutionEngine` (recordVoteDecision + fireDecisionReached), `GroupConversationService` (loop wiring), `SlackGroupDiscussionListener` (tally block), `docs/group-conversations.md`, 4 test classes.
+
+---
+
+## 🔎 fix(groups): I6 PR #640 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i6-human-members`)
+
+CI failure + all 20 review comments (CodeQL ×5, code-quality ×4, CodeRabbit ×11) triaged; every one accepted and fixed:
+
+- **CI**: `submit_group_human_input` added to `McpToolFilter`'s whitelist (a non-whitelisted MCP tool is unreachable dead code — the guard test caught exactly that).
+- **The pending member can now READ their turn**: new `HitlAccessGuard.requireGroupConversationReadAccess` — owner/admin/approver PLUS the human member a pending turn waits on — used by the REST and MCP approval-status endpoints (whose summary now carries `pendingMemberId`/`pendingHumanPrompt` on both surfaces). The full-transcript view stays role-gated: the member's working material is the rendered prompt, never the transcript.
+- **Mid-phase resume no longer replays earlier repeats**: the phase loop starts at the bookmark's `repeatIdx` (clamped) — each replayed repeat was a full round of duplicate turns and spend.
+- **Metric/audit/resume-event moved AFTER the successful executor submit** in the human-turn resolution (a rolled-back attempt must not pollute the resume metric or the EU-AI-Act trail — the rule `resumeDiscussion` already followed); the rollback path now re-checks the control token (`removeTokenAndConvertIfSignalled`) so a cancel racing the rollback is not dropped; and the method returns a **freshly-read copy** instead of the live instance the background leg mutates under the serializer.
+- **Slack listener releases its completion latch on a human pause** (it blocked `awaitCompletion`'s full 300s on every human turn); **deletion of an `AWAITING_HUMAN_INPUT` conversation runs the paused-cleanup branch** (timeout schedule + ephemeral agents + signing cursor); **the signing cursor now survives a human pause** in `executeDiscussion`'s finally; **crash-recovery sweeps are isolated** (a failing approval query no longer skips the human re-arm).
+- **Inbox starvation fixed**: both pause states are queried with the full limit, merged oldest-pause-first, then capped — approvals can no longer push a member's own turn out of the window.
+- **Validation**: `turnTimeout` must be positive (PT0S/PT-4H parsed but armed an immediately-firing timeout that silently skipped every turn); `"members": null` cannot NPE the nested/moderator checks.
+- **F2 drift guard explicitly scoped to approval bookmarks** (human bookmarks never reach `resumeDiscussion` — disjoint states — and their advanced `speakerIdx+1` semantics would false-positive at the last-speaker boundary; the executors clamp instead).
+- CodeQL ×5 sanitized; the `HumanTurnRequired` `@param` docs moved from class to constructor Javadoc (×4).
+
+**Tests:** +7 (read-access matrix incl. stranger-refused + wrong-group-404; full-view refusal for the pending member; PT0S/PT-4H rejection; null-members no-NPE; MCP guard/gate re-alignment ×2). Suites: 2882 green across `engine.internal` + `configs.groups` + `engine.hitl` + `engine.mcp`; checkstyle clean.
+
+---
+
+## 🙋 feat(groups): I6 — humans as group members (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i6-human-members`)
+
+Fourth Wave 2 queue item. Humans can finally *speak*, not just gate: a `MemberType.HUMAN` member's turn pauses the discussion in a **new state `AWAITING_HUMAN_INPUT`** until they submit — deliberately not `AWAITING_APPROVAL` (approval endpoints must never accept free text; inboxes must tell "approve/reject" from "you're up").
+
+- **Turn flow, exactly per the plan:** the phase loops intercept HUMAN speakers before any LLM machinery, render their input *exactly like an agent's* (`buildPhaseInput`), and surface a `HumanTurnRequired` control-flow signal; `executeDiscussion` catches it, and `GroupHitlCoordinator.commitHumanTurnPause` persists `PendingHumanInput{memberId, displayName, phaseIdx, repeatIdx, speakerIdx, entryType, renderedPrompt, onTimeout, requestedAt}` + the F2 `ResumePoint` — writer-less until now, this is its first producer. The human's turn is counted at the pause (`pausedTurnCount = turns+1`), so it is never free.
+- **Submission:** `POST /groups/{groupId}/conversations/{id}/human-input` + MCP `submit_group_human_input`. Authorization is a NEW guard (`requireGroupHumanInputAccess`): the pending member's own principal or admin — deliberately narrower than approve (an `eddi-approver` may decide approvals; speaking as another human is impersonation). The answer lands as the phase's natural entry type (captured at pause time so config edits can't re-type it), the bookmark advances past the answered speaker, the CAS out of `AWAITING_HUMAN_INPUT` makes double-submits a 409, and the discussion re-enters like an approval resume. Drift-checks run BEFORE any mutation — a stale bookmark refuses the submission instead of needing rollback; the one post-CAS failure (executor saturation) rolls the append back and restores the pause.
+- **Timeouts:** `humanMemberConfig {turnTimeout (ISO-8601, null=wait), onTimeout=SKIP_TURN|ABORT}`, riding the HITL schedule machinery with a new surface `group-human` — the SKIP_TURN/ABORT policies are NOT `HitlTimeoutPolicy` values, so the fire handler branches on surface before parsing. SKIP_TURN writes the plan's SKIPPED entry ("no response from <name> within <d>") and resumes; ABORT cancels gracefully. Crash recovery re-arms human-turn timeouts (policy bookmarked on the pending record).
+- **PARALLEL phases:** humans never join the fan-out; agents run first, humans are then prompted sequentially against the **pre-fan-out snapshot** (blindness preserved). The one carve-out from "PARALLEL never honors a bookmark": a `HUMAN_TURN_PARALLEL` resume skips the fan-out entirely and resumes the human tail — no duplicate agent turns on resume.
+- **Save-time matrix** (`AgentGroupStore.validateHumanMembers`, hard-throws — safe because no legacy doc can contain the new enum value): displayName required; no humans in task-force (PLAN/EXECUTE/VERIFY) or `targetEachPeer` groups (preset-EXPANDED, or the check is inert); nested groups containing humans rejected one level deep (runtime backstop in `MemberTurnExecutor` cancels a stranded `AWAITING_HUMAN_INPUT` child); `turnTimeout` must parse. Human moderator allowed + warned — and `resolveParticipants` now preserves the roster's member for the moderator id (the 4-arg ctor silently DEMOTED a human moderator to an agent).
+- **Surfaces:** `human_input_requested` event (constant + record + listener default + SSE forward incl. OpenAPI list + Slack "you're up" notice, mrkdwn-escaped); pending human turns join the existing inbox as `pauseType: "HUMAN_TURN"` + `pendingMemberId` (no third inbox) and the member sees their own turns without owning the conversation; `availableActions` gains `submitHumanInput`; MCP `get_group_approval_status` reports the pending member and their rendered prompt; cancel paths (`cancelDiscussion`, pause→cancel conversion, `removeTokenAndConvertIfSignalled`) all treat the new state as a first-class pause.
+- **Defense in depth:** a HUMAN member reaching `executeAgentTurn` (convergence judge, dissent round, task-force wave, nested group — contexts that cannot pause) yields a SKIPPED entry, mirroring the member-HITL SKIP precedent.
+- **Deviation, recorded:** the I14 `HUMAN_DECIDES` tie-policy wiring stays save-time-rejected — I14 (PR #638) is not merged; wiring it is a small follow-up once both branches land (I12 needs both anyway).
+
+**Tests (+23 across 8 classes; `engine.internal` + `configs.groups` + `engine.hitl` suites 1869 green; checkstyle clean):** sequential pause with rendered prompt + absolute index + budget-before-human ordering; parallel fan-out-then-human with pre-fan-out blindness (captor on the prompt transcript), resume-tail without fan-out re-run, and post-resume blindness; commitHumanTurnPause bookmark/pending/schedule shape (surface + policy asserted); submit→record→advance→CAS→re-enter (captured runnable proves the re-entry coords); wrong member / wrong state / blank / oversize / config drift all refuse BEFORE mutation; SKIP_TURN timeout writes the named SKIPPED entry and advances; cancel-of-human-pause clears the pending turn; timeout-handler routing (SKIP_TURN/ABORT/unknown-degrades); guard matrix (member ok, admin ok, owner+approver FORBIDDEN, wrong-group 404, auth-off no-op, inbox shows the member their turn); save-time matrix; human-moderator preservation; defense-in-depth skip; 4 enum pins updated (the I14/I8 CI lesson — caught locally this time).
+## 🔎 fix(groups): I11 PR #641 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i11-negotiation`)
+
+All 12 review comments (CodeQL ×4, code-quality ×3, CodeRabbit ×5) triaged; every one accepted and fixed:
+
+- **Stale signatures could reach "unanimity" (the real defect):** `applyMove` never withdrew an agent's earlier signature when they moved. Now: putting new terms on the table (`addProposal`, both the PROPOSAL path and a BARGAIN counter) **withdraws the mover's signatures from every other open proposal** — and, symmetrically, signing someone else's terms **supersedes the signer's own open offer**. A turn carrying BOTH `accept` and `proposal` resolves deterministically for the proposal (the accept is ignored with a WARN — new terms mean the mover is not settling). Mutation-checked: without the withdrawal, the new test's agreement check would pass on a signature its signatory abandoned.
+- **Schema v4 (CodeRabbit Major, accepted):** `negotiationState` is resume-critical — an older deployment re-saving a paused v4 document would drop the table and the agreement check would run empty. `CURRENT_SCHEMA_VERSION` 3→4, identity hop (v3 docs have no negotiation state). Note: the I12 branch bumps to 4 for `runtimePhases` with the same reasoning — on merge the two v4s coalesce into one release-shape v4, which is correct: both features ship together and any pre-release pod must refuse both.
+- **`NegotiationState` encapsulated** (code-quality ×2): getters return unmodifiable views; mutation goes through `addProposal`/`replaceProposal`/`addConcession` — the table cannot be edited behind the state's back.
+- **Unused `phase` parameter dropped** from `applyRepeat` (call sites updated); **moderator filter null-safe** (`filter(Objects::nonNull)` before the id comparison); **CodeQL ×4** log-injection sites sanitized (`LogSanitizer` in `NegotiationEngine` ×3 + the service's skipIf log).
+
+**Tests:** +3 (counter-proposal withdraws the stale signature AND blocks the stale agreement; accept+proposal in one turn → proposal wins; GROUP member's signature not required for unanimity) and 2 extended (superseded-proposal acceptance is inert — the case the DisplayName claimed; the scripted bargain now asserts p2 is SUPERSEDED once its owner signs p3). `NegotiationEngineTest` 15 green; group suites green.
+
+---
+
+## 🤝 feat(groups): I11 — NEGOTIATION style, the trade form (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i11-negotiation`)
+
+First Wave 3 queue item. EDDI had win/lose decision forms and no **trade** form; a negotiation's output is a drafted compromise with an explicit **concession ledger** for human sign-off. The typed structure IS the anti-sycophancy mechanism.
+
+- **Phase types `PROPOSAL` + `BARGAIN`; `skipIf="AGREEMENT_REACHED"`** — a single enum condition, deliberately NOT an expression language (a phase is skipped for a reason the engine can PROVE against the typed decision). The arbitration phase is its only user.
+- **`NegotiationState` on `GroupConversation`**: proposals `{id, byAgentId, round, terms (String v1), status OPEN|SUPERSEDED, acceptedBy, acceptanceEntryIndices}` + concessions `{byAgentId, round, gaveUp, inReturnFor, refProposalId}`. Persisted with the document — a pause/resume keeps the table as it stood.
+- **The BARGAIN turn contract** (`{"accept", "proposal": {"terms"}, "concessions": [{"gaveUp","inReturnFor"}]}` + free-text reasoning): three-tier parse mirroring `VoteTallyEngine` (strict → embedded → give up, FAIL_ON_TRAILING_TOKENS); an unparseable turn is prose with NO state effect (WARN, never a guessed acceptance). A concession that names nothing in return is NOT recorded — the rule is the structure, and the baked-in template says so. A new proposal supersedes the mover's own open one; the proposer signs their own terms implicitly.
+- **Ledger accountability:** the open proposals + concession ledger are appended to every PROPOSAL/BARGAIN turn (and to negotiation SYNTHESIS turns — arbitration and final synthesis quote the record). Appended by `NegotiationEngine.appendStateIfRelevant` at the two input-build sites rather than templated, because the state lives on the conversation, which `buildPhaseInput` deliberately does not see.
+- **Agreement**: all non-moderator participants signed the same OPEN proposal → the bargaining phase's repeats end early through the SAME `PhaseOutcome.endRepeats` plumbing convergence uses, and `DecisionRecord{AGREEMENT, method="negotiation"}` carries `tally.signedAcceptances` — each signatory mapped to the transcript index of their (already signed) acceptance entry. The entries ARE the co-signatures; no new crypto. `decision_reached` fires (its F3 event finally has a second producer).
+- **Preset `NEGOTIATION`** (① Positions & Interests, PARALLEL+NONE — interests enable integrative trades ② Opening Proposals ③ Bargaining, repeats=maxRounds ④ Arbitration, MODERATOR + `skipIf` + its own TEMPLATE_ARBITRATION — the default synthesis template asks for a balanced summary, an arbitrator DECIDES ⑤ Synthesis). Arbitration that RUNS records its conclusion as `DecisionRecord{VERDICT, method="arbitration"}` (never overwriting an existing decision).
+- Enum additions are compat-safe; `describe_discussion_styles` (REST) gained the entry via an exhaustive switch the compiler flagged.
+
+**Tests (12 new in `NegotiationEngineTest` + preset shape + 2 enum pins; `engine.internal` + `configs.groups` suites 1694 green; checkstyle clean):** parse tiers incl. the JSON-plus-reasoning form; concession-must-name-return; implicit self-signature with the authoring entry index; supersession; unknown/superseded acceptance + unparseable turn inertness; ledger accumulation with round + refProposal attribution; unanimous acceptance with signed indices asserted exactly; partial acceptance ≠ agreement; arbitration records once and never overwrites; ledger rendering into the turn (and its no-op paths); and the plan's **scripted 3-round bargain converging in round 3** — propose → counter+concede → sign — as living documentation of the protocol.
+## 🔎 fix(groups): I18 PR #642 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i18-bidding`)
+
+All 6 CodeQL log-injection findings in `TaskForceEngine`'s bid round accepted and fixed: `LogSanitizer` applied to every caller-influenced value in the bid-round logs (groupId, task subject, bidder/winner agentId, exception messages) — 7 sites sanitized, the 6 flagged plus the bid-turn-failure log the scan will otherwise flag next round. Bid suites (51) green.
+
+---
+
+## 🏷️ feat(groups): I18 — bid-based task assignment, CNP-lite (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i18-bidding`)
+
+Second Wave 3 queue item (adopted from the research review, scoped down — the turn-auction extension stays REJECTED: an extra call per member per turn to decide who talks doubles cost to save cost). The planner cannot know members' actual fit or load; the Contract Net Protocol's announce-bid-award loop maps onto the existing wave scheduler.
+
+- **`assignmentMode = ROLE (default) | BID`** on `TaskDefinition` (per task) and `GroupTaskConfig` (group default), both with compat constructors — every pre-I18 config resolves to ROLE through `TaskBidEngine.effectiveMode`'s task → group → ROLE chain.
+- **PLAN leaves BID-mode tasks unassigned** (both the pre-configured and LLM-planned paths) — assigning there would preempt the auction with the planner's guess.
+- **The wave's bid round** (`TaskForceEngine.runBidRoundIfNeeded`, before each wave's grouping so awards join the same wave): eligible members (non-moderator AGENTs) each get one **blind, parallel** bid turn — the prompt carries the announced batch and NOTHING else (no transcript, no peer bids; blindness is what makes the self-assessed confidences comparable, and the honesty rule is stated to the model: an inflated confidence wins you work you will fail at, on the record). Replies land as `BID` transcript entries — F4's blind-bid visibility (peer-hidden while the phase runs) has its first producer.
+- **Deterministic award, never a stalled wave**: highest confidence per task; ties break by speaking order then agent id (identical on every pod); a task nobody bid on falls back to ROLE/round-robin; the auction skips itself with a LOG (a silent cap reads as coverage) when <2 bidders, <2 unassigned tasks, or the turn budget cannot cover one bid turn per member. Bid turns count toward the turn budget and their cost flows through the normal member-turn attribution.
+- **The award is per-task metadata** (`SharedTaskList.awardedBids[taskId] = AwardedBid{agentId, confidence, estimatedComplexity, rationale}`), deliberately NOT a global DecisionRecord — an award is a scheduling fact about one task, not the discussion's conclusion.
+- Parse discipline mirrors `VoteTallyEngine`: three tiers, FAIL_ON_TRAILING_TOKENS, unknown subjects dropped (an out-of-contract bid is never guessed onto a task), confidence clamped to [0,1], first-bid-per-task within one reply.
+
+**Tests (13 new: 8 `TaskBidEngineTest` + 5 `TaskForceEngineTest`; `engine.internal` + `configs.groups` suites 1694 green; checkstyle clean):** parse tiers + clamping + unknown-subject drop; award to highest confidence; tie-break determinism (speaking order, then agent id); no-bids absence; effective-mode chain; worthwhile-auction caps; blind prompt content; engine-level award with recorded bid + turn accounting + BID entries; **blindness asserted on the captured prompts** (no peer rationale/confidence leaks); no-bids ROLE fallback never stalls; skip-conditions make zero LLM calls; ROLE-mode tasks never auctioned.
+## 🔎 fix(groups): I13 PR #644 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams`)
+
+All 3 findings (CodeQL ×2, code-quality ×1) accepted and fixed: the workspace-deletion and cadence-deletion logs sanitize their caller-influenced values; `GroupWorkspace.getCadences` returns an unmodifiable view with mutation through new `addCadence`/`removeCadence` (the NegotiationState treatment) — REST layer and tests rewired. Suites (73) green.
+
+---
+
+## 🏭 feat(groups): I13 — standing teams (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i13-standing-teams` — stacked on the I8 branch: retro lessons flow through I8 unchanged)
+
+Ninth queue item, the Wave 3 flagship. A group conversation is an episode; the **`GroupWorkspace`** is what persists — backlog, cadences, metrics. Deliberately thin glue over existing machinery: the backlog IS a `SharedTaskList`, scheduling IS `SchedulePollerService`, the run ceiling IS I1's inherited-ceiling slot.
+
+- **Model + store:** `GroupWorkspace` (own collection, one doc per group id): `backlog` (SharedTaskList reused whole so pulled tasks flow straight into the task-force machinery), `metrics {discussions, tasksVerified, totalCost, lastRunAt, perMemberStats}` (per-member stats are reliability RECORDING only — the research-adopted substrate; no routing/weighting in v1), `cadences [{cadenceId, scheduleRef, inputTemplate (Qute), maxBacklogTasksPerRun=5, maxCostPerRun, createdBy}]`, `runningDiscussionId` + `pulledTaskIds`. `IGroupWorkspaceStore`/`GroupWorkspaceStore` follow the GroupConversationStore single-version pattern; `casRunningDiscussion` is a conditional store write (`storeIfFieldEquals`) — cluster-safe, no in-JVM locks, idle sentinel `""` because the CAS compares a concrete stored value.
+- **`TeamCadenceService`** (the DreamService pattern, exactly): metadata contract `teamCadenceType="team_cadence"` + a dedicated `ScheduleFireExecutor.fireTeamCadence` branch, so cluster claim/lease/retry/dead-letter/fire-logs come free. The fire protocol is crash-proof by construction: **reconcile** (a finished previous run is written back FIRST; one still running — possibly paused at an HITL gate for days — skips the fire) → **pull** (top-N executable by priority; empty pull skips, logged) → **claim** (CAS; a lost race cancels the just-started discussion and stands down) → **run**. Deliberate skips are COMPLETED fires with the reason logged; real failures are FAILED so they retry and dead-letter.
+- **Task injection without config writes:** new `GroupConversationService.startCadenceDiscussionAsync` — the pulled tasks replace `config.tasks` on the call's own fresh read (a runtime copy; the stored config is never written) and `maxCostPerRun` rides `inheritedCostCeiling`, so `effectiveCostCeiling` takes the tighter of it and the group's own ceiling (dollar-primary, the Dream precedent). The discussion runs under the cadence **creator's** identity (`createdBy`), not a synthetic scheduler user.
+- **Writeback** at the next fire or on workspace read (read-repair in the REST layer) — never from the discussion thread, so a crash loses nothing: VERIFIED stays VERIFIED on the backlog + credits the assignee's stats; anything else returns to PENDING with the reviewer feedback appended to the description (the cross-run retry loop); FAILED/CANCELLED returns every pulled task untouched; a vanished discussion releases the claim instead of stalling every future fire.
+- **Surfaces:** REST `/groupstore/groups/{groupId}/workspace` (GET workspace/backlog with read-repair; POST backlog — cap 200 with an actionable 409; POST/DELETE cadences — the cron is validated at creation by computing the first fire, and the schedule carries the dispatch metadata); MCP `add_team_task` + `list_team_backlog` (whitelisted; filter pins green). **Teardown:** a permanent group deletion cascades to the workspace; a soft delete keeps it (the group can come back).
+
+**Tests (+14 TeamCadenceServiceTest, +9 RestGroupWorkspaceTest, +2 fire-executor dispatch, +4 MCP, +2 cascade):** fire pulls top-priority tasks and the captured `startCadenceDiscussionAsync` call carries them, the creator identity and the dollar ceiling; every skip (empty backlog, still-running, lost claim → cancel); reconcile-then-run; writeback matrix (VERIFIED credited / failed-with-feedback returns as the retry loop / FAILED returns untouched / vanished releases) — the feedback-appended and VERIFIED assertions are the mutation-check; backlog cap actionable on both surfaces; cadence schedule metadata + invalid-cron-fails-at-creation; permanent-delete cascade vs soft-delete keep.
+
+---
+
+## 🔎 fix(groups): I8 PR #639 CI round 1 + plan-mandated test extension (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i8-retro-memory`)
+
+Follow-ups on the open PR (commits `8025962c6`, `c2b4b7a79`, `3de3de69e`):
+
+- **CI failures**: `AgentGroupConfigurationTest.phaseType_allValues` pins the enum size (RETRO is this branch's 12th value — same pin fixed for VOTE on the I14 branch), and `PostgresUserMemoryStoreUnitTest.getVisibleEntries_withGroupIds_includesGroupClause` pinned the pre-I8 bind order — now asserts all nine parameters incl. the derived `group:` owners. The third failing check (ClusterFuzzLite) was a transient gcr.io 403 pulling the fuzz image — it passed on the sibling PRs minutes later.
+- **CodeQL**: the four flagged RetroEngine log sinks sanitized (conversation id, phase name, team owner, exception message).
+- **Plan-mandated tests** the first commit missed (`UserMemoryToolScopingTest` extension, named explicitly in the I8 plan item): eviction can never delete a team-owned lesson even with the store wall deliberately breached (the fixed `"retro"` sourceAgentId is a second independent wall), and personal `visibility:self` entries never cross users through a shared group.
+
+---
+
+## 🧠 feat(groups): I8 — retro phases harvest team-owned group memory (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i8-retro-memory`)
+
+Third Wave 2 queue item, and the substrate I13 (Standing Teams) builds on. Discussions stop evaporating: a `RETRO` phase's lessons persist and surface as `{properties.*}` in every member's later discussions.
+
+- **`PhaseType.RETRO`** + built-in template (full-transcript review, JSON lessons contract) + `RetroConfig {maxLessonsPerRun=3, maxStoredLessons=50}`. The template *quotes* the default per-run cap; `RetroEngine` *enforces* the configured one at parse time regardless — the context builder deliberately does not receive the group config.
+- **Storage exactly as the plan resolved (V2):** `IUserMemoryStore.upsert` under the synthetic team owner `"group:"+groupId` with `group` visibility. New `TEAM_OWNER_PREFIX` contract constant; lessons belong to the team, not the human who ran the discussion, and survive that human's GDPR erasure without carrying their identity.
+- **The additive synthetic-team-owner recall branch, on BOTH backends:** Mongo's `buildVisibilityFilter` and Postgres's `buildVisibilityQuery` (+ its bind order) now OR in a narrow team scope — owner ids DERIVED from the supplied group ids (never caller-supplied), `group` visibility, group-id overlap. The user's own scope is untouched, per the plan's "do not widen the existing user-scoped group branch". Both made package-private static so the filter/SQL shapes are directly assertable — and both are pinned side by side so the backends cannot drift.
+- **Idempotency + bounded growth:** key `retro:<sha256(lesson)[0..16]>` with a FIXED `sourceAgentId` ("retro") — the upsert identity for group entries is `(userId, key, sourceAgentId)`, so a real speaker id would have made the same lesson from two speakers two rows. FIFO eviction past `maxStoredLessons` via the newest-first recall (everything past the cap is the oldest); `RetroEngine` is the ONLY reaper — `UserMemoryTool`'s eviction only ever touches the calling agent's `self` entries.
+- **Wiring:** discussion-loop harvest on the RETRO phase's last repeat, before the persist (a crash must not lose lessons a stored document claims were taken); `IUserMemoryStore` reaches the facade by the established null-safe field-injection pattern. New `retro_recorded` event (constant + record + listener default + SSE forward) — fires even at zero lessons stored, which is itself signal.
+
+**Tests (11 new, all green; `engine.internal` + `configs.properties` suites 1572 green; checkstyle clean):** parse tiers (strict/fenced/prose-refused); per-run cap enforced past what the model was told; idempotent team-owned upsert against a REAL in-memory store with the production upsert identity (a mocked idempotency claim would prove nothing); FIFO evicts the oldest and never the newest; `retro_recorded` carries the stored count; null store and failing store never fail the discussion; Mongo filter shape (no-groups → user scope only; with-groups → derived `group:` owners paired with group visibility; no foreign human id reachable); Postgres SQL shape incl. the `??|` escape arithmetic pinning the bind order.
+
+**Files:** `AgentGroupConfiguration` (RETRO + RetroConfig), `DiscussionStylePresets` (TEMPLATE_RETRO), `GroupContextBuilder` (RETRO branch + entry mapping), `RetroEngine` (new), `GroupConversationService` (wiring + store injection), `IUserMemoryStore` (TEAM_OWNER_PREFIX + contract Javadoc), `MongoUserMemoryStore`, `PostgresUserMemoryStore`, `GroupConversationEventSink`/listener/SSE, `docs/group-conversations.md`, 3 test classes.
+## 🔎 fix(groups): I17 PR #637 review round 2 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i17-shared-artifacts`)
+
+Two comments triaged:
+
+- **Announce mutex no longer held across listener callbacks (CodeRabbit Major, accepted):** `announceArtifactChanges` held `artifactAnnounceMutex` through `onArtifactUpdated`, so one slow/backpressured SSE client blocked every other turn's end-of-turn drain. Now the mutex guards only the HANDOFF: exactly one thread at a time is the publisher — it drains under the mutex, releases it, fires the callbacks, and loops for late arrivals; every other thread sees the publisher flag and leaves, its changes guaranteed to ride the publisher's next pass. Write order preserved (single announcer, FIFO queue), no caller ever blocks on a listener. New test drives a write + reentrant announce from INSIDE a callback: published exactly once, in order, nothing stranded, no deadlock.
+- **CodeQL log-injection (stale):** raised against the initial commit 6aeba1393; the flagged attach-artifacts log was sanitized in round 1 (74c0acaf7). Reply-only.
+
+`MemberTurnExecutorTest` (14) + artifact suites green.
+
+---
+
+## 🔎 fix(groups): I17 PR #637 review round 1 (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i17-shared-artifacts`)
+
+All 11 review comments (CodeRabbit ×9, Copilot/CodeQL ×2) triaged; every one accepted and fixed:
+
+- **Meta-schema validation at save time** (`ArtifactValidators.schemaSpecProblem`): `getSchema(spec)` only parses — `{"type":"strng"}` passed and misbehaved at write time. Specs now also validate *as instances* against the bundled 2020-12 meta-schema (no network I/O; degrades to parse-only with a WARN if the bundled resource can't load, rather than rejecting every config).
+- **ReDoS bound on REGEX validators**: config-authored pattern × 256 KB LLM content could backtrack catastrophically and pin the member turn. `checkRegex` now matches through a deadline-guarded `CharSequence` (500 ms, sampled every 1024 char accesses) and refuses the write on expiry — fails closed, like every other broken-spec path.
+- **`[null]` validator entries**: `List.copyOf` NPE'd during config deserialization, preempting `requireValidSpecs`' positional message; now an unmodifiable null-tolerant copy.
+- **Artifact event ordering + late writes**: drain+announce now holds a per-conversation mutex (two PARALLEL turns ending together could split the queue and publish v2 before v1), and `executeDiscussion`'s `finally` runs one **final announce pass per leg** so a write accepted by a timed-out member's still-running agent is announced instead of stranded. A write after even that pass keeps the artifact — only its live event is best-effort, by design.
+- **`listByGroupConversationId` order**: both backends sort DESC; the interface promises oldest-first. Now re-sorted in Java per the contract.
+- **`deleteByGroupConversationId`**: same processed-set/no-progress guard as `deleteAllForUser` — an undislodgeable row is counted once and ends the loop instead of spinning `MAX_ERASURE_PASSES` times and inflating the count.
+- **Slack mrkdwn injection**: artifact name/editor id are LLM-authored; `<!channel>` in a name rendered as a real broadcast. Both fields now `&`/`<`/`>`-escaped.
+- **Oversize refusal rounds up** (`Math.ceilDiv`): MAX+1 bytes no longer reads "256 KB is over the 256 KB limit".
+- **GDPR cascade Javadoc** now names the shared-artifact step; **CodeQL log injection** at `populateArtifacts` sanitized.
+
+**Tests:** +7 (meta-schema reject, null-entry positional message, catastrophic-regex deadline, late-write announce pass, single-pass write order, oldest-first sort, no-spin cascade delete). Touched suites 1961 tests — green except the 27 known environmental socket-bound errors (SafeHttpClient/SlackWebApi/Weather/WebScraper), which fail identically on an untouched tree.
+
+---
+
+## 📄 feat(groups): I17 — shared artifacts (blackboard-lite) (2026-08-08)
+
+**Repo:** EDDI (`feat/group-i17-shared-artifacts`)
+
+First Wave 2 queue item from `planning/group-collaboration-NEXT.md` §3. Agents can now **co-edit typed documents** instead of only talking: four member tools — `createArtifact`, `readArtifact`, `proposeArtifactUpdate`, `listArtifacts` — gated by a new `artifactConfig` on the group config.
+
+**Design decisions, per the plan (and the plan's own rejections honored):**
+
+- **Own collection, never embedded.** `SharedArtifact` + `ISharedArtifactStore`/`SharedArtifactStore` follow `GroupConversationStore`'s single-version runtime-document pattern. The discussion loop's whole-document stale-snapshot persists cannot clobber artifact writes, which is also why — unlike I5's task tools — the artifact tools write **through the store directly**. The live registry is still consulted: membership at assembly (`getForMember`, the caller-supplied-id IDOR guard), liveness at write time, and accepted writes ride a new transient change queue on the live `GroupConversation`.
+- **Deterministic CAS-and-retry, explicitly not an LLM fusion arbiter.** The version CAS needed a storage primitive that doesn't exist for numbers: `storeIfFieldEquals(String)` text-compares, which "works" on Postgres (`data->>` renders JSON numbers as text) and **silently never matches on Mongo** (typed BSON equality). New `storeIfFieldEquals(…, long)` overload on `IResourceStorage` + both backends, same no-silent-degrade contract (the default throws). Stale writers get the plan's sentence: *"artifact changed since you read it (now vN); re-read and merge your change."*
+- **Declarative validators only.** `JSON_SCHEMA` (new dependency `com.networknt:json-schema-validator` — the victools libraries only *generate* schemas), `REGEX`, `MAX_LENGTH`. Specs hard-fail the config save (`ArtifactValidators.requireValidSpecs` from `AgentGroupStore`, `HitlConfigValidation`'s contract); write-time failures are rejection sentences and the gate fails closed on a broken spec. Content ≤ 256 KB.
+- **Events without a listener reference:** tools can't fire SSE/Slack events (`ToolAssemblyContext` carries no listener — the structural gap that left I5's planned `task_added_by_agent` unfired). Accepted writes queue an `ArtifactChange` on the live instance; `MemberTurnExecutor` drains the queue in a `finally` after every turn and fires the new `artifact_updated` event (sink constant + record + SSE forward + Slack line + OpenAPI description lists). Drained even with a null listener so the queue cannot grow unbounded.
+- **Lifecycle:** artifacts are attached to the discussion status payload at read time in the service (so REST *and* MCP `read_group_conversation` carry them — `availableActions` idiom, `READ_ONLY`, never trusted back from storage); close/delete cascade removes them (`GroupLifecycleOps`, warn-and-continue so a broken artifact store can't make discussions undeletable); GDPR erasure sweeps them **user-keyed** via a stamped `ownerUserId` (page/exact-recheck/fail-loud contract copied from the group store) as a new `GdprComplianceService` cascade step.
+- **Caps:** `maxArtifactsPerDiscussion` (default 5) counted inside a `synchronized (liveInstance)` block — creation is check-then-act and PARALLEL phases genuinely race; updates need no lock, the CAS decides.
+
+**Tests (148 across 8 classes, all green):** tools against a real in-memory CAS store (stale-version retry sentence with the CURRENT version, concurrent same-version writers → exactly one winner, FINAL freeze, foreign-discussion ids don't resolve, validator chain, refusals leave no side effect); provider gate matrix (every uncertainty → contribute nothing, membership not existence, `enableBuiltInTools` still applies); store CAS through the numeric overload with `verify(never()).store(…)`; anchored+escaped filters with Java exact-recheck; erasure paging/fail-loud; lifecycle cascade ordering (`inOrder` artifact-delete before document-delete) + cascade-failure-still-deletes; GDPR step + not-resolvable skip + failure-continues; turn-executor drain (exactly once, null-listener drain); Slack lines incl. degenerate-payload skip. **Mutation notes:** degrading the store CAS to an unconditional store does not even compile (the gone-document catch becomes unreachable) — the CAS call is structurally load-bearing; the Mockito-verified negatives (`never().store`, `specs().isEmpty()`) pin the rest.
+
+**Files:** `SharedArtifact`, `ISharedArtifactStore`, `SharedArtifactStore`, `ArtifactValidators`, `ArtifactTools`, `ArtifactToolsProvider` (+ `AgentOrchestrator` phase-1 wiring), `AgentGroupConfiguration` (`ArtifactConfig`/`ArtifactValidator`/`ValidatorKind`), `GroupConversation` (change queue + read-time `artifacts`), `IResourceStorage` + Mongo/Postgres (numeric CAS), `GroupConversationEventSink`/listener/SSE/Slack, `GroupLifecycleOps`, `GroupConversationService`, `GdprComplianceService`, `AgentGroupStore`, `pom.xml`, `docs/group-conversations.md`, 8 test classes.
+## 🔍 fix(review): PR #636 review findings — NaN cost guard, ceiling-gated summarizer, visible-entry boundary (2026-08-08)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`, PR [#636](https://github.com/labsai/EDDI/pull/636))
+
+Every reviewer finding on #636 triaged; the real ones fixed, each with a pinning test:
+
+- **NaN poisons the cost ledger (CodeRabbit, real).** Both `GroupCostLedger.recordSystemCost` and `LlmTask.accumulateCost` guarded with `delta <= 0.0` — NaN fails *every* comparison, so it slipped through, made `totalCost` NaN, and every ceiling comparison against NaN is false: the ceiling silently never fires again. Now `!Double.isFinite(x) || !(x > 0.0)`. Tests: NaN/∞/non-positive rejected in both accumulators.
+- **Summarizer spend must be ceiling-gated (Copilot, real).** The I9 boundary call now runs behind `GroupCostLedger.wouldExceedCeiling`, exactly like the convergence judge and the dissent round. The pinning test needed care — the first attempt was vacuous because the per-turn gate fired before any boundary could (mutation survived); rebuilt so the first phase completes under the gate while blowing the ceiling cumulatively. **Mutation-checked: removing the guard fails exactly this test.**
+- **Summary boundary counts raw entries, not visible ones (Copilot, real).** Bookkeeping rows (SKIPPED/CONVERGENCE/…) in the tail shrank the verbatim window below `maxRecentEntries` while newer real contributions got summarized away. New `summaryBoundary` walks back over `isSummarizable` entries (one shared predicate with `renderForSummarizer`). Test: bookkeeping interleaved in the tail keeps the 3 newest *visible* entries verbatim.
+- **Blank summarizer identifiers (CodeRabbit, real-minor).** Whitespace-only `llmProvider`/`llmModel` bypassed the null checks and reached `SummarizationService`. Normalized to null in `ContextWindowConfig`'s compact constructor (the one choke point); the store warn simplifies to null checks. Test: blank identifiers → truncation fallback, `verifyNoInteractions(summarizer)`.
+- **CodeQL log injection ×4 (real).** `gc.getId()` and the group name are caller-influenced; the three windowing WARNs and the save-time warn now go through `LogSanitizer.sanitize`.
+- **Live-transcript iteration (CodeRabbit, partly right).** The `updateWindowSummary` copy already held the correct monitor (`Collections.synchronizedList`'s mutex IS the wrapper object — the PhaseExecutionEngine comment documents this), but the windowed `filterByScope`'s indexed walk over the LIVE list could interleave with tool-thread appends (recruitment's FACILITATION entries). It now copies under the wrapper monitor first.
+- **`memberCosts` key shape (CodeRabbit, documentation).** The "agentId → cost" Javadoc was stale *before* the nested-cost fix — I2's `__convergence_judge` and I4's `__dissent__*` conversation keys already live in that map. Rewritten to the actual invariant: one key = one conversation, `totalCost` = sum of everything. Copying a member total onto `memberCosts[agentId]` (the suggested fix) would double-count in the re-sum.
+
+144 tests across the touched classes green; checkstyle clean.
+
+---
+
+## 🪟 feat(groups): N2/I9 — transcript windowing for rendered member context (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+Third and last pre-feature item from `planning/group-collaboration-NEXT.md` §2 — a live cost bug, not a new collaboration mode: FULL-scope phases re-fed the entire transcript to every member every turn (~quadratic prompt cost), and every queued Wave 2/3 item makes transcripts longer. Landed in `GroupContextBuilder` per the plan (`### I9`, plan line ~337).
+
+- **Config:** `AgentGroupConfiguration.ContextWindowConfig` (`contextWindow`) — `enabled=false`, `maxRecentEntries=30`, `summarizeOverflow=true`, plus `llmProvider`/`llmModel` for the summarizer and optional `inputPricePer1M`/`outputPricePer1M` (I1 attribution, reusing N1's shared `TokenPricing`). Boolean-not-boolean for `summarizeOverflow` so an omitted JSON key means true; compact-constructor normalization in the `GroupTaskConfig` style. Save-time warn in `AgentGroupStore` when summarization is on but no model is named.
+- **Rendering:** windowed `filterByScope` overload — when the FULL/ANONYMOUS scope-filtered context exceeds the cap, older entries collapse into one leading "System" pseudo-entry: the rolling summary when it covers the omitted range, else the `[n earlier entries omitted]` truncation marker (the `summarizeOverflow=false` path and the failure fallback). The verbatim/summary split is the summary's **raw-transcript boundary**, so there is never a gap or duplication; between boundaries the tail may grow a few entries past the cap and the next boundary re-tightens. The stored transcript is never modified; signing verifies raw entries as before.
+- **Summaries:** extended **incrementally at phase boundaries only** (`updateWindowSummary`, called from the discussion loop before each repeat — never per member turn), previous summary + new slice, mirroring `ConversationSummarizer`'s self-correcting algorithm via the shared `SummarizationService` (unification rule). Failure or empty answer leaves stored state untouched: WARN, truncation fallback, next boundary catches up with a larger batch. Summarizer spend lands on the discussion ledger via `GroupCostLedger.recordSystemCost` keyed `system:summarizer:{variant}:{boundary}` (idempotent per extension, distinct extensions sum).
+- **One deliberate deviation from the plan text:** the plan named a single `transcriptSummary`/`summaryUpToIndex` pair *and* required ANONYMOUS summarizer input to use "Anonymous" labels. One shared summary cannot satisfy both — a FULL-built summary carries real names and would de-anonymize an ANONYMOUS phase through the back door. `GroupConversation` therefore carries a second, lazily-built pair (`anonymousTranscriptSummary`/`anonymousSummaryUpToIndex`); a group that never uses ANONYMOUS never pays for it. Fields are additive with correct defaults — no `CURRENT_SCHEMA_VERSION` bump (a legacy document simply starts summarizing at its next boundary).
+- **Wiring:** `PhaseExecutionEngine`'s three `buildPhaseInput` call sites pass `config.getContextWindow()` + gc; `SummarizationService` reaches the facade by the established field-injection pattern (null in direct-construction unit tests → truncation fallback). The I2 convergence judge's input is untouched (already bounded to two rounds); SYNTHESIS deliberately keeps the full picture.
+
+**Tests** (`GroupContextBuilderWindowingTest`, 13): boundary at exactly the cap (must exceed, not meet); truncation marker; summary + boundary-split tail (no gap/duplication); ANONYMOUS uses the anonymous summary and labels (the named FULL summary must not surface); incremental extension (second call sees previous summary + only the new slice); failure/empty-answer state untouched + rendering falls back; priced summarization reaches `totalCost`; no summarizer call outside its remit (wrong phase type/scope, below cap, summarization off); config normalization. **Mutation-checked:** re-feeding the whole prefix instead of the new slice fails exactly the incremental test. `PhaseExecutionEngineTest`'s input stub updated to the new 9-arg overload (same reasoning as its own comment: a shorter stub silently nulls every input). Full `engine.internal` suite: 1438 green; checkstyle clean.
+
+**Files:** `AgentGroupConfiguration.java`, `GroupConversation.java`, `GroupContextBuilder.java`, `PhaseExecutionEngine.java`, `GroupConversationService.java`, `GroupCostLedger.java`, `AgentGroupStore.java`, `TokenPricing.java` (now public), `docs/group-conversations.md`, `planning/group-collaboration-NEXT.md` (all three §2 items marked done), tests.
+
+---
+
+## 🪜 fix(schema): N3 — legacy documents now enter the migration ladder at the bottom (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+Second pre-feature defect from `planning/group-collaboration-NEXT.md` §2, filed by the round-5 review of #626. `GroupConversation.schemaVersion` was initialised to `CURRENT_SCHEMA_VERSION` (3). Every pre-F6 production document has no `schemaVersion` key, Jackson leaves the initialiser standing, so those documents loaded **claiming schema 3 while being version-1-shaped** — and `prepareForResume`'s ladder ran `for (v = 3; v < 3; ...)`: zero iterations on exactly the documents it exists for. Fixed now, while it is free: no released build has ever written a versioned document, so nothing in production carries a wrong claim to migrate away from.
+
+- **Test first, watched it fail:** `documentWithoutVersionKey_claimsLegacyVersionNotCurrent` deserialises `{}` and asserts version 1 — failed with `expected: <1> but was: <3>` before the fix, exactly the round-5 finding. This is the case none of the four previous review rounds' tests covered (they all *set* a version).
+- **The fix is a split, not a re-initialisation:** new `LEGACY_SCHEMA_VERSION = 1` is the field initialiser (the version a key-less document claims — it never moves), and the single creation point (`GroupConversationService.createGroupConversation`) stamps `CURRENT_SCHEMA_VERSION` explicitly. The initialiser alone cannot distinguish "absent" from "current" — Jackson runs the no-arg constructor either way — so the stamp must live at creation.
+- **`ConversationMemorySnapshot` got the identical split** even though its `CURRENT` is still 1 (correct only by coincidence — first bump to 2 would have silently re-created the group side's bug). Its stamp lives in `ConversationMemoryUtilities.getMemorySnapshot`, the one place snapshots are built from live memory. A pinning test asserts `LEGACY_SCHEMA_VERSION` stays 1 when `CURRENT` bumps.
+- **(b) Stale Javadoc fixed:** `GroupConversationSchemaMigrations.MIGRATIONS` claimed `CURRENT_SCHEMA_VERSION` is 1 and "there is nothing yet to migrate from" — it is 3, and the identity-default path has already been exercised twice. Rewritten (plus the single-conversation mirror and the stale test-class Javadoc).
+
+**Mutation-checked:** removing the creation stamp fails exactly `discuss_stampsCurrentSchemaVersionOnTheCreatedDocument` (a fresh document would persist claiming legacy). Deserialisation side proven by the red→green cycle above. 133 tests across the six touched classes green.
+
+⚠️ **Surefire note for the next session:** `-Dtest=ClassName` prints `Tests run: 0` for the parent of `@Nested` tests while the nested groups report under their `@DisplayName` — read the run TOTAL, not the class line, before concluding nothing ran.
+
+**Files:** `GroupConversation.java`, `GroupConversationService.java`, `ConversationMemorySnapshot.java`, `ConversationMemoryUtilities.java`, both `*SchemaMigrations.java`, tests.
+
+---
+
+## 🧮 fix(groups): nested-group cost is summed per child discussion, not overwritten (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+The N1 fold-in flagged in `planning/group-collaboration-NEXT.md` §4. `GroupCostLedger.accumulateNestedGroupCost` keyed `memberCosts` by the GROUP member's `agentId`, but every turn of a GROUP member spawns a **fresh child discussion** whose `totalCost` starts at 0 — and the map records by replacement (idempotency invariant: one key = one conversation's cumulative cost). So child N's total replaced child N−1's, only the last child's spend survived the re-sum, and the parent's ceiling checks ran against an undercount.
+
+Fix keeps the replacement invariant instead of breaking it with deltas: the attribution key is now `agentId:childConversationId` — one key per child conversation, replacement stays idempotent, multiple children of the same member sum. A child without an id falls back to the plain agentId (old behaviour). No production reader indexes `memberCosts` by agentId — the map is serialized whole.
+
+`MemberTurnExecutorTest.executeGroupMemberTurn_rollsUpChildDiscussionCost` pinned the old single-key shape and was updated to the new contract. New `GroupCostLedgerTest` case: two children ($1.00, $0.50) of one member total $1.50, not $0.50. **Mutation-checked:** reverting to the agentId key fails exactly that new test.
+
+**Files:** `GroupCostLedger.java`, `GroupCostLedgerTest.java`, `MemberTurnExecutorTest.java`.
+
+---
+
+## 💰 fix(llm): N1 — price ordinary model calls so the ledger's common case is no longer $0 (2026-08-07)
+
+**Repo:** EDDI (`fix/group-pre-feature-defects`)
+
+First of the three pre-feature defects from `planning/group-collaboration-NEXT.md` §2. `AUDIT_COST` was written from `cascadeCostUsd + toolCostUsd` only, so a plain model call — no cascade, no priced tool — contributed **$0.00**: I1's `maxCostPerDiscussion` ceiling could never trip for an ordinary group, and `memberCosts`/`totalCost` were served over REST as if authoritative.
+
+- **`LlmConfiguration.Task` gains `inputPricePer1M`/`outputPricePer1M`** — same names and nullable semantics as the cascade fields (null = unpriced, contributes $0), so nothing changes for anyone not setting prices. Config-driven per Golden Rule 1: no hardcoded provider price table — it would be wrong within weeks.
+- **The pricing arithmetic now lives once, in `TokenPricing.cost()`.** `CascadingModelExecutor.computeCost` (step→cascade price resolution) and `LlmTask.accumulateAuditEvidence` (task-level prices for plain calls) both delegate — the formula cannot drift between paths (§4.7 unification rule).
+- **Precedence is explicit, not accidental:** `accumulateAuditEvidence` discriminates on the presence of the `cascadeCostUsd` metadata key, which the cascade branch always writes. A cascade run is priced by its steps alone; task-level prices apply only to non-cascade calls — cascade steps may target entirely different models, so inheriting the task price would price the wrong model. (This matches the precedence concern pre-filed in `docs/superpowers/specs/2026-07-21-manager-coverage-backend-design.md`.) Pinned by a test with deliberately absurd task prices on a cascade turn.
+- **Validation:** negative task-level prices fail deployment (`CascadeConfigValidator`, same new-field hard-error rationale as cascade pricing; the validator now also runs its task-level block for cascade-less tasks).
+- **`GroupCostLedger`'s "Known gap (V1)" Javadoc** rewritten — the gap is closed; `totalCost` remains a lower bound only for members whose configs carry no prices.
+
+**Tests** (`LlmTaskAuditLedgerTest`, `CascadeConfigValidatorTest`): plain priced legacy call accumulates the expected dollars; priced agent-mode turn sums token + tool cost; unpriced call still writes no cost key; cascade with absurd task prices set is priced by the cascade alone; negative task price throws at deploy. **Mutation-checked:** reverting the pricing line to `0.0` fails exactly the two new priced-plain-call tests and nothing else.
+
+The group-side chain (AUDIT_COST → `GroupCostLedger` → ceiling policies ABORT/SYNTHESIZE_NOW) was already pinned end-to-end by `GroupConversationServiceCostCeilingTest` with stubbed member cost; what could not exist before this fix — a plain call producing nonzero AUDIT_COST — is now the pinned link.
+
+**Files:** `LlmConfiguration.java`, `TokenPricing.java` (new), `CascadingModelExecutor.java`, `LlmTask.java`, `CascadeConfigValidator.java`, `GroupCostLedger.java`, `docs/langchain.md`, tests.
+
+---
+
+## 🔀 merge: bring `origin/main` (PR #627 HITL request pinning) into the branch (2026-08-07)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+`main` merged PR #627 — ~50 commits of HITL request *pinning* (an approval binds to the resolved HTTP request, re-checked immediately before execution) plus redaction hardening. It edited the pre-extraction `ConversationService` and `AgentOrchestrator` while this branch was busy decomposing both, so the conflict is "logic moved here / logic changed there". Resolved by **porting main's behaviour into the extracted homes**, not by picking a side.
+
+**Only two files conflicted; the other 20 of main's changed files are byte-identical to `origin/main` after the merge** (verified file-by-file, not assumed).
+
+- **`ConversationService` → `ConversationHitlService`.** Main's only behavioural change here was a defence-in-depth fail-closed guard rejecting a resume whose verdict resolved to null. Ported to the extracted service, then verified all six callers (`RestAgentEngine`, `McpHitlTools`, `SlackInteractivityHandler`, `HitlTimeoutHandler`, `MemberTurnExecutor`, the facade) reach it with no bypass, and that the two *internal* callers always set a verdict so the new guard cannot break them.
+- **`AgentOrchestrator` → the R2 collaborators.** `ToolRequestResolver` became a real SPI type (`tools.spi`) rather than a nested interface; `ToolContribution`/`ToolSourceRegistry.Assembled`/`ToolSetup` now carry `toolRequestResolvers`; resolution + pinning moved to `HttpCallToolsProvider` (a single `templateDataFor` shared by executor and resolver, so the pinned fingerprint describes the request execution actually builds), `ToolApprovalGateSupport.pinResolvedRequest`, and `ToolLoopResumer.requestChangedSinceApproval`.
+
+**Main's `pruneResolversToSurvivingHttpTools` was deliberately NOT ported — the invariant is now structural.** That sweep existed because `mergeExternalTools` registered resolvers before the collision verdict was known, so a builtin that won a name could be pinned against the losing http tool's request (an approver shown a preview of a request that never runs, and the pre-execution re-check comparing against that same fabricated request). `ToolSourceRegistry` copies a resolver only *after* the spec owning the name is accepted, so a loser's resolver is never carried. Main's two tests were ported to assert the property at its new enforcement point, and **mutation-checked**: moving the resolver copy above the collision check makes `droppedHttpToolLosesItsResolver` fail while `survivingHttpToolKeepsItsResolver` still passes — the guard is proven, and proven not to be a blanket wipe.
+
+**A silent test-seam break, found and fixed.** Main's two "does pinning *apply*" tests spy `AgentOrchestrator` and stub `buildToolSetup` to inject a resolver. After R2, `ToolLoopResumer` resolved the setup through the orchestrator reference captured at *construction* — so the spy no longer intercepted. One test failed loudly; the other **passed for the wrong reason**, because the refusal envelope text is identical for every refusal reason, so "resolver missing entirely" reads the same as "fingerprint changed". Exactly the failure mode main added those tests to prevent. Fixed by having the facade build the setup and pass it down (also dropping one use of the back-reference). Mutation-checked: neutering the fingerprint comparison now fails `pinnedCallWithChangedRequestIsRefusedInTheLoop`, which it did not before.
+
+**One regression avoided by taking our side.** Main's `sourceForBuiltInTool` does not tag `RecruitAgentTool` as `dynamic`. Our `ToolObjectReflector` does — that is the I7 fix that stops a documented `requireApproval:["dynamic:*"]` missing it while `exempt:["builtin:*"]` un-gates it. Taking main's version would have silently reopened that approval-gate hole.
+
+Suite at the environmental baseline (13,954 run; 8 failures / 294 errors, all loopback/network/embedding — none in the merged surfaces). Checkstyle clean.
+
+---
+
 ## 📌 chore(ci): close the last two OpenSSF gaps — pinned demo images, ungated CodeQL (2026-08-05)
 
 **Repo:** EDDI (`chore/scorecard-pinned-deps-and-sast`)
@@ -25,6 +650,1065 @@ Impact is limited to `pull_request` events: CodeQL already ran unconditionally o
 
 ---
 
+## 🔍 review(groups): round 5 — F6's migration ladder never runs on legacy documents (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Fifth review pass, deliberately aimed at what the previous four had covered *least* rather than re-walking the group tools: the schema migrations (they decide the fate of stored production documents) and the HITL tool-loop resume path.
+
+**`GroupConversation.schemaVersion` defaults to `CURRENT_SCHEMA_VERSION`, so legacy documents claim to be current.** Every group conversation in production was written before F6 existed — `main` has zero occurrences of the field — so those documents have no such key, Jackson leaves the initialiser standing, and they load reporting schema **3** while being version-1-shaped. `prepareForResume` then loops `for (v = 3; v < 3; ...)`: zero iterations. The migration ladder never runs on exactly the documents F6 was built to protect. Proven by deserialising a key-less document rather than reasoning about Jackson's semantics — it reported 3.
+
+Impact today is zero (`MIGRATIONS` is empty, and all three bumps happened inside this unreleased branch, so no released build ever wrote a versioned document). Impact at the first non-additive bump is real: a v1-shaped document either skips its transform or receives a `3→4` transform meant for a v3-shaped one. `ConversationMemorySnapshot` carries the identical pattern and is correct only by coincidence — its `CURRENT` is 1, which is also the floor — so it inherits the bug on its first bump.
+
+Filed as **N3** in `planning/group-collaboration-NEXT.md` alongside two companions: the `MIGRATIONS` Javadoc still asserts `CURRENT_SCHEMA_VERSION` is 1 and "there is nothing yet to migrate from" (it is 3), and `GroupConversationSchemaMigrationsTest` covers only documents that *have* a version — never the key-less case that is every document in production, which is why this survived four review rounds. **Not fixed on this branch on purpose:** it cannot fire today, and pushing it would invalidate a green CI for a latent bug. It is flagged do-it-before-#626-ships, because the fix is free only while no production document carries a version.
+
+**Three suspicions traced to ground and cleared,** recorded in NEXT.md so the next reviewer does not repeat the work: `ToolLoopResumer`'s null-verdict fallthrough into the approved path is unreachable (all five entry surfaces reject a null verdict first); the `McpToolsProvider` collision fix from the previous commit is correct because `executors` is method-scoped rather than loop-scoped — worth re-deriving given three of this session's fixes were themselves wrong; and the HITL tool journal handles crash-inside-the-tool honestly.
+
+**Files:** `planning/group-collaboration-NEXT.md`, `docs/changelog.md`.
+
+---
+
+## 📋 docs(plan): a single handoff file so a new session knows what to build next (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+New `planning/group-collaboration-NEXT.md`. The implementation plan is 500+ lines of *design* and carried no status, so picking the work back up meant re-deriving what had shipped from git history — which is exactly how the earlier sessions lost time.
+
+**Status now lives in exactly one file.** The status block added to the plan earlier today was collapsed to a pointer rather than duplicated: two files tracking status drift, and the stale one is always the one that gets read. The plan is now explicitly the design reference, NEXT.md the sequencing authority.
+
+**What it records that git history does not:**
+
+- **Two defects to fix before any new feature** — N1: `AUDIT_COST` sums `cascadeCostUsd + toolCostUsd` only, so an ordinary model call prices at $0, I1's ceiling can never trip, and `$0.00` is served over REST as if authoritative. Scoped while writing this: the arithmetic and the `inputPricePer1M`/`outputPricePer1M` fields already exist in `CascadingModelExecutor.computeCost`, and token usage is already accumulated on the ordinary path — only the price is missing at the non-cascade level, so this is small and stays config-driven (no hardcoded provider price table; prices are an agent-designer concern). N2: I9 windowing, a live ~quadratic cost bug that every later item makes worse.
+- **An ordered queue with dependencies** — I17/I14/I8 are unblocked and parallelize; I12 and I13 are late because they *compose* the earlier items and building them first means building them twice; I10 ships last so templates only reference features that exist.
+- **The gaps that are not on the critical path**, including the two whose obvious fixes were tried and rejected (parallel-phase late entries), so the next session does not re-attempt them.
+- **The conventions that cost time on this branch** — `@Vetoed` on `@Tool` classes (no unit test catches it; the app just won't start), `getForMember` not `get` for caller-supplied ids, the mutation-check discipline that caught three wrong fixes, the red-out-of-the-box local baseline, and that a CONFLICTING PR never runs `ci.yml` while still looking green.
+
+**Files:** `planning/group-collaboration-NEXT.md` (new), `planning/group-collaboration-improvements-plan.md` (status block → pointer).
+
+---
+
+## 🐛 fix(orchestrator): MCP tool-name collision could run a different server's tool (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+From PR review comments.
+
+**Two MCP servers exposing the same tool name produced a spec/executor mismatch.** `McpToolsProvider.discover` added every spec to a list while writing executors into a **map**, so a duplicate name left two specs and only the *last* server's executor. `ToolSourceRegistry` then keeps the *first* spec and looks the executor up by name — pairing server A's signature with server B's implementation. The model is shown one tool's contract and a different tool runs. One careless or hostile MCP server can take over another's tool name this way. Now first-write-wins within the provider, a spec is only added when its executor is present, and the collision is logged with the `toolsBlacklist` remedy named.
+
+**A null guard of mine implied a nullability the surrounding code does not honour.** `addDynamicAgentTools` dereferences `memory` unconditionally three lines before the `memory != null ?` I had added for `getConversationId()` — so a null would have thrown long earlier, and guarding only that one line read as though one path were protected and the others overlooked. Removed.
+
+Also assessed and **declined**, with reasoning rather than silence: a static-analysis finding that `getRecruitedAgentIds()` exposes internal state. `RecruitAgentTool` deliberately synchronizes on that list to make its cap check atomic, and it is a `CopyOnWriteArrayList`; returning a defensive copy would break the mutator to satisfy a heuristic. A third comment (`RecruitAgentTool` untagged in `ToolObjectReflector`) was filed against a SHA predating the commit that fixed it.
+
+---
+
+## 🚨 fix(groups): pre-merge review — recruitment was inert, and three of my own fixes were wrong (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+A final two-lens review (code audit + UX) before merge, deliberately pointed at the code the four earlier passes under-sampled. It found that **I7's headline feature never worked**, and that **three fixes from the previous rounds were incomplete or introduced new defects**.
+
+**Recruitment refused every real agent.** `RecruitAgentTool` compared the deployment environment against the string `"unrestricted"` — a **v5 name that has not existed since v6**, surviving only in `V6RenameMigration` and the legacy path filter. `Deployment.Environment` is `{production, test}` and `MongoDeploymentStorage` always stores one, so the comparison was false for every real deployment: **every recruitment refused**, with a message telling the model the agent was not deployed and to go find one that is — sending it back to a tool that keeps returning the same agent. The test suite passed because its `deployment()` helper never set an environment, so every case slipped through the null-guard. Now compares against `Environment.production` (what member turns actually run in), and the helper sets what a real deployment carries — reverting the constant now fails 7 tests.
+
+**A continuation round still reported the previous round's answer.** The earlier fix scoped the transcript *scan* but never cleared the *fields*: the extraction is `.ifPresent(...)` with no else, and `recordDissents` **merges** into an existing `DecisionRecord`. So round 2 kept round 1's `synthesizedAnswer` and verdict, and had round 2's dissents merged onto them. `continueDiscussion` now clears both.
+
+**The peer-targeted denominator was re-broken by the fix that made recruits first-class.** Passing the recruit-inclusive roster as `targets` made it disagree with the loop again in the other direction — 4 speakers over a 3-member target roster run 9 turns; it computed 12, putting I4's unanimous-abstention exit permanently out of reach.
+
+**The CME fix's cancellation guard was over-correction.** The CME is prevented by the *collections* (copy-on-write lists, concurrent maps), not by skipping work — and skipping dropped `propagateDynamicAgentTracking`, the **only** writer of `createdAgentIds`, which teardown iterates to undeploy. An abandoned turn that had created an agent therefore **leaked a real production deployment**. It also dropped the cost accumulation that I1's ceiling bounds. Guard removed; the comment now records why.
+
+**`memberDisplayNames` was the one collection the CME fix missed** — a plain `LinkedHashMap` that Jackson walks unguarded on every persist, and that the round-3 fix then gave a foreign-thread writer. Now a `ConcurrentHashMap`. `setDynamicMembers(null)` also still installed a non-copy-on-write list on its null branch.
+
+`CURRENT_SCHEMA_VERSION` bumped to 3 for `roundStartTranscriptIndex`, per F6's own contract.
+
+**The pattern worth recording:** every one of these sat behind a green suite, and three were introduced *by the fixes for earlier review findings*. Fixing under time pressure without re-verifying the fix is its own defect source — the mutation check is what separates "the code changed" from "the behaviour is pinned", and it has now caught this three separate times on this branch.
+
+---
+
+## 🐛 fix: the last five branch-review findings (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+**Signature verification reported authentic entries as unverifiable after a key rotation.** An entry signed before key versioning carries `signatureKeyVersion = 0`, and `getKeyForVersion(0)` returned the legacy `publicKey` field *only while the versioned `keys` list was empty*. Onboarding a keys list starting at v1 — the normal rotation path — therefore made every pre-rotation entry resolve to `null`, and peer verification logged "No public key found … cannot verify signature" for entries that were perfectly valid. The commit that introduced the version-exact lookup was fixing a real rotation-window bug; it just dropped `getKeyValidAt`'s `.orElse(publicKey)` fallback along with it. Version 0 *means* "signed against the legacy field", so that field is its key regardless of what has been added since.
+
+**LAZY + built-ins disabled entered the tool loop instead of falling back to legacy chat** — an R2 fidelity break. The path R2 replaced returned *before* its LAZY branch when `enableBuiltInTools` was null/false; the new one added `discover_tools` unconditionally. An agent with built-ins off, LAZY, and no http/mcp/a2a tools went from an empty `toolSpecs` (which makes `buildToolList` return null and the turn fall back to non-tool completion) to a single spec, entering the full tool loop to be offered a meta-tool that can activate nothing. Different request shape, different cost, from a refactor billed as a pure move.
+
+**A recruit could not be addressed by name.** `memberDisplayNames` is seeded once from the config roster and only while still empty, so a runtime recruit never entered it — and that map is what `followUpWithMember` resolves a human-typed name against, and what the "which member did you mean?" error lists.
+
+**F15's executor-shadowing assertion was stranded on dead code.** The production collision branch is correct — it `continue`s before touching executors — but the only test asserting so ran against `mergeExternalTools`, which has no production caller. On the live path, a branch that overwrote the executor while leaving spec count and provenance tag intact would have gone unnoticed, and a remote MCP server advertising `calculator` would have served every calculator call. Now pinned where the code actually runs.
+
+**`GroupAttachmentBinderTest` matched the stored payload with `any()`**, so replacing the Base64 decode with `getBytes(UTF_8)` — persisting every inline attachment as its base64 *text* rather than the file — passed.
+
+**Process note.** All five were mutation-checked, and **three survived the first pass**: the code fix was present but nothing pinned it, which is the exact defect class this review round was chartered to find. The fixes are only complete now that `versionZeroResolvesToTheLegacyKey_evenAfterAVersionedListIsAdded`, `lazyStrategyWithBuiltInsDisabled_assemblesNothing` and `recruit_isAddressableByDisplayName` each fail when their fix is reverted.
+
+---
+
+## ✅ test(orchestrator): two gates that a real regression would have shipped green
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Both found by the branch review's test-quality lens, and both **verified by mutation before writing the test** — the claims were exact.
+
+**`AgentOrchestratorLocalToolAssemblyTest` was vacuous for 4 of its 5 tool sources.** Its shared `memory()` stub deliberately keeps the contextual and dynamic-agent sources quiet so the old-vs-new comparison isolates the paths — but the consequence was that all 8 tests compared only the nine plain built-in beans. Deleting `contextualToolsProvider()` and `dynamicAgentToolsProvider()` outright from `buildToolSetup`'s phase-1 list — which would silently remove `UserMemoryTool`, `ConversationRecallTool` and every dynamic-agent tool from every agent in the deployment — passed the entire class. Confirmed by running it. The new test names a dynamic-agent tool in the whitelist, so it pins the *provider set* rather than the bean list; with the providers deleted it now fails.
+
+**`DynamicAgentToolsProvider.contribute`'s `enableBuiltInTools` gate had zero coverage.** Its own Javadoc calls it "the highest-blast-radius gate in this class", and no test called `contribute()` at all — every existing test drove `addDynamicAgentTools` directly, one layer below the gate. Deleting it would hand an agent configured `enableBuiltInTools: false`, but carrying a stale whitelist still naming `create_sub_agent`/`teardown_agent`, tools that deploy and delete real agents. Now covered on both the off and unset paths, plus the positive case so the negative one cannot pass by the provider simply never contributing.
+
+One correction worth recording: my first version of the assembly assertion used the canonical slug (`calculator`) where the assembled spec carries the `@Tool` method name (`calculate`). The test failed immediately and correctly.
+
+---
+
+## 🐛 fix(groups): a continuation round could report the previous round's conclusion (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+`latestSynthesis` and the answer extraction both scanned the **whole** transcript for the last SYNTHESIS entry. A continuation re-runs every phase from index 0 against a transcript that still holds the previous round's entries, and a transcript entry carries no round of its own — only a phase index, which repeats each round. So "the latest synthesis" was ambiguous across rounds.
+
+The consequence, for a round 2 whose synthesis produced nothing — judge undeployed, timed out, abstained, or the cost ceiling fired, all of which leave a SKIPPED entry with null content:
+
+- `recordDebateVerdict` parsed **round 1's** judgment and stored it as round 2's `DecisionRecord`, stamped with round 2's phase name;
+- `runDissentRound` asked every member where they disagreed with round 1's conclusion and filed the replies as round 2's dissents;
+- the answer extraction picked round 1's SYNTHESIS entry, so `synthesizedAnswer` was non-null and the "completed without an answer" guard stayed silent.
+
+The conversation reported `COMPLETED`, with a structured verdict and a minority report, for a question round 2 never answered.
+
+Fixed with `GroupConversation.roundStartTranscriptIndex` — the index where the current round's entries begin, stamped by `continueDiscussion` when it bumps the round. Both scans start there. The `getSynthesizedAnswer()` fallback is dropped for any round past the first, since that field also still holds the prior round's answer; a first round has index 0, which is exactly "the whole transcript", so the ordinary case is unchanged.
+
+A transcript entry could have carried its round instead, but that is a 15th component on a record already constructed positionally in ~30 places — a marker on the conversation says the same thing without that blast radius.
+
+Pinned by `aLaterRoundNeverAdoptsAnEarlierRoundsConclusion` and `aFirstRoundStillSeesItsOwnSynthesis`; mutation-checked by resetting the scope to 0.
+
+---
+
+## 🐛 fix(groups): branch review, round 3 — recruits were second-class everywhere (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+I7 wired recruits into `resolveParticipants`, so they *speak* — but only two sites in the codebase used the recruit-inclusive roster. Everything else still keyed off `config.getMembers()`, so a recruited member was a speaker no other feature recognised as a member:
+
+- **It never got a dissent turn.** `runDissentRound` filtered the config roster, so a recruit could argue in every phase and was structurally unable to register a minority view — the one thing the minority report exists to capture.
+- **`addGroupTask(assignToRole=…)` could not name it**, and the `rosterHint()` on failure listed a team that omitted the member the model had just watched join.
+- **The peer-visibility and team-filter paths** (`buildPhaseInput`'s `allMembers`, used by `ARGUE`/`REBUTTAL` to decide which arguments are *opposing*) treated it as neither teammate nor opponent.
+- **`recordDebateVerdict`'s two-sided-roster check** could not see a recruit's role, so recruiting the second side of a debate still produced no verdict.
+
+`rosterWithRecruits` is now static and is the single roster source across `PhaseExecutionEngine` and `GroupTaskToolsProvider`. Pinned by `dissentRound_includesRecruitedMembers`, mutation-checked: reverting that one call to `config.getMembers()` fails it.
+
+---
+
+## 🐛 fix(groups): branch review, round 2 — CME on persist, registry leak, ceiling-vs-HITL (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Concurrency and lifecycle findings from the same review.
+
+**Abandoned member turns could fail a whole discussion.** `conversationService.say` hands the turn to the coordinator, so its response callback runs on a *coordinator* thread and fired unconditionally — including long after a batch deadline, cancel or pause had abandoned that speaker. It mutated `gc` (`propagateDynamicAgentTracking`, cost attribution) while the loop was serializing the same object, so Jackson's plain iteration of the tracking lists threw `ConcurrentModificationException` out of `conversationStore.update`, and `executeDiscussion`'s catch-all turned one slow speaker into a **FAILED** discussion. The callback now drops its bookkeeping once cancellation is observed — an abandoned turn's entry was already written as SKIPPED, so it was worth nothing anyway. `GroupHitlCoordinator` already documented this hazard ("CME-safe serialization") without the loop's own persist being guarded.
+
+`createdAgentIds`, `recruitedAgentIds` and `dynamicMembers` are now `CopyOnWriteArrayList`. `synchronizedList` makes each `add` atomic but does **not** make unguarded iteration safe, and these three are iterated without a monitor on every persist and at teardown. The transcript deliberately stays `synchronizedList` — it grows large enough that copying per entry would be quadratic.
+
+**F1's registry leaked, and could hand a tool a dead instance.** `register` sat ~80 lines *above* the `try` whose `finally` removes it, despite both the Javadoc and the call-site comment asserting removal is unconditional. Any throw in that window — reachable via an unguarded `config.getMembers().stream()` that NPEs on a stored config with `"members": null`, which every other site guards — left the entry in a map with no eviction. Worse than the leak: a task or recruit tool would then resolve that dead instance, accept the write, and tell the model it succeeded for a mutation nothing will ever persist. Registration moved inside the try; the NPE guarded.
+
+**A phase abandoned by the cost ceiling still paused for human approval.** The SYNTHESIZE_NOW skip-ahead guard sits at the top of the phase loop, so it only protects *subsequent* phases — the phase that actually blew the budget fell straight through to the HITL gate. That stranded the discussion `AWAITING_APPROVAL` for an approval the run would never act on, and on resume re-tripped the ceiling in the next non-SYNTHESIS phase, appending a second identical SKIPPED entry and re-incrementing the hit counter. The guard's own comment states this requirement verbatim; it simply could not see the current phase.
+
+Also: `ToolSourceRegistry.isCausedByInterrupt` walked cause chains forever. Its `cause != cause.getCause()` test only rejects a self-cycle, which `Throwable.initCause` already makes impossible; the reachable shape is A→B→A, which spins at 100% CPU inside the handler whose purpose is to stop one bad provider taking assembly down. Now hop-bounded.
+
+**Two test fixes worth naming, because both were passing for the wrong reason.** `PhaseExecutionEngineTest` stubbed the *6-arg* `buildPhaseInput` while the engine only calls the 7-arg one, so all 19 tests ran with `input == null` — an implementation that dropped the phase rendering entirely and passed the raw question through passed the whole class. Correcting the stub was **not sufficient**: a mutation check with the rendering deleted still passed, because every verification had `any()` in the input position. Only asserting `eq("rendered-input")` kills it. And `GroupSigningGuardTest` used `anyInt()` against `read(String, Integer)` — `anyInt()` does not match `null`, so a regression calling `read(id, null)` satisfied a `verify(never())` vacuously.
+
+**One finding deliberately left open, with the reason recorded in the code.** After the batch deadline, later speakers' `get()` returns immediately, so a member finishing a millisecond late loses its real entry to a SKIPPED one. Both obvious fixes are worse: a bounded drain extends the phase past the deadline that exists to bound it (a 3s budget became 8s), and cancelling the futures makes `get()` throw `CancellationException`, which neither catch handles, losing those entries entirely (5 SKIPPED entries became 1). `parallelPhase_appliesOneDeadlineAcrossAllMembers` caught both attempts. Containing the orphan's *writes* is what mattered and is now done; recovering the late entry needs the deadline contract renegotiated, which is its own change.
+
+---
+
+## 🔒 fix(groups): branch review — cross-discussion write, ungated recruitment, orphaned tasks (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Findings from a four-lens adversarial review of the whole branch. Every one is a defect I introduced in I5/I7 or an interaction I missed.
+
+**IDOR: the two new write tools were authorized by a caller-supplied string.** `Conversation.createContextData` stores *every* caller context key verbatim as `context:<key>` with no reserved-key filter, and `AgentOrchestrator` reads `context:groupConversationId` straight back out. Both new providers gated on `liveDiscussionRegistry.get(id).isPresent()` — which asks "does this discussion exist?", not "may you write to it". Any `eddi-user` could start a private conversation, name another discussion's id (enumerable via the REST list endpoints), and have `addGroupTask`/`recruitAgent` bound to a discussion they have no relationship with — filing tasks other groups' members then execute, or injecting a speaker. Fixed with `LiveDiscussionRegistry.getForMember(gcId, conversationId)`: the caller's own conversation must appear in that discussion's `memberConversationIds`, which only the discussion itself writes. Existence is not authorization.
+
+**`recruitAgent` was tagged `builtin`, not `dynamic`.** `ToolObjectReflector.sourceForBuiltInTool` enumerates the dynamic-agent tools by class name and I never added the new one, so the highest-privilege of them — it mutates a live roster — fell to the `builtin` default. The documented operator config `requireApproval: ["dynamic:*"] / exempt: ["builtin:*"]` therefore gated its four siblings and **actively exempted** it, since exempt beats require.
+
+**A group that never configured `dynamicAgents` had recruitment on.** The field is null by default, `MemberTurnExecutor` skipped injecting the context variable when null, and the provider fell back to the *standalone* permissive default (creation, recruitment and delegation all true). That default exists for a lone agent with those tools whitelisted; inheriting it inside a group meant an operator who never opted in got roster mutation. Group turns now always receive an explicit config — a disabled one when the group configured none.
+
+**`GroupTaskToolsProvider` ignored the agent's own capability switch.** Every sibling provider returns empty when `enableBuiltInTools` is off; mine didn't, so a group opting in handed write tools to a member whose own config says it has none — and flipped a zero-tool member out of legacy chat into a tool loop.
+
+**Agent-filed tasks were never executed.** `assignTask` is only ever called from the PLAN phase, and the EXECUTE wave schedules `findExecutableTasks().filter(assignedAgentId != null)`. A task filed without `assignToRole` stayed PENDING and unowned forever — so the tool's own promise ("the team will pick it up") was false, and under TASK-granularity HITL the leftover executable task re-paused the phase until the no-progress guard **failed the whole discussion**. Every filed task now gets an owner through the same resolver the PLAN phase uses, round-robined by task count. My test asserted `findExecutableTasks()` contained the task — true, but not the gate that matters.
+
+**The per-discussion task cap was advisory.** Counted outside `SharedTaskList`'s monitor, so five concurrent speakers against a cap of 20 with 19 filed all passed and produced 24. Moved inside the same lock as the insert, where the duplicate and cycle checks already were.
+
+**A converging synthesis phase skipped its own verdict and dissent round.** The I3/I4 block was gated on `lastRepeat`, but I2's convergence break is evaluated *after* it — so a phase converging on repeat 1 of 3 exited having recorded no `DecisionRecord`, and the answer extraction then handed the caller the raw judgment JSON, which is exactly what I3's rendering exists to prevent.
+
+**The peer-targeted turn count assumed speakers and targets are the same list.** They are not: speakers come from the resolved participants (recruit-inclusive, or a `ROLE:` subset), targets from the configured roster. `n*(n-1)` over-counted for a role-scoped phase (2 reviewers of 5 members run 8 turns, not 2 — so 2 abstentions among 8 ended a round that produced 6 real critiques) and under-counted once I7 let a recruit speak, making I4's unanimity exit arithmetically unreachable.
+
+Also: `totalCost` is now `volatile` (written under `memberCosts`' monitor by parallel member turns, read unsynchronized by both ceiling checks — no happens-before edge, and a non-volatile 64-bit read may tear); `CURRENT_SCHEMA_VERSION` bumped to 2, which F6's own contract required once resume-time logic began depending on `recruitedAgentIds`.
+
+---
+
+## ✨ feat(groups): Runtime recruitment + delegation timeout (I7) (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+**Recruitment was a dead end, and the plan's re-scope was accurate.** I verified all four of its claims against the current tree before building: `addDynamicMember` had **zero** production callers, `maxRecruitedAgentsPerDiscussion` was read **nowhere** (only its getter existed), `resolveParticipants` never looked at `dynamicMembers`, and the delegation timeout was hard-coded to 60s. So an agent could *discover* a specialist via `findAgentsByCapability` — which already shipped — and then had no way to act on it. `dynamicMembers` was written by nothing and read by nothing in the participation path.
+
+`RecruitAgentTool.recruitAgent(agentId, role, reason)` closes it, gated by the same `enabled && allowRecruitment` as the discovery half — finding an agent and bringing it in are two halves of one capability, and allowing one without the other is either a dead end or an ungated roster write. It additionally requires a live group discussion, since recruiting into a standalone conversation has no roster to join.
+
+**Recruits join from the next phase, never mid-phase.** `rosterWithRecruits` unions the configured members with `gc.getDynamicMembers()` at the two sites that build a speaker list. Mutating a roster mid-phase would desynchronise the speaker index F2's resume bookmark points into, and move the denominator I2's convergence check and I4's unanimity test already computed for the round in flight. The union lives at the call sites rather than inside `resolveParticipants` because that method is resolved by exact parameter types by the characterization suite, and its purity is what makes its ALL/MODERATOR/ROLE branches testable without a live discussion.
+
+The HITL resume path resolves against the **same** roster, or its config-drift guard would measure a roster the resumed loop no longer has and abort a discussion that merely recruited someone before it paused.
+
+**Recruits are never torn down.** Tracked in a new `recruitedAgentIds`, deliberately *not* merged into `createdAgentIds` — that list drives `cleanupEphemeralAgents`, which undeploys. A recruit is a borrowed pre-existing agent; undeploying it would take it away from every other conversation using it. Two lists because they mean two different things at teardown.
+
+**Delegation timeout is now `DynamicAgentConfig.delegationTimeoutSeconds`** (default 60). The hard-coded 60s was far too short for a delegate that itself runs tools and far too long for a fan-out of quick lookups. The stale `"(60s limit)"` message now reports the limit actually applied — a message naming a limit that was never enforced is worse than no message. Non-positive values fall back to the default rather than meaning "wait forever", which is how a delegation cycle became a hang before the depth cap existed. The config reaches the tool through the existing group→member context channel, so no new plumbing was needed.
+
+**Deliberately not done: the cost sub-budget.** The spec calls for passing the delegate conversation a ceiling equal to the remaining group budget. `IConversationService.say()` has no budget parameter and single-agent conversations have no cost-ceiling mechanism at all — only *group* discussions do, via `discuss(..., remainingBudget)`. Worse, per the plan's own V1 finding, non-cascade model-call cost is not tracked per-conversation anywhere, so a ceiling there would bound a number that is mostly zero. That is protection in name only, which is worse than none; building it properly is its own item.
+
+Also registered `recruit_agent` in `ToolNameResolver`, without which the tool would have no canonical slug for whitelisting, pricing or rate-limiting.
+
+New: `RecruitAgentTool`, `RecruitAgentToolTest`, `GroupConversation.recruitedAgentIds`, `GroupConversationService.rosterWithRecruits`, `DynamicAgentConfig.delegationTimeoutSeconds`; the recruitment section of `docs/group-conversations.md` rewritten to the actual mechanism (V6). 17 tests; 11 mutation checks.
+
+---
+
+## ✨ feat(groups): Agent-writable shared task list (I5) (2026-08-04)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+The shared task list was written only by the PLAN phase and by config, so work an agent *discovers* while executing — a missing migration, an untested edge case — could only be described in prose and hoped for. Two tools (`addGroupTask`, `listGroupTasks`) let a member file it, and because the wave loop already re-queries `findExecutableTasks()` every wave, a filed task flows into execution with **zero scheduler changes**.
+
+**Two tools, not four.** No claim or complete tool: the wave loop owns every task-state transition, and a second writer racing it would corrupt the state machine that decides what runs next. Filing is the only agent-side write.
+
+**Off by default, and *absent* rather than refusing when off.** `GroupTaskConfig {allowAgentTaskCreation=false, maxAgentAddedTasksPerDiscussion=20, maxPerTurn=3}`. `GroupTaskToolsProvider` (R2's SPI) assembles the tools only on the positive case — a live group discussion whose config explicitly opts in. Every ambiguous case fails closed: no group conversation id, discussion not live, config absent, store unreadable. A tool that is not assembled costs no prompt tokens and cannot be argued with; one that exists and always says no invites retries.
+
+**Writes the live instance, never the store.** The loop persists the whole document after each phase, so a tool writing through its own store call would be silently clobbered by the next stale-snapshot write. F1's `LiveDiscussionRegistry` resolves the in-memory instance the loop is holding — which is also why an unregistered (paused or finished) discussion refuses the write instead of pretending to accept it.
+
+**Validation, cycle detection and insert happen under one lock.** `SharedTaskList.addAgentTask` holds the monitor across the whole check-then-act sequence, because a PARALLEL phase runs every speaker at once: validating outside the lock would let two callers both pass a duplicate-subject check, or both pass a cycle check that only the pair of them together violates. Cycle detection needs the candidate already inserted, so the insert happens first and is rolled back on a cycle — sound only because nobody else can observe the intermediate state.
+
+**`assignToRole` assigns at insert, not after.** Between an insert and a follow-up `assignTask`, the task is PENDING and unowned — `findExecutableTasks()` would hand it to a concurrent wave, which then assigns it to whoever the loop picks, silently discarding the owner the filing agent asked for. Role resolution reuses `TaskForceEngine`'s existing resolver (extracted to a static entry point, one implementation, so loop-assignment and filed-assignment cannot drift). `"ALL"` and omission deliberately do *not* round-robin here: round-robin keys off a task index the loop assigns, and a filed task has no position in the plan.
+
+**Rejections are sentences aimed at the model**, because that is who reads them — duplicate subject, unknown dependency (refused, not dropped: filing without the dependency schedules the task immediately, the opposite of what was asked), circular dependency, oversized subject/description, and either cap. A rejected call does not consume the per-turn budget, or one malformed argument would silence the rest of the turn.
+
+**`TaskItem` gained `createdByAgentId`** as a 14th component, carried through all 10 positional mutator constructions. Missing one would have erased the author the moment the loop assigned the task — and since the discussion cap counts exactly that field, the cap would have silently reset itself as tasks progressed. A test walks a filed task through assign → start → complete → verify asserting attribution survives each.
+
+Caps are independent by design: `maxPerTurn` bounds a runaway single turn, `maxAgentAddedTasksPerDiscussion` bounds slow drift across a long one, and the discussion cap counts only agent-filed tasks so a large planned backlog does not exhaust it.
+
+**Follow-up, caught by CI:** `GroupTaskTools` needs `@Vetoed`. The langchain4j extension registers `@Tool`-bearing classes as CDI beans, so Arc tried to inject the constructor's `String`s and `GroupTaskConfig` — five deployment problems, and **the application does not start**. No unit test can see that; only a container boot can, which is exactly why local green is not the same as CI green here. `ReadAttachmentTool` and `DiscoverToolsTool` carry the annotation for the same reason; this class was the only `@Tool` holder in its package without it.
+
+New: `GroupTaskTools`, `GroupTaskToolsProvider`, `SharedTaskList.addAgentTask`, `AgentGroupConfiguration.GroupTaskConfig`, plus an "Agent-filed tasks" section in `docs/group-conversations.md`. 33 tests across `GroupTaskToolsTest` and `GroupTaskToolsProviderTest`; 16 mutation checks.
+
+---
+
+## 🐛 fix(groups): wouldExceedCeiling disagreed with enforceCeiling at zero (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+From PR review. I1 gave `enforceCeiling` an explicit zero-ceiling guard — a nested child inherits `ceiling = 0.0` when its parent has spent its whole budget (`MemberTurnExecutor`'s `Math.max(0.0, remaining)`), and treating that as "one free turn" lets every nested group overspend a fully-consumed parent. I did not give the same guard to `wouldExceedCeiling`, the read-only sibling added alongside it.
+
+So the two answered the same question differently at exactly the point that matters: with `ceiling == 0.0` and `totalCost == 0.0`, `0.0 > 0.0` reads as "budget available". The optional work this gate exists to skip ran anyway — I2's convergence judge, and I4's entire dissent round at one LLM call per dissenter — against a budget already gone.
+
+The gate now mirrors `enforceCeiling`'s test exactly. `wouldExceedCeiling` had **no test at all**; it has five now, including a property test that runs both functions over the same 25 ceiling/spend combinations and asserts they agree — neither function's own tests would have caught the divergence, which is how it got in.
+
+Not changed: a static-analysis finding that `getMemberCosts()` exposes internal mutable state. It is deliberate — `GroupCostLedger.recordAndReSum` is the sole mutator and synchronizes on that map, and Jackson needs the getter for persistence. Returning a copy would break the mutator to satisfy a heuristic.
+
+---
+
+## ✨ feat(groups): Structured verdicts + deterministic synthesis (I3) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Two independent fixes to how a discussion reaches its conclusion.
+
+**(a) A moderator-less synthesis had no author — it had a winner by accident.** A phase configured `participants: "MODERATOR"` in a group naming no `moderatorAgentId` fell back to *every* member, and `executeDiscussion` takes the **last** SYNTHESIS entry as the answer. So the conclusion of such a discussion was decided by speaking order: whoever happened to go last won, silently, with every other member's synthesis discarded unread. Now exactly one synthesizer speaks — first by `speakingOrder`, the ordering every other phase already uses. This is a behavior change and deliberately so; the old behavior had no defensible reading. Old configs still load and save: `AgentGroupStore` logs a warning at save time rather than rejecting.
+
+**(b) A debate's judgment was prose nothing could read.** DEBATE ends in a SYNTHESIS phase that picks a winner, but the winner existed only as English — a caller wanting to branch on it had to parse the sentence. The judge is now prompted for JSON, which `DebateVerdictParser` reads into `DecisionRecord{type=VERDICT, method="debate-judgment"}` with per-side scores. Three-tier parse (strict → brace extraction → give up), and every failure mode degrades to `type=NONE` carrying the raw text: a malformed judgment costs the structured view, never the discussion.
+
+**The transcript keeps the agent's words; only the answer is rendered.** The JSON is what the judge actually said and is what its signature covers, so rewriting that entry would forge a member's contribution under its own signature. The substitution happens at `setSynthesizedAnswer` instead, guarded by an exact match against the text the verdict was parsed from — a later SYNTHESIS phase that supersedes the judgment keeps its own words.
+
+**Anti-sycophancy** (spec-required): the judgment template directs scoring of argument quality and factual support, and explicitly *not* assertiveness, confidence, fluency, or length — an LLM judge shown two sides reliably rewards the more forceful one. A tie is named as a legitimate verdict so the model does not manufacture a winner.
+
+**Two independent adversarial reviews found a blocker and six real defects**, none of which the passing tests caught.
+
+*The blocker:* two pre-existing tests in other files still asserted the old fallback-to-ALL and were red on the branch. I had searched for them and not found them; only running the wider suite did.
+
+*A verdict fabricated for a debate that had no sides.* `create_group(style="DEBATE")` without `memberRoles` — the shape in our own docs — resolves `ROLE:PRO` to ALL, maps every speaker to the same side, and produces a transcript nobody argued PRO in. The first cut keyed detection on entry types alone, so the judge was still asked to score PRO against CON, and would pick one.
+
+*A partisan judging its own debate.* With (a) in place, a moderator-less DEBATE makes a debater the sole synthesizer — and its own conversation holds "argue the FOR side" as recent context. That is exactly the contamination I2's `JUDGE_CONVERSATION_KEY` exists to prevent, and stamping the result as `DecisionRecord.winner` would present one side's opinion as the group's finding.
+
+Both are closed by moving detection out of `selectDefaultTemplate` (which can only see the transcript) into `GroupContextBuilder.isDebateJudgment`, which also sees the speaker and the roster: a verdict now requires a two-sided roster **and** an impartial judge. A moderator-less debate concludes in prose, which is at least honest about who wrote it. `recordDebateVerdict` calls the same predicate with the same arguments rather than re-deriving the answer, so the prompt and the parse cannot disagree about whether a verdict was ever requested.
+
+*Every DEBATE's answer got shorter.* The first template capped `reasoning` at "2-3 sentences", and that text becomes the discussion's answer — so every existing DEBATE config, and every parent group consuming one as a nested member, would have silently traded a full analysis for one sentence and a scoreline. Uncapped, and the escape hatch (a phase's own `inputTemplate`, which suppresses the verdict path entirely) is now documented at the template.
+
+*The minority report argued with braces.* The dissent round read the transcript entry, so members were asked to disagree with a JSON blob — in public, SSE-streamed `DISSENT` entries. It now reacts to the rendered outcome.
+
+*The save-time warning was inert for preset styles.* It read `getPhases()`, but a preset-style group stores no phases at all — the engine expands the preset at discussion time, and all six presets end in a MODERATOR phase. So the one mitigation for (a)'s behavior change was silent for exactly the configs that hit it. The decision is now a separate `moderatorlessPhaseNames()`, because a log-only method is a decision nothing can pin.
+
+*Case-sensitive score keys.* `normalizeWinner` accepts `"pro"`, but the score lookup was exact-match — so a judge writing lowercase throughout got its winner read and its whole scoreboard silently dropped.
+
+**The test review found four gaps and proved each by mutation** — including that *nothing at any layer asserted the judge was actually prompted with the judgment template*: the engine test mocks the context builder, the end-to-end test mocks the templating engine, and the builder test only covered the other branch of the ternary. Wiring that never selected the template would have left every I3 test green. Also: a `noSynthesisEntry` test that held no reference to the object it claimed to assert on, score bounds untested at 0 and 10 (the exact endpoints the template asks the judge for), and the production verdict→dissents ordering never exercised — only its reverse.
+
+**A Qute check worth keeping.** The judgment template's literal JSON survives rendering only in its single-line form: `{"winner"` renders verbatim, but the same JSON pretty-printed across lines does not — Qute consumes it. `debateJudgmentTemplate_survivesQuteRendering` pins that with a real engine, because every other test in the suite mocks the templating engine and would not have noticed the contract being eaten.
+
+New: `DebateVerdictParser`, `DebateVerdictParserTest`, `GroupConversationServiceVerdictTest`, `AgentGroupStoreTest`, plus a "Debate verdicts" section in `docs/group-conversations.md`.
+
+---
+
+## ✨ feat(groups): Abstention + minority report (I4) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Two opt-in mechanisms that make a discussion say less and mean more. **Abstention** (`allowAbstention` per phase): a member with nothing new to add replies `PASS` and gets an `ABSTAINED` entry instead of an N-th restatement of agreement. **Minority report** (`recordDissents` per group): after each synthesis, every non-synthesizer gets one short turn to say where they still materially disagree — non-`PASS` replies become public `DISSENT` entries and populate `DecisionRecord.dissents`.
+
+This also makes I2's deterministic convergence path live. It shipped with I2 but could not fire, because nothing produced `ABSTAINED` entries; the stale "inert until I4 lands" Javadoc is corrected here.
+
+**Exact-token detection, never containment.** "I'll pass on point one, but I disagree about the timeline" is a position that happens to contain the word. Reading it as an abstention deletes it from the group record silently and — once several members are misread the same way — can end the phase early through the convergence hook on the strength of arguments nobody read. Case and whitespace are normalized and a single trailing terminator is accepted (`PASS.` is the common near-miss); a run of them is not.
+
+**An adversarial review found three MAJOR defects the tests missed.**
+
+*Detection without instruction on task phases.* `TaskForceEngine` builds its PLAN/EXECUTE/VERIFY inputs itself and never routes through `buildPhaseInput`, so the member was never told `PASS` exists — but detection ran anyway. "PASS" is a natural verdict word for a VERIFY turn, and an abstention's `null` content sends `parseAndApplyVerification` down its mark-everything-passed fallback: **tasks nobody checked, silently verified**. An EXECUTE turn would complete its task with no result. Both sides now consult one `AbstentionDetector.isEnabledFor`, so the instruction and the detection cannot drift apart.
+
+*Wrong denominator for unanimity.* A peer-targeted phase runs N×(N−1) turns, but the check compared against the speaker count. For 3 members that made 3 abstentions out of 6 entries read as "all 3 participants abstained" — ending a round that produced four real critiques — while a genuinely unanimous 6-of-6 round could never use the free exit at all. Only N=2 was accidentally correct.
+
+*Dissents duplicating.* The round sat inside the repeat loop, so a synthesis phase with `repeats > 1` ran it once per repeat, duplicating every dissent in both the transcript and the `DecisionRecord` and paying N extra calls each time.
+
+Four MINORs from the same pass: dissent entries landed inside I2's convergence slice (the judge would read them as this round's contributions); they were rebuilt bare, dropping the signature envelope `executeAgentTurn` had already computed — making `DISSENT` the one entry type a signing-enabled group could not verify; a `MemberType.GROUP` dissenter's "one short turn" would recurse into an entire nested sub-discussion; and the round fired no speaker events, so the minority report was invisible to SSE and Slack.
+
+**A mutation check caught a weak test of my own** — and it was the same trap the reviewer had explicitly named. My peer-targeted test used 2 members, where `n` and `n×(n-1)` are both 2, so reverting the denominator fix changed nothing and the test passed either way. Rebuilt on 3 members, the smallest roster where the two differ. The reviewer also found the instruction append had *zero* coverage: every abstention test stubs the response directly, so the one line that tells a model the token exists could have been deleted silently. Now covered on the template path, the fallback path, and the task-phase exclusion.
+
+**Anti-sycophancy** (spec-required): `TEMPLATE_OPINION_WITH_CONTEXT` and `TEMPLATE_CRITIQUE` gain a directive line, via a shared constant rather than duplicated text so editing it actually changes both. Added only where a member can see peers — `INDEPENDENT` shows none, and `ANONYMOUS` already instructs independent judgment.
+
+24 new tests across `AbstentionDetectorTest`, `GroupContextBuilderTest` and `GroupConversationServiceAbstentionTest`; three mutation checks, all confirmed load-bearing after the 2-member test was rebuilt.
+
+---
+
+## ✨ feat(groups): Convergence detection + early exit (I2) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+A DELPHI-style phase with `repeats: 4` runs exactly four rounds whether or not the members stopped changing their minds after two — "convergence" was prompt text, not behavior. I2 makes it real.
+
+**Note on ordering:** the plan sequences Wave 1 as I1 → I3 → I4 → I2, with `I4 --> I2` in its dependency graph, because I2's deterministic mechanism consumes I4's PASS. Built here on request, ahead of I4. The deterministic path is implemented and tested but **cannot fire in production** until I4 produces `ABSTAINED` entries — stated in the Javadoc at both the config and the detector, since a mechanism documented as active but structurally dead is worse than one documented as pending.
+
+**Design.** Phase-level `ConvergenceConfig {enabled=false, minRepeats=2, threshold=0.8, judge}`, off by default. Two mechanisms, one exit: unanimous abstention (free, no LLM call, ungated by `minRepeats` — silence is evidence on its own terms), or a judge comparing this round's positions with the previous round's. `PhaseOutcome`/`PhaseExitSignal` (CONTINUE / END_REPEATS / END_DISCUSSION) is the general exit channel I11 and I12 also need; `END_DISCUSSION` has no producer yet but the loop honors it, so adding one later cannot silently degrade it to END_REPEATS.
+
+**Nothing converges on doubt.** Unparseable output, missing score, out-of-range score, judge error — every failure returns "not converged" and the phase runs its remaining rounds exactly as it would have without the feature. Converging on a verdict we couldn't read would silently truncate a discussion the operator paid for; failing to converge costs one round. The threshold is also authoritative over the judge's own `converged` boolean: a model returning `{"agreementScore": 0.3, "converged": true}` does not override the operator's setting.
+
+**A test found a real parser bug.** Jackson's `readTree` parses the first complete JSON value and ignores trailing content, so a judge returning two verdicts — `[{"agreementScore":0.9},{"agreementScore":0.1}]`, whose brace extraction yields two objects in a row — silently converged on the first and discarded the opposite second one. `FAIL_ON_TRAILING_TOKENS` is now enabled and load-bearing, not hygiene.
+
+**An adversarial review pass found a MAJOR defect the tests did not.** The judge runs the *moderator agent*, and `MemberTurnExecutor` keys each private conversation by `member.agentId()` — so every judge call was writing its "reply with ONLY this JSON" prompt and verdict into the **moderator's own conversation**. A later SYNTHESIS phase resolves to that same agent and reads that history as recent context: the synthesized answer would come back as JSON, and each judge call also shipped the full group transcript into that conversation, inflating its window and cost. Fixed with a `conversationKey` override on `executeAgentTurn` (defaulting to the agent id, so no existing caller changes) and a dedicated `__convergence_judge` key.
+
+That fix exposed a second, latent one: `GroupCostLedger` records by *replacement*, so once the judge had its own conversation, attributing it under the moderator's agent id would have **overwritten the moderator's real accumulated cost with the judge's smaller one** — silently shrinking `totalCost` and loosening I1's ceiling. Cost is now attributed under the conversation key, which is what per-conversation cumulative costs actually mean.
+
+Three further gaps from the same pass: the judge was invisible to `maxTurns` (a `repeats: 10` phase could add ten uncapped LLM calls behind the cap's back); it wasn't re-checked against I1's cost ceiling, which the last speaker of a repeat may have just crossed; and it could be handed an empty round after the turn budget ran out, where a judge reading silence as agreement would record a `convergence_reached` for a phase that actually ran out of budget. All three now guarded — the ceiling via a new read-only `wouldExceedCeiling`, deliberately distinct from `enforceCeiling` so declining optional work doesn't emit a duplicate SKIPPED entry or end the phase.
+
+**A mutation check found a weak test of my own.** The "disabled" case passed a `null` config, so the `enabled()` check was never exercised — deleting it left every test green. An operator writing `{"enabled": false}` rather than omitting the block would have gotten judge calls they explicitly turned off. Split into two tests; the explicit-disable one now fails without the check. A second weak assertion (counting moderator transcript entries to prove the judge didn't run) was vacuous, since `runJudge` discards the entry it gets back — replaced with a `verify(..., never())` on the service call.
+
+30 new tests across `ConvergenceDetectorTest` (parse tiers, threshold semantics, abstention counting, config normalization) and `GroupConversationServiceConvergenceTest` (real loop: early exit, all-repeats-run, unparseable-verdict, `minRepeats` gating, both disabled forms, judge-conversation isolation, empty-repeat guard, persist-and-complete). Four mutation checks, all confirmed load-bearing.
+
+---
+
+## 🔧 fix(orchestrator): three SPI hardening fixes from PR review (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Three findings from Copilot's review of the R2 SPI, all verified against the code and all real.
+
+**The tool-collision warning recommended a knob most sources don't have.** It told operators to "exclude it via `toolsBlacklist`" for *any* colliding source, but `toolsBlacklist` exists only on `McpCallsConfiguration` — so an HTTP or A2A collision sent someone hunting for a setting their source has no concept of, during an incident. Now points at the colliding tool's own source config and names `toolsBlacklist` only as the MCP-specific option it is.
+
+**`contributeSafely` swallowed the stack trace and the interrupt.** It logged `t.toString()` only — and the case this broad `catch (Throwable)` exists for is precisely `NoClassDefFoundError`/`LinkageError` from an optional integration, which is near-undiagnosable without the trace naming the missing class. It also cleared the thread's interrupt status: a provider interrupted mid-discovery had that signal dropped, hiding it from every later blocking call on the thread. Both fixed.
+
+**`ToolAssemblyContext.dynamicAgentConfig` promised "never null" in Javadoc and enforced nothing.** Callers (tests included) do pass null, so a future provider dereferencing it per the documented contract would NPE. Now normalized in the record's compact constructor — one choke point rather than a guard in every provider. A default `DynamicAgentConfig` has `enabled=false`, so "no config supplied" correctly means dynamic agents are off, never accidentally on.
+
+2 new tests pinning the normalization (null → disabled default; a supplied config is preserved by identity).
+
+---
+
+## 🐛 fix(orchestrator): UserMemoryTool never resolved its group scope (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Raised by Copilot on PR #626, verified against the code, and real. `ContextualToolsProvider` derived `UserMemoryTool`'s `groupIds` from `memory.getConversationProperties().get("groupId")` — but **nothing in the codebase ever writes `groupId` as a conversation property.** It arrives as a *context* value, injected in exactly two places (`MemberTurnExecutor` at member-turn start, `GroupLifecycleOps` for follow-ups), both `context.put("groupId", ...)`.
+
+So the property lookup returned null on every group member turn, `groupIds` stayed empty, and the tool silently ran self-scoped. The asymmetry is what makes it easy to miss: conversation *init* reads the context correctly (`Conversation.extractGroupIds`), so group-visible memories **were** loaded into the turn — they just could not be recalled or written back through the tool. A group whose members were configured to share memory quietly behaved as if they did not, with no error anywhere.
+
+**The defect predates this branch** — it is on `main` at `AgentOrchestrator:2298`, and R2a moved it verbatim into the extracted provider. Worth stating plainly: a "pure move" refactor faithfully carried a bug across, which is the correct behavior for a pure move but means extraction reviews cannot be relied on to surface this class of defect.
+
+Now reads `context:groupId` from the current step, falling back to earlier steps (a resumed turn re-enters without the original context map) and finally to the property, so a config that genuinely sets a `groupId` property still works. Follows the same context-resolution shape `DynamicAgentToolsProvider.resolveDelegationDepth` already uses for its own context key.
+
+6 new tests in `ContextualToolsProviderGroupIdTest`, mutation-checked: restoring the property-only read fails exactly the three context-sourced cases and leaves the property-fallback and no-group cases passing.
+
+---
+
+## ✨ feat(groups): Group cost ceiling + attribution (I1) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+First Wave 1 item, and the first thing built on Wave 0's foundations — F5's `GroupCostLedger` supplies the running spend this gates on. A discussion multiplies cost (members × phases × repeats × tools) and nothing capped dollars before this.
+
+**`ProtocolConfig` gains `Double maxCostPerDiscussion` (null = unlimited) and `CostPolicy onCostExceeded`** — `SYNTHESIZE_NOW` (default: stop scheduling work, jump ahead to the next remaining SYNTHESIS phase so the run still concludes with an answer) or `ABORT` (fail immediately). The record's canonical constructor normalizes a null policy, so no reader null-checks it; two backward-compat constructors keep all ~30 existing call sites compiling unchanged.
+
+**The gate is one method, `GroupCostLedger.enforceCeiling`, called from five sites**: before each sequential speaker, before a parallel batch fans out, before each peer-targeted turn, and before each `TaskForceEngine` PLAN / EXECUTE-wave / VERIFY turn. It records a `SKIPPED` transcript entry naming spend, ceiling and policy, and leaves a read-once signal the phase loop acts on. PARALLEL is necessarily whole-batch — there is no mid-fan-out checkpoint — which is the same accepted overshoot the spec already documents for a single in-flight turn.
+
+**Six defects found and fixed before this landed** — three by the tests as they were written, three by an adversarial review pass afterwards:
+
+- **`SYNTHESIZE_NOW` was gating its own synthesis phase**, making it behave identically to `ABORT` and never produce the answer the policy exists to deliver. The synthesis phase is now exempt under that policy (and only that policy).
+- **A default-locale money format** rendered `$1,50` on a decimal-comma JVM and `$1.50` on another for the same spend — pinned to `Locale.ROOT`, since the string lands in an audit transcript and in operator log triage.
+- **One overspend was reported many times.** The skip-ahead flag was set inside the *repeat* loop without breaking it, so a phase with `repeats > 1` (ROUND_TABLE's default "Discussion" is `rounds - 1`) re-entered its executor per remaining repeat, re-tripping the gate — one more identical entry and one more `eddi_group_cost_ceiling_hit_total` increment each time.
+- **PLAN and VERIFY had no gate at all**, so a TASK_FORCE discussion still paid for planning and verification with its budget already blown. Both now gate like EXECUTE.
+- **A fully-consumed inherited budget (`0.0`) granted a free turn**, because `totalCost <= ceiling` passes at `0 <= 0` — and under the synthesis exemption, two. Zero is now always stopping.
+- **Completing with no answer looked like ordinary success.** If the ceiling fires and no SYNTHESIS phase remains (a DELPHI-style config of pure opinion rounds; a resume already past synthesis), the run now says so via an ERROR transcript entry and an `onGroupError` event instead of returning COMPLETED with a null answer.
+
+**Nested groups inherit `min(own ceiling, parent's remaining)`**, threaded through a new internal 7-arg `discuss` overload deliberately kept off `IGroupConversationService` — every external caller starts at depth 0 with no parent, and the one caller that has a parent holds the concrete class already. **One known bound is documented rather than papered over**: N nested GROUP members dispatched *in parallel* each read the same remaining budget, so a batch can collectively reach N×remaining. Bounding that needs budget *reservation* at dispatch, not a read of the current remainder — a design change with its own question (how unspent slices return), not a tweak. Sequential nesting, the common shape, is exact.
+
+Also: a save-time warn-and-coalesce for a non-positive ceiling (which would otherwise stop the first turn of every discussion that group ever runs), a `eddi_group_cost_dollars` gauge fed per-leg as a delta so a resumed leg cannot double-count, and the `eddi_group_cost_ceiling_hit_total` counter.
+
+19 new tests across `GroupCostCeilingTest` (the gate in isolation), `PhaseExecutionEngineTest` (all three turn-order call sites) and `GroupConversationServiceCostCeilingTest` (the full loop: both policies end-to-end, single-report-per-overspend, attribution, inherited-budget wiring). Four mutation checks — removing the sequential gate, the skip-ahead guard, the synthesis exemption, and the ABORT branch each fail exactly their own tests. Two weak tests found and replaced during review: one asserted `totalCost == sum(memberCosts)`, restating the ledger's own invariant so it could never fail; the skip-ahead test originally had only one trailing non-synthesis phase, which cannot distinguish the guard from the per-phase gate — it now has two, and the mutation fails as it should. Full group/HITL/config battery green (1,167 tests); Checkstyle unchanged.
+
+---
+
+## 🔍 review: Wave R branch review + PR nitpicks (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Critical pass over the whole branch after Wave R completed, plus every open automated-review comment.
+
+**The extractions were verified structurally, not just by a green suite.** Two checks that a passing test run cannot give you: (1) every method signature present in the pre-branch `AgentOrchestrator` and `ConversationService` was matched against the union of the facade plus every new collaborator — none vanished; (2) a line-level diff of the old class against the new set, ignoring comments and braces, left 23 unmatched statements, and each was confirmed to be an intentional qualifier rewrite with its qualified counterpart present (`getAgent(` → `conversationService.getAgent(`, `CancelOutcome.X` → `IConversationService.CancelOutcome.X`, and so on). Construction ordering in the `ConversationService` constructor was checked positionally: every dependency of `ConversationStepRunner` is assigned before it is built.
+
+**Three dead locals removed from `ToolLoopRunner.executeWithTools`** — `toolExecutors`, `toolSources`, `builtInSpecs` each read a `ToolSetup` component and were then never used. Dead since long before this branch; only visible once the method had a file of its own. The method hands the whole `ToolSetup` down to `runToolCallLoop`, which reads those components itself.
+
+**The recurring "useless parameter" findings on `GroupContextBuilder` are now documented in place rather than left to be re-reported forever.** `selectDefaultTemplate`'s `transcript`/`phaseIdx` and `buildPlainTextFallback`'s `transcript` are genuinely unused — and removing them breaks the build, because the characterization suite resolves both through `getDeclaredMethod(..., DiscussionPhase.class, List.class, int.class)`, which matches on exact parameter types. 44 test references depend on those signatures. A static analyser cannot see a reflective call site; a comment at the declaration can tell the next person why the obvious fix is wrong.
+
+656 tests green across the affected batteries; CI green on the Wave R commit (Build & Test, CodeQL, Trivy, Secret Scanning, Analyze).
+
+---
+
+## 🧩 refactor(conversation): extract ConversationStepRunner — Wave R complete (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R3 step 2, and with it **Wave R is done**. All three monoliths are decomposed:
+
+| Class | Before | After |
+| --- | --- | --- |
+| `GroupConversationService` | 4,417 | **1,422** |
+| `AgentOrchestrator` | 2,725 | **1,163** |
+| `ConversationService` | 2,735 | **1,174** |
+
+**Checkstyle is down from 8 violations to 6, and every remaining one is a pre-existing `LineLength` in a file this branch never touched. There is no `FileLength` violation left anywhere in the codebase.**
+
+With the HITL cluster gone, what was left in `ConversationService` was two things wearing one name: the public `IConversationService` surface (start, say, read, undo/redo, access checks) and the machinery that actually executes a turn. `ConversationStepRunner` is the machinery; the facade is the surface.
+
+**The processing gauge and its release token are the delicate part.** `ProcessingTurn` increments `processingConversationCount` on construction and releases exactly once, and every path out of a turn — normal completion, timeout, abandonment, a pre-submission throw — must release it, or the gauge drifts upward forever and the graceful-shutdown drain waits on turns that already finished. Both the token type and `releaseTurn` stay on the facade, shared by reference, because `say`/`sayStreaming` create the token before the runner ever sees it.
+
+**Two bounds errors caught before they could hide.** The first extraction attempt sliced into `getAgent` (the method has no javadoc, and the walk-back heuristic overshot); the second still overshot by two lines. Both produced immediate parse errors rather than silently valid-but-wrong code — which is the argument for cutting exact ranges and letting the compiler check the seam, rather than retyping and hoping. Reverted cleanly both times via `git checkout --`.
+
+2,640 tests green across every group, orchestrator, conversation and HITL battery.
+
+---
+
+## 🧩 refactor(conversation): extract ConversationHitlService (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R3 step 1. **`ConversationService`: 2,735 → 1,515 lines** — and with it, **no `FileLength` Checkstyle violation is left anywhere in the codebase.** Both monoliths this plan set out to decompose are now under the limit.
+
+The HITL cluster was the back ~43% of the class and had almost nothing to do with the front. `ConversationService` is fundamentally "run a turn"; this is "a turn stopped, and a person is deciding what happens next" — cancel and resume, per-tool decision validation, the no-progress guard, approval timeout scheduling and bookmarks, effective-policy resolution, and the compliance audit trail for all of it. The two halves share conversation memory and the coordinator, and little else.
+
+**Resume re-enters the facade deliberately.** Applying a verdict eventually means running the rest of the turn, and that has to be the same `say`/step machinery a normal turn uses — a second, resume-shaped copy of turn execution is exactly how post-approval behaviour drifts from ordinary behaviour without anyone noticing. Hence the back-reference for the eight facade members the cluster calls. Same pattern and same safety argument as `GroupHitlCoordinator` in R1.
+
+**One real trap, caught by the tests.** The collaborator was first built in a `@PostConstruct`, which never fires for the ~34 test classes that construct `ConversationService` with `new` — 12 tests failed with NPEs on a null collaborator. Moved into the constructor, which is what plan rule 3.0-4 (collaborators are plain classes the facade constructs) exists to prevent in the first place. Everything it needs is a constructor parameter or a field initializer, so there was never anything to wait for.
+
+Bare-token sweep first, as always: `resumeConversation` (118 test refs), `cancelConversation` (83), `listPendingApprovals` (46), `CancelOutcome` (27) — the `IConversationService` contract methods — plus reflection-reached internals. All keep declared delegators, and the front half's own calls into the cluster (`scheduleHitlTimeout`, `populateHitlTimeoutBookmark`, `deleteHitlTimeoutSchedule`, `auditHitlCancellation`, `fireHitlResumeCompletedTerminal`, `populateToolApprovalsConfig`) now route through the extracted service.
+
+1,355 tests green across the conversation, HITL and MCP batteries.
+
+---
+
+## 🧩 refactor(orchestrator): extract ToolLoopRunner + ToolLoopResumer — R2 complete (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 5, and with it R2 is done. **`AgentOrchestrator`: 2,725 → 1,163 lines.**
+
+`ToolLoopRunner` owns the live loop — drive the model, gate and execute the tools it asks for, meter cost and context budget, pause when a gated call needs a human. `ToolLoopResumer` owns the other way in: replay the transcript, apply the human's verdicts call by call, hand back to the same loop.
+
+**The two share one execution pipeline by construction, not by convention.** Every approved call goes through `ToolLoopRunner.executeSingleToolCallResult` and the continuation through `runToolCallLoop`, so rate limits, cache hits, cost charges, tenant budgets and LAZY activation behave identically whether a call was requested by the model or approved by a person. That was already true; it is now stated at the top of both classes, because two classes sharing one pipeline is much easier to break than one class calling itself — and a divergence there is the kind nobody notices until an audit asks why approved calls were priced differently.
+
+**Moved by exact line ranges rather than retyped.** ~470 lines of live LLM-execution code, and the failure mode of a hand-transcription slip in `runToolCallLoop` is a silent behavioural change in the path every agent turn takes. A script cut the source ranges verbatim and rewrote only the call sites that had to change: seven cross-class calls in the runner (now `ToolContextBudget.*` / `gateSupport.*`), and the resumer's calls back into the facade for tool assembly and into the runner for the shared pipeline.
+
+`ToolLoopResumer` holds a reference back to `AgentOrchestrator` for exactly two things resume genuinely needs from the facade — `buildToolSetup`, so a resumed turn rebuilds tooling through the same provider assembly the live path used, and `collectEnabledTools` for the history-rebuild fallback. Same pattern and same safety argument as `MemberTurnExecutor`'s self-reference in R1: the constructor only stores it. `ENVELOPE_MAPPER` moved along with its only two callers.
+
+Bare-token sweep before the move, as always: `activateDiscoveredTools` (28 refs), `toJson` (10), `restoreActiveSpecs` (9) are reached via `getDeclaredMethod`, and `auditOutcomeUnknown` is a direct instance call — all four keep declared delegators, along with everything else in both clusters.
+
+1,004 tests green. Checkstyle is down to 7 violations, and the only `FileLength` one left is `ConversationService` — R3's target.
+
+---
+
+## 🧩 refactor(orchestrator): introduce IAgentOrchestrator (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 6. Two methods, because there are exactly two ways into the tool loop: `executeIfToolsEnabled` and `resumeToolLoop`. Everything else `AgentOrchestrator` exposes is internal or test-facing, and hoisting it would turn a seam into a second copy of the class's surface.
+
+**Package-private, and in `modules.llm.impl` rather than an `api` package** — deliberately. `ExecutionResult` is a package-private nested record; moving the interface elsewhere would have meant promoting it purely to satisfy a file's location, widening a genuinely internal type for cosmetics. A public interface whose methods return a package-private record compiles but cannot be called from outside anyway, which is worse than matching the visibility that already exists. Both consumers (`LlmTask`, `CascadingModelExecutor`) live in that package already.
+
+The two implementing methods widen from package-private to `public` — required, since interface methods are implicitly public. Effective visibility is unchanged: the class itself is package-private.
+
+The 13 orchestrator test classes are untouched. They construct the concrete class and reach its package-private internals, which is exactly why this is a pure-move commit and not a migration. 701 tests green.
+
+---
+
+## 🧩 refactor(orchestrator): extract ToolApprovalGateSupport (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 4 — the gate's supporting cast: per-turn pause accounting, the approver-facing pause reason, the durable `PendingToolCallBatch` snapshot with its size caps, the batch fingerprint, tool-call-id normalisation, and the pause-cap guard's metric/audit emission. Pure move.
+
+**`AgentOrchestrator`: 2,127 -> 1,904 lines — under the 2,000-line Checkstyle `FileLength` limit it has exceeded for its entire history.** That was never the point of R2, but it is a fair marker of how much of this class was never orchestration.
+
+The cluster was mechanical to move because almost all of it is static; it accompanies `ToolApprovalGate`, which decides *whether* a batch pauses, while everything here is what happens once it does. The two were always a pair — the gate is self-instantiated by the orchestrator and these helpers sat in a labelled block beside its call sites — and lived in `AgentOrchestrator` only because that is where the loop is.
+
+**Every one stays as a declared delegator, and the reason is specific.** A bare-token sweep across the test tree first: `fingerprint` 25 references, `maxPausesPerTurn` 16, `buildPauseReason` 13, `normalizeToolCallIds` 10, `buildPendingBatch` 10, `readToolPauseCount` 3. Four of those are reached via `AgentOrchestrator.class.getDeclaredMethod(...)`, which resolves only methods declared on that exact class — inlining them at call sites would have broken the characterization suite even though nothing in production would notice — and `buildPendingBatch` is called directly as an instance method eight times. Signatures and modifiers are preserved verbatim.
+
+442 tests green across the orchestrator, gate and HITL batteries.
+
+---
+
+## 🧩 refactor(orchestrator): buildToolSetup now iterates providers (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 done — the rewiring the SPI was introduced for. `buildToolSetup` no longer calls each source by name; it assembles them through `ToolSourceRegistry`. Adding a tool source is now adding a provider, which is what gates Wave 2's I5/I7/I17.
+
+**Two phases, because assembly was never one uniform pass.** Phase 1 is the object-producing sources; phase 2 the externally-discovered ones. Between them sit two things a single loop cannot express: LAZY's `discover_tools` meta-tool, which advertises the specs phase 1 just produced and so can only be built once they exist, and the `builtInSpecs` snapshot LAZY later activates against, which must be taken before any external source merges in. `ToolSourceRegistry.Merger` exposes exactly that half-assembled view while keeping one collision namespace across the whole turn — two independent `assemble` calls would have lost that, and an MCP tool could then have silently shadowed a governed built-in.
+
+**`AttachmentToolsProvider`, split out of `ContextualToolsProvider`, for a concrete reason.** The pre-SPI `collectAllBuiltInTools` added `readAttachment` *after* the dynamic-agent tools in its whitelist branch. Leaving it inside the contextual provider would have moved it ahead of that block for any agent with both a dynamic-agent whitelist and attachments in the conversation — a small, silent change to the order the model sees its tools, and exactly what a pure move may not do. Its own provider, assembled last, reproduces the old order exactly. It also happens to be the more honest grouping: unlike user memory and recall, this tool sits outside `enableBuiltInTools` and the whitelist entirely.
+
+**The merge rules are `mergeExternalTools`' rules, carried over verbatim** — a spec with no name, or with no executor to dispatch to, is dropped with a WARN. Both paths previously differed here (the built-in path added specs unconditionally), and the stricter rule is the correct one: a spec the model can call but nothing can run costs it a turn and returns an error.
+
+**A dropped signal, now carried.** `McpToolsProvider.discover` computed per-server failures and threw them away, exactly as the pre-extraction code did — so an unreachable or misconfigured MCP server had no signal above one log line. It now accumulates them across servers and maps them onto `ProviderFailure`, which the registry collects for the turn. The two `Kind` enums were already one-to-one.
+
+**The dangerous leftover, and what protects it.** `collectEnabledTools` now has no production caller — but several characterization tests call it directly, so deleting it would mean rewriting the safety net mid-refactor. Left in place, routed through the same provider instances, and pinned by a new `AgentOrchestratorLocalToolAssemblyTest` that asserts both paths yield the same tools in the same order across seven configurations. Without that test it would be precisely the kind of dead lookalike that keeps a suite green while production drifts. Mutation-checked: dropping one provider from the phase-1 list fails 5 of its 8 tests, and its output shows the two paths agreeing on a 32-tool list.
+
+1,086 tests green across the group and orchestrator batteries; `AgentOrchestrator` is temporarily up to 2,127 lines (the rewiring adds before the loop/gate/resume extractions remove).
+
+---
+
+## 🧩 feat(groups): LiveDiscussionRegistry (Wave 0, F1) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+First Wave 0 foundation, in its plan-mandated home: `executeDiscussion`'s registration point.
+
+**Why now, with no consumer yet.** I5 (agent-writable shared task list), I7 (runtime recruitment) and I17 (shared artifacts) all need an LLM tool, running mid-turn, to mutate the *running* discussion. The loop persists via whole-document `conversationStore.update(gc)` after each phase boundary — a tool writing through a separate store call would be clobbered by the loop's next stale-snapshot write. The only race-free fix is for the tool to mutate the exact same in-memory `GroupConversation` instance the loop holds, so the loop's next persist picks up the mutation as part of its own snapshot. That requires the tool to be able to find that instance — which is all this registry does.
+
+**`@ApplicationScoped`, unlike its R1 packagemates — deliberately.** Rule 3.0-4 keeps the R1 extraction collaborators (`GroupContextBuilder`, `MemberTurnExecutor`, etc.) as plain constructor-built classes because ~34 test classes construct `GroupConversationService` directly; a constructor signature change breaks all of them for no functional gain. F1 is the rule's own carved-out exception: a genuinely new bean dependency, field-injected exactly like `attachmentStore` (`@Inject LiveDiscussionRegistry liveDiscussionRegistry;`, `null` in the direct-construction tests, every call site null-checked).
+
+**Wired at the two points the plan specifies, and nowhere else.** `register(gc)` at the top of `executeDiscussion` — which covers both a fresh start and a resume, since `GroupHitlCoordinator#resumeDiscussion` re-enters through that exact method, not a separate path. `unregister(gc.getId())` unconditionally in the `finally` block, which already runs on every exit (completion, pause, cancel, failure) for the control-token cleanup beside it.
+
+**One inaccurate assumption caught before it shipped as a comment.** The first draft of the `finally`-block comment claimed `commitPause` runs *after* `executeDiscussion` returns to its caller, and that this was why there's no window where the registry says "running" while the store already says paused. Checking the actual call sites (`commitPause(...)` followed immediately by `return gc;`, twice, inside the phase loop) showed this is backwards: `commitPause` persists the pause from *inside* the same call, before the `finally` that unregisters. The window does exist — briefly, within the same call — and is harmless for a different reason: by the time `commitPause` runs, the phase loop has already produced every member turn it's going to for this leg, so nothing remains that could look the registry up before `finally` runs moments later. Corrected in place rather than left as a false comment for the next reader.
+
+10 new tests: `LiveDiscussionRegistryTest` (8) proves the class's identity semantics directly — `get` returns the *exact* instance `register` was given (asserted with `assertSame`, never just `equals`, since identity is the entire point), a same-id `register` replaces rather than accumulates, and discussions are tracked independently. `GroupConversationServiceLiveDiscussionTest` (3, new file) proves the wiring itself using a spied registry and an empty-phase-list discussion that falls straight through to the completion path — register-then-unregister in order on normal completion, unregister still fires when the completion path throws, and a null registry is a no-op. Mutation-checked: removing the two wiring calls fails exactly those two wiring tests.
+
+687 tests green; Checkstyle unchanged at 6 pre-existing violations.
+
+---
+
+## 🐛 fix(groups): DEBATE opposingArguments team-filter bug (V6(a)) — resolves Wave 0 verify tasks V5-V7 (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Closing the plan's Wave-0-gate verify tasks before starting F1-F6, per §2's own instruction that findings get recorded and, if confirmed, fixed in a separate labeled commit.
+
+**V5 (same-JVM invariant) — confirmed.** `MemberTurnExecutor.executeAgentTurn` calls `conversationService.say(...)` directly, in-process; there is no dispatch boundary between the discussion loop and a member's turn. F1's `LiveDiscussionRegistry` (next) relies on this.
+
+**V6(a) (DEBATE `opposingArguments` team-filter bug) — confirmed and fixed.** `GroupContextBuilder`'s ARGUE/REBUTTAL branch filtered "opposing" transcript entries by `!speakerAgentId.equals(speaker.agentId())` — excluding only the speaker's own entries, not their team's. The comment even flagged it: "filtered by different speaker, not role label." This was correct only by coincidence for the shipped 1-PRO/1-CON preset — but `resolveParticipants`'s `ROLE:PRO`/`ROLE:CON` selector resolves against *every* member sharing that role, with no cap of one per side (`GroupConversationService.resolveParticipants`). A group with 2 PRO + 2 CON members would show a PRO speaker their own PRO teammate's argument folded into `opposingArguments`.
+
+Fixed by resolving each entry's speaker against the full roster and excluding same-role teammates, not just the speaker itself. `buildPhaseInput` gained a `List<GroupMember> allMembers` overload (the roster, threaded from `PhaseExecutionEngine`'s `config.getMembers()`, which all three phase executors already receive); the pre-existing 6-arg overload falls back to the old not-me filter when no roster is available, preserving every existing caller and reflection-pinned test byte-for-byte. A `null` role also falls back to not-me, since there is no team to resolve.
+
+This incidentally resolves the "useless parameter" finding on `PhaseExecutionEngine`'s `config`: threading the roster through gives all three phase executors a real use for it, so the Javadoc explaining why it stayed unused is now simply deleted rather than needed.
+
+**V6(b) (docs/group-conversations.md accuracy) — deferred**, no in-flight session found (`git log --all` shows nothing touching that file since the merge); tracked separately, not gating Wave 0.
+
+**V7 (dynamic tools skipped without whitelist) — already resolved during R2.** `DynamicAgentToolsProvider.contribute()` now gates on `enableBuiltInTools` (fixed in the R2 review pass); the whitelist-vs-no-whitelist asymmetry the plan flagged is preserved verbatim and documented in that class's Javadoc as a deliberate, separately-tracked behavior decision — not silently changed inside a refactor.
+
+4 new regression tests in `GroupContextBuilderTest` (multi-team exclusion, no-roster fallback, null-role fallback, case-insensitive `teamSide`), mutation-checked: reverting to the not-me filter fails exactly the multi-team test. 677 tests green.
+
+---
+
+## 🧩 feat(groups): Speaker-level ResumePoint (Wave 0, F2) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Second Wave 0 foundation. Today, every group HITL pause is a phase/task boundary bookmark — resuming re-enters a whole phase (`TASK`) or the next one (`PHASE`). F2 adds a finer bookmark for a pause landing *inside* a running `SEQUENTIAL` phase's speaker list, so a resume can skip the speakers that already ran instead of re-running the whole phase. No producer sets one yet — like F1, this is infrastructure for I6 (human as a group member), which will pause between one speaker and the next.
+
+**`GroupConversation.ResumePoint`** is a nested record — `{phaseIdx, repeatIdx, speakerIdx, pauseKind}` — deliberately independent of `HitlPauseType`. Resume logic keys off "is `resumePoint` non-null," not a pause-type tag, so it never has to guess which enum value I6 eventually uses. `executeDiscussion`'s phase-dispatch block reads and clears it in the same step, only once, for the exact `(phaseIdx, repeat)` it names — a stale offset can never bleed into a later phase or repeat within the same resumed leg.
+
+**`PhaseExecutionEngine.executeSequentialPhase` gained a `startSpeakerIdx` overload**, clamped to `[0, speakers.size()]` — an out-of-range offset produces zero turns rather than an `IndexOutOfBoundsException`. `PARALLEL` phases never receive the offset: a parallel phase fans every speaker out and joins at the end, so there is no partial-progress state to bookmark, and re-running a member whose turn already landed is redundant work, not a correctness problem, the way it would be for a stateful sequential order.
+
+**`GroupHitlCoordinator.resumeDiscussion` gained a second bookmark-drift guard, alongside the existing phase-name one.** If the config changed while paused and the bookmarked phase's roster is now shorter than or equal to `speakerIdx` (a member removed, or the phase itself gone), the pause is restored instead of resumed. This is not a hypothetical: the mutation check for this guard showed that *without* it, the existing `PhaseExecutionEngine` clamp silently produces zero turns for that phase and the discussion sails through to `onGroupComplete` — a discussion that quietly skipped every remaining speaker in the paused phase, with no error and no signal to the operator. The guard turns that into a restored pause plus an actionable transcript/SSE error, the same shape as the phase-name drift branch it sits beside.
+
+**One deliberate scope boundary, documented rather than silently accepted.** `repeatIdx` only gates *which* repeat of a `repeats() > 1` phase gets the speaker offset — the resumed leg's repeat loop still starts at 0, so earlier repeats of the same phase replay in full before reaching the bookmarked one. This mirrors what a `TASK` pause already does for a whole phase (safe there because `findExecutableTasks` is idempotent). Whether it stays safe for a speaker-level pause depends on I6's own design — noted on `ResumePoint.repeatIdx()`'s Javadoc rather than solved speculatively for a producer that does not exist yet.
+
+`GroupConversationService.resolveParticipants` widened from `private` to `public` — `GroupHitlCoordinator`'s new guard needs the same roster-resolution logic the phase loop uses, and the only existing coupling to it was reflective (`getDeclaredMethod`), which resolves regardless of visibility.
+
+4 new tests, all mutation-checked: `PhaseExecutionEngineTest` gets the resume-skips-earlier-speakers case and the out-of-range clamp; `GroupConversationServiceHitlTest` gets the roster-shrink-restores-the-pause case and a defensive PARALLEL-phase case (a bookmark present but ignored, every speaker still runs, cleared regardless). Reverting each of the three behavioral changes in turn fails exactly its own test and no others. 825 tests green across the full group and HITL batteries; Checkstyle unchanged.
+
+---
+
+## 🧩 feat(groups): DecisionRecord (Wave 0, F3) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Third Wave 0 foundation. Every group discussion today concludes in prose (`synthesizedAnswer`) — a caller that wants to branch on a winner, a vote tally, or an award has to parse it. F3 adds the typed alternative: a `DecisionRecord` field, surfaced everywhere a discussion's state already surfaces. Like F1 and F2, no producer sets one yet — I3 (verdicts), I11 (agreements), I14 (votes) and I18 (awards) are the eventual writers.
+
+**`GroupConversation.DecisionRecord`** — nested record, same placement convention as `TranscriptEntry` and `ResumePoint` — `{DecisionType, outcome, winner, tally, dissents, method, decidedAtPhase, raw}`. `DecisionType` is `VERDICT | VOTE | AGREEMENT | AWARD | NONE`; `method` is a free-text tag (`"debate-judgment"`, `"majority"`, ...) rather than an enum, deliberately, so later features can name new mechanisms without touching this record. `NONE` is not "absent" — it is the documented fallback every producing feature is expected to use when its own judgment/tally parse fails, with `raw` holding the unparsed text for audit, so a parse failure never has to choose between losing the source material and leaving the field silently `null`.
+
+**Surfaced for free in two of the three places.** `RestGroupConversation.readGroupConversation` and `McpGroupTools.read_group_conversation` both already return the whole `GroupConversation` via direct Jackson serialization — a getter is all either needed. The third surface, the SSE stream, needed the usual four-part addition: `EVENT_DECISION_REACHED` constant, `DecisionReachedEvent` payload record, a default no-op `onDecisionReached` on `GroupDiscussionEventListener` (so neither existing implementer breaks), and the SSE consumer override in `RestGroupConversation`'s streaming listener — same shape as every other event in the sink, copied from `onSynthesisStart`.
+
+**Slack gets a real (not stub) `onDecisionReached` override**, styled after `onTaskVerified`'s informational post rather than the heavier HITL approval Block Kit card — a decision is news, not a request. Skips posting for `type=NONE`: that is the producing feature's own parse failure, not something worth surfacing to a channel that can't do anything about it.
+
+11 new tests: `GroupConversationTest` covers the new field's default/round-trip plus `DecisionRecord`/`Dissent` accessors and the `DecisionType` value set; `SlackGroupDiscussionListenerTest` covers the formatted post (type, outcome, winner, dissent count), the `NONE`-skips-posting guard, and a null-decision defensive case — mutation-checked by disabling the guard, which fails exactly those two tests (the null case as an actual `NullPointerException`, confirming the guard is load-bearing, not decorative). 1030 tests green across the full group, HITL and Slack batteries (27 unrelated `SlackWebApiClientTest` failures are a pre-existing sandbox limitation — that class opens a real loopback `HttpClient` in `setUp`, which this environment cannot do; untouched by this change). Checkstyle unchanged.
+
+---
+
+## 🧩 feat(groups): Transcript entry types + visibility matrix (Wave 0, F4) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Fourth and last Wave 0 *type* foundation (F5/F6 remain). Ten new `TranscriptEntryType` values for the items F1–F3 already reference by name in Javadoc but that had nowhere to land: `ABSTAINED`, `DISSENT` (I4); `CONVERGENCE` (I2); `FACILITATION` (I12); `VOTE` (I14); `PROPOSAL`, `BARGAIN` (I11); `HUMAN_INPUT` (I6); `RETRO` (I8); `BID` (I18). Same as every prior Wave 0 piece — no feature writes one of these yet.
+
+**The peer-visibility matrix is the actual point, and it is the spec, not documentation of one.** `GroupContextBuilder.filterByScope` decides what a group MEMBER's own turn context includes — the single place, per its class Javadoc, this was always meant to land. `ABSTAINED`, `CONVERGENCE`, `FACILITATION` are unconditionally peer-hidden (a pass, a judge's score, a facilitator's intervention are process bookkeeping, not a contribution a peer should react to). `VOTE`/`BID` are conditionally hidden — blind while their *own* phase is still running (`entry.phaseIndex() == currentPhaseIdx`, a ballot/bid cast so far this round) and visible once that phase completes and a later phase looks back — commit-reveal, not permanent concealment. Everything else, including the four new peer-visible types, follows every pre-F4 type's default.
+
+**Observers were already unaffected — no code needed there.** SSE (`RestGroupConversation.readGroupConversation`, the SSE listener's `SpeakerCompleteEvent`) and Slack read `GroupConversation`/its transcript directly; neither ever called `filterByScope`. "Observers see everything" was already true by construction — the plan's phrasing describes the existing boundary between peer and observer, not a new one this commit draws.
+
+**One deliberate non-change, called out where a reviewer would look for it.** The SYNTHESIS phase's own transcript-building filter (`buildPhaseInput`'s `SYNTHESIS` branch) has always been a separate inline filter, never routed through `filterByScope` — it already saw everything `filterByScope` now starts hiding from ordinary peers. Left as-is (a synthesizer needs the full picture to summarize accurately) with a comment explaining why, rather than silently gaining new blind spots or silently being pulled into the matrix without discussion.
+
+**One pre-existing test would have gone red without a fix.** `GroupConversationTest.transcriptEntryTypes` asserted an exact count (`15`) of `TranscriptEntryType.values()` — caught before the battery run, updated to `25` with the ten new values asserted by name alongside it.
+
+4 new tests: `GroupContextBuilderTest` gets a table-driven test enumerating expected visibility for all 25 entry types (asserting `expected.size() == TranscriptEntryType.values().length` first, so a future entry type added without updating the table fails loudly instead of silently defaulting to visible) plus two focused tests for `VOTE`/`BID`'s still-running-vs-completed transition. Mutation-checked: reducing `isVisibleToPeers` to `return true` fails exactly those three tests — the table-driven test on its first mismatch (`ABSTAINED`), both dedicated tests on the still-running case — while the other 21 pre-existing tests in that class stay green. Full group/HITL/Slack battery green; Checkstyle unchanged.
+
+---
+
+## 🧩 feat(groups): GroupCostLedger (Wave 0, F5) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Fifth Wave 0 foundation, and the first one that had to answer an open question before it could be built: F5's own spec text says "if V1 shows model-call costs are missing from the tracker, close that gap first." V1 (dollar-cost source coverage) had never actually been answered — no changelog entry recorded a finding, despite being informally bundled into an earlier "verify tasks V1, V3–V7" checkbox. Answered now, with file:line evidence: `ToolCostTracker` covers tool executions only; the multi-model cascade's admin-configured $/1M-token pricing is the only other dollar source; a plain non-cascade member turn's own model-completion cost is recorded **nowhere** — `LlmTask`'s own Javadoc says so directly ("There is no token price table for non-cascade tasks, so those contribute tool cost only"). **The gap is real, confirmed — but closing it is I1's job, not F5's**, per the plan's own division of labor (V1: *"if so, I1 must add model-call cost recording"*; the dependency graph has F5 feeding I1, not the reverse). F5 builds the accumulation plumbing against whatever cost signal exists today; I1 (Wave 1) adds the missing signal and the ceiling/attribution logic on top — its own "Guardrails" section already treats a partial cost read as a normal, guarded case ("cost-read failure never kills a discussion... treat 0"), confirming the plan never expected this signal to be complete at Wave 0.
+
+**`GroupCostLedger`** is a stateless static helper (no new bean, no facade constructor change) with two entry points. `accumulateMemberCost` reads `MemoryKeys.AUDIT_COST` — the member's own private conversation's cumulative tracked cost — off the last step of the post-turn snapshot, mirroring `GroupLifecycleOps.propagateDynamicAgentTracking`'s exact existing pattern for reading step data back out of a `SimpleConversationMemorySnapshot`. `accumulateNestedGroupCost` rolls a `MemberType.GROUP` member's child discussion's own `totalCost` up whole once `executeGroupMemberTurn` gets it back — recursive by construction, since the child's members fed it through this same method.
+
+**Set, never added.** `AUDIT_COST` is itself cumulative (`LlmTask.accumulateCost` adds each turn's delta into a running total already), so a second turn's value already includes the first's — `memberCosts.put(agentId, cost)` replacing the entry, not `merge(..., Double::sum)` adding to it, is the only correct reading. `totalCost` is recomputed as the sum of `memberCosts.values()` on every update rather than tracked as its own running accumulator, which keeps it from drifting out of sync under a PARALLEL phase's concurrent member turns and makes a duplicate call for the same turn idempotent. The read-resum sequence is `synchronized` on `gc.getMemberCosts()` — the same per-field-monitor idiom `PhaseExecutionEngine` already uses for the transcript list — since two members finishing in the same instant could otherwise race a stale sum back over a fresher one.
+
+**Attributed before the nested-HITL guard, deliberately.** A nested sub-group that pauses for approval gets cancelled (nested HITL isn't supported in v1) — its cost is rolled up *before* that check, so a cancelled nested discussion still counts the real spend its members already incurred rather than silently dropping it.
+
+16 new tests, mutation-checked: `GroupCostLedgerTest` covers the null/empty/non-`Number` guards, the replace-not-add semantics, multi-member summation, last-step-only reading, and nested rollup, in isolation. `MemberTurnExecutorTest` adds two wiring tests proving `executeAgentTurn` and `executeGroupMemberTurn` actually call into the ledger (not just that the ledger's own logic is correct) — mutation-checked by deleting each call site in turn, which fails exactly its own wiring test, and by reverting `put` to `merge(..., Double::sum)`, which fails exactly the replace-not-add test with the tell-tale double-counted `0.17` instead of `0.12`. Full group/HITL/Slack battery green; Checkstyle unchanged.
+
+---
+
+## 🧩 feat(groups): Paused-document schema versioning (Wave 0, F6) (2026-08-03)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Sixth and last Wave 0 foundation — Wave 0 is now complete (F1–F6); I1–I18 (Wave 1+) are next. A paused discussion (`AWAITING_APPROVAL`, and on the single-conversation side `AWAITING_HUMAN`) can sit in storage for days — long enough for a deploy to land in between, changing the shape resume-time logic depends on. Both surfaces gain the same guard: `schemaVersion` (current = 1) checked at the top of resume, before anything reads a bookmark field. Newer than this deployment understands → refuse. Older → run registered migrations forward (a `Map<Integer, UnaryOperator<T>>` chain keyed by the version each entry upgrades *from*; a hop with no registered entry defaults to identity, the documented common case for a bump whose new fields default correctly via Jackson). Both registries are empty today — version 1 is the first version that has ever existed, so there is nothing yet to migrate from; every future Wave item that adds a resume-relevant field bumps the constant and registers its own entry, per the plan's own obligation on every subsequent item.
+
+**Two parallel implementations, not one shared one — the two resume paths' failure semantics are different enough that sharing would have meant compromising one of them.** `GroupHitlCoordinator.resumeDiscussion` loads the document *before* any state CAS, so `GroupConversationSchemaMigrations.prepareForResume` (checked `GroupDiscussionException`) is a plain throw with nothing to roll back. `ConversationHitlService.resumeConversation` CASes `AWAITING_HUMAN → IN_PROGRESS` *before* loading the snapshot, so a refusal must roll that back or the conversation wedges `IN_PROGRESS` forever — `ConversationSchemaMigrations.prepareForResume` throws an *unchecked* `IllegalStateException` instead, deliberately, so it falls straight into the method's existing generic `catch (Exception e)` that already restores the pause and rethrows as `ResourceStoreException` for every other pre-conversion failure on that path (a transient snapshot-load hiccup, an undeployed agent) — reusing that already-hardened rollback rather than adding a second one next to it.
+
+**A reassignment nearly broke effective-finality on the group side.** `gc` is captured by several lambdas later in `resumeDiscussion` (the async `resumeWork` and its nested drift-guard closures); a first attempt reassigned it (`gc = GroupConversationSchemaMigrations.prepareForResume(gc);`) after its initial `conversationStore.read(...)` assignment, which doesn't compile once anything downstream captures it. Fixed by folding the read and the version-check into `gc`'s single assignment expression instead of reassigning it — same class of fix as the `startFromPhase` ternary in F2.
+
+**Tests intentionally use fixture documents at synthetic version numbers.** There is no real "older version" today (1 is the floor), so both `*SchemaMigrationsTest` classes construct documents with an explicit `setSchemaVersion(N)` below/above current rather than relying on Jackson's absent-field defaulting — the mechanism is exercised directly, independent of whether a real legacy Mongo document would ever naturally produce that value.
+
+14 new tests, mutation-checked: `GroupConversationSchemaMigrationsTest` and `ConversationSchemaMigrationsTest` each cover current/older/newer-version handling and the newer-version no-mutation guarantee for their own type; `GroupConversationServiceHitlTest` and `ConversationServiceResumeTest` each add one wiring test proving their resume path actually calls into the version guard — the group one asserts the refusal is synchronous (`verifyNoInteractions(groupStore)`, nothing async ever starts), the single-conversation one asserts the pre-resume CAS gets rolled back. Reverting each wiring call site, and reducing each `prepareForResume` to a no-op, fails exactly the tests scoped to that change. Full group/HITL/Slack/conversation-resume battery green; Checkstyle unchanged.
+
+---
+
+## 🧩 refactor(orchestrator): BuiltinToolsProvider + close the three SPI gaps (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 completed and the rewiring unblocked. All eight tool sources now have a provider — this time actually.
+
+**`BuiltinToolsProvider` — the doubled if-chain becomes one catalog.** `collectAllBuiltInTools` listed the same nine tool beans twice: once as `if (whitelist.contains(...))` lines, once as unconditional `tools.add(...)` lines in the no-whitelist branch. Two lists of the same nine things in the same order is a drift hazard for nothing — add a tool to one branch, forget the other, and behaviour silently diverges for exactly one of the two configurations. The catalog declares each tool once with the whitelist keys that select it, and one loop serves both branches, because "no whitelist" has always meant "every entry applies". Order is load-bearing (it is the spec order the model sees) and is preserved verbatim: catalog declaration order == the old if-chain's order, which is also *not* the agent's whitelist order — the old code had that property too, since the if-chain's sequence governed. `fetch_page`/`fetch_tool_response_page` are aliases of one entry rather than two entries, which is what stops a whitelist naming both from registering the bean twice.
+
+**Gap 2: `ToolContribution` gained `toolCanonicalNames`.** Canonical names are what let the executor boundary price a call and pick its cache TTL under the configured slug (`searchWeb → websearch`) rather than the dispatch name. The record had no slot for them, so the three bean-producing providers were silently dropping what `ToolObjectReflector` had already computed — rewiring without this would have re-priced and re-cached every built-in under its method name.
+
+**Gap 3: never-throw is now structural, not a request.** The SPI asked implementations not to throw; only two of five actually didn't. Rather than adding five try/catches and hoping the sixth provider remembers, `ToolSourceRegistry.assemble` wraps every `contribute` call. It catches `Throwable`, not `Exception`, deliberately: the realistic non-`Exception` here is `NoClassDefFoundError` from an optional integration whose dependency is absent at runtime — precisely the per-source failure that must not take the other sources down with it.
+
+**`ToolSourceRegistry` also fixes merge determinism.** First-write-wins per dispatch name, so an earlier source's tool is never displaced by a later one — collisions resolve by provider order rather than by whichever map happened to be merged last, and an operator cannot shadow a governed built-in by naming an MCP tool after it. Collisions log at WARN, since a silently-dropped tool reads to the agent designer as "the model ignored my tool". Per-tool `toolSources` tags win over the provider's nominal `source()`, with `source()` as fallback only — the security property the SPI Javadoc had been describing as a specification is now the implementation.
+
+**Tests:** `ToolSourceProviderTest` (15) is the plan's R2 post-condition — a provider throwing yields an empty contribution and the loop continues, including the `Error` case, the null-return case, and every merge rule. `BuiltinToolsProviderTest` (11) pins catalog-order equivalence with the old if-chain for both configurations and the alias behaviour. 347 tests green across the orchestrator and provider batteries.
+
+---
+
+## 🔍 review: PR #626 automated-review findings — 6 more defects fixed (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Worked through every inline comment CodeRabbit, Copilot and github-code-quality left on the PR. CI is green (CodeQL, Codacy, CodeRabbit, GitBook). Six were real; two were declined with reasons; the rest were doc corrections.
+
+**Two Major, both in extracted-but-unchanged code — pre-existing, found because the extraction put them under a reviewer's nose.**
+
+1. **A member's tool-less contribution was never signed** (`MemberTurnExecutor`). When a group auto-rejects a member's gated tool call, the graceful resume path builds the transcript entry with the 9-arg constructor — no signature, nonce, timestamp or key version — while the normal path three lines away signs an identically-shaped entry. Peers read both through the same `verifyPriorEntriesIfRequired`, so a signing-enabled agent silently produced an unverifiable entry in exactly the branch where provenance matters most: its content was shaped by a rejection the agent did not choose. Now signed; `signOutgoingMessage` returns `UNSIGNED` when signing is off, so nothing changes for agents that never sign.
+
+2. **A stale snapshot could abort task verification entirely** (`TaskForceEngine`). `completedTasks` is captured before the VERIFY phase and `TaskItem` is immutable, so `task.status()` still reads `COMPLETED` for a task the phase already moved to `VERIFIED`. Concretely: a verifier LLM repeating the same subject twice makes the second match re-verify an already-verified task, tripping `verifyTask`'s `requireStatus(COMPLETED)` guard. `tryParseVerificationJson`'s catch swallows that and returns false, control falls into the fallback loop — which sits *outside* the enclosing `try` — and the same `IllegalStateException` then escapes `parseAndApplyVerification` **and** `executeTaskVerificationPhase`, losing the verifier's transcript entry and its `onSpeakerComplete` event. Both loops now re-read live status via `findById`. Three regression tests, all mutation-checked.
+
+**A cancel listener could leave dynamically created agents deployed** (`GroupHitlCoordinator`). `notifyCancelled` ran inside the same `try` as the store commit, under a blanket `catch (Exception)` that reset in-memory state to `AWAITING_APPROVAL`. A listener throwing — an SSE sink on a closed stream — therefore left the store holding `CANCELLED` while memory said `AWAITING_APPROVAL`, and `executeDiscussion`'s `finally` reads the in-memory state: it skips `forgetConversation` for `AWAITING_APPROVAL` (leaking the verification cursor) and only runs `cleanupEphemeralAgents` for `FAILED`/`CANCELLED`. Restructured so only the persist itself may revert; everything after the commit is best-effort. The pre-commit revert — a genuinely lost CAS race, where the store really does still hold `AWAITING_APPROVAL` — is kept and now has its own test.
+
+**`snippets` and `vars` were missing from `RESERVED_TEMPLATE_KEYS`** (`HttpCallToolsProvider`, found by Copilot). That set exists to stop model-supplied tool arguments from shadowing the namespaces `MemoryItemConverter#convert` produces; both are written by `addSnippetsAndVars` and were unprotected, so a prompt-injected argument named `vars` could shadow the deployment-configuration namespace that httpcall templates read as `{vars.<key>}`. The new test spells out all eight namespaces rather than deriving them, so adding a namespace without reserving it fails loudly instead of agreeing with itself.
+
+Also: `TokenCounterFactory.extractText` now never returns null (`SystemMessage.text()` and `UserMessage.singleText()` both can be, and `ToolContextBudget#tokensOf` calls `text.length()` inside the very fallback that exists to keep a turn alive); raw model-generated tool arguments are no longer written to the WARN log on a parse failure (length and tool name are); `UserMemoryTool`'s enablement log records the conversation id instead of the user id (`sanitize` strips control characters, it does not make an identifier non-personal); a `getCurrentStep()` null guard made consistent within one method; and five doc corrections, including the plan's "nonce replay protection via `NonceCacheService`" — which is true for the sending side only, since `verifyPriorEntriesIfRequired` performs no replay check at all.
+
+**Two declined, with reasons.** (1) *Gate `create_sub_agent`/`teardown_agent` at registration rather than at call time* — `CreateSubAgentTool` already enforces `isEnabled()`/`isAllowCreation()` in its body and `TeardownAgentTool` only touches agents created during the discussion, so there is no gap; suppressing registration would change what the model can see and would be a behavior change inside a pure move. (2) *Remove unused parameters* (`config`, `transcript`, `phaseIdx`, `input` on six extracted methods) — genuine dead weight, but these signatures are pinned by characterization tests that reach them through `getDeclaredMethod(...)`, which is the whole reason the delegators exist; churning them mid-refactor trades a real safety net for a cosmetic gain. Separately, `PhaseExecutionEngine`'s "collect all non-moderator members" comment was corrected rather than the code: there is no moderator filter and never was, and adding one is a group-config design decision, not something to slip into an extraction. Tracked as a follow-up.
+
+---
+
+## 🔍 review: critical pass over the whole Wave R branch — 8 defects fixed (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Four independent review agents over the branch's 12 unpushed commits, plus the automated review comments already on the PR. Everything below was found by that pass and is fixed here; nothing is deferred.
+
+**Two were real defects, not style.**
+
+1. **NPE in `GroupSigningGuard`** (found by Copilot on the PR). `agentStore.getCurrentResourceId(agentId)` returns null for an agent with no current version — routinely so on the PostgreSQL adapter — and the result was dereferenced unguarded. `GroupConversationService.discuss` already had exactly this guard; the extraction dropped it. Restored, with the reason in a comment so it survives the next move.
+2. **The `contribute()` methods on `ContextualToolsProvider` and `DynamicAgentToolsProvider` were missing the `enableBuiltInTools` gate** that the live path applies. Not yet reachable (no production caller), but this is precisely the class of bug that rewiring would have silently activated — and the dynamic-agent one deploys agents to production. Both now mirror the live enablement rules exactly, whitelist checks included.
+
+**The graceful-shutdown observer was removed rather than fixed.** Added earlier this session, it observed `ShutdownEvent` at priority 1900 to cancel in-flight discussions before `GracefulShutdownService` drained. Verified against the source rather than assumed: `shuttingDown = true` is set *inside* `drain()`, in the default-priority (2500) observer — so a 1900 observer runs while the reject gate is still open and races the very drain it was meant to precede. The `rejectIfShuttingDown()` gate it was paired with is sound and stays (now also on `continueDiscussion`/`followUpWithMember`, both asserted to throw *before* touching the store); the observer was deleted along with its tests. One of those tests was itself vacuous — it stubbed `conversationStore.read` to throw, but `cancelDiscussion` short-circuits on a live token and never reaches the store.
+
+**Three documentation defects in the new SPI, all of which would have misled the rewiring step.** `ToolSourceProvider`'s Javadoc claimed `buildToolSetup` already iterates providers (it does not — `contribute()` has zero production callers); documented `source()` as authoritative for per-tool tagging (following that would stamp one tag over a contribution that legitimately spans `memory`/`recall`/`builtin`, silently unmatching a `require: ["memory:*"]` approval pattern — an ungated persistent-memory write); and stated a never-throw contract as though implemented, when only 2 of 5 providers satisfy it. All three now say what is true today and what the rewiring step still owes.
+
+**`ToolContribution` gained a compact constructor** copying every component to an immutable view. Mutability previously varied per provider *and* per component — live `ArrayList`/`HashMap` for specs but `Map.of()` for `toolSources`. The natural merge implementation would then throw `UnsupportedOperationException` for some sources and succeed for others *depending on iteration order*: the worst failure shape available. Uniform immutability makes that mistake fail fast and identically.
+
+Also: a dead `case PLAN ->` branch in `GroupContextBuilder` that put an empty `members` list behind a false "populated by caller" comment, replaced with an accurate one; 8 write-only fields and a dead delegator deleted from `AgentOrchestrator`; 6 inline-FQN violations of AGENTS.md §4.7 fixed across three test classes, plus 5 unused imports; and five factual errors in this changelog corrected, the largest of which is the "all 8 sources" claim addressed directly in the entry below.
+
+---
+
+## 🧩 refactor(orchestrator): extract ContextualToolsProvider (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 continued — the last three object-producing tool sources: `addUserMemoryToolIfEnabled`, `addConversationRecallToolIfEnabled`, `addReadAttachmentToolIfEnabled` into `ContextualToolsProvider`. **`AgentOrchestrator`: 2,108 → 2,031 lines** — down from 2,725 at R2's start, and now 31 lines from clearing the Checkstyle `FileLength` limit it has exceeded for its entire history.
+
+**Grouped as one provider, not three — a judgment call worth stating.** The plan's §3.2 lists `UserMemoryToolProvider`, `ConversationRecallToolProvider` and `AttachmentToolProvider` as separate providers. Implemented as one, because all three share the single property that defines them: each is enabled by *what the conversation currently holds* — a user-memory config, an existing rolling summary, attachments from this or any earlier turn — on top of whatever the built-in-tools config says. (To be precise, since an earlier draft of this line overstated it: user memory and conversation recall are gated by `enableBuiltInTools` **and** the whitelist just like any other built-in, and `contribute` applies both. Only `readAttachment` sits outside those gates, being part of attachment support rather than a configurable capability. What unites the three is the *second*, conversation-state condition each one adds.) Three separate classes would each be ~20 lines of construction with identical dependencies and lifetime — bureaucracy rather than modularity. Critically, this costs nothing at the approval-gate boundary: `toolSources` provenance is derived per *tool object* by `ToolObjectReflector` (`"memory"` / `"recall"` / `"builtin"`), not from the contributing provider's `source()`, so `memory:*` and `recall:*` approval patterns behave exactly as before. If a later item genuinely needs them separable, splitting one cohesive class is a much smaller move than merging three.
+
+Per-call construction again (third occurrence): `attachmentStore` and `attachmentTextExtractor` are `@Inject volatile` fields on `AgentOrchestrator`, null at constructor time. All three methods keep declared delegators — each has two call sites across `collectAllBuiltInTools`' whitelist and no-whitelist branches.
+
+No new test class: unlike the other providers, these three methods have no new surface — `contribute` composes the same three already-covered methods, and their enablement logic is covered by `AgentOrchestratorBranchTest`/`AgentOrchestratorExtendedBranchTest`/`AgentOrchestratorCoverageTest` through the unchanged delegators. Adding a fourth near-duplicate provider test asserting "the delegator delegates" would be ceremony, not coverage.
+
+Full 20-class battery (363 tests) green; 6 more imports removed.
+
+**R2 provider extraction: 7 of the SPI's 8 named sources now have a provider class** — `HttpCallToolsProvider`, `McpToolsProvider`, `A2AToolsProvider`, `DynamicAgentToolsProvider`, `ContextualToolsProvider` (covering user-memory/recall/attachment), with `ToolObjectReflector` shared by the object-producing ones. **The 8th — plain built-ins — has no provider**: `collectAllBuiltInTools`'s ~20-branch if-chain (calculator, websearch, datetime, …) is still inline in `AgentOrchestrator`, and there is deliberately no `BuiltinToolsProvider` yet. Correcting the record: the commit message on `a8cc233b4` and an earlier draft of this entry both claimed "all 8 sources are SPI-conformant", which is false — that if-chain is the single largest source and the one the rewiring step exists to replace. Two other gaps also block rewiring, both now documented in the SPI Javadoc rather than discovered later: `ToolContribution` has no slot for `toolCanonicalNames` (which is what prices a call and picks its cache TTL), and `contribute()`'s never-throw obligation is satisfied by only 2 of the 5 providers. What remains in R2: closing those three gaps and rewiring `buildToolSetup` to iterate providers instead of calling them by name, then the `ToolApprovalGateSupport`/`ToolLoopRunner`/`ToolLoopResumer` extractions and the `IAgentOrchestrator` interface.
+
+---
+
+## 🧩 refactor(orchestrator): extract DynamicAgentToolsProvider + ToolObjectReflector (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 continued — the biggest and most safety-relevant provider extraction: the ~60-line anonymous block inside `collectAllBuiltInTools` that constructs the four dynamic-agent tools (`CreateSubAgentTool`, `ConverseWithAgentTool`, `FindAgentsByCapabilityTool`, `TeardownAgentTool`) along with every guardrail bounding them, into `DynamicAgentToolsProvider`. `AgentOrchestrator`: 2,352 → 2,108 lines.
+
+**Extracted a shared reflection helper first, because the object-producing sources genuinely need one.** The http/mcp/a2a sources arrive as specs + executors; the five *object*-producing sources (built-ins, dynamic-agent, user memory, conversation recall, attachments) arrive as beans that `buildToolSetup` reflected over in one shared loop to derive specs/executors/provenance/canonical-names. Making those five SPI-conformant — the SPI's contract being specs + executors — needs exactly one copy of that loop, not five. `ToolObjectReflector` is that copy, extracted verbatim; `buildToolSetup` now calls it, and `DynamicAgentToolsProvider.contribute` uses it to satisfy the SPI honestly rather than faking a contribution shape.
+
+**Moved with the block, because they exist only to serve it:** `resolveDynamicAgentConfig` (+`createDefaultDynamicConfig`), `seedCreatedAgentIds` (+`collectAgentIds`), `resolveDelegationDepth` (+`parseDelegationDepth`), and the two `KEY_DYNAMIC_*` tracking-key constants. The bare-token sweep found three hard class-qualified references in tests — `AgentOrchestrator.seedCreatedAgentIds`, `AgentOrchestrator.resolveDelegationDepth`, `AgentOrchestrator.KEY_DYNAMIC_CREATED_AGENT_IDS` — so those three keep delegators/aliases on the facade; `KEY_DYNAMIC_RETAINED_AGENT_IDS` has no test reference but was kept aliased anyway, since splitting a constant pair across two classes is a readability trap for the next reader. The four genuinely internal helpers moved with no delegator.
+
+**Per-call construction, third instance of the field-injection wrinkle.** `deploymentStore` (handed to `TeardownAgentTool`) is `@Inject`-field-injected on `AgentOrchestrator` and still null when its constructor runs — the same constraint that forced `GroupAttachmentBinder` (R1 step 1) and `GroupLifecycleOps` (R1 step 8) to be built per call rather than once. Added a matching `dynamicAgentToolsProvider()` factory; unlike the http/mcp providers, this one cannot be a constructor-time field.
+
+**The V7 defect is now visible instead of buried — deliberately not fixed here.** The plan's verify-task V7 is that an agent with `enableBuiltInTools=true`, *no* whitelist, and `dynamicAgents.enabled=true` silently gets none of these four tools: the no-whitelist branch of `collectAllBuiltInTools` never constructed them. Post-extraction that asymmetry is a single legible fact — the no-whitelist branch simply doesn't call this provider — rather than a subtlety hidden in a 130-line if/else. Preserved verbatim (pure move) and documented in the new class's Javadoc pointing at V7; fixing it is a behavior change owing its own labeled commit and a deliberate update to `AgentOrchestratorBuiltInToolWiringTest`, exactly as the plan's ground rule 3.0-1 requires.
+
+Added `DynamicAgentToolsProviderTest` (11 tests) covering each of the four tools' whitelist gating independently, the null/empty/no-dynamic-keys short-circuits, the all-four case, and `createDefaultDynamicConfig`'s permissive defaults. The tools' own guardrail behavior stays covered by the unchanged `AgentOrchestratorBuiltInToolWiringTest`, `AgentOrchestratorToolGovernanceTest` and `ConverseWithAgentTool*Test` suites.
+
+Full 22-class test battery (376 tests) green — including the two `ConverseWithAgentTool` guardrail suites and `DynamicAgentTrackingPropagationTest`, the ones with the most power to catch a mistake in this particular move. 7 unused imports removed.
+
+---
+
+## 🧩 feat(orchestrator): add A2AToolsProvider, not yet wired (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 continued — third of 8 providers, and structurally different from the first two. A2A discovery was never a separate named method on `AgentOrchestrator` — it's a five-line config-gated block inline at the top of `buildToolSetup` (`a2aAgents == null/empty → null` else `a2aToolProviderManager.discoverTools(a2aAgents)`), so there was no reflected delegator to preserve and nothing to extract *from* in the usual sense.
+
+**Landed as new, tested, standalone code — `buildToolSetup`'s inline block is untouched.** Same choice as R2 step 1 (the SPI itself): add the capability, defer wiring it in. Threading a `ToolAssemblyContext` through `buildToolSetup` just to call this one provider, ahead of the other seven, would touch the shared method for an isolated, low-value partial migration — the real payoff is one rewiring commit that switches all 8 providers on together, once they all exist. `AgentOrchestrator` gets no changes at all in this commit; `A2AToolsProvider` is exercised only by its own new test suite for now.
+
+Considered and rejected keeping this one in a separate package since — unlike the HTTP/MCP providers — it has no `WorkflowTraversal` dependency forcing same-package placement. Splitting one provider out from its seven siblings for a reason that won't apply to most of them is not a real improvement; kept in `ai.labs.eddi.modules.llm.impl` for uniformity.
+
+Added `A2AToolsProviderTest` (4 tests): source tag, empty/null agent list short-circuits without calling the manager, and a configured agent delegates and wraps the result. `A2AToolProviderManager`'s own discovery logic is untouched and remains covered by its existing suites.
+
+Full 13-class test battery (279 tests) green; zero production files changed besides the new provider itself.
+
+---
+
+## 🧩 refactor(orchestrator): extract McpToolsProvider (2026-08-02)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 continued — second of 8 providers, same pattern as `HttpCallToolsProvider`: moved `discoverMcpCallTools` into a new `McpToolsProvider implements ToolSourceProvider`, same package as `AgentOrchestrator` (needs `WorkflowTraversal`), delegator kept on the facade returning the legacy `McpToolProviderManager.McpToolsResult` shape, `buildToolSetup` unchanged. Simpler than the HTTP provider — no endpoint tracking, no template-argument merging, just per-server discovery plus whitelist/blacklist filtering.
+
+**Found, and flagged rather than fixed, a pre-existing diagnostic gap while reading the method closely enough to move it.** `McpToolProviderManager.discoverTools(...)` returns a `McpToolsResult` carrying `failures()` — structured per-server rejection reasons, specifically added (per its own Javadoc) so a caller can distinguish "server misconfigured" from "server has no tools." `discoverMcpCallTools` (and now `McpToolsProvider.discover`, unchanged by this move) reads only `.toolSpecs()`/`.executors()` from that result — `failures()` is computed and discarded every time, meaning a misconfigured MCP server silently contributes zero tools with no signal above whatever `McpToolProviderManager` itself logs internally. Preserved exactly as-is (pure move, not the place to fix a pre-existing gap), but the new `ToolContribution.failures()` field this session added specifically to carry this kind of thing (R2 step 1) makes the gap more visible than it was before — `McpToolsProvider.contribute()` currently passes an empty list rather than mapping the discovery result's real failures into it. Spawned as a standalone follow-up rather than expanded inline, since surfacing it properly (trace entry vs. metric vs. both) is a design decision belonging with the later step that rewires `buildToolSetup` to actually consume `ToolContribution.failures()`, not this pure-move commit.
+
+Added `McpToolsProviderTest` (4 tests) for `contribute`'s enable/disable gate — same genuinely-new-surface reasoning as the HTTP provider's test. Discovery itself remains covered by `AgentOrchestratorExtendedTest` plus the six unchanged `McpToolProviderManager*Test` suites (not re-run — orthogonal to this move, since `McpToolProviderManager` itself wasn't touched).
+
+Full 15-class test battery (313 tests) green; 2 unused imports removed. `AgentOrchestrator`: 2,404 → 2,352 lines.
+
+---
+
+## 🧩 refactor(orchestrator): extract HttpCallToolsProvider, first SPI-conformant provider (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 2 of `planning/group-collaboration-improvements-plan.md` §3.2 — first of 8 providers, and the template for the rest. Moved `discoverHttpCallTools`, `normalizeEndpointPath`, and `safeTemplateMerge` (plus `RESERVED_TEMPLATE_KEYS`) into a new `HttpCallToolsProvider implements ToolSourceProvider`.
+
+**A cross-class package-private dependency changed the whole extraction's package strategy before any code moved.** `discoverHttpCallTools` calls `WorkflowTraversal.discoverConfigs(...)` — a package-private static utility, in its own Javadoc "shared... between httpcall and mcpcalls tool discovery" (and RAG). Wave R's `groups`-subpackage convention would have forced widening `WorkflowTraversal` itself to `public` — a shared utility with call sites this extraction doesn't otherwise touch, for zero benefit. Decided instead: provider *implementations* live in `ai.labs.eddi.modules.llm.impl`, the same package as `AgentOrchestrator` (only the SPI *contracts*, already committed, live in the cross-cutting `tools.spi` package the plan names). Same-package access means zero widening was needed for `WorkflowTraversal` or anything else this or later providers touch there — a direct, one-extraction-early correction of the packaging assumption carried over from Wave R, made before it could compound across seven more providers.
+
+**Incremental de-risking, same pattern as `ToolContextBudget`: extract + delegate, defer the caller rewiring.** `buildToolSetup` still calls `discoverHttpCallTools` exactly as before — the delegator now adapts the provider's new `ToolContribution` back to the legacy `HttpCallToolsResult` record (which stays declared on `AgentOrchestrator`, unchanged). The provider's `contribute(ToolAssemblyContext)` — the actual SPI method future callers will use — is fully implemented and adds the `enableHttpCallTools` gate check (previously done by `buildToolSetup` itself, one level up); `discover(memory)` is the direct old-signature equivalent the current delegator calls. Rewiring `buildToolSetup` to iterate a provider list instead of calling three named discovery methods is deliberately still deferred — a separate, later step once all providers exist behind this same pattern.
+
+**Self-caught transcription error, same failure mode as R1 step 6 and R1 step 8 — the third time this exact mistake pattern has surfaced this session.** First draft of `safeTemplateMerge`'s delegator called a nonexistent `HttpCallToolsProvider.safeTemplateMergeForTest(...)`. Caught before compiling by re-reading the diff; fixed by widening the new class's `safeTemplateMerge` from `private` to package-private (same package as the caller — no `ForTest`-suffixed shim needed at all) rather than inventing a name. Also caught a straight copy-paste error in the new file's own `LOGGER` field (initialized against `AgentOrchestrator.class` instead of `HttpCallToolsProvider.class`) during the same re-read pass, before compiling.
+
+Added `HttpCallToolsProviderTest` (5 tests) for `contribute`'s enable/disable gate — genuinely new surface, since the check moved down from `buildToolSetup` and didn't exist as a method on the old `discoverHttpCallTools`. Discovery itself remains covered by `AgentOrchestratorTest`/`AgentOrchestratorExtendedTest`'s existing `normalizeEndpointPath`/`safeTemplateMerge` reflection suites, re-verified green through the new delegators.
+
+Full 16-class test battery (322 tests) green; formatter/validate clean after removing 6 imports the move made unused. `AgentOrchestrator`: 2,542 → 2,404 lines.
+
+---
+
+## 🧩 feat(orchestrator): introduce the ToolSourceProvider SPI (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 1 of `planning/group-collaboration-improvements-plan.md` §3.2 — new types only, zero behavior change, nothing wired up yet. `ai.labs.eddi.modules.llm.tools.spi` (package named directly per the plan's own text) now has: `ToolContribution` (unifies the three bespoke per-source result shapes `AgentOrchestrator` carries today — `HttpCallToolsResult` with `endpoints`, `McpToolProviderManager.McpToolsResult` with `failures`, `A2AToolProviderManager.A2AToolsResult` with neither — into one 5-component record every provider returns); `ProviderFailure` (generalizes `McpToolProviderManager.McpServerFailure` from MCP-only to any source); `ToolAssemblyContext` (what a provider needs to decide its contribution — memory, task, whitelist, resolved `DynamicAgentConfig`, caller identity, plus the `groupConversationId` Wave 2's group-aware providers will read); `ToolSourceProvider` (the one-method contract).
+
+**This is deliberately the safest possible increment, not a shortcut.** `buildToolSetup` still calls its three original discovery methods and the original `collectAllBuiltInTools` if-chain — this commit adds a contract nothing implements or calls yet. The actual migration (converting `discoverHttpCallTools`/`discoverMcpCallTools`/A2A discovery to return `ToolContribution`, then extracting `collectAllBuiltInTools`'s ~130-line whitelist/dynamic-agent-tool logic — including the V7 defect area — into `BuiltinToolsProvider`/`DynamicAgentToolsProvider`, then restructuring `buildToolSetup` itself to iterate a provider list instead of hand-merging three named results) is a materially larger, riskier change than introducing the contract those providers will implement: it changes control flow, not just code location, unlike every extraction so far in Wave R/R2. Landing the SPI on its own lets that follow-on work compile and test against a stable contract instead of co-evolving both at once.
+
+Added `ToolAssemblyContextTest` (7 tests) for the two records' helper methods (`isWhitelisted`/`hasNoWhitelist`, the convenience constructors, `ProviderFailure`'s field carriage) — everything currently testable, since nothing calls this SPI in production yet.
+
+Full clean compile + this package's own tests green. Provider extraction (R2 step 2, the SPI's actual payoff) is next.
+
+---
+
+## 🧩 refactor(orchestrator): extract ToolContextBudget from AgentOrchestrator (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R2 step 3 of `planning/group-collaboration-improvements-plan.md` §3.2 — the first step of the second monolith decomposition, `AgentOrchestrator` (2,725 lines, 30 constructor params, no interface). Deliberately started with the plan's step 3 (the static token-budget cluster) rather than its step 1 (the `ToolSourceProvider` SPI) — same reasoning as Wave R's own ground rule 7 ("static clusters extract first, they are pure moves"): a small, self-contained, dependency-light piece to validate the methodology against an unfamiliar file before the much larger SPI introduction.
+
+**Full structural map built before touching anything.** Used a research agent to page through all 2,725 lines and produce an exhaustive method/dependency inventory (confirmed against the plan's own anchors) rather than grepping piecemeal as I went — `AgentOrchestrator` was unfamiliar territory this session, unlike `GroupConversationService` after 8 R1 extractions. Confirmed: only the 9-arg `executeIfToolsEnabled` and 7-arg `resumeToolLoop` are ever reached from production code (`LlmTask`, `CascadingModelExecutor`); every shorter overload exists purely for tests. Also surfaced a small inaccuracy in the plan doc itself: it says "12 orchestrator test classes" in three places (and "10" in a fourth), but 13 files construct `AgentOrchestrator` directly — noted for whoever next relies on that count as a gate.
+
+Moved `resolveToolContextEstimator`, `enforceToolContextBudget`, `findToolExchanges`, `tokensOf`, `sumTokens`, `sumInt`, `tokenUsageMap` plus the `DEFAULT_MAX_TOOL_CONTEXT_TOKENS`/`TOKEN_USAGE_FIELDS` constants into a new `ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget` — a new subpackage sibling to `AgentOrchestrator` (the plan names `ai.labs.eddi.modules.llm.tools.spi` for the *SPI* specifically; the SPI's own provider implementations will likely live under `tools.providers` when that step lands, but this cluster is orchestrator-internal machinery, not a tool source, so it stays adjacent to `impl` — same `parent` → `parent.subpackage` shape as Wave R's `engine.internal` → `engine.internal.groups`).
+
+**A naming collision the bare-token sweep alone wouldn't have caught, since it's not a reflection issue at all.** `runToolCallLoop` already declares a local `int toolContextBudget` (the resolved token ceiling) in the exact scope where the new collaborator field would have been referenced. Naming the field `toolContextBudget` to match the class name — the obvious first choice — would have shadowed the local and silently miscompiled (or refused to compile, since `int` has no methods) at the one call site needing the instance. Caught by re-reading the diff in context before compiling, not by the compiler; fixed by naming the field `toolContextBudgetGuard` instead, isolating the fix to code this commit added rather than renaming the pre-existing local.
+
+**Two package-private cross-class dependencies widened to public** — `LlmTask.resolveModelName` and `TokenCounterFactory.extractText` — both already carried comments explaining *why* they were package-private-not-private (so `AgentOrchestrator`, same package, could call them); updated both comments to name `ToolContextBudget` instead now that the caller has moved to a different package. Same category of change as every prior step's visibility widenings, just crossing sibling classes instead of a facade/collaborator pair.
+
+**Delegator ratio:** 7 of 9 units needed a facade delegator (four are hard class-qualified references from tests — `AgentOrchestrator.DEFAULT_MAX_TOOL_CONTEXT_TOKENS`/`enforceToolContextBudget`/`sumTokens`/`tokenUsageMap` — and `tokenUsageMap`/`TOKEN_USAGE_FIELDS` are also referenced directly by production code in `LegacyChatExecutor`/`CascadingModelExecutor`/`LlmTask`, which is why those two got constant-alias/method-delegator treatment rather than a call-site rewrite). Only `findToolExchanges`/`tokensOf` (internal-only, called solely by `enforceToolContextBudget`) and `sumInt` (internal-only, called solely by `sumTokens`) moved with no delegator. `resolveToolContextEstimator` — not reflected — moved with no delegator either; its one remaining caller (`runToolCallLoop`, staying on the facade) was updated to call `toolContextBudgetGuard.resolveToolContextEstimator(task)` directly.
+
+**Self-caught dead-code bug from an imprecise `Edit` match**, before compiling: the first pass at replacing `tokenUsageMap`'s body left the original `return map;` statement behind after the new `return ToolContextBudget.tokenUsageMap(usage);` line — an unreachable-statement compile error. Caught by re-reading the edited region immediately after applying it, fixed before the first compile attempt.
+
+Added a focused `ToolContextBudgetTest` (6 tests) covering `resolveToolContextEstimator` directly — it has no reflection dependency in the existing suite and was previously only exercised indirectly through the full tool-call loop, so this is genuinely new coverage — plus light sanity coverage of `sumTokens`/`tokenUsageMap`. `enforceToolContextBudget`'s eviction logic (the bulk of this cluster) is already exhaustively covered by the pre-existing 462-line `AgentOrchestratorToolContextBudgetTest`, re-verified green through the facade's delegator rather than duplicated.
+
+Full 20-class test battery (382 tests: all 14 `AgentOrchestrator*` suites + `JsonResponseFormatThreadingTest` + `LlmTaskAgentModeMetadataTest` + the new `ToolContextBudgetTest` + key `CascadingModelExecutor*`/`LegacyChatExecutor*` suites, covering every production cross-reference found during the structural mapping) green. `AgentOrchestrator`: 2,725 → 2,542 lines. First of R2's ~7 steps done.
+
+---
+
+## 🚦 feat(groups): wire group discussions into graceful shutdown (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+> **Superseded in part — read this alongside the review entry at the top of this file.** The `onShutdown(@Observes ShutdownEvent)` observer described below (and its `@Priority` reasoning in the paragraph "Observer-ordering risk caught…") was **removed** by the subsequent critical review: `GracefulShutdownService` sets `shuttingDown = true` *inside* `drain()`, so an earlier-priority observer runs while the reject gate is still open. The `rejectIfShuttingDown()` gate, piece (1) below, is sound and shipped — and now also covers `continueDiscussion`/`followUpWithMember`.
+
+R1 step 10 of `planning/group-collaboration-improvements-plan.md` §3.1 — the last R1 item, and per the plan's own ground rule 3.0-1 a **deliberate behavior change**, not a refactor: it gets its own commit and tests rather than riding along with an extraction. Before this, `GroupConversationService` did not participate in graceful shutdown at all — its `@PreDestroy` unconditionally tore down the executor with no drain, while `ConversationService` has rejected new turns and drained in-flight ones since the 2026-07/08 merge (`GracefulShutdownService`).
+
+**Two additive pieces, both reusing existing machinery rather than inventing new drain logic.** (1) `rejectIfShuttingDown()` — copied verbatim in spirit from `ConversationService`'s method of the same name, field-injects the same `GracefulShutdownService` bean (same pattern as `attachmentStore`/`deploymentStore`: `null` in the direct-construction unit tests, which then never reject) and throws `RejectedExecutionException` — already globally mapped to HTTP 503 by the pre-existing `RejectedExecutionExceptionMapper`, so no REST-layer change was needed. Called from the three entry points that start or resume a discussion: `discuss`, `startAndDiscussAsync`, `resumeDiscussion`. (2) A new `onShutdown(@Observes ShutdownEvent)` handler that signals every currently-active discussion's control token `ControlSignal.CANCEL_GRACEFUL` — the exact signal `cancelDiscussion` already exposes over REST/MCP, so `executeDiscussion`'s existing top-of-phase check stops scheduling new phase work with zero new cancellation logic.
+
+**Deliberately did not re-implement `GracefulShutdownService`'s bounded wait.** Every dispatched member turn already runs through the shared `IConversationCoordinator` via `IConversationService#say`, so `GracefulShutdownService#drain()` already waits for whatever member turn is currently in flight — that half of "let the drain await in-flight discussions" was already true before this commit, a side effect of shared infrastructure, not something to duplicate. What the drain had no way to do was stop the group orchestration loop from queuing *more* phase work while it waited (a multi-round DELPHI or TASK_FORCE discussion can run well past the default 20s drain timeout); `CANCEL_GRACEFUL` closes exactly that gap.
+
+**Observer-ordering risk caught before writing a single test — not left to be discovered by one failing intermittently.** CDI does not guarantee firing order between independent `@Observes ShutdownEvent` methods on different beans. `GracefulShutdownService`'s own observer calls `drain()` synchronously and blocks for up to ~23s; if it fired *before* this new observer, the graceful-cancel signals would only go out after the drain had already finished waiting — useless for the shutdown they were meant to help, and only for the *first* shutdown a deployment ever exercises (the kind of bug that hides until a slow discussion is actually in flight during a rolling deploy). Fixed by giving the new observer `@Priority(Interceptor.Priority.APPLICATION - 100)`, which CDI guarantees runs before the default-priority, unprioritized observer.
+
+**Tests** (new `GroupConversationServiceGracefulShutdownTest`, 8 tests at the time of this commit — later trimmed to 7 when the observer was removed; see the review entry at the top of this file, mirroring `ConversationServiceProcessingGaugeTest`'s established pattern of constructing a real `GracefulShutdownService` via its public constructor with an overridden `isShuttingDown()` rather than mocking the final drain logic): every gated entry point throws `RejectedExecutionException` while shutting down (three at this commit — `discuss`, `startAndDiscussAsync`, `resumeDiscussion`; the review pass added `continueDiscussion` and `followUpWithMember`, taking it to five); `discuss` proceeds normally (falls through to its ordinary not-shutting-down code path) when the gate is false or unset; `onShutdown` sets `CANCEL_GRACEFUL` on every token in `activeTokens`; a no-active-discussions shutdown is a no-op; one troublesome entry's exception during signalling does not stop the others from being signalled (proven by making the mocked store throw and asserting every remaining token was still touched).
+
+Full 28-class group + MCP test battery (802 tests) green. This closes out R1 — all 10 steps of `GroupConversationService`'s decomposition are now complete. `AgentOrchestrator` (R2) and `ConversationService` (R3) are next.
+
+---
+
+## ✅ chore(groups): R1 step 9 — facade finalization verification, no further extraction (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R1 step 9 of `planning/group-collaboration-improvements-plan.md` §3.1 is a verification step, not an extraction — its job is to confirm `GroupConversationService` now matches the plan's target shape ("entry overloads, validation, depth guard, metrics, event fan-out, C8 resolution, and a slimmed `executeDiscussion`") and record the R1 post-condition results. No production code changed in this commit.
+
+**Reviewed every remaining top-level member against the plan's own description of what should stay, not just what's left over.** After steps 1–8, `GroupConversationService` is 1,380 lines, composed of: the `discuss`/`startAndDiscussAsync` entry overloads (validation + depth guard, ~145 lines — explicitly "remains" per the plan); `executeDiscussion` itself (443–764, 322 lines — the phase loop the plan says stays, "delegates to the engines"); C8 resolution (`resolvePhases`/`resolveProtocol`/`resolveAgentTimeoutSeconds`/`resolveParticipants`, ~150 lines — explicitly "remains"); the cooperative-cancellation infrastructure (`MemberTurnCancellation`/`MemberTurnCancelledException`, ~53 lines) and the shared static utilities (`reserveTurn`/`parallelBatchBudgetSeconds`, ~54 lines) — both genuinely homeless (used across ≥2 collaborators, e.g. `TaskForceEngine` and `PhaseExecutionEngine`; moving either into one collaborator would be an arbitrary ownership call for no benefit, not a "pure move"); and ~50 thin delegators (~400 lines) to the 8 collaborators extracted in steps 1–8, every one of which is required by either the `IGroupConversationService` public interface contract or a direct reflection dependency confirmed via the bare-token sweep at its own extraction step. Nothing here is a leftover cluster — there is no more mechanical, low-risk extraction available without either (a) moving `executeDiscussion` itself, which the plan does not assign to any R1 step and which would be a materially larger, riskier undertaking than any single step so far, or (b) deleting delegators that tests still depend on.
+
+**The literal "≤800 lines" target is no longer realistic, and that is worth saying plainly rather than chasing it with unsafe cuts.** The plan's own Rev 2.1 preamble documents why: the original cluster survey (§3.1, sizes "re-verified 2026-08-01 after merging main") was done against a smaller pre-merge class, and the 2026-07/08 merge added roughly 700 lines of machinery the plan itself enumerates as must-preserve — cooperative cancellation, the `recordTaskFailure`/`notifyTaskFailure` lock-order split, `reserveTurn`, whole-batch parallel deadlines, HITL granularity (TASK vs PHASE), dynamic-agent tracking, `IDeploymentStore` cleanup. All of that grew a genuine home somewhere in the facade-plus-collaborators split; it did not evaporate. What actually matters for the plan's stated goal ("~80% of this plan's group features would otherwise land inside a 4,417-line class... refactoring after would mean moving every new feature twice") is that every feature-relevant seam now has a clean, focused, independently-testable home — and it does: 8 collaborator classes, each under 1,600 instructions per JaCoCo, each with its own focused test class. The facade went from 4,417 to 1,380 lines (68.8% reduction) and now holds only entry/validation/orchestration plus the required delegator surface.
+
+**R1 post-condition results:**
+- Full 27-class group + MCP test battery: 794 tests, 0 failures, 0 errors (unchanged since step 8's commit — nothing to re-verify beyond re-confirming green, since no code changed).
+- JaCoCo coverage, `jacoco.csv` this run, summed precisely (not eyeballed) across the facade + all 8 collaborators: 8,738/10,244 instructions (85.3%), 888/1,166 branches (76.2%). `GroupConversationService` alone: 1,803/2,032 instructions (88.7%), 138/174 branches (79.3%). No exact V8 baseline percentage was preserved in a durable artifact to diff against numerically — a gap in this session's own record-keeping, noted rather than papered over — but a pure-move refactor cannot by construction reduce which lines the *same* test suite exercises, and every one of the 12 original group characterization test classes (including `GroupConversationServiceConcurrencyTest`) still passes unmodified against the new structure, which is the operative regression signal.
+- `IGroupConversationService`'s public interface: unchanged across all 8 extraction commits (still empty diff, re-confirmed).
+
+8 of R1's 10 steps functionally complete; step 9 itself contributes verification, not code. Step 10 (graceful-shutdown wiring) is the one remaining item, and it is explicitly a deliberate behavior change with its own commit — never bundled into a refactor step.
+
+---
+
+## 🧩 refactor(groups): extract GroupLifecycleOps from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R1 step 8 of `planning/group-collaboration-improvements-plan.md` §3.1: post-discussion lifecycle operations (`followUpWithMember`, `continueDiscussion`, `closeGroupConversation`, `readGroupConversation`, `deleteGroupConversation`, `listGroupConversations`, `listGroupPendingApprovals`, `cleanupEphemeralAgents`, `failConversation`, `propagateDynamicAgentTracking`) into a new `ai.labs.eddi.engine.internal.groups.GroupLifecycleOps`. `GroupConversationService`: 1,885 → 1,380 lines.
+
+**A genuine CDI-timing bug in my own first draft, caught before compiling.** `deploymentStore` is `@Inject`-field-injected on the facade — not yet populated when the facade's own constructor runs — so `GroupLifecycleOps` cannot be constructed once eagerly like `GroupHitlCoordinator`/`MemberTurnExecutor` were; it needs the same per-call construction `GroupAttachmentBinder` already uses via `attachmentBinder()` (R1 step 1). Added a matching `lifecycleOps()` helper that builds a fresh instance per facade call, reading `this.deploymentStore` at call time. That in turn created a second, sharper bug I caught while writing it: `operationsInProgress` (the in-flight-operation guard `followUpWithMember`/`continueDiscussion`/`closeGroupConversation`/`deleteGroupConversation` all serialize against) would have been re-created empty on every `GroupLifecycleOps` instantiation if declared as a field *inside* the new class — silently defeating the mutual-exclusion guarantee between concurrent calls, since each call would race against its own private empty set instead of a shared one. Fixed by keeping `operationsInProgress` declared on the facade (unchanged) and passing it into `GroupLifecycleOps` by reference, exactly like `activeTokens` already is.
+
+**Every eligible method needed a facade delegator — the highest ratio yet.** Nine of the ten extracted methods are called back into by code that stays on the facade: seven are the `IGroupConversationService` public interface surface (can never be anything but a delegator), `cleanupEphemeralAgents` is called from `executeDiscussion`'s finally block plus (since step 7) `GroupHitlCoordinator`, and `failConversation` is called from three sites inside `executeDiscussion`. Only `cleanupEphemeralAgentsForGroup`/`retireDeploymentRecords`/`isTerminalState` (internal-only helpers, confirmed via bare-token sweep against both the test tree and the production file) moved with no delegator.
+
+**`propagateDynamicAgentTracking` — reversed the step-4 deferral, on schedule.** Step 4's changelog explicitly deferred this static method ("slated to relocate to `GroupLifecycleOps` in a later R1 step") because `DynamicAgentTrackingPropagationTest` calls it by hard compile-time class reference (not reflection) in 20+ places, and `MemberTurnExecutor` calls it the same way in 2 places. Moved the body to `GroupLifecycleOps` as a `public static` method (it needs no instance state) and left a one-line `public static` delegator on the facade forwarding to it — every one of those 22+ call sites compiles and passes unchanged, in either class.
+
+**Self-caught transcription error, same failure mode as step 6's `...ForTest` invention:** while wiring `deleteGroupConversation`'s delegator calls to `GroupHitlCoordinator`'s HITL-cleanup methods, first wrote `deleteGroupHitlTimeoutScheduleForTest`/`cleanupAfterTerminalStateForTest` — plausible-looking names that don't exist. Caught before compiling by re-reading the diff against the actual facade method names (`deleteGroupHitlTimeoutSchedule`/`cleanupAfterTerminalState`, both already `private` delegators from step 7 — widened to `public` here since `GroupLifecycleOps` now calls them cross-package, same as `resolveAgentTimeoutSeconds` and `extractResponse` needed widening for `followUpWithMember`'s callbacks).
+
+Added `GroupLifecycleOpsTest` (11 tests) for `cleanupEphemeralAgents`'s lifecycle-policy branches and `failConversation`'s terminal-state alignment — genuinely new coverage exercising the class directly rather than through the old facade's reflection path. `propagateDynamicAgentTracking` already has 20+ dedicated tests in `DynamicAgentTrackingPropagationTest` (now calling through the facade's static delegator into this class, unchanged) and wasn't duplicated; the post-discussion entry points are already thoroughly covered by the existing reflection-based characterization suites and the MCP group/HITL tool suites.
+
+Full 27-class group + MCP test battery (794 tests) green after both self-caught fixes. 8 of R1's 10 extraction steps done; facade at 1,380 lines, still above the ≤800-line target step 9 needs to close.
+
+---
+
+## 🧩 refactor(groups): extract GroupHitlCoordinator from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R1 step 7 of `planning/group-collaboration-improvements-plan.md` §3.1 — the second-largest extraction after step 6: unites two textually non-adjacent HITL regions (~800 lines total) into a new `ai.labs.eddi.engine.internal.groups.GroupHitlCoordinator`. Cluster 1 (pause commit, task-state fingerprint/no-progress guard, cancel-signal races, timeout scheduling) sat right after `executeDiscussion`; cluster 2 (`activeTokens`, `cancelDiscussion`, `resumeDiscussion` — 327 lines, restore-pause, HITL audit, cleanup, timeout deletion) sat at the very end of the file. The bare-token sweep before writing any code showed the two clusters call directly into each other (cluster 1's `failDiscussionNoProgress` calls cluster 2's `cleanupAfterTerminalState`; cluster 2's `resumeDiscussion` calls cluster 1's `removeTokenAndConvertIfSignalled`) — confirming they had to move together, exactly as the plan anticipated.
+
+**Heaviest delegator ratio of any R1 step so far.** Unlike prior extractions where only reflected methods needed a facade delegator, `executeDiscussion` (the ~320-line phase loop, staying on the facade — out of this step's scope per the plan) calls directly into nearly every cluster-1 helper, and `deleteGroupConversation` calls into two cluster-2 helpers. Checking call sites (not just test reflection) found 14 of the 16 moved methods needed a delegator; only `auditHitlDecision` and the `GROUP_HITL_REARM_GRACE` constant had zero external callers and zero reflection, so those moved with no delegator left behind.
+
+**Circular self-reference, same pattern as `MemberTurnExecutor` (step 4).** `resumeDiscussion` re-enters the phase loop via `executeDiscussion` and reads `resolvePhases`; `cleanupAfterTerminalState` needs `cleanupEphemeralAgents` — all three stay on the facade (not in this step's scope) and were widened to `public` so `GroupHitlCoordinator` can call back through a `GroupConversationService` reference passed as `this`, constructed last in the facade's constructor after every field it depends on.
+
+**Deliberately did not split `resumeDiscussion`'s 327 lines into validate/rebuild/route sub-methods**, even though the plan's own prose for this step suggests it. Consistent with the step-5 decision not to build the plan's speculative `PhaseExecutor` interface early: this step's job is the pure move, and restructuring the method's internals is a separate, later decision — bundling it in here would have doubled the risk surface of an already-large step for no test-visible benefit.
+
+Full 24-class group test battery (683 tests, including the new `GroupHitlCoordinatorTest`) green on the first run after compile succeeded — every reflection-based characterization test that targets a delegator (`GroupConversationServiceHitlCoverageTest`, `...HitlCoverage2Test`, the `activeTokens` field reflection in `...HitlTest`) passed unmodified, and `GroupConversationServiceConcurrencyTest` (the cancel/resume race suite) passed without any changes to its own code. One self-caught bug in the new `GroupHitlCoordinatorTest`: four `persistedTerminalOverride` tests stubbed `conversationStore` *before* calling the `coordinator()` helper that actually assigns that mock field — the same field-ordering mistake made in step 6's `TaskForceEngineTest`, caught immediately by Mockito's strict-stubbing `NullInsteadOfMock` check on the first run. Fixed by constructing the coordinator first in every affected test.
+
+Added a focused `GroupHitlCoordinatorTest` (13 tests) for the class's pure-function and simple store-facing methods (`notifyCancelled`, `taskPauseFingerprint`, `persistedTerminalOverride`, `scheduleGroupHitlTimeout`); `cancelDiscussion`/`resumeDiscussion` and the rest of the pause/resume machinery are already thoroughly covered by the existing reflection-based characterization suites and weren't worth duplicating. `GroupConversationService`: 2,594 → 1,885 lines (709 lines net). 7 of R1's 10 extraction steps done.
+
+---
+
+## 🔍 review(groups): independent review of R1 steps 4-6 before step 7 (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+Before starting R1 step 7 (`GroupHitlCoordinator`), ran a second independent review — 6 parallel agents, each reading the full 7-commit/16-file branch diff fresh with no access to the extraction sessions' own reasoning, focused on the three steps that hadn't yet had dedicated review: `MemberTurnExecutor` (step 4), `PhaseExecutionEngine` (step 5), `TaskForceEngine` (step 6). Lenses: AGENTS.md compliance, shallow bug scan, git history/blame (confirming every historical bug-fix marker — H2-H6, C4, NEW-3, R2 — survived the moves intact), concurrency-adversarial, delegator argument-order cross-check across all 32 delegators and 6 collaborator constructors, and comment-accuracy.
+
+**Exceptionally clean result — one stale comment, one pre-existing test-coverage gap, nothing else.** 5 of 6 agents reported no issues; `IGroupConversationService.java`'s public interface has a completely empty diff across all 7 commits, as required for a pure facade decomposition.
+
+**Fixed:** `PhaseExecutionEngine.java`'s class-Javadoc still said TASK_FORCE routing was "slated for R1 step 6 ... and stays on the facade for now" — written during step 5, before step 6 existed, and never updated once `TaskForceEngine` actually landed two commits later. Corrected to reference `{@link TaskForceEngine}` directly.
+
+**Flagged, not fixed inline — pre-existing concurrency-test-coverage gap.** The concurrency-adversarial agent confirmed the `TaskForceEngine` extraction itself is byte-identical to the pre-extraction code (not a regression), but surfaced that no test actually races `recordTaskFailure` (must execute under the `taskList` monitor, ordered against `abortWave` → `resetStrandedInProgressTasks`'s reset sweep) against that sweep concurrently — `GroupConversationServiceConcurrencyTest`'s one EXECUTE-wave test only exercises the no-write cancellation branch, and the two direct `recordTaskFailure` tests in `GroupConversationServiceHitlCoverage3Test` call it single-threaded via reflection. A future edit that moved the call outside its `synchronized(taskList)` block would pass every existing test. This is pre-existing risk (not introduced by the refactor) and closing it properly needs real thread-orchestration engineering — the codebase's own `CyclicBarrier`-based concurrency test elsewhere in the suite is the right model, not a quick latch-based approximation. Spawned as a standalone follow-up task rather than rushed inline, per the "too difficult or delicate to fix inline" carve-out.
+
+Full 23-class group test battery (16 `GroupConversationService*`/`RestGroupConversation*` classes + `DynamicAgentTrackingPropagationTest` + all 6 focused collaborator test classes, 670 tests) green after the fix. `./mvnw clean compile` and `formatter:format validate` both clean.
+
+---
+
+## 🧩 refactor(groups): extract TaskForceEngine from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R1 step 6 of `planning/group-collaboration-improvements-plan.md` §3.1 — the largest and most concurrency-sensitive extraction in Wave R: the entire TASK_FORCE-style PLAN/EXECUTE/VERIFY cluster (~840 lines) into a new `ai.labs.eddi.engine.internal.groups.TaskForceEngine`. This is the code `GroupConversationServiceConcurrencyTest` exists specifically to pin — the documented lock order (`taskList` → `transcript`), the `recordTaskFailure`/`notifyTaskFailure` split (document write under the monitor, SSE emission outside it), and `resetStrandedInProgressTasks`'s compare-and-set-under-monitor sweep all had to move verbatim, byte-for-byte, with zero reordering.
+
+**The reflection-sweep lesson from step 5 paid for itself immediately.** Doing the bare-token sweep *first* this time (before writing a line of the new class) surfaced 12 of the cluster's 16 methods as test-reflected — far more than any prior step — including four that a pattern-based (not bare-token) grep would have missed entirely: `formatVerificationForDisplay` and three others are reflected via a direct multi-line `GroupConversationService.class.getDeclaredMethod(...)` call split across two source lines, which a single-line regex can't see. All 12 kept as thin delegators; the other 4 (`executeTaskPlanPhase`, `abortWave`, `stringOrNull`, `notifyTaskFailure`) had zero bare-token matches anywhere in the test tree and were fully inlined.
+
+**A 13th reflected method was hiding just outside the cluster's own banner.** `reserveTurn` — the CAS-loop turn-budget reservation `executeTaskExecutionPhase` calls — is textually declared in the *previous* banner section ("Cooperative cancellation of in-flight member turns"), not under "Task-oriented phase execution" at all, and `GroupConversationServiceConcurrencyTest` reflects into it as a **static** method (`invoke(null, ...)`). Initially missed because the search was scoped to the TASK_FORCE cluster's own line range; caught before compiling by checking every method actually *called from* the code being moved, not just what a banner's boundaries claim it contains. Moved to `TaskForceEngine` (its only real call site) with a static delegator left behind on the facade, same pattern as `propagateDynamicAgentTracking` in step 4.
+
+Two bugs caught and fixed before any of this reached CI:
+1. **My own transcription error** — while wiring the facade's delegators, I invented non-existent `...ForTest`-suffixed method names instead of matching `TaskForceEngine`'s actual (correct) method names. Caught immediately by re-reading my own diff before compiling, not by the compiler — the names were plausible enough that autocomplete-shaped review wouldn't have caught it either.
+2. **A stale-object bug in the new `TaskForceEngineTest`**: `TaskItem` is an immutable record, so calling `completeTask(id, ...)` on a `SharedTaskList` returns a *new* instance rather than mutating the one already held in a local variable — a test that captured the pre-completion `TaskItem` and passed it into `tryParseVerificationJson` was silently checking `status == COMPLETED` against a `PENDING` snapshot. Test failure (`expected: <true> but was: <false>`), not a production bug, but the fix (re-fetch via `findById` after each mutation) is the same one anyone writing against this record-based API needs.
+
+Full 12-class group suite + `DynamicAgentTrackingPropagationTest` + all 6 focused collaborator test classes green (555 tests) — including `GroupConversationServiceConcurrencyTest` (8/8) and `GroupConversationServiceTaskForceTest` (20/20), the two suites this extraction had the most power to silently break. `GroupConversationService`: 3,432 → 2,594 lines (838 lines moved — the single biggest reduction of any R1 step so far). 6 of R1's 10 extraction steps done; `GroupConversationService` is now smaller than `AgentOrchestrator` (2,725) and `ConversationService` (2,698), the two classes R2/R3 will decompose next.
+
+---
+
+## 🧩 refactor(groups): extract PhaseExecutionEngine from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R1 step 5 of `planning/group-collaboration-improvements-plan.md` §3.1 — the debate-style turn-order executors: `executeSequentialPhase`, `executeParallelPhase`, `executePeerTargetedPhase` (~190 lines) into a new `ai.labs.eddi.engine.internal.groups.PhaseExecutionEngine`. TASK_FORCE's PLAN/EXECUTE/VERIFY routing is a separate cluster staying on the facade for now (R1 step 6, `TaskForceEngine`).
+
+**Deliberately did not build the plan's speculative `PhaseExecutor`/`PhaseOutcome`/`PhaseExitSignal` interface abstraction.** The plan's §3.1 description of this step is written with hindsight of the *final* shape after F2 (speaker-level `ResumePoint`) and I2 (convergence detection) land — neither exists yet; R1 runs before Wave 0/1 in the plan's own sequencing. Building that interface now would be exactly the "design for hypothetical future requirements" AGENTS.md warns against. Moved the three methods as concrete methods on a plain class instead; the interface can be introduced later, when F2/I2 actually need it, as its own decision.
+
+Two shared-resource wrinkles, same pattern as step 4: `PhaseExecutionEngine` takes the facade's `ExecutorService` **by reference, not ownership** — `TaskForceEngine`'s not-yet-extracted execution waves submit to the same virtual-thread executor, and `GroupConversationService` keeps the `@PreDestroy` shutdown hook regardless of how many collaborators use it. `parallelBatchBudgetSeconds(ProtocolConfig)` (reads the same `DEFAULT_AGENT_TIMEOUT_SECONDS`/`DEFAULT_MAX_RETRIES` constants `MemberTurnExecutor` was given by value in step 4) stays on the facade, widened to `public static`, called back cross-package — confirmed via search that only `executeParallelPhase` itself uses it, so no other stranded caller.
+
+**The reflection sweep methodology needed fixing, not just re-running.** `GroupConversationServiceConcurrencyTest` reflects into `executeParallelPhase` through a *third* distinct local helper-wrapper name (`phaseMethod(name)` — neither the `method(name)` convention most files use nor a bare `getDeclaredMethod` call), which a case-sensitive grep for `method("executeParallelPhase"` genuinely cannot distinguish from `phaseMethod("executeParallelPhase")` — `Method(` capitalized inside `phaseMethod(` doesn't match a lowercase `method(` pattern. First test run failed with `NoSuchMethodException` on exactly this. Fixed by re-sweeping with a bare-token grep (`executeParallelPhase` anywhere in the test tree, no assumption about the calling convention) instead of guessing at wrapper names — this is now the standard first move for future extraction steps, not the fallback. `executeSequentialPhase`/`executePeerTargetedPhase` confirmed clean by the same bare-token search and were fully inlined at their one call site each (no delegator needed, unlike every other extraction so far).
+
+Also caught in my own new `PhaseExecutionEngineTest`, before it ever touched CI: a mock stub that hardcoded `targetAgentId=null` in its canned response instead of threading through the actual argument, which the peer-targeted test then correctly flagged as wrong (`expected: <b> but was: <null>`) — a bug in the test double, not production code. Fixed by reading the real argument in the stub's `thenAnswer`.
+
+Full 12-class group suite + `DynamicAgentTrackingPropagationTest` + 5 focused collaborator test classes green (540 tests). `GroupConversationService`: 3,605 → 3,432 lines. 5 of R1's 10 extraction steps done.
+
+---
+
+## 🧩 refactor(groups): extract MemberTurnExecutor from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`refactor/group-service-split`, PR [#626](https://github.com/labsai/EDDI/pull/626))
+
+R1 step 4 of `planning/group-collaboration-improvements-plan.md` §3.1 — the biggest and riskiest extraction yet, and correctly so: it's the code `GroupConversationServiceConcurrencyTest` exists specifically to pin. Moved both `executeAgentTurn` overloads, `tryResolveMemberToolPause`, `handleMemberPause`, `executeGroupMemberTurn`, `handleAgentFailure`, and `errorEntry` (~430 lines) into a new `ai.labs.eddi.engine.internal.groups.MemberTurnExecutor`.
+
+Scoped this properly before touching code (see the prior session's status update) and it paid off — three real design decisions surfaced that a naive move would have gotten wrong or would have silently broken:
+
+1. **Circular self-reference.** `executeGroupMemberTurn` (nested `GROUP`-type members) calls back into the facade's own public `discuss(...)`/`cancelDiscussion(...)`. Resolved by passing `this` into `MemberTurnExecutor`'s constructor, typed as the concrete `GroupConversationService` (constructed last in the facade's own constructor, after every field it depends on — safe because `MemberTurnExecutor`'s constructor only stores the reference, never invokes it during construction).
+2. **`propagateDynamicAgentTracking` stays put.** `DynamicAgentTrackingPropagationTest` calls `GroupConversationService.propagateDynamicAgentTracking(...)` directly by class name — a hard compile-time reference, not reflection. Moving it would have forced rewriting ~22 tests in that file for no benefit, and the plan already assigns this method to a later step (`GroupLifecycleOps`, R1 step 8) regardless. Widened to `public static` so `MemberTurnExecutor` can call it cross-package; left declared exactly where it was.
+3. **Attachment granting reaches back to the facade.** Rather than giving `MemberTurnExecutor` its own `IAttachmentStore` and duplicating the facade's per-call `GroupAttachmentBinder` construction (needed because `attachmentStore` is field-injected and test-mutable — see the R1-step-1 changelog entry), `grantAndInjectAttachments` was widened to `public` on the facade and `MemberTurnExecutor` calls back through its self-reference. One dependency, not two overlapping ones.
+
+Also widened `MemberTurnCancellation`/`MemberTurnCancelledException` (the cooperative-cancellation types) from package-private to `public`, since `MemberTurnExecutor` lives in a different package and needs to reference them in its own method signatures.
+
+The reflection sweep for this step needed a second pass: my first pass only grepped for the literal `getDeclaredMethod("..."` pattern and came up empty across 5 of the 7 remaining group test classes — which was wrong. This codebase's actual convention is a shared `method("name", ...)` test helper wrapping `getDeclaredMethod`, and grepping for *that* pattern found real dependencies in two files (`GroupConversationServiceHitlCoverage2Test`: `handleMemberPause`, `tryResolveMemberToolPause`, `errorEntry`, `handleAgentFailure`; `GroupConversationServiceHitlCoverage3Test`: `executeGroupMemberTurn`, `executeAgentTurn`) that the first pass missed entirely. All six methods kept as thin delegators as a result — same pattern as steps 2–3, just a reminder to grep for both patterns every time, not just the one that happened to work on the first three files.
+
+Also caught and fixed during self-review before committing: an early draft of `executeGroupMemberTurn`'s move replaced `Collectors.joining("\n\n")` with a hand-rolled `.reduce(...)` purely to dodge one import — behaviorally equivalent but an unjustified deviation from "pure move, no logic changes" for zero benefit. Reverted to the exact original before running any tests.
+
+Full 12-class group suite + `DynamicAgentTrackingPropagationTest` (22 tests, unmodified) + all 4 focused collaborator test classes green on the first run after compile succeeded — including `GroupConversationServiceConcurrencyTest` (8/8), the strongest possible signal that the cooperative-cancellation contracts survived intact. Added a modest `MemberTurnExecutorTest` (5 tests) for the class's pure-function methods; the complex async/cancellation/HITL paths are already thoroughly covered by the reflection-based characterization suites and weren't worth duplicating. `GroupConversationService`: 3,980 → 3,605 lines. 4 of R1's 10 extraction steps done.
+
+---
+
+## 🔍 fix(groups): key-rotation-safe signature verification, plus review-comment cleanup (2026-08-01)
+
+**Repo:** EDDI (`claude/group-collaboration-plan-9bca77`)
+
+Before pushing the three R1 extraction commits, ran a thorough independent review: 5 parallel agents (AGENTS.md compliance, shallow bug scan, git blame/history context, prior-PR-comment context via `gh`, code-comment-vs-code consistency), each reading the diff fresh with no access to the extraction session's own reasoning. Zero regressions from the extraction itself — all three "pure move" claims held up to line-by-line, argument-by-argument scrutiny. Six real findings surfaced; five were doc/comment fixes, one was a genuine pre-existing bug worth fixing in place.
+
+**Real bug fixed — key-rotation-unsafe signature lookups in `GroupSigningGuard`.** Pre-existing on `main` (carried over unchanged by the pure-move extraction; originally flagged by CodeRabbit on PR #494, never fixed). Two call sites resolved a signer's public key via `AgentIdentity.getKeyValidAt(timestamp)` — "whichever key is valid right now" — instead of `getKeyForVersion(exactVersion)`, even though the exact key version used to sign is recorded and available in both cases:
+
+- **Self-verify at signing time** (`signOutgoingMessage`): could self-discard a just-created, perfectly good signature if the signing key's validity window doesn't yet cover "now" by the time self-verify runs.
+- **Peer verify on receipt** (`verifyPriorEntriesIfRequired`): during a rotation overlap window (both old and new key simultaneously valid — the exact scenario `AgentPublicKey`'s own Javadoc says the system is designed to support), every entry was verified against the *newest* valid key regardless of which key actually signed it. Worse, the per-speaker public-key cache was keyed by agent ID alone, so once the first entry from an agent resolved a (possibly wrong) key, every later entry from that same agent — even ones signed with a different key version — silently reused the same cached key without ever consulting its own `signatureKeyVersion`.
+
+Fixed both call sites to use `getKeyForVersion`; changed the verify-side cache key to `agentId#keyVersion` so entries signed with different key versions get independently resolved and cached. Added two regression tests (`GroupSigningGuardTest`) that construct an overlapping-validity two-key identity and assert (via `ArgumentCaptor`) the exact key material passed to `verifyEnvelope` at each call — mutation-checked by temporarily reverting the production fix (`git stash` on just that file) and confirming both new tests fail, and only those two, before restoring it.
+
+**Doc/comment fixes (no behavior change):** an inline fully-qualified name in `GroupSigningGuardTest` (AGENTS.md §4.4 — the only such occurrence across all six new files, everything else in the extraction was already clean); a stale "is now private" comment about `GroupContextBuilder.buildPlainTextFallback`, which is actually `public` (necessarily, for the cross-package delegator call); two Javadoc comments in `GroupConversationService` still naming `lastVerifiedIndex`, a field that moved entirely into `GroupSigningGuard` two commits ago; a `GroupSigningGuardTest` class-Javadoc claim that overstated which characterization suite exercises the signing happy path.
+
+**Two real findings deliberately NOT fixed here** — both pre-existing, both security-relevant, both genuinely delicate rather than mechanical: (1) `verifyPriorEntriesIfRequired` never consults `NonceCacheService` for replay detection, but the sender already calls `validate()` once at signing time (a mutating "mark as seen" op) — naively calling it again on the receive side would make every signature immediately register as "replayed," which is worse than today's gap; needs a non-mutating check method and a decision about what "replay" means on the receive side. (2) `requirePeerVerification=true` is audit-only — a failed verification only logs, the turn proceeds and the receiving agent gets the content anyway; fixing this is a product decision (fail the turn? quarantine the entry? configurable policy?) not a bug fix. Both filed as background follow-up tasks with full context rather than folded into this refactor PR.
+
+Full 15-class group suite green (470 + 12 + 17 + 14, including the 2 new regression tests); clean compile; formatter/Checkstyle clean.
+
+---
+
+## 🧩 refactor(groups): extract GroupSigningGuard from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`claude/group-collaboration-plan-9bca77`)
+
+R1 step 3 of `planning/group-collaboration-improvements-plan.md` §3.1: moved the Ed25519 inter-agent signing cluster into a new `ai.labs.eddi.engine.internal.groups.GroupSigningGuard` — `verifyPriorEntriesIfRequired` (receiver-side incremental verification), the signing-creation block that was inline inside `executeAgentTurn` (sign → self-verify → nonce-validate, falling back to unsigned on any failure), and the `lastVerifiedIndex` cursor map that both share.
+
+The signing-creation block previously set four loose local variables (`signature`, `signatureNonce`, `signatureTimestampMs`, `signatureKeyVersion`) that fed straight into a `TranscriptEntry` constructor call; extracted as `signOutgoingMessage(...)` returning a `SigningResult` record (with an `UNSIGNED` singleton for the "not signed, for any reason" case — crypto infra absent, signing not configured, self-verification failed, nonce validation failed), destructured back into the same four constructor args at the call site. `verifyPriorEntriesIfRequired` and the two `lastVerifiedIndex.remove(...)` cleanup call sites (end of a discussion leg; terminal-state cleanup) became one-line delegations.
+
+Repeated the reflection sweep from step 2 before touching anything: `verifyPriorEntriesIfRequired` is reached via `GroupConversationServiceHitlCoverage3Test`'s reflection helper, so it stays a declared delegator on `GroupConversationService` (same pattern as step 2's seven methods). Added a focused `GroupSigningGuardTest` covering the guard-clause branches directly (12 tests) — the full sign → self-verify → nonce-validate happy path needs real Ed25519 key material and stays covered by the untouched characterization suites instead of being re-mocked here.
+
+Full 12-class group suite + all three new focused test classes: 470 + 12 + 17 + 12, all green; clean compile; formatter/Checkstyle clean. `GroupConversationService` is now 4,186 → 3,977 lines; 3 of R1's 10 extraction steps done.
+
+---
+
+## 🧩 refactor(groups): extract GroupContextBuilder from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`claude/group-collaboration-plan-9bca77`)
+
+R1 step 2 of `planning/group-collaboration-improvements-plan.md` §3.1: moved the phase-input-construction and scope-filtering cluster (`buildPhaseInput`, `selectDefaultTemplate`, `filterByScope`, `findLatestResponse`, `mapPhaseToEntryType`, `extractResponse`, `buildPlainTextFallback` — ~280 lines) into a new `ai.labs.eddi.engine.internal.groups.GroupContextBuilder`, constructed once in `GroupConversationService`'s constructor (its only dependency, `templatingEngine`, is never reassigned post-construction, unlike the attachments step's field-injected `attachmentStore`).
+
+**A wrinkle this step surfaced that step 1 didn't:** three characterization test classes (`GroupConversationServiceTest`, `GroupConversationServiceHitlCoverage3Test`, `GroupConversationServiceUncoveredBranchTest`) reach several of these methods via `GroupConversationService.class.getDeclaredMethod(...)` reflection, which requires the method to be *declared directly on that class* — a delegator that's merely inlined at call sites doesn't satisfy it. All seven extracted methods are kept as thin private delegators on `GroupConversationService` for this reason (confirmed by an exhaustive grep for every `getDeclaredMethod("...")` / `method("...")` reflection lookup across the test package before deleting anything — one, `findLatestResponse`, is now reachable only via reflection since its one production call site moved into `GroupContextBuilder` too; left as documented dead-from-production-code, not deleted, since removing it would break the pinned characterization test).
+
+Added a new focused `GroupContextBuilderTest` (17 tests, direct construction, no reflection) alongside the untouched characterization suites, per the plan's rule 5. Full 12-class group suite + both new focused test classes: 470 original tests + 12 (step 1) + 17 (step 2), all green; clean compile; formatter/Checkstyle clean.
+
+---
+
+## 🧩 refactor(groups): extract GroupAttachmentBinder from GroupConversationService (2026-08-01)
+
+**Repo:** EDDI (`claude/group-collaboration-plan-9bca77`)
+
+Added `planning/group-collaboration-improvements-plan.md` — the Rev 2.1 implementation plan for group-conversation collaboration features (cost ceilings, convergence detection, voting, negotiation, standing teams, shared artifacts, and more), re-aligned against `main` post-merge of `e20d510a6`. It opens with a **Wave R refactoring workstream**: `GroupConversationService` (4,417 lines), `AgentOrchestrator` (2,725 lines) and `ConversationService` (2,698 lines) are decomposed into focused collaborator classes before any feature work lands, so the ~18 planned items don't pile onto three already-oversized files. Verified the plan's structural claims against the actual repo before starting: line counts, section-banner count (10), and the 12-class/470-test characterization net for `GroupConversationService` all matched exactly.
+
+**This commit is R1 step 1 of that plan** — the first, smallest extraction (the plan's own ordering: static/pure-move clusters first). Moved the attachment-handling cluster (`materializeAttachments`, `rehydrateAttachmentsFromStore`, `grantAndInjectAttachments` — previously ~112 lines inline in `GroupConversationService`) into a new `ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder`, a plain class (not a CDI bean — see the plan's rule 3.0-4: the 12 existing test classes construct `GroupConversationService` directly, and `attachmentStore` is field-injected specifically to keep that compiling, so the extracted collaborator must not force a constructor-signature change). `GroupConversationService` now constructs a `GroupAttachmentBinder(attachmentStore, defaultTenantId)` per call site and delegates — a pure move, no logic changes.
+
+The dedicated `Attachments` nested test class (12 tests) moved from `GroupConversationServiceTest` to a new focused `GroupAttachmentBinderTest`, testing the extracted class directly instead of through the facade. Baselined the full 12-class/470-test `GroupConversationService*Test` suite before touching any code (all green; JaCoCo: 82% instruction / 72% branch on the class) — that is this refactor's regression budget going forward. Re-ran the same suite plus the new test class after the extraction: still all green, 470 tests total (458 in the `GroupConversationService` family + 12 in the new class), `./mvnw clean compile` clean, formatter + Checkstyle clean.
+
+**What's next:** R1 steps 2–10 (extract `GroupContextBuilder`, `GroupSigningGuard`, `MemberTurnExecutor`, `PhaseExecutionEngine`, `TaskForceEngine`, `GroupHitlCoordinator`, `GroupLifecycleOps`, then the graceful-shutdown wiring commit) per `planning/group-collaboration-improvements-plan.md` §3.1, each its own commit. R2 (`AgentOrchestrator` tool-source SPI) and R3 (`ConversationService` HITL split) follow. Full sequencing in the plan's §7 dependency graph.
 ## 🔒 fix(docker): move to the republished UBI base and retire the microdnf stopgap (2026-08-04)
 
 **Repo:** EDDI (`fix/base-image-cve-2026-47063`)
@@ -44,6 +1728,113 @@ The Trivy gate on `main` fails the image push: `CVE-2026-47063` (HIGH, "Enhance 
 Retiring it also removes a build-time network dependency and a layer from the runtime image. The risk of going back to baked packages — that an erratum newer than the 2026-07-29 build exists, which `microdnf` would have pulled and the base would not — was checked: the Red Hat CVE feed lists nothing for `glib2`, `acl`, `python3.9` or `java-25-openjdk` after 2026-07-25.
 
 **Verification.** Reproduced the CI gate locally — `mvnw package`, `docker build`, then Trivy 0.70.0 with the exact settings from `ci.yml` (`--severity CRITICAL,HIGH --ignore-unfixed --exit-code 1`): **exit 0, redhat 9.8 row clean**, against the previous run's 2 HIGH. The runtime image reports `openjdk version "25.0.4" (Red_Hat-25.0.4.0.7-1)`, and `rpm -q` in the built image confirms `glib2-2.68.4-19.el9_8.2`, `libacl-2.4.0-1.el9_8` and `python3-3.9.25-7.el9_8.2` — the stopgap versions, now inherited rather than installed. `1.24` is still the newest tag stream (`1.25`–`1.29` and `2.0` all 404). No other file pins the old digest; `ContainerBaseIT` references the tag only.
+
+---
+
+## 🧭 feat(operator): a context-aware side-chat drawer, reachable from Manager and Workforce (2026-08-04)
+
+**Repo:** EDDI-Manager (`feat/operator-write-scope`)
+
+The operator existed only as a dedicated page at `/manage/operator` — Manager-only, full-page-only, no idea what screen the admin was actually looking at when they opened it. Added a floating-launcher drawer (`operator-drawer.tsx`) mounted once in `AppLayout` and once in each of `WorkforceLayout`'s three viewport branches (mobile/tablet/desktop) — a self-positioned `fixed` panel, since those four layouts share no common chrome slot the way the existing `ChatDrawer` shares `AppLayout`'s one.
+
+**Shared conversation, not a second one.** The drawer reuses `useOperatorChat`/`useOperatorConfig` directly rather than standing up a parallel chat — same react-query cache, same conversation. That required promoting `use-operator-chat.ts`'s state off local `useState` onto a Zustand store (`useOperatorChatStore`): today, even the full page silently drops its visible transcript on remount (the backend conversation survives via the `sessionStorage`-remembered id, but `messages` restarts empty), because nothing shared it. The wrapper hook keeps the exact same public API, so `operator.tsx`'s call sites are unchanged.
+
+That refactor was stress-tested by a dedicated Plan-agent pass before writing it, which caught four things a naive `useState`→Zustand translation would have gotten wrong: `set()` merges rather than replaces (so `reset()` must explicitly null the three promoted-from-`useRef` fields, not just the public ones); the eslint-disables in `operator.tsx` don't disappear on their own (the rule flags the *shape* of `chat.reset()`, unrelated to the state container); a second existing test file (`operator.test.tsx`, not just the hook's own test) mounts the real hook and needed the same reset; and `context` (see below) has to be a call-time argument to `send()`, never a store field, or two mounted surfaces would race to overwrite each other's screen context. Mutation-tested the one real bug risk (the merge trap): reverting the internal-field nulling in `reset()` let an orphaned turn — one whose conversation was reset mid-stream — graft its trace onto the fresh state; a new test (`use-operator-chat.test.tsx`) drives exactly that interleaving and fails without the fix.
+
+**Pause handling doesn't duplicate `ApprovalBanner`.** That component is security-reviewed for one full-width surface (redacted previews, self-guard, blocked-calls) — a docked drawer has no room to review a gated write responsibly, and forking a second smaller copy is exactly the "two systems drift apart" trap this whole feature has spent most of its review cycles closing. `operator-chat.tsx` gained one prop, `pauseSurface?: "banner" | "compact"` (default `"banner"`, zero diff for the full page); compact renders the pause reason plus a link to `/manage/operator`, where the real banner picks up the identical pause — same conversation, no re-ask.
+
+**Context flows through a transport that already existed and was unused.** `sendMessageStreaming`'s `InputData` has had an optional `context?: Record<string, unknown>` field since well before this — it flows into the backend's per-turn `{context.x}` Qute variable, the documented mechanism for exactly this. Nothing populated it. Added `useCurrentScreenContext()` (route → `{screen, agentId, workflowId, groupId, boardId}`, matched via `matchPath` against an ordered table — the drawer lives above the routed `<Outlet/>`, so `useParams()` can't see it there, and `matchPath` has no cross-pattern ranking, so literal routes have to precede the param routes they'd otherwise collide with) and thread its output into `send(input, context)` from the drawer only (the full page's own location is always just "the operator page" — not informative). A new unconditional section of the system prompt (`BODY_APP_CONTEXT`, Qute-conditional so it degrades to nothing when no context was sent) reads it back as `{context.screen}` etc. Zero backend changes. Existing operators pick this up on their next reconfigure, same as every other prompt-body change in this feature.
+
+**Caught live, not by the test suite:** the mobile Workforce viewport has a `fixed bottom-0 h-16` tab bar (`WorkforceBottomTabs`) that jsdom can't lay out, so nothing in the automated suite could have caught the drawer's default `bottom-6` sitting ~40px inside it. Found by actually resizing a running dev-server browser to the mobile breakpoint and reading `getBoundingClientRect()`; fixed with a `clearsBottomTabBar` prop (mirrors the same layout's own `<main className="pb-20">`, used only on mobile), verified the fix live, then added a regression test asserting the class difference (`operator-drawer.test.tsx`) since geometry itself isn't observable in jsdom.
+
+i18n: `operator.chat.pauseCompact{Fallback,Review}`, `operator.drawer.{title,notActivated,activate}` — all 11 locales.
+
+**Verification:** typecheck and lint clean; full suite 309 files / 4642 tests green (+4 files / +26 tests over baseline); production build succeeds; manual pass in a live dev server (MSW mock backend) across Manager and all three Workforce viewport branches, including the mobile fix above.
+
+---
+
+## 🔒 fix(hitl): a resume verdict that resolved to null was one comparison away from executing as approved (2026-08-03)
+
+**Repo:** EDDI (`feat/operator-request-fingerprint`)
+
+Found by an automated review comment on [#627](https://github.com/labsai/EDDI/pull/627) (Copilot), on `AgentOrchestrator.resumeToolLoop`'s per-call verdict resolution: `HitlVerdict verdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : topVerdict` falls back to `topVerdict` with no null check, and the only gate downstream is `if (verdict == REJECTED) { ...skip... }` — a null verdict is not `== REJECTED`, so it silently fell through to the execute branch. The metric emitted alongside it made this worse, not just neutral: `recordWriteApprovalDecision`'s `verdict == APPROVED ? "approved" : "rejected"` would have tagged the very same call `"rejected"` while it executed — the telemetry that should have caught the bug in production would have shown the opposite of what happened.
+
+Traced every caller of the shared choke point (`ConversationService.resumeConversation`) before concluding this was live: `RestAgentEngine` (`decision.getVerdict() == null` → 400), `SlackInteractivityHandler` (`verdictFor` checked before `ParsedAction` exists), `McpHitlTools` (`parseVerdictOrNull` checked before the tool call proceeds), `HitlTimeoutHandler` (verdict is a hardcoded `APPROVED`/`REJECTED` ternary), `GroupConversationService`'s member-tool-pause auto-resolution (hardcoded `REJECTED`) — all five independently guarantee a non-null top-level verdict today. Not exploitable as the code stands, but fragile: the invariant was enforced four separate times, never once at the method every one of them funnels through, so a sixth caller (or a refactor of any of the five) could silently reintroduce the gap with nothing to catch it.
+
+Fixed at both ends rather than patching the symptom:
+- **`ConversationService.resumeConversation`** now rejects `decision == null || decision.getVerdict() == null` up front with `IllegalArgumentException`, mirroring `RestAgentEngine`'s existing message — enforced once, for every current and future caller, instead of assumed five times over.
+- **`AgentOrchestrator`**, per Copilot's specific suggestion: normalizes an (now theoretically unreachable, but no longer trusted blindly) unresolved verdict to `REJECTED` before either the metric emit or the execution check, so the two can never disagree with each other again.
+
+Mutation-verified both independently: reverting the `ConversationService` guard makes the new null-decision/null-verdict tests fail with `ResourceNotFoundException` instead of `IllegalArgumentException` (proving the check, not something else, produces the 400); reverting the `AgentOrchestrator` normalization makes `unresolvedVerdictFailsClosed` fail on `journalStore.tryClaim` actually being invoked — i.e. with the fix removed, the call really does execute. Both restored and re-verified green (`ConversationServiceHitlCoverage2Test` 14/14, `AgentOrchestratorResumeToolLoopTest` 12/12, `ConversationServiceResumeTest` 18/18).
+
+Also landed on this branch: reattached `auditOutcomeUnknown`'s Javadoc, separated from its method by the request-pinning commit's insertion point (also a review finding, cosmetic — see the commit itself).
+
+---
+
+## 🔓 feat(setup): let the standard agent-setup path install a HITL gate too (2026-08-03)
+
+**Repo:** EDDI (`feat/operator-request-fingerprint`)
+
+`CreateApiAgentRequest` (the OpenAPI-spec agent path) has carried a `hitlConfig` field since the setup-api gate provisioning work referenced above — `SetupAgentRequest` (the "standard" agent path: behavior rules + LLM + output, no OpenAPI spec) never got the same field, so every agent it created had `hitlConfig == null` and no gate. Added the field, mirroring `CreateApiAgentRequest`'s reasoning exactly: validated up front (`HitlConfigValidation.validate`, same as `createApiAgent`), wired onto `AgentConfiguration` at creation time — before `createAgent()` is called, never via a later PUT, for the same "v1 must ship gated or a redeploy reaches an ungated version" reason documented on `createApiAgent`. Deliberately absent from the MCP `setup_agent` tool's arguments (stays `null`, same as `create_api_agent`) — that tool already lets the caller choose the created agent's tool surface, so also letting it choose the approval gate would be a caller-controlled way to produce an ungated agent. Provisioning a gated agent goes through `POST /administration/agents/setup` directly, which the JAX-RS layer deserializes with no such restriction.
+
+Closes a real, previously undocumented gap: this was the one remaining agent-creation path with no `hitlConfig` support at all — a prerequisite for letting the operator provision *any* type of agent (not just OpenAPI-spec ones) with an approval gate installed from v1.
+
+New coverage: `HitlConfigWiringTests` (`AgentSetupServiceTest`) asserts — via `ArgumentCaptor<AgentConfiguration>` — that the exact `hitlConfig` object reaches `createAgent()`, and that an absent one leaves the agent ungated rather than inventing a default. This assertion didn't previously exist for either `setupAgent` or `createApiAgent`; adding it for the new path closed the gap for both. Mutation-tested: removing the `setHitlConfig` call fails `hitlConfigReachesTheCreatedAgentConfiguration` (asserted `null` where the real object was expected); restored and re-verified 95/95 green.
+
+**Verification.** Full `mvnw test` run checked against the documented environmental baseline (~288 no-network loopback errors in `Web*ToolTest`, 8 pre-existing failures in `EmbeddingModelFactoryBranchTest`); this run: 313 errors / 8 failures, none in a touched class.
+
+---
+
+## 🔒 feat(hitl): approval binds to the resolved request, not the tool name (2026-08-03)
+
+**Repo:** EDDI (`feat/operator-request-fingerprint`, branched from `main` after PR #625 merged — the per-endpoint-friction entry below plus setup-api gate provisioning, docs-over-REST, and `mcpServerUrls`; builds on the foundation laid in [#622](#-featoperator-the-foundation-for-an-agent-that-can-safely-write-2026-07-29))
+
+Closes the gap the operator write-scope plan (`planning/operator-write-scope-plan.md` §3) flagged as the reason `WRITE_ENDPOINTS` had to stay empty: an approver of a gated `http` call saw the tool's name and the model's raw arguments, never the actual request. Method, path, query and body are only produced inside `ApiCallExecutor#execute`, **after** approval — so what an approver signed off on and what ran could, in principle, differ.
+
+**Four commits, one seam apiece:**
+
+1. `IApiCallExecutor#resolve` — builds the request `execute` would send, without sending it. Deliberately weaker than `execute`: it skips `preRequest.propertyInstructions` because those write to conversation memory and previewing a call must never do that, so a call that has them comes back with no fingerprint rather than one that doesn't match what execution will actually build. Shares one redaction definition (`RequestRedactor`, extracted from `ApiCallExecutor`'s private scrub) between the conversation-memory debug record and the approval preview, so the two paths cannot drift apart on what counts as a credential.
+2. Gate time: each gated httpcall tool is resolved, and a redacted preview plus a SHA-256 fingerprint are persisted on the pause (`PendingToolCall.requestPreview` / `.requestFingerprint`). The fingerprint deliberately hashes the **redacted** request, not the live one — `ApiCallExecutor` resolves `${caller:token}` into `Authorization`, the approver is routinely a different person than whoever's turn raised the pause, and fingerprinting the live header would mismatch on every cross-user approval (the normal case), which would just get the check disabled. Canonicalization is length-prefixed rather than delimiter-joined, so a body containing a crafted newline cannot impersonate an extra header field and collide.
+3. Resume time: an approved, pinned call is re-resolved and refused — synthetic `NOT_EXECUTED`, audited as `hitl.tool.request_changed` (tool + callId + reason, never the request) — if the fingerprint moved. This is the actual enforcement; everything before it was groundwork. Three situations fail *closed* rather than being waved through: the tool vanished from the workflow across the pause, re-resolution throws, or the call's config gained `preRequest.propertyInstructions` mid-pause. "Cannot verify" is a different answer than "unchanged" — treating it as the latter would make reconfiguring an agent while a human decides the way around the guard.
+4. `eddi.operator.write.approval{decision=approved|rejected|timeout}` — the rubber-stamping signal the plan's metrics table calls for, emitted the instant a gated call's verdict is resolved regardless of what happens to it afterwards. `timeout` is its own bucket (`decidedBy == "system:timeout"`, from `HitlTimeoutHandler`) rather than folded into `approved`/`rejected` — an unattended auto-approval inflating "approved" would defeat the point of the metric.
+
+**Two metrics the backend cannot honestly emit itself.** `eddi.operator.canary` (+`.duration`) and `eddi.operator.gate.verified` describe facts the Manager establishes client-side — the write canary is a synthetic conversation it drives in the browser, gate verification is it re-reading every version of the operator agent document — and this codebase has no first-class notion of "the operator" to hang a server-side event on. `POST /administration/operator/{canary-result,gate-status}` (`eddi-admin`) exists purely to relay those already-established facts onto `/q/metrics`, so on-call doesn't need a Manager tab open. **Not a verification endpoint** — a report is trusted at face value, which is why it sits behind the same tier that can provision the operator at all. The gauge defaults to 0 before any report arrives, which is indistinguishable from "activated, and broken"; that ambiguity is real and this signal alone doesn't resolve it.
+
+**Verification.** Full `mvnw validate` + `mvnw test` run checked against the documented environmental baseline (no-network loopback failures in `Web*ToolTest`); none of the touched classes appear in the failure list. The fingerprint discrimination properties (method/URI/query/body/header changes each move the hash; header casing, ordering, and redacted-credential values do not) and the enforcement decision (pinned+changed → refused; unpinned, amended, or matching → proceeds; unresolvable → fails closed) are both covered with dedicated unit tests. Four mutations applied against the enforcement path, each confirmed to kill exactly the tests guarding that branch; one applied against the timeout-tagging logic, confirmed to kill only the two timeout tests and leave approved/rejected untouched.
+
+Documented in [`docs/hitl.md`](hitl.md) (new §"Request pinning — approval binds to a request, not a tool name"; Operations metrics list extended).
+
+### Two more commits on the same branch: the preview reaches the wire, and everything above gets a real metric (2026-08-03)
+
+The pinning above persisted `requestPreview`/`requestFingerprint` on the pause record, but nothing external ever read them back — `RestAgentEngine.buildToolCallPauseDetails` builds its response as an explicit field-by-field map, so a new model field is invisible to a caller until something puts it there. `GET .../approval-status` now surfaces `requestPinned` and, when pinned, the redacted `requestPreview` (`method`/`uri`/`queryParams`/`headers`/`body`/`bodyTruncated`) per call — this is what an approver actually reads, replacing what the Manager previously had to guess by reconstructing an `operationId` against a separately-fetched spec. The raw fingerprint stays internal; it means nothing to a human. `namesOnlyPendingToolCalls` — the security-motivated projection for the generic (non-approver) read surfaces — needed no code change, since it's an explicit allow-list and a field it was never told to copy is absent by construction; only its doc comment needed the two new field names added.
+
+Also lands `eddi.operator.write.approval{decision=approved|rejected|timeout}` (a real backend-native metric — the orchestrator observes every gated-call verdict directly) and the relay endpoints `POST /administration/operator/{canary-result,gate-status}` for the two metrics the backend cannot honestly emit itself.
+
+**Verification note worth recording**: this repo's `@Nested`-only JUnit classes report `Tests run: 0` in the plain-text surefire report even when every test inside passed — already documented in memory from a prior session, and it still cost real time to rediscover mid-session before the XML `<testsuite tests="…">` attribute was checked. Both touched test classes' real results: `RestAgentEngineToolPauseDetailsTest` 11/11, `ConversationMemoryUtilitiesHitlTest` 8/8.
+
+### The preview leaked the body it was supposed to protect (2026-08-03)
+
+Found while scoping the operator's authoring UI, and the reason that scope changed: `RequestRedactor` only ever touched `headers`. Both consumers of a resolved request — the debug record persisted to the conversation document and the approval preview shown to a human — passed the **body** through verbatim. A config write carries its credential in the body, not a header, so a `POST` creating an agent with a provider key would have shown that key in plaintext to whoever approved the pause — routinely a different admin than the one whose turn raised it.
+
+Fixed by giving `RequestRedactor` a `redactBody` (delegating to `SecretRedactionFilter`, the same value-shape scan already behind `argumentsRedacted` — one filter for one class of data, rather than a second scheme that would drift), wired into both `redactRequestMap` and `ResolvedRequest#of`.
+
+The ordering matters more than the redaction. Headers stay fingerprinted **redacted** for the cross-user-approval reason documented above; the body is fingerprinted **raw** and only the stored copy is redacted, because a body has no equivalent legitimate variance (`${caller:token}` is header-only; `${vault:…}` resolves identically both times). Redacting first would hash two *different* credentials to one marker and so to one fingerprint — a swapped secret would pass the pre-execution re-check as an unchanged request. `ResolvedRequest#of` does the redaction itself so no call site can get that order wrong; a test asserts two distinct keys produce distinct fingerprints, and it fails if the redaction is hoisted above the hash. The fingerprint is never exposed to a client, so hashing raw reveals nothing.
+
+The limitation is stated rather than papered over: value-shape matching catches `sk-…`, `sk-ant-…`, bearer tokens and vault refs, not a hand-rolled secret in a generically named field. That is the same limitation `argumentsRedacted` already carries.
+
+### Review findings on the PR — pinning was silently not applying (2026-08-03)
+
+Three defects found by automated review on [#627](https://github.com/labsai/EDDI/pull/627), all in the pinning path, all fixed with tests that fail without the fix.
+
+**Query parameters broke pinning entirely.** `IRequest#toMap` returns them as `Map<String, List<String>>` — `HttpClientWrapper` accumulates repeats — but `resolve` cast that to `Map<String, String>`. The cast erases cleanly and then throws `ClassCastException` inside the fingerprint canonicaliser, which `pinResolvedRequest` catches and downgrades to "approved unpinned". So **every gated endpoint carrying a query parameter was silently unpinned**, `POST .../deploy/{agentId}?version=N` — a granted write — among them. The headline guarantee of this PR did not apply where it mattered most, and nothing failed loudly. Fixed by normalising both shapes, canonicalising one length-prefixed field per value (so `?tag=a&tag=b` cannot be forged by a single value containing the display separator), and correcting the `KEY_QUERY_PARAMS` javadoc that asserted the wrong type.
+
+**Query parameters were not redacted.** Same class as the body leak above and missed for the same reason — `?api_key=…` is a conventional credential channel, and the query string is shown to the approver. Redacted for display, hashed raw, exactly as the body is.
+
+**A dropped tool kept its resolver.** `mergeExternalTools` resolves a name collision by dropping the incoming tool, but the resolver was registered before that verdict was known. A builtin that won a collision against an http tool of the same name would then be pinned against the *dropped* tool's request — the approver shown a preview of a call that never runs, and the pre-execution check comparing against that same fabricated request and passing. Resolvers are now pruned to names a surviving http tool actually owns.
+
+Also: the tool name in the resolve-failure WARN now goes through `sanitize` (it is model-chosen and could forge log records), and the docs no longer claim `requestPinned: false` implies `requestPreview: null` — a call with `preRequest.propertyInstructions` is previewed best-effort *and* left unpinnable, so both are true at once.
+
+**`WRITE_ENDPOINTS` is now populated**, on the Manager side — see that repo's own changelog for the write canary, the curated endpoints (four operational verbs plus group create), real `read_write` scope selection, and the approval banner rendering this backend's `requestPreview` in place of the client-side `operationId` reconstruction it was always labelled as a stand-in for. Nothing further is required on this side.
 
 ---
 

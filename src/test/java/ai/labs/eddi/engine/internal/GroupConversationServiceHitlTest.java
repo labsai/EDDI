@@ -21,6 +21,8 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
+import ai.labs.eddi.configs.groups.model.GroupConversation.HitlPauseType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.ResumePoint;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -1418,6 +1420,150 @@ class GroupConversationServiceHitlTest {
     }
 
     // =================================================================
+    // F2: speaker-level ResumePoint bookmark drift guard
+    // =================================================================
+
+    @Nested
+    @DisplayName("Speaker bookmark drift guard (F2)")
+    class SpeakerBookmarkDriftGuard {
+
+        @Test
+        @DisplayName("bookmarked speaker index beyond the current roster restores the pause instead of resuming")
+        void speakerIndexBeyondCurrentRoster_restoresPauseInsteadOfResuming() throws Exception {
+            var phases = List.of(
+                    new DiscussionPhase("Opinion", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, false));
+
+            var gc = new GroupConversation();
+            gc.setId("gc-speaker-drift");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(0);
+            gc.setPausedPhaseName("Opinion");
+            gc.setPausedAt(Instant.now());
+            gc.setHitlPauseType(HitlPauseType.TASK);
+            gc.setOriginalQuestion("Speaker drift test");
+            // Bookmarked speaker index 1, but buildConfig(...) below configures only a
+            // single member (index 0) — simulates a member being removed from the
+            // group config while the discussion was paused.
+            gc.setResumePoint(new ResumePoint(0, 0, 1, "TASK"));
+
+            doReturn(gc).when(conversationStore).read("gc-speaker-drift");
+
+            var config = buildConfig(phases);
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+
+            var request = new GroupApprovalRequest();
+            var dec = new HitlDecision();
+            dec.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(dec);
+
+            var errorMessage = new java.util.concurrent.atomic.AtomicReference<String>();
+            var resumeDone = new java.util.concurrent.CountDownLatch(1);
+            var listener = new ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener() {
+                @Override
+                public void onGroupError(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupErrorEvent event) {
+                    errorMessage.set(event.error());
+                    resumeDone.countDown();
+                }
+
+                @Override
+                public void onGroupComplete(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupCompleteEvent event) {
+                    resumeDone.countDown();
+                }
+            };
+
+            service.resumeDiscussion("gc-speaker-drift", request, listener);
+
+            assertTrue(resumeDone.await(5, java.util.concurrent.TimeUnit.SECONDS),
+                    "Async resume should complete within 5s");
+
+            assertNotNull(errorMessage.get(), "a roster shrink below the bookmarked speaker index must fire onGroupError");
+            assertTrue(errorMessage.get().contains("bookmarked speaker index"), () -> "unexpected message: " + errorMessage.get());
+            assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(),
+                    "the pause must be restored, not consumed, when the roster no longer fits the bookmark");
+            verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+        }
+    }
+
+    @Nested
+    @DisplayName("Parallel phase ignores speaker bookmark (F2)")
+    class ParallelPhaseIgnoresSpeakerBookmark {
+
+        @Test
+        @DisplayName("resume into a PARALLEL phase runs every speaker even with a speaker bookmark present")
+        void resumeIntoParallelPhase_runsEverySpeaker_bookmarkIgnoredAndCleared() throws Exception {
+            var phases = List.of(
+                    new DiscussionPhase("Parallel", PhaseType.OPINION,
+                            "ALL", TurnOrder.PARALLEL, ContextScope.FULL,
+                            false, null, 1, false));
+
+            var gc = new GroupConversation();
+            gc.setId("gc-parallel-resume");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(0);
+            gc.setPausedPhaseName("Parallel");
+            gc.setPausedAt(Instant.now());
+            gc.setHitlPauseType(HitlPauseType.TASK);
+            gc.setOriginalQuestion("Parallel resume test");
+            // PARALLEL phases never produce a resumePoint in production (see its
+            // Javadoc) — this proves the defensive case is still harmless: the
+            // offset is silently ignored (never passed to executeParallelPhase)
+            // and the bookmark is cleared like any other, rather than causing a
+            // skipped speaker or an exception.
+            gc.setResumePoint(new ResumePoint(0, 0, 1, "TASK"));
+
+            doReturn(gc).when(conversationStore).read("gc-parallel-resume");
+
+            var config = buildConfig(phases);
+            config.setMembers(List.of(
+                    new GroupMember(AGENT_A, "Agent A", 1, null),
+                    new GroupMember("agent-b", "Agent B", 2, null)));
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+            stubAgentSay();
+
+            var request = new GroupApprovalRequest();
+            var dec = new HitlDecision();
+            dec.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(dec);
+
+            var completedSpeakers = java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+            var resumeDone = new java.util.concurrent.CountDownLatch(1);
+            var listener = new ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener() {
+                @Override
+                public void onSpeakerComplete(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.SpeakerCompleteEvent event) {
+                    completedSpeakers.add(event.agentId());
+                }
+
+                @Override
+                public void onGroupComplete(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupCompleteEvent event) {
+                    resumeDone.countDown();
+                }
+
+                @Override
+                public void onGroupError(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupErrorEvent event) {
+                    resumeDone.countDown();
+                }
+            };
+
+            service.resumeDiscussion("gc-parallel-resume", request, listener);
+
+            assertTrue(resumeDone.await(5, java.util.concurrent.TimeUnit.SECONDS),
+                    "Async resume should complete within 5s");
+
+            assertEquals(java.util.Set.of(AGENT_A, "agent-b"), completedSpeakers,
+                    "a PARALLEL resume must run every speaker — the speaker bookmark is not honored for PARALLEL phases");
+            assertNull(gc.getResumePoint(), "the bookmark must be consumed/cleared even though its offset was ignored");
+        }
+    }
+
+    // =================================================================
     // Resume: not AWAITING_APPROVAL → exception
     // =================================================================
 
@@ -1440,6 +1586,36 @@ class GroupConversationServiceHitlTest {
             assertThrows(GroupDiscussionException.class,
                     () -> service.resumeDiscussion("gc-wrong", request, null),
                     "Resuming a non-AWAITING_APPROVAL GC should throw");
+        }
+    }
+
+    // =================================================================
+    // Resume: schema version guard (Wave 0, F6)
+    // =================================================================
+
+    @Nested
+    @DisplayName("Resume schema version guard (F6)")
+    class ResumeSchemaVersionGuard {
+
+        @Test
+        @DisplayName("a document newer than this code understands refuses resume synchronously, before any async work")
+        void resumeOnNewerSchemaVersion_refusesSynchronously() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-future-schema");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setSchemaVersion(GroupConversation.CURRENT_SCHEMA_VERSION + 1);
+
+            doReturn(gc).when(conversationStore).read("gc-future-schema");
+
+            var request = new GroupApprovalRequest();
+
+            var ex = assertThrows(GroupDiscussionException.class,
+                    () -> service.resumeDiscussion("gc-future-schema", request, null),
+                    "a document written by a newer version must refuse resume rather than guess at its shape");
+            assertTrue(ex.getMessage().contains("newer version"), () -> "unexpected message: " + ex.getMessage());
+
+            verifyNoInteractions(groupStore);
         }
     }
 

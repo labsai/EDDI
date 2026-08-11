@@ -941,7 +941,8 @@ class DynamicAgentToolsTest {
             deploymentStore = mock(IDeploymentStore.class);
             createdAgentIds = new CopyOnWriteArrayList<>(List.of("created-1", "created-2"));
             retainedAgentIds = ConcurrentHashMap.newKeySet();
-            tool = new TeardownAgentTool(agentFactory, agentStore, deploymentStore, createdAgentIds, retainedAgentIds);
+            tool = new TeardownAgentTool(agentFactory, agentStore, deploymentStore, createdAgentIds, retainedAgentIds,
+                    ConcurrentHashMap.newKeySet());
         }
 
         @Test
@@ -1096,7 +1097,7 @@ class DynamicAgentToolsTest {
         @Test
         void constructor_nullArgs_doesNotThrow() {
             // Null constructor args should produce safe fallback collections
-            var safeTool = new TeardownAgentTool(agentFactory, agentStore, null, null, null);
+            var safeTool = new TeardownAgentTool(agentFactory, agentStore, null, null, null, null);
             // teardownAgent with unknown agentId returns a warning (doesn't NPE)
             String result = safeTool.teardownAgent("non-existent", false);
             assertTrue(result.contains("⚠️"));

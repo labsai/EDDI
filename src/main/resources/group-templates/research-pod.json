@@ -1,0 +1,71 @@
+{
+  "manifest": {
+    "templateId": "research-pod",
+    "title": "Research Pod",
+    "description": "Delphi-style independent estimation with anonymous convergence rounds. Convergence detection ends rounds early once positions stabilize, a retro harvests lessons into team memory, transcript windowing keeps long runs affordable, and a dollar ceiling bounds each discussion.",
+    "requiredRoles": [
+      { "role": "researcher1", "description": "First independent researcher" },
+      { "role": "researcher2", "description": "Second independent researcher" },
+      { "role": "researcher3", "description": "Third independent researcher" },
+      { "role": "moderator", "description": "Synthesizes the pod's findings and judges convergence" }
+    ]
+  },
+  "config": {
+    "name": "Research Pod",
+    "description": "Delphi-style independent estimation with convergence, retro memory and cost bounds",
+    "style": "CUSTOM",
+    "moderatorAgentId": "$moderator",
+    "members": [
+      { "agentId": "$researcher1", "displayName": "Researcher 1", "speakingOrder": 1 },
+      { "agentId": "$researcher2", "displayName": "Researcher 2", "speakingOrder": 2 },
+      { "agentId": "$researcher3", "displayName": "Researcher 3", "speakingOrder": 3 }
+    ],
+    "phases": [
+      {
+        "name": "Independent Estimates",
+        "type": "OPINION",
+        "participants": "ALL",
+        "turnOrder": "PARALLEL",
+        "contextScope": "NONE",
+        "repeats": 1
+      },
+      {
+        "name": "Anonymous Revision",
+        "type": "OPINION",
+        "participants": "ALL",
+        "turnOrder": "PARALLEL",
+        "contextScope": "ANONYMOUS",
+        "repeats": 3,
+        "allowAbstention": true,
+        "convergence": { "enabled": true, "minRepeats": 2, "threshold": 0.8 }
+      },
+      {
+        "name": "Synthesis",
+        "type": "SYNTHESIS",
+        "participants": "MODERATOR",
+        "turnOrder": "SEQUENTIAL",
+        "contextScope": "FULL",
+        "repeats": 1
+      },
+      {
+        "name": "Retro",
+        "type": "RETRO",
+        "participants": "MODERATOR",
+        "turnOrder": "SEQUENTIAL",
+        "contextScope": "FULL",
+        "repeats": 1
+      }
+    ],
+    "retroConfig": { "maxLessonsPerRun": 3, "maxStoredLessons": 50 },
+    "contextWindow": { "enabled": true, "maxRecentEntries": 30, "summarizeOverflow": false },
+    "protocol": {
+      "agentTimeoutSeconds": 180,
+      "onAgentFailure": "SKIP",
+      "maxRetries": 2,
+      "onMemberUnavailable": "SKIP",
+      "maxTurns": 60,
+      "maxCostPerDiscussion": 5.0,
+      "onCostExceeded": "SYNTHESIZE_NOW"
+    }
+  }
+}

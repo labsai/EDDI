@@ -305,6 +305,16 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
+    public void storeIfFieldEquals(IResource<T> newResource, String fieldName, long expectedValue)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        // data ->> field renders a JSON number as its canonical text ("3"), so on
+        // this backend the numeric CAS is a text comparison against the rendered
+        // number. The overload exists for MongoDB, whose typed BSON equality has
+        // no such coincidence — see IResourceStorage's Javadoc.
+        storeIfFieldEquals(newResource, fieldName, String.valueOf(expectedValue));
+    }
+
+    @Override
     public void createNew(IResource<T> resource) {
         Resource pgResource = checkInternalResource(resource);
         String sql = "INSERT INTO resources (id, collection_name, version, data) " + "VALUES (?::uuid, ?, ?, ?::jsonb)";

@@ -16,10 +16,10 @@
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.37.4</quarkus.platform.version>
-        <langchain4j-beta.version>1.18.0-beta28</langchain4j-beta.version>
-        <langchain4j.version>1.18.0</langchain4j.version>
-        <langchain4j-libs.version>1.18.0</langchain4j-libs.version>
+        <quarkus.platform.version>3.38.1</quarkus.platform.version>
+        <langchain4j-beta.version>1.18.1-beta28</langchain4j-beta.version>
+        <langchain4j.version>1.18.1</langchain4j.version>
+        <langchain4j-libs.version>1.18.1</langchain4j-libs.version>
         <jandex-maven-plugin.version>3.6.0</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.5.6</surefire-plugin.version>
@@ -332,6 +332,13 @@
             <groupId>com.github.victools</groupId>
             <artifactId>jsonschema-module-jackson</artifactId>
             <version>4.38.0</version>
+        </dependency>
+        <!-- JSON Schema VALIDATION (victools above only GENERATES schemas) — used
+             by the declarative shared-artifact validators (I17). -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>1.5.4</version>
         </dependency>
         <dependency>
             <groupId>jakarta.annotation</groupId>

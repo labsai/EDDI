@@ -47,13 +47,14 @@ class AgentGroupConfigurationTest {
 
     @Test
     void style_allValues() {
-        assertEquals(7, DiscussionStyle.values().length);
+        assertEquals(8, DiscussionStyle.values().length);
         assertNotNull(DiscussionStyle.valueOf("ROUND_TABLE"));
         assertNotNull(DiscussionStyle.valueOf("PEER_REVIEW"));
         assertNotNull(DiscussionStyle.valueOf("DEVIL_ADVOCATE"));
         assertNotNull(DiscussionStyle.valueOf("DELPHI"));
         assertNotNull(DiscussionStyle.valueOf("DEBATE"));
         assertNotNull(DiscussionStyle.valueOf("TASK_FORCE"));
+        assertNotNull(DiscussionStyle.valueOf("NEGOTIATION"));
         assertNotNull(DiscussionStyle.valueOf("CUSTOM"));
     }
 
@@ -136,7 +137,10 @@ class AgentGroupConfigurationTest {
 
     @Test
     void phaseType_allValues() {
-        assertEquals(11, PhaseType.values().length);
+        assertEquals(15, PhaseType.values().length);
+        assertNotNull(PhaseType.valueOf("PROPOSAL"));
+        assertNotNull(PhaseType.valueOf("BARGAIN"));
+        assertNotNull(PhaseType.valueOf("RETRO"));
         assertNotNull(PhaseType.valueOf("OPINION"));
         assertNotNull(PhaseType.valueOf("CRITIQUE"));
         assertNotNull(PhaseType.valueOf("REVISION"));
@@ -148,6 +152,7 @@ class AgentGroupConfigurationTest {
         assertNotNull(PhaseType.valueOf("PLAN"));
         assertNotNull(PhaseType.valueOf("EXECUTE"));
         assertNotNull(PhaseType.valueOf("VERIFY"));
+        assertNotNull(PhaseType.valueOf("VOTE"));
     }
 
     @Test
@@ -236,9 +241,54 @@ class AgentGroupConfigurationTest {
 
     @Test
     void memberType_allValues() {
-        assertEquals(2, MemberType.values().length);
+        assertEquals(3, MemberType.values().length);
         assertNotNull(MemberType.valueOf("AGENT"));
         assertNotNull(MemberType.valueOf("GROUP"));
+        assertNotNull(MemberType.valueOf("HUMAN"));
+    }
+
+    // ==================== Facilitator (I12) ====================
+
+    @Test
+    void facilitatorMove_allValues() {
+        assertEquals(6, FacilitatorMove.values().length);
+        assertNotNull(FacilitatorMove.valueOf("CONTINUE"));
+        assertNotNull(FacilitatorMove.valueOf("END_PHASE"));
+        assertNotNull(FacilitatorMove.valueOf("EXTEND_PHASE"));
+        assertNotNull(FacilitatorMove.valueOf("CALL_VOTE"));
+        assertNotNull(FacilitatorMove.valueOf("RECRUIT"));
+        assertNotNull(FacilitatorMove.valueOf("ESCALATE_HUMAN"));
+    }
+
+    @Test
+    void facilitatorCheckpoint_allValues() {
+        assertEquals(2, FacilitatorCheckpoint.values().length);
+        assertNotNull(FacilitatorCheckpoint.valueOf("EACH_PHASE"));
+        assertNotNull(FacilitatorCheckpoint.valueOf("EACH_REPEAT"));
+    }
+
+    @Test
+    void facilitatorConfig_compactConstructor_normalizesDefaults() {
+        var sparse = new FacilitatorConfig(true, "fac", null, null, 0, null);
+
+        assertEquals(List.of(FacilitatorMove.CONTINUE), sparse.allowedMoves(),
+                "an enabled-but-unconfigured facilitator is a pure observer");
+        assertEquals(FacilitatorCheckpoint.EACH_PHASE, sparse.checkAfter());
+        assertEquals(FacilitatorConfig.DEFAULT_MAX_MOVES, sparse.maxMovesPerDiscussion());
+
+        var emptyMoves = new FacilitatorConfig(true, "fac", List.of(), FacilitatorCheckpoint.EACH_REPEAT, -5, "boss");
+        assertEquals(List.of(FacilitatorMove.CONTINUE), emptyMoves.allowedMoves());
+        assertEquals(FacilitatorConfig.DEFAULT_MAX_MOVES, emptyMoves.maxMovesPerDiscussion(),
+                "non-positive caps fall back to the default, never to unlimited");
+    }
+
+    @Test
+    void facilitatorConfig_noArgConstructor_isDisabledObserver() {
+        var config = new FacilitatorConfig();
+
+        assertFalse(config.enabled());
+        assertEquals(List.of(FacilitatorMove.CONTINUE), config.allowedMoves());
+        assertEquals(FacilitatorCheckpoint.EACH_PHASE, config.checkAfter());
     }
 
     // ==================== LifecyclePolicy ====================

@@ -41,6 +41,14 @@ public class TeardownAgentTool {
     private final IDeploymentStore deploymentStore;
     private final List<String> createdAgentIds;
     private final Set<String> retainedAgentIds;
+    /**
+     * Agents this discussion has actually torn down. Persisted to step data by
+     * {@code DynamicAgentToolsProvider} and subtracted by
+     * {@code seedCreatedAgentIds}, so a teardown frees a
+     * {@code maxCreatedAgentsPerDiscussion} slot instead of the id reappearing on
+     * the next turn's seed.
+     */
+    private final Set<String> tornDownAgentIds;
 
     /**
      * {@code deploymentStore} may be null; teardown then skips retiring deployment
@@ -50,12 +58,14 @@ public class TeardownAgentTool {
             IAgentStore agentStore,
             IDeploymentStore deploymentStore,
             List<String> createdAgentIds,
-            Set<String> retainedAgentIds) {
+            Set<String> retainedAgentIds,
+            Set<String> tornDownAgentIds) {
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
         this.deploymentStore = deploymentStore;
         this.createdAgentIds = createdAgentIds != null ? createdAgentIds : new CopyOnWriteArrayList<>();
         this.retainedAgentIds = retainedAgentIds != null ? retainedAgentIds : new CopyOnWriteArraySet<>();
+        this.tornDownAgentIds = tornDownAgentIds != null ? tornDownAgentIds : new CopyOnWriteArraySet<>();
     }
 
     @Tool("Tear down (undeploy) a dynamically created agent. Only agents created during this discussion "
@@ -93,20 +103,27 @@ public class TeardownAgentTool {
             }
 
             // --- Optional: delete agent configuration ---
-            createdAgentIds.remove(agentId);
             if (Boolean.TRUE.equals(delete)) {
                 try {
                     agentStore.deleteAllPermanently(agentId);
                     retireDeploymentRecords(agentId);
-                    LOGGER.infof("[TEARDOWN] Permanently deleted agent '%s'", agentId);
-                    return "✅ Agent '%s' has been undeployed and permanently deleted.".formatted(agentId);
                 } catch (Exception e) {
+                    // Deliberately BEFORE forgetting the agent: an agent whose config
+                    // survives must stay tracked, or the ephemeral cleanup at the end of
+                    // the discussion will never retry it and the config plus its
+                    // deployment record are orphaned. The old code removed it from
+                    // createdAgentIds up front and then reported the failure, which is
+                    // exactly the leak this ordering prevents.
                     LOGGER.warnf("[TEARDOWN] Delete failed for agent '%s': %s", agentId, e.getMessage());
                     return "⚠️ Agent '%s' was undeployed but deletion failed: %s"
                             .formatted(agentId, e.getMessage());
                 }
+                forget(agentId);
+                LOGGER.infof("[TEARDOWN] Permanently deleted agent '%s'", agentId);
+                return "✅ Agent '%s' has been undeployed and permanently deleted.".formatted(agentId);
             }
 
+            forget(agentId);
             return "✅ Agent '%s' has been undeployed successfully.".formatted(agentId);
 
         } catch (Exception e) {
@@ -114,6 +131,28 @@ public class TeardownAgentTool {
                     agentId, e.getMessage());
             return "❌ Unexpected error: " + e.getMessage();
         }
+    }
+
+    /**
+     * Stops tracking a successfully torn-down agent, and records the teardown so it
+     * survives the turn.
+     * <p>
+     * Removing it from {@code createdAgentIds} alone was not enough to free a
+     * {@code maxCreatedAgentsPerDiscussion} slot: that list is rebuilt every turn
+     * by {@code seedCreatedAgentIds}, which unions the
+     * {@code dynamic:created_agent_ids} entry of every earlier step — so the id
+     * came straight back and the cap counted an agent that no longer exists
+     * forever. The torn-down set is what {@code seedCreatedAgentIds} subtracts, and
+     * what {@code propagateDynamicAgentTracking} uses to drop the id from the
+     * group's own tracking too.
+     */
+    private void forget(String agentId) {
+        // Tombstone first: DynamicAgentToolsProvider persists this set into step data
+        // and GroupLifecycleOps applies it to the group's tracking, where it must win
+        // over any created-list snapshot that has not observed the teardown yet.
+        tornDownAgentIds.add(agentId);
+        createdAgentIds.remove(agentId);
+        retainedAgentIds.remove(agentId);
     }
 
     /**

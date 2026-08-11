@@ -202,4 +202,39 @@ class ConverseWithAgentToolGuardrailsTest {
         assertTrue(third.contains("Maximum delegations for this task"), third);
         verify(conversationService, times(2)).startConversation(any(), anyString(), any(), any());
     }
+
+    // =================================================================
+    // I7 — the delegation timeout is configurable
+    // =================================================================
+
+    @Test
+    @DisplayName("delegationTimeoutSeconds bounds the wait, and the message reports the same number")
+    void delegationTimeoutIsConfigurable() throws Exception {
+        // A delegate that never answers. Before I7 the wait was hard-coded to 60s
+        // and the message said "(60s limit)" even if that was not the limit
+        // applied — so this asserts both halves against one config value.
+        lenient().doAnswer(invocation -> null).when(conversationService)
+                .say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        var config = config(true, 3, 3, null);
+        config.setDelegationTimeoutSeconds(1);
+        var tool = new ConverseWithAgentTool(conversationService, "user-1", config, 0);
+
+        long startedAt = System.nanoTime();
+        String reply = tool.converseWithAgent("agent-b", "hello", null);
+        long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+        assertTrue(reply.contains("Timeout"), reply);
+        assertTrue(reply.contains("(1s limit)"), "the message must report the limit actually applied: " + reply);
+        assertTrue(elapsedMs < 30_000, "the configured 1s bound was not applied — waited " + elapsedMs + "ms");
+    }
+
+    @Test
+    @DisplayName("an unset delegation timeout keeps the historical 60s default")
+    void delegationTimeoutDefaultsTo60() {
+        assertEquals(60, config(true, 3, 3, null).getDelegationTimeoutSeconds());
+        var zeroed = config(true, 3, 3, null);
+        zeroed.setDelegationTimeoutSeconds(0);
+        assertEquals(60, zeroed.getDelegationTimeoutSeconds(),
+                "a non-positive value must not mean \"wait forever\" — that is how a delegation cycle becomes a hang");
+    }
 }

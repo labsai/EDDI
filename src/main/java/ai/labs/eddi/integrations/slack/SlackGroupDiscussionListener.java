@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import org.jboss.logging.Logger;
@@ -40,7 +42,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
      * mode (single thread) is too hard to follow with multiple agents.
      */
     private static final Set<String> EXPANDED_STYLES = Set.of(
-            "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI", "TASK_FORCE");
+            "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI", "TASK_FORCE", "NEGOTIATION");
 
     private final SlackWebApiClient slackApi;
     private final String authToken;
@@ -266,6 +268,137 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
         String threadTs = expandedMode ? null : userThreadTs;
         postSafe(channelId, threadTs, sb.toString().stripTrailing());
+    }
+
+    @Override
+    public void onDecisionReached(GroupConversationEventSink.DecisionReachedEvent event) {
+        var decision = event.decision();
+        // NONE means the producing feature's own parse fell back rather than
+        // leaving the record unset (see DecisionRecord's Javadoc) — that failure
+        // is the producing feature's own concern, not something to surface here.
+        if (decision == null || decision.type() == DecisionType.NONE) {
+            return;
+        }
+
+        var sb = new StringBuilder();
+        sb.append(String.format("⚖️ *Decision reached* (%s)\n", decision.type()));
+        if (decision.outcome() != null && !decision.outcome().isBlank()) {
+            sb.append(String.format("> %s\n", decision.outcome()));
+        }
+        if (decision.winner() != null && !decision.winner().isBlank()) {
+            sb.append(String.format("Winner: *%s*\n", decision.winner()));
+        }
+        appendVoteTally(sb, decision);
+        if (decision.dissents() != null && !decision.dissents().isEmpty()) {
+            sb.append(String.format("Dissents: %d\n", decision.dissents().size()));
+        }
+
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, sb.toString().stripTrailing());
+    }
+
+    /**
+     * The per-option tally block for VOTE decisions (I14). Bounded and defensive:
+     * the tally map is model-shaped data that crossed serialization, so every read
+     * is instanceof-guarded rather than cast.
+     */
+    private static void appendVoteTally(StringBuilder sb, DecisionRecord decision) {
+        if (decision.type() != DecisionType.VOTE || decision.tally() == null) {
+            return;
+        }
+        Object totals = decision.tally().get("totals");
+        if (totals instanceof Map<?, ?> totalsMap && !totalsMap.isEmpty()) {
+            sb.append("Tally:\n");
+            totalsMap.entrySet().stream().limit(MAX_TALLY_LINES).forEach(entry -> sb.append(String.format("• %s — %s\n",
+                    buildPreview(String.valueOf(entry.getKey()), MAX_TALLY_OPTION_CHARS), entry.getValue())));
+            if (totalsMap.size() > MAX_TALLY_LINES) {
+                sb.append(String.format("… and %d more option(s)\n", totalsMap.size() - MAX_TALLY_LINES));
+            }
+        }
+        Object valid = decision.tally().get("validBallots");
+        Object participants = decision.tally().get("participants");
+        if (valid instanceof Number && participants instanceof Number) {
+            sb.append(String.format("Ballots: %s of %s\n", valid, participants));
+        }
+    }
+
+    /** Slack messages are skimmed, not scrolled — a ten-option tally is noise. */
+    private static final int MAX_TALLY_LINES = 6;
+
+    /**
+     * Same reasoning per line: a LAST_SYNTHESIS-derived option is whatever text
+     * followed "Option X:", which can be a paragraph — six of those could push the
+     * whole decision message past Slack's per-message limit, and postSafe would
+     * swallow the loss.
+     */
+    private static final int MAX_TALLY_OPTION_CHARS = 120;
+
+    /**
+     * I6: a HUMAN member's turn is up. Slack is notification-only in v1 — the
+     * member responds through the EDDI UI/API (free-text reply capture from Slack
+     * is a planned follow-up); this message tells them they are up and where.
+     */
+    @Override
+    public void onHumanInputRequested(GroupConversationEventSink.HumanInputRequestedEvent event) {
+        if (event == null || event.memberId() == null) {
+            return;
+        }
+        String name = event.displayName() != null && !event.displayName().isBlank()
+                ? event.displayName()
+                : event.memberId();
+        String msg = String.format("🙋 *%s* — you're up in *%s*. Respond in EDDI (conversation `%s`).",
+                escapeMrkdwnHuman(name), escapeMrkdwnHuman(event.phaseName()),
+                groupConversationId != null ? groupConversationId : "unknown");
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, msg);
+        // A human pause is terminal for THIS listener instance — the discussion
+        // leg ends, and a resumed leg gets its own listener. Without the count
+        // down, SlackEventHandler blocks its full awaitCompletion timeout on
+        // every human pause (the same rule onHitlPause follows).
+        completionLatch.countDown();
+    }
+
+    /**
+     * Escapes Slack's three mrkdwn control characters — a member display name
+     * containing {@code <!channel>} must render as text, not broadcast.
+     */
+    private static String escapeMrkdwnHuman(String value) {
+        return value == null
+                ? ""
+                : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    @Override
+    public void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
+        // Degenerate payload → skip rather than posting noise, same as
+        // onDecisionReached's NONE guard.
+        if (event == null || event.name() == null) {
+            return;
+        }
+        String emoji = event.created() ? "📄" : "✏️";
+        String verb = event.created() ? "created" : "updated";
+        var sb = new StringBuilder();
+        sb.append(String.format("%s *Artifact \"%s\"* %s (v%d)", emoji, escapeMrkdwn(event.name()), verb, event.version()));
+        if (event.editorAgentId() != null && !event.editorAgentId().isBlank()) {
+            sb.append(String.format(" by %s", escapeMrkdwn(event.editorAgentId())));
+        }
+        if ("FINAL".equals(event.status())) {
+            sb.append(" — FINAL");
+        }
+
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, sb.toString().stripTrailing());
+    }
+
+    /**
+     * Escapes Slack's three mrkdwn control characters. Without this, an
+     * LLM-authored artifact name (or an agent id) containing e.g.
+     * {@code <!channel>} renders as a real channel broadcast.
+     */
+    private static String escapeMrkdwn(String value) {
+        return value == null
+                ? null
+                : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     // ─── HITL (human-in-the-loop) ───

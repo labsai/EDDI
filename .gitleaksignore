@@ -58,3 +58,13 @@
 # introduced the line stays in history and still needs an entry. Not a real key:
 # it never authenticated against anything.
 eebfe898b34858918d5cbbe11e60336d1b6a916e:src/test/java/ai/labs/eddi/secrets/sanitize/SecretScrubberTest.java:generic-api-key:238
+
+# ResolvedRequestTest: the same mistake as the SecretScrubberTest entry above,
+# made again. Tests proving that a credential in a request BODY is redacted need
+# a literal carrying SecretRedactionFilter's `sk-` + 20-char shape, and the first
+# version used a realistic-looking one. Replaced in a follow-up commit with a
+# zero-entropy value (repeated characters — same shape, nothing for the scanner
+# to flag), but gitleaks scans a PR's whole commit range, so the commit that
+# introduced it stays in history and still needs an entry. Never a real key: it
+# never authenticated against anything.
+96df3c83fa449e02250c08c1aa420a11617f2ebb:src/test/java/ai/labs/eddi/modules/apicalls/impl/ResolvedRequestTest.java:generic-api-key:193

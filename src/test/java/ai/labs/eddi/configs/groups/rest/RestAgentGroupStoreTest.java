@@ -6,6 +6,9 @@ package ai.labs.eddi.configs.groups.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
+import ai.labs.eddi.configs.groups.model.GroupWorkspace;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
@@ -30,6 +33,8 @@ class RestAgentGroupStoreTest {
     private IAgentGroupStore groupStore;
     private IDocumentDescriptorStore documentDescriptorStore;
     private IJsonSchemaCreator jsonSchemaCreator;
+    private IGroupWorkspaceStore workspaceStore;
+    private IScheduleStore scheduleStore;
     private RestAgentGroupStore restStore;
 
     @BeforeEach
@@ -37,7 +42,9 @@ class RestAgentGroupStoreTest {
         groupStore = mock(IAgentGroupStore.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
-        restStore = new RestAgentGroupStore(groupStore, documentDescriptorStore, jsonSchemaCreator);
+        workspaceStore = mock(IGroupWorkspaceStore.class);
+        scheduleStore = mock(IScheduleStore.class);
+        restStore = new RestAgentGroupStore(groupStore, documentDescriptorStore, jsonSchemaCreator, workspaceStore, scheduleStore);
     }
 
     @Nested
@@ -126,6 +133,54 @@ class RestAgentGroupStoreTest {
             restStore.deleteGroup("group-1", 1, false);
 
             verify(groupStore).delete("group-1", 1);
+        }
+
+        @Test
+        @DisplayName("I13: a PERMANENT delete cascades to the standing workspace")
+        void permanentDelete_cascadesToWorkspace() throws Exception {
+            when(groupStore.getCurrentResourceId("group-1"))
+                    .thenReturn(createResourceId("group-1", 1));
+
+            restStore.deleteGroup("group-1", 1, true);
+
+            verify(groupStore).deleteAllPermanently("group-1");
+            verify(workspaceStore).deleteByGroupId("group-1");
+        }
+
+        @Test
+        @DisplayName("a PERMANENT delete retires the cadence schedules BEFORE the workspace — no orphan fires")
+        void permanentDelete_retiresCadenceSchedulesFirst() throws Exception {
+            when(groupStore.getCurrentResourceId("group-1"))
+                    .thenReturn(createResourceId("group-1", 1));
+            var workspace = new GroupWorkspace();
+            workspace.setGroupId("group-1");
+            workspace.addCadence(new GroupWorkspace.Cadence(
+                    "c-1", "sched-1", null, 5, null, "pm"));
+            workspace.addCadence(new GroupWorkspace.Cadence(
+                    "c-2", "sched-2", null, 5, null, "pm"));
+            when(workspaceStore.find("group-1")).thenReturn(workspace);
+
+            restStore.deleteGroup("group-1", 1, true);
+
+            // Review finding: enabled ScheduleConfigurations outlived the deleted
+            // workspace and fired "No workspace exists" forever. InOrder pins the
+            // crash-recoverable ORDER, not just the calls — deleting the workspace
+            // first would leave unreachable schedules on a crash in between.
+            var inOrder = inOrder(scheduleStore, workspaceStore);
+            inOrder.verify(scheduleStore).deleteSchedule("sched-1");
+            inOrder.verify(scheduleStore).deleteSchedule("sched-2");
+            inOrder.verify(workspaceStore).deleteByGroupId("group-1");
+        }
+
+        @Test
+        @DisplayName("I13: a soft (versioned) delete keeps the workspace — the group can come back")
+        void softDelete_keepsWorkspace() throws Exception {
+            when(groupStore.getCurrentResourceId("group-1"))
+                    .thenReturn(createResourceId("group-1", 1));
+
+            restStore.deleteGroup("group-1", 1, false);
+
+            verify(workspaceStore, never()).deleteByGroupId(anyString());
         }
     }
 

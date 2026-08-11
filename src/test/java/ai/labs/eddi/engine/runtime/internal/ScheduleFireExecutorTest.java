@@ -34,6 +34,7 @@ class ScheduleFireExecutorTest {
     private IScheduleStore scheduleStore;
     private ai.labs.eddi.engine.internal.HitlTimeoutHandler hitlTimeoutHandler;
     private DreamService dreamService;
+    private TeamCadenceService teamCadenceService;
     private ScheduleFireExecutor executor;
 
     @BeforeEach
@@ -42,6 +43,7 @@ class ScheduleFireExecutorTest {
         scheduleStore = mock(IScheduleStore.class);
         hitlTimeoutHandler = mock(ai.labs.eddi.engine.internal.HitlTimeoutHandler.class);
         dreamService = mock(DreamService.class);
+        teamCadenceService = mock(TeamCadenceService.class);
 
         executor = new ScheduleFireExecutor();
         // Inject mocks via reflection (field injection)
@@ -49,6 +51,7 @@ class ScheduleFireExecutorTest {
         setField(executor, "scheduleStore", scheduleStore);
         setField(executor, "hitlTimeoutHandler", hitlTimeoutHandler);
         setField(executor, "dreamService", dreamService);
+        setField(executor, "teamCadenceService", teamCadenceService);
     }
 
     @Test
@@ -527,6 +530,58 @@ class ScheduleFireExecutorTest {
         } finally {
             Thread.interrupted();
         }
+    }
+
+    private static ScheduleConfiguration makeTeamCadenceSchedule(String id) {
+        var s = new ScheduleConfiguration();
+        s.setId(id);
+        s.setName("team-cadence-group-1");
+        s.setTriggerType(TriggerType.CRON);
+        s.setCronExpression("0 9 * * 1");
+        s.setEnvironment("production");
+        s.setTimeZone("UTC");
+        s.setFireStatus(FireStatus.CLAIMED);
+        s.setNextFire(Instant.now().minusSeconds(1));
+        s.setMetadata(java.util.Map.of(
+                TeamCadenceService.METADATA_TYPE_KEY, TeamCadenceService.METADATA_TYPE_CADENCE,
+                TeamCadenceService.METADATA_GROUP_ID_KEY, "group-1",
+                TeamCadenceService.METADATA_CADENCE_ID_KEY, "cadence-1"));
+        return s;
+    }
+
+    @Test
+    @Timeout(10)
+    void fire_teamCadenceSchedule_dispatchesToTheCadenceService() throws Exception {
+        var schedule = makeTeamCadenceSchedule("sched-cadence-1");
+        when(teamCadenceService.processScheduledFire(any()))
+                .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", "gc-1", 3, null, null));
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.COMPLETED.name(), result.status());
+        assertEquals("gc-1", result.conversationId(), "the fire log records WHICH discussion the cadence started");
+        verify(teamCadenceService).processScheduledFire(schedule.getMetadata());
+        // A cadence pull is orchestration, not a conversation turn.
+        verifyNoInteractions(conversationService);
+    }
+
+    @Test
+    @Timeout(10)
+    void fire_teamCadenceSchedule_skipIsCompleted_failureRetries() throws Exception {
+        var skipped = makeTeamCadenceSchedule("sched-cadence-2");
+        when(teamCadenceService.processScheduledFire(any()))
+                .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", null, 0,
+                        "No executable backlog tasks", null));
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(skipped, "instance-1", 1).status(),
+                "a deliberate skip is a successful fire, not a retryable failure");
+
+        var failing = makeTeamCadenceSchedule("sched-cadence-3");
+        when(teamCadenceService.processScheduledFire(any()))
+                .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", null, 0, null,
+                        "No workspace exists for group group-1"));
+        ScheduleFireLog failed = executor.fire(failing, "instance-1", 2);
+        assertEquals(FireStatus.FAILED.name(), failed.status(), "a real failure must retry and dead-letter");
+        assertTrue(failed.errorMessage().contains("No workspace"), failed.errorMessage());
     }
 
     private static ScheduleConfiguration makeDreamSchedule(String id, String userId) {

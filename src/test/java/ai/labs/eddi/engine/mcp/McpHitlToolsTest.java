@@ -278,14 +278,47 @@ class McpHitlToolsTest {
     }
 
     @Test
+    void getGroupApprovalStatus_detailFull_duringHumanTurnPause_approverForbidden() throws Exception {
+        // Review finding: `paused` also covers AWAITING_HUMAN_INPUT — an approver
+        // must not read the transcript of a discussion waiting on a human's turn.
+        GroupConversation gc = mock(GroupConversation.class);
+        when(gc.getState()).thenReturn(GroupConversation.GroupConversationState.AWAITING_HUMAN_INPUT);
+        when(gc.getUserId()).thenReturn("someone-else");
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
+        when(ownershipValidator.isApprover(any())).thenReturn(true);
+
+        String out = tools.getGroupApprovalStatus("g1", "gc1", "full");
+
+        assertTrue(out.contains("\"errorCode\":\"FORBIDDEN\""), out);
+    }
+
+    @Test
     void getGroupApprovalStatus_detailFull_whilePaused_returnsFullConversation() throws Exception {
         GroupConversation gc = mock(GroupConversation.class);
         when(gc.getState()).thenReturn(GroupConversation.GroupConversationState.AWAITING_APPROVAL); // paused
         when(gc.getUserId()).thenReturn("someone-else");
         when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
         when(json.serialize(any())).thenReturn("{\"full\":true}");
+        // I6: the full view while paused is for APPROVERS — the read guard now
+        // also admits the pending human member, who must NOT see the transcript,
+        // so the gate checks the role explicitly instead of inferring it from
+        // having passed the guard.
+        when(ownershipValidator.isApprover(any())).thenReturn(true);
         String out = tools.getGroupApprovalStatus("g1", "gc1", "full");
         assertTrue(out.contains("full"), out);
         assertFalse(out.contains("FORBIDDEN"), out);
+    }
+
+    @Test
+    void getGroupApprovalStatus_detailFull_pendingMemberWithoutRole_refused() throws Exception {
+        GroupConversation gc = mock(GroupConversation.class);
+        when(gc.getState()).thenReturn(GroupConversation.GroupConversationState.AWAITING_HUMAN_INPUT);
+        when(gc.getUserId()).thenReturn("someone-else");
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
+
+        String out = tools.getGroupApprovalStatus("g1", "gc1", "full");
+
+        assertTrue(out.contains("FORBIDDEN"),
+                "the pending member reads their prompt from the SUMMARY, never the transcript: " + out);
     }
 }

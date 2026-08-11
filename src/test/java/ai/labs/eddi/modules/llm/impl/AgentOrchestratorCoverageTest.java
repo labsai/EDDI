@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -15,6 +16,9 @@ import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeAll;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -23,7 +27,10 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
+import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
@@ -78,6 +85,23 @@ import static org.mockito.Mockito.*;
  * mirrors the sibling tests.
  */
 class AgentOrchestratorCoverageTest {
+
+    /**
+     * {@code recordWriteApprovalDecision} writes to the process-wide
+     * {@code Metrics.globalRegistry}. Outside a running Quarkus app that registry
+     * is a bare {@code CompositeMeterRegistry} with no backing registry attached —
+     * meters register and {@code increment()} without throwing, but nothing
+     * actually stores a count, so every read-back is a silent 0. A real backing
+     * registry has to be attached before these tests can observe anything at all.
+     * Guarded so repeat attachment across test classes in the same JVM fork is a
+     * no-op rather than an error.
+     */
+    @BeforeAll
+    static void attachMeterRegistryBackingStore() {
+        if (Metrics.globalRegistry.getRegistries().isEmpty()) {
+            Metrics.addRegistry(new SimpleMeterRegistry());
+        }
+    }
 
     @Mock
     private CalculatorTool calculatorTool;
@@ -890,7 +914,7 @@ class AgentOrchestratorCoverageTest {
     // ═══════════════════════════════════════════════════════════════════
 
     private AgentOrchestrator.ToolSetup setupWith(List<ToolSpecification> all, List<ToolSpecification> builtIn) {
-        return new AgentOrchestrator.ToolSetup(all, Map.of(), Map.of(), builtIn, Map.of(), Map.of());
+        return new AgentOrchestrator.ToolSetup(all, Map.of(), Map.of(), builtIn, Map.of(), Map.of(), Map.of());
     }
 
     private ToolSpecification spec(String name) {
@@ -1171,6 +1195,202 @@ class AgentOrchestratorCoverageTest {
         assertFalse(batch.isTranscriptOmitted());
     }
 
+    /** One gated http call, with whatever resolver the test wants to supply. */
+    private PendingToolCallBatch batchWithResolver(ToolRequestResolver resolver) {
+        var deploy = ToolExecutionRequest.builder().id("c1").name("deployAgent").arguments("{\"id\":\"a1\"}").build();
+        var gr = new ToolApprovalGate.GateResult(List.of(deploy), List.of(), Map.of("c1", "http.post:*"));
+        List<ChatMessage> msgs = List.of(UserMessage.from("deploy it"), AiMessage.from(List.of(deploy)));
+        return orchestrator.buildPendingBatch(msgs, gr, twoToolTask(), memory, 0,
+                List.of(), new ArrayList<>(), 1, 0, Map.of("deployAgent", "http"),
+                gateCalculate(), PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT,
+                Map.of(), null, resolver == null ? Map.of() : Map.of("deployAgent", resolver));
+    }
+
+    @Test
+    void buildPendingBatch_pinsTheResolvedRequestSoApprovalBindsToItNotTheToolName() {
+        var resolved = ResolvedRequest.of("POST", "https://eddi.example/administration/production/deploy/a1",
+                Map.of("force", List.of("false")), Map.of("Authorization", RequestRedactor.REDACTED), "{\"id\":\"a1\"}", true);
+
+        var call = batchWithResolver(req -> resolved).getCalls().get(0);
+
+        assertTrue(call.isRequestPinned());
+        assertEquals(resolved.fingerprint(), call.getRequestFingerprint());
+        // The approver sees the real request, not an operationId.
+        assertEquals("POST", call.getRequestPreview().getMethod());
+        assertEquals("https://eddi.example/administration/production/deploy/a1", call.getRequestPreview().getUri());
+        assertEquals("{\"id\":\"a1\"}", call.getRequestPreview().getBody());
+        assertFalse(call.getRequestPreview().isBodyTruncated());
+        // Headers travel too, because the fingerprint covers them — approving what
+        // you were shown has to mean the whole of what is later checked.
+        assertEquals(RequestRedactor.REDACTED, call.getRequestPreview().getHeaders().get("authorization"));
+    }
+
+    @Test
+    void buildPendingBatch_leavesACallUnpinnedWhenNothingCanResolveIt() {
+        // Every non-http tool: there is no HTTP request on this side of the
+        // boundary to pin, so the call is approved on name and arguments exactly
+        // as it was before pinning existed.
+        var call = batchWithResolver(null).getCalls().get(0);
+
+        assertFalse(call.isRequestPinned());
+        assertNull(call.getRequestFingerprint());
+        assertNull(call.getRequestPreview());
+    }
+
+    @Test
+    void buildPendingBatch_survivesAResolverThatThrows() {
+        // A template error while previewing must not kill the turn. The pause is
+        // still built; the call is merely unpinned, which is the honest outcome
+        // for "we could not determine the request".
+        var batch = batchWithResolver(req -> {
+            throw new LifecycleException("template blew up", new RuntimeException());
+        });
+
+        assertEquals(1, batch.getCalls().size());
+        assertFalse(batch.getCalls().get(0).isRequestPinned());
+        assertNotNull(batch.getPauseEpoch());
+    }
+
+    @Test
+    void buildPendingBatch_truncatesAnOversizeBodyForDisplayWithoutWeakeningTheFingerprint() {
+        String hugeBody = "x".repeat(PendingToolCallBatch.PREVIEW_BODY_MAX_BYTES + 500);
+        var resolved = ResolvedRequest.of("POST", "https://eddi.example/x", Map.of(), Map.of(), hugeBody, true);
+
+        var call = batchWithResolver(req -> resolved).getCalls().get(0);
+
+        assertTrue(call.getRequestPreview().isBodyTruncated());
+        assertTrue(call.getRequestPreview().getBody().length() <= PendingToolCallBatch.PREVIEW_BODY_MAX_BYTES);
+        // The fingerprint was computed over the WHOLE body before capping, so a
+        // caller cannot hide a payload change past the display cut-off.
+        assertEquals(resolved.fingerprint(), call.getRequestFingerprint());
+        assertNotEquals(ResolvedRequest.of("POST", "https://eddi.example/x", Map.of(), Map.of(), hugeBody + "y", true).fingerprint(),
+                call.getRequestFingerprint());
+    }
+
+    /** A pinned call as it would have been persisted at gate time. */
+    private static PendingToolCallBatch.PendingToolCall pinnedCall(String fingerprint) {
+        var call = new PendingToolCallBatch.PendingToolCall();
+        call.setCallId("c1");
+        call.setToolName("deployAgent");
+        call.setSource("http");
+        call.setArgumentsRaw("{\"id\":\"a1\"}");
+        call.setRequestFingerprint(fingerprint);
+        return call;
+    }
+
+    private static ResolvedRequest approvedRequest() {
+        return ResolvedRequest.of("POST", "https://eddi.example/deploy/a1", Map.of(), Map.of(), "{\"id\":\"a1\"}", true);
+    }
+
+    @Test
+    void requestChangedSinceApproval_allowsACallWhoseRequestStillMatches() {
+        var approved = approvedRequest();
+        var result = orchestrator.requestChangedSinceApproval(pinnedCall(approved.fingerprint()), null,
+                Map.of("deployAgent", req -> approved));
+        assertNull(result);
+    }
+
+    @Test
+    void requestChangedSinceApproval_refusesACallWhoseRequestNoLongerMatches() {
+        // The whole point: the approver said yes to /deploy/a1, and something now
+        // resolves to a different target. It does not run.
+        var tampered = ResolvedRequest.of("POST", "https://eddi.example/deploy/PRODUCTION", Map.of(), Map.of(), "{\"id\":\"a1\"}", true);
+        var result = orchestrator.requestChangedSinceApproval(pinnedCall(approvedRequest().fingerprint()), null,
+                Map.of("deployAgent", req -> tampered));
+        assertNotNull(result);
+        assertTrue(result.contains("no longer matches"));
+    }
+
+    @Test
+    void requestChangedSinceApproval_ignoresACallThatWasNeverPinned() {
+        // Every non-http tool, and anything unresolvable at gate time. Enforcing
+        // here would refuse calls on a comparison that never existed.
+        var unpinned = pinnedCall(null);
+        assertNull(orchestrator.requestChangedSinceApproval(unpinned, null, Map.of()));
+    }
+
+    @Test
+    void requestChangedSinceApproval_allowsAnAmendedCall() {
+        // The approver rewrote the arguments themselves, so the pin describes the
+        // request they replaced. Comparing against it would refuse every amendment.
+        var result = orchestrator.requestChangedSinceApproval(pinnedCall(approvedRequest().fingerprint()), "{\"id\":\"a2\"}",
+                Map.of("deployAgent", req -> ResolvedRequest.of("POST", "https://eddi.example/deploy/a2", Map.of(), Map.of(), "{}", true)));
+        assertNull(result);
+    }
+
+    @Test
+    void requestChangedSinceApproval_failsClosedWhenTheToolVanishedAcrossThePause() {
+        // Pinned at gate time, unresolvable now — the agent was reconfigured while
+        // a human was deciding. We cannot show that what runs is what was
+        // approved, so it does not run.
+        var result = orchestrator.requestChangedSinceApproval(pinnedCall(approvedRequest().fingerprint()), null, Map.of());
+        assertNotNull(result);
+        assertTrue(result.contains("no longer available"));
+    }
+
+    @Test
+    void requestChangedSinceApproval_failsClosedWhenReResolutionThrows() {
+        var result = orchestrator.requestChangedSinceApproval(pinnedCall(approvedRequest().fingerprint()), null,
+                Map.of("deployAgent", req -> {
+                    throw new LifecycleException("template blew up", new RuntimeException());
+                }));
+        assertNotNull(result);
+        assertTrue(result.contains("could not be re-resolved"));
+    }
+
+    @Test
+    void requestChangedSinceApproval_failsClosedWhenTheCallCanNoLongerBePinned() {
+        // Config gained a pre-request property instruction across the pause, so the
+        // request is no longer resolvable ahead of execution. Unverifiable is not
+        // the same as unchanged.
+        var unpinnable = ResolvedRequest.of("POST", "https://eddi.example/deploy/a1", Map.of(), Map.of(), "{\"id\":\"a1\"}", false);
+        var result = orchestrator.requestChangedSinceApproval(pinnedCall(approvedRequest().fingerprint()), null,
+                Map.of("deployAgent", req -> unpinnable));
+        assertNotNull(result);
+        assertTrue(result.contains("could no longer be resolved"));
+    }
+
+    /** Delta of the named decision-tagged counter across whatever `action` does. */
+    private static double approvalCountDelta(String decision, Runnable action) {
+        double before = Metrics.globalRegistry.find("eddi.operator.write.approval").tag("decision", decision).counters().stream()
+                .mapToDouble(io.micrometer.core.instrument.Counter::count).sum();
+        action.run();
+        double after = Metrics.globalRegistry.find("eddi.operator.write.approval").tag("decision", decision).counters().stream()
+                .mapToDouble(io.micrometer.core.instrument.Counter::count).sum();
+        return after - before;
+    }
+
+    @Test
+    void recordWriteApprovalDecision_tagsAHumanApprovalAsApproved() {
+        assertEquals(1.0, approvalCountDelta("approved",
+                () -> orchestrator.recordWriteApprovalDecision(HitlDecision.HitlVerdict.APPROVED, "user:alice")));
+    }
+
+    @Test
+    void recordWriteApprovalDecision_tagsAHumanRejectionAsRejected() {
+        assertEquals(1.0, approvalCountDelta("rejected",
+                () -> orchestrator.recordWriteApprovalDecision(HitlDecision.HitlVerdict.REJECTED, "user:alice")));
+    }
+
+    @Test
+    void recordWriteApprovalDecision_tagsATimeoutAutoApproveAsTimeoutNotApproved() {
+        // The rubber-stamping signal this counter exists for ("approvals >>
+        // rejections") is meaningless if an unattended timeout auto-approval
+        // silently inflates "approved". It must land in its own bucket.
+        assertEquals(0.0, approvalCountDelta("approved",
+                () -> orchestrator.recordWriteApprovalDecision(HitlDecision.HitlVerdict.APPROVED, "system:timeout")));
+        assertEquals(1.0, approvalCountDelta("timeout",
+                () -> orchestrator.recordWriteApprovalDecision(HitlDecision.HitlVerdict.APPROVED, "system:timeout")));
+    }
+
+    @Test
+    void recordWriteApprovalDecision_tagsATimeoutAutoRejectAsTimeoutNotRejected() {
+        assertEquals(0.0, approvalCountDelta("rejected",
+                () -> orchestrator.recordWriteApprovalDecision(HitlDecision.HitlVerdict.REJECTED, "system:timeout")));
+        assertEquals(1.0, approvalCountDelta("timeout",
+                () -> orchestrator.recordWriteApprovalDecision(HitlDecision.HitlVerdict.REJECTED, "system:timeout")));
+    }
+
     @Test
     void buildPendingBatch_persistsTheGoverningRuleAndThePerCallMatch() {
         // The rule is resolved at gate time and must SURVIVE the pause: the persisted
@@ -1191,7 +1411,7 @@ class AgentOrchestratorCoverageTest {
         var batch = orchestrator.buildPendingBatch(msgs, gr, twoToolTask(), memory, 0,
                 List.of(), new ArrayList<>(), 1, 0, Map.of("deployAgent", "http", "deleteAgent", "http"),
                 gateCalculate(), PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT,
-                Map.of("c1", deployRule, "c2", deleteRule), deleteRule);
+                Map.of("c1", deployRule, "c2", deleteRule), deleteRule, Map.of());
 
         assertNotNull(batch.getEffectiveRule());
         assertEquals("http.delete:*", batch.getEffectiveRule().getMatch());

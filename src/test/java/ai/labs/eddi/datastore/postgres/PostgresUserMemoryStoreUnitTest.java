@@ -408,12 +408,19 @@ class PostgresUserMemoryStoreUnitTest {
         sut.getVisibleEntries("user1", "agent1",
                 List.of("group-a", "group-b"), "most_recent", 10);
 
-        // then — params: userId=1, agentId=2, group-a=3, group-b=4, limit=5
+        // then — I8 bind order: userId=1, agentId=2, user-scope group overlap
+        // (group-a=3, group-b=4), derived team owners (group:group-a=5,
+        // group:group-b=6), team-scope group overlap (group-a=7, group-b=8),
+        // limit=9. Mirrors buildVisibilityQuery exactly.
         verify(preparedStatement).setString(1, "user1");
         verify(preparedStatement).setString(2, "agent1");
         verify(preparedStatement).setString(3, "group-a");
         verify(preparedStatement).setString(4, "group-b");
-        verify(preparedStatement).setInt(5, 10);
+        verify(preparedStatement).setString(5, "group:group-a");
+        verify(preparedStatement).setString(6, "group:group-b");
+        verify(preparedStatement).setString(7, "group-a");
+        verify(preparedStatement).setString(8, "group-b");
+        verify(preparedStatement).setInt(9, 10);
     }
 
     @Test

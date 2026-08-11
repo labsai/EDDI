@@ -28,6 +28,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.internal.groups.TaskForceEngine;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
@@ -45,6 +46,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -88,6 +90,17 @@ class GroupConversationServiceHitlCoverage3Test {
     private IScheduleStore scheduleStore;
 
     private GroupConversationService service;
+    /**
+     * The engine that owns {@code recordTaskFailure}.
+     * <p>
+     * Reached until now through {@code getDeclaredMethod} on a private facade
+     * delegator with ZERO production callers, kept alive only so this reflection
+     * resolved. Note the delegator's name appears here as a STRING — a plain grep
+     * for {@code recordTaskFailure(} does not find this call site, which is why
+     * {@code GroupConversationService}'s own comments warn that one calling
+     * convention is not enough when sweeping for these.
+     */
+    private TaskForceEngine taskForceEngine;
 
     private static final int MAX_DEPTH = 3;
     private static final String DEFAULT_TENANT = "default";
@@ -104,6 +117,8 @@ class GroupConversationServiceHitlCoverage3Test {
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
                 scheduleStore, nonceCacheService, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
+        taskForceEngine = new TaskForceEngine(null, templatingEngine, jsonSerialization, null,
+                new CallerIdentityContext(null, null), new ConcurrentHashMap<>(), 180, 5);
     }
 
     // =================================================================
@@ -790,12 +805,9 @@ class GroupConversationServiceHitlCoverage3Test {
         // handleTaskFailure was split so the SSE listener callback is not made while
         // holding the task-list monitor; recordTaskFailure is the document-mutating
         // half these tests actually assert on.
-        var m = method("recordTaskFailure", GroupConversation.class, TaskItem.class, GroupMember.class,
-                String.class, int.class, DiscussionPhase.class,
-                List.class, GroupDiscussionException.class);
         var ex = new GroupDiscussionException("agent broke");
 
-        invoke(m, g, task, member(), "agent broke", 0, phase(PhaseType.EXECUTE), errors, ex);
+        taskForceEngine.recordTaskFailure(g, task, member(), "agent broke", 0, phase(PhaseType.EXECUTE), errors, ex);
 
         assertEquals(TaskStatus.FAILED, g.getTaskList().all().get(0).status());
         assertEquals(1, errors.size());
@@ -821,12 +833,9 @@ class GroupConversationServiceHitlCoverage3Test {
         // handleTaskFailure was split so the SSE listener callback is not made while
         // holding the task-list monitor; recordTaskFailure is the document-mutating
         // half these tests actually assert on.
-        var m = method("recordTaskFailure", GroupConversation.class, TaskItem.class, GroupMember.class,
-                String.class, int.class, DiscussionPhase.class,
-                List.class, GroupDiscussionException.class);
 
-        assertDoesNotThrow(() -> invoke(m, g, task, member(), "late fail", 0, phase(PhaseType.EXECUTE),
-                errors, new GroupDiscussionException("late fail")));
+        assertDoesNotThrow(() -> taskForceEngine.recordTaskFailure(g, task, member(), "late fail", 0,
+                phase(PhaseType.EXECUTE), errors, new GroupDiscussionException("late fail")));
         assertEquals(1, errors.size(), "error is still collected even when task cannot transition");
     }
 

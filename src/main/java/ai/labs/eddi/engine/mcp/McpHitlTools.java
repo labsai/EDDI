@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -169,7 +170,10 @@ public class McpHitlTools {
                     return errorJson("Full approval status is available to approvers only while awaiting approval — "
                             + "use the summary view", "FORBIDDEN", null);
                 }
-                return jsonSerialization.serialize(snapshot);
+                // Same internal-fingerprint strip as the REST surface — this
+                // serializes the identical snapshot object, so leaving it out
+                // here would just move the leak to the other door.
+                return jsonSerialization.serialize(ConversationMemoryUtilities.stripRequestFingerprintsForRead(snapshot));
             }
             Map<String, String> summary = new LinkedHashMap<>();
             summary.put("conversationId", conversationId);
@@ -333,11 +337,23 @@ public class McpHitlTools {
             return errorJson("groupId and conversationId are required", "BAD_REQUEST", null);
         }
         try {
-            hitlAccessGuard.requireGroupConversationHitlAccess(groupId, conversationId);
+            // I6: the READ guard — the pending HUMAN member may read the status
+            // of the turn they owe (their rendered prompt is in the summary).
+            hitlAccessGuard.requireGroupConversationReadAccess(groupId, conversationId);
             GroupConversation gc = groupConversationService.readGroupConversation(conversationId);
-            boolean paused = gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL;
+            boolean paused = gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL
+                    || gc.getState() == GroupConversation.GroupConversationState.AWAITING_HUMAN_INPUT;
+            // The approver full-view window is the APPROVAL pause only — `paused`
+            // also covers AWAITING_HUMAN_INPUT, where there is nothing for an
+            // approver to decide and the transcript would leak outside their
+            // remit (review finding). Summary fields keep the wider predicate.
+            boolean awaitingApproval = gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL;
             if ("full".equals(detail)) {
-                if (!paused && !ownershipValidator.isAdmin(identity) && !ownershipValidator.isOwner(identity, gc.getUserId())) {
+                // The pending human member (admitted by the READ guard) does NOT
+                // get the full view — their working material is the rendered
+                // prompt in the summary. Same gate as the REST surface.
+                if (!ownershipValidator.isAdmin(identity) && !ownershipValidator.isOwner(identity, gc.getUserId())
+                        && !(awaitingApproval && ownershipValidator.isApprover(identity))) {
                     return errorJson("Full approval status is available to approvers only while the group conversation "
                             + "is awaiting approval — use the summary view", "FORBIDDEN", null);
                 }
@@ -358,6 +374,13 @@ public class McpHitlTools {
             summary.put("pauseReason", paused && gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");
             summary.put("timeoutPolicy", paused && gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy().name() : "");
             summary.put("awaitingApprovalTaskIds", awaitingTaskIds);
+            // I6: a human-turn pause carries WHO is up and WHAT they were asked —
+            // the summary is that member's working view, no transcript needed.
+            if (gc.getPendingHumanInput() != null) {
+                summary.put("pendingMemberId", gc.getPendingHumanInput().memberId());
+                summary.put("pendingMemberDisplayName", gc.getPendingHumanInput().displayName());
+                summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
+            }
             return jsonSerialization.serialize(summary);
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
@@ -452,6 +475,52 @@ public class McpHitlTools {
         } catch (Exception e) {
             LOGGER.warn("MCP approve_group_phase failed", e);
             return errorJson("Failed to approve group phase", "INTERNAL", null);
+        }
+    }
+
+    @Tool(name = "submit_group_human_input",
+          description = "Submit a HUMAN group member's response for the turn an AWAITING_HUMAN_INPUT discussion is "
+                  + "waiting on (I6). The response is recorded as the member's transcript entry and the discussion "
+                  + "resumes from the next speaker. Only the pending member's own principal (or an admin) may submit "
+                  + "— this is the member SPEAKING, not an approval.")
+    @Blocking
+    public String submitGroupHumanInput(
+                                        @ToolArg(description = "Group ID") String groupId,
+                                        @ToolArg(description = "Group conversation ID") String conversationId,
+                                        @ToolArg(description = "The pending HUMAN member's id (their principal id)") String memberId,
+                                        @ToolArg(description = "The member's response text") String content) {
+        String disabled = disabledIfMutationsOff();
+        if (disabled != null) {
+            return disabled;
+        }
+        if (groupId == null || groupId.isBlank() || conversationId == null || conversationId.isBlank()
+                || memberId == null || memberId.isBlank() || content == null || content.isBlank()) {
+            return errorJson("groupId, conversationId, memberId and content are required", "BAD_REQUEST", null);
+        }
+        try {
+            hitlAccessGuard.requireGroupHumanInputAccess(groupId, conversationId, memberId);
+            GroupConversation result = groupConversationService.submitHumanInput(
+                    conversationId, memberId, content, principalWithMcpPrefix());
+            meterRegistry.counter("eddi.mcp.hitl.decision", "surface", "group", "verdict", "HUMAN_INPUT").increment();
+            return jsonSerialization.serialize(result);
+        } catch (ForbiddenException e) {
+            return errorJson("Access denied", "FORBIDDEN", null);
+        } catch (jakarta.ws.rs.NotFoundException e) {
+            return errorJson("Group conversation not found", "NOT_FOUND", null);
+        } catch (IResourceStore.ResourceModifiedException e) {
+            return errorJson("The group conversation was modified concurrently — reload and retry", "CONFLICT", null);
+        } catch (ResourceNotFoundException
+                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+            return errorJson("Group conversation not found", "NOT_FOUND", null);
+        } catch (IGroupConversationService.GroupDiscussionException e) {
+            return errorJson("Group conversation is not awaiting human input — the turn may have been resolved, "
+                    + "timed out, or cancelled", "WRONG_STATE", null);
+        } catch (IllegalArgumentException e) {
+            return errorJson("Invalid submission: the memberId does not match the pending turn, or the content is "
+                    + "blank or too long", "BAD_REQUEST", null);
+        } catch (Exception e) {
+            LOGGER.warn("MCP submit_group_human_input failed", e);
+            return errorJson("Failed to submit human input", "INTERNAL", null);
         }
     }
 

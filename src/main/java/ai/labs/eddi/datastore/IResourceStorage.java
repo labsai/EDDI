@@ -154,6 +154,24 @@ public interface IResourceStorage<T> {
     }
 
     /**
+     * As {@link #storeIfFieldEquals(IResource, String, String)}, but comparing a
+     * JSON <em>number</em> field. A separate overload because the two backends
+     * disagree about text-comparing numbers: PostgreSQL's {@code data ->> field}
+     * renders a JSON number as text so {@code "3"} matches, but MongoDB's typed
+     * BSON equality never matches an int64 against a string — a string-typed CAS on
+     * a numeric field would "work" on one backend and silently never match on the
+     * other. Used by the shared-artifact store's version CAS (I17).
+     * <p>
+     * Same no-fallback contract as the String overload.
+     */
+    default void storeIfFieldEquals(IResource<T> newResource, String fieldName, long expectedValue)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        throw new UnsupportedOperationException(
+                "storeIfFieldEquals(long) is not implemented by " + getClass().getName()
+                        + " — a compare-and-swap must never silently degrade to an unconditional store");
+    }
+
+    /**
      * Archive {@code history} and apply the version-checked update as ONE unit of
      * work.
      * <p>

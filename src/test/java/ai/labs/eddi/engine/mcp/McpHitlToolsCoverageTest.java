@@ -309,8 +309,10 @@ class McpHitlToolsCoverageTest {
 
     @Test
     void getGroupApprovalStatus_forbidden_returnsForbidden() {
+        // I6: the status endpoint now uses the READ guard (which additionally
+        // admits the pending human member) — not the strict HITL guard.
         doThrow(new ForbiddenException("no"))
-                .when(guard).requireGroupConversationHitlAccess("g1", "gc1");
+                .when(guard).requireGroupConversationReadAccess("g1", "gc1");
         String out = tools.getGroupApprovalStatus("g1", "gc1", "summary");
         assertTrue(out.contains("\"errorCode\":\"FORBIDDEN\""), out);
     }

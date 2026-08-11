@@ -159,6 +159,44 @@ public interface IGroupConversationService {
             IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException;
 
     /**
+     * Submits a HUMAN group member's response for the turn an
+     * {@code AWAITING_HUMAN_INPUT} discussion is waiting on (I6), records it as the
+     * phase's natural transcript entry, and resumes the discussion from the next
+     * speaker.
+     *
+     * @param groupConversationId
+     *            the paused discussion
+     * @param memberId
+     *            the human member the submission is for — must match the pending
+     *            turn's member (authorization is the caller's concern; the service
+     *            verifies the MATCH, the REST/MCP guard verifies the caller may act
+     *            as this member)
+     * @param content
+     *            the member's response — becomes the transcript entry's content
+     * @param submittedBy
+     *            attribution for the audit trail (server-derived, never
+     *            caller-supplied)
+     * @return the conversation, resumed (IN_PROGRESS) — the discussion continues on
+     *         a background thread, exactly like an approval resume
+     * @throws IllegalArgumentException
+     *             blank content, unknown member, or a memberId that does not match
+     *             the pending turn — maps to HTTP 400
+     * @throws GroupDiscussionException
+     *             if the conversation is not awaiting human input — maps to a
+     *             conflict, not a validation error
+     */
+    GroupConversation submitHumanInput(String groupConversationId, String memberId, String content, String submittedBy)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException,
+            IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException;
+
+    /**
+     * SKIP_TURN resolution of an expired human turn (I6): records a SKIPPED entry
+     * for the pending member and resumes the discussion. Called by the HITL timeout
+     * scheduler; never throws — an already-resolved turn is a no-op.
+     */
+    void skipHumanTurnOnTimeout(String groupConversationId);
+
+    /**
      * List group conversations currently awaiting human approval, as bounded
      * summaries (no transcripts). Used by dashboards and admin UIs.
      *
@@ -203,6 +241,18 @@ public interface IGroupConversationService {
         default void onCancelled(GroupConversationEventSink.CancelledEvent event) {
         }
         default void onMemberPauseSkipped(GroupConversationEventSink.MemberPauseSkippedEvent event) {
+        }
+        default void onDecisionReached(GroupConversationEventSink.DecisionReachedEvent event) {
+        }
+        default void onConvergenceChecked(GroupConversationEventSink.ConvergenceCheckedEvent event) {
+        }
+        default void onConvergenceReached(GroupConversationEventSink.ConvergenceReachedEvent event) {
+        }
+        default void onHumanInputRequested(GroupConversationEventSink.HumanInputRequestedEvent event) {
+        }
+        default void onRetroRecorded(GroupConversationEventSink.RetroRecordedEvent event) {
+        }
+        default void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
         }
     }
 

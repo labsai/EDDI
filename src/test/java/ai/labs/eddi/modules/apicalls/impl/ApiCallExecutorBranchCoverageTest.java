@@ -39,7 +39,7 @@ import static org.mockito.MockitoAnnotations.openMocks;
  * retryOnHttpCodes match - retryCall with null postResponse - retryCall with
  * null retryApiCallInstruction - path building: no slash, http:// prefix, body
  * present with custom content type - request delay > 0 (scheduled executor) -
- * scrubSensitiveHeaders with various header names - empty targetServerUrl
+ * request-map redaction with various header names - empty targetServerUrl
  */
 @DisplayName("ApiCallExecutor — Branch Coverage v2")
 class ApiCallExecutorBranchCoverageTest {
@@ -78,7 +78,8 @@ class ApiCallExecutorBranchCoverageTest {
         lenient().when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));
         executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime,
-                prePostUtils, globalVariableResolver, secretResolver, callerIdentityResolver, callerIdentityContext, false, 30_000L, 2_000_000);
+                prePostUtils, globalVariableResolver, secretResolver, callerIdentityResolver, callerIdentityContext,
+                new RequestRedactor(callerIdentityResolver), false, 30_000L, 2_000_000);
 
         when(memory.getCurrentStep()).thenReturn(currentStep);
         when(mockRequest.toMap()).thenReturn(new HashMap<>());
@@ -303,11 +304,11 @@ class ApiCallExecutorBranchCoverageTest {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // scrubSensitiveHeaders — comprehensive header name checks
+    // request-map redaction — comprehensive header name checks
     // ═══════════════════════════════════════════════════════════════
 
     @Nested
-    @DisplayName("scrubSensitiveHeaders — all header name patterns")
+    @DisplayName("request-map redaction — all header name patterns")
     class ScrubHeaders {
 
         @Test
@@ -578,11 +579,11 @@ class ApiCallExecutorBranchCoverageTest {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // scrubSensitiveHeaders — additional patterns
+    // request-map redaction — additional patterns
     // ═══════════════════════════════════════════════════════════════
 
     @Nested
-    @DisplayName("scrubSensitiveHeaders — additional header patterns")
+    @DisplayName("request-map redaction — additional header patterns")
     class ScrubHeadersAdditional {
 
         @Test

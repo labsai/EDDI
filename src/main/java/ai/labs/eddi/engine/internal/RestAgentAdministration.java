@@ -214,6 +214,18 @@ public class RestAgentAdministration implements IRestAgentAdministration {
     }
 
     private Future<Void> deploy(final Deployment.Environment environment, final String agentId, final Integer version, final Boolean autoDeploy) {
+        // Register BEFORE the deployment starts, so a concurrent getAgent that finds
+        // the agent IN_PROGRESS has a future to await.
+        //
+        // This is what makes AgentFactory's wait machinery reachable at all. Only
+        // RestImportService ever registered, so for every ordinary deploy
+        // getRegisteredDeploymentEvent returned null, waitForDeploymentCompletion had
+        // nothing to await, and a caller racing a deployment simply got a null agent.
+        // Registration must precede agentFactory.deployAgent: that call is what
+        // publishes the IN_PROGRESS placeholder a waiter can observe, so registering
+        // afterwards would leave exactly the window this closes.
+        deploymentListener.registerAgentDeployment(agentId, version);
+
         Callable<Void> deployAgentCallable = () -> {
             try {
                 if (EnumSet.of(NOT_FOUND, ERROR).contains(checkDeploymentStatus(environment, agentId, version))) {

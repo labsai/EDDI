@@ -148,6 +148,28 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
+    public void storeIfFieldEquals(IResource<T> newResource, String fieldName, long expectedValue)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        Resource resource = checkInternalResource(newResource);
+        // Typed BSON equality — the String overload's Filters.eq(field, "3") never
+        // matches an int64 3, which is exactly why this overload exists.
+        var result = currentCollection.replaceOne(
+                Filters.and(
+                        Filters.eq(ID_FIELD, new ObjectId(resource.getId())),
+                        Filters.eq(fieldName, expectedValue)),
+                resource.getMongoDocument());
+        if (result.getMatchedCount() == 0) {
+            long exists = currentCollection.countDocuments(Filters.eq(ID_FIELD, new ObjectId(resource.getId())));
+            if (exists == 0) {
+                throw new IResourceStore.ResourceNotFoundException(
+                        String.format("Resource no longer exists (id=%s)", resource.getId()));
+            }
+            throw new IResourceStore.ResourceModifiedException(
+                    String.format("Resource field '%s' was not %d (id=%s)", fieldName, expectedValue, resource.getId()));
+        }
+    }
+
+    @Override
     public void createNew(IResource<T> currentResource) {
         Resource resource = checkInternalResource(currentResource);
         currentCollection.insertOne(resource.getMongoDocument());

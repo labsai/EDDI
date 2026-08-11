@@ -227,4 +227,36 @@ public final class MemoryKeys {
      * @since 6.1.0
      */
     public static final MemoryKey<List<String>> ATTACHMENT_EXTRACTS = MemoryKey.of("attachments:extracts");
+
+    // ---- Dynamic agents ----
+
+    /**
+     * Agent ids created by {@code create_sub_agent} during this conversation,
+     * cumulative across turns. Written by {@code DynamicAgentToolsProvider}, read
+     * back by its own seeding pass (so {@code maxCreatedAgentsPerDiscussion} bounds
+     * the conversation rather than a single turn) and by
+     * {@code GroupLifecycleOps#propagateDynamicAgentTracking}, which folds it into
+     * the group's tracking for ephemeral cleanup.
+     */
+    public static final String DYNAMIC_CREATED_AGENT_IDS = "dynamic:created_agent_ids";
+
+    /**
+     * Agent ids the creating model asked to keep past the discussion
+     * ({@code retain=true}). Exempt from ephemeral cleanup under the
+     * {@code AGENT_DECIDES} lifecycle policy.
+     */
+    public static final String DYNAMIC_RETAINED_AGENT_IDS = "dynamic:retained_agent_ids";
+
+    /**
+     * Agent ids torn down by {@code teardown_agent} during this conversation.
+     * Subtracted from {@link #DYNAMIC_CREATED_AGENT_IDS} when seeding, so a
+     * teardown frees a {@code maxCreatedAgentsPerDiscussion} slot instead of the id
+     * reappearing on the next turn's seed, and applied to the group's tracking by
+     * {@code GroupLifecycleOps#propagateDynamicAgentTracking}.
+     * <p>
+     * A plain {@code String} rather than a {@code MemoryKey}: these three are read
+     * positionally out of a serialized snapshot's step data by the group layer,
+     * which sees keys as strings and never resolves a typed {@code MemoryKey}.
+     */
+    public static final String DYNAMIC_TORN_DOWN_AGENT_IDS = "dynamic:torn_down_agent_ids";
 }

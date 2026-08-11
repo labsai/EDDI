@@ -433,6 +433,23 @@ class RestGroupConversationHitlTest {
         }
 
         @Test
+        @DisplayName("Approver gets 403 for detail=full during a HUMAN-TURN pause — nothing awaits their decision")
+        void approverFullDeniedDuringHumanTurnPause() throws Exception {
+            // Review finding: the gate used the shared `paused` predicate, which
+            // also covers AWAITING_HUMAN_INPUT — an approver could read the full
+            // transcript of a discussion merely waiting on a human member's turn.
+            asApprover(ATTACKER_ID);
+            var gc = makeGc(OWNER_ID);
+            gc.setState(GroupConversationState.AWAITING_HUMAN_INPUT);
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(gc);
+
+            Response response = restGroupConversation.getGroupApprovalStatus(GROUP_ID, GC_ID, "full");
+
+            assertEquals(403, response.getStatus(),
+                    "The approver full-view window is the APPROVAL pause only");
+        }
+
+        @Test
         @DisplayName("Approver gets 403 for detail=full on a non-paused conversation")
         void approverFullDeniedWhenNotPaused() throws Exception {
             asApprover(ATTACKER_ID);

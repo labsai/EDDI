@@ -63,6 +63,9 @@ public class ScheduleFireExecutor {
     @Inject
     DreamService dreamService;
 
+    @Inject
+    TeamCadenceService teamCadenceService;
+
     /**
      * Execute a schedule fire. Returns the fire log entry.
      *
@@ -110,6 +113,13 @@ public class ScheduleFireExecutor {
             // (cluster-wide CAS claim, lease, retry/backoff, dead-lettering, fire
             // log) applies unchanged.
             return fireDreamConsolidation(schedule, instanceId, attemptNumber);
+        }
+
+        if (TeamCadenceService.isTeamCadenceSchedule(md)) {
+            // Team cadence fast-path (I13) — a backlog pull into a group
+            // discussion, not a conversation turn. Same reasoning and machinery
+            // as the Dream fast-path above.
+            return fireTeamCadence(schedule, instanceId, attemptNumber);
         }
 
         Instant startedAt = Instant.now();
@@ -248,6 +258,61 @@ public class ScheduleFireExecutor {
             scheduleStore.logFire(fireLog);
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Failed to log dream fire for schedule %s", schedule.getId());
+        } finally {
+            restoreInterrupt(interrupted);
+        }
+        return fireLog;
+    }
+
+    /**
+     * Run one team-cadence pull (I13) and record the fire. Mirrors
+     * {@link #fireDreamConsolidation}: a deliberate skip (backlog empty, previous
+     * discussion still running, lost claim) is COMPLETED with the reason in the
+     * log; a real failure is FAILED so it retries with backoff and eventually
+     * dead-letters instead of appearing to run while doing nothing.
+     */
+    private ScheduleFireLog fireTeamCadence(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status;
+        String errorMessage = null;
+        String conversationId = null;
+        boolean interrupted = false;
+
+        try {
+            TeamCadenceService.CadenceResult result = teamCadenceService.processScheduledFire(schedule.getMetadata());
+            conversationId = result.discussionId();
+            if (result.isSuccess()) {
+                status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+                if (result.skippedReason() != null) {
+                    LOGGER.infof("[SCHEDULE] Team cadence '%s' (id=%s) skipped: %s", schedule.getName(), schedule.getId(),
+                            result.skippedReason());
+                } else {
+                    LOGGER.infof("[SCHEDULE] Team cadence '%s' (id=%s) started discussion %s with %d task(s)",
+                            schedule.getName(), schedule.getId(), result.discussionId(), result.tasksPulled());
+                }
+            } else {
+                status = ScheduleConfiguration.FireStatus.FAILED.name();
+                errorMessage = result.error();
+                LOGGER.errorf("[SCHEDULE] Team cadence failed for schedule '%s' (id=%s): %s", schedule.getName(),
+                        schedule.getId(), errorMessage);
+            }
+        } catch (Exception e) {
+            // Same B2 interrupt reasoning — and the same ordering — as fire() above.
+            if (e instanceof InterruptedException) {
+                interrupted = true;
+            }
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
+            LOGGER.errorf(e, "[SCHEDULE] Team cadence threw for schedule '%s' (id=%s)", schedule.getName(), schedule.getId());
+        }
+
+        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(),
+                schedule.getNextFire(), startedAt, Instant.now(), status, instanceId, conversationId, errorMessage,
+                attemptNumber, 0.0);
+        try {
+            scheduleStore.logFire(fireLog);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Failed to log team-cadence fire for schedule %s", schedule.getId());
         } finally {
             restoreInterrupt(interrupted);
         }
