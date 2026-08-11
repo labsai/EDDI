@@ -250,9 +250,9 @@ Both **eddi-chat-ui** and the **EDDI-Manager chat panel** support secret input:
 - No secret values are stored in browser `localStorage` or `sessionStorage`
 - `autoComplete="new-password"` prevents browser caching
 
-### Agent Father Example
+### Example: collecting a key in a conversation
 
-The default Agent Father agent demonstrates vault integration during API key setup:
+An agent that asks the user for an API key mid-conversation wires it up like this:
 
 ```json
 // Output configuration — prompts with a password field
@@ -274,7 +274,7 @@ The `scope: secret` instruction causes `PropertySetterTask` to store the API key
 
 ## Auto-Vaulting (Agent Setup)
 
-When creating agents through the **Agent Father** wizard or the Setup API, API keys are **automatically stored in the vault**. You don't need to manually create vault entries.
+When creating agents through the Manager's agent wizard, the Platform Operator, or the Setup API directly (`POST /administration/agents/setup` and `/setup-api`), API keys are **automatically stored in the vault**. You don't need to manually create vault entries.
 
 ### How It Works
 
@@ -289,7 +289,7 @@ Each vault key includes an epoch-millisecond timestamp suffix. This prevents key
 
 ### Graceful Degradation
 
-When the vault is disabled (no `EDDI_VAULT_MASTER_KEY`), the setup service logs a warning and falls back to plaintext storage. This ensures the Agent Father wizard works in local development without requiring vault configuration.
+When the vault is disabled (no `EDDI_VAULT_MASTER_KEY`), the setup service logs a warning and falls back to plaintext storage. This ensures agent setup works in local development without requiring vault configuration.
 
 > **Production recommendation:** Always set `EDDI_VAULT_MASTER_KEY` in production. The installer does this automatically.
 

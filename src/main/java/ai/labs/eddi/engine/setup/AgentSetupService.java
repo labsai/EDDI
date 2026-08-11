@@ -104,8 +104,9 @@ public class AgentSetupService {
     }
 
     /**
-     * Create a fully configured and optionally deployed agent. Equivalent to the
-     * Agent Father's 12-step workflow.
+     * Create a fully configured and optionally deployed agent: parser, behaviour
+     * rules, LLM config, optional MCP calls and output set, workflow and agent, in
+     * one call.
      *
      * @param request
      *            the setup parameters

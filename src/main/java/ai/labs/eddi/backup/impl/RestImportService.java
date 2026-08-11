@@ -52,10 +52,7 @@ import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.api.IRestAgentAdministration;
-import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
-import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
@@ -73,15 +70,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static ai.labs.eddi.configs.descriptors.ResourceUtilities.createDocumentDescriptor;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
-import static ai.labs.eddi.engine.model.Deployment.Environment.production;
-import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -98,9 +92,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final IZipArchive zipArchive;
     private final IJsonSerialization jsonSerialization;
 
-    private final IRestAgentAdministration restAgentAdministration;
     private final IMigrationManager migrationManager;
-    private final IDeploymentListener deploymentListener;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final TemplateSyntaxMigrator templateSyntaxMigrator;
     private final StructuralMatcher structuralMatcher;
@@ -110,78 +102,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     @Inject
     public RestImportService(IZipArchive zipArchive, IJsonSerialization jsonSerialization,
-            IRestAgentAdministration restAgentAdministration, IMigrationManager migrationManager, IDeploymentListener deploymentListener,
+            IMigrationManager migrationManager,
             IDocumentDescriptorStore documentDescriptorStore, TemplateSyntaxMigrator templateSyntaxMigrator,
             StructuralMatcher structuralMatcher, UpgradeExecutor upgradeExecutor) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
-        this.restAgentAdministration = restAgentAdministration;
         this.migrationManager = migrationManager;
-        this.deploymentListener = deploymentListener;
         this.documentDescriptorStore = documentDescriptorStore;
         this.templateSyntaxMigrator = templateSyntaxMigrator;
         this.structuralMatcher = structuralMatcher;
         this.upgradeExecutor = upgradeExecutor;
-    }
-
-    @Override
-    public List<AgentDeploymentStatus> importInitialAgents() {
-        try {
-            var agentExampleFiles = getResourceFiles("/initial-agents/available_agents.txt");
-            List<CompletableFuture<Void>> deploymentFutures = new ArrayList<>();
-
-            for (var agentFileName : agentExampleFiles) {
-                Response result = importAgent(getResourceAsStream("/initial-agents/" + agentFileName), "create", null, null, null);
-                if (result != null && result.getStatus() == 201) {
-                    String resourceUri = result.getHeaderString("Location");
-                    if (resourceUri != null && !resourceUri.isBlank()) {
-                        var agentId = RestUtilities.extractResourceId(URI.create(resourceUri));
-                        if (agentId != null) {
-                            var deploymentFuture = deploymentListener.registerAgentDeployment(agentId.getId(), agentId.getVersion());
-                            deploymentFutures.add(deploymentFuture);
-
-                            restAgentAdministration.deployAgent(production, agentId.getId(), agentId.getVersion(), true, false);
-                        }
-                    }
-                }
-            }
-
-            // Wait for all deployments to complete.
-            //
-            // Tolerant of a failure, and bounded: a registration now self-expires
-            // (DeploymentListener.REGISTRATION_TTL), so this can complete
-            // exceptionally where it previously could only block forever. One initial
-            // agent that never reports must not hang startup — log it and carry on
-            // with the ones that did deploy.
-            CompletableFuture.allOf(deploymentFutures.toArray(new CompletableFuture[0]))
-                    .handle((ignored, error) -> {
-                        if (error != null) {
-                            LOGGER.warnf("Not every initial agent reported a deployment event (%s) — continuing with those that did",
-                                    error.getMessage());
-                        }
-                        return null;
-                    })
-                    .join();
-
-            LOGGER.info("Imported & Deployed Initial Agents");
-            return restAgentAdministration.getDeploymentStatuses(production);
-        } catch (IOException e) {
-            throw sneakyThrow(e);
-        }
-    }
-
-    private List<String> getResourceFiles(String path) throws IOException {
-        List<String> filenames = new ArrayList<>();
-
-        try (var in = getResourceAsStream(path); var br = new BufferedReader(new InputStreamReader(in))) {
-
-            String resource;
-            while ((resource = br.readLine()) != null) {
-                filenames.add(resource);
-            }
-        }
-
-        return filenames;
     }
 
     // ==================== Preview ====================

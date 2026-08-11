@@ -430,7 +430,7 @@ In CI, fuzz tests run as standard JUnit regression tests. For deep coverage-guid
 ## See Also
 
 - [LangChain Integration](langchain.md) — Full agent configuration reference
-- [Agent Father LangChain Tools Guide](agent-father-langchain-tools-guide.md) — Guided tool setup
+- [Human-in-the-Loop](hitl.md) — Gating tool calls on human approval
 - [Architecture](architecture.md) — EDDI's lifecycle pipeline and concurrency model
 - [Metrics](metrics.md) — Monitoring tool execution performance
 - [HIPAA Compliance](hipaa-compliance.md) — HIPAA deployment guide

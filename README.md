@@ -38,7 +38,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 
 ## 🏁 Quick Start
 
-The fastest way to get EDDI running is the **one-command installer**. It sets up EDDI + your choice of database via Docker Compose, deploys the [Agent Father](docs/agent-father-deep-dive.md) starter agent, and walks you through creating your first AI agent.
+The fastest way to get EDDI running is the **one-command installer**. It sets up EDDI + your choice of database via Docker Compose and points you at the dashboard, where the **Platform Operator** (or the form-based agent wizard) creates your first AI agent for you.
 
 **Linux / macOS / WSL2:**
 
@@ -264,7 +264,7 @@ Most multi-agent frameworks (LangGraph, CrewAI, AutoGen) are Python/Node librari
 - 📦 **Preset Group Templates** — Five packaged, validated group configs (research pod, editorial team, ops task force, decision board, negotiation table) — instantiate by assigning agents to named roles, not by hand-writing phases
 - 👥 **Managed Conversations** — Intent-based auto-routing with one conversation per user per intent
 - 🎯 **Capability Matching** — Discover and route to agents by skill, confidence score, and custom attributes
-- 🧙 **Agent Father** — Meta-agent that creates other agents through conversation (ships out of the box)
+- 🧙 **Platform Operator** — Meta-agent that reads and operates the deployment — including creating other agents — with every write behind a human approval gate
 
 ### 🧠 LLM Provider Support (12 Providers)
 
@@ -466,7 +466,7 @@ EDDI implements open standards — not proprietary APIs:
 | **[Kubernetes](docs/kubernetes.md)**                         | Deploy with Kustomize or Helm                      |
 | **[Monitoring & Tracing](docs/monitoring/monitoring-guide.md)** | Prometheus, Grafana, OpenTelemetry, alerting     |
 | **[Red Hat & OpenShift](docs/redhat-openshift.md)**          | RHEL support, certified container, automated release |
-| **[Agent Father Deep Dive](docs/agent-father-deep-dive.md)** | How the meta-agent works                           |
+| **[Human-in-the-Loop](docs/hitl.md)**                        | Approval gates for turns and individual tool calls  |
 | **[Full Documentation](https://docs.labs.ai/)**              | Complete documentation site                        |
 
 ---

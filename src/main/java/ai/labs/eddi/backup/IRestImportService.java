@@ -8,7 +8,6 @@ import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.SyncMapping;
 import ai.labs.eddi.backup.model.SyncRequest;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
@@ -26,11 +25,6 @@ import java.util.List;
 @Tag(name = "Operations / Backup", description = "Import and export agents as zip files")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestImportService {
-    @POST
-    @Path("/initialAgents")
-    @Produces(MediaType.APPLICATION_JSON)
-    List<AgentDeploymentStatus> importInitialAgents();
-
     @POST
     @Consumes("application/zip")
     @Operation(description = "Import a Agent from a zip file. "

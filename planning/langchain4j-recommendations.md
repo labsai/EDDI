@@ -753,9 +753,10 @@ Replace lines 241–243 with:
 
 Config table `:441` and feature table `:844`: add `defaultToolCacheScope` / `toolCacheScopes` rows; correct `:844` "Deduplicates identical tool calls by arguments hash" → "…by scope + tool + arguments". Add the two fields to the JSON example at `:859`.
 
-##### MODIFY — `docs/agent-father-langchain-tools-guide.md:164`
-
-Add the two new rows to the config table.
+> The former `docs/agent-father-langchain-tools-guide.md` also carried a copy of
+> this config table and was named here as a MODIFY target. It was deleted along
+> with the rest of the Agent Father; `docs/langchain.md` is now the only place
+> the table lives.
 
 ##### MODIFY — `docs/changelog.md`
 
@@ -920,7 +921,7 @@ Runnable locally: all of the above are plain Mockito/JUnit — `.\mvnw.cmd test 
 | 4 | Add the two `Task` config fields + accessors. | `LlmConfiguration.java` | `feat(llm): add defaultToolCacheScope / toolCacheScopes config` |
 | 5 | Wire resolution in both `AgentOrchestrator` paths; update the 4 orchestrator test classes; add the 3 new orchestrator tests. | `AgentOrchestrator.java` + 4 tests | `fix(llm): resolve tool-cache scope per tool call` |
 | 6 | Raise `tool-results` cache size; correct `CacheImpl` javadoc. | `CacheFactory.java`, `CacheImpl.java` | `chore(caching): size tool-results for scoped keys; fix false TTL javadoc` |
-| 7 | Docs + changelog. | `docs/security.md`, `docs/langchain.md`, `docs/agent-father-langchain-tools-guide.md`, `docs/changelog.md` | `docs: correct tool-cache scope and key description` |
+| 7 | Docs + changelog. | `docs/security.md`, `docs/langchain.md`, `docs/changelog.md` | `docs: correct tool-cache scope and key description` |
 
 Effort: **S** (confirms the decision doc). Steps 3 and 5 are the mechanical bulk — ~30 test call sites, all one-argument insertions.
 
@@ -1249,7 +1250,7 @@ All facts verified against the current working tree. Producing the replacement s
 | `…/modules/llm/tools/ToolExecutionService.java` | **MODIFY** |
 | `…/modules/llm/impl/AgentOrchestrator.java` | **MODIFY** |
 | `…/modules/llm/model/LlmConfiguration.java` | **MODIFY** |
-| `docs/langchain.md`, `docs/security.md`, `docs/agent-father-langchain-tools-guide.md` | **MODIFY** |
+| `docs/langchain.md`, `docs/security.md` | **MODIFY** |
 | `docs/changelog.md` | **MODIFY** (AGENTS.md §2 rule 8) |
 
 No `application.properties` change. No new CDI wiring for `RetryConfiguration` (orthogonal).
@@ -1390,7 +1391,7 @@ All plain Mockito/JUnit — no sockets/Docker.
 
 ### 6. Acceptance criteria
 
-1. `.\mvnw.cmd validate` passes. 2. `.\mvnw.cmd clean test` passes — **`clean` mandatory** (record + 2 signature changes masked by stale `.class`). 3. `grep -rn "TOOL_COSTS" src/main/java` → 0. 4. `grep -rn "toolRequest.name(), toolRequest.arguments(), conversationId" src/main/java` → 0. 5–8. Per-class `-Dtest=…` green (filter by **class**, never `Class#method`). 9. `builtInToolsWhitelist:["websearch"]` → non-zero `eddi.tool.costs{tool="websearch"}`. 10. `maxBudgetPerConversation:0.0` alone → tool runs; `+enforceBudget:true` → `Error: Budget exceeded…`. 11. `toolRateLimits:{"websearch":1}` → 2nd `searchWeb`/min → `Error: Rate limit exceeded for tool: searchWeb`. 12. `toolPricing:{"websearch":0.05}` → `GET /toolhistory/costs` reflects $0.05/call. 13–14. Docs (`docs/langchain.md`, `docs/security.md`, `docs/agent-father-langchain-tools-guide.md`) + top changelog entry name the three live-visible effects (rate limits bind; TTLs change; metric tags→slugs) and the inert budget flag; `docs/langchain.md` states `maxBudgetPerConversation` covers **tool** cost only (LLM token cost is cascade-scoped `maxCostPerRun`).
+1. `.\mvnw.cmd validate` passes. 2. `.\mvnw.cmd clean test` passes — **`clean` mandatory** (record + 2 signature changes masked by stale `.class`). 3. `grep -rn "TOOL_COSTS" src/main/java` → 0. 4. `grep -rn "toolRequest.name(), toolRequest.arguments(), conversationId" src/main/java` → 0. 5–8. Per-class `-Dtest=…` green (filter by **class**, never `Class#method`). 9. `builtInToolsWhitelist:["websearch"]` → non-zero `eddi.tool.costs{tool="websearch"}`. 10. `maxBudgetPerConversation:0.0` alone → tool runs; `+enforceBudget:true` → `Error: Budget exceeded…`. 11. `toolRateLimits:{"websearch":1}` → 2nd `searchWeb`/min → `Error: Rate limit exceeded for tool: searchWeb`. 12. `toolPricing:{"websearch":0.05}` → `GET /toolhistory/costs` reflects $0.05/call. 13–14. Docs (`docs/langchain.md`, `docs/security.md`) + top changelog entry name the three live-visible effects (rate limits bind; TTLs change; metric tags→slugs) and the inert budget flag; `docs/langchain.md` states `maxBudgetPerConversation` covers **tool** cost only (LLM token cost is cascade-scoped `maxCostPerRun`).
 
 ---
 

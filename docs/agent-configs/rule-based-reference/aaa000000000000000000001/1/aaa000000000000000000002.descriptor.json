@@ -1,6 +1,6 @@
 {
   "resource" : "eddi://ai.labs.rules/rulestore/rulesets/aaa000000000000000000002?version=1",
-  "name" : "Agent Father",
+  "name" : "Rule-Based Reference Agent",
   "description" : "Conversation flow rules",
   "deleted" : false
 }

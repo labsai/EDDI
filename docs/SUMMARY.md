@@ -10,8 +10,6 @@
 - [Creating your first Agent](creating-your-first-agent/README.md)
   - [Create a "Hello World" agent](creating-your-first-agent/creating-your-first-agent.md)
   - [Create an agent that reacts to user inputs](creating-your-first-agent/creating-your-first-agent-1.md)
-- [Your first agent](your-first-agent/README.md)
-  - [Understanding your first agent](your-first-agent/understanding-your-first-agent.md)
 - [Putting It All Together](putting-it-all-together.md)
 - [Import/Export an Agent](import-export-an-agent.md)
 
@@ -69,12 +67,6 @@
 - [Compliance Data Flow](compliance-data-flow.md)
 - [Incident Response Plan](incident-response.md)
 - [Privacy & Data Processing](../PRIVACY.md)
-
-## Advanced Concepts
-
-- [Agent Father: A Deep Dive](agent-father-deep-dive.md)
-- [Agent Father: LangChain Tools Guide](agent-father-langchain-tools-guide.md)
-- [Agent Father: Conversation Flow](agent-father-conversation-flow.md)
 
 ## Deployment & Infrastructure
 

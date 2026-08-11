@@ -389,8 +389,8 @@ Discover deployed agents with their capabilities. Returns an enriched list of de
     },
     {
       "agentId": "64513b3c...",
-      "name": "Agent Father",
-      "description": "Agent to create Connector Agents...",
+      "name": "Platform Operator",
+      "description": "Agent that reads and operates this EDDI deployment...",
       "version": 110,
       "status": "READY",
       "environment": "production"

@@ -5,7 +5,7 @@
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "Hello! I'm the <b>Agent Father</b> \u2014 EDDI's built-in agent creation wizard.",
+        "text" : "Hello! I'm the <b>Rule-Based Reference Agent</b> \u2014 a worked example of EDDI's rule-based configuration.",
         "delay" : 0
       } ]
     }, {

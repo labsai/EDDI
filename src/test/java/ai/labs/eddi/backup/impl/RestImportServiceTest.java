@@ -17,8 +17,6 @@ import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.api.IRestAgentAdministration;
-import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,17 +53,15 @@ class RestImportServiceTest {
     void setUp() {
         zipArchive = mock(IZipArchive.class);
         jsonSerialization = mock(IJsonSerialization.class);
-        var restAgentAdministration = mock(IRestAgentAdministration.class);
         var migrationManager = mock(IMigrationManager.class);
-        var deploymentListener = mock(IDeploymentListener.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         var templateSyntaxMigrator = mock(TemplateSyntaxMigrator.class);
         structuralMatcher = mock(StructuralMatcher.class);
         upgradeExecutor = mock(UpgradeExecutor.class);
 
         importService = new RestImportService(
-                zipArchive, jsonSerialization, restAgentAdministration,
-                migrationManager, deploymentListener, documentDescriptorStore,
+                zipArchive, jsonSerialization,
+                migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, structuralMatcher, upgradeExecutor);
     }
 

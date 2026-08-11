@@ -397,23 +397,6 @@ check_prerequisites() {
   fi
 }
 
-# ── Detect existing state ─────────────────────────────────
-
-detect_deployed_agents() {
-  local count=0
-  local response
-  response=$(curl -sf "http://localhost:${EDDI_PORT}/administration/production/deploymentstatus" 2>/dev/null) || return 1
-
-  if [[ "$JQ_AVAILABLE" == "true" ]]; then
-    count=$(echo "$response" | jq 'length' 2>/dev/null) || count=0
-  else
-    # Fallback: count array elements by counting "agentId" occurrences
-    count=$(echo "$response" | grep -o '"agentId"' | wc -l | tr -d ' ') || count=0
-  fi
-
-  echo "$count"
-}
-
 # ── Wizard steps ───────────────────────────────────────────
 
 TOTAL_STEPS=5
@@ -1115,28 +1098,6 @@ print(', '.join(n for n in names if n in ('eddi-admin', 'eddi-editor')))" 2>/dev
   fi
 }
 
-# ── Import initial agents ──────────────────────────────────
-
-maybe_import_initial_agents() {
-  local agent_count
-  agent_count=$(detect_deployed_agents) || agent_count=0
-
-  if [[ "$agent_count" -eq 0 ]]; then
-    echo -ne "  Deploying Agent Father...  "
-    local status
-    status=$(curl -sf -o /dev/null -w "%{http_code}" \
-      -X POST "http://localhost:${EDDI_PORT}/backup/import/initialAgents" 2>/dev/null) || status="000"
-
-    if [[ "$status" == "200" ]]; then
-      echo -e "${GREEN}✅${RESET}"
-    else
-      echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${status} — non-fatal, EDDI is still usable)${RESET}"
-    fi
-  else
-    info "Found ${agent_count} deployed agent(s), skipping initial import."
-  fi
-}
-
 # ── Success banner ────────────────────────────────────────
 
 print_success() {
@@ -1176,9 +1137,9 @@ print_success() {
   echo -e "  ${YELLOW}└────────────────────────────────────────────────────┘${RESET}"
   echo ""
   echo -e "  ${BOLD}🤖 Ready to create your first agent?${RESET}"
-  echo "     Open the dashboard and chat with Agent Father!"
-  echo "     It will guide you through choosing an AI provider,"
-  echo "     setting up API keys, and building your first agent."
+  echo -e "     Activate the Platform Operator at ${CYAN}http://localhost:${EDDI_PORT}/manage/operator${RESET}"
+  echo "     and just describe the agent you want — it builds and deploys it for you."
+  echo -e "     Prefer a form? The wizard is at ${CYAN}http://localhost:${EDDI_PORT}/manage/agents/wizard${RESET}"
   echo ""
   echo -e "  ${DIM}┌─ Claude Desktop / Cursor ──────────────────────────┐${RESET}"
   echo -e "  ${DIM}│ Add to your MCP config:                            │${RESET}"
@@ -1407,7 +1368,6 @@ EDDI_HTTPS_PORT=$EDDI_HTTPS_PORT
 CFGEOF
       chmod 600 "$EDDI_DIR/.eddi-config"
     fi
-    maybe_import_initial_agents
     install_cli_wrapper
     print_success
     exit 0
@@ -1428,7 +1388,6 @@ CFGEOF
   start_eddi
   wait_for_ready
   configure_keycloak_client
-  maybe_import_initial_agents
 
   # Install CLI wrapper
   install_cli_wrapper

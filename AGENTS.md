@@ -620,12 +620,11 @@ When designing any new feature, always consider these before finalizing the desi
 | ------------------------------------------- | ----------------------------------------------------------- |
 | `src/main/docker/Dockerfile`                | Production JVM container image (digest-pinned base)         |
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, MongoDB)             |
-| `src/main/resources/initial-agents/`        | Agent Father and sample agent configs                       |
 | `.github/workflows/ci.yml`                  | CI/CD pipeline (build, test, Docker push, smoke test)       |
 | `docs/`                                     | Markdown documentation, published at docs.labs.ai           |
 | `docker-compose.yml`                        | EDDI + MongoDB local setup                                  |
 | `mise.toml`                                 | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
-| `docs/agent-configs/`                       | Agent config sources (e.g. Agent Father) — reference for AI |
+| `docs/agent-configs/`                       | Worked agent config sources — reference for AI, and swept by two unit tests (§5.6) |
 | `src/main/java/.../httpclient/SafeHttpClient.java` | Centralized SSRF-safe HTTP client wrapper              |
 | `src/main/java/.../security/AuthStartupGuard.java` | Production auth enforcement guard                      |
 | `.env.example`                              | Docker Compose env var reference (copy to `.env`; optional for basic local dev) |
@@ -796,7 +795,7 @@ Matcher:      "actions" : "ask_for_model"
 | `longTerm`     | Persisted to `usermemories` collection across conversations                                                                                   |
 | `secret`       | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${vault:...}`) stored as property value |
 
-> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If vault is disabled (common in dev mode), `autoVaultSecret()` fails and falls back to storing plaintext — but logs an ERROR that may confuse users. For wizard-style agents that collect API keys and pass them to an endpoint (like the Agent Father), prefer `scope: "conversation"` and delegate vaulting to the receiving service.
+> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If vault is disabled (common in dev mode), `autoVaultSecret()` fails and falls back to storing plaintext — but logs an ERROR that may confuse users. For wizard-style agents that collect API keys and pass them to an endpoint (see §5.6), prefer `scope: "conversation"` and delegate vaulting to the receiving service.
 
 #### Capturing user input vs. setting fixed values
 
@@ -873,7 +872,7 @@ Supported `subType` values: `"password"`, `"text"`, `"email"`. When the UI recei
 
 ### 5.5 ZIP Structure for Agent Import
 
-Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service validates IDs via `RestUtilities.isValidId()` which requires ≥18 hex characters (`0-9a-fA-F` and dashes). Semantic names like `agent-father-wf1` will be rejected.
+Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service validates IDs via `RestUtilities.isValidId()` which requires ≥18 hex characters (`0-9a-fA-F` and dashes). Semantic names like `my-agent-wf1` will be rejected.
 
 The file naming convention is `{id}.{type}.json` where `{id}` matches the last path segment of the resource URI:
 
@@ -931,13 +930,15 @@ Always use v6 canonical URIs in new configs:
 
 ### 5.6 Reference Implementation
 
-The **Agent Father** (`docs/agent-configs/agent-father/`) is a complete, working, rule-based agent config. Use it as the canonical reference for:
+`docs/agent-configs/rule-based-reference/` is a complete, working, rule-based agent config — a conversational wizard that provisions another agent over EDDI's own REST API. It is a **reference and test fixture only**: nothing ships or deploys it, and agents are created in practice through the Manager's Platform Operator, its agent wizard, or the setup API. Use it as the canonical reference for:
 
 - Behavior rule patterns with `actionmatcher` + `inputmatcher`
 - Property setter capturing free-text input via `{memory.current.input}` (it uses `scope: "conversation"` throughout and delegates secret vaulting to the receiving `create_agent` HTTP call — the wizard pattern from §5.4, deliberately **not** `scope: "secret"`)
 - HTTP call template syntax
 - Output with quick replies
 - Provider-aware branching (local vs. cloud LLM providers)
+
+Both `StrictBoundaryShippedConfigsTest` and `RuleSetStoreShippedRulesetsTest` sweep `docs/agent-configs`, so this config is validated on every unit run — keep it parseable and save-time-valid.
 
 ---
 

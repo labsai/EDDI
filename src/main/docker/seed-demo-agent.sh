@@ -1,13 +1,9 @@
 #!/bin/sh
 # Seeds a minimal demo agent so the Open WebUI model list is not empty.
 #
-# It builds the agent through EDDI's own REST API rather than calling
-# POST /backup/import/initialAgents, which cannot currently import the bundled
-# Agent Father on Linux: the ZIP's entry names are correctly forward-slashed,
-# but extraction writes them as single files with literal backslashes, so the
-# workflow directory is never created and the import 500s. That is a
-# pre-existing EDDI defect, unrelated to the /v1 adapter this demo exists to
-# show, so the demo routes around it instead of depending on it.
+# It builds the agent through EDDI's own REST API. EDDI ships no starter agent
+# and has no import-on-startup path, so a fresh instance has an empty model
+# list until something creates one.
 #
 # The agent is rule-based and has no LLM, so the demo needs no provider
 # credentials and its replies are deterministic.

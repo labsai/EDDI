@@ -120,8 +120,8 @@ COPY --chown=185 licenses/ /licenses/
 # Only the TOP-LEVEL *.md pages are ever reachable at runtime: listDocs() calls
 # Files.newDirectoryStream(docsDir, "*.md") — non-recursive — and readDoc()
 # rejects any name containing '/', so nothing under docs/agent-configs/,
-# docs/templates/, docs/your-first-agent/ etc. can be requested. Copying the
-# whole tree (~2.2 MB) shipped those subdirectories as dead weight.
+# docs/templates/, docs/creating-your-first-agent/ etc. can be requested.
+# Copying the whole tree (~2.2 MB) shipped those subdirectories as dead weight.
 COPY --chown=185 docs/*.md /deployments/docs/
 
 # Drop the internal-only pages that have no business being served to an MCP

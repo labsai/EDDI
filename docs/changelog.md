@@ -7,6 +7,58 @@
 
 
 
+## 🗑️ chore: remove the Agent Father, now that the Platform Operator has replaced it (2026-08-11)
+
+**Repo:** EDDI (`chore/remove-agent-father`)
+
+The Agent Father was EDDI's conversational agent-creation wizard, shipped as a ZIP and deployed on
+first install. Both of its jobs are now done better elsewhere in EDDI-Manager: the **Platform
+Operator** (`/manage/operator`) for the conversational path, and the **agent wizard**
+(`/manage/agents/wizard`) for the form path. Both call `AgentSetupService`, which has been the
+Java equivalent of the Agent Father's workflow for some time. It was also already half-broken:
+the bundled ZIP's entry names use literal backslashes, so `importInitialAgents` 500s on Linux —
+which is why `seed-demo-agent.sh` was written to route around it.
+
+**What went, and why the import machinery went with it.** `POST /backup/import/initialAgents` read
+`initial-agents/available_agents.txt`, which listed exactly one file: the Agent Father ZIP. With the
+ZIP gone the endpoint could only ever return an empty list, so it was removed rather than left as a
+no-op that three installers call and whose success banner promises an agent that will not be there.
+Removing it also freed `RestImportService` of two injected dependencies it used nowhere else
+(`IDeploymentListener`, `IRestAgentAdministration`) — constructor narrowed, six unit tests updated.
+Not in the operator's endpoint allow-list (`tool-scopes.ts`), so activation is unaffected.
+
+**The reference config stayed, renamed.** `docs/agent-configs/agent-father/` →
+`docs/agent-configs/rule-based-reference/`, descriptors and intro text rebranded. Deleting it would
+have cost two things that have nothing to do with whether the agent ships: AGENTS.md §5.6's only
+worked example of `actionmatcher`+`inputmatcher`, property setters, httpcalls templating and quick
+replies; and the only complete multi-extension agent in the corpus that
+`StrictBoundaryShippedConfigsTest` and `RuleSetStoreShippedRulesetsTest` sweep — no other fixture
+carries a `.property.json` or `.httpcalls.json`. Post-rename the sweeps still report 32 configs and
+7 rulesets checked. §5.6 now says explicitly that it is a fixture, not something that ships.
+
+**Installers point at the successor instead of a dead import.** `install.sh`, `install.ps1` and
+`gcp/provision-vm.sh` no longer POST to the removed endpoint; `detect_deployed_agents` /
+`Get-DeployedAgentCount` existed only to guard it and went too. The success banner now names
+`/manage/operator` and `/manage/agents/wizard`.
+
+**Docs.** Deleted `agent-father-{deep-dive,langchain-tools-guide,conversation-flow}.md` and
+`docs/your-first-agent/` (both SUMMARY entries removed). `architecture.md`'s case study was
+retargeted rather than dropped — the point it makes ("a meta-agent built from ordinary EDDI
+primitives, self-modifying the system") is *more* true of the operator, and now also carries the
+gate reasoning that makes it safe. Scattered mentions rewritten in README, `getting-started`,
+`developer-quickstart`, `httpcalls`, `langchain`, `security`, `secrets-vault`, `mcp-server`,
+`open-webui-integration`, plus a stale MODIFY target in `planning/langchain4j-recommendations.md`.
+
+`docs/changelog.md`, `HANDOFF.md` and `docs/release-notes-6.0.2.md` deliberately keep their
+mentions — they are dated records of what was true at the time, not live documentation.
+
+**Verified:** `clean compile` + `test-compile` green; the nine affected test classes green;
+`validate` (Checkstyle) clean.
+
+---
+
+
+
 ## 🔢 docs(mcp): the MCP tool catalogue was eight tools short, and a count sweep of both READMEs (2026-08-11)
 
 **Repo:** EDDI (`docs/group-collaboration-refresh`)
