@@ -148,6 +148,11 @@ take.
 - **`build-css.mjs` depends on `src/index.css`'s `@import 'tailwindcss';` line** and on
   `@source`-able component dirs. If the app migrates Tailwind config or moves index.css,
   update build-css.mjs.
+- **Two components are in the declared surface but not synced**: `shared/update-check-card.tsx`
+  and `layout/update-banner.tsx`, both newer than the last sync. `UpdateCheckCard` pulls
+  `react-markdown` + `remark-gfm` (it renders GitHub release notes) and talks to
+  `api.github.com`, so syncing it is a real bundle and network decision, not a formality —
+  measure with the esbuild command above before adding it.
 - **`.design-sync/` is type-checked** by `tsconfig.design-sync.json`, wired into `tsc -b`
   via `tsconfig.json`'s references. It maps `eddi-manager` → `ds-entry.tsx` so the previews
   resolve, and pulls in `src/vite-env.d.ts` for `import.meta.env` / `__APP_VERSION__`. A

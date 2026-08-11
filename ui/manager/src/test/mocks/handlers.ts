@@ -1329,6 +1329,24 @@ export const handlers = [
     });
   }),
 
+  // GitHub latest-release lookup behind the opt-in update check. Returns a
+  // version far ahead of the mock backend's so the "update available" path is
+  // the one exercised by default.
+  http.get("https://api.github.com/repos/labsai/EDDI/releases/latest", () => {
+    return HttpResponse.json({
+      tag_name: "9.9.9",
+      name: "9.9.9",
+      html_url: "https://github.com/labsai/EDDI/releases/tag/9.9.9",
+      published_at: "2026-01-15T10:00:00Z",
+      body: "## Highlights\n\n- Mock release note one\n- Mock release note two",
+    });
+  }),
+
+  // There is deliberately no second outbound handler here. The update check
+  // contacts exactly one host, and `onUnhandledRequest: "error"` in the test
+  // setup means reintroducing a relay (shields.io or otherwise) fails the suite
+  // rather than passing quietly.
+
   // OpenAPI endpoint discovery
   http.get("*/apicallstore/apicalls/discover-endpoints", ({ request }) => {
     const url = new URL(request.url);

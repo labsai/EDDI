@@ -3724,5 +3724,37 @@
   },
   "workforceWizard": {
     "title": "Nouvelle équipe"
+  },
+  "updates": {
+    "title": "Mises à jour EDDI",
+    "description": "Vérifiez si une version plus récente d'EDDI est disponible. Rien n'est envoyé tant que vous ne le demandez pas.",
+    "installed": "Installée",
+    "githubRelease": "Version GitHub",
+    "dockerImage": "Image Docker",
+    "unknownVersion": "Inconnue",
+    "checkNow": "Vérifier maintenant",
+    "checking": "Vérification…",
+    "autoCheck": "Vérifier automatiquement à chaque chargement de page",
+    "autoCheckHint": "Effectue une vérification par rechargement du navigateur et affiche une bannière si une version plus récente existe.",
+    "privacyNote": "La vérification contacte uniquement api.github.com depuis votre navigateur. Aucune donnée de votre déploiement n'est transmise.",
+    "neverChecked": "Aucune vérification effectuée.",
+    "upToDate": "Vous utilisez la dernière version ({{version}}).",
+    "updateAvailable": "EDDI {{version}} est disponible",
+    "updateAvailableDetail": "Vous utilisez {{installed}}.",
+    "ahead": "Vous utilisez {{installed}}, plus récente que la dernière version publiée ({{version}}).",
+    "unknownInstalled": "La dernière version est {{version}}. La version installée n'a pas pu être déterminée, aucune comparaison n'est donc possible.",
+    "errorRateLimited": "La limite de requêtes non authentifiées de GitHub est atteinte. Réessayez plus tard ou ouvrez la page des versions.",
+    "errorUnreachable": "Impossible de joindre api.github.com. Vérifiez votre réseau ou votre proxy sortant.",
+    "errorFailed": "La vérification des mises à jour a échoué. Ouvrez la page des versions pour vérifier manuellement.",
+    "publishedOn": "Publiée le {{date}}",
+    "whatsNew": "Nouveautés de la version {{version}}",
+    "fullNotes": "Notes de version complètes sur GitHub",
+    "noNotes": "Cette version n'a pas de notes.",
+    "releaseNotes": "Notes de version",
+    "allReleases": "Toutes les versions",
+    "howToUpdate": "Comment mettre à jour",
+    "howToUpdateCli": "Avec la CLI eddi (créée par l'installateur) :",
+    "howToUpdateManual": "Sans la CLI, depuis votre répertoire d'installation (~/.eddi par défaut) :",
+    "howToUpdateNote": "Adaptez les options -f à votre configuration — ajoutez -f docker-compose.auth.yml si vous utilisez Keycloak."
   }
 }

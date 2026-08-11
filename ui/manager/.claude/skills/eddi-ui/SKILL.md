@@ -1,6 +1,6 @@
 ---
 name: eddi-ui
-description: EDDI Manager's UI vocabulary — the 24 existing components, their variant props, the brand tokens, and the styling rules. Load before writing or editing any component that renders.
+description: EDDI Manager's UI vocabulary — the 25 existing components, their variant props, the brand tokens, and the styling rules. Load before writing or editing any component that renders.
 ---
 
 # EDDI Manager UI
@@ -42,6 +42,7 @@ class system, never use raw hex.
 | `CommandPalette` | Global Ctrl+K. Opens via its store, not props. |
 | `CreateOrWizardDialog` | "Quick create or launch the wizard" fork. |
 | `ModeSwitcher`, `RefetchErrorNotice` | Mode switch; background-refetch failure notice. |
+| `UpdateCheckCard` | "Is a newer EDDI released?" panel for the dashboard. No props. Opt-in — issues no request until the operator asks. |
 
 ### `src/components/layout/` — the shell
 
@@ -53,6 +54,7 @@ class system, never use raw hex.
 | `PlatformStatus` | Backend connectivity pill with a click-to-expand popover (instance, latency, last checked). |
 | `PageLoader` | Route-level skeleton. Use it for lazy-route fallbacks, not for in-page loading. |
 | `MockDataBanner` | Demo-mode strip; self-hides unless MSW is active. |
+| `UpdateBanner` | New-release strip, mounted by `AppLayout`. No props; self-hides unless the opt-in check is on and an update is available. |
 | `ThemeProvider` | Light/dark; toggles the `dark` class. Wrap tests and previews in it. |
 
 ## Tokens

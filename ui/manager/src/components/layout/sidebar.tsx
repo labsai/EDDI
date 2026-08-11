@@ -42,8 +42,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useOnboarding, ALL_CHAPTERS, type TourChapterId } from "@/hooks/use-onboarding";
 import { TOUR_CHAPTERS } from "@/components/onboarding/tour-chapters";
-import { useQuery } from "@tanstack/react-query";
-import { getEddiVersion } from "@/lib/api/system";
+import { useEddiVersion } from "@/hooks/use-update-check";
+import { UNKNOWN_VERSION } from "@/lib/api/system";
 import { ModeSwitcher } from "@/components/shared/mode-switcher";
 
 const navSections = [
@@ -118,12 +118,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { method, user, logout } = useAuth();
   const showUser = method === "keycloak" && user;
 
-  const { data: serverVersion, isLoading } = useQuery({
-    queryKey: ["eddi-version"],
-    queryFn: getEddiVersion,
-    staleTime: Infinity,
-    retry: 1, // Don't retry infinitely if offline
-  });
+  const { data: serverVersion, isLoading } = useEddiVersion();
 
   // Shares its query key with the approvals page, so mounting this in the
   // sidebar adds an observer rather than a second poll. The endpoint allows
@@ -388,11 +383,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {!collapsed && (
           <p 
             className="mb-1 px-3 text-center text-[10px] text-sidebar-foreground/30"
-            title={serverVersion === "Unknown" ? `Standalone Demo Mode fallback` : undefined}
+            title={serverVersion === UNKNOWN_VERSION ? `Standalone Demo Mode fallback` : undefined}
           >
-            {isLoading 
+            {isLoading
               ? "Checking version..."
-              : serverVersion && serverVersion !== "Unknown" 
+              : serverVersion && serverVersion !== UNKNOWN_VERSION
                 ? `EDDI ${serverVersion}`
                 : `EDDI Demo ${__APP_VERSION__}`}
           </p>

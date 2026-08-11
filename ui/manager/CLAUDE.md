@@ -16,7 +16,7 @@ look like.**
 ## The five rules that catch most mistakes
 
 1. **Compose, don't recreate.** `src/components/ui/` (11 primitives) and
-   `src/components/shared/` (13 shared components) already exist. Import them. Do not
+   `src/components/shared/` (14 shared components) already exist. Import them. Do not
    pull in a fresh shadcn/ui component, and do not hand-roll a button, badge, card,
    dialog, empty state or error state.
 2. **Colors come from tokens, never hex.** `bg-primary`, `text-muted-foreground`,
@@ -38,11 +38,12 @@ the whole app gets it; don't patch it at the call site.
 
 ## Design system mirror
 
-The synced surface is **29 components**: the 24 above plus five pieces of chrome from
+The synced surface is **29 components**: 24 of the 25 above plus five pieces of chrome from
 `src/components/layout/` (`Sidebar`, `TopBar`, `PlatformStatus`, `PageLoader`,
 `MockDataBanner`). `AppLayout` and `ConfigEditorLayout` are excluded on purpose — both pull
-Monaco into the bundle. `.design-sync/conventions.md` is the styling contract;
-`.design-sync/NOTES.md` explains the build wiring.
+Monaco into the bundle. `UpdateCheckCard` and `UpdateBanner` are not synced either (they are
+newer than the last sync; see NOTES.md). `.design-sync/conventions.md` is the styling
+contract; `.design-sync/NOTES.md` explains the build wiring.
 
 **Adding a component to `ui/`, `shared/` or `layout/` does not add it to the design system**
 — it must also be added to `.design-sync/ds-entry.tsx`, `config.json`'s `componentSrcMap`,
