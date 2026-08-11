@@ -27,10 +27,20 @@ Header now 84, the whitelist paragraph too, and every section header matches its
 Verified mechanically rather than by eye: each of the 84 names is now present in the page, and the
 whitelist and the `@Tool` set are in exact parity with no entry on either side alone.
 
-Also corrected: `describe_discussion_styles` was sold as covering "all 6 discussion styles". Six is
-what the tool's hardcoded text really covers — but the engine has **seven** built-in styles, so
-"all" was the false word. It now says six and names the gap (`NEGOTIATION`), pointing at the full
-table. **The tool's own output is still six** — a code fix, deliberately not made on a docs branch.
+**`describe_discussion_styles` was two styles short, and that one is a code fix.** Its hardcoded
+text covered six styles; the engine has seven built-in plus `CUSTOM`. This is not cosmetic — the
+tool exists so a caller can *pick* a style before `create_group`, so a style absent from it is a
+style that effectively does not exist over MCP. `NEGOTIATION` shipped in I11 and was never
+selectable this way. Both are now described: `NEGOTIATION` with its real preset flow (positions →
+proposals → bargaining → arbitration → synthesis, arbitration **skipped** on
+`AGREEMENT_REACHED`, read off `DiscussionStylePresets`), and `CUSTOM` as the escape hatch. The
+`@Tool` description string listed the same six and now matches.
+
+The existing test asserted six hardcoded names and stayed green for the entire life of the bug.
+Its replacement iterates `DiscussionStyle.values()`, so the next style added fails the build until
+it is described. Mutation-checked rather than assumed: with the `NEGOTIATION` block removed, the
+new test fails with *"describe_discussion_styles omits the style NEGOTIATION"* and the old one
+still passes — which is exactly the blind spot that let this drift.
 
 **Count sweep of both READMEs.** Every numeric claim re-derived from source; all four hold, so no
 edit was needed: `7 built-in discussion styles` (7 + `CUSTOM`), `80+ MCP tools` (84), `50+

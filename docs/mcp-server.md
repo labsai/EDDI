@@ -87,7 +87,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 
 | Tool                        | Description                                                                                                                                                |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `describe_discussion_styles` | Rich descriptions of six discussion styles with phase flows, member roles, and use cases. **Note:** the engine now has seven built-in styles — this tool's text predates `NEGOTIATION` and does not cover it; see [Group Conversations](group-conversations.md#discussion-styles) for the full set |
+| `describe_discussion_styles` | Rich descriptions of all seven built-in discussion styles plus `CUSTOM`, with phase flows, member roles, and use cases |
 | `list_groups`               | List all group configurations with name, style, member count                                                                                               |
 | `read_group`                | Read a group configuration's full details                                                                                                                  |
 | `create_group`              | Create a group (members, moderator, style, roles, member types, tasks). Supports nested groups via `memberTypes=GROUP` and pre-configured TASK_FORCE tasks via `tasks` param |
