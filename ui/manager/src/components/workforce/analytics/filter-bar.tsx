@@ -4,10 +4,10 @@ import { X, ChevronDown, Filter, SearchX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   DISCUSSION_STYLES,
-  STYLE_INFO,
   type GroupConversationState,
   type DiscussionStyle,
 } from "@/lib/api/groups";
+import { styleLabel } from "@/lib/discussion-styles";
 import type { ActiveFilter } from "./filter-utils";
 
 // ─── Dropdown ────────────────────────────────────────────────────
@@ -202,7 +202,7 @@ function AnalyticsFilterBar({
     { value: null, label: t("analyticsPage.allStyles", "All styles") },
     ...DISCUSSION_STYLES.map((s) => ({
       value: s,
-      label: STYLE_INFO[s]?.label ?? s,
+      label: styleLabel(s, t),
       count: (styleCounts ?? {})[s] ?? 0,
     })),
   ];

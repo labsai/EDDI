@@ -50,8 +50,10 @@ describe("GroupConfigPanel", () => {
 
     expect(screen.getByText("Product Design Council")).toBeInTheDocument();
     expect(screen.getByText("Discusses product design and user experience aspects.")).toBeInTheDocument();
-    expect(screen.getByText("Collaborative Council")).toBeInTheDocument();
-    expect(screen.getByText("All experts contribute perspectives in structured rounds")).toBeInTheDocument();
+    expect(screen.getByText("Round Table")).toBeInTheDocument();
+    expect(
+      screen.getByText("Everyone gives their view, then builds on the others over several rounds"),
+    ).toBeInTheDocument();
   });
 
   it("renders members list with initials, role badges, and moderator highlight", () => {
@@ -279,5 +281,52 @@ describe("GroupConfigPanel", () => {
       await user.click(screen.getByTestId("group-hitl-edit"));
       expect(screen.queryByTestId("group-advanced-editor")).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("GroupConfigPanel — role coverage", () => {
+  it("warns when a DEBATE has nobody on one side", () => {
+    renderWithProviders(
+      <GroupConfigPanel
+        config={{
+          ...mockConfig,
+          style: "DEBATE",
+          maxRounds: 1,
+          members: mockConfig.members.map((m) => ({ ...m, role: "PRO" })),
+        }}
+      />,
+    );
+    const warnings = screen.getAllByTestId("group-role-coverage-warning");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toHaveTextContent("CON");
+    expect(warnings[0]).toHaveTextContent("Opening Arguments (Con)");
+  });
+
+  it("stays silent when every addressed role is covered", () => {
+    renderWithProviders(
+      <GroupConfigPanel
+        config={{
+          ...mockConfig,
+          style: "DEBATE",
+          maxRounds: 1,
+          members: [
+            { ...mockConfig.members[0]!, role: "PRO" },
+            { ...mockConfig.members[1]!, role: "CON" },
+          ],
+        }}
+      />,
+    );
+    expect(screen.queryByTestId("group-role-coverage-warning")).not.toBeInTheDocument();
+  });
+
+  it("warns for a DEVIL_ADVOCATE group without the advocate", () => {
+    renderWithProviders(
+      <GroupConfigPanel
+        config={{ ...mockConfig, style: "DEVIL_ADVOCATE", maxRounds: 1 }}
+      />,
+    );
+    expect(screen.getByTestId("group-role-coverage-warning")).toHaveTextContent(
+      "DEVIL_ADVOCATE",
+    );
   });
 });

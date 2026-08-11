@@ -2461,6 +2461,7 @@
     "agentFiledCaps": "الحدود",
     "agentFiledCapsValue": "{{perDiscussion}} / نقاش · {{perTurn}} / دور",
     "moderatorlessWarning": "مقصورة على منسّق لا تملكه هذه المجموعة: {{phases}}. سينوب عنه العضو الأول حسب ترتيب الكلام.",
+    "roleCoverageWarning": "لا يحمل أي عضو الدور «{{role}}» — وسيتحدث جميع الأعضاء في {{phases}} بدلًا من ذلك.",
     "delegationDepth": "أقصى عمق",
     "delegationTimeout": "مهلة التفويض",
     "secondsShort": "{{seconds}} ث",
@@ -2627,7 +2628,42 @@
     "artifactRevisions_one": "{{count}} مراجعة سابقة",
     "artifactRevisions_two": "{{count}} مراجعات سابقة",
     "artifactRevisions_zero": "{{count}} مراجعات سابقة",
-    "artifactRevisions_other": "{{count}} مراجعات سابقة"
+    "artifactRevisions_other": "{{count}} مراجعات سابقة",
+    "styles": {
+      "ROUND_TABLE": {
+        "label": "طاولة مستديرة",
+        "flow": "يعرض كل عضو رأيه، ثم يبني الجميع على آراء بعضهم عبر عدة جولات"
+      },
+      "PEER_REVIEW": {
+        "label": "مراجعة الأقران",
+        "flow": "يجيب كل عضو بمفرده، ثم ينقد الأعضاء بعضهم ويُنقّحون إجاباتهم"
+      },
+      "DEVIL_ADVOCATE": {
+        "label": "محامي الشيطان",
+        "flow": "عضو واحد يهاجم موقف المجموعة والبقية يدافعون عنه"
+      },
+      "DELPHI": {
+        "label": "جولات مجهولة",
+        "flow": "يجيب الأعضاء دون ذكر أسمائهم ويُنقّحون في كل جولة، فلا ينساق أحد خلف أول متحدث"
+      },
+      "DEBATE": {
+        "label": "مناظرة مع وضد",
+        "flow": "طرف يؤيد وطرف يعارض، ثم تأتي الردود ثم الحكم"
+      },
+      "TASK_FORCE": {
+        "label": "فريق مهام",
+        "flow": "يضع المنسّق الخطة، وينفّذ الأعضاء المهام بالتوازي، ثم يجري التحقق من النتائج"
+      },
+      "NEGOTIATION": {
+        "label": "تفاوض",
+        "flow": "تتبادل الأطراف المقترحات حتى تتفق، ولا يتدخل المحكّم إلا إذا تعذّر الاتفاق"
+      },
+      "CUSTOM": {
+        "label": "مسار مخصّص",
+        "flow": "مراحل تحددها بنفسك"
+      }
+    },
+    "unsupportedStyle": "لا يدعم هذا الخادم {{style}}. اختر إطارًا آخر للمتابعة."
   },
   "taskBoard": {
     "title": "لوحة المهام",
@@ -2919,6 +2955,9 @@
     "hintDevilAdvocate": "قم بتعيين دور DEVIL_ADVOCATE لعضو واحد على الأقل. سيتحدى إجماع المجموعة.",
     "hintPeerReview": "يقوم كل عضو بنقد عمل كل عضو آخر بشكل فردي، ثم يراجع بناءً على الملاحظات المتلقاة.",
     "hintDelphi": "يستجيب جميع الأعضاء بشكل مستقل ومجهول. بعد كل جولة، يرون النتائج المجهولة ويمكنهم التعديل. الحد الأقصى للأدوار يتحكم في عدد التكرارات المجهولة.",
+    "hintNegotiation": "يعرض الأعضاء مصالحهم، ثم يقدّمون المقترحات ويتفاوضون — ويحدّد «الحد الأقصى للجولات» عدد جولات المساومة. ولا يتدخل المنسّق للتحكيم إلا إذا لم يتم التوصل إلى اتفاق.",
+    "roleCoverageWarning": "لا يحمل أي عضو الدور «{{role}}»",
+    "roleCoverageHint": "يلجأ الخادم إلى السماح لجميع الأعضاء بالتحدث في {{phases}}، فيدافع الأشخاص أنفسهم عن الجانبين. ارجع إلى «الأعضاء» واملأ حقل الدور.",
     "hintTaskForce": "ينشئ المشرف خطة مهام، ويوزع العمل على الوكلاء بشكل متوازٍ، ثم يتحقق من النتائج ويجمعها.",
     "hintCustom": "حدد مراحلك الخاصة يدوياً. يمكن تكوين المراحل المخصصة عبر واجهة API بعد الإنشاء.",
     "hintRoundTable": "يشارك جميع الأعضاء آراءهم، ثم يناقشون وجهات نظر بعضهم عبر جولات متعددة قبل أن يقوم المشرف بالتجميع.",
@@ -2951,27 +2990,29 @@
     "memberTypeHuman": "بشري"
   },
   "groupTemplates": {
-    "advisoryBoard": "Advisory Board",
-    "advisoryBoardDesc": "A panel of expert advisors consulting on strategic decisions.",
-    "codeReview": "Code Review Panel",
-    "codeReviewDesc": "Structured code review with independent opinions, peer critique, and revision.",
-    "riskAssessment": "Risk Assessment",
-    "riskAssessmentDesc": "A panel with a devil's advocate who challenges assumptions.",
-    "forecasting": "Forecasting Panel",
-    "forecastingDesc": "Delphi-style anonymous deliberation for unbiased estimates.",
-    "proCon": "Pro/Con Debate",
-    "proConDesc": "Formal debate with pro and con teams arguing their positions.",
-    "taskForce": "فريق العمل",
-    "taskForceDesc": "تنسيق المهام الموجه نحو الأهداف حيث يخطط الوكلاء وينفذون المهام بالتوازي ويتحققون من النتائج ويجمعون النتائج.",
+    "advisoryBoard": "مجلس استشاري",
+    "advisoryBoardDesc": "خمس وجهات نظر — التسويق والهندسة والمالية والقانون والاستراتيجية — تُبدي رأيها في السؤال نفسه، ثم يلخّص المنسّق.",
+    "peerReview": "لجنة مراجعة الأقران",
+    "peerReviewDesc": "يقيّم المراجعون ما تقدّمه — مسودة أو خطة أو مقترحًا — وينقدون تقييمات بعضهم ثم يُنقّحونها، ويجمع المنسّق النتيجة.",
+    "riskAssessment": "تقييم المخاطر",
+    "riskAssessmentDesc": "يعرض كل عضو قراءته، ويتبنّى أحدهم الموقف المعاكس لكشف النقاط العمياء، فيردّ الباقون، ثم يلخّص المنسّق ما صمد.",
+    "forecasting": "تقديرات مستقلة",
+    "forecastingDesc": "يجيب الأعضاء دون ذكر أسمائهم عبر عدة جولات ولا يرون بينها سوى نتائج مجهولة المصدر، فلا ينساق أحد خلف أول متحدث.",
+    "proCon": "مناظرة مع وضد",
+    "proConDesc": "عضوان يؤيدان المقترح وعضوان يعارضانه، تليها ردود ثم حكم المنسّق.",
+    "negotiation": "تفاوض",
+    "negotiationDesc": "يعرض طرفان مصالحهما ويقدّمان المقترحات ويتبادلان التنازلات جولة بعد جولة؛ ولا يتدخل المنسّق للتحكيم إلا إذا لم يتم التوصل إلى اتفاق.",
+    "taskForce": "فريق مهام",
+    "taskForceDesc": "يقسّم المنسّق الهدف إلى مهام، ينفّذها الأعضاء بالتوازي، ثم يتحقق منها ويجمع النتائج.",
     "roles": {
-      "marketingExpert": "Marketing Expert",
-      "techLead": "Tech Lead",
-      "financeDirector": "Finance Director",
-      "legalCounsel": "Legal Counsel",
-      "strategyConsultant": "Strategy Consultant",
-      "seniorEngineer": "Senior Engineer",
-      "architect": "Architect",
-      "securityReviewer": "Security Reviewer",
+      "marketingExpert": "خبير التسويق",
+      "techLead": "قائد تقني",
+      "financeDirector": "المدير المالي",
+      "legalCounsel": "المستشار القانوني",
+      "strategyConsultant": "استشاري الاستراتيجية",
+      "substanceReviewer": "مراجع المضمون",
+      "structureReviewer": "مراجع البنية",
+      "riskReviewer": "مراجع المخاطر",
       "riskAnalyst": "Risk Analyst",
       "domainExpert": "Domain Expert",
       "devilsAdvocate": "Devil's Advocate",
@@ -2983,6 +3024,8 @@
       "proAdvocate2": "Pro Advocate 2",
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2",
+      "partyA": "الطرف أ",
+      "partyB": "الطرف ب",
       "projectLead": "قائد المشروع",
       "researcher": "باحث",
       "implementer": "منفذ",

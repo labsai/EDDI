@@ -65,6 +65,101 @@ describe("wave-3 parity across group-discussion surfaces", () => {
     });
   }
 
+  // The structured OUTCOMES of the newer collaboration modes (task board,
+  // decision record) must render on every transcript surface, not only the
+  // Manager's — a debate whose verdict shows on one page out of three is a
+  // feature that "works" only where the demo happened to run.
+  const outcomeSurfaces: [label: string, file: string][] = [
+    ["Manager transcript", "components/groups/discussion-transcript.tsx"],
+    ["Workforce board", "pages/workforce/workforce-board.tsx"],
+    ["Workforce history viewer", "components/workforce/conversation-viewer.tsx"],
+  ];
+
+  for (const [label, file] of outcomeSurfaces) {
+    it(`${label} mounts the persisted task board`, () => {
+      expect(read(file)).toMatch(/<PersistedTaskBoard[\s>]/);
+    });
+  }
+
+  it("the board transcript and history viewer render the decision record", () => {
+    expect(read("components/workforce/board-transcript.tsx")).toMatch(/<DecisionRecordCard[\s>]/);
+    expect(read("components/workforce/conversation-viewer.tsx")).toMatch(/<DecisionRecordCard[\s>]/);
+    expect(read("components/groups/discussion-transcript.tsx")).toMatch(/<DecisionRecordCard[\s>]/);
+  });
+
+  it("the Workforce board passes live convergence state to its transcript", () => {
+    const board = read("pages/workforce/workforce-board.tsx");
+    expect(board).toMatch(/convergence=\{/);
+    const transcript = read("components/workforce/board-transcript.tsx");
+    expect(transcript).toContain("ConvergenceProgress");
+  });
+
+  // Editors that can produce a ROLE:-addressed phase with no member carrying
+  // the role must warn — on every surface that edits members or styles.
+  const roleWarningSurfaces: [label: string, file: string][] = [
+    ["Manager group wizard", "pages/group-wizard.tsx"],
+    ["Manager create dialog", "components/groups/create-group-dialog.tsx"],
+    ["Workforce settings", "pages/workforce/workforce-settings.tsx"],
+    ["Group config panel", "components/groups/group-config-panel.tsx"],
+  ];
+
+  for (const [label, file] of roleWarningSurfaces) {
+    it(`${label} checks role coverage`, () => {
+      expect(read(file)).toContain("uncoveredRolePhases");
+    });
+  }
+
+  it("every style picker offers what the backend supports, not a hardcoded list", () => {
+    for (const file of [
+      "pages/group-wizard.tsx",
+      "components/groups/create-group-dialog.tsx",
+      "pages/workforce/workforce-settings.tsx",
+    ]) {
+      expect(read(file)).toContain("useAvailableStyles");
+    }
+  });
+
+  it("NEGOTIATION is reachable from the template-driven Workforce wizard", () => {
+    const templates = read("lib/group-templates.ts");
+    expect(templates).toContain('"NEGOTIATION"');
+  });
+
+  // The styles endpoint returns an ARRAY of descriptors. Reading it as a map
+  // keyed by the enum type-checks, passes a map-shaped mock, and silently
+  // matches nothing against the real backend — so the whole capability check
+  // becomes dead code. Pin the array read.
+  it("reads the styles endpoint as an array of descriptors", () => {
+    const hook = read("hooks/use-groups.ts");
+    expect(hook).toContain("Array.isArray(data)");
+    expect(hook).toMatch(/entry\.style/);
+    expect(hook).not.toContain("Object.keys(data)");
+  });
+
+  // Creation paths provision agents BEFORE saving the group, so an unsupported
+  // style must block rather than fail after the fact. Editing an existing group
+  // is different and deliberately keeps its saved style.
+  const creationGates: [label: string, file: string][] = [
+    ["Manager group wizard", "pages/group-wizard.tsx"],
+    ["Manager create dialog", "components/groups/create-group-dialog.tsx"],
+  ];
+  for (const [label, file] of creationGates) {
+    it(`${label} blocks an unsupported style`, () => {
+      expect(read(file)).toContain("isStyleSupported");
+    });
+  }
+
+  it("every template gallery filters by backend-supported styles", () => {
+    for (const file of [
+      "components/workforce/wizard/template-picker.tsx",
+      "components/workforce/onboarding-hero.tsx",
+      "pages/workforce/workforce-wizard.tsx",
+      "pages/group-wizard.tsx",
+    ]) {
+      expect(read(file), `${file} offers templates the backend may not run`)
+        .toContain("useAvailableStyles");
+    }
+  });
+
   it("the Workforce board can answer a human turn without leaving the surface", () => {
     const source = read("pages/workforce/workforce-board.tsx");
     // Submitting your own turn is participation, not governance — unlike the

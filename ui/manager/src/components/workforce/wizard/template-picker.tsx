@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getGroupTemplates } from "@/lib/group-templates";
+import { useAvailableStyles } from "@/hooks/use-groups";
 
 interface TemplatePickerProps {
   selected: string | null; // template key or "custom"
@@ -10,7 +11,15 @@ interface TemplatePickerProps {
 
 function TemplatePicker({ selected, onSelect }: TemplatePickerProps) {
   const { t } = useTranslation();
-  const templates = getGroupTemplates(t);
+  // Hide templates whose style the running backend does not support. This
+  // wizard provisions every member agent BEFORE saving the group, so an
+  // unsupported template does not merely fail — it fails expensively, after
+  // real agents exist. While the styles request is in flight the hook returns
+  // the full static list, so nothing is hidden spuriously.
+  const availableStyles = useAvailableStyles();
+  const templates = getGroupTemplates(t).filter((tpl) =>
+    availableStyles.includes(tpl.style),
+  );
 
   return (
     <div role="group" aria-label={t("Workforce.wizard.templates", "Discussion templates")} className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

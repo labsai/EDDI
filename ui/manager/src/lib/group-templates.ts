@@ -45,16 +45,16 @@ export function getGroupTemplates(t: TFunction): GroupTemplate[] {
       moderatorSuggested: true,
     },
     {
-      key: "code-review",
-      name: t("groupTemplates.codeReview"),
-      description: t("groupTemplates.codeReviewDesc"),
+      key: "peer-review",
+      name: t("groupTemplates.peerReview"),
+      description: t("groupTemplates.peerReviewDesc"),
       icon: "🔍",
       style: "PEER_REVIEW",
       maxRounds: 1,
       roles: [
-        { displayName: t("groupTemplates.roles.seniorEngineer"), role: "Code Quality" },
-        { displayName: t("groupTemplates.roles.architect"), role: "Architecture" },
-        { displayName: t("groupTemplates.roles.securityReviewer"), role: "Security" },
+        { displayName: t("groupTemplates.roles.substanceReviewer"), role: "Substance" },
+        { displayName: t("groupTemplates.roles.structureReviewer"), role: "Structure" },
+        { displayName: t("groupTemplates.roles.riskReviewer"), role: "Risk" },
       ],
       moderatorSuggested: true,
     },
@@ -100,6 +100,23 @@ export function getGroupTemplates(t: TFunction): GroupTemplate[] {
         { displayName: t("groupTemplates.roles.conAdvocate1"), role: "CON" },
         { displayName: t("groupTemplates.roles.conAdvocate2"), role: "CON" },
       ],
+      moderatorSuggested: true,
+    },
+    {
+      key: "negotiation",
+      name: t("groupTemplates.negotiation"),
+      description: t("groupTemplates.negotiationDesc"),
+      icon: "🤝",
+      style: "NEGOTIATION",
+      // Drives Bargaining's `repeats` directly (unlike every other preset,
+      // where rounds add phases) — see DiscussionStylePresets.negotiation.
+      maxRounds: 3,
+      roles: [
+        { displayName: t("groupTemplates.roles.partyA"), role: "Party A" },
+        { displayName: t("groupTemplates.roles.partyB"), role: "Party B" },
+      ],
+      // The moderator is the arbiter — the Arbitration phase only runs when
+      // bargaining ends without an agreement.
       moderatorSuggested: true,
     },
     {

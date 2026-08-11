@@ -98,7 +98,7 @@ describe("CreateGroupDialog", () => {
     expect(nextBtn).toBeEnabled();
 
     // Select Discussion Style
-    const styleBtn = screen.getByText("Quality Review");
+    const styleBtn = screen.getByText("Peer Review");
     await user.click(styleBtn);
 
     // Transition to members
@@ -239,5 +239,37 @@ describe("CreateGroupDialog", () => {
     const backBtn = screen.getByRole("button", { name: /Back/i });
     await user.click(backBtn);
     expect(screen.getByText("Members")).toHaveClass("bg-primary");
+  });
+
+  it("warns on review when a DEBATE has no member carrying PRO/CON", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CreateGroupDialog open={true} onClose={mockOnClose} />);
+
+    await user.click(screen.getByTestId("template-blank"));
+    await user.type(screen.getByTestId("group-name-input"), "One-sided Debate");
+    await user.click(screen.getByText("Pro/Con Debate"));
+    await user.click(screen.getByRole("button", { name: /Next/i }));
+
+    // Two members, neither with a PRO/CON role.
+    await user.click(screen.getByRole("button", { name: /Add Member/i }));
+    await user.click(screen.getByRole("button", { name: /Add Member/i }));
+    const displayInputs = screen.getAllByPlaceholderText("Agent Name");
+    await user.type(displayInputs[0]!, "Alpha");
+    await user.type(displayInputs[1]!, "Beta");
+    await user.click(screen.getByRole("button", { name: /Next/i }));
+
+    // Review step: both sides of the debate are uncovered.
+    const warning = screen.getByTestId("dialog-role-coverage-warning");
+    expect(warning).toHaveTextContent('"PRO"');
+    expect(warning).toHaveTextContent('"CON"');
+    expect(warning).toHaveTextContent("Opening Arguments (Pro)");
+
+    // Covering the roles removes the warning.
+    await user.click(screen.getByRole("button", { name: /Back/i }));
+    const roleInputs = screen.getAllByPlaceholderText("Role (e.g. Marketing, Engineering)");
+    await user.type(roleInputs[0]!, "PRO");
+    await user.type(roleInputs[1]!, "CON");
+    await user.click(screen.getByRole("button", { name: /Next/i }));
+    expect(screen.queryByTestId("dialog-role-coverage-warning")).not.toBeInTheDocument();
   });
 });

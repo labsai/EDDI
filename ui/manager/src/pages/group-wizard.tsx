@@ -29,11 +29,11 @@ import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
-import { useCreateGroup } from "@/hooks/use-groups";
+import { useCreateGroup, useAvailableStyles, isStyleSupported } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { styleLabel, styleDisplay } from "@/lib/discussion-styles";
+import { uncoveredRolePhases } from "@/lib/group-config";
 import {
-  DISCUSSION_STYLES,
-  STYLE_INFO,
   type DiscussionStyle,
   type GroupMember,
   type AgentGroupConfiguration,
@@ -209,6 +209,9 @@ export function GroupWizardPage() {
   const [isBatchCreating, setIsBatchCreating] = useState(false);
 
   const createMutation = useCreateGroup();
+  // Gate progression on it here too: ConfigStep only renders the warning, and
+  // this wizard provisions agents before saving.
+  const availableStyles = useAvailableStyles();
 
   const isCreating = createMutation.isPending || isBatchCreating;
   const step = STEPS[currentStep];
@@ -237,7 +240,11 @@ export function GroupWizardPage() {
       case "template":
         return true;
       case "config":
-        return state.name.trim().length > 0 && isHitlConfigValid(state);
+        return (
+          state.name.trim().length > 0 &&
+          isHitlConfigValid(state) &&
+          isStyleSupported(state.style, availableStyles)
+        );
       case "members": {
         if (state.members.length < 2) return false;
         // Every member must have a displayName, plus an identity appropriate to
@@ -424,7 +431,7 @@ export function GroupWizardPage() {
             {t("groupWizard.created")}
           </h2>
           <p className="mt-2 text-muted-foreground">
-            {state.name} — {state.members.length} {t("groups.members")} · {STYLE_INFO[state.style]?.label}
+            {state.name} — {state.members.length} {t("groups.members")} · {styleLabel(state.style, t)}
           </p>
 
           <div className="mt-6 flex items-center justify-center gap-3">
@@ -589,6 +596,12 @@ function TemplateStep({
   onSkip: () => void;
 }) {
   const { t } = useTranslation();
+  // Only templates whose style the backend supports — picking one the server
+  // cannot run would fail at save, after every member agent was provisioned.
+  const availableStyles = useAvailableStyles();
+  const templates = getGroupTemplates(t).filter((tpl) =>
+    availableStyles.includes(tpl.style),
+  );
 
   return (
     <div>
@@ -600,8 +613,8 @@ function TemplateStep({
       </p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2" data-testid="template-grid">
-        {getGroupTemplates(t).map((tmpl) => {
-          const styleInfo = STYLE_INFO[tmpl.style];
+        {templates.map((tmpl) => {
+          const styleInfo = styleDisplay(tmpl.style, t);
           return (
             <button
               key={tmpl.key}
@@ -674,6 +687,12 @@ function ConfigStep({
   onChange: (patch: Partial<WizardState>) => void;
 }) {
   const { t } = useTranslation();
+  // What the backend actually supports. This wizard PROVISIONS AGENTS before it
+  // saves the group, so letting an unsupported style through would burn real
+  // agent creations on a save that then 400s — it is flagged and blocks Next
+  // instead of being carried along.
+  const availableStyles = useAvailableStyles();
+  const styleSupported = isStyleSupported(state.style, availableStyles);
 
   return (
     <div>
@@ -724,9 +743,9 @@ function ConfigStep({
             {t("groups.discussionStyle", "Discussion Style")}
           </label>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {DISCUSSION_STYLES.filter((s) => s !== "CUSTOM").map((s) => {
-              const info = STYLE_INFO[s];
-              const colors = STYLE_COLORS[s];
+            {availableStyles.filter((s) => s !== "CUSTOM").map((s) => {
+              const info = styleDisplay(s, t);
+              const colors = STYLE_COLORS[s] ?? STYLE_COLORS.CUSTOM;
               const selected = state.style === s;
               return (
                 <button
@@ -757,6 +776,24 @@ function ConfigStep({
             })}
           </div>
         </div>
+
+        {/* A template can preselect a style the running backend does not have —
+            say so before any agent is provisioned for it. */}
+        {!styleSupported && (
+          <div
+            className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3"
+            data-testid="gw-unsupported-style"
+          >
+            <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "groups.unsupportedStyle",
+                "This server does not support {{style}}. Pick another framework to continue.",
+                { style: styleDisplay(state.style, t).label },
+              )}
+            </p>
+          </div>
+        )}
 
         {/* Max Rounds */}
         <div>
@@ -1761,8 +1798,9 @@ function ReviewStep({
   state: WizardState;
 }) {
   const { t } = useTranslation();
-  const styleInfo = STYLE_INFO[state.style];
-  const colors = STYLE_COLORS[state.style];
+  const styleInfo = styleDisplay(state.style, t);
+  // `?? CUSTOM`: pickers may offer a backend-only style with no color entry.
+  const colors = STYLE_COLORS[state.style] ?? STYLE_COLORS.CUSTOM;
 
   const willCreateCount = state.members.filter(needsAgentCreation).length
     + (state.moderator && needsAgentCreation(state.moderator) ? 1 : 0);
@@ -1773,6 +1811,16 @@ function ReviewStep({
     (m) => m.memberType === "AGENT" && m.mode === "existing" && !m.agentId,
   ).length;
   const newCount = state.members.filter((m) => m.created).length;
+
+  // A DEBATE with nobody on CON, a DEVIL_ADVOCATE group with no advocate: the
+  // phases addressed to that role would run with zero speakers, and nothing
+  // downstream ever says so. Warn here, at the last screen before Create.
+  const roleGaps = uncoveredRolePhases({
+    members: state.members,
+    phases: null,
+    style: state.style,
+    maxRounds: state.maxRounds,
+  });
 
   return (
     <div>
@@ -1843,6 +1891,36 @@ function ReviewStep({
                 {t("groupWizard.unassignedHint")}
               </p>
             </div>
+          </div>
+        )}
+
+        {/* Role coverage warning — a ROLE:<x> phase with no member carrying <x> */}
+        {roleGaps.length > 0 && (
+          <div
+            className="flex flex-col gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3"
+            data-testid="wizard-role-coverage-warning"
+          >
+            {roleGaps.map((gap) => (
+              <div key={gap.role} className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                    {t(
+                      "groupWizard.roleCoverageWarning",
+                      'No member has the role "{{role}}"',
+                      { role: gap.role },
+                    )}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {t(
+                      "groupWizard.roleCoverageHint",
+                      "The server falls back to letting every member speak in {{phases}}, so both sides get argued by the same people. Go back to Members and set the role field.",
+                      { phases: gap.phaseNames.join(", ") },
+                    )}
+                  </p>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 

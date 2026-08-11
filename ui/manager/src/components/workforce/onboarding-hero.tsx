@@ -15,7 +15,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { getGroupTemplates, type GroupTemplate } from "@/lib/group-templates";
-import { STYLE_INFO } from "@/lib/api/groups";
+import { useAvailableStyles } from "@/hooks/use-groups";
+import { styleInfo as localizedStyleInfo } from "@/lib/discussion-styles";
 
 // ─── How It Works Step ───────────────────────────────────────────
 
@@ -92,7 +93,7 @@ function TemplateCard({
   hasAgents: boolean;
 }) {
   const { t } = useTranslation();
-  const styleInfo = STYLE_INFO[template.style];
+  const styleInfo = localizedStyleInfo(template.style, t);
 
   return (
     <Link
@@ -243,7 +244,13 @@ function OnboardingHero() {
   );
   // Treat loading as "has agents" to avoid flashing the deploy banner
   const hasAgents = agentsLoading || agents.length > 0;
-  const templates = useMemo(() => getGroupTemplates(t), [t]);
+  // Same filter as the wizard's picker: a template whose style the backend does
+  // not support would provision agents and then fail at group save.
+  const availableStyles = useAvailableStyles();
+  const templates = useMemo(
+    () => getGroupTemplates(t).filter((tpl) => availableStyles.includes(tpl.style)),
+    [t, availableStyles],
+  );
 
   return (
     <div className="p-5 md:p-8 max-w-5xl ms-auto me-auto space-y-10">

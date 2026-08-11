@@ -1,5 +1,4 @@
-import type { GroupConversationState, DiscussionStyle } from "@/lib/api/groups";
-import { STYLE_INFO } from "@/lib/api/groups";
+import type { GroupConversationState } from "@/lib/api/groups";
 
 // ─── Filter types ────────────────────────────────────────────────
 
@@ -53,6 +52,8 @@ export function stateLabel(
   return t ? t(stateLabelKey(s), fallback) : fallback;
 }
 
-export function styleLabel(s: DiscussionStyle): string {
-  return STYLE_INFO[s]?.label ?? s;
-}
+/**
+ * Localized name for a discussion style. Re-exported so the analytics
+ * filters and every other surface resolve the same key.
+ */
+export { styleLabel } from "@/lib/discussion-styles";

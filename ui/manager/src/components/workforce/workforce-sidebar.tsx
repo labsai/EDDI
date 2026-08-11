@@ -17,7 +17,8 @@ import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
 import { useStreamingGroupIds } from "@/hooks/use-group-discussion-stream";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { useTheme } from "@/components/layout/theme-provider";
-import { STYLE_INFO, type DiscussionStyle } from "@/lib/api/groups";
+import { type DiscussionStyle } from "@/lib/api/groups";
+import { styleDisplay } from "@/lib/discussion-styles";
 import { getInitials } from "@/lib/utils";
 import { ModeSwitcher } from "@/components/shared/mode-switcher";
 
@@ -201,7 +202,7 @@ export function WorkforceSidebar({
             const isActive = board.id === boardId;
             const isLive = streamingBoardIds.includes(board.id);
             const styleKey = (board.style ?? "ROUND_TABLE") as DiscussionStyle;
-            const style = STYLE_INFO[styleKey] ?? STYLE_INFO.ROUND_TABLE;
+            const style = styleDisplay(styleKey, t);
 
             return (
               <li key={board.id}>

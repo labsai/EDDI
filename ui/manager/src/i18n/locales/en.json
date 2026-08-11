@@ -2422,6 +2422,7 @@
     "agentFiledCaps": "Caps",
     "agentFiledCapsValue": "{{perDiscussion}} / discussion · {{perTurn}} / turn",
     "moderatorlessWarning": "Restricted to a moderator this group does not have: {{phases}}. The first member by speaking order will stand in.",
+    "roleCoverageWarning": "No member carries the role \"{{role}}\" — every member will speak in {{phases}} instead.",
     "delegationDepth": "Max Depth",
     "delegationTimeout": "Delegate Timeout",
     "secondsShort": "{{seconds}}s",
@@ -2572,7 +2573,42 @@
     "retroRecordedBadge_one": "{{phase}}: {{count}} lesson saved to team memory",
     "retroRecordedBadge_other": "{{phase}}: {{count}} lessons saved to team memory",
     "artifactRevisions_one": "{{count}} prior revision",
-    "artifactRevisions_other": "{{count}} prior revisions"
+    "artifactRevisions_other": "{{count}} prior revisions",
+    "styles": {
+      "ROUND_TABLE": {
+        "label": "Round Table",
+        "flow": "Everyone gives their view, then builds on the others over several rounds"
+      },
+      "PEER_REVIEW": {
+        "label": "Peer Review",
+        "flow": "Members answer on their own, critique each other, then revise"
+      },
+      "DEVIL_ADVOCATE": {
+        "label": "Devil's Advocate",
+        "flow": "One member attacks the group's position, the rest defend it"
+      },
+      "DELPHI": {
+        "label": "Anonymous Rounds",
+        "flow": "Members answer anonymously and revise each round, so nobody anchors on the first speaker"
+      },
+      "DEBATE": {
+        "label": "Pro/Con Debate",
+        "flow": "One side argues for, one against, then rebuttals and a verdict"
+      },
+      "TASK_FORCE": {
+        "label": "Task Force",
+        "flow": "The moderator plans the work, members run tasks in parallel, results get verified"
+      },
+      "NEGOTIATION": {
+        "label": "Negotiation",
+        "flow": "Parties trade proposals until they agree; an arbiter steps in only if they do not"
+      },
+      "CUSTOM": {
+        "label": "Custom Flow",
+        "flow": "Phases you define yourself"
+      }
+    },
+    "unsupportedStyle": "This server does not support {{style}}. Pick another framework to continue."
   },
   "taskBoard": {
     "title": "Task Board",
@@ -2672,6 +2708,9 @@
     "hintDevilAdvocate": "Assign the role DEVIL_ADVOCATE to at least one member. They will challenge the group's consensus.",
     "hintPeerReview": "Each member individually critiques every other member's work, then revises based on feedback received.",
     "hintDelphi": "All members respond independently and anonymously. After each round, they see anonymous results and can adjust. Max Rounds controls the number of anonymous iterations.",
+    "hintNegotiation": "Members state their interests, table proposals, then bargain — Max Rounds sets how many bargaining rounds run. The moderator arbitrates only if no agreement is reached.",
+    "roleCoverageWarning": "No member has the role \"{{role}}\"",
+    "roleCoverageHint": "The server falls back to letting every member speak in {{phases}}, so both sides get argued by the same people. Go back to Members and set the role field.",
     "hintTaskForce": "The moderator creates a task plan, assigns work to agents in parallel, then verifies and synthesizes the results.",
     "hintCustom": "Define your own phases manually. Custom phases can be configured via the API after creation.",
     "hintRoundTable": "All members share their opinions, then discuss each other's views across multiple rounds before the moderator synthesizes.",
@@ -2705,26 +2744,28 @@
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
-    "advisoryBoardDesc": "A panel of expert advisors consulting on strategic decisions. Each agent represents a different business function.",
-    "codeReview": "Code Review Panel",
-    "codeReviewDesc": "Structured code review with independent opinions, peer critique, revision, and a synthesized assessment.",
+    "advisoryBoardDesc": "Five business perspectives — marketing, engineering, finance, legal, strategy — weigh in on the same question, then the moderator sums up.",
+    "peerReview": "Peer Review Panel",
+    "peerReviewDesc": "Reviewers assess whatever you bring — a draft, a plan, a proposal — critique each other's assessment, revise, and the moderator merges the result.",
     "riskAssessment": "Risk Assessment",
-    "riskAssessmentDesc": "Panel with a devil's advocate who challenges assumptions and identifies blind spots.",
-    "forecasting": "Forecasting Panel",
-    "forecastingDesc": "Delphi-style anonymous deliberation for reducing groupthink and getting unbiased estimates.",
+    "riskAssessmentDesc": "Everyone gives their read, one member argues the opposite to expose blind spots, the others defend, then the moderator sums up what held.",
+    "forecasting": "Independent Estimates",
+    "forecastingDesc": "Members answer anonymously over several rounds and see only anonymized results in between, so no one anchors on whoever spoke first.",
     "proCon": "Pro/Con Debate",
-    "proConDesc": "Formal debate with pro and con teams arguing their positions, followed by rebuttals and a verdict.",
+    "proConDesc": "Two members argue for the proposal and two against, followed by rebuttals and the moderator's verdict.",
+    "negotiation": "Negotiation",
+    "negotiationDesc": "Two parties state their interests, table proposals and trade concessions round by round; the moderator arbitrates only if no deal is reached.",
     "taskForce": "Task Force",
-    "taskForceDesc": "Goal-oriented task orchestration where agents plan, execute tasks in parallel, verify results, and synthesize findings.",
+    "taskForceDesc": "The moderator splits the goal into tasks, members work them in parallel, and the moderator verifies and combines the results.",
     "roles": {
       "marketingExpert": "Marketing Expert",
       "techLead": "Tech Lead",
       "financeDirector": "Finance Director",
       "legalCounsel": "Legal Counsel",
       "strategyConsultant": "Strategy Consultant",
-      "seniorEngineer": "Senior Engineer",
-      "architect": "Architect",
-      "securityReviewer": "Security Reviewer",
+      "substanceReviewer": "Substance Reviewer",
+      "structureReviewer": "Structure Reviewer",
+      "riskReviewer": "Risk Reviewer",
       "riskAnalyst": "Risk Analyst",
       "domainExpert": "Domain Expert",
       "devilsAdvocate": "Devil's Advocate",
@@ -2736,6 +2777,8 @@
       "proAdvocate2": "Pro Advocate 2",
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2",
+      "partyA": "Party A",
+      "partyB": "Party B",
       "projectLead": "Project Lead",
       "researcher": "Researcher",
       "implementer": "Implementer",

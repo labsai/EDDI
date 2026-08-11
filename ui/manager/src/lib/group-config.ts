@@ -5,6 +5,7 @@ import {
   DEFAULT_DELEGATION_TIMEOUT_SECONDS,
   type AgentGroupConfiguration,
   type ConvergenceConfig,
+  type DiscussionStyle,
   type DecisionRecord,
   type DiscussionPhase,
   type GroupTaskConfig,
@@ -46,6 +47,62 @@ export function moderatorlessPhaseNames(
   return phases
     .filter((p) => p && p.participants?.toUpperCase() === "MODERATOR")
     .map((p) => p.name);
+}
+
+/** One role no member carries, with every phase that is restricted to it. */
+export interface RoleCoverageGap {
+  role: string;
+  phaseNames: string[];
+}
+
+/**
+ * Phases restricted to a `ROLE:<name>` that no member actually carries.
+ *
+ * DEBATE addresses `ROLE:PRO`/`ROLE:CON` and DEVIL_ADVOCATE addresses
+ * `ROLE:DEVIL_ADVOCATE`; custom phases can address any role. When no member
+ * carries the role, `GroupConversationService.resolveParticipants` logs a
+ * warning and falls back to ALL members — so the phase is not skipped, it is
+ * answered by everyone. A debate with no CON role therefore has the PRO members
+ * arguing the CON side too, and the judge rules on that. Nothing validated this
+ * before: both wizards let a debate be created with every member role blank.
+ *
+ * Same expansion rule as {@link moderatorlessPhaseNames}: a preset-style group
+ * stores NO phases, so the check must expand the preset or it is inert for
+ * exactly the configs that need it.
+ *
+ * Matching is trimmed and case-insensitive — kinder than exact matching, and a
+ * member whose role differs only by case is far more likely a typo we should
+ * not punish with a false alarm.
+ */
+export function uncoveredRolePhases(config: {
+  /** Only `role` is read — wizard member slots qualify without a full GroupMember. */
+  members?: ReadonlyArray<{ role?: string | null }> | null;
+  phases?: DiscussionPhase[] | null;
+  style?: DiscussionStyle | null;
+  maxRounds?: number | null;
+}): RoleCoverageGap[] {
+  const phases: DiscussionPhase[] =
+    config.phases && config.phases.length > 0
+      ? config.phases
+      : getStylePhases(config.style ?? "ROUND_TABLE", config.maxRounds ?? 2);
+
+  const memberRoles = new Set(
+    (config.members ?? [])
+      .map((m) => m.role?.trim().toUpperCase())
+      .filter((r): r is string => !!r),
+  );
+
+  const gaps = new Map<string, RoleCoverageGap>();
+  for (const phase of phases) {
+    const participants = phase?.participants?.trim() ?? "";
+    if (!participants.toUpperCase().startsWith("ROLE:")) continue;
+    const role = participants.slice("ROLE:".length).trim();
+    if (!role || memberRoles.has(role.toUpperCase())) continue;
+    const gap = gaps.get(role.toUpperCase()) ?? { role, phaseNames: [] };
+    gap.phaseNames.push(phase.name);
+    gaps.set(role.toUpperCase(), gap);
+  }
+  return [...gaps.values()];
 }
 
 /**
