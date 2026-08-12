@@ -22,8 +22,8 @@ persisted and re-seeded them — reintroducing the exact duplicate the fix exist
 a narrower door. The drain and the publish now happen under the same read lock submitters take, so
 eviction cannot observe the intermediate state. No I/O is inside the lock.
 
-**Every fix in this branch now has a mutation-checked regression test.** Not merely "a test that
-passes" — in each case the fix was reverted and the test was confirmed to fail, with the message it
+**Every fix whose failure mode a test can express is mutation-checked.** Not merely "a test that
+passes" — in each case the fix was reverted and the test confirmed to fail, with the message it
 would print to whoever broke it:
 
 | Fix | Test | Reverting the fix produces |
@@ -38,7 +38,23 @@ would print to whoever broke it:
 | ToC drift | `everyDocIsListedInSummary` | names the unreachable page |
 | Inline FQNs | `noInlineFullyQualifiedNames` | names file, line and the offending name |
 
-Two of these deserve note as *class-of-bug* guards rather than single-defect regressions.
+The rest are covered differently, and it is worth being exact about how rather than letting the
+sentence above imply more than it should:
+
+- **`SafeHttpClient`'s timeout backstop** has five direct unit cases (`SafeHttpClientTimeoutTest`)
+  covering the bound, the caller's own timeout winning, and the rebuild preserving method, headers
+  and body. They are not mutation-checked in the same sense — the defect was an *absent* bound, so
+  reverting it is what the "unbounded request is bounded" case already asserts.
+- **`ConversationStepRunner`'s registration move** has no dedicated test on purpose: only an
+  `Error` can reach the window, since the intervening call swallows `Exception`. A test would have
+  to inject a `StackOverflowError` to prove a hardening change, which pins the mechanism rather than
+  the behaviour.
+- **`ThreadLocalRandom`** is behaviour-preserving; the existing selection tests cover it.
+- **The installer CI and the rescued dashboard** are verified by the pipeline itself — `shell-lint`
+  runs against `install.sh` and passes, and the compose mount is exercised by the monitoring stack
+  rather than by a unit test.
+
+Two of the tests above deserve note as *class-of-bug* guards rather than single-defect regressions.
 
 `DocumentationLinksTest` walks every markdown file in the repository and resolves every relative
 link. Link rot is invisible to every other check in this build — markdown compiles to nothing, so a

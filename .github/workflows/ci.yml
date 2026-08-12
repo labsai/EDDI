@@ -124,21 +124,31 @@ jobs:
         shell: pwsh
         run: |
           # Parse-only: never dot-source or run the installer in CI.
+          # Covers scripts/ too — preflight-local.ps1 is a contributor-facing
+          # script and was as unchecked as the installers were.
           $ErrorActionPreference = 'Stop'
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path ./install.ps1), [ref]$null, [ref]$errors) | Out-Null
-          if ($errors) {
-            $errors | ForEach-Object { Write-Host "::error file=install.ps1,line=$($_.Extent.StartLineNumber)::$($_.Message)" }
-            exit 1
-          }
-          Write-Host "install.ps1 parses cleanly"
+          $failed = $false
+          Get-ChildItem -Path ./install.ps1, ./scripts -Filter *.ps1 -Recurse -ErrorAction SilentlyContinue |
+            ForEach-Object {
+              $errors = $null
+              [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
+              if ($errors) {
+                $failed = $true
+                $name = Resolve-Path -Relative $_.FullName
+                $errors | ForEach-Object { Write-Host "::error file=$name,line=$($_.Extent.StartLineNumber)::$($_.Message)" }
+              } else {
+                Write-Host "$($_.Name) parses cleanly"
+              }
+            }
+          if ($failed) { exit 1 }
 
       - name: PSScriptAnalyzer
         shell: pwsh
         run: |
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
-          $found = Invoke-ScriptAnalyzer -Path ./install.ps1 -Severity Error,Warning
+          $targets = @('./install.ps1')
+          if (Test-Path ./scripts) { $targets += './scripts' }
+          $found = Invoke-ScriptAnalyzer -Path $targets -Recurse -Severity Error,Warning
           $found | Format-Table -AutoSize | Out-String | Write-Host
           if ($found | Where-Object { $_.Severity -eq 'Error' }) { exit 1 }
 

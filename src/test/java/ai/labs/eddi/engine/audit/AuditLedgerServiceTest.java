@@ -232,6 +232,46 @@ class AuditLedgerServiceTest {
                 "the counter must have survived an eviction that ran while its entry was in the flush batch");
     }
 
+    /**
+     * When every tracked conversation is genuinely live, a scan evicts nothing —
+     * and without a barrier the next submit for an unseen conversation would take
+     * the write lock and traverse the whole queue (bounded at 100k) to reach the
+     * same conclusion, with every other submitter blocked behind it on the read
+     * lock. Only a flush can change the answer, so only a flush lifts the barrier.
+     */
+    @Test
+    @DisplayName("sequence eviction — a futile scan is not repeated until a flush could change the answer")
+    void futileEvictionScanIsNotRepeatedUntilFlush() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation(anyString())).thenReturn(0L);
+        service = createService(true, null);
+
+        // Fill the table with conversations that are all still queued, so nothing
+        // is evictable.
+        for (int i = 0; i < AuditLedgerService.MAX_TRACKED_CONVERSATIONS + 5; i++) {
+            service.submit(entry("fill-" + i, "filler-" + i, "agent1"));
+        }
+        int trackedAfterFill = service.getTrackedConversationCount();
+
+        // Further unseen conversations must not each re-scan; they degrade to
+        // UNSEQUENCED, which is the honest verdict rather than a duplicate.
+        for (int i = 0; i < 50; i++) {
+            service.submit(entry("late-" + i, "late-conv-" + i, "agent1"));
+        }
+        assertEquals(trackedAfterFill, service.getTrackedConversationCount(),
+                "a barred scan must not grow the table either");
+        assertEquals(1, service.getFutileEvictionScans(),
+                "the scan should have run once and then been barred, not once per submit");
+
+        // A flush moves entries out of the queue, so the next scan is worthwhile
+        // again — and this time it can actually evict.
+        service.flush();
+        service.submit(entry("after-1", "after-flush", "agent1"));
+
+        assertTrue(service.getTrackedConversationCount() < trackedAfterFill,
+                "once the queue drained, the barrier must lift and eviction reclaim the table");
+    }
+
     @Test
     @DisplayName("flush — does nothing when queue is empty")
     void flushEmptyQueue() {

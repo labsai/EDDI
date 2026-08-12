@@ -555,7 +555,13 @@ function Get-ComposeFiles {
                     Write-Information -MessageData "✅"
                 }
                 catch {
-                    Write-Warn "Failed to download $mf (monitoring may not work)"
+                    # Bind-mounted as a FILE by docker-compose.monitoring.yml, so a
+                    # missing one is worse than it sounds: Docker creates a
+                    # *directory* at the mount path and Grafana then fails to
+                    # provision, including the dashboards that did download. Same
+                    # reasoning as the Keycloak realm below.
+                    if (Test-Path $mfTarget) { Remove-Item -Path $mfTarget -Force }
+                    Write-Fail "Failed to download $mf (required for -WithMonitoring).`n     URL: $mfUrl"
                 }
             }
         }

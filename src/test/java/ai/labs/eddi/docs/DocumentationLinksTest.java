@@ -197,7 +197,14 @@ class DocumentationLinksTest {
                 Path resolved = decoded.startsWith("/")
                         ? root.resolve(decoded.substring(1)).normalize()
                         : file.getParent().resolve(decoded).normalize();
-                if (!Files.exists(resolved)) {
+                if (!resolved.startsWith(root)) {
+                    // normalize() collapses '..' but does not confine the result to
+                    // the repository. `../../thing.md` can land on a real file
+                    // outside the checkout and quietly pass — which is the very
+                    // mistake that put 32 planning/ links outside the repo.
+                    broken.add(root.relativize(file) + "  ->  " + target
+                            + "  (escapes the repository root)");
+                } else if (!Files.exists(resolved)) {
                     broken.add(root.relativize(file) + "  ->  " + target);
                 } else {
                     String actualCasing = mismatchedCasing(resolved);
@@ -226,15 +233,20 @@ class DocumentationLinksTest {
         String summary = Files.readString(docs.resolve("SUMMARY.md"), StandardCharsets.UTF_8);
 
         Set<String> missing = new TreeSet<>();
-        try (Stream<Path> paths = Files.list(docs)) {
-            for (Path p : paths.filter(Files::isRegularFile).toList()) {
-                String name = p.getFileName().toString();
-                if (!name.endsWith(".md") || name.equals("SUMMARY.md") || name.equals("README.md")) {
-                    continue; // the index itself, and the folder's own landing page
-                }
-                if (!summary.contains("(" + name + ")") && !summary.contains("/" + name + ")")) {
-                    missing.add(name);
-                }
+        // Recursive, not Files.list: the tutorials live in
+        // docs/creating-your-first-agent/
+        // and docs/monitoring/, so a direct-children listing would let a nested
+        // page go unlisted — exactly the pages a newcomer needs to find.
+        for (Path p : markdownFiles(docs)) {
+            String name = p.getFileName().toString();
+            if (name.equals("SUMMARY.md") || name.equals("README.md")) {
+                continue; // the index itself, and each folder's own landing page
+            }
+            String relative = docs.relativize(p).toString().replace('\\', '/');
+            // SUMMARY.md links either by bare name or by path, depending on depth.
+            if (!summary.contains("(" + relative + ")") && !summary.contains("(" + name + ")")
+                    && !summary.contains("/" + name + ")")) {
+                missing.add(relative);
             }
         }
 

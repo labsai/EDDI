@@ -166,8 +166,9 @@ By the way you can use the attached **postman collection** below to do all of th
 > **Run it yourself.** The GitBook-hosted Postman collections that used to be linked here
 > were lost in the migration. You do not need them: every request is shown inline above,
 > and Postman can import EDDI's own spec directly — **Import → Link →**
-> `http://localhost:7070/openapi`, which is generated from the running build and so is
-> never out of date. The same spec is browsable at `/q/swagger-ui`.
+> `<your-eddi-host>/openapi` (`http://localhost:7070/openapi` for a local install).
+> It is generated from the running build, so unlike a committed collection it cannot go
+> out of date. The same spec is browsable at `<your-eddi-host>/q/swagger-ui`.
 
 ### External Links
 

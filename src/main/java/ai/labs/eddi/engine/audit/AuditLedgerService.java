@@ -122,6 +122,21 @@ public class AuditLedgerService {
      * store, so eviction has to treat their conversations as live.
      */
     private volatile List<AuditEntry> inFlightBatch = List.of();
+    /**
+     * Bumped once per completed {@link #flush()}. The only event that can change
+     * whether a counter is evictable, so it is what
+     * {@link #evictSequenceCountersIfFull} uses to decide a rescan is worthwhile.
+     */
+    private final AtomicLong flushGeneration = new AtomicLong();
+    /**
+     * The {@link #flushGeneration} at which an eviction scan last found nothing to
+     * evict. Equal values mean "already tried, nothing has moved since".
+     */
+    private final AtomicLong evictionBarrier = new AtomicLong(-1L);
+    /**
+     * Counts scans that evicted nothing — see {@link #getFutileEvictionScans()}.
+     */
+    private final AtomicLong futileEvictionScans = new AtomicLong();
     private ScheduledExecutorService flushExecutor;
 
     @Inject
@@ -354,11 +369,23 @@ public class AuditLedgerService {
             return;
         }
 
+        // A scan that evicted nothing will evict nothing again until a flush has
+        // moved entries out of the queue. Without this guard, a table full of
+        // genuinely live conversations makes EVERY submit for an unseen
+        // conversation take the write lock and traverse the whole queue (bounded
+        // at maxQueueSize, 100_000 by default) to reach the same conclusion —
+        // and because submitters hold the read lock, they all queue behind it.
+        // The barrier turns a per-submit scan into at most one per flush cycle.
+        if (evictionBarrier.get() == flushGeneration.get()) {
+            return;
+        }
+
         sequenceLock.writeLock().lock();
         try {
             if (conversationSequences.size() < MAX_TRACKED_CONVERSATIONS) {
                 return;
             }
+            long generation = flushGeneration.get();
 
             Set<String> retain = new HashSet<>(undelivered.keySet());
             collectConversationIds(queue, retain);
@@ -371,6 +398,15 @@ public class AuditLedgerService {
             if (evicted > 0) {
                 LOGGER.infov("Audit sequence table hit {0} conversations — evicted {1} fully-persisted counters; "
                         + "{2} retained as in flight", MAX_TRACKED_CONVERSATIONS, evicted, conversationSequences.size());
+            } else {
+                // Read AFTER the scan: a flush that completed while we scanned
+                // must not be recorded as already-accounted-for, or the next
+                // genuinely useful scan would be skipped.
+                evictionBarrier.set(generation);
+                futileEvictionScans.incrementAndGet();
+                LOGGER.warnv("Audit sequence table is full ({0}) and every counter is in flight; not rescanning "
+                        + "until the next flush. New conversations are recorded unsequenced meanwhile.",
+                        MAX_TRACKED_CONVERSATIONS);
             }
         } finally {
             sequenceLock.writeLock().unlock();
@@ -486,6 +522,9 @@ public class AuditLedgerService {
                 // Every outcome has put these positions somewhere eviction can see
                 // again: persisted, re-queued, or recorded in `undelivered`.
                 inFlightBatch = List.of();
+                // Entries have moved, so a previously futile eviction scan may now
+                // find something. Bump last, once the move is visible.
+                flushGeneration.incrementAndGet();
             }
         }
     }
@@ -604,6 +643,20 @@ public class AuditLedgerService {
 
     int getQueueSize() {
         return queueSize.get();
+    }
+
+    /** Conversations currently holding a sequence counter. */
+    int getTrackedConversationCount() {
+        return conversationSequences.size();
+    }
+
+    /**
+     * How many eviction scans found nothing to evict. The barrier exists so this
+     * stays near-constant under a full table of live conversations rather than
+     * growing once per submit, which is what the test asserts.
+     */
+    long getFutileEvictionScans() {
+        return futileEvictionScans.get();
     }
 
     byte[] getHmacKey() {

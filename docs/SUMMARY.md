@@ -65,6 +65,7 @@
 - [Audit Ledger](audit-ledger.md)
 - [GDPR / CCPA Compliance](gdpr-compliance.md)
 - [HIPAA Compliance](hipaa-compliance.md)
+- [Business Associate Agreement (BAA) Template](templates/baa-template.md)
 - [EU AI Act Compliance](eu-ai-act-compliance.md)
 - [Compliance Data Flow](compliance-data-flow.md)
 - [Incident Response Plan](incident-response.md)
