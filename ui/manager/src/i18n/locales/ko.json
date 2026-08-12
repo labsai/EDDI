@@ -3205,6 +3205,7 @@
     "restrictionTitle": "처리 제한 (Art. 18)",
     "resultsTitle": "삭제 완료",
     "statusActive": "처리 활성",
+    "statusUnknown": "상태를 확인할 수 없음",
     "statusRestricted": "처리 제한됨",
     "subtitle": "GDPR 준수 사용자 데이터 관리 — 삭제(Art. 17), 이동성(Art. 15/20), 처리 제한(Art. 18)",
     "title": "개인정보 보호 및 규정 준수",
@@ -3434,7 +3435,9 @@
       "openStudio": "매니저에서 열기",
       "triggers": "트리거 보기",
       "starterSelected": "프롬프트가 입력창에 추가되었습니다",
-      "title": "채팅"
+      "title": "채팅",
+      "hideAgentDetails": "에이전트 세부 정보 숨기기",
+      "showAgentDetails": "에이전트 세부 정보 표시"
     },
     "agentEditor": {
       "capabilities": "역량",

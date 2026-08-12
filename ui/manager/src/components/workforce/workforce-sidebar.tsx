@@ -21,6 +21,9 @@ import { type DiscussionStyle } from "@/lib/api/groups";
 import { styleDisplay } from "@/lib/discussion-styles";
 import { getInitials } from "@/lib/utils";
 import { ModeSwitcher } from "@/components/shared/mode-switcher";
+// See the note in layout/sidebar.tsx — the wordmark is imported so Vite inlines
+// it, which also keeps the design-system bundle from shipping a broken image.
+import logoEddi from "@/assets/logo_eddi.png";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -75,7 +78,7 @@ export function WorkforceSidebar({
         {!collapsed && (
           <Link to="/workforce" className="flex flex-1 items-center gap-2 truncate">
             <img
-              src="/logo_eddi.png"
+              src={logoEddi}
               alt="EDDI"
               className="h-6 w-auto"
             />

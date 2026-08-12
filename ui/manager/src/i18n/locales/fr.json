@@ -3231,6 +3231,7 @@
     "restrictionTitle": "Restriction de traitement (Art. 18)",
     "resultsTitle": "Effacement terminé",
     "statusActive": "Traitement actif",
+    "statusUnknown": "Statut indisponible",
     "statusRestricted": "Traitement restreint",
     "subtitle": "Gestion des données utilisateur conforme au RGPD — effacement (Art. 17), portabilité (Art. 15/20) et restriction du traitement (Art. 18)",
     "title": "Confidentialité et conformité",
@@ -3462,7 +3463,9 @@
       "openStudio": "Ouvrir dans le Manager",
       "triggers": "Voir les déclencheurs",
       "starterSelected": "Prompt ajouté à la zone de texte",
-      "title": "Discussion"
+      "title": "Discussion",
+      "hideAgentDetails": "Masquer les détails de l'agent",
+      "showAgentDetails": "Afficher les détails de l'agent"
     },
     "agentEditor": {
       "capabilities": "Capacités",

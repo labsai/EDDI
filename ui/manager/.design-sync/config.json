@@ -4,19 +4,63 @@
   "projectId": "408b967f-5a31-4a9f-85f7-f8794639218b",
   "shape": "package",
   "entry": ".design-sync/ds-entry.tsx",
-  "tsconfig": "tsconfig.app.json",
+  "tsconfig": "tsconfig.ds-bundle.json",
   "buildCmd": "node .design-sync/build-css.mjs",
   "cssEntry": ".design-sync/.cache/compiled.css",
-  "extraFonts": ["node_modules/@fontsource-variable/noto-sans/index.css"],
+  "extraFonts": [
+    "node_modules/@fontsource-variable/noto-sans/index.css"
+  ],
   "readmeHeader": ".design-sync/conventions.md",
-  "provider": { "component": "DesignSyncProvider" },
+  "provider": {
+    "component": "DesignSyncProvider"
+  },
   "overrides": {
-    "AccessibleDialog": { "cardMode": "single", "viewport": "560x560" },
-    "AlertDialog": { "cardMode": "single", "viewport": "560x440" },
-    "UnsavedChangesDialog": { "cardMode": "single", "viewport": "520x480" },
-    "CreateOrWizardDialog": { "cardMode": "single", "viewport": "760x620" },
-    "AgentPicker": { "cardMode": "column" },
-    "SecretKeyPicker": { "cardMode": "column" }
+    "AccessibleDialog": {
+      "cardMode": "single",
+      "viewport": "560x560"
+    },
+    "AlertDialog": {
+      "cardMode": "single",
+      "viewport": "560x440"
+    },
+    "UnsavedChangesDialog": {
+      "cardMode": "single",
+      "viewport": "520x480"
+    },
+    "CreateOrWizardDialog": {
+      "cardMode": "single",
+      "viewport": "760x620"
+    },
+    "AgentPicker": {
+      "cardMode": "column"
+    },
+    "SecretKeyPicker": {
+      "cardMode": "column"
+    },
+    "DropdownMenu": {
+      "cardMode": "single",
+      "viewport": "440x380"
+    },
+    "MockDataBanner": {
+      "cardMode": "single",
+      "viewport": "760x120"
+    },
+    "PageLoader": {
+      "cardMode": "single",
+      "viewport": "860x460"
+    },
+    "PlatformStatus": {
+      "cardMode": "single",
+      "viewport": "440x320"
+    },
+    "Sidebar": {
+      "cardMode": "single",
+      "viewport": "340x800"
+    },
+    "TopBar": {
+      "cardMode": "single",
+      "viewport": "960x160"
+    }
   },
   "componentSrcMap": {
     "AccessibleDialog": "src/components/ui/accessible-dialog.tsx",
@@ -24,6 +68,7 @@
     "Badge": "src/components/ui/badge.tsx",
     "Button": "src/components/ui/button.tsx",
     "Card": "src/components/ui/card.tsx",
+    "DropdownMenu": "src/components/ui/dropdown-menu.tsx",
     "ErrorBoundary": "src/components/ui/error-boundary.tsx",
     "Input": "src/components/ui/input.tsx",
     "Skeleton": "src/components/ui/skeleton.tsx",
@@ -37,8 +82,46 @@
     "EmptyState": "src/components/shared/empty-state.tsx",
     "ErrorState": "src/components/shared/error-state.tsx",
     "InfiniteScrollSentinel": "src/components/shared/infinite-scroll-sentinel.tsx",
+    "ModeSwitcher": "src/components/shared/mode-switcher.tsx",
+    "RefetchErrorNotice": "src/components/shared/refetch-error-notice.tsx",
     "ResourceTypeBadge": "src/components/shared/resource-type-badge.tsx",
     "SecretKeyPicker": "src/components/shared/secret-key-picker.tsx",
-    "ViewToggle": "src/components/shared/view-toggle.tsx"
+    "ViewToggle": "src/components/shared/view-toggle.tsx",
+    "MockDataBanner": "src/components/layout/mock-data-banner.tsx",
+    "PageLoader": "src/components/layout/page-loader.tsx",
+    "PlatformStatus": "src/components/layout/platform-status.tsx",
+    "Sidebar": "src/components/layout/sidebar.tsx",
+    "TopBar": "src/components/layout/top-bar.tsx"
+  },
+  "dtsPropsFor": {
+    "AccessibleDialog": "/** Whether the dialog is open */\n  open: boolean;\n  /** Called when the dialog should close */\n  onClose: () => void;\n  /** Dialog title (also used for aria-labelledby) */\n  title: string;\n  children: React.ReactNode;\n  testId?: string;\n  /** Max-width utility class (default: max-w-md) */\n  maxWidth?: string;\n  /** Show the close button (default: true) */\n  showClose?: boolean;",
+    "AlertDialog": "open: boolean;\n  onOpenChange: (open: boolean) => void;\n  title: string;\n  description: string;\n  confirmLabel?: string;\n  cancelLabel?: string;\n  onConfirm: () => void;\n  /** destructive = red confirm, warning = gold confirm */\n  variant?: \"destructive\" | \"warning\";\n  isPending?: boolean;\n  /** Extra controls between the description and the buttons */\n  children?: React.ReactNode;\n  confirmDisabled?: boolean;",
+    "Badge": "variant?: \"default\" | \"secondary\" | \"success\" | \"warning\" | \"destructive\" | \"outline\";\n  className?: string;\n  children?: React.ReactNode;\n  /** Plus every native div attribute — the component spreads unlisted props through. */",
+    "Button": "variant?: \"primary\" | \"secondary\" | \"destructive\" | \"outline\" | \"ghost\" | \"link\";\n  size?: \"sm\" | \"md\" | \"lg\" | \"icon\";\n  /** Render the child element instead of a <button> (Radix Slot) */\n  asChild?: boolean;\n  disabled?: boolean;\n  type?: \"button\" | \"submit\" | \"reset\";\n  onClick?: React.MouseEventHandler<HTMLButtonElement>;\n  className?: string;\n  children?: React.ReactNode;\n  /** Plus every native Button attribute — the component spreads unlisted props through (source extends ButtonHTMLAttributes). */",
+    "Card": "className?: string;\n  children?: React.ReactNode;\n  /** Plus every native div attribute — Card and all its sub-components (CardHeader/Title/Description/Content/Footer) spread unlisted props through. */",
+    "DropdownMenu": "/** Radix root. Compose with DropdownMenuTrigger / DropdownMenuContent /\n  *  DropdownMenuItem / DropdownMenuSeparator / DropdownMenuLabel. */\n  open?: boolean;\n  defaultOpen?: boolean;\n  onOpenChange?: (open: boolean) => void;\n  modal?: boolean;\n  children?: React.ReactNode;",
+    "ErrorBoundary": "children: React.ReactNode;\n  /** Custom fallback — receives the error and a reset callback */\n  fallback?: (error: Error, reset: () => void) => React.ReactNode;\n  /** Changing this value auto-resets any caught error */\n  resetKey?: string;",
+    "Input": "type?: string;\n  value?: string | number;\n  defaultValue?: string | number;\n  placeholder?: string;\n  disabled?: boolean;\n  readOnly?: boolean;\n  onChange?: React.ChangeEventHandler<HTMLInputElement>;\n  className?: string;\n  /** Plus every native Input attribute — the component spreads unlisted props through (source extends InputHTMLAttributes). */",
+    "Skeleton": "className?: string;\n  /** Plus every native div attribute — spread through. */",
+    "StreamBadge": "/** Whether the SSE stream is currently connected */\n  connected: boolean;\n  className?: string;",
+    "UnsavedChangesDialog": "open: boolean;\n  onConfirm: () => void;\n  onCancel: () => void;\n  /** Defaults to \"You have unsaved changes…\" */\n  message?: string;\n  /** Defaults to \"Unsaved Changes\" */\n  title?: string;",
+    "ActionBadge": "/** Diff action: CREATE | UPDATE | SKIP | CONFLICT */\n  action: string;",
+    "AgentPicker": "value: string;\n  onChange: (value: string) => void;\n  placeholder?: string;\n  readOnly?: boolean;",
+    "BackLink": "to: string;\n  label: string;",
+    "CommandPalette": "/** Takes no props — opens via the global Ctrl+K store. */",
+    "CreateOrWizardDialog": "open: boolean;\n  onClose: () => void;\n  type: \"agent\" | \"group\";\n  wizardPath: string;\n  /** Picked \"Quick Create\" — close this dialog and open the create form */\n  onQuickCreate: () => void;",
+    "EmptyState": "/** Lucide icon component, e.g. `Bot` from lucide-react */\n  icon: React.ComponentType<{ className?: string }>;\n  title: string;\n  description?: string;\n  /** Omit both action props for a \"no search results\" empty state */\n  actionLabel?: string;\n  onAction?: () => void;",
+    "ErrorState": "message: string;\n  onRetry?: () => void;\n  retryLabel?: string;",
+    "InfiniteScrollSentinel": "onLoadMore: () => void;\n  isFetchingMore: boolean;\n  hasMore: boolean;",
+    "ModeSwitcher": "collapsed?: boolean;",
+    "RefetchErrorNotice": "onRetry: () => void;\n  className?: string;\n  /** Overrides the default \"could not refresh\" wording */\n  message?: string;",
+    "ResourceTypeBadge": "/** Resource slug. Known keys get a distinct color: agent, workflow, behavior,\n   *  rules, httpcalls, apicalls, langchain, llm, output, property, propertysetter,\n   *  dictionary, regulardictionary, mcpcalls, rag, snippet, snippets. Anything else\n   *  renders with a neutral fallback, and a trailing \".json\" is stripped. */\n  type: string;",
+    "SecretKeyPicker": "/** Plain text, or a vault reference of the form vault:<keyName> */\n  value: string;\n  onChange: (value: string) => void;\n  readOnly?: boolean;\n  tenantId?: string;\n  placeholder?: string;\n  testId?: string;",
+    "ViewToggle": "view: \"card\" | \"list\";\n  onChange: (view: \"card\" | \"list\") => void;",
+    "MockDataBanner": "/** Takes no props — self-hides unless mock data is active. */",
+    "PageLoader": "/** Takes no props — route-level skeleton. */",
+    "PlatformStatus": "/** Takes no props — polls backend health and renders a status pill. */",
+    "Sidebar": "collapsed: boolean;\n  onToggle: () => void;",
+    "TopBar": "onMenuClick: () => void;\n  sidebarVisible: boolean;"
   }
 }

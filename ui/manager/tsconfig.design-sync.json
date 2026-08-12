@@ -1,0 +1,30 @@
+{
+  // baseUrl + paths come from tsconfig.ds-bundle.json, which the converter also
+  // reads as cfg.tsconfig. Inheriting rather than repeating them means the
+  // type-check and the bundle resolve every import identically — including the
+  // operator-drawer stub, so tsc validates that stub against TopBar's real usage.
+  "extends": "./tsconfig.ds-bundle.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.design-sync.tsbuildinfo",
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true
+  },
+  // src/vite-env.d.ts supplies `vite/client` and the `__APP_VERSION__` global. The
+  // entry re-exports real app code, so without it every `import.meta.env` and the
+  // sidebar's version footer fail to resolve here.
+  "include": [".design-sync/**/*.ts", ".design-sync/**/*.tsx", "src/vite-env.d.ts"]
+}

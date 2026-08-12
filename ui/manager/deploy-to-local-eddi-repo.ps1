@@ -1,12 +1,16 @@
-<#
+﻿<#
 .SYNOPSIS
     Build EDDI Manager and deploy to the EDDI backend resource directory.
 
 .DESCRIPTION
     1. Runs `npm run build` to produce the production bundle
-    2. Removes hashed assets in EDDI that the new build did not produce.
-    3. Copies the entire new assets folder into EDDI's assets/ directory.
-    4. Updates manage.html, welcome.html, and workforce.html with the new hashed filenames
+    2. Locates the new entry bundle (index-*.js / index-*.css)
+    3. Clears the legacy scripts/js and scripts/css locations
+    4. Copies the new assets folder in, then repoints the HTML shells at it
+    5. LAST, removes hashed assets the new build did not produce
+
+    Step 5 runs last on purpose: deleting stale files before the copy meant a
+    failed copy left the live shells referencing files already gone.
     Note: index.html is a smart redirect page and does not reference asset bundles.
 
     NOTE ON CHUNK COUNT
@@ -46,7 +50,7 @@ if (-not (Test-Path $ManageHtml)) {
 }
 
 # ─── Step 1: Build ───────────────────────────────────────────────────────────
-Write-Host "`n[1/4] Building EDDI Manager..." -ForegroundColor Cyan
+Write-Host "`n[1/5] Building EDDI Manager..." -ForegroundColor Cyan
 npm run build
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Build failed!"
@@ -65,13 +69,13 @@ if (-not $newJs -or -not $newCss) {
     exit 1
 }
 
-Write-Host "`n[2/4] New main assets:" -ForegroundColor Cyan
+Write-Host "`n[2/5] New main assets:" -ForegroundColor Cyan
 Write-Host "  JS:  $($newJs.Name)"
 Write-Host "  CSS: $($newCss.Name)"
 Write-Host "  Total assets: $($distFiles.Count)" -ForegroundColor DarkGray
 
 # ─── Step 3: Remove old files selectively ────────────────────────────────────
-Write-Host "`n[3/4] Cleaning stale Manager assets..." -ForegroundColor Cyan
+Write-Host "`n[3/5] Clearing legacy asset locations..." -ForegroundColor Cyan
 
 $removedFiles = @()
 
@@ -95,36 +99,8 @@ if (-not (Test-Path $AssetsDir)) {
     New-Item -ItemType Directory -Force -Path $AssetsDir | Out-Null
 }
 
-# Clean hashed assets that the new build did not produce.
-#
-# This is a SET DIFFERENCE against the new dist, not a per-prefix sweep. The
-# per-prefix version only deleted an old file when a same-prefixed new one
-# existed, so a chunk that vanished between builds — a page renamed, a component
-# removed, a lazy boundary moved — was never cleaned and silted up in the EDDI
-# repo forever. That was survivable when the build emitted a handful of chunks.
-# Route-level code splitting emits ~240, all content-hashed, so a stale set now
-# accumulates fast enough to matter.
-#
-# Only files matching Vite's `name-<8charhash>.ext` shape are considered, so
-# anything hand-placed in assets/ is left alone.
-# Keep this in step with the same block in deploy-to-local-eddi-repo.sh.
-$hashRe = "^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$"
-$newAssetNames = [System.Collections.Generic.HashSet[string]]::new(
-    [string[]]($distFiles | ForEach-Object { $_.Name }),
-    [System.StringComparer]::Ordinal
-)
-
-foreach ($old in (Get-ChildItem -Path $AssetsDir -File -ErrorAction SilentlyContinue)) {
-    if ($old.Name -notmatch $hashRe) { continue }
-    if (-not $newAssetNames.Contains($old.Name)) {
-        Write-Host "  Removing stale asset $($old.Name)" -ForegroundColor Yellow
-        $removedFiles += "src/main/resources/META-INF/resources/assets/$($old.Name)"
-        Remove-Item $old.FullName -Force
-    }
-}
-
 # ─── Step 4: Copy new assets + update manage.html ──────────────────────────
-Write-Host "`n[4/4] Deploying new assets..." -ForegroundColor Cyan
+Write-Host "`n[4/5] Deploying new assets..." -ForegroundColor Cyan
 
 Copy-Item "$distAssets\*" -Destination $AssetsDir -Force -Recurse
 Write-Host "  Copied all $($distFiles.Count) files into assets/"
@@ -156,14 +132,52 @@ if (Test-Path $WorkforceHtml) {
     Write-Host "  Updated workforce.html" -ForegroundColor Green
 }
 
+# --- Step 5: Remove assets the new build did not produce ---------------------
+#
+# Deliberately LAST. Running it before the copy meant a failed Copy-Item or
+# Set-Content left the live HTML shells pointing at files this loop had already
+# deleted - a broken UI and no rollback, from a deploy that never completed.
+# Cleaning only after the new assets are in place and the shells reference them
+# means the worst case of an interrupted deploy is some extra files on disk.
+# Keep this in step with the same block in deploy-to-local-eddi-repo.sh.
+Write-Host "`n[5/5] Removing assets the new build did not produce..." -ForegroundColor Cyan
+
+# Clean hashed assets that the new build did not produce.
+#
+# This is a SET DIFFERENCE against the new dist, not a per-prefix sweep. The
+# per-prefix version only deleted an old file when a same-prefixed new one
+# existed, so a chunk that vanished between builds — a page renamed, a component
+# removed, a lazy boundary moved — was never cleaned and silted up in the EDDI
+# repo forever. That was survivable when the build emitted a handful of chunks.
+# Route-level code splitting emits ~240, all content-hashed, so a stale set now
+# accumulates fast enough to matter.
+#
+# Only files matching Vite's `name-<8charhash>.ext` shape are considered, so
+# anything hand-placed in assets/ is left alone.
+# Keep this in step with the same block in deploy-to-local-eddi-repo.sh.
+$hashRe = "^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$"
+$newAssetNames = [System.Collections.Generic.HashSet[string]]::new(
+    [string[]]($distFiles | ForEach-Object { $_.Name }),
+    [System.StringComparer]::Ordinal
+)
+
+foreach ($old in (Get-ChildItem -Path $AssetsDir -File -ErrorAction SilentlyContinue)) {
+    if ($old.Name -notmatch $hashRe) { continue }
+    if (-not $newAssetNames.Contains($old.Name)) {
+        Write-Host "  Removing stale asset $($old.Name)" -ForegroundColor Yellow
+        $removedFiles += "src/main/resources/META-INF/resources/assets/$($old.Name)"
+        Remove-Item $old.FullName -Force
+    }
+}
+
 Write-Host "`n[DONE] EDDI Manager deployed successfully!" -ForegroundColor Green
 Write-Host "  JS:  /assets/$($newJs.Name)"
 Write-Host "  CSS: /assets/$($newCss.Name)`n"
 
-# ─── Step 5 (optional): Commit in EDDI repo ────────────────────────────────
+# ─── Optional: Commit in EDDI repo ─────────────────────────────────────────
 $answer = Read-Host "Commit these assets in the EDDI repo? [y/N]"
 if ($answer -match '^[Yy]') {
-    Write-Host "`n[5/5] Committing in EDDI repo..." -ForegroundColor Cyan
+    Write-Host "`nCommitting in EDDI repo..." -ForegroundColor Cyan
 
     # Get the latest Manager commit hash for the message
     $managerHash = git -C $PSScriptRoot log -1 --format="%h" 2>$null

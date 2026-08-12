@@ -1510,8 +1510,16 @@ async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> 
       }
     }
 
-    // Flush whatever the stream ended on. A server that closes without a final
-    // blank line still meant to send that frame.
+    // Flush the DECODER first. Every read above passes `{ stream: true }`, which
+    // deliberately holds back a trailing incomplete UTF-8 sequence in case the
+    // rest arrives next chunk. At EOF there is no next chunk, so a final
+    // `decode()` with no argument is what emits those held-back bytes — without
+    // it, a frame ending mid-character (any non-ASCII agent output split across
+    // the last chunk boundary) loses its last character.
+    buffer += decoder.decode();
+
+    // Then flush the BUFFER. A server that closes without a final blank line
+    // still meant to send that frame.
     buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
     for (const frame of buffer.split("\n\n")) {
       const event = toEvent(frame);

@@ -233,7 +233,7 @@ export function ChannelDetailPage() {
   // below instead.
   if (isError && !draft) {
     return (
-      <div className="p-6" data-testid="channel-detail-error">
+      <div data-testid="channel-detail-error">
         <ErrorState
           message={t("common.error")}
           onRetry={() => refetch()}
@@ -245,7 +245,7 @@ export function ChannelDetailPage() {
 
   if (isLoading || !draft) {
     return (
-      <div className="p-6 space-y-6" data-testid="channel-detail-loading">
+      <div className="space-y-6" data-testid="channel-detail-loading">
         <div className="h-8 w-48 bg-muted rounded animate-pulse" />
         <div className="h-64 bg-muted rounded-xl animate-pulse" />
       </div>
@@ -253,7 +253,7 @@ export function ChannelDetailPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-4xl">
+    <div className="flex flex-col gap-6 max-w-4xl">
       {/* A refetch failed while the form was already open. Non-blocking on
           purpose: the user's in-progress edits stay intact and saveable, but the
           failure is not swallowed either. Uses the shared notice like the sibling

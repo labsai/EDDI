@@ -984,20 +984,21 @@ if (SKIP_DTS) {
   console.error(`  _ds_sync.json: ${components.length} render hash(es) + source key(s) (verification anchor)`);
 }
 
-// The upload rejects files over 5 MB — surface offenders at BUILD time, not
+// The upload rejects files over 12 MB — surface offenders at BUILD time, not
 // after grading (a post-grade slim changes contracts and clears grades).
 {
+  const MAX = 12 * 1024 * 1024;
   const big = [];
   const walk = (dir) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
       if (e.isDirectory()) walk(p);
-      else if (e.isFile() && statSync(p).size > 5 * 1024 * 1024) big.push([relative(OUT, p), statSync(p).size]);
+      else if (e.isFile() && statSync(p).size > MAX) big.push([relative(OUT, p), statSync(p).size]);
     }
   };
   try { walk(OUT); } catch { /* best-effort */ }
   for (const [p, sz] of big) {
-    console.error(`! [FILE_OVER_5MB] ${p} is ${(sz / 1024 / 1024).toFixed(1)} MB — the upload rejects files over 5 MB. Slim it NOW (before grading): heavy dev-only deps (syntax highlighters, icons-as-code) usually don't belong in a preview or decorator bundle.`);
+    console.error(`! [FILE_TOO_LARGE] ${p} is ${(sz / 1024 / 1024).toFixed(1)} MB — the upload rejects files over ${MAX / 1024 / 1024} MB. Slim it NOW (before grading): heavy dev-only deps (syntax highlighters, icons-as-code) usually don't belong in a preview or decorator bundle.`);
   }
 }
 

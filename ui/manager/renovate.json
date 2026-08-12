@@ -21,8 +21,9 @@
       "automerge": true
     },
     {
-      "description": "Never auto-bump react-router. SECURITY.md documents an accepted advisory whose only real fix is a v8 migration, and an automated bump would either reintroduce GHSA-wrjc-x8rr-h8h6 or break every react-router-dom import.",
+      "description": "Block only MAJOR react-router bumps. v8 consolidates react-router-dom into react-router, so an automated major would break every import; patch and minor updates must stay visible because that is how a future security fix arrives. See the accepted advisory in SECURITY.md.",
       "matchPackageNames": ["react-router", "react-router-dom"],
+      "matchUpdateTypes": ["major"],
       "enabled": false
     }
   ]

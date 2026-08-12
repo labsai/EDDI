@@ -66,21 +66,40 @@ function flatten(obj, prefix = "", out = {}) {
 
 const isTestFile = (f) => /__tests__|\.test\.|[\\/]test[\\/]/.test(f);
 
-/** Every key referenced by a string literal passed to `t()` or `i18nKey=`. */
+/**
+ * Every key referenced by a string literal passed to `t()` or `i18nKey=`.
+ *
+ * Scans each file WHOLE rather than line by line. Prettier wraps long calls, so
+ * `t(\n  "some.key",\n  "Default",\n)` is extremely common here — and a per-line
+ * scan cannot match `t(` against a key on the next line. Measured when this was
+ * fixed: the line-based version saw 2,955 keys where the file-based one sees
+ * 3,287. All 332 it missed happened to be present in `en.json`, so the gate was
+ * green while blind to a third of the codebase; a new wrapped key would simply
+ * not have been checked.
+ *
+ * Line numbers come from the match offset, so failures stay clickable.
+ */
 export function collectUsedKeys(files, read = (f) => fs.readFileSync(f, "utf8")) {
   const used = new Map(); // key -> first "file:line"
+
   for (const file of files) {
     if (isTestFile(file)) continue;
-    read(file)
-      .split("\n")
-      .forEach((line, i) => {
-        for (const m of line.matchAll(/\bt\(\s*(["'])([A-Za-z0-9_.-]+)\1/g)) {
-          if (m[2].includes(".") && !used.has(m[2])) used.set(m[2], `${file}:${i + 1}`);
-        }
-        for (const m of line.matchAll(/\bi18nKey=(["'])([A-Za-z0-9_.-]+)\1/g)) {
-          if (m[2].includes(".") && !used.has(m[2])) used.set(m[2], `${file}:${i + 1}`);
-        }
-      });
+    const src = read(file);
+    // `\s*` spans newlines, so this matches wrapped calls as well as inline ones.
+    const patterns = [
+      /\bt\(\s*(["'])([A-Za-z0-9_.-]+)\1/g,
+      /\bi18nKey=\s*(["'])([A-Za-z0-9_.-]+)\1/g,
+    ];
+    for (const re of patterns) {
+      for (const m of src.matchAll(re)) {
+        const key = m[2];
+        if (!key.includes(".") || used.has(key)) continue;
+        // Count newlines before the match rather than tracking them as we go —
+        // simpler, and this runs once per key, not once per character.
+        const line = src.slice(0, m.index).split("\n").length;
+        used.set(key, `${file}:${line}`);
+      }
+    }
   }
   return used;
 }
@@ -145,16 +164,26 @@ export function collectDefaults(files, read = (f) => fs.readFileSync(f, "utf8"))
   for (const file of files) {
     if (isTestFile(file)) continue;
     const src = read(file);
-    // Matches t("key", "default"). The default must be a plain literal closed by
-    // the same quote it opened with, so an interpolation-options object never
-    // matches. A default containing an escaped quote is truncated here, which is
-    // fine: this only has to tell two DIFFERENT defaults apart, not reproduce
-    // either of them.
-    const re = /\bt\(\s*(["'])([A-Za-z0-9_.-]+)\1\s*,\s*(["'])((?:(?!\3)[^\n])*)\3/g;
-    for (const m of src.matchAll(re)) {
-      if (!m[2].includes(".")) continue;
-      if (!byKey.has(m[2])) byKey.set(m[2], new Set());
-      byKey.get(m[2]).add(m[4]);
+    // Two shapes carry an English default, and both are used in this codebase:
+    //
+    //   t("key", "Default")                       — positional
+    //   t("key", { count, defaultValue: "…" })    — object form (111 call sites)
+    //
+    // The default must be a plain literal closed by the same quote it opened
+    // with. A default containing an escaped quote, or built from a template
+    // literal, is skipped rather than half-captured — this only has to tell two
+    // DIFFERENT defaults apart, not reproduce either of them, and a template
+    // literal is not a fixed string to compare in the first place.
+    const patterns = [
+      /\bt\(\s*(["'])([A-Za-z0-9_.-]+)\1\s*,\s*(["'])((?:(?!\3)[^\n])*)\3/g,
+      /\bt\(\s*(["'])([A-Za-z0-9_.-]+)\1\s*,\s*\{[^}]*?defaultValue:\s*(["'])((?:(?!\3)[^\n])*)\3/g,
+    ];
+    for (const re of patterns) {
+      for (const m of src.matchAll(re)) {
+        if (!m[2].includes(".")) continue;
+        if (!byKey.has(m[2])) byKey.set(m[2], new Set());
+        byKey.get(m[2]).add(m[4]);
+      }
     }
   }
   return byKey;

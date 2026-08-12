@@ -3231,6 +3231,7 @@
     "restrictionTitle": "Restricción del procesamiento (Art. 18)",
     "resultsTitle": "Borrado completado",
     "statusActive": "Procesamiento activo",
+    "statusUnknown": "Estado no disponible",
     "statusRestricted": "Procesamiento restringido",
     "subtitle": "Gestión de datos de usuario conforme al RGPD — borrado (Art. 17), portabilidad (Art. 15/20) y restricción del procesamiento (Art. 18)",
     "title": "Privacidad y cumplimiento",
@@ -3462,7 +3463,9 @@
       "openStudio": "Abrir en Manager",
       "triggers": "Ver disparadores",
       "starterSelected": "Prompt añadido al campo de entrada",
-      "title": "Chat"
+      "title": "Chat",
+      "hideAgentDetails": "Ocultar detalles del agente",
+      "showAgentDetails": "Mostrar detalles del agente"
     },
     "agentEditor": {
       "capabilities": "Capacidades",

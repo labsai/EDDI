@@ -86,15 +86,12 @@ export class BearerEventSource {
         return;
       }
 
-      // A connection that actually opened refills the retry budget, so a
-      // long-lived stream that blips occasionally never walks up the backoff
-      // curve — only one that is consistently refused does.
-      this.reconnects.reset();
       this.onopen?.();
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let receivedData = false;
 
       this.resetInactivityTimer();
 
@@ -102,7 +99,23 @@ export class BearerEventSource {
         const { done, value } = await reader.read();
         this.resetInactivityTimer();
         if (done) break;
-        
+
+        // Refill the retry budget only once the stream has actually produced
+        // bytes — NOT when the response headers arrive.
+        //
+        // Resetting on headers looked equivalent and was not: a server that
+        // answers 200 and closes the body immediately would reset the counter,
+        // fall out of this loop, and schedule another attempt at zero. That
+        // reinstates the unbounded 5s retry loop the attempt cap exists to
+        // prevent, just behind a success status. Bytes on the wire are the
+        // earliest point at which the connection is demonstrably working; EDDI's
+        // log stream sends a heartbeat comment every 15s, so a genuinely healthy
+        // idle stream still refills promptly.
+        if (!receivedData) {
+          receivedData = true;
+          this.reconnects.reset();
+        }
+
         const chunk = decoder.decode(value, { stream: true });
         buffer += chunk;
 

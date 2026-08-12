@@ -60,8 +60,30 @@ describe("collision detection", () => {
     expect(found.get("x.y")!.size).toBe(1);
   });
 
-  it("ignores an options object, which is not a default", () => {
+  it("ignores an options object that carries no default", () => {
     const found = collectDefaults(["a.tsx"], () => 't("x.y", { count: 3 })');
+    expect(found.has("x.y")).toBe(false);
+  });
+
+  it("reads the object form's defaultValue, which 111 call sites use", () => {
+    const found = collectDefaults(["a.tsx"], () =>
+      't("x.y", { count: 3, defaultValue: "{{count}} Members" })',
+    );
+    expect([...found.get("x.y")!]).toEqual(["{{count}} Members"]);
+  });
+
+  it("spots a collision between the positional and object forms", () => {
+    // The two shapes are equally authoritative, so a key that disagrees with
+    // itself across them is the same bug as two disagreeing positional defaults.
+    const found = collectDefaults(["a.tsx"], () =>
+      ['t("x.y", "One wording")', 't("x.y", { defaultValue: "Another wording" })'].join("\n"),
+    );
+    expect(found.get("x.y")!.size).toBe(2);
+  });
+
+  it("skips a template-literal default rather than half-capturing it", () => {
+    // Not a fixed string, so there is nothing meaningful to compare.
+    const found = collectDefaults(["a.tsx"], () => "t(\"x.y\", `New ${typeLabel}`)");
     expect(found.has("x.y")).toBe(false);
   });
 
@@ -107,5 +129,30 @@ describe("checker internals", () => {
   it("records where a key was first seen, for an actionable failure message", () => {
     const used = collectUsedKeys(["src/page.tsx"], () => 'x\nt("a.b", "A")');
     expect(used.get("a.b")).toBe("src/page.tsx:2");
+  });
+
+  it("sees a t() call that Prettier wrapped across lines", () => {
+    // Regression. Scanning line by line could not match `t(` against a key on
+    // the following line, and Prettier wraps long calls constantly — the
+    // line-based version was blind to 332 of the 3,287 keys in this codebase.
+    const used = collectUsedKeys(["src/wrapped.tsx"], () =>
+      ['t(', '  "wrapped.key",', '  "Some rather long English default",', ")"].join("\n"),
+    );
+    expect([...used.keys()]).toEqual(["wrapped.key"]);
+  });
+
+  it("reports the line the key sits on, not the line t( sits on", () => {
+    const used = collectUsedKeys(["src/wrapped.tsx"], () =>
+      ["const x = 1;", "t(", '  "wrapped.key",', ")"].join("\n"),
+    );
+    // The match starts at `t(` on line 2; that is the actionable location.
+    expect(used.get("wrapped.key")).toBe("src/wrapped.tsx:2");
+  });
+
+  it("sees a wrapped i18nKey attribute too", () => {
+    const used = collectUsedKeys(["src/trans.tsx"], () =>
+      ["<Trans", '  i18nKey="trans.key"', "/>"].join("\n"),
+    );
+    expect([...used.keys()]).toEqual(["trans.key"]);
   });
 });

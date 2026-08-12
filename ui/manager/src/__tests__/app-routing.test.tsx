@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { screen, waitFor, within } from "@testing-library/react";
+import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { App } from "@/app";
 
 /**
@@ -57,14 +57,30 @@ describe("App routing (code-split)", () => {
     // The whole reason the Suspense boundary sits at the outlet rather than
     // above <Routes>: the sidebar, top bar and chat drawer must survive a page
     // swap. A boundary above the layout would unmount and remount them.
-    const { container } = renderWithProviders(<App />, { initialRoute: "/manage" });
-    await waitFor(() => expect(screen.getByTestId("sidebar")).toBeInTheDocument());
-    const sidebarBefore = container.querySelector("[data-testid='sidebar']");
+    //
+    // This has to navigate INSIDE the rendered tree. Rendering a second
+    // <App /> mounts a second MemoryRouter, which proves nothing about the
+    // first one — the original sidebar node would still be in the document
+    // whether or not navigation preserves it.
+    const user = userEvent.setup();
+    renderWithProviders(<App />, { initialRoute: "/manage" });
 
-    // Re-render at another route in the same shell.
-    renderWithProviders(<App />, { initialRoute: "/manage/agents" });
-    await waitFor(() => expect(screen.getAllByTestId("sidebar").length).toBeGreaterThan(0));
-    expect(sidebarBefore).not.toBeNull();
+    const sidebarBefore = await screen.findByTestId("sidebar");
+    await waitFor(() =>
+      expect(document.querySelector("[data-testid='page-loader']")).toBeNull(),
+    );
+
+    // Follow a real link in the sidebar rather than poking history directly.
+    const agentsLink = within(sidebarBefore).getByRole("link", { name: /agents/i });
+    await user.click(agentsLink);
+
+    // The destination chunk resolves…
+    await waitFor(
+      () => expect(document.querySelector("[data-testid='page-loader']")).toBeNull(),
+      { timeout: 5000 },
+    );
+    // …and the chrome is the very same DOM node, not a remount.
+    expect(screen.getByTestId("sidebar")).toBe(sidebarBefore);
   });
 
   it("redirects an unknown path to /welcome", async () => {

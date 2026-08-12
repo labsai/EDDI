@@ -30,6 +30,30 @@ function sseResponse(chunks: string[]): Response {
   } as unknown as Response;
 }
 
+/** Same as {@link collect}, but the caller controls the exact byte split. */
+function sseResponseBytes(chunks: Uint8Array[]): Response {
+  let i = 0;
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    body: {
+      getReader: () => ({
+        read: async () =>
+          i < chunks.length ? { done: false, value: chunks[i++] } : { done: true, value: undefined },
+        releaseLock: () => {},
+      }),
+    },
+  } as unknown as Response;
+}
+
+async function collectBytes(chunks: Uint8Array[]): Promise<GroupSSEEvent[]> {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponseBytes(chunks)));
+  const events: GroupSSEEvent[] = [];
+  for await (const event of streamGroupDiscussion("g1", "question?")) events.push(event);
+  return events;
+}
+
 async function collect(chunks: string[]): Promise<GroupSSEEvent[]> {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse(chunks)));
   const events: GroupSSEEvent[] = [];
@@ -103,6 +127,21 @@ describe("group SSE framing", () => {
     const frame = "event: speaker_end\ndata: {\"ok\":true}\n\n";
     const events = await collect([...frame]);
     expect(events).toEqual([{ type: "speaker_end", data: '{"ok":true}' }]);
+  });
+
+  it("emits a multi-byte character split across the final chunk boundary", async () => {
+    // Regression. Every read uses `{ stream: true }`, which holds back a partial
+    // UTF-8 sequence in case the rest arrives next chunk. At EOF there is no
+    // next chunk, so without a final `decoder.decode()` those bytes are simply
+    // dropped — and any non-ASCII agent output (Arabic, Japanese, an emoji) that
+    // happened to straddle the last boundary lost its final character.
+    const encoder = new TextEncoder();
+    const frame = encoder.encode("event: speaker_end\ndata: über\n\n");
+    // Split mid-way through the two-byte "ü": the prefix ends one byte into it.
+    const splitAt = "event: speaker_end\ndata: ".length + 1;
+    const events = await collectBytes([frame.slice(0, splitAt), frame.slice(splitAt)]);
+
+    expect(events).toEqual([{ type: "speaker_end", data: "über" }]);
   });
 
   it("throws with the status when the stream is refused", async () => {

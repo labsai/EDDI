@@ -414,4 +414,48 @@ describe("GDPR Privacy Admin Page", () => {
       expect(screen.getByText(/test-user-abc/)).toBeInTheDocument();
     });
   });
+
+  // ─── Restriction status could not be read ───────────────────────────────
+
+  it("reports an unknown restriction status instead of 'Processing Active' when the check fails", async () => {
+    server.use(
+      http.get("*/admin/gdpr/:userId/restrict", () => {
+        return HttpResponse.json({ message: "boom" }, { status: 500 });
+      })
+    );
+
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("gdpr-user-id"), "test-user-abc");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("restriction-badge-unknown")).toBeInTheDocument();
+    });
+
+    // The bug this pins: a failed check used to render the green "Processing
+    // Active" badge, reporting an unknown state as a known-safe one.
+    expect(
+      screen.queryByTestId("restriction-badge-active"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("blocks the restriction toggle while the status is unknown", async () => {
+    server.use(
+      http.get("*/admin/gdpr/:userId/restrict", () => {
+        return HttpResponse.json({ message: "boom" }, { status: 500 });
+      })
+    );
+
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("gdpr-user-id"), "test-user-abc");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("restriction-badge-unknown")).toBeInTheDocument();
+    });
+
+    // Both the label and the action derive from `isRestricted`, so acting on an
+    // unknown state could restrict a user the caller meant to unrestrict.
+    expect(screen.getByTestId("gdpr-restrict-toggle")).toBeDisabled();
+  });
 });

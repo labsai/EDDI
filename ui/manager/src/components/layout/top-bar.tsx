@@ -130,19 +130,36 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
   ];
 
   /**
-   * Switch language, tolerating a locale chunk that fails to arrive.
+   * Switch language, tolerating a locale chunk that fails to arrive and a user
+   * who changes their mind mid-download.
    *
    * Locales are code-split (`src/i18n/config.ts`), so `changeLanguage` now
-   * performs a network fetch and its promise can genuinely reject — a tab held
-   * open across a deploy asks for a hashed chunk that no longer exists. Left
-   * floating, that surfaces as an unhandled rejection and the select silently
-   * snaps back. i18next keeps the previous language on a failed load, so the UI
-   * stays usable; this just makes the failure visible instead of silent.
+   * performs a network fetch. Two consequences, both handled here:
+   *
+   *  - **It can reject.** A tab held open across a deploy asks for a hashed
+   *    chunk that no longer exists. Left floating, that surfaces as an unhandled
+   *    rejection and the select silently snaps back. i18next keeps the previous
+   *    language on a failed load, so the UI stays usable — this just makes the
+   *    failure visible.
+   *  - **Two changes can be in flight at once.** Chunks are different sizes, so
+   *    picking Thai then Spanish can finish Spanish-then-Thai and leave the user
+   *    reading a language they already moved on from. `latestLanguageRequest`
+   *    records the most recent pick; an older completion is discarded rather
+   *    than applied.
    */
+  const latestLanguageRequest = useRef<string | null>(null);
+
   async function handleLanguageChange(code: string) {
+    latestLanguageRequest.current = code;
     try {
       await i18n.changeLanguage(code);
+      // A slower earlier request may land after a faster later one. Only the
+      // most recent pick is allowed to stand.
+      if (latestLanguageRequest.current !== code) {
+        await i18n.changeLanguage(latestLanguageRequest.current ?? code);
+      }
     } catch {
+      if (latestLanguageRequest.current !== code) return; // superseded; stay quiet
       toast.error(
         t("language.switchFailed", "Could not load that language. Please try again."),
       );

@@ -257,11 +257,39 @@ describe("BearerEventSource", () => {
     es.close();
   });
 
+  it("does NOT refill the budget on a 200 that closes without sending anything", async () => {
+    // Regression, from review: the budget used to reset as soon as response
+    // headers arrived. A server answering 200 and immediately closing the body
+    // therefore reset the counter, fell out of the read loop, and retried at
+    // attempt zero — an unbounded 5s loop again, just wearing a success status.
+    // Bytes on the wire are the earliest honest signal that the stream works.
+    fetchSpy.mockResolvedValue(new Response(createSSEStream([]), { status: 200 }));
+    const exhausted = vi.fn();
+    const es = new BearerEventSource("http://test/sse");
+    es.onexhausted = exhausted;
+
+    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < SSE_RECONNECT_MAX_ATTEMPTS; i++) {
+      await vi.advanceTimersByTimeAsync(SSE_RECONNECT_MAX_DELAY_MS);
+    }
+
+    expect(exhausted).toHaveBeenCalledTimes(1);
+    const callsAtGiveUp = fetchSpy.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(SSE_RECONNECT_MAX_DELAY_MS * 20);
+    expect(fetchSpy).toHaveBeenCalledTimes(callsAtGiveUp);
+
+    es.close();
+  });
+
   it("refills the retry budget once a connection succeeds", async () => {
     // A long-lived stream that blips occasionally must never walk up to the cap.
     fetchSpy
       .mockResolvedValueOnce(new Response(null, { status: 502 }))
-      .mockResolvedValueOnce(new Response(createSSEStream([]), { status: 200 }))
+      // A frame on the wire is what proves the stream healthy now, so this
+      // success must actually deliver one.
+      .mockResolvedValueOnce(
+        new Response(createSSEStream(["event: log\ndata: {}\n\n"]), { status: 200 }),
+      )
       .mockResolvedValue(new Response(null, { status: 502 }));
 
     const es = new BearerEventSource("http://test/sse");

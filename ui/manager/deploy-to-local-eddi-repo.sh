@@ -5,9 +5,13 @@
 #
 # DESCRIPTION
 #    1. Runs `npm run build` to produce the production bundle
-#    2. Removes hashed assets in EDDI that the new build did not produce.
-#    3. Copies the entire new assets folder into EDDI's assets/ directory.
-#    4. Updates manage.html, welcome.html, and workforce.html with the new hashed filenames
+#    2. Locates the new entry bundle (index-*.js / index-*.css)
+#    3. Clears the legacy scripts/js and scripts/css locations
+#    4. Copies the new assets folder in, then repoints the HTML shells at it
+#    5. LAST, removes hashed assets the new build did not produce
+#
+#    Step 5 runs last on purpose: deleting stale files before the copy meant a
+#    failed copy left the live shells referencing files already gone.
 #
 # NOTE ON CHUNK COUNT
 #    The build is route-code-split, so dist/assets holds ~240 JS chunks plus the
@@ -55,7 +59,7 @@ if [[ ! -f "$MANAGE_HTML" ]]; then
 fi
 
 # ─── Step 1: Build ───────────────────────────────────────────────────────────
-echo -e "\n${CYAN}[1/4] Building EDDI Manager...${NC}"
+echo -e "\n${CYAN}[1/5] Building EDDI Manager...${NC}"
 cd "$SCRIPT_DIR"
 npm run build
 if [[ $? -ne 0 ]]; then
@@ -80,13 +84,13 @@ NEW_JS_NAME=$(basename "$NEW_JS")
 NEW_CSS_NAME=$(basename "$NEW_CSS")
 TOTAL_ASSETS=$(find "$DIST_ASSETS" -maxdepth 1 -type f | wc -l)
 
-echo -e "\n${CYAN}[2/4] New main assets:${NC}"
+echo -e "\n${CYAN}[2/5] New main assets:${NC}"
 echo "  JS:  $NEW_JS_NAME"
 echo "  CSS: $NEW_CSS_NAME"
 echo -e "  Total assets: $TOTAL_ASSETS" -e "${DARK_GRAY}"
 
 # ─── Step 3: Remove old files selectively ────────────────────────────────────
-echo -e "\n${CYAN}[3/4] Cleaning stale Manager assets...${NC}"
+echo -e "\n${CYAN}[3/5] Clearing legacy asset locations...${NC}"
 
 REMOVED_FILES=()
 
@@ -110,46 +114,9 @@ fi
 # Ensure destination assets dir exists
 mkdir -p "$ASSETS_DIR"
 
-# Clean hashed assets that the new build did not produce.
-#
-# This is a SET DIFFERENCE against the new dist, not a per-prefix sweep. The
-# per-prefix version only deleted an old file when a same-prefixed new one
-# existed, so a chunk that vanished between builds — a page renamed, a component
-# removed, a lazy boundary moved — was never cleaned and silted up in the EDDI
-# repo forever. That was survivable when the build emitted a handful of chunks.
-# Route-level code splitting emits ~240, all content-hashed, so a stale set now
-# accumulates fast enough to matter.
-#
-# Only files matching Vite's `name-<8charhash>.ext` shape are considered, so
-# anything hand-placed in assets/ is left alone.
-HASH_RE='^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$'
-
-# Build the set of filenames the new build produced.
-NEW_ASSET_NAMES=()
-while IFS= read -r -d '' f; do
-    NEW_ASSET_NAMES+=("$(basename "$f")")
-done < <(find "$DIST_ASSETS" -maxdepth 1 -type f -print0)
-
-is_in_new_build() {
-    local needle="$1" name
-    for name in "${NEW_ASSET_NAMES[@]}"; do
-        [[ "$name" == "$needle" ]] && return 0
-    done
-    return 1
-}
-
-while IFS= read -r -d '' old; do
-    oldname=$(basename "$old")
-    [[ "$oldname" =~ $HASH_RE ]] || continue
-    if ! is_in_new_build "$oldname"; then
-        echo -e "  ${YELLOW}Removing stale asset $oldname${NC}"
-        REMOVED_FILES+=("src/main/resources/META-INF/resources/assets/$oldname")
-        rm -f "$old"
-    fi
-done < <(find "$ASSETS_DIR" -maxdepth 1 -type f -print0 2>/dev/null)
 
 # ─── Step 4: Copy new assets + update manage.html ──────────────────────────
-echo -e "\n${CYAN}[4/4] Deploying new assets...${NC}"
+echo -e "\n${CYAN}[4/5] Deploying new assets...${NC}"
 
 # Copy all files from dist/assets to destination
 cp -f "$DIST_ASSETS"/* "$ASSETS_DIR/" 2>/dev/null || true
@@ -196,14 +163,61 @@ if grep -q 'index-.*\.js\|index-.*\.css' "$INDEX_HTML" 2>/dev/null; then
         "$INDEX_HTML"
     echo -e "  ${GREEN}Updated index.html${NC}"
 fi
+# ─── Step 5: Remove assets the new build did not produce ─────────────────────
+#
+# Deliberately LAST. Running it before the copy meant a failed `cp` or `sed`
+# left the live HTML shells pointing at files this loop had already deleted —
+# a broken UI and no rollback, from a deploy that never completed. Cleaning
+# only after the new assets are in place and the shells reference them means
+# the worst case of an interrupted deploy is some extra files on disk.
+echo -e "\n${CYAN}[5/5] Removing assets the new build did not produce...${NC}"
+
+# Clean hashed assets that the new build did not produce.
+#
+# This is a SET DIFFERENCE against the new dist, not a per-prefix sweep. The
+# per-prefix version only deleted an old file when a same-prefixed new one
+# existed, so a chunk that vanished between builds — a page renamed, a component
+# removed, a lazy boundary moved — was never cleaned and silted up in the EDDI
+# repo forever. That was survivable when the build emitted a handful of chunks.
+# Route-level code splitting emits ~240, all content-hashed, so a stale set now
+# accumulates fast enough to matter.
+#
+# Only files matching Vite's `name-<8charhash>.ext` shape are considered, so
+# anything hand-placed in assets/ is left alone.
+HASH_RE='^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$'
+
+# Build the set of filenames the new build produced.
+NEW_ASSET_NAMES=()
+while IFS= read -r -d '' f; do
+    NEW_ASSET_NAMES+=("$(basename "$f")")
+done < <(find "$DIST_ASSETS" -maxdepth 1 -type f -print0)
+
+is_in_new_build() {
+    local needle="$1" name
+    for name in "${NEW_ASSET_NAMES[@]}"; do
+        [[ "$name" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
+while IFS= read -r -d '' old; do
+    oldname=$(basename "$old")
+    [[ "$oldname" =~ $HASH_RE ]] || continue
+    if ! is_in_new_build "$oldname"; then
+        echo -e "  ${YELLOW}Removing stale asset $oldname${NC}"
+        REMOVED_FILES+=("src/main/resources/META-INF/resources/assets/$oldname")
+        rm -f "$old"
+    fi
+done < <(find "$ASSETS_DIR" -maxdepth 1 -type f -print0 2>/dev/null)
+
 echo -e "\n${GREEN}[DONE] EDDI Manager deployed successfully!${NC}"
 echo "  JS:  /assets/$NEW_JS_NAME"
 echo -e "  CSS: /assets/$NEW_CSS_NAME\n"
 
-# ─── Step 5 (optional): Commit in EDDI repo ────────────────────────────────
+# ─── Optional: Commit in EDDI repo ─────────────────────────────────────────
 read -p "Commit these assets in the EDDI repo? [y/N] " answer
 if [[ "$answer" =~ ^[Yy]$ ]]; then
-    echo -e "\n${CYAN}[5/5] Committing in EDDI repo...${NC}"
+    echo -e "\n${CYAN}Committing in EDDI repo...${NC}"
 
     # Get the latest Manager commit hash for the message
     MANAGER_HASH=$(git -C "$SCRIPT_DIR" log -1 --format="%h" 2>/dev/null || echo "")

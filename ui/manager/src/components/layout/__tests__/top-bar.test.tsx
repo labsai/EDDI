@@ -170,6 +170,40 @@ describe("TopBar", () => {
     await waitFor(() => expect(select.value).toBe("de"));
   });
 
+  it("lets the LAST pick win when two language changes overlap", async () => {
+    // Locale chunks differ in size, so picking Thai then Spanish can complete
+    // Spanish-then-Thai and leave the user reading a language they already moved
+    // on from. The most recent request has to be the one that stands.
+    const i18nModule = await import("@/i18n/config");
+    const resolvers: Array<() => void> = [];
+    const spy = vi
+      .spyOn(i18nModule.default, "changeLanguage")
+      .mockImplementation(
+        (() =>
+          new Promise<never>((resolve) => {
+            resolvers.push(resolve as () => void);
+          })) as unknown as typeof i18nModule.default.changeLanguage,
+      );
+
+    renderWithProviders(<TopBar onMenuClick={() => {}} sidebarVisible={false} />);
+    const select = screen.getByTestId("language-selector") as HTMLSelectElement;
+
+    fireEvent.change(select, { target: { value: "th" } });
+    fireEvent.change(select, { target: { value: "es" } });
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+
+    // Finish the SECOND request first, then the first — the out-of-order case.
+    resolvers[1]?.();
+    resolvers[0]?.();
+
+    // The stale completion must re-assert the latest pick rather than stand.
+    await waitFor(() => {
+      const asked = spy.mock.calls.map((c) => c[0]);
+      expect(asked[asked.length - 1]).toBe("es");
+    });
+    spy.mockRestore();
+  });
+
   it("keeps the previous language and warns when a locale chunk fails to load", async () => {
     // A tab held open across a deploy asks for a hashed locale chunk that no
     // longer exists. i18next keeps the current language, so the UI stays usable —

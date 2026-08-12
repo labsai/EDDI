@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderPage, userEvent } from "@/test/test-utils";
 import { AgentStudioPage } from "@/pages/agent-studio";
+import { server } from "@/test/mocks/server";
+import { http, HttpResponse } from "msw";
 
 function renderStudio(agentId = "agent1") {
   return renderPage(
@@ -133,5 +135,43 @@ describe("Agent Studio Page", () => {
       );
       expect(hasAriaCurrent).toBe(true);
     });
+  });
+
+  // ─── Prerequisite query failures ────────────────────────────────────────
+
+  // Each studio query is gated on the previous one succeeding, so a failed
+  // prerequisite leaves the next query *disabled* rather than errored — it
+  // never reports isLoading or isError. These pin that every failure still
+  // reaches an error state instead of the chrome with an empty pipeline.
+
+  it("shows an error state when the agent descriptor fetch fails", async () => {
+    server.use(
+      http.get("*/agentstore/agents/descriptors", () => {
+        return HttpResponse.json({ message: "boom" }, { status: 500 });
+      })
+    );
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("error-state")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("agent-studio")).not.toBeInTheDocument();
+  });
+
+  it("shows an error state when the workflow fetch fails", async () => {
+    server.use(
+      http.get("*/workflowstore/workflows/:id", () => {
+        return HttpResponse.json({ message: "boom" }, { status: 500 });
+      })
+    );
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("error-state")).toBeInTheDocument();
+    });
+    // An empty pipeline would otherwise read as "this agent has no workflow".
+    expect(screen.queryByTestId("agent-studio")).not.toBeInTheDocument();
   });
 });

@@ -143,6 +143,16 @@ describe("i18n translation debt", () => {
     for (const [code, keys] of Object.entries(DELIBERATELY_IDENTICAL)) {
       const flat = flatten(LOCALES[code]!);
       for (const key of keys) {
+        // Assert both sides EXIST before comparing. `toBe` alone passes when the
+        // key has been deleted from both files — `undefined === undefined` — so a
+        // renamed or removed key would keep its exemption forever while naming
+        // nothing.
+        expect(typeof enFlat[key], `${key} is exempt but absent from en.json`).toBe(
+          "string",
+        );
+        expect(typeof flat[key], `${code}.${key} is exempt but absent from ${code}.json`).toBe(
+          "string",
+        );
         expect(flat[key], `${code}.${key} is exempt but no longer matches English`).toBe(
           enFlat[key],
         );

@@ -254,8 +254,10 @@ what it finds. Off by default. Worth knowing before touching it:
 
 #### 6. Route-level code splitting
 
-Every page in `app.tsx` is loaded through `lazyPage()` (`src/lib/lazy-page.ts`);
-the layouts, the landing page and the command palette are deliberately eager.
+Route pages in `app.tsx` load through `lazyPage()` (`src/lib/lazy-page.ts`) —
+with three deliberate exceptions that stay eager: the two layouts, the landing
+page (where `/` redirects, so it is on the critical path) and the command palette
+(it binds a global hotkey and must exist before the user presses it).
 Two consequences worth knowing:
 
 - **Add a route → use `lazyPage`.** A static page import puts that page back in

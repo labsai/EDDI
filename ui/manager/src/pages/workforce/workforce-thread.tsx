@@ -890,10 +890,11 @@ function WorkforceThread() {
                 ? "bg-primary/10 text-primary"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
             )}
-            aria-label={t(
-              "Workforce.chat.toggleDetails",
-              showDetails ? "Hide agent details" : "Show agent details"
-            )}
+            aria-label={
+              showDetails
+                ? t("Workforce.chat.hideAgentDetails", "Hide agent details")
+                : t("Workforce.chat.showAgentDetails", "Show agent details")
+            }
             aria-expanded={showDetails}
           >
             {showDetails ? (
