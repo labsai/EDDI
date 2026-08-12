@@ -71,6 +71,24 @@ class CspPolicyTest {
         return "";
     }
 
+    /**
+     * Whether a directive lists exactly this source.
+     * <p>
+     * Sources are whitespace-delimited, and equality is the only safe test on the
+     * permissive side: {@code contains} would also accept
+     * {@code https://api.github.com.evil}, a different host entirely that permits
+     * nothing we want. The prohibitive assertions below stay substring checks on
+     * purpose — there, matching more broadly is the stricter reading.
+     */
+    private static boolean allows(String directive, String source) {
+        for (var token : directive.trim().split("\\s+")) {
+            if (token.equals(source)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Test
     @DisplayName("the application policy may reach the GitHub API")
     void applicationConnectSrcAllowsGitHubApi() throws Exception {
@@ -78,7 +96,7 @@ class CspPolicyTest {
         assertNotNull(csp, DEFAULT_HEADER + " must be configured");
 
         var connectSrc = directive(csp, "connect-src");
-        assertTrue(connectSrc.contains(GITHUB_API),
+        assertTrue(allows(connectSrc, GITHUB_API),
                 "The Manager's update check reads api.github.com from the browser; without this "
                         + "source the browser refuses it before it leaves the page: " + connectSrc);
     }

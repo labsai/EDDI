@@ -7,7 +7,7 @@
 
 
 
-## 🔓 fix(csp): the Manager's update check was blocked by our own CSP, in every deployment (2026-08-12)
+## 🔓 fix(csp): the Manager's update check was blocked by our own CSP, in every production deployment (2026-08-12)
 
 **Repo:** EDDI (`fix/csp-allow-github-release-check`)
 
@@ -33,8 +33,9 @@ calls GitHub, and widening it would be pure surface.
 Both halves are now pinned, in two places for one reason. `InfrastructureIT` asserts them over HTTP
 — the real proof — and previously checked only `script-src`, so it would have stayed green if the
 source were dropped again or pasted into the Swagger policy. But its Swagger case is guarded by an
-`Assumptions.assumeFalse` and skips whenever the profile does not serve Swagger UI, which is every
-integration run today (11 run, 1 skipped) — so the half that says *do not widen this one* was
+`Assumptions.assumeFalse` and skips whenever the profile does not serve Swagger UI, which as of
+2026-08-12 is every integration run (11 run, 1 skipped) — so the half that says *do not widen this
+one* was
 asserted nowhere that executes. `CspPolicyTest` therefore reads the two configured headers straight
 from `application.properties`, with no container and no assumption: the application policy must
 carry the source, the Swagger policy must not, and neither may reach it through `default-src` or

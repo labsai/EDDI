@@ -141,7 +141,7 @@ public class InfrastructureIT {
         // the rejection is indistinguishable from an unreachable host — so tightening
         // this back kills the feature quietly rather than loudly.
         var connectSrc = extractDirective(csp, "connect-src");
-        Assertions.assertTrue(connectSrc.contains("https://api.github.com"),
+        Assertions.assertTrue(allowsSource(connectSrc, "https://api.github.com"),
                 "Non-Swagger connect-src must allow the Manager's release check: " + connectSrc);
     }
 
@@ -158,6 +158,22 @@ public class InfrastructureIT {
             }
         }
         return "";
+    }
+
+    /**
+     * Whether a CSP directive lists exactly this source. Sources are
+     * whitespace-delimited, and equality is the only safe test on the permissive
+     * side: a substring match would also accept https://api.github.com.evil, which
+     * is a different host permitting nothing we want. The prohibitive assertions
+     * stay substring checks, where matching more broadly is stricter.
+     */
+    private static boolean allowsSource(String directive, String source) {
+        for (var token : directive.trim().split("\\s+")) {
+            if (token.equals(source)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ==================== Coordinator Admin ====================
