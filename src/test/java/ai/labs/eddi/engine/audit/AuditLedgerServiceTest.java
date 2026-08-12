@@ -287,12 +287,57 @@ class AuditLedgerServiceTest {
      * say so.
      */
     @Test
-    @DisplayName("sequence eviction — pinned undelivered conversations cannot exhaust the table")
+    @DisplayName("sequence eviction — pinned undelivered conversations do not block reclamation")
     void undeliveredPinCannotExhaustTheTable() {
-        assertTrue(AuditLedgerService.MAX_TRACKED_UNDELIVERED < AuditLedgerService.MAX_TRACKED_CONVERSATIONS,
-                "every conversation in the undelivered table is pinned in the sequence table, so the undelivered "
-                        + "cap must stay strictly below the conversation cap or a store outage can strand every "
-                        + "later conversation on UNSEQUENCED until restart");
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation(anyString())).thenReturn(0L);
+        service = createService(true, null);
+
+        // A store outage dead-letters this conversation, so position 0 is
+        // consumed but never persisted. Its counter is pinned from here on: the
+        // store count can no longer tell us where the chain resumes.
+        doThrow(new RuntimeException("db error")).when(auditStore).appendBatch(anyList());
+        service.submit(entry("pinned-1", "pinned", "agent1"));
+        service.flush();
+        service.flush();
+        service.flush(); // dead-lettered
+        assertEquals(Set.of(0L), service.undeliveredSequences("pinned"),
+                "precondition: the outage left an unattributed position for this conversation");
+
+        // Store recovers. Fill the table with conversations that DO persist.
+        doAnswer(invocation -> null).when(auditStore).appendBatch(anyList());
+        for (int i = 0; i < AuditLedgerService.MAX_TRACKED_CONVERSATIONS + 5; i++) {
+            service.submit(entry("fill-" + i, "filler-" + i, "agent1"));
+        }
+        service.flush();
+
+        // The pinned conversation is retained while the persisted ones are
+        // reclaimed, so a new conversation still gets a real chain position
+        // rather than being stranded on UNSEQUENCED.
+        service.submit(entry("fresh-1", "fresh", "agent1"));
+        service.flush();
+
+        var persisted = ArgumentCaptor.forClass(List.class);
+        verify(auditStore, atLeastOnce()).appendBatch(persisted.capture());
+        @SuppressWarnings("unchecked")
+        var fresh = ((List<AuditEntry>) persisted.getValue()).stream()
+                .filter(e -> "fresh".equals(e.conversationId()))
+                .findFirst().orElseThrow();
+        assertNotEquals(AuditEntry.UNSEQUENCED, fresh.sequence(),
+                "a pinned conversation must not cost later conversations their chain position");
+        assertEquals(0L, fresh.sequence());
+
+        // And the pin did its job: the dead-lettered position is not handed out
+        // a second time.
+        service.submit(entry("pinned-2", "pinned", "agent1"));
+        service.flush();
+        verify(auditStore, atLeastOnce()).appendBatch(persisted.capture());
+        @SuppressWarnings("unchecked")
+        var pinnedSecond = ((List<AuditEntry>) persisted.getValue()).stream()
+                .filter(e -> "pinned".equals(e.conversationId()))
+                .findFirst().orElseThrow();
+        assertEquals(1L, pinnedSecond.sequence(),
+                "the counter survived, so the chain resumes past the dead-lettered 0 rather than reusing it");
     }
 
     @Test

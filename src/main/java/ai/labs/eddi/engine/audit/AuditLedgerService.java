@@ -379,9 +379,11 @@ public class AuditLedgerService {
      * {@link #undeliveredTracked} counts <em>sequences</em>, so at most
      * {@link #MAX_TRACKED_UNDELIVERED} conversations can be pinned (one sequence
      * each, the worst case) out of a {@link #MAX_TRACKED_CONVERSATIONS} table —
-     * leaving 80% of it evictable. {@code undeliveredPinCannotExhaustTheTable} pins
-     * that headroom, so raising one cap past the other fails the build rather than
-     * silently stranding new conversations on {@code UNSEQUENCED}.
+     * leaving 80% of it evictable. {@code undeliveredPinCannotExhaustTheTable}
+     * exercises that end to end: a dead-lettered conversation stays pinned while
+     * the persisted ones around it are reclaimed, a later conversation still
+     * receives a real position rather than {@code UNSEQUENCED}, and the pinned
+     * chain resumes past its dead-lettered position instead of reusing it.
      */
     private void evictSequenceCountersIfFull(String conversationId) {
         // Fast path: nothing to do until the table is full, and a conversation
