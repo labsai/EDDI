@@ -8,8 +8,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -450,9 +456,9 @@ class SharedTaskListTest {
 
         // Concurrently assign + start + complete from multiple threads
         var tasks = list.all();
-        var futures = new java.util.ArrayList<java.util.concurrent.CompletableFuture<Void>>();
+        var futures = new ArrayList<CompletableFuture<Void>>();
         for (var task : tasks) {
-            futures.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+            futures.add(CompletableFuture.runAsync(() -> {
                 try {
                     list.assignTask(task.id(), "agent-" + task.priority(), "Agent " + task.priority());
                     list.startTask(task.id());
@@ -463,8 +469,8 @@ class SharedTaskListTest {
             }));
         }
 
-        java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).get(10,
-                java.util.concurrent.TimeUnit.SECONDS);
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get(10,
+                TimeUnit.SECONDS);
 
         // No corruption: all tasks should still be accessible
         assertEquals(100, list.size(), "All 100 tasks should survive concurrent access");
@@ -663,8 +669,8 @@ class SharedTaskListTest {
 
         // If reentrant locking fails, this would deadlock.
         // Use a timeout to detect deadlock rather than hanging forever.
-        var future = java.util.concurrent.CompletableFuture.supplyAsync(() -> list.findExecutableTasks());
-        var result = future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        var future = CompletableFuture.supplyAsync(() -> list.findExecutableTasks());
+        var result = future.get(5, TimeUnit.SECONDS);
 
         // task1 has no deps → executable; task2 depends on uncompleted task1 → not
         // executable
@@ -687,8 +693,8 @@ class SharedTaskListTest {
                 List.of(task1.id()), null, null, false, 0, Instant.now(), null);
         list.addTask(task2);
 
-        var future = java.util.concurrent.CompletableFuture.supplyAsync(() -> list.detectCycles());
-        var result = future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        var future = CompletableFuture.supplyAsync(() -> list.detectCycles());
+        var result = future.get(5, TimeUnit.SECONDS);
         assertTrue(result.isEmpty(), "No cycles expected");
     }
 
@@ -699,12 +705,12 @@ class SharedTaskListTest {
     @Test
     void parallelLifecycleTransitions_noDeadlockOrCorruption() throws Exception {
         int taskCount = 50;
-        var latch = new java.util.concurrent.CountDownLatch(1);
-        var errors = new java.util.concurrent.CopyOnWriteArrayList<Throwable>();
-        var threads = new java.util.ArrayList<Thread>();
+        var latch = new CountDownLatch(1);
+        var errors = new CopyOnWriteArrayList<Throwable>();
+        var threads = new ArrayList<Thread>();
 
         // Pre-populate tasks
-        var taskIds = new java.util.ArrayList<String>();
+        var taskIds = new ArrayList<String>();
         for (int i = 0; i < taskCount; i++) {
             var task = list.addTask(new SharedTaskList.TaskItem("Task " + i, "desc " + i, i));
             taskIds.add(task.id());
@@ -749,11 +755,11 @@ class SharedTaskListTest {
      */
     @Test
     void concurrentReadWriteInterleaving_noDeadlock() throws Exception {
-        var latch = new java.util.concurrent.CountDownLatch(1);
-        var errors = new java.util.concurrent.CopyOnWriteArrayList<Throwable>();
+        var latch = new CountDownLatch(1);
+        var errors = new CopyOnWriteArrayList<Throwable>();
         int writerCount = 20;
         int readerCount = 20;
-        var threads = new java.util.ArrayList<Thread>();
+        var threads = new ArrayList<Thread>();
 
         // Writers: add tasks and transition them
         for (int i = 0; i < writerCount; i++) {
@@ -806,10 +812,10 @@ class SharedTaskListTest {
     @Test
     void raceCondition_doubleAssign_exactlyOneWins() throws Exception {
         var task = list.addTask(new SharedTaskList.TaskItem("Contested Task", "desc", 0));
-        var latch = new java.util.concurrent.CountDownLatch(1);
-        var successes = new java.util.concurrent.atomic.AtomicInteger(0);
-        var expectedFailures = new java.util.concurrent.atomic.AtomicInteger(0);
-        var unexpectedErrors = new java.util.concurrent.CopyOnWriteArrayList<Throwable>();
+        var latch = new CountDownLatch(1);
+        var successes = new AtomicInteger(0);
+        var expectedFailures = new AtomicInteger(0);
+        var unexpectedErrors = new CopyOnWriteArrayList<Throwable>();
 
         var t1 = Thread.ofVirtual().start(() -> {
             try {
@@ -875,7 +881,7 @@ class SharedTaskListTest {
     @Test
     void realisticContention_lifecycleWithDependencyQueries() throws Exception {
         // Create a realistic task graph: 5 root tasks, 5 dependent tasks
-        var rootIds = new java.util.ArrayList<String>();
+        var rootIds = new ArrayList<String>();
         for (int i = 0; i < 5; i++) {
             var task = list.addTask(new SharedTaskList.TaskItem("Root " + i, "desc", 0));
             rootIds.add(task.id());
@@ -888,9 +894,9 @@ class SharedTaskListTest {
             list.addTask(depTask);
         }
 
-        var latch = new java.util.concurrent.CountDownLatch(1);
-        var errors = new java.util.concurrent.CopyOnWriteArrayList<Throwable>();
-        var threads = new java.util.ArrayList<Thread>();
+        var latch = new CountDownLatch(1);
+        var errors = new CopyOnWriteArrayList<Throwable>();
+        var threads = new ArrayList<Thread>();
 
         // 5 threads drive root tasks through lifecycle
         for (String rootId : rootIds) {

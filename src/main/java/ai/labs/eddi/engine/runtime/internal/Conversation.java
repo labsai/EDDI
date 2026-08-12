@@ -27,6 +27,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.ArrayList;
 
 import static ai.labs.eddi.engine.memory.ContextUtilities.storeContextLanguageInLongTermMemory;
 import static ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -1070,7 +1071,7 @@ public class Conversation implements IConversation {
             return;
         List<String> actions = actionData.getResult();
         if (actions != null && actions.contains(IConversation.PAUSE_CONVERSATION)) {
-            List<String> cleaned = new java.util.ArrayList<>(actions);
+            List<String> cleaned = new ArrayList<>(actions);
             cleaned.remove(IConversation.PAUSE_CONVERSATION);
             IData<List<String>> replacement = new Data<>(ACTIONS.key(), cleaned);
             step.storeData(replacement);

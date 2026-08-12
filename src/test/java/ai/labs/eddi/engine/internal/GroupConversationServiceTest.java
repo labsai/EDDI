@@ -26,6 +26,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -45,6 +46,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -836,10 +838,10 @@ class GroupConversationServiceTest {
 
     /** Reflectively access the private per-conversation concurrency guard set. */
     @SuppressWarnings("unchecked")
-    private java.util.Set<String> operationsInProgress() throws Exception {
+    private Set<String> operationsInProgress() throws Exception {
         var field = GroupConversationService.class.getDeclaredField("operationsInProgress");
         field.setAccessible(true);
-        return (java.util.Set<String>) field.get(service);
+        return (Set<String>) field.get(service);
     }
 
     @Nested
@@ -901,7 +903,7 @@ class GroupConversationServiceTest {
 
             // Specific subtype so REST can map an unknown member to 404 (not a 409
             // conflict).
-            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupMemberNotFoundException.class,
+            assertThrows(IGroupConversationService.GroupMemberNotFoundException.class,
                     () -> service.followUpWithMember("gc-1", "ghost", "hello"));
             verify(conversationService, never())
                     .say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
@@ -918,7 +920,7 @@ class GroupConversationServiceTest {
             doThrow(new RuntimeException("provider 500")).when(conversationService)
                     .say(any(), eq("agentA"), any(), any(), any(), any(), any(), anyBoolean(), any());
 
-            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException.class,
+            assertThrows(IGroupConversationService.GroupExecutionException.class,
                     () -> service.followUpWithMember("gc-1", "agentA", "hello"));
         }
 
@@ -1007,7 +1009,7 @@ class GroupConversationServiceTest {
             // must NOT be able to reach "unanimous agreement" on it.
             inProgress.negotiationState().addProposal(new GroupConversation.Proposal(
                     "p1", "a1", 0, "round 1 terms", GroupConversation.PROPOSAL_OPEN,
-                    java.util.List.of("a1"), java.util.Map.of("a1", 3)));
+                    List.of("a1"), Map.of("a1", 3)));
             when(conversationStore.read("gc-1")).thenReturn(gc, inProgress);
             when(conversationStore.compareAndSetState("gc-1",
                     GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);

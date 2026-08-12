@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.util.*;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -62,7 +63,7 @@ class McpCallsTaskTest {
         // tests keep asserting on the raw tool result.
         lenient().when(toolExecutionService.executeToolWrapped(anyString(), any(), any(), any(), any(),
                 anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
-                .thenAnswer(inv -> ((java.util.function.Supplier<String>) inv.getArgument(4)).get());
+                .thenAnswer(inv -> ((Supplier<String>) inv.getArgument(4)).get());
         task = new McpCallsTask(resourceClientLibrary, memoryItemConverter,
                 jsonSerialization, mcpToolProviderManager, prePostUtils, toolExecutionService);
     }

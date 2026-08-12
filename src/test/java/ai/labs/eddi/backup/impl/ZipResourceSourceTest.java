@@ -9,6 +9,7 @@ import ai.labs.eddi.backup.IResourceSource.SnippetSourceData;
 import ai.labs.eddi.backup.IResourceSource.WorkflowSourceData;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import org.junit.jupiter.api.*;
@@ -141,11 +142,11 @@ class ZipResourceSourceTest {
             Files.writeString(snippetsDir.resolve("snp1.snippet.json"),
                     "{\"name\":\"greeting\",\"content\":\"Hi!\"}", StandardCharsets.UTF_8);
 
-            var snippet = new ai.labs.eddi.configs.snippets.model.PromptSnippet();
+            var snippet = new PromptSnippet();
             snippet.setName("greeting");
             snippet.setContent("Hi!");
             when(jsonSerialization.deserialize(anyString(),
-                    eq(ai.labs.eddi.configs.snippets.model.PromptSnippet.class)))
+                    eq(PromptSnippet.class)))
                     .thenReturn(snippet);
 
             try (var source = new ZipResourceSource(tempDir, jsonSerialization)) {
@@ -168,10 +169,10 @@ class ZipResourceSourceTest {
             Files.writeString(snippetsDir.resolve("snp2.snippet.json"),
                     "{\"name\":\"persona\"}", StandardCharsets.UTF_8);
 
-            var snippet = new ai.labs.eddi.configs.snippets.model.PromptSnippet();
+            var snippet = new PromptSnippet();
             snippet.setName("persona");
             when(jsonSerialization.deserialize(anyString(),
-                    eq(ai.labs.eddi.configs.snippets.model.PromptSnippet.class)))
+                    eq(PromptSnippet.class)))
                     .thenReturn(snippet);
 
             try (var source = new ZipResourceSource(tempDir, jsonSerialization)) {

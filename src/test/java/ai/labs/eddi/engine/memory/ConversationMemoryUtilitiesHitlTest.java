@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -227,12 +229,12 @@ class ConversationMemoryUtilitiesHitlTest {
             batch.setPauseEpoch("epoch-1");
             batch.setLlmTaskId("task-a");
             batch.setChatTranscriptJson(CANARY_TRANSCRIPT);
-            batch.setTraceSoFar(List.of(java.util.Map.of("args", CANARY_ARGS)));
+            batch.setTraceSoFar(List.of(Map.of("args", CANARY_ARGS)));
             batch.setFingerprint("sha256-" + CANARY_SECRET);
             batch.setCalls(List.of(call));
             // Fix #1: the batch carries the effective tool-approval config — it must NOT
             // enter the fix-#4 names-only projection (config, not user data).
-            var effective = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var effective = new ToolApprovalsConfig();
             effective.setPendingMessage("Awaiting review for {toolNames}");
             batch.setEffectiveToolApprovals(effective);
             snapshot.setHitlPendingToolCalls(batch);

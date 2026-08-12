@@ -32,6 +32,7 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -384,7 +385,7 @@ class RestAgentAdministrationExtendedTest {
 
             assertEquals(200, response.getStatus());
             @SuppressWarnings("unchecked")
-            var body = (java.util.Map<String, Object>) response.getEntity();
+            var body = (Map<String, Object>) response.getEntity();
             assertEquals("Deployment was interrupted", body.get("error"));
 
             // Verify thread interrupt flag was set

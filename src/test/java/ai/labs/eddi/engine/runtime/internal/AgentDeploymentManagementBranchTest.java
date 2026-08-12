@@ -31,6 +31,7 @@ import org.mockito.Mock;
 
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
@@ -75,7 +76,7 @@ class AgentDeploymentManagementBranchTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        var scheduledExecutorService = mock(java.util.concurrent.ScheduledExecutorService.class);
+        var scheduledExecutorService = mock(ScheduledExecutorService.class);
         when(runtime.getScheduledExecutorService()).thenReturn(scheduledExecutorService);
 
         management = new AgentDeploymentManagement(

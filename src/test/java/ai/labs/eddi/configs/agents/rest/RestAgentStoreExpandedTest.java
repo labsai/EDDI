@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
@@ -271,7 +272,7 @@ class RestAgentStoreExpandedTest {
             config.setWorkflows(new ArrayList<>(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1"))));
             var hitl = new AgentConfiguration.HitlConfig();
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.delete:*"));
             toolApprovals.setExempt(List.of("http.get:*"));
             hitl.setToolApprovals(toolApprovals);

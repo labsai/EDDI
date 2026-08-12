@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.lifecycle.internal;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
@@ -29,10 +30,12 @@ import io.opentelemetry.context.Scope;
 import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.Counter;
+import java.time.Duration;
 
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeoutException;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_CASCADE_MODEL;
@@ -369,7 +372,7 @@ public class LifecycleManager implements ILifecycleManager {
                 // and strict-write rollback — the partially-executed step data (incl. the
                 // pending batch just written to memory) must survive into the pause
                 // snapshot, exactly like the rule-based PAUSE_CONVERSATION path.
-                if (e instanceof ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException tare) {
+                if (e instanceof ToolApprovalRequiredException tare) {
                     taskSpan.setAttribute("eddi.hitl.pause", "tool_call");
                     throw new ConversationPauseException(workflowId.getId(), absoluteIndex,
                             tare.getPauseReason(), ConversationPauseException.PauseOrigin.TOOL_CALL);
@@ -462,7 +465,7 @@ public class LifecycleManager implements ILifecycleManager {
                         .tag("task.type", taskType)
                         .description("Pipeline task execution duration")
                         .publishPercentileHistogram()
-                        .register(Metrics.globalRegistry)).record(java.time.Duration.ofMillis(durationMs));
+                        .register(Metrics.globalRegistry)).record(Duration.ofMillis(durationMs));
 
                 taskSpan.end();
             }
@@ -978,7 +981,7 @@ public class LifecycleManager implements ILifecycleManager {
     static String classifyError(Throwable e) {
         for (Throwable current = e; current != null; current = current.getCause()) {
             if (current instanceof java.net.SocketTimeoutException
-                    || current instanceof java.util.concurrent.TimeoutException) {
+                    || current instanceof TimeoutException) {
                 return "timeout";
             }
             if (current instanceof java.net.ConnectException

@@ -5,13 +5,16 @@
 package ai.labs.eddi.modules.nlp.extensions.dictionaries;
 
 import ai.labs.eddi.modules.nlp.expressions.Expression;
+import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
+import java.util.LinkedList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -412,8 +415,8 @@ class NlpDictionariesTest {
         void lookupIfKnownTrueChecksRegex() {
             var dict = new RegularDictionary();
             dict.setLookupIfKnown(true);
-            dict.addWord("123", new ai.labs.eddi.modules.nlp.expressions.Expressions(new Expression("num")), 0);
-            dict.addRegex("\\d+", new ai.labs.eddi.modules.nlp.expressions.Expressions(new Expression("digit")));
+            dict.addWord("123", new Expressions(new Expression("num")), 0);
+            dict.addRegex("\\d+", new Expressions(new Expression("digit")));
 
             // With lookupIfKnown=true, BOTH the word match AND regex match should be in
             // results
@@ -425,7 +428,7 @@ class NlpDictionariesTest {
         @DisplayName("lookupTerm phrase word exact match vs case-insensitive deduplication")
         void phraseWordDeduplication() {
             var dict = new RegularDictionary();
-            dict.addPhrase("Hello World", new ai.labs.eddi.modules.nlp.expressions.Expressions(new Expression("greeting")));
+            dict.addPhrase("Hello World", new Expressions(new Expression("greeting")));
 
             // "Hello" is an exact match (case-sensitive) of one of the phrase words
             var result = dict.lookupTerm("Hello");
@@ -438,7 +441,7 @@ class NlpDictionariesTest {
         @DisplayName("lookupTerm phrase word case-insensitive match (not exact)")
         void phraseWordCaseInsensitive() {
             var dict = new RegularDictionary();
-            dict.addPhrase("Hello World", new ai.labs.eddi.modules.nlp.expressions.Expressions(new Expression("greeting")));
+            dict.addPhrase("Hello World", new Expressions(new Expression("greeting")));
 
             // "hello" is a case-insensitive match of "Hello" in the phrase
             var result = dict.lookupTerm("hello");
@@ -449,7 +452,7 @@ class NlpDictionariesTest {
         @DisplayName("setWords replaces word map")
         void setWords() {
             var dict = new RegularDictionary();
-            var words = new java.util.TreeMap<String, IDictionary.IWord>(String.CASE_INSENSITIVE_ORDER);
+            var words = new TreeMap<String, IDictionary.IWord>(String.CASE_INSENSITIVE_ORDER);
             dict.setWords(words);
             assertTrue(dict.getWords().isEmpty());
         }
@@ -458,7 +461,7 @@ class NlpDictionariesTest {
         @DisplayName("setPhrases replaces phrase list")
         void setPhrases() {
             var dict = new RegularDictionary();
-            dict.setPhrases(new java.util.LinkedList<>());
+            dict.setPhrases(new LinkedList<>());
             assertTrue(dict.getPhrases().isEmpty());
         }
 
@@ -466,7 +469,7 @@ class NlpDictionariesTest {
         @DisplayName("setRegExs replaces regex list")
         void setRegExs() {
             var dict = new RegularDictionary();
-            dict.setRegExs(new java.util.LinkedList<>());
+            dict.setRegExs(new LinkedList<>());
             assertTrue(dict.getRegExs().isEmpty());
         }
     }

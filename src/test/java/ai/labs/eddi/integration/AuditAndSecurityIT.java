@@ -7,6 +7,7 @@ package ai.labs.eddi.integration;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
+import java.util.List;
 import org.junit.jupiter.api.*;
 
 import static io.restassured.RestAssured.given;
@@ -45,7 +46,7 @@ public class AuditAndSecurityIT extends BaseIntegrationIT {
                 .then().assertThat()
                 .statusCode(200)
                 .contentType(ContentType.JSON)
-                .body("$", instanceOf(java.util.List.class));
+                .body("$", instanceOf(List.class));
     }
 
     @Test

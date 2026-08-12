@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -133,7 +134,7 @@ class RestLogAdminTest {
                     .build())
                     .thenReturn(event);
             when(eventSink.send(any(jakarta.ws.rs.sse.OutboundSseEvent.class)))
-                    .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
+                    .thenReturn(CompletableFuture.completedFuture(null));
             when(eventSink.isClosed()).thenReturn(true); // close immediately to prevent cleanup thread from running long
 
             restLogAdmin.streamLogs("agent-1", null, "INFO", eventSink, sse);

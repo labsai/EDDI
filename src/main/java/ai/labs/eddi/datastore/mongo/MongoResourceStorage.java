@@ -23,7 +23,9 @@ import org.bson.types.ObjectId;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
@@ -372,9 +374,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public List<IResourceStore.IResourceId> findResourceIdsContaining(String jsonPath, String value) {
-        Document filter = new Document(jsonPath, new Document("$in", java.util.Collections.singletonList(value)));
+        Document filter = new Document(jsonPath, new Document("$in", Collections.singletonList(value)));
 
-        List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
+        List<IResourceStore.IResourceId> results = new LinkedList<>();
         currentCollection.find(filter).forEach(doc -> {
             String docId = doc.getObjectId(ID_FIELD).toString();
             Integer version = doc.getInteger(VERSION_FIELD);
@@ -385,9 +387,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public List<IResourceStore.IResourceId> findHistoryResourceIdsContaining(String jsonPath, String value) {
-        Document filter = new Document(jsonPath, new Document("$in", java.util.Collections.singletonList(value)));
+        Document filter = new Document(jsonPath, new Document("$in", Collections.singletonList(value)));
 
-        List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
+        List<IResourceStore.IResourceId> results = new LinkedList<>();
         historyCollection.find(filter).forEach(doc -> {
             Object idObject = doc.get(ID_FIELD);
             if (idObject instanceof Document idDoc) {
@@ -402,9 +404,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public List<IResourceStore.IResourceId> findResources(IResourceFilter.QueryFilters[] allQueryFilters, String sortField, int skip, int limit) {
 
-        List<Bson> connectedFilters = new java.util.ArrayList<>();
+        List<Bson> connectedFilters = new ArrayList<>();
         for (IResourceFilter.QueryFilters queryFilters : allQueryFilters) {
-            List<Bson> filters = new java.util.ArrayList<>();
+            List<Bson> filters = new ArrayList<>();
             for (IResourceFilter.QueryFilter queryFilter : queryFilters.getQueryFilters()) {
                 if (queryFilter.getFilter() instanceof String) {
                     filters.add(Filters.regex(queryFilter.getField(), queryFilter.getFilter().toString()));
@@ -425,7 +427,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
         var iterable = currentCollection.find(query.toBsonDocument()).sort(sort).limit(effectiveLimit).skip(skip > 0 ? skip : 0);
 
-        List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
+        List<IResourceStore.IResourceId> results = new LinkedList<>();
         iterable.forEach(doc -> {
             String docId = doc.get(ID_FIELD).toString();
             Object versionField = doc.get(VERSION_FIELD);

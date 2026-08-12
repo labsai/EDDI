@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.admin.rest;
 
 import ai.labs.eddi.configs.admin.model.OrphanReport;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
@@ -91,7 +92,7 @@ class RestOrphanAdminTest {
             agentDesc.setResource(URI.create("eddi://ai.labs.agent/agents/agent1?version=1"));
 
             // Agent config references a workflow
-            var agentConfig = new ai.labs.eddi.configs.agents.model.AgentConfiguration();
+            var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflows/wf1?version=1")));
             when(agentStore.read("agent1", 1)).thenReturn(agentConfig);
 

@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.concurrent.Callable;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -322,7 +323,7 @@ class NatsConversationCoordinatorTest {
 
         // Publish metrics should be recorded
         verify(publishCount).increment();
-        verify(publishDuration).record(any(java.time.Duration.class));
+        verify(publishDuration).record(any(Duration.class));
     }
 
     @Test
@@ -339,6 +340,6 @@ class NatsConversationCoordinatorTest {
         callbackCaptor.getValue().onComplete(null);
 
         verify(consumeCount).increment();
-        verify(consumeDuration).record(any(java.time.Duration.class));
+        verify(consumeDuration).record(any(Duration.class));
     }
 }

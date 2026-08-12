@@ -9,6 +9,8 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
@@ -247,7 +249,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             "hitlPauseType", "hitlPendingToolCalls.calls.toolName");
 
     @Override
-    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit) {
+    public List<PendingApprovalSummary> findPendingApprovalSummaries(int limit) {
         // Single bounded, projected query on the indexed state field — the
         // (potentially multi-MB) step/output data of paused conversations is
         // never deserialized, and there are no per-id point-reads (this listing
@@ -259,7 +261,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(String ownerUserId, int limit) {
+    public List<PendingApprovalSummary> findPendingApprovalSummaries(String ownerUserId, int limit) {
         // Owner filter INSIDE the query: the limit applies after the restriction,
         // so a user's inbox is complete even behind a large global backlog.
         return collectPendingSummaries(
@@ -270,11 +272,11 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                         .limit(limit));
     }
 
-    private List<ai.labs.eddi.engine.model.PendingApprovalSummary> collectPendingSummaries(
-                                                                                           com.mongodb.client.FindIterable<ConversationMemorySnapshot> snapshots) {
-        List<ai.labs.eddi.engine.model.PendingApprovalSummary> out = new ArrayList<>();
+    private List<PendingApprovalSummary> collectPendingSummaries(
+                                                                 com.mongodb.client.FindIterable<ConversationMemorySnapshot> snapshots) {
+        List<PendingApprovalSummary> out = new ArrayList<>();
         snapshots.forEach(snapshot -> {
-            var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
+            var summary = new PendingApprovalSummary(
                     snapshot.getConversationId(), snapshot.getAgentId(), snapshot.getUserId(),
                     snapshot.getHitlPausedAt(), snapshot.getHitlPauseReason(),
                     snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null);
@@ -282,7 +284,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             summary.setPauseType(snapshot.getHitlPauseType());
             if (snapshot.getHitlPendingToolCalls() != null && snapshot.getHitlPendingToolCalls().getCalls() != null) {
                 summary.setToolNames(snapshot.getHitlPendingToolCalls().getCalls().stream()
-                        .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
+                        .map(PendingToolCallBatch.PendingToolCall::getToolName)
                         .toList());
             }
             out.add(summary);

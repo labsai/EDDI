@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.mcp;
+import ai.labs.eddi.configs.groups.IGroupConversationStore;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
@@ -436,7 +437,7 @@ public class McpHitlTools {
             // (e.g. {"t1": 5}) would otherwise survive to resumeDiscussion and throw
             // a ClassCastException that surfaces as INTERNAL instead of the correct
             // BAD_REQUEST. Fail fast with a clear message; keys are always JSON strings.
-            taskApprovals = new java.util.LinkedHashMap<>();
+            taskApprovals = new LinkedHashMap<>();
             for (var entry : rawApprovals.entrySet()) {
                 if (!(entry.getValue() instanceof String value) || value.isBlank()) {
                     return errorJson("Invalid taskApprovals: each value must be a non-empty string "
@@ -464,7 +465,7 @@ public class McpHitlTools {
         } catch (IResourceStore.ResourceModifiedException e) {
             return errorJson("The group conversation was modified concurrently — reload and retry", "CONFLICT", null);
         } catch (ResourceNotFoundException
-                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+                | IGroupConversationStore.GroupConversationGoneException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
         } catch (IGroupConversationService.GroupDiscussionException e) {
             return errorJson("Group conversation is not awaiting approval — it may have been resolved, cancelled, "
@@ -510,7 +511,7 @@ public class McpHitlTools {
         } catch (IResourceStore.ResourceModifiedException e) {
             return errorJson("The group conversation was modified concurrently — reload and retry", "CONFLICT", null);
         } catch (ResourceNotFoundException
-                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+                | IGroupConversationStore.GroupConversationGoneException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
         } catch (IGroupConversationService.GroupDiscussionException e) {
             return errorJson("Group conversation is not awaiting human input — the turn may have been resolved, "
@@ -550,7 +551,7 @@ public class McpHitlTools {
         } catch (jakarta.ws.rs.NotFoundException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
         } catch (ResourceNotFoundException
-                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+                | IGroupConversationStore.GroupConversationGoneException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
         } catch (Exception e) {
             LOGGER.warn("MCP cancel_group_discussion failed", e);

@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.mongo.MongoUserMemoryStore;
 import ai.labs.eddi.configs.variables.IGlobalVariableStore;
 import ai.labs.eddi.configs.variables.mongo.GlobalVariableStore;
+import ai.labs.eddi.datastore.mongo.GridFsAttachmentStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory;
 import ai.labs.eddi.datastore.postgres.*;
 import ai.labs.eddi.engine.audit.AuditStore;
@@ -22,10 +23,13 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.MongoConversationCheckpointStore;
 import ai.labs.eddi.engine.runtime.DatabaseLogs;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.mongo.MongoScheduleStore;
+import ai.labs.eddi.engine.tenancy.MongoTenantQuotaStore;
+import ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore;
 import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.AgentTriggerStore;
@@ -400,9 +404,9 @@ class DataStoreProducersBranchTest {
     @DisplayName("conversationCheckpointStore — mongo")
     void conversationCheckpointStore_mongo() throws Exception {
         producers.datastoreType = "mongodb";
-        Instance<ai.labs.eddi.engine.memory.MongoConversationCheckpointStore> mongo = mock(Instance.class);
+        Instance<MongoConversationCheckpointStore> mongo = mock(Instance.class);
         Instance<PostgresConversationCheckpointStore> pg = mock(Instance.class);
-        var mongoStore = mock(ai.labs.eddi.engine.memory.MongoConversationCheckpointStore.class);
+        var mongoStore = mock(MongoConversationCheckpointStore.class);
         when(mongo.get()).thenReturn(mongoStore);
 
         IConversationCheckpointStore result = producers.conversationCheckpointStore(mongo, pg);
@@ -413,7 +417,7 @@ class DataStoreProducersBranchTest {
     @DisplayName("conversationCheckpointStore — postgres")
     void conversationCheckpointStore_postgres() throws Exception {
         producers.datastoreType = "postgres";
-        Instance<ai.labs.eddi.engine.memory.MongoConversationCheckpointStore> mongo = mock(Instance.class);
+        Instance<MongoConversationCheckpointStore> mongo = mock(Instance.class);
         Instance<PostgresConversationCheckpointStore> pg = mock(Instance.class);
         var pgStore = mock(PostgresConversationCheckpointStore.class);
         when(pg.get()).thenReturn(pgStore);
@@ -428,9 +432,9 @@ class DataStoreProducersBranchTest {
     @DisplayName("attachmentStore — mongo")
     void attachmentStore_mongo() throws Exception {
         producers.datastoreType = "mongodb";
-        Instance<ai.labs.eddi.datastore.mongo.GridFsAttachmentStore> mongo = mock(Instance.class);
+        Instance<GridFsAttachmentStore> mongo = mock(Instance.class);
         Instance<PostgresAttachmentStore> pg = mock(Instance.class);
-        var mongoStore = mock(ai.labs.eddi.datastore.mongo.GridFsAttachmentStore.class);
+        var mongoStore = mock(GridFsAttachmentStore.class);
         when(mongo.get()).thenReturn(mongoStore);
 
         IAttachmentStore result = producers.attachmentStore(mongo, pg);
@@ -441,7 +445,7 @@ class DataStoreProducersBranchTest {
     @DisplayName("attachmentStore — postgres")
     void attachmentStore_postgres() throws Exception {
         producers.datastoreType = "postgres";
-        Instance<ai.labs.eddi.datastore.mongo.GridFsAttachmentStore> mongo = mock(Instance.class);
+        Instance<GridFsAttachmentStore> mongo = mock(Instance.class);
         Instance<PostgresAttachmentStore> pg = mock(Instance.class);
         var pgStore = mock(PostgresAttachmentStore.class);
         when(pg.get()).thenReturn(pgStore);
@@ -456,9 +460,9 @@ class DataStoreProducersBranchTest {
     @DisplayName("tenantQuotaStore — mongo")
     void tenantQuotaStore_mongo() throws Exception {
         producers.datastoreType = "mongodb";
-        Instance<ai.labs.eddi.engine.tenancy.MongoTenantQuotaStore> mongo = mock(Instance.class);
-        Instance<ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore> pg = mock(Instance.class);
-        var mongoStore = mock(ai.labs.eddi.engine.tenancy.MongoTenantQuotaStore.class);
+        Instance<MongoTenantQuotaStore> mongo = mock(Instance.class);
+        Instance<PostgresTenantQuotaStore> pg = mock(Instance.class);
+        var mongoStore = mock(MongoTenantQuotaStore.class);
         when(mongo.get()).thenReturn(mongoStore);
 
         var result = producers.tenantQuotaStore(mongo, pg);
@@ -469,9 +473,9 @@ class DataStoreProducersBranchTest {
     @DisplayName("tenantQuotaStore — postgres")
     void tenantQuotaStore_postgres() throws Exception {
         producers.datastoreType = "postgres";
-        Instance<ai.labs.eddi.engine.tenancy.MongoTenantQuotaStore> mongo = mock(Instance.class);
-        Instance<ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore> pg = mock(Instance.class);
-        var pgStore = mock(ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore.class);
+        Instance<MongoTenantQuotaStore> mongo = mock(Instance.class);
+        Instance<PostgresTenantQuotaStore> pg = mock(Instance.class);
+        var pgStore = mock(PostgresTenantQuotaStore.class);
         when(pg.get()).thenReturn(pgStore);
 
         var result = producers.tenantQuotaStore(mongo, pg);

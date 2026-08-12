@@ -11,13 +11,32 @@ import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
+import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
+import ai.labs.eddi.configs.llm.IRestLlmStore;
+import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
+import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.output.IRestOutputStore;
+import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
+import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
+import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
+import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.rules.IRestRuleSetStore;
+import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -273,9 +292,9 @@ class UpgradeExecutorTest {
             when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
 
             // Mock LLM store via CDI (getStore now uses CDI.current().select())
-            var llmStore = Mockito.mock(ai.labs.eddi.configs.llm.IRestLlmStore.class);
+            var llmStore = Mockito.mock(IRestLlmStore.class);
             when(jsonSerialization.deserialize(eq("{\"model\":\"gpt-4\"}"), any()))
-                    .thenReturn(new ai.labs.eddi.modules.llm.model.LlmConfiguration(List.of()));
+                    .thenReturn(new LlmConfiguration(List.of()));
             when(llmStore.updateLlm(eq(extId), eq(2), any())).thenReturn(Response.ok().build());
 
             // Workflow config with workflowStep referencing old extension URI
@@ -299,9 +318,9 @@ class UpgradeExecutorTest {
             try (cdiMock) {
                 var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceLlm = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.llm.IRestLlmStore>) Mockito
+                var instanceLlm = (jakarta.enterprise.inject.Instance<IRestLlmStore>) Mockito
                         .mock(jakarta.enterprise.inject.Instance.class);
-                when(cdiInstance.select(ai.labs.eddi.configs.llm.IRestLlmStore.class)).thenReturn(instanceLlm);
+                when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
                 when(instanceLlm.get()).thenReturn(llmStore);
 
                 URI result = executor.executeUpgrade(source, "target-1", null, null);
@@ -338,9 +357,9 @@ class UpgradeExecutorTest {
             when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
 
             // Mock RAG direct store via CDI for create (dispatchCreateDirect uses CDI)
-            var ragDirectStore = Mockito.mock(ai.labs.eddi.configs.rag.IRagStore.class);
-            var ragRestStore = Mockito.mock(ai.labs.eddi.configs.rag.IRestRagStore.class);
-            var ragResourceId = new ai.labs.eddi.datastore.IResourceStore.IResourceId() {
+            var ragDirectStore = Mockito.mock(IRagStore.class);
+            var ragRestStore = Mockito.mock(IRestRagStore.class);
+            var ragResourceId = new IResourceStore.IResourceId() {
                 @Override
                 public String getId() {
                     return "newragid1234567890123456";
@@ -351,7 +370,7 @@ class UpgradeExecutorTest {
                 }
             };
             when(jsonSerialization.deserialize(eq("{\"vectorStore\":\"pgvector\"}"), any()))
-                    .thenReturn(new ai.labs.eddi.configs.rag.model.RagConfiguration());
+                    .thenReturn(new RagConfiguration());
             when(ragDirectStore.create(any())).thenReturn(ragResourceId);
 
             // Workflow config (empty steps — no URI rewriting needed for CREATE)
@@ -370,15 +389,15 @@ class UpgradeExecutorTest {
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
 
                 // CDI lookup for IRestRagStore (getStore in resolveExtensionOps)
-                var instanceRestRag = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.rag.IRestRagStore>) Mockito
+                var instanceRestRag = (jakarta.enterprise.inject.Instance<IRestRagStore>) Mockito
                         .mock(jakarta.enterprise.inject.Instance.class);
-                when(cdiInstance.select(ai.labs.eddi.configs.rag.IRestRagStore.class)).thenReturn(instanceRestRag);
+                when(cdiInstance.select(IRestRagStore.class)).thenReturn(instanceRestRag);
                 when(instanceRestRag.get()).thenReturn(ragRestStore);
 
                 // CDI lookup for IRagStore (dispatchCreateDirect)
-                var instanceRag = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.rag.IRagStore>) Mockito
+                var instanceRag = (jakarta.enterprise.inject.Instance<IRagStore>) Mockito
                         .mock(jakarta.enterprise.inject.Instance.class);
-                when(cdiInstance.select(ai.labs.eddi.configs.rag.IRagStore.class)).thenReturn(instanceRag);
+                when(cdiInstance.select(IRagStore.class)).thenReturn(instanceRag);
                 when(instanceRag.get()).thenReturn(ragDirectStore);
 
                 executor.executeUpgrade(source, "target-1", null, null);
@@ -411,8 +430,8 @@ class UpgradeExecutorTest {
 
             // Mock IWorkflowStore via CDI for direct create
             String newWfId = "newwfid123456789012";
-            var wfDirectStore = Mockito.mock(ai.labs.eddi.configs.workflows.IWorkflowStore.class);
-            var wfResourceId = new ai.labs.eddi.datastore.IResourceStore.IResourceId() {
+            var wfDirectStore = Mockito.mock(IWorkflowStore.class);
+            var wfResourceId = new IResourceStore.IResourceId() {
                 @Override
                 public String getId() {
                     return newWfId;
@@ -429,9 +448,9 @@ class UpgradeExecutorTest {
             try (cdiMock) {
                 var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceWf = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.workflows.IWorkflowStore>) Mockito
+                var instanceWf = (jakarta.enterprise.inject.Instance<IWorkflowStore>) Mockito
                         .mock(jakarta.enterprise.inject.Instance.class);
-                when(cdiInstance.select(ai.labs.eddi.configs.workflows.IWorkflowStore.class)).thenReturn(instanceWf);
+                when(cdiInstance.select(IWorkflowStore.class)).thenReturn(instanceWf);
                 when(instanceWf.get()).thenReturn(wfDirectStore);
 
                 URI result = executor.executeUpgrade(source, "target-1", null, null);
@@ -606,9 +625,9 @@ class UpgradeExecutorTest {
 
             setupPreviewAndAgent("target-1", 1, diffs);
 
-            var llmStore = Mockito.mock(ai.labs.eddi.configs.llm.IRestLlmStore.class);
+            var llmStore = Mockito.mock(IRestLlmStore.class);
             when(jsonSerialization.deserialize(eq("{\"model\":\"gpt-4\"}"), any()))
-                    .thenReturn(new ai.labs.eddi.modules.llm.model.LlmConfiguration(List.of()));
+                    .thenReturn(new LlmConfiguration(List.of()));
             // Return 500 instead of 200
             when(llmStore.updateLlm(eq(extId), eq(2), any()))
                     .thenReturn(Response.serverError().build());
@@ -620,9 +639,9 @@ class UpgradeExecutorTest {
             try (cdiMock) {
                 var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceLlm = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.llm.IRestLlmStore>) Mockito
+                var instanceLlm = (jakarta.enterprise.inject.Instance<IRestLlmStore>) Mockito
                         .mock(jakarta.enterprise.inject.Instance.class);
-                when(cdiInstance.select(ai.labs.eddi.configs.llm.IRestLlmStore.class)).thenReturn(instanceLlm);
+                when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
                 when(instanceLlm.get()).thenReturn(llmStore);
 
                 URI result = executor.executeUpgrade(source, "target-1", null, null);
@@ -663,9 +682,9 @@ class UpgradeExecutorTest {
             try (cdiMock) {
                 var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceWf = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.workflows.IWorkflowStore>) Mockito
+                var instanceWf = (jakarta.enterprise.inject.Instance<IWorkflowStore>) Mockito
                         .mock(jakarta.enterprise.inject.Instance.class);
-                when(cdiInstance.select(ai.labs.eddi.configs.workflows.IWorkflowStore.class)).thenReturn(instanceWf);
+                when(cdiInstance.select(IWorkflowStore.class)).thenReturn(instanceWf);
                 when(instanceWf.get()).thenThrow(new RuntimeException("CDI lookup failed"));
 
                 // Should NOT throw — createNewWorkflow catches and returns null
@@ -706,9 +725,9 @@ class UpgradeExecutorTest {
 
             setupPreviewAndAgent("target-1", 1, diffs);
 
-            var llmStore = Mockito.mock(ai.labs.eddi.configs.llm.IRestLlmStore.class);
+            var llmStore = Mockito.mock(IRestLlmStore.class);
             when(jsonSerialization.deserialize(eq("{\"model\":\"gpt-4\"}"), any()))
-                    .thenReturn(new ai.labs.eddi.modules.llm.model.LlmConfiguration(List.of()));
+                    .thenReturn(new LlmConfiguration(List.of()));
             when(llmStore.updateLlm(eq(extId), eq(2), any())).thenReturn(Response.ok().build());
 
             // Workflow config with a step that has NULL type
@@ -723,9 +742,9 @@ class UpgradeExecutorTest {
             try (cdiMock) {
                 var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceLlm = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.llm.IRestLlmStore>) Mockito
+                var instanceLlm = (jakarta.enterprise.inject.Instance<IRestLlmStore>) Mockito
                         .mock(jakarta.enterprise.inject.Instance.class);
-                when(cdiInstance.select(ai.labs.eddi.configs.llm.IRestLlmStore.class)).thenReturn(instanceLlm);
+                when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
                 when(instanceLlm.get()).thenReturn(llmStore);
 
                 URI result = executor.executeUpgrade(source, "target-1", null, null);
@@ -889,10 +908,10 @@ class UpgradeExecutorTest {
             try (cdiMock) {
                 var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceLlm = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.llm.IRestLlmStore>) Mockito
+                var instanceLlm = (jakarta.enterprise.inject.Instance<IRestLlmStore>) Mockito
                         .mock(jakarta.enterprise.inject.Instance.class);
-                when(cdiInstance.select(ai.labs.eddi.configs.llm.IRestLlmStore.class)).thenReturn(instanceLlm);
-                when(instanceLlm.get()).thenReturn(Mockito.mock(ai.labs.eddi.configs.llm.IRestLlmStore.class));
+                when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
+                when(instanceLlm.get()).thenReturn(Mockito.mock(IRestLlmStore.class));
 
                 // Should NOT throw — extension processing catches and logs
                 URI result = executor.executeUpgrade(source, "target-1", null, null);
@@ -912,8 +931,8 @@ class UpgradeExecutorTest {
         @SuppressWarnings("unchecked")
         void dispatchDictionary() throws Exception {
             verifyDispatchUpdate("regulardictionary", "ai.labs.parser",
-                    ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration.class,
-                    ai.labs.eddi.configs.dictionary.IRestDictionaryStore.class);
+                    DictionaryConfiguration.class,
+                    IRestDictionaryStore.class);
         }
 
         @Test
@@ -921,8 +940,8 @@ class UpgradeExecutorTest {
         @SuppressWarnings("unchecked")
         void dispatchRuleSet() throws Exception {
             verifyDispatchUpdate("behavior", "ai.labs.behavior",
-                    ai.labs.eddi.configs.rules.model.RuleSetConfiguration.class,
-                    ai.labs.eddi.configs.rules.IRestRuleSetStore.class);
+                    RuleSetConfiguration.class,
+                    IRestRuleSetStore.class);
         }
 
         @Test
@@ -930,8 +949,8 @@ class UpgradeExecutorTest {
         @SuppressWarnings("unchecked")
         void dispatchApiCalls() throws Exception {
             verifyDispatchUpdate("httpcalls", "ai.labs.httpcalls",
-                    ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration.class,
-                    ai.labs.eddi.configs.apicalls.IRestApiCallsStore.class);
+                    ApiCallsConfiguration.class,
+                    IRestApiCallsStore.class);
         }
 
         @Test
@@ -939,8 +958,8 @@ class UpgradeExecutorTest {
         @SuppressWarnings("unchecked")
         void dispatchPropertySetter() throws Exception {
             verifyDispatchUpdate("property", "ai.labs.property",
-                    ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration.class,
-                    ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore.class);
+                    PropertySetterConfiguration.class,
+                    IRestPropertySetterStore.class);
         }
 
         @Test
@@ -948,8 +967,8 @@ class UpgradeExecutorTest {
         @SuppressWarnings("unchecked")
         void dispatchOutput() throws Exception {
             verifyDispatchUpdate("output", "ai.labs.output",
-                    ai.labs.eddi.configs.output.model.OutputConfigurationSet.class,
-                    ai.labs.eddi.configs.output.IRestOutputStore.class);
+                    OutputConfigurationSet.class,
+                    IRestOutputStore.class);
         }
 
         @Test
@@ -957,8 +976,8 @@ class UpgradeExecutorTest {
         @SuppressWarnings("unchecked")
         void dispatchMcpCalls() throws Exception {
             verifyDispatchUpdate("mcpcalls", "ai.labs.mcpcalls",
-                    ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration.class,
-                    ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore.class);
+                    McpCallsConfiguration.class,
+                    IRestMcpCallsStore.class);
         }
 
         @SuppressWarnings({"unchecked", "rawtypes"})

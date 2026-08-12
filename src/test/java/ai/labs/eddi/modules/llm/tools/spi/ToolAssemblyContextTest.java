@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentCon
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -86,7 +87,7 @@ class ToolAssemblyContextTest {
 
     @Test
     void toolContribution_fourArgConstructor_defaultsFailuresToEmpty() {
-        var contribution = new ToolContribution(List.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
+        var contribution = new ToolContribution(List.of(), Map.of(), Map.of(), Map.of());
 
         assertTrue(contribution.failures().isEmpty());
     }

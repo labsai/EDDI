@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.tenancy.rest;
 
 import ai.labs.eddi.engine.tenancy.InMemoryTenantQuotaStore;
+import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -107,7 +108,7 @@ class RestTenantQuotaTest {
     @Test
     void shouldReturnExceptionMapperResponse() {
         var mapper = new QuotaExceededExceptionMapper();
-        var exception = new ai.labs.eddi.engine.tenancy.QuotaExceededException("Test limit exceeded");
+        var exception = new QuotaExceededException("Test limit exceeded");
 
         try (Response response = mapper.toResponse(exception)) {
             assertEquals(429, response.getStatus());

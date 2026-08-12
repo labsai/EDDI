@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
@@ -104,7 +105,7 @@ class AgentOrchestratorExtendedBranchTest {
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
                 null, null, null, null, null,
-                mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
+                mock(IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
     }
 
     // =========================================================
@@ -225,7 +226,7 @@ class AgentOrchestratorExtendedBranchTest {
                     null, // null userMemoryStore
                     toolResponseTruncator, tenantQuotaService, memorySnapshotService,
                     null, null, null, null, null,
-                    mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
+                    mock(IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
 
             var task = new LlmConfiguration.Task();
             task.setEnableBuiltInTools(true);

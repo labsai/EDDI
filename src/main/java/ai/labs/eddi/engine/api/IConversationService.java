@@ -9,9 +9,13 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.lifecycle.TaskId;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 
 import java.net.URI;
 import java.util.List;
@@ -283,7 +287,7 @@ public interface IConversationService {
      *             on persistence failures
      */
     default CancelOutcome cancelConversation(String conversationId,
-                                             ai.labs.eddi.engine.lifecycle.model.ControlSignal mode)
+                                             ControlSignal mode)
             throws ResourceStoreException {
         return cancelConversation(conversationId, mode, null);
     }
@@ -295,7 +299,7 @@ public interface IConversationService {
      * recorded as {@code unknown}.
      */
     CancelOutcome cancelConversation(String conversationId,
-                                     ai.labs.eddi.engine.lifecycle.model.ControlSignal mode,
+                                     ControlSignal mode,
                                      String cancelledBy)
             throws ResourceStoreException;
 
@@ -328,7 +332,7 @@ public interface IConversationService {
      *             if the conversation is not found
      */
     void resumeConversation(String conversationId,
-                            ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                            HitlDecision decision,
                             ConversationResponseHandler responseHandler)
             throws ResourceStoreException, ResourceNotFoundException;
 
@@ -340,7 +344,7 @@ public interface IConversationService {
      * @throws ResourceNotFoundException
      *             if the conversation is not found
      */
-    ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
+    ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
             throws ResourceStoreException, ResourceNotFoundException;
 
     /**
@@ -352,7 +356,7 @@ public interface IConversationService {
      * @throws ResourceStoreException
      *             on persistence failures
      */
-    java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(int limit)
+    List<PendingApprovalSummary> listPendingApprovals(int limit)
             throws ResourceStoreException;
 
     /**
@@ -361,7 +365,7 @@ public interface IConversationService {
      * restriction — a non-admin caller's approval inbox cannot be starved by other
      * users' backlog.
      */
-    java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
+    List<PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
             throws ResourceStoreException;
 
     // --- Domain exceptions (no JAX-RS dependency) ---

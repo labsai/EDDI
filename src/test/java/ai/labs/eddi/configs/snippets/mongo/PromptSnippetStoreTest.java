@@ -11,6 +11,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -28,7 +29,7 @@ class PromptSnippetStoreTest {
      * Regex pattern duplicated from PromptSnippetStore for validation testing. In
      * production, the store enforces this on create/update.
      */
-    private static final java.util.regex.Pattern NAME_PATTERN = java.util.regex.Pattern.compile("[a-z0-9_]+");
+    private static final Pattern NAME_PATTERN = Pattern.compile("[a-z0-9_]+");
 
     // ==================== Name Validation ====================
 

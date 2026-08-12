@@ -28,10 +28,12 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
 import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -269,8 +271,8 @@ class AgentOrchestratorCoverageTest {
     }
 
     @SuppressWarnings("unchecked")
-    private ai.labs.eddi.engine.memory.IData<Integer> dataOfInt(int v) {
-        var d = mock(ai.labs.eddi.engine.memory.IData.class);
+    private IData<Integer> dataOfInt(int v) {
+        var d = mock(IData.class);
         lenient().when(d.getResult()).thenReturn(v);
         return d;
     }
@@ -378,14 +380,14 @@ class AgentOrchestratorCoverageTest {
      * {@code isWithinBudget}, not from accumulated cost. That the budget can be
      * reached by real spend at all is proved by
      * {@code AgentOrchestratorToolCostTest}, which drives the same loop against a
-     * REAL {@link ai.labs.eddi.modules.llm.tools.ToolCostTracker}.
+     * REAL {@link ToolCostTracker}.
      */
     @Test
     void toolCall_perConversationBudgetExceeded_returnsBudgetError() throws Exception {
         var task = calcOnlyTask();
         task.setMaxBudgetPerConversation(1.0);
         task.setEnforceBudget(true);
-        var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
+        var costTracker = mock(ToolCostTracker.class);
         when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
         when(costTracker.isWithinBudget(eq("conv-1"), eq(1.0))).thenReturn(false);
 
@@ -689,7 +691,7 @@ class AgentOrchestratorCoverageTest {
         var task = calcOnlyTask();
         task.setMaxBudgetPerConversation(1.0);
         task.setEnforceBudget(false);
-        var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
+        var costTracker = mock(ToolCostTracker.class);
         lenient().when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
         lenient().when(costTracker.isWithinBudget(anyString(), anyDouble())).thenReturn(false);
 
@@ -731,7 +733,7 @@ class AgentOrchestratorCoverageTest {
         var task = calcOnlyTask();
         task.setMaxBudgetPerConversation(1.0);
         // deliberately no setEnforceBudget(...)
-        var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
+        var costTracker = mock(ToolCostTracker.class);
         lenient().when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
         lenient().when(costTracker.isWithinBudget(nullable(String.class), anyDouble())).thenReturn(false);
 

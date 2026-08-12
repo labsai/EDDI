@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.hitl.tools;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.JournalEntry;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.Status;
@@ -28,7 +29,9 @@ import org.mockito.Mock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -294,8 +297,8 @@ class HitlJournalCodecCoverageTest {
             return dev.langchain4j.agent.tool.ToolExecutionRequest.builder().id(id).name(name).arguments("{}").build();
         }
 
-        private static ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig cfg(List<String> require, List<String> exempt) {
-            var c = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+        private static ToolApprovalsConfig cfg(List<String> require, List<String> exempt) {
+            var c = new ToolApprovalsConfig();
             c.setRequireApproval(require);
             c.setExempt(exempt);
             return c;
@@ -306,9 +309,9 @@ class HitlJournalCodecCoverageTest {
         void exemptPrecedenceAllows() {
             var gate = new ToolApprovalGate();
             var batch = List.of(req("1", "read_file"));
-            var sources = java.util.Map.of("read_file", "mcp");
+            var sources = Map.of("read_file", "mcp");
             var result = gate.classify(batch, sources,
-                    cfg(List.of("mcp:*"), List.of("mcp:read_*")), java.util.Set.of());
+                    cfg(List.of("mcp:*"), List.of("mcp:read_*")), Set.of());
             assertTrue(result.gated().isEmpty(), "exempt must beat require");
             assertEquals(1, result.allowed().size());
         }
@@ -318,8 +321,8 @@ class HitlJournalCodecCoverageTest {
         void clearedCallIdAllowed() {
             var gate = new ToolApprovalGate();
             var batch = List.of(req("1", "delete_account"));
-            var result = gate.classify(batch, java.util.Map.of("delete_account", "http"),
-                    cfg(List.of("delete_*"), null), java.util.Set.of("1"));
+            var result = gate.classify(batch, Map.of("delete_account", "http"),
+                    cfg(List.of("delete_*"), null), Set.of("1"));
             assertTrue(result.gated().isEmpty());
             assertEquals(1, result.allowed().size());
         }
@@ -329,8 +332,8 @@ class HitlJournalCodecCoverageTest {
         void gatedNonNullIdRecordsReason() {
             var gate = new ToolApprovalGate();
             var batch = List.of(req("call-9", "delete_account"));
-            var result = gate.classify(batch, java.util.Map.of("delete_account", "http"),
-                    cfg(List.of("delete_*"), null), java.util.Set.of());
+            var result = gate.classify(batch, Map.of("delete_account", "http"),
+                    cfg(List.of("delete_*"), null), Set.of());
             assertEquals(1, result.gated().size());
             assertEquals("delete_*", result.gateReasonByCallId().get("call-9"),
                     "the matched require-pattern must be recorded as the gate reason");

@@ -8,6 +8,7 @@ import ai.labs.eddi.utils.CharacterUtilities;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -199,7 +200,7 @@ public class Expression implements Cloneable {
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(expressionName, Arrays.hashCode(getSubExpressions()));
+        return Objects.hash(expressionName, Arrays.hashCode(getSubExpressions()));
     }
 
     @Override

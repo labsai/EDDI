@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.hitl.tools;
+import java.time.Instant;
 
 import java.util.Optional;
 
@@ -22,7 +23,7 @@ public interface IHitlToolJournalStore {
 
     record JournalEntry(String conversationId, String pauseEpoch, String callId,
             String toolName, Status status, String resultCapped,
-            java.time.Instant executedAt, String decidedBy) {
+            Instant executedAt, String decidedBy) {
     }
 
     /**

@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.runtime.internal;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -175,11 +178,11 @@ class CronDescriberExtendedTest {
         @Test
         @DisplayName("should fall back to String.valueOf for negative value in single-element set")
         void negativeValueSingleElement() throws Exception {
-            java.lang.reflect.Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", java.util.Set.class, String[].class);
+            java.lang.reflect.Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", Set.class, String[].class);
             formatSet.setAccessible(true);
 
             String[] labels = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-            java.util.Set<Integer> negativeSet = java.util.Set.of(-1);
+            Set<Integer> negativeSet = Set.of(-1);
 
             // Before fix: ArrayIndexOutOfBoundsException
             // After fix: returns "-1" (String.valueOf)
@@ -190,11 +193,11 @@ class CronDescriberExtendedTest {
         @Test
         @DisplayName("should fall back to String.valueOf for negative values in multi-element set")
         void negativeValueMultiElement() throws Exception {
-            java.lang.reflect.Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", java.util.Set.class, String[].class);
+            java.lang.reflect.Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", Set.class, String[].class);
             formatSet.setAccessible(true);
 
             String[] labels = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-            java.util.Set<Integer> mixedSet = new java.util.TreeSet<>(java.util.List.of(-1, 0, 99));
+            Set<Integer> mixedSet = new TreeSet<>(List.of(-1, 0, 99));
 
             String result = (String) formatSet.invoke(null, mixedSet, labels);
             assertTrue(result.contains("-1"), "negative value should be rendered as string");
@@ -205,23 +208,23 @@ class CronDescriberExtendedTest {
         @Test
         @DisplayName("should handle value equal to labels.length (out of bounds)")
         void valueAtBoundary() throws Exception {
-            java.lang.reflect.Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", java.util.Set.class, String[].class);
+            java.lang.reflect.Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", Set.class, String[].class);
             formatSet.setAccessible(true);
 
             String[] labels = {"A", "B", "C"};
             // v=3 is exactly labels.length, should fall back to String.valueOf
-            String result = (String) formatSet.invoke(null, java.util.Set.of(3), labels);
+            String result = (String) formatSet.invoke(null, Set.of(3), labels);
             assertEquals("3", result);
         }
 
         @Test
         @DisplayName("should handle valid value at max index")
         void validMaxIndex() throws Exception {
-            java.lang.reflect.Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", java.util.Set.class, String[].class);
+            java.lang.reflect.Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", Set.class, String[].class);
             formatSet.setAccessible(true);
 
             String[] labels = {"A", "B", "C"};
-            String result = (String) formatSet.invoke(null, java.util.Set.of(2), labels);
+            String result = (String) formatSet.invoke(null, Set.of(2), labels);
             assertEquals("C", result);
         }
     }

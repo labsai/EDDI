@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.model.Deployment;
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test;
 
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+import java.util.Date;
 
 import java.util.List;
 import java.util.concurrent.*;
@@ -233,8 +235,8 @@ class RestAgentAdministrationTest {
             when(agent1.getAgentVersion()).thenReturn(1);
             when(agent1.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
 
-            var desc1 = new ai.labs.eddi.configs.descriptors.model.DocumentDescriptor();
-            desc1.setLastModifiedOn(new java.util.Date(1000));
+            var desc1 = new DocumentDescriptor();
+            desc1.setLastModifiedOn(new Date(1000));
             when(documentDescriptorStore.readDescriptor("agent-1", 1)).thenReturn(desc1);
 
             when(agentFactory.getAllLatestAgents(any())).thenReturn(List.of(agent1));

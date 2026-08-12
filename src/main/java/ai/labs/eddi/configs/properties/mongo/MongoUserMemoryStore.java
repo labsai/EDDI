@@ -19,6 +19,7 @@ import com.mongodb.client.result.DeleteResult;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import java.time.Duration;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
@@ -381,7 +382,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
 
     @Override
     public long deleteOlderThan(int olderThanDays) throws IResourceStore.ResourceStoreException {
-        Instant cutoff = Instant.now().minus(java.time.Duration.ofDays(olderThanDays));
+        Instant cutoff = Instant.now().minus(Duration.ofDays(olderThanDays));
         // Exclude GDPR system keys (e.g. _gdpr_processing_restricted) from retention
         // cleanup
         Bson filter = and(
