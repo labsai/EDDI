@@ -255,6 +255,12 @@ if [[ "$answer" =~ ^[Yy]$ ]]; then
     git add "src/main/resources/META-INF/resources/workforce.html" 2>/dev/null || true
     git add "src/main/resources/META-INF/resources/index.html"
 
+    # The manifest has to travel with the assets it describes. Left untracked,
+    # every fresh clone of the EDDI repo looks like a first run, so the
+    # stale-asset cleanup would never fire anywhere but the machine that
+    # happened to deploy twice.
+    git add "src/main/resources/META-INF/resources/assets/.manager-assets"
+
     # Stage the specific old files that were deleted
     # Guard with length check: bash 3.2 (macOS default) treats empty array
     # expansion "${arr[@]}" as unbound when set -u is active.

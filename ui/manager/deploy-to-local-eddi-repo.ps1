@@ -216,7 +216,14 @@ if ($answer -match '^[Yy]') {
         git add "src/main/resources/META-INF/resources/welcome.html" 2>$null
         git add "src/main/resources/META-INF/resources/workforce.html" 2>$null
         git add "src/main/resources/META-INF/resources/index.html" 2>$null
-        
+
+        # The manifest has to travel with the assets it describes. Left
+        # untracked, every fresh clone of the EDDI repo looks like a first run,
+        # so the stale-asset cleanup would never fire anywhere but the machine
+        # that happened to deploy twice.
+        git add "src/main/resources/META-INF/resources/assets/.manager-assets"
+
+
         # Stage the specific old files that were deleted
         foreach ($removed in $removedFiles) {
             git add $removed
