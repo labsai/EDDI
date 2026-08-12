@@ -650,7 +650,7 @@ UI tasks live in **EDDI-Manager**, not this repo. Track in `EDDI-Manager/AGENTS.
 - [`docs/architecture.md`](../docs/architecture.md) — new components and flows.
 - [`docs/behavior-rules.md`](../docs/behavior-rules.md) — new condition types with examples.
 - [`docs/langchain.md`](../docs/langchain.md) — counterweight, tool-loading strategy, response limits.
-- [`docs/security.md`](../security.md) — signing model, replay protection, key rotation.
+- [`docs/security.md`](../docs/security.md) — signing model, replay protection, key rotation.
 - [`docs/compliance-data-flow.md`](../docs/compliance-data-flow.md) — attachments in flow diagrams.
 - [`docs/changelog.md`](../docs/changelog.md) — per-PR entries per [`AGENTS.md` §2](../AGENTS.md).
 

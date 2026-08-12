@@ -12,6 +12,7 @@ import java.io.UncheckedIOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -110,6 +111,30 @@ class DocumentationLinksTest {
                 || t.contains("(");
     }
 
+    /**
+     * Returns the on-disk name when {@code resolved} exists only by a
+     * case-insensitive match, else {@code null}.
+     * <p>
+     * This matters more than it looks. Windows and macOS resolve
+     * {@code ../security.md} to {@code SECURITY.md}, so a link that is broken on
+     * the Linux CI runner — and for every reader of the published docs — looks
+     * perfectly fine to the developer who wrote it. That is exactly how
+     * {@code planning/agentic-improvements-plan.md} came to point at the security
+     * <em>policy</em> at the repository root while its own link text said
+     * {@code docs/security.md}. Without this check the test would have inherited
+     * the same blind spot as the human.
+     */
+    private static String mismatchedCasing(Path resolved) {
+        try {
+            Path real = resolved.toRealPath(LinkOption.NOFOLLOW_LINKS);
+            String actual = real.getFileName().toString();
+            String requested = resolved.getFileName().toString();
+            return actual.equals(requested) ? null : actual;
+        } catch (IOException e) {
+            return null; // existence was already established; nothing more to say
+        }
+    }
+
     @Test
     @DisplayName("every relative link in every tracked markdown file resolves to a real path")
     void everyRelativeLinkResolves() {
@@ -147,6 +172,12 @@ class DocumentationLinksTest {
                         : file.getParent().resolve(decoded).normalize();
                 if (!Files.exists(resolved)) {
                     broken.add(root.relativize(file) + "  ->  " + target);
+                } else {
+                    String actualCasing = mismatchedCasing(resolved);
+                    if (actualCasing != null) {
+                        broken.add(root.relativize(file) + "  ->  " + target
+                                + "  (case mismatch — the file on disk is '" + actualCasing + "')");
+                    }
                 }
             }
         }
