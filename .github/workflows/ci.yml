@@ -145,10 +145,19 @@ jobs:
       - name: PSScriptAnalyzer
         shell: pwsh
         run: |
-          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          # Preinstalled on the runner; installing over it only emits a
+          # "currently in use" warning.
+          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+            Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          }
           $targets = @('./install.ps1')
           if (Test-Path ./scripts) { $targets += './scripts' }
-          $found = Invoke-ScriptAnalyzer -Path $targets -Recurse -Severity Error,Warning
+          # -Path takes ONE string, not an array — passing @(...) fails with
+          # "Cannot convert 'System.Object[]' to the type 'System.String'".
+          $found = @()
+          foreach ($t in $targets) {
+            $found += Invoke-ScriptAnalyzer -Path $t -Recurse -Severity Error,Warning
+          }
           $found | Format-Table -AutoSize | Out-String | Write-Host
           if ($found | Where-Object { $_.Severity -eq 'Error' }) { exit 1 }
 
