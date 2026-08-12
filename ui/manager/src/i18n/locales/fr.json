@@ -3196,6 +3196,7 @@
     "restrictionTitle": "Restriction de traitement (Art. 18)",
     "resultsTitle": "Effacement terminé",
     "statusActive": "Traitement actif",
+    "statusUnknown": "Statut indisponible",
     "statusRestricted": "Traitement restreint",
     "subtitle": "Gestion des données utilisateur conforme au RGPD — effacement (Art. 17), portabilité (Art. 15/20) et restriction du traitement (Art. 18)",
     "title": "Confidentialité et conformité",

@@ -3170,6 +3170,7 @@
     "restrictionTitle": "Verarbeitungseinschränkung (Art. 18)",
     "resultsTitle": "Löschung abgeschlossen",
     "statusActive": "Verarbeitung aktiv",
+    "statusUnknown": "Status nicht verfügbar",
     "statusRestricted": "Verarbeitung eingeschränkt",
     "subtitle": "DSGVO-konforme Verwaltung von Nutzerdaten — Löschung (Art. 17), Portabilität (Art. 15/20) und Verarbeitungseinschränkung (Art. 18)",
     "title": "Datenschutz & Compliance",

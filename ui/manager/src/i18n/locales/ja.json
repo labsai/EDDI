@@ -3170,6 +3170,7 @@
     "restrictionTitle": "処理の制限（Art. 18）",
     "resultsTitle": "消去が完了しました",
     "statusActive": "処理有効",
+    "statusUnknown": "ステータスを取得できません",
     "statusRestricted": "処理制限中",
     "subtitle": "GDPR に準拠したユーザーデータ管理 — 消去（Art. 17）、ポータビリティ（Art. 15/20）、処理の制限（Art. 18）",
     "title": "プライバシーとコンプライアンス",

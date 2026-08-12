@@ -297,6 +297,88 @@ describe("ChannelsPage", () => {
     });
   });
 
+  // ─── View-mode persistence ──────────────────────────────────────────────
+
+  it("restores the persisted view mode on remount", async () => {
+    // Scoped cleanup: the suite's other tests assume the card-view default,
+    // so the persisted key must not leak past this test.
+    const KEY = "eddi-view-mode-channels";
+    try {
+      const first = renderWithProviders(<ChannelsPage />, {
+        initialRoute: "/manage/channels",
+      });
+      await waitFor(() => {
+        expect(screen.getAllByTestId(/^channel-card-/).length).toBeGreaterThanOrEqual(1);
+      });
+
+      const user = userEvent.setup();
+      await user.click(screen.getByTestId("view-toggle-list"));
+      await waitFor(() => {
+        expect(screen.getAllByTestId(/^channel-row-/).length).toBeGreaterThanOrEqual(1);
+      });
+
+      // Remount from scratch — the choice must come back from localStorage,
+      // not from surviving component state.
+      first.unmount();
+      renderWithProviders(<ChannelsPage />, { initialRoute: "/manage/channels" });
+      await waitFor(() => {
+        expect(screen.getAllByTestId(/^channel-row-/).length).toBeGreaterThanOrEqual(1);
+      });
+      expect(screen.queryByTestId(/^channel-card-/)).not.toBeInTheDocument();
+    } finally {
+      localStorage.removeItem(KEY);
+    }
+  });
+
+  // ─── Error state ────────────────────────────────────────────────────────
+
+  it("shows an error state, not the empty state, when the list fails to load", async () => {
+    server.use(
+      http.get("*/channelstore/channels/descriptors", () => {
+        return HttpResponse.json({ message: "boom" }, { status: 500 });
+      })
+    );
+
+    renderWithProviders(<ChannelsPage />, {
+      initialRoute: "/manage/channels",
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("error-state")).toBeInTheDocument();
+    });
+
+    // The bug this pins: a failed fetch used to fall through to "No channels
+    // yet", telling the user nothing exists when nothing could be reached.
+    expect(screen.queryByText("No channels yet")).not.toBeInTheDocument();
+  });
+
+  it("offers a retry that refetches the list", async () => {
+    let calls = 0;
+    server.use(
+      http.get("*/channelstore/channels/descriptors", () => {
+        calls++;
+        return calls === 1
+          ? HttpResponse.json({ message: "boom" }, { status: 500 })
+          : HttpResponse.json([]);
+      })
+    );
+
+    renderWithProviders(<ChannelsPage />, {
+      initialRoute: "/manage/channels",
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("error-state")).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("error-state-retry"));
+
+    await waitFor(() => {
+      expect(screen.getByText("No channels yet")).toBeInTheDocument();
+    });
+  });
+
   // ─── Confirm delete flow ──────────────────────────────────────────────
 
   it("confirms channel deletion when Delete is clicked", async () => {

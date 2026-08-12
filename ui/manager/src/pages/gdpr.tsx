@@ -34,8 +34,11 @@ export function GdprPage() {
   const exportMutation = useExportUserData();
   const restrictMutation = useRestrictProcessing();
   const unrestrictMutation = useUnrestrictProcessing();
-  const { data: isRestricted, isLoading: restrictLoading } =
-    useIsProcessingRestricted(userId.trim());
+  const {
+    data: isRestricted,
+    isLoading: restrictLoading,
+    isError: restrictError,
+  } = useIsProcessingRestricted(userId.trim());
 
   const handleExport = useCallback(() => {
     if (!userId.trim()) return;
@@ -219,6 +222,14 @@ export function GdprPage() {
                   <div className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
                   {t("gdpr.checkingStatus", "Checking...")}
                 </span>
+              ) : restrictError ? (
+                // Without this branch a failed check fell through to the green
+                // "Processing Active" badge — reporting an unknown state as a
+                // known-safe one, on a screen about legal obligations.
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground" data-testid="restriction-badge-unknown">
+                  <AlertTriangle className="h-3 w-3" />
+                  {t("gdpr.statusUnknown", "Status unavailable")}
+                </span>
               ) : isRestricted ? (
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400" data-testid="restriction-badge-restricted">
                   <Ban className="h-3 w-3" />
@@ -241,7 +252,10 @@ export function GdprPage() {
             variant={isRestricted ? "secondary" : "destructive"}
             size="sm"
             onClick={handleToggleRestriction}
-            disabled={!userId.trim() || isBusy || restrictLoading}
+            // Also blocked when the status check failed: the label and the action
+            // both derive from `isRestricted`, so acting on an unknown state could
+            // restrict a user the caller meant to unrestrict.
+            disabled={!userId.trim() || isBusy || restrictLoading || restrictError}
             className="gap-2"
             data-testid="gdpr-restrict-toggle"
           >

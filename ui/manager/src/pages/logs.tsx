@@ -128,7 +128,7 @@ export function LogsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("live");
 
   return (
-    <div className="flex h-full flex-col p-6" data-testid="logs-page">
+    <div className="flex h-full flex-col" data-testid="logs-page">
       {/* Header */}
       <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

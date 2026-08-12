@@ -29,6 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { useCreateGroup, useAvailableStyles, isStyleSupported } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { styleLabel, styleDisplay } from "@/lib/discussion-styles";
@@ -2008,7 +2009,7 @@ function GroupMemberPicker({
   onUpdate: (updates: Partial<MemberSlot>) => void;
   t: ReturnType<typeof useTranslation>["t"];
 }) {
-  const { data: groups, isLoading } = useEnrichedGroupDescriptors(100);
+  const { data: groups, isLoading, isError, refetch } = useEnrichedGroupDescriptors(100);
   const hasGroups = groups && groups.length > 0;
 
   return (
@@ -2021,6 +2022,15 @@ function GroupMemberPicker({
         <div className="rounded-lg border border-input bg-background px-3 py-2 text-xs text-muted-foreground animate-pulse">
           {t("common.loading", "Loading…")}
         </div>
+      ) : isError && !groups ? (
+        // Distinct from "no groups available" — that reads as a fact about the
+        // account and points the user at creating one, which does not help when
+        // the list simply failed to load. Gated on !groups so a background
+        // refetch failure keeps the cached, still-selectable list visible.
+        <RefetchErrorNotice
+          onRetry={() => refetch()}
+          message={t("common.loadError", "Failed to load data")}
+        />
       ) : !hasGroups ? (
         <div className="rounded-lg border border-dashed border-amber-400/50 bg-amber-400/5 px-3 py-3 text-center">
           <Users className="h-4 w-4 text-amber-500 mx-auto mb-1" />
