@@ -158,32 +158,74 @@ export const KNOWN_COLLISIONS = new Set([
   "userConversations.title",
 ]);
 
+/**
+ * Given the index of a `{`, return the object literal it opens, brace-balanced
+ * and quote-aware, or `null` if it is never closed.
+ */
+function readObjectLiteral(src, open) {
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  for (let i = open; i < src.length; i++) {
+    const c = src[i];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") quote = c;
+    else if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return src.slice(open, i + 1);
+  }
+  return null;
+}
+
+/** The `defaultValue:` string literal in an options object, if it has one. */
+function defaultValueIn(options) {
+  // Anchored on the property name rather than the enclosing braces, so nested
+  // option objects before it (`{ interpolation: { … }, defaultValue: "…" }`)
+  // are irrelevant. A default built from a template literal, or one containing
+  // an escaped quote, is skipped rather than half-captured: this only has to
+  // tell two DIFFERENT defaults apart, not reproduce either.
+  const m = /\bdefaultValue\s*:\s*(["'])((?:(?!\1)[^\n])*)\1/.exec(options);
+  return m ? m[2] : null;
+}
+
 /** Map of key -> the distinct English defaults it is called with. */
 export function collectDefaults(files, read = (f) => fs.readFileSync(f, "utf8")) {
   const byKey = new Map();
+  const add = (key, value) => {
+    if (!key.includes(".")) return;
+    if (!byKey.has(key)) byKey.set(key, new Set());
+    byKey.get(key).add(value);
+  };
+
   for (const file of files) {
     if (isTestFile(file)) continue;
     const src = read(file);
+
     // Two shapes carry an English default, and both are used in this codebase:
     //
     //   t("key", "Default")                       — positional
-    //   t("key", { count, defaultValue: "…" })    — object form (111 call sites)
+    //   t("key", { count, defaultValue: "…" })    — object form
     //
-    // The default must be a plain literal closed by the same quote it opened
-    // with. A default containing an escaped quote, or built from a template
-    // literal, is skipped rather than half-captured — this only has to tell two
-    // DIFFERENT defaults apart, not reproduce either of them, and a template
-    // literal is not a fixed string to compare in the first place.
-    const patterns = [
-      /\bt\(\s*(["'])([A-Za-z0-9_.-]+)\1\s*,\s*(["'])((?:(?!\3)[^\n])*)\3/g,
-      /\bt\(\s*(["'])([A-Za-z0-9_.-]+)\1\s*,\s*\{[^}]*?defaultValue:\s*(["'])((?:(?!\3)[^\n])*)\3/g,
-    ];
-    for (const re of patterns) {
-      for (const m of src.matchAll(re)) {
-        if (!m[2].includes(".")) continue;
-        if (!byKey.has(m[2])) byKey.set(m[2], new Set());
-        byKey.get(m[2]).add(m[4]);
-      }
+    // The positional form is a plain literal closed by the quote it opened
+    // with; anything fancier is skipped, same rationale as `defaultValueIn`.
+    const positional = /\bt\(\s*(["'])([A-Za-z0-9_.-]+)\1\s*,\s*(["'])((?:(?!\3)[^\n])*)\3/g;
+    for (const m of src.matchAll(positional)) add(m[2], m[4]);
+
+    // The object form is brace-matched rather than pattern-matched. A regex
+    // bounded by `[^}]*?` stops at the first `}` it meets, so an option object
+    // holding a nested one — `{ interpolation: { escapeValue: false },
+    // defaultValue: "…" }` — slipped past the scan entirely and its key was
+    // silently left out of the collision report.
+    const objectForm = /\bt\(\s*(["'])([A-Za-z0-9_.-]+)\1\s*,\s*(?=\{)/g;
+    for (const m of src.matchAll(objectForm)) {
+      const options = readObjectLiteral(src, m.index + m[0].length);
+      if (!options) continue;
+      const value = defaultValueIn(options);
+      if (value !== null) add(m[2], value);
     }
   }
   return byKey;

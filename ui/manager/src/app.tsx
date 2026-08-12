@@ -65,6 +65,7 @@ const ChannelsPage = lazyPage(() => import("@/pages/channels"), "ChannelsPage");
 const ChannelDetailPage = lazyPage(() => import("@/pages/channel-detail"), "ChannelDetailPage");
 const ApprovalsPage = lazyPage(() => import("@/pages/approvals"), "ApprovalsPage");
 const OperatorPage = lazyPage(() => import("@/pages/operator"), "OperatorPage");
+const UpdatesPage = lazyPage(() => import("@/pages/updates"), "UpdatesPage");
 
 // ── Groups ───────────────────────────────────────────────────────────
 const GroupsPage = lazyPage(() => import("@/pages/groups"), "GroupsPage");
@@ -177,6 +178,7 @@ export function App() {
             <Route path="/manage/channels" element={<ChannelsPage />} />
             <Route path="/manage/channels/:id" element={<ChannelDetailPage />} />
             <Route path="/manage/approvals" element={<ApprovalsPage />} />
+            <Route path="/manage/updates" element={<UpdatesPage />} />
             {/* Redirects from old standalone user-data pages */}
             <Route
               path="/manage/memories"

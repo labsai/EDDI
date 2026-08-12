@@ -72,6 +72,33 @@ describe("collision detection", () => {
     expect([...found.get("x.y")!]).toEqual(["{{count}} Members"]);
   });
 
+  it("reads defaultValue past a nested option object", () => {
+    // A regex bounded by `[^}]*?` stops at the `}` closing `interpolation`, so
+    // this call site used to be skipped and its key never reached the collision
+    // report at all.
+    const found = collectDefaults(["a.tsx"], () =>
+      't("x.y", { interpolation: { escapeValue: false }, defaultValue: "Text" })',
+    );
+    expect([...found.get("x.y")!]).toEqual(["Text"]);
+  });
+
+  it("still collides when only one of the two calls nests its options", () => {
+    const found = collectDefaults(["a.tsx"], () =>
+      [
+        't("x.y", { defaultValue: "One wording" })',
+        't("x.y", { interpolation: { escapeValue: false }, defaultValue: "Another" })',
+      ].join("\n"),
+    );
+    expect(found.get("x.y")!.size).toBe(2);
+  });
+
+  it("does not mistake a brace inside a default for the end of the options", () => {
+    const found = collectDefaults(["a.tsx"], () =>
+      't("x.y", { defaultValue: "a } brace", count: 1 })',
+    );
+    expect([...found.get("x.y")!]).toEqual(["a } brace"]);
+  });
+
   it("spots a collision between the positional and object forms", () => {
     // The two shapes are equally authoritative, so a key that disagrees with
     // itself across them is the same bug as two disagreeing positional defaults.

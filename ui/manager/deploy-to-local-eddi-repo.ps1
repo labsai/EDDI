@@ -142,7 +142,8 @@ if (Test-Path $WorkforceHtml) {
 # Keep this in step with the same block in deploy-to-local-eddi-repo.sh.
 Write-Host "`n[5/5] Removing assets the new build did not produce..." -ForegroundColor Cyan
 
-# Clean hashed assets that the new build did not produce.
+# Clean assets that a PREVIOUS run of this script deployed and the new build no
+# longer produces.
 #
 # This is a SET DIFFERENCE against the new dist, not a per-prefix sweep. The
 # per-prefix version only deleted an old file when a same-prefixed new one
@@ -152,23 +153,39 @@ Write-Host "`n[5/5] Removing assets the new build did not produce..." -Foregroun
 # Route-level code splitting emits ~240, all content-hashed, so a stale set now
 # accumulates fast enough to matter.
 #
-# Only files matching Vite's `name-<8charhash>.ext` shape are considered, so
-# anything hand-placed in assets/ is left alone.
+# What is eligible for deletion comes from $manifest — the list this script
+# wrote on its last run — never from the shape of a filename. Matching Vite's
+# `name-<8charhash>.ext` pattern is not proof of provenance: a hand-placed
+# `brand-a1b2c3d4.svg` matches it exactly, and a sweep by pattern would delete
+# it. Anything absent from the manifest is left alone, whoever put it there.
 # Keep this in step with the same block in deploy-to-local-eddi-repo.sh.
-$hashRe = "^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$"
+$manifest = Join-Path $AssetsDir ".manager-assets"
 $newAssetNames = [System.Collections.Generic.HashSet[string]]::new(
     [string[]]($distFiles | ForEach-Object { $_.Name }),
     [System.StringComparer]::Ordinal
 )
 
-foreach ($old in (Get-ChildItem -Path $AssetsDir -File -ErrorAction SilentlyContinue)) {
-    if ($old.Name -notmatch $hashRe) { continue }
-    if (-not $newAssetNames.Contains($old.Name)) {
-        Write-Host "  Removing stale asset $($old.Name)" -ForegroundColor Yellow
-        $removedFiles += "src/main/resources/META-INF/resources/assets/$($old.Name)"
-        Remove-Item $old.FullName -Force
+if (Test-Path $manifest) {
+    foreach ($oldName in (Get-Content $manifest)) {
+        if ([string]::IsNullOrWhiteSpace($oldName)) { continue }
+        if ($newAssetNames.Contains($oldName)) { continue }
+        $oldPath = Join-Path $AssetsDir $oldName
+        if (-not (Test-Path $oldPath)) { continue }
+        Write-Host "  Removing stale asset $oldName" -ForegroundColor Yellow
+        $removedFiles += "src/main/resources/META-INF/resources/assets/$oldName"
+        Remove-Item $oldPath -Force
     }
+} else {
+    # First run against this checkout. Nothing is deleted: without a manifest
+    # there is no way to tell a stale chunk from a file someone put here on
+    # purpose, and silently guessing wrong is worse than one deploy's worth of
+    # leftovers. The manifest written below makes the next run precise.
+    Write-Host "  No manifest yet - skipping cleanup this once." -ForegroundColor Yellow
+    Write-Host "  Stale assets from earlier deploys will be removed on the next run."
 }
+
+# Record what this run deployed, for the next run to diff against.
+Set-Content -Path $manifest -Value ($distFiles | ForEach-Object { $_.Name })
 
 Write-Host "`n[DONE] EDDI Manager deployed successfully!" -ForegroundColor Green
 Write-Host "  JS:  /assets/$($newJs.Name)"

@@ -71,6 +71,14 @@ describe("Sidebar", () => {
     expect(screen.getByText("Resources")).toBeInTheDocument();
   });
 
+  it("reaches the Updates page from the menu", () => {
+    // It used to be a section at the bottom of the dashboard, findable only by
+    // scrolling past everything else.
+    renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
+
+    expect(screen.getByText("Updates").closest("a")).toHaveAttribute("href", "/manage/updates");
+  });
+
   it("hides labels when collapsed", () => {
     renderWithProviders(
       <Sidebar collapsed={true} onToggle={() => {}} />
@@ -437,6 +445,18 @@ describe("Sidebar", () => {
       const text = sidebar.textContent;
       expect(text).toMatch(/EDDI|Checking version/);
     });
+  });
+
+  it("makes the version the shortcut to the Updates page", async () => {
+    // "Am I current?" is asked at the version, and the nav entry for it is the
+    // last item of the last section — so the version itself is the way in.
+    renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
+
+    const version = await screen.findByTestId("sidebar-version");
+    expect(version).toHaveAttribute("href", "/manage/updates");
+    // The visible text is a version string, so the accessible name has to say
+    // where the link goes.
+    expect(version.getAttribute("aria-label")).toMatch(/EDDI Updates/);
   });
 
   it("hides version text when collapsed", () => {

@@ -32,7 +32,7 @@ describe("updates i18n", () => {
       "unknownVersion", "checkNow", "checking", "autoCheck", "autoCheckHint",
       "privacyNote", "neverChecked", "upToDate", "updateAvailable",
       "updateAvailableDetail", "ahead", "unknownInstalled",
-      "errorRateLimited", "errorUnreachable", "errorFailed",
+      "errorRateLimited", "errorBlockedByCsp", "errorUnreachable", "errorFailed",
       "publishedOn", "whatsNew", "fullNotes", "noNotes", "releaseNotes",
       "allReleases", "howToUpdate", "howToUpdateCli", "howToUpdateManual",
       "howToUpdateNote",
@@ -268,6 +268,100 @@ describe("updates", () => {
       const error = await fetchLatestEddiRelease().catch((e: unknown) => e);
       expect(error).toBeInstanceOf(UpdateCheckError);
       expect(error).toMatchObject({ reason: "unreachable" });
+    });
+
+    /**
+     * The failure a real deployment actually gets: EDDI serves the Manager under
+     * `connect-src 'self'`, so the browser refuses the request before it leaves
+     * the page — with the same TypeError a dead network produces. Reported as
+     * "unreachable" it sent operators to check a proxy that was never in the
+     * path, so the CSP violation event is what tells the two apart.
+     */
+    it("reports a CSP-blocked request as blocked-by-csp, not unreachable", async () => {
+      server.use(
+        http.get(LATEST_URL, () => {
+          document.dispatchEvent(
+            Object.assign(new Event("securitypolicyviolation"), {
+              blockedURI: "https://api.github.com",
+              violatedDirective: "connect-src",
+              effectiveDirective: "connect-src",
+            }),
+          );
+          return HttpResponse.error();
+        }),
+      );
+
+      const error = await fetchLatestEddiRelease().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(UpdateCheckError);
+      expect(error).toMatchObject({ reason: "blocked-by-csp" });
+    });
+
+    it("does not blame CSP for a lookalike origin", async () => {
+      // `startsWith(origin)` would accept this: a different host entirely, whose
+      // violation would explain away a genuine GitHub outage as a CSP problem.
+      server.use(
+        http.get(LATEST_URL, () => {
+          document.dispatchEvent(
+            Object.assign(new Event("securitypolicyviolation"), {
+              blockedURI: "https://api.github.com.example/repos/labsai/EDDI/releases/latest",
+              violatedDirective: "connect-src",
+              effectiveDirective: "connect-src",
+            }),
+          );
+          return HttpResponse.error();
+        }),
+      );
+
+      await expect(fetchLatestEddiRelease()).rejects.toMatchObject({ reason: "unreachable" });
+    });
+
+    it("accepts the origin reported bare, as most browsers report it", async () => {
+      server.use(
+        http.get(LATEST_URL, () => {
+          document.dispatchEvent(
+            Object.assign(new Event("securitypolicyviolation"), {
+              blockedURI: "https://api.github.com",
+              effectiveDirective: "connect-src",
+            }),
+          );
+          return HttpResponse.error();
+        }),
+      );
+
+      await expect(fetchLatestEddiRelease()).rejects.toMatchObject({ reason: "blocked-by-csp" });
+    });
+
+    it("does not blame CSP for a violation against some other host", async () => {
+      server.use(
+        http.get(LATEST_URL, () => {
+          document.dispatchEvent(
+            Object.assign(new Event("securitypolicyviolation"), {
+              blockedURI: "https://fonts.example/font.woff2",
+              violatedDirective: "font-src",
+              effectiveDirective: "font-src",
+            }),
+          );
+          return HttpResponse.error();
+        }),
+      );
+
+      await expect(fetchLatestEddiRelease()).rejects.toMatchObject({ reason: "unreachable" });
+    });
+
+    it("stops listening for violations once the request is done", async () => {
+      server.use(http.get(LATEST_URL, () => HttpResponse.json({ tag_name: "6.3.0" })));
+      await fetchLatestEddiRelease();
+
+      // A late violation must not leak into the next check's verdict.
+      document.dispatchEvent(
+        Object.assign(new Event("securitypolicyviolation"), {
+          blockedURI: "https://api.github.com",
+          effectiveDirective: "connect-src",
+        }),
+      );
+
+      server.use(http.get(LATEST_URL, () => HttpResponse.error()));
+      await expect(fetchLatestEddiRelease()).rejects.toMatchObject({ reason: "unreachable" });
     });
 
     it("rejects a release with no tag rather than inventing a version", async () => {

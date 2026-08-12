@@ -82,14 +82,44 @@ describe("UpdateBanner", () => {
     expect(await screen.findByTestId("update-banner")).toBeInTheDocument();
   });
 
-  it("links to the update instructions on the dashboard and to the release notes", async () => {
+  it.each(["/manage/updates", "/manage/updates/"])(
+    "stays out of the way on the page it points at (%s)",
+    async (route) => {
+      localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
+      // The card is rendered alongside so the check's completion is observable:
+      // asserting the banner's absence against a still-pending query would pass
+      // no matter what the route rule did, since the banner is absent while the
+      // status is "unknown" anyway.
+      renderWithProviders(
+        <>
+          <UpdateBanner />
+          <UpdateCheckCard />
+        </>,
+        { initialRoute: route },
+      );
+
+      // Same query, same cache: once the card names the release, the banner has
+      // everything it needs and is silent only because of where we are.
+      expect(await screen.findByText(/EDDI 9\.9\.9 is available/)).toBeInTheDocument();
+      expect(screen.queryByTestId("update-banner")).not.toBeInTheDocument();
+    },
+  );
+
+  it("still announces itself everywhere else, so this is a route rule and not a mute", async () => {
+    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
+    renderWithProviders(<UpdateBanner />, { initialRoute: "/manage/agents" });
+
+    expect(await screen.findByTestId("update-banner")).toBeInTheDocument();
+  });
+
+  it("links to the Updates page and to the release notes", async () => {
     localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     renderWithProviders(<UpdateBanner />);
 
     const banner = await screen.findByTestId("update-banner");
     expect(within(banner).getByRole("link", { name: /How to update/ })).toHaveAttribute(
       "href",
-      "/manage#updates",
+      "/manage/updates",
     );
     expect(within(banner).getByTestId("update-banner-notes-link")).toHaveAttribute(
       "href",

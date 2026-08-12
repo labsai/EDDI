@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { ExternalLink, Gift, X } from "lucide-react";
 import { useUpdateCheck } from "@/hooks/use-update-check";
 
@@ -18,10 +18,20 @@ export function UpdateBanner() {
   const { t } = useTranslation();
   const { autoCheck, status, latest, knownInstalledVersion } = useUpdateCheck();
   const [dismissed, setDismissed] = useState(false);
+  const { pathname } = useLocation();
 
   if (!autoCheck || status !== "update-available" || !latest || dismissed) {
     return null;
   }
+
+  // Silent on the page it points at. The Updates screen already says which
+  // release is out and how to get it, so a strip above the top bar repeating it
+  // is noise — and its "How to update" link would navigate to where you are.
+  //
+  // Trailing slash stripped first: React Router serves /manage/updates/ from the
+  // same route, but `pathname` keeps the slash verbatim, so an equality test
+  // would show the banner on the very page it is meant to stay off.
+  if (pathname.replace(/\/+$/, "") === "/manage/updates") return null;
 
   return (
     <div
@@ -48,7 +58,7 @@ export function UpdateBanner() {
           </>
         )}
       </span>
-      <Link to="/manage#updates" className="underline underline-offset-2 hover:no-underline">
+      <Link to="/manage/updates" className="underline underline-offset-2 hover:no-underline">
         {t("updates.howToUpdate", "How to update")}
       </Link>
       <a

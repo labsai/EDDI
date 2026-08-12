@@ -172,7 +172,8 @@ fi
 # the worst case of an interrupted deploy is some extra files on disk.
 echo -e "\n${CYAN}[5/5] Removing assets the new build did not produce...${NC}"
 
-# Clean hashed assets that the new build did not produce.
+# Clean assets that a PREVIOUS run of this script deployed and the new build no
+# longer produces.
 #
 # This is a SET DIFFERENCE against the new dist, not a per-prefix sweep. The
 # per-prefix version only deleted an old file when a same-prefixed new one
@@ -182,11 +183,14 @@ echo -e "\n${CYAN}[5/5] Removing assets the new build did not produce...${NC}"
 # Route-level code splitting emits ~240, all content-hashed, so a stale set now
 # accumulates fast enough to matter.
 #
-# Only files matching Vite's `name-<8charhash>.ext` shape are considered, so
-# anything hand-placed in assets/ is left alone.
-HASH_RE='^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$'
+# What is eligible for deletion comes from MANIFEST — the list this script wrote
+# on its last run — never from the shape of a filename. Matching Vite's
+# `name-<8charhash>.ext` pattern is not proof of provenance: a hand-placed
+# `brand-a1b2c3d4.svg` matches it exactly, and a sweep by pattern would delete
+# it. Anything absent from the manifest is left alone, whoever put it there.
+MANIFEST="$ASSETS_DIR/.manager-assets"
 
-# Build the set of filenames the new build produced.
+# Filenames the new build produced.
 NEW_ASSET_NAMES=()
 while IFS= read -r -d '' f; do
     NEW_ASSET_NAMES+=("$(basename "$f")")
@@ -200,15 +204,26 @@ is_in_new_build() {
     return 1
 }
 
-while IFS= read -r -d '' old; do
-    oldname=$(basename "$old")
-    [[ "$oldname" =~ $HASH_RE ]] || continue
-    if ! is_in_new_build "$oldname"; then
+if [[ -f "$MANIFEST" ]]; then
+    while IFS= read -r oldname; do
+        [[ -n "$oldname" ]] || continue
+        is_in_new_build "$oldname" && continue
+        [[ -f "$ASSETS_DIR/$oldname" ]] || continue
         echo -e "  ${YELLOW}Removing stale asset $oldname${NC}"
         REMOVED_FILES+=("src/main/resources/META-INF/resources/assets/$oldname")
-        rm -f "$old"
-    fi
-done < <(find "$ASSETS_DIR" -maxdepth 1 -type f -print0 2>/dev/null)
+        rm -f "$ASSETS_DIR/$oldname"
+    done < "$MANIFEST"
+else
+    # First run against this checkout. Nothing is deleted: without a manifest
+    # there is no way to tell a stale chunk from a file someone put here on
+    # purpose, and silently guessing wrong is worse than one deploy's worth of
+    # leftovers. The manifest written below makes the next run precise.
+    echo -e "  ${YELLOW}No manifest yet — skipping cleanup this once.${NC}"
+    echo "  Stale assets from earlier deploys will be removed on the next run."
+fi
+
+# Record what this run deployed, for the next run to diff against.
+printf '%s\n' "${NEW_ASSET_NAMES[@]}" > "$MANIFEST"
 
 echo -e "\n${GREEN}[DONE] EDDI Manager deployed successfully!${NC}"
 echo "  JS:  /assets/$NEW_JS_NAME"

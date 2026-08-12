@@ -73,6 +73,19 @@ export default defineConfig({
   optimizeDeps: {
     include: ["monaco-editor"],
   },
+  build: {
+    /**
+     * Never inline a font, whatever its size.
+     *
+     * Vite inlines any asset under 4 KB as a `data:` URI, and six of the Noto
+     * subsets land under that. EDDI serves the Manager with `font-src 'self'`,
+     * which refuses a `data:` URI — so exactly those six faces were blocked in
+     * production and silently fell back to a system font, while the other 467
+     * (shipped as files) loaded fine. As files they are same-origin, which
+     * `'self'` allows.
+     */
+    assetsInlineLimit: (filePath) => (/\.woff2?$/i.test(filePath) ? false : undefined),
+  },
   worker: {
     format: "es",
   },

@@ -55,6 +55,7 @@ function useBreadcrumbs() {
     capabilities: t("nav.capabilities", "Capabilities"),
     sync: t("nav.sync", "Sync"),
     gdpr: t("nav.gdpr", "GDPR"),
+    updates: t("nav.updates", "Updates"),
     wizard: t("wizard.title", "Agent Wizard"),
     agentview: t("nav.agents"),
     workflowview: t("nav.packages"),
@@ -136,11 +137,13 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
    * Locales are code-split (`src/i18n/config.ts`), so `changeLanguage` now
    * performs a network fetch. Two consequences, both handled here:
    *
-   *  - **It can reject.** A tab held open across a deploy asks for a hashed
-   *    chunk that no longer exists. Left floating, that surfaces as an unhandled
-   *    rejection and the select silently snaps back. i18next keeps the previous
-   *    language on a failed load, so the UI stays usable — this just makes the
-   *    failure visible.
+   *  - **It can fail without rejecting.** A tab held open across a deploy asks
+   *    for a hashed chunk that no longer exists. i18next 24 treats that as a
+   *    soft miss: `changeLanguage` RESOLVES, its callback reports `err === null`,
+   *    and `i18n.language` is set to the requested code — only `resolvedLanguage`
+   *    quietly stays behind on the fallback. So the select would read "Deutsch"
+   *    over English text with nothing to explain it. Whether the bundle actually
+   *    landed is the one trustworthy signal, hence {@link applyLanguage}.
    *  - **Two changes can be in flight at once.** Chunks are different sizes, so
    *    picking Thai then Spanish can finish Spanish-then-Thai and leave the user
    *    reading a language they already moved on from. `latestLanguageRequest`
@@ -149,17 +152,33 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
    */
   const latestLanguageRequest = useRef<string | null>(null);
 
+  /**
+   * Switch to `code`, throwing if its bundle did not actually arrive.
+   *
+   * English is bundled statically, so its check passes without a fetch.
+   */
+  async function applyLanguage(code: string) {
+    await i18n.changeLanguage(code);
+    if (!i18n.hasResourceBundle(code, "translation")) {
+      throw new Error(`locale bundle for "${code}" did not load`);
+    }
+  }
+
   async function handleLanguageChange(code: string) {
+    const previous = i18n.language;
     latestLanguageRequest.current = code;
     try {
-      await i18n.changeLanguage(code);
+      await applyLanguage(code);
       // A slower earlier request may land after a faster later one. Only the
       // most recent pick is allowed to stand.
-      if (latestLanguageRequest.current !== code) {
-        await i18n.changeLanguage(latestLanguageRequest.current ?? code);
-      }
+      const latest = latestLanguageRequest.current;
+      if (latest !== code) await applyLanguage(latest ?? code);
     } catch {
       if (latestLanguageRequest.current !== code) return; // superseded; stay quiet
+      // i18next has already moved `language` to the code that failed, which is
+      // what the select binds to. Put it back on something that renders.
+      latestLanguageRequest.current = previous;
+      await i18n.changeLanguage(previous).catch(() => {});
       toast.error(
         t("language.switchFailed", "Could not load that language. Please try again."),
       );
