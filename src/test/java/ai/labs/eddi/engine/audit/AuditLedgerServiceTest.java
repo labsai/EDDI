@@ -272,6 +272,29 @@ class AuditLedgerServiceTest {
                 "once the queue drained, the barrier must lift and eviction reclaim the table");
     }
 
+    /**
+     * A conversation with a dead-lettered position can never be re-seeded — the
+     * store count is smaller than the next free position once there is a gap, so
+     * re-seeding would hand the same numbers out twice. Those counters are
+     * therefore pinned for the process lifetime, which is only safe because they
+     * cannot fill the table: the undelivered cap counts <em>sequences</em>, so the
+     * worst case is one pinned conversation per tracked sequence.
+     * <p>
+     * The failure this guards is a plausible future edit — raising
+     * {@code MAX_TRACKED_UNDELIVERED} to or past {@code MAX_TRACKED_CONVERSATIONS}
+     * — after which a long store outage could pin every slot and strand every later
+     * conversation on {@code UNSEQUENCED} until restart, with nothing failing to
+     * say so.
+     */
+    @Test
+    @DisplayName("sequence eviction — pinned undelivered conversations cannot exhaust the table")
+    void undeliveredPinCannotExhaustTheTable() {
+        assertTrue(AuditLedgerService.MAX_TRACKED_UNDELIVERED < AuditLedgerService.MAX_TRACKED_CONVERSATIONS,
+                "every conversation in the undelivered table is pinned in the sequence table, so the undelivered "
+                        + "cap must stay strictly below the conversation cap or a store outage can strand every "
+                        + "later conversation on UNSEQUENCED until restart");
+    }
+
     @Test
     @DisplayName("flush — does nothing when queue is empty")
     void flushEmptyQueue() {

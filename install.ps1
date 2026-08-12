@@ -560,7 +560,10 @@ function Get-ComposeFiles {
                     # *directory* at the mount path and Grafana then fails to
                     # provision, including the dashboards that did download. Same
                     # reasoning as the Keycloak realm below.
-                    if (Test-Path $mfTarget) { Remove-Item -Path $mfTarget -Force }
+                    # -Recurse as well as -Force: what is in the way is most
+                    # likely a DIRECTORY left by a previous run's failed mount,
+                    # and -Force alone will not remove one.
+                    if (Test-Path $mfTarget) { Remove-Item -Path $mfTarget -Recurse -Force -ErrorAction SilentlyContinue }
                     Write-Fail "Failed to download $mf (required for -WithMonitoring).`n     URL: $mfUrl"
                 }
             }

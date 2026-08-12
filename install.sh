@@ -642,7 +642,13 @@ resolve_compose_files() {
           # then fails to provision — including the dashboards that did
           # download. Same reasoning as the Keycloak realm below; a half-built
           # monitoring stack is not better than a refusal to build one.
-          rm -f "$mf_target"
+          # -rf, not -f: the thing in the way is most likely a DIRECTORY that a
+          # previous run's failed mount left behind, and `rm -f` cannot remove
+          # one. Under `set -e` that turns this cleanup into the script's exit
+          # point, so the user sees "rm: cannot remove ...: Is a directory"
+          # instead of the message below, and the stale path survives to break
+          # the next run too.
+          rm -rf "$mf_target"
           fail "Failed to download ${mf} (required for --with-monitoring).\n     URL: ${mf_url}"
         fi
       fi

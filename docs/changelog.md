@@ -65,14 +65,10 @@ link was fine; the resolver was wrong, and now handles the leading `/` the way t
 Documentation *of* link syntax (the `` `![alt](uri)` `` rows in the output-format tables) is excluded
 by stripping code spans and fences, not by an ignore list that would rot in turn.
 
-`ImportStyleTest` enforces AGENTS.md §4.7. These accumulate precisely because nothing fails when one
-is added — the code compiles either way, so the rule was advice a reviewer had to catch by eye.
-Writing it exposed that the original audit had **under-counted**: its pattern required a package
-segment after `java.util`, so `java.util.List` never matched. The real total was 575, not 141, and
-the remaining 209 (mostly `java.util.Objects` in `equals`/`hashCode`) are now cleaned up too. The
-one genuine exception AGENTS.md allows — `mongo.HistorizedResourceStore extends
-datastore.HistorizedResourceStore` and its Modifiable twin — is an explicit allowlist, so adding to
-it is a reviewable act rather than silent drift.
+`ImportStyleTest` and the 575-name cleanup it guards ship on a separate branch, so they are
+described in that branch's own entry rather than claimed here. Writing it did change one fact
+recorded above: the original audit had under-counted, because its pattern required a package
+segment after `java.util`, so `java.util.List` never matched.
 
 **Two seams were widened for testability, both deliberately.** `RateLimitBucket` became
 package-private with a `backdateLastRefill` hook, because a ~107-day idle bucket cannot be reached
@@ -81,17 +77,13 @@ behaviour. `SafeHttpClient.withDefaultTimeout` became package-private so its fiv
 without an embedded server — the existing `SafeHttpClientTest` binds a loopback socket in
 `@BeforeEach` and therefore only runs where those are available.
 
-**And a proof rather than an assurance about the 575-name refactor.** Every string literal in all
-273 mechanically-changed files was extracted and compared against `origin/main`: byte-identical.
-A rewrite that reached inside a literal — a reflective class name, a config key, a log format —
-would compile, pass every test, and show up nowhere else. The only six files whose literals changed
-are the hand-edited ones, and each change is a message this branch intended to change.
+
 
 ---
 
 
 
-## 🧹 chore: close the gaps outside the build — installer CI, link rot, dead code, 366 inline FQNs (2026-08-12)
+## 🧹 chore: close the gaps outside the build — installer CI, link rot, dead code (2026-08-12)
 
 **Repo:** EDDI (`fix/code-review-defects-and-docs`)
 
@@ -132,14 +124,9 @@ was a JAX-RS interface declaring `/user/isAuthenticated` and `/user/securityType
 implementing class** — the only `@Path("/user")` in the codebase, so those endpoints were advertised
 to OpenAPI and served by nothing. Both removed.
 
-**366 inline fully-qualified names across 168 files**, against AGENTS.md §4.7's own rule. These were
-not the permitted disambiguation case — `PendingApprovalSummary`, `HitlDecision`,
-`ToolApprovalsConfig`, `ConversationMemorySnapshot` and `ControlSignal` each resolve to exactly one
-class, and `IConversationService` imported `java.util.List` on line 17 while writing
-`java.util.List<…>` on line 355. The two genuine cases — `mongo.HistorizedResourceStore extends
-datastore.HistorizedResourceStore` and its Modifiable twin — were detected and left alone. Verified
-with a **clean** `test-compile`, since an incremental build reuses stale classes and hides exactly
-this kind of break.
+**Inline fully-qualified names** were also found in breach of AGENTS.md §4.7, but that cleanup does
+not ship here — it is a separate branch and its own changelog entry, so this one does not claim
+work it did not carry.
 
 **Link rot: 38 broken links, now zero.** Every `planning/*.md` file computed `../` and `../../` as
 though it lived under `docs/planning/`, but the directory is at the repo root — so `../../AGENTS.md`

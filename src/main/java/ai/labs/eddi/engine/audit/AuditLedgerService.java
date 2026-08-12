@@ -59,10 +59,14 @@ public class AuditLedgerService {
     static final int DEFAULT_MAX_QUEUE_SIZE = 100_000;
 
     /**
-     * Cap on how many conversations are tracked for sequence assignment at once. On
-     * overflow, counters whose positions are all accounted for are evicted and
-     * re-seeded from the store on next use — see
-     * {@link #evictSequenceCountersIfFull} for why only those are safe to drop.
+     * Threshold at which sequence-counter eviction kicks in. On overflow, counters
+     * whose positions are all accounted for are evicted and re-seeded from the
+     * store on next use — see {@link #evictSequenceCountersIfFull} for why only
+     * those are safe to drop.
+     * <p>
+     * A threshold, not a hard ceiling: the check in {@link #nextSequence} is not
+     * atomic with the insert that follows it, so concurrent submitters can
+     * overshoot it slightly. See the comment there for why that is the right trade.
      * <p>
      * Package-visible so the eviction tests can reach the threshold instead of
      * hard-coding a copy of it that would drift.
@@ -76,7 +80,7 @@ public class AuditLedgerService {
      * is hit the remaining drops go unattributed and the verifier falls back to
      * reporting them as {@code BROKEN} — the conservative verdict.
      */
-    private static final int MAX_TRACKED_UNDELIVERED = 10_000;
+    static final int MAX_TRACKED_UNDELIVERED = 10_000;
 
     private final IAuditStore auditStore;
     private final boolean enabled;
@@ -361,6 +365,23 @@ public class AuditLedgerService {
      * undelivered table stops recording, so a dead-lettered position may be reused.
      * That window already reports {@code BROKEN} by the documented fail-strict
      * rule, so the verdict is unchanged — only its reason is.
+     * <p>
+     * <b>Conversations with dead-lettered positions stay pinned for the process
+     * lifetime, and that cannot starve the table.</b> Re-seeding them is not merely
+     * inconvenient, it is unsound: the seed comes from {@code countByConversation},
+     * which counts persisted rows, and a dead-lettered gap makes that count smaller
+     * than the next free position. With sequences 0-9 where 3 and 5 never landed,
+     * the count is 8 while the next position is 10 — so a re-seed would hand out 8
+     * and 9 a second time. Accounting for the highest known undelivered position
+     * does not rescue it either ({@code max(8, 6)} is still 8); a sound re-seed
+     * would need a {@code maxSequence(conversationId)} that {@link IAuditStore}
+     * does not expose. Retention is therefore correct, and it is bounded:
+     * {@link #undeliveredTracked} counts <em>sequences</em>, so at most
+     * {@link #MAX_TRACKED_UNDELIVERED} conversations can be pinned (one sequence
+     * each, the worst case) out of a {@link #MAX_TRACKED_CONVERSATIONS} table —
+     * leaving 80% of it evictable. {@code undeliveredPinCannotExhaustTheTable} pins
+     * that headroom, so raising one cap past the other fails the build rather than
+     * silently stranding new conversations on {@code UNSEQUENCED}.
      */
     private void evictSequenceCountersIfFull(String conversationId) {
         // Fast path: nothing to do until the table is full, and a conversation
@@ -441,8 +462,18 @@ public class AuditLedgerService {
         // reported as BROKEN — the ledger accusing the deployment of tampering
         // because its own table filled up. An unsequenced entry instead degrades
         // the window to UNAVAILABLE ("cannot be established"), which is honest.
+        // Deliberately NOT atomic with the computeIfAbsent below. Submitters share
+        // the read lock, so N concurrent unseen conversations can all observe
+        // "one slot left" and all insert, overshooting by up to the number of
+        // concurrent callers. That is why MAX_TRACKED_CONVERSATIONS is a
+        // threshold that triggers eviction rather than a hard ceiling: the
+        // overshoot is bounded by concurrency, self-corrects at the next
+        // eviction, and costs one AtomicLong per excess conversation. Making it
+        // exact would mean serialising the insert path — a lock on every submit
+        // for a new conversation — to enforce a bound that is a memory heuristic,
+        // not a correctness property.
         if (!conversationSequences.containsKey(conversationId) && conversationSequences.size() >= MAX_TRACKED_CONVERSATIONS) {
-            LOGGER.warnv("Audit sequence table is full ({0} conversations, all with entries in flight) — "
+            LOGGER.warnv("Audit sequence table is at its {0}-conversation threshold with every counter in flight — "
                     + "new conversations are recorded unsequenced until it drains", MAX_TRACKED_CONVERSATIONS);
             return AuditEntry.UNSEQUENCED;
         }
