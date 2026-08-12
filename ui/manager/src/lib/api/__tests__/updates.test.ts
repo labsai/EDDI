@@ -296,6 +296,41 @@ describe("updates", () => {
       expect(error).toMatchObject({ reason: "blocked-by-csp" });
     });
 
+    it("does not blame CSP for a lookalike origin", async () => {
+      // `startsWith(origin)` would accept this: a different host entirely, whose
+      // violation would explain away a genuine GitHub outage as a CSP problem.
+      server.use(
+        http.get(LATEST_URL, () => {
+          document.dispatchEvent(
+            Object.assign(new Event("securitypolicyviolation"), {
+              blockedURI: "https://api.github.com.example/repos/labsai/EDDI/releases/latest",
+              violatedDirective: "connect-src",
+              effectiveDirective: "connect-src",
+            }),
+          );
+          return HttpResponse.error();
+        }),
+      );
+
+      await expect(fetchLatestEddiRelease()).rejects.toMatchObject({ reason: "unreachable" });
+    });
+
+    it("accepts the origin reported bare, as most browsers report it", async () => {
+      server.use(
+        http.get(LATEST_URL, () => {
+          document.dispatchEvent(
+            Object.assign(new Event("securitypolicyviolation"), {
+              blockedURI: "https://api.github.com",
+              effectiveDirective: "connect-src",
+            }),
+          );
+          return HttpResponse.error();
+        }),
+      );
+
+      await expect(fetchLatestEddiRelease()).rejects.toMatchObject({ reason: "blocked-by-csp" });
+    });
+
     it("does not blame CSP for a violation against some other host", async () => {
       server.use(
         http.get(LATEST_URL, () => {

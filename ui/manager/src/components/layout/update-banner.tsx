@@ -27,7 +27,11 @@ export function UpdateBanner() {
   // Silent on the page it points at. The Updates screen already says which
   // release is out and how to get it, so a strip above the top bar repeating it
   // is noise — and its "How to update" link would navigate to where you are.
-  if (pathname === "/manage/updates") return null;
+  //
+  // Trailing slash stripped first: React Router serves /manage/updates/ from the
+  // same route, but `pathname` keeps the slash verbatim, so an equality test
+  // would show the banner on the very page it is meant to stay off.
+  if (pathname.replace(/\/+$/, "") === "/manage/updates") return null;
 
   return (
     <div

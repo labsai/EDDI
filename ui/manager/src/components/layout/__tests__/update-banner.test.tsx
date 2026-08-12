@@ -82,16 +82,33 @@ describe("UpdateBanner", () => {
     expect(await screen.findByTestId("update-banner")).toBeInTheDocument();
   });
 
-  it("stays out of the way on the page it points at", async () => {
+  it.each(["/manage/updates", "/manage/updates/"])(
+    "stays out of the way on the page it points at (%s)",
+    async (route) => {
+      localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
+      // The card is rendered alongside so the check's completion is observable:
+      // asserting the banner's absence against a still-pending query would pass
+      // no matter what the route rule did, since the banner is absent while the
+      // status is "unknown" anyway.
+      renderWithProviders(
+        <>
+          <UpdateBanner />
+          <UpdateCheckCard />
+        </>,
+        { initialRoute: route },
+      );
+
+      // Same query, same cache: once the card names the release, the banner has
+      // everything it needs and is silent only because of where we are.
+      expect(await screen.findByText(/EDDI 9\.9\.9 is available/)).toBeInTheDocument();
+      expect(screen.queryByTestId("update-banner")).not.toBeInTheDocument();
+    },
+  );
+
+  it("still announces itself everywhere else, so this is a route rule and not a mute", async () => {
     localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
-    renderWithProviders(<UpdateBanner />, { initialRoute: "/manage/updates" });
-
-    // Everything the banner says is already on that page, and its "How to
-    // update" link would navigate to where the reader already is.
-    await waitFor(() => expect(screen.queryByTestId("update-banner")).not.toBeInTheDocument());
-
-    // Still shows everywhere else, so this is a route rule and not a mute.
     renderWithProviders(<UpdateBanner />, { initialRoute: "/manage/agents" });
+
     expect(await screen.findByTestId("update-banner")).toBeInTheDocument();
   });
 

@@ -3745,7 +3745,7 @@
     "ahead": "Estás usando {{installed}}, más reciente que la última versión publicada ({{version}}).",
     "unknownInstalled": "La última versión es {{version}}. No se pudo determinar la versión instalada, así que no hay nada con lo que compararla.",
     "errorRateLimited": "Se alcanzó el límite de peticiones sin autenticar de GitHub. Inténtalo más tarde o abre la página de versiones.",
-    "errorBlockedByCsp": "La Content-Security-Policy de esta instalación impide que el navegador acceda a api.github.com, por lo que la comprobación no puede ejecutarse. Añada api.github.com a la directiva connect-src o utilice el enlace de versiones de abajo.",
+    "errorBlockedByCsp": "La Content-Security-Policy de esta instalación impide que el navegador acceda a api.github.com, por lo que la comprobación no puede ejecutarse. Añade api.github.com a la directiva connect-src o utiliza el enlace de versiones de abajo.",
     "errorUnreachable": "No se pudo contactar con api.github.com. Comprueba tu red o el proxy de salida.",
     "errorFailed": "La comprobación de actualizaciones falló. Abre la página de versiones para comprobarlo manualmente.",
     "publishedOn": "Publicada el {{date}}",

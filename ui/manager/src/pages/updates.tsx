@@ -19,11 +19,14 @@ export function UpdatesPage() {
     // badly at 1000px a line.
     <div className="max-w-3xl space-y-6" data-testid="updates-page">
       <div>
-        <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
+        <h1
+          className="flex items-center gap-2 text-2xl font-bold text-foreground"
+          data-testid="updates-page-title"
+        >
           <ArrowUpCircle className="h-6 w-6 text-primary" aria-hidden="true" />
           {t("updates.title", "EDDI Updates")}
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-1 text-sm text-muted-foreground" data-testid="updates-page-description">
           {t(
             "updates.description",
             "Check whether a newer EDDI release is available. Nothing is sent until you ask.",

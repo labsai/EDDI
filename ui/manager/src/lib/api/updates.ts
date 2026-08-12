@@ -171,8 +171,13 @@ function watchForCspBlock(url: string) {
 
   const onViolation = (event: SecurityPolicyViolationEvent) => {
     // `blockedURI` is the origin alone for most fetch violations, the full URL
-    // in some browsers — a prefix test covers both.
-    if (event.blockedURI?.startsWith(origin)) blocked = true;
+    // in some browsers — so accept both, but only those two. A bare
+    // `startsWith(origin)` would also swallow `https://api.github.com.example`,
+    // an unrelated host whose violation would then explain away a genuine
+    // GitHub outage as a CSP problem.
+    if (event.blockedURI === origin || event.blockedURI?.startsWith(`${origin}/`)) {
+      blocked = true;
+    }
   };
   document.addEventListener("securitypolicyviolation", onViolation);
 

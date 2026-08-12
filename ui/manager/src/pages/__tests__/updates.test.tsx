@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { UpdatesPage } from "@/pages/updates";
 
@@ -7,7 +7,11 @@ describe("UpdatesPage", () => {
   it("titles the screen and hosts the check", async () => {
     renderWithProviders(<UpdatesPage />);
 
-    expect(screen.getByRole("heading", { level: 1, name: /EDDI Updates/ })).toBeInTheDocument();
+    const title = screen.getByTestId("updates-page-title");
+    expect(title).toHaveTextContent("EDDI Updates");
+    // The page owns the heading now that the card has none — so this has to be
+    // the h1, or the screen has no top-level heading at all (WCAG 2.4.6).
+    expect(title.tagName).toBe("H1");
     expect(await screen.findByTestId("update-check-card")).toBeInTheDocument();
   });
 
@@ -16,13 +20,18 @@ describe("UpdatesPage", () => {
     // so "nothing is sent until you ask" has to be readable here.
     renderWithProviders(<UpdatesPage />);
 
-    expect(screen.getByText(/Nothing is sent until you ask/)).toBeInTheDocument();
-    expect(await screen.findByText("No check run yet.")).toBeInTheDocument();
+    expect(screen.getByTestId("updates-page-description")).toHaveTextContent(
+      /Nothing is sent until you ask/,
+    );
+    expect(await screen.findByTestId("update-check-result")).toHaveTextContent(
+      "No check run yet.",
+    );
   });
 
-  it("says the title once — the card no longer repeats it", () => {
+  it("says the title once — the card no longer repeats it", async () => {
     renderWithProviders(<UpdatesPage />);
 
-    expect(screen.getAllByText("EDDI Updates")).toHaveLength(1);
+    const card = await screen.findByTestId("update-check-card");
+    expect(within(card).queryByText("EDDI Updates")).not.toBeInTheDocument();
   });
 });
