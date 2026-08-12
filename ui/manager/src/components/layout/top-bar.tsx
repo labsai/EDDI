@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { useLocation, Link } from "react-router-dom";
 import {
   Moon,
@@ -129,6 +130,61 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
     { value: "system" as const, icon: Monitor, label: t("theme.system") },
   ];
 
+  /**
+   * Switch language, tolerating a locale chunk that fails to arrive and a user
+   * who changes their mind mid-download.
+   *
+   * Locales are code-split (`src/i18n/config.ts`), so `changeLanguage` now
+   * performs a network fetch. Two consequences, both handled here:
+   *
+   *  - **It can fail without rejecting.** A tab held open across a deploy asks
+   *    for a hashed chunk that no longer exists. i18next 24 treats that as a
+   *    soft miss: `changeLanguage` RESOLVES, its callback reports `err === null`,
+   *    and `i18n.language` is set to the requested code — only `resolvedLanguage`
+   *    quietly stays behind on the fallback. So the select would read "Deutsch"
+   *    over English text with nothing to explain it. Whether the bundle actually
+   *    landed is the one trustworthy signal, hence {@link applyLanguage}.
+   *  - **Two changes can be in flight at once.** Chunks are different sizes, so
+   *    picking Thai then Spanish can finish Spanish-then-Thai and leave the user
+   *    reading a language they already moved on from. `latestLanguageRequest`
+   *    records the most recent pick; an older completion is discarded rather
+   *    than applied.
+   */
+  const latestLanguageRequest = useRef<string | null>(null);
+
+  /**
+   * Switch to `code`, throwing if its bundle did not actually arrive.
+   *
+   * English is bundled statically, so its check passes without a fetch.
+   */
+  async function applyLanguage(code: string) {
+    await i18n.changeLanguage(code);
+    if (!i18n.hasResourceBundle(code, "translation")) {
+      throw new Error(`locale bundle for "${code}" did not load`);
+    }
+  }
+
+  async function handleLanguageChange(code: string) {
+    const previous = i18n.language;
+    latestLanguageRequest.current = code;
+    try {
+      await applyLanguage(code);
+      // A slower earlier request may land after a faster later one. Only the
+      // most recent pick is allowed to stand.
+      const latest = latestLanguageRequest.current;
+      if (latest !== code) await applyLanguage(latest ?? code);
+    } catch {
+      if (latestLanguageRequest.current !== code) return; // superseded; stay quiet
+      // i18next has already moved `language` to the code that failed, which is
+      // what the select binds to. Put it back on something that renders.
+      latestLanguageRequest.current = previous;
+      await i18n.changeLanguage(previous).catch(() => {});
+      toast.error(
+        t("language.switchFailed", "Could not load that language. Please try again."),
+      );
+    }
+  }
+
   const languages = [
     { code: "en", label: t("language.en") },
     { code: "de", label: t("language.de") },
@@ -214,7 +270,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
             <Globe className="h-4 w-4 text-muted-foreground" />
             <select
               value={i18n.language}
-              onChange={(e) => i18n.changeLanguage(e.target.value)}
+              onChange={(e) => void handleLanguageChange(e.target.value)}
               data-testid="language-selector"
               className="appearance-none rounded-md bg-transparent px-2 py-1.5 text-sm text-foreground outline-none transition-colors hover:bg-secondary focus:ring-2 focus:ring-ring"
             >

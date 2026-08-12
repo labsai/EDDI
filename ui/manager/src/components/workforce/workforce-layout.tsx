@@ -1,11 +1,11 @@
 import "@/styles/advisory.css";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { WorkforceSidebar } from "./workforce-sidebar";
 import { WorkforceTopbar } from "./workforce-topbar";
+import { SuspendedOutlet } from "@/components/layout/suspended-outlet";
 import { WorkforceBottomTabs } from "./workforce-bottom-tabs";
 import { WorkforceShortcuts } from "./workforce-shortcuts";
 import { ShortcutsDialog } from "./shortcuts-dialog";
@@ -134,7 +134,7 @@ export function WorkforceLayout() {
           className="flex flex-1 flex-col min-h-0 overflow-hidden pb-20"
           style={{ backgroundColor: "var(--br-bg)" }}
         >
-          <Outlet />
+          <SuspendedOutlet />
         </main>
         <WorkforceBottomTabs />
       </div>
@@ -160,7 +160,7 @@ export function WorkforceLayout() {
           className="flex flex-1 flex-col min-h-0 overflow-hidden"
           style={{ backgroundColor: "var(--br-bg)" }}
         >
-          <Outlet />
+          <SuspendedOutlet />
         </main>
 
         {/* Drawer overlay */}
@@ -219,7 +219,7 @@ export function WorkforceLayout() {
           className="flex flex-1 flex-col min-h-0 overflow-hidden"
           style={{ backgroundColor: "var(--br-bg)" }}
         >
-          <Outlet />
+          <SuspendedOutlet />
         </main>
       </div>
     </div>

@@ -52,10 +52,14 @@ export function WorkforceChat() {
               : "text-muted-foreground hover:bg-muted hover:text-foreground",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           )}
-          aria-label={t(
-            "Workforce.chat.toggleDetails",
-            showDetails ? "Hide agent details" : "Show agent details",
-          )}
+          // Two keys, not one with a ternary default: a single key can hold only
+          // one string, so the toggled state would have rendered the other
+          // one's text in every locale.
+          aria-label={
+            showDetails
+              ? t("Workforce.chat.hideAgentDetails", "Hide agent details")
+              : t("Workforce.chat.showAgentDetails", "Show agent details")
+          }
           aria-expanded={showDetails}
         >
           {showDetails ? (

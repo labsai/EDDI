@@ -35,6 +35,19 @@ vi.mock("keycloak-js", () => ({
   },
 }));
 
+// Neutralise the Monaco bootstrap globally.
+//
+// The four editor components import `@/lib/monaco-setup` for its side effect, so
+// that `loader.config({ monaco })` has run before <Editor> mounts and Monaco is
+// never fetched from the jsDelivr CDN. In tests that side effect is both
+// unnecessary and impossible: `@monaco-editor/react` is mocked, and the real
+// `monaco-editor` package ships raw `.css` and `?worker` imports that Node
+// cannot load — which is exactly why `vitest.config.ts` externalises it.
+//
+// A factory mock is what keeps the real module from being evaluated at all; an
+// automock would still resolve and import it to introspect its shape.
+vi.mock("@/lib/monaco-setup", () => ({}));
+
 // Mock window.matchMedia for theme-provider (JSDOM doesn't implement it)
 Object.defineProperty(window, "matchMedia", {
   writable: true,

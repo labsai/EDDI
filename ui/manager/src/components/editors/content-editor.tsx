@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+// Configures the self-hosted Monaco instance before <Editor> can look for one.
+// Side-effect import: without it @monaco-editor/react falls back to the jsDelivr CDN.
+import "@/lib/monaco-setup";
 import Editor, { type OnMount, type BeforeMount } from "@monaco-editor/react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Maximize2, Minimize2 } from "lucide-react";

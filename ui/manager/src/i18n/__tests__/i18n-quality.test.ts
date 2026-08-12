@@ -85,6 +85,28 @@ describe("i18n translation debt", () => {
     ar: 78, hi: 81, ja: 82, ko: 82, pt: 83, th: 83, zh: 83,
   };
 
+  /**
+   * Strings that are identical to English *because that is the correct
+   * translation* — loanwords and cognates, not untranslated copy-paste.
+   *
+   * Deliberately a list of EXACT keys rather than a namespace prefix. A prefix
+   * exemption is prospective: it silently covers every key added under it later,
+   * which is precisely how `config.test.ts` once waived all of `variables.*` and
+   * hid 34 real gaps. An exact key has to be added by a human who looked at that
+   * one string, and it stops applying the moment the English changes.
+   *
+   * Each entry needs a reason. If you cannot write one, it is debt, not an
+   * exception — leave it in the count.
+   */
+  const DELIBERATELY_IDENTICAL: Record<string, string[]> = {
+    // "Task Force" is standard German business vocabulary; "Arbeitsgruppe"
+    // means something softer, and the rest of the German UI uses the loanword.
+    de: ["Workforce.board.title", "Workforce.boardsLabel", "knowledgeHealth.taskForces"],
+    // "expert(s)" is the same word in French, and the surrounding French strings
+    // already use it ("Aucun expert").
+    fr: ["Workforce.card.advisorCount", "workforce.count"],
+  };
+
   it("records a baseline for every locale", () => {
     // Without this, adding a 12th locale to LOCALES but not to BASELINE compares
     // its count against `undefined`, and the guard silently stops applying to
@@ -95,11 +117,13 @@ describe("i18n translation debt", () => {
   for (const [code, locale] of Object.entries(LOCALES)) {
     it(`${code}.json has no more untranslated strings than its baseline`, () => {
       const flat = flatten(locale);
+      const exempt = new Set(DELIBERATELY_IDENTICAL[code] ?? []);
       const untranslated = Object.keys(flat).filter((k) => {
         const source = enFlat[k];
         const target = flat[k];
         if (typeof source !== "string" || typeof target !== "string") return false;
         if (source !== target) return false;
+        if (exempt.has(k)) return false;
         // Single tokens are usually technical identifiers that must not be
         // translated (e.g. "capabilityMatch", "deploymentContext").
         return source.trim().split(/\s+/).length >= 2;
@@ -112,6 +136,29 @@ describe("i18n translation debt", () => {
       ).toBeLessThanOrEqual(BASELINE[code]!);
     });
   }
+
+  it("every deliberately-identical entry still describes a real match", () => {
+    // A stale exemption is worse than none: it reads as "reviewed" while
+    // covering nothing, and hides the key if the English later diverges.
+    for (const [code, keys] of Object.entries(DELIBERATELY_IDENTICAL)) {
+      const flat = flatten(LOCALES[code]!);
+      for (const key of keys) {
+        // Assert both sides EXIST before comparing. `toBe` alone passes when the
+        // key has been deleted from both files — `undefined === undefined` — so a
+        // renamed or removed key would keep its exemption forever while naming
+        // nothing.
+        expect(typeof enFlat[key], `${key} is exempt but absent from en.json`).toBe(
+          "string",
+        );
+        expect(typeof flat[key], `${code}.${key} is exempt but absent from ${code}.json`).toBe(
+          "string",
+        );
+        expect(flat[key], `${code}.${key} is exempt but no longer matches English`).toBe(
+          enFlat[key],
+        );
+      }
+    }
+  });
 });
 
 describe("i18n interpolation integrity", () => {

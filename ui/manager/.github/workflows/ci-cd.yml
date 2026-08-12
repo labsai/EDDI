@@ -32,6 +32,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Fails on any drift between the code and the locale files: a key passed
+      # to t() that en.json lacks, a key en.json has that a locale lacks, or a
+      # leftover key in a locale. See .github/scripts/check-i18n.mjs.
+      - name: i18n drift check
+        run: npm run i18n:check
+
       - name: Type check
         run: npm run typecheck
 

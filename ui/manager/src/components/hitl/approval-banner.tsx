@@ -518,7 +518,7 @@ export function ApprovalBanner({
                 <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
                 {t("hitl.approvalBlockedHeading", "This cannot be approved here")}
               </p>
-              <ul className="mt-1 list-disc space-y-0.5 pl-5">
+              <ul className="mt-1 list-disc space-y-0.5 ps-5">
                 {blocked.map((entry) => (
                   <li key={entry.callId}>{entry.reason}</li>
                 ))}

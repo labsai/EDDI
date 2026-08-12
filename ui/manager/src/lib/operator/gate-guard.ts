@@ -126,12 +126,20 @@ function containsToolApprovalsKey(node: unknown): boolean {
  * answers "what prompt is this agent running?", and refusing that would break
  * introspection to prevent nothing.
  *
- * A call with no resolved preview is NOT refused here: it is also not pinned, so
- * it carries its own separate warning, and refusing every unpreviewable call
- * would block legitimate non-http tools entirely. That is the same line
- * `findSelfTargetedCalls` draws. Note the difference from a *truncated* body,
- * which IS refused — there the request is previewable and pinned, we simply
- * cannot see all of what we would be approving.
+ * A call with no resolved preview at all is NOT refused here: it is also not
+ * pinned, so it carries its own separate warning, and refusing every
+ * unpreviewable call would block legitimate non-http tools entirely. That is the
+ * same line `findSelfTargetedCalls` draws.
+ *
+ * Everything else about an llmstore write IS decided, and the checks run in a
+ * deliberate order — pinned first, then body. Three outcomes, none of which can
+ * be reached by an unpinned call:
+ *
+ *  - *truncated* or unparseable body → refused; the request is pinned, we simply
+ *    cannot see all of what we would be approving.
+ *  - *absent* body → allowed; the request is pinned, so what was previewed is
+ *    what runs, and it carries nothing.
+ *  - body containing `toolApprovals` at any depth → refused.
  */
 export function findGateCarryingCalls(
   calls: readonly PendingToolCallView[] | null | undefined,
@@ -145,12 +153,6 @@ export function findGateCarryingCalls(
     if (method === "GET" || method === "HEAD" || method === "") continue;
     if (!uriTargetsLlmStore(preview.uri)) continue;
 
-    // No body at all on a write to this store: nothing can carry a gate, so
-    // there is nothing to refuse. (A bodyless PUT would fail server-side for
-    // its own reasons; that is not this guard's business.)
-    const body = preview.body;
-    if (body == null || body.trim() === "") continue;
-
     // An UNPINNED http call is previewed best-effort: per PendingToolCallView's
     // own contract the request "can still change before it runs" (a call with
     // pre-request property instructions). Inspecting that body proves nothing —
@@ -159,10 +161,26 @@ export function findGateCarryingCalls(
     // than a gap in it. Only a pinned request is re-checked against its
     // fingerprint immediately before execution, so only a pinned request can be
     // reasoned about.
+    //
+    // This is checked BEFORE the body, and the order is load-bearing. The body
+    // checks below all reason from what the preview shows; on an unpinned call
+    // the preview is not what will run, so *no* body shape — including an empty
+    // or absent one — establishes anything. Testing the body first let an
+    // unpinned write with a null preview body fall straight through this guard:
+    // "we were shown no body" is not "no body will be sent".
+    // `PendingToolCallView.requestPinned` documents this combination as real —
+    // "a best-effort preview can exist while this is false" — and
+    // `ResolvedRequestPreview.body` is optional, so it is reachable by contract.
     if (!call.requestPinned) {
       found.push({ callId: call.callId, reason: "unpinned-request" });
       continue;
     }
+
+    // No body at all on a PINNED write to this store: the request is fixed and
+    // carries nothing, so there is nothing to refuse. (A bodyless PUT would fail
+    // server-side for its own reasons; that is not this guard's business.)
+    const body = preview.body;
+    if (body == null || body.trim() === "") continue;
 
     if (preview.bodyTruncated) {
       found.push({ callId: call.callId, reason: "unverifiable-body" });

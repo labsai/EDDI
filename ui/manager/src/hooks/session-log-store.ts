@@ -55,12 +55,19 @@ function connect() {
     eventSource.addEventListener("log", handleEvent);
     eventSource.onmessage = handleEvent;
 
+    // Reconnection is BearerEventSource's job, on the bounded policy in
+    // `sse-reconnect.ts`. This used to close the source and re-create it on an
+    // unbounded `setTimeout(connect, 5000)`, which meant a stream the backend
+    // will never serve — `/administration/logs` answers 403 without the
+    // `eddi-admin` role — was re-requested every five seconds for the entire
+    // session. This module connects at app boot, so that happened whether or not
+    // anyone ever opened the Logs page.
     eventSource.onerror = () => {
       useSessionLogStore.setState({ connected: false });
-      eventSource?.close();
-      eventSource = null;
-      // Reconnect after 5s
-      setTimeout(connect, 5000);
+    };
+
+    eventSource.onexhausted = () => {
+      useSessionLogStore.setState({ connected: false, seeded: true });
     };
 
     eventSource.onopen = async () => {

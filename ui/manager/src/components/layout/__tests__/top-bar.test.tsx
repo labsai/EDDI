@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, fireEvent, render } from "@testing-library/react";
+import { toast } from "sonner";
+import { screen, fireEvent, render, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { TopBar } from "@/components/layout/top-bar";
 import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
@@ -163,7 +164,137 @@ describe("TopBar", () => {
     const select = screen.getByTestId("language-selector") as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "de" } });
 
-    expect(select.value).toBe("de");
+    // Awaited, not synchronous: locales are code-split, so `changeLanguage`
+    // fetches a chunk before `languageChanged` fires and the controlled <select>
+    // re-renders. One tick, imperceptible to a user, but the assertion has to
+    // wait for it.
+    await waitFor(() => expect(select.value).toBe("de"));
+  });
+
+  it("lets the LAST pick win when two language changes overlap", async () => {
+    // Locale chunks differ in size, so picking Thai then Spanish can complete
+    // Spanish-then-Thai and leave the user reading a language they already moved
+    // on from. The most recent request has to be the one that stands.
+    const i18nModule = await import("@/i18n/config");
+    const resolvers: Array<() => void> = [];
+    const spy = vi
+      .spyOn(i18nModule.default, "changeLanguage")
+      .mockImplementation(
+        (() =>
+          new Promise<never>((resolve) => {
+            resolvers.push(resolve as () => void);
+          })) as unknown as typeof i18nModule.default.changeLanguage,
+      );
+    // `changeLanguage` is stubbed, so no bundle ever really loads. Report one as
+    // present to keep this test on the success path — ordering is what it is
+    // about; the missing-bundle path has its own test below.
+    const bundleSpy = vi
+      .spyOn(i18nModule.default, "hasResourceBundle")
+      .mockReturnValue(true);
+
+    renderWithProviders(<TopBar onMenuClick={() => {}} sidebarVisible={false} />);
+    const select = screen.getByTestId("language-selector") as HTMLSelectElement;
+
+    fireEvent.change(select, { target: { value: "th" } });
+    fireEvent.change(select, { target: { value: "es" } });
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+
+    // Finish the SECOND request first, then the first — the out-of-order case.
+    resolvers[1]?.();
+    resolvers[0]?.();
+
+    // The stale completion must re-assert the latest pick rather than stand.
+    await waitFor(() => {
+      const asked = spy.mock.calls.map((c) => c[0]);
+      expect(asked[asked.length - 1]).toBe("es");
+    });
+    spy.mockRestore();
+    bundleSpy.mockRestore();
+  });
+
+  it("keeps the previous language and warns when a locale chunk fails to load", async () => {
+    // A tab held open across a deploy asks for a hashed locale chunk that no
+    // longer exists. i18next keeps the current language, so the UI stays usable —
+    // this pins that the failure is surfaced rather than swallowed as an
+    // unhandled rejection.
+    const i18nModule = await import("@/i18n/config");
+    const spy = vi
+      .spyOn(i18nModule.default, "changeLanguage")
+      .mockRejectedValueOnce(new Error("Failed to fetch dynamically imported module"));
+
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+    const select = screen.getByTestId("language-selector") as HTMLSelectElement;
+    const before = select.value;
+    fireEvent.change(select, { target: { value: "ja" } });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("ja"));
+    // No unhandled rejection, and the selector did not move to a language whose
+    // strings never arrived.
+    await waitFor(() => expect(select.value).toBe(before));
+    spy.mockRestore();
+  });
+
+  it("warns and reverts when i18next reports success but no bundle arrived", async () => {
+    // The failure mode that actually happens. i18next 24 does NOT reject on a
+    // failed backend read: `changeLanguage` resolves, its callback reports
+    // `err === null`, and `i18n.language` moves to the requested code — only
+    // `resolvedLanguage` stays behind. Relying on a rejection here left the
+    // select reading "日本語" over English text with nothing to explain it.
+    const i18nModule = await import("@/i18n/config");
+    const i18nInstance = i18nModule.default;
+    const previous = i18nInstance.language;
+
+    const changeSpy = vi
+      .spyOn(i18nInstance, "changeLanguage")
+      .mockResolvedValue(((k: string) => k) as never);
+    const bundleSpy = vi
+      .spyOn(i18nInstance, "hasResourceBundle")
+      .mockReturnValue(false);
+    const toastSpy = vi.spyOn(toast, "error").mockReturnValue("id" as never);
+
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+    fireEvent.change(screen.getByTestId("language-selector"), {
+      target: { value: "ja" },
+    });
+
+    await waitFor(() => expect(toastSpy).toHaveBeenCalled());
+    // And it puts the language back rather than leaving the select on "ja".
+    expect(changeSpy).toHaveBeenLastCalledWith(previous);
+
+    changeSpy.mockRestore();
+    bundleSpy.mockRestore();
+    toastSpy.mockRestore();
+  });
+
+  it("stays quiet when the bundle does arrive", async () => {
+    const i18nModule = await import("@/i18n/config");
+    const i18nInstance = i18nModule.default;
+
+    const changeSpy = vi
+      .spyOn(i18nInstance, "changeLanguage")
+      .mockResolvedValue(((k: string) => k) as never);
+    const bundleSpy = vi
+      .spyOn(i18nInstance, "hasResourceBundle")
+      .mockReturnValue(true);
+    const toastSpy = vi.spyOn(toast, "error").mockReturnValue("id" as never);
+
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+    fireEvent.change(screen.getByTestId("language-selector"), {
+      target: { value: "ja" },
+    });
+
+    await waitFor(() => expect(changeSpy).toHaveBeenCalledWith("ja"));
+    expect(toastSpy).not.toHaveBeenCalled();
+
+    changeSpy.mockRestore();
+    bundleSpy.mockRestore();
+    toastSpy.mockRestore();
   });
 
   // ── Mobile menu ────────────────────────────────────────────────────

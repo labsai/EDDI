@@ -419,7 +419,7 @@ function WorkforceHistory() {
             {!isLoading && isError && (
               <div className="flex flex-col items-center justify-center py-12 ps-4 pe-4">
                 <p className="text-sm text-destructive">
-                  {t("Workforce.history.loadError", "Failed to load conversations")}
+                  {t("Workforce.history.loadListError", "Failed to load conversations")}
                 </p>
               </div>
             )}

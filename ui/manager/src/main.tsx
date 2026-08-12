@@ -6,7 +6,7 @@ import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { AuthProvider } from "@/components/auth/auth-provider";
 import { App } from "@/app";
-import "@/i18n/config";
+import { i18nReady } from "@/i18n/config";
 import "@/index.css";
 // Start collecting logs from session start (before user navigates to /manage/logs)
 import "@/hooks/session-log-store";
@@ -21,26 +21,10 @@ import "@fontsource-variable/noto-sans-kr";
 import "@fontsource-variable/noto-sans-sc";
 import "@fontsource-variable/noto-sans-tc";
 
-// ── Self-host Monaco Editor (no jsDelivr CDN) ───────────────────────
-import * as monaco from "monaco-editor";
-import { loader } from "@monaco-editor/react";
-
-// Monaco needs web workers for language intelligence (validation,
-// autocompletion, formatting).  Without this, the JSON editor loses
-// schema validation and smart features.  Vite handles the worker
-// bundling via the `?worker` import syntax.  Monaco 0.56+'s exports
-// map routes `./*` → `./esm/vs/*.js`, so we drop the `esm/vs/` prefix.
-import editorWorker from "monaco-editor/editor/editor.worker?worker";
-import jsonWorker from "monaco-editor/language/json/json.worker?worker";
-
-self.MonacoEnvironment = {
-  getWorker(_: string, label: string) {
-    if (label === "json") return new jsonWorker();
-    return new editorWorker();
-  },
-};
-
-loader.config({ monaco });
+// Monaco is deliberately NOT imported here. It is ~7 MB and only four editor
+// components need it, so it lives in `@/lib/monaco-setup`, which those
+// components import for its side effect — see that file for why the
+// configuration cannot simply be deferred behind a function call.
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -68,6 +52,13 @@ async function startApp() {
       (window as unknown as Record<string, unknown>).__EDDI_MOCK_ACTIVE__ = true;
     }
   }
+
+  // Wait for the detected language's bundle before the first paint. Only English
+  // is in the entry chunk (see `i18n/config.ts`), so rendering immediately would
+  // show English and then swap — a visible flash of the wrong language on every
+  // cold load in a non-English locale. Never rejects; a failed chunk falls back
+  // to English inside i18next.
+  await i18nReady;
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

@@ -195,7 +195,7 @@ export function AgentPicker({ value, onChange, placeholder, readOnly }: AgentPic
           }`}
           tabIndex={-1}
         >
-          <Bot className="h-3.5 w-3.5 mr-1" />
+          <Bot className="h-3.5 w-3.5 me-1" />
           <ChevronDown className={`h-3 w-3 transition-transform ${popupOpen ? "rotate-180" : ""}`} />
         </button>
       </div>

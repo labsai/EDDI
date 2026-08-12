@@ -494,7 +494,12 @@ describe("SecretsPage", () => {
     });
     // A backend failure must not masquerade as "No secrets found".
     expect(screen.queryByText("No secrets found")).not.toBeInTheDocument();
-    expect(screen.getByText("Vault read failed")).toBeInTheDocument();
+    // Asserted through the error panel's own testid rather than a loose text
+    // query, per the repo's selector rule. `SecretsError` carries the HTTP
+    // status, so it satisfies `isApiError` and renders through the same
+    // `getErrorMessage` path as every other API failure — backend message
+    // first, status appended.
+    expect(screen.getByTestId("secrets-error")).toHaveTextContent(/Vault read failed/);
   });
 
   // ─── Allowed agents: flush pending input on submit ────────────────────

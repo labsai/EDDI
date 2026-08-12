@@ -382,7 +382,9 @@ export function CoordinatorPage() {
             <Clock className="h-4 w-4 text-muted-foreground" />
             {t("coordinator.eventHistory", "Event History")}
             <span className="text-xs font-normal text-muted-foreground">
-              ({t("coordinator.lastNSnapshots", `Last ${eventHistory.length} snapshots`)})
+              ({t("coordinator.lastNSnapshots", "Last {{count}} snapshots", {
+                count: eventHistory.length,
+              })})
             </span>
           </h2>
           <div className="max-h-48 overflow-y-auto space-y-0.5 rounded-lg bg-muted/30 p-2 font-mono text-[11px]">

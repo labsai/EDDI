@@ -2,15 +2,14 @@ name: E2E Tests
 
 on:
   push:
-    branches: [master, main]
+    branches: [main]
   pull_request:
-    branches: [master, main]
+    branches: [main]
   workflow_dispatch:
     inputs:
-      run_fullstack:
-        description: "Run full-stack tests (pulls the EDDI image from Docker Hub)"
-        type: boolean
-        default: false
+      # No `run_fullstack` input. One existed and nothing read it — the
+      # full-stack step ran unconditionally in `backend-tests` regardless of what
+      # the operator ticked, which is worse than having no switch at all.
       eddi_image_tag:
         description: "EDDI image tag to test against (e.g. 6.2.0-b764). Defaults to latest."
         type: string
@@ -51,15 +50,17 @@ jobs:
 
   # ── Tier 2+3: Backend tests (integration + fullstack) ───────────────
   # Runs against both MongoDB and PostgreSQL via matrix strategy.
-  # Only runs on push to main/master, manual dispatch, or when
-  # explicitly requested via workflow_dispatch.
+  # Only runs on push to main or manual dispatch — a PR gets the fast UI tier
+  # only, because spinning up EDDI plus a database per PR is minutes of runner
+  # time for a signal that main will give within the hour.
   backend-tests:
     name: Backend E2E (${{ matrix.database }})
     runs-on: ubuntu-latest
+    # No `schedule` arm: this workflow declares no `schedule:` trigger, so that
+    # condition could never be true.
     if: >-
       github.event_name == 'push' ||
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'schedule'
+      github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:

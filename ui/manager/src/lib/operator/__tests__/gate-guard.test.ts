@@ -5,13 +5,14 @@ import type { PendingToolCallView, ResolvedRequestPreview } from "@/lib/api/hitl
 function call(
   callId: string,
   preview: Partial<ResolvedRequestPreview> | null,
+  requestPinned = true,
 ): PendingToolCallView {
   return {
     callId,
     toolName: "http_put_llmstore",
     source: "http",
     argsTruncated: false,
-    requestPinned: true,
+    requestPinned,
     requestPreview: preview
       ? {
           method: "PUT",
@@ -149,6 +150,35 @@ describe("findGateCarryingCalls", () => {
   it("ignores a bodyless write — there is nothing that could carry a gate", () => {
     expect(findGateCarryingCalls([call("c1", { body: null })])).toEqual([]);
     expect(findGateCarryingCalls([call("c1", { body: "   " })])).toEqual([]);
+  });
+
+  it("refuses an UNPINNED write whatever its body shape — pinned is checked first", () => {
+    // Regression. The pinned check used to sit BELOW the empty-body early
+    // return, so an unpinned write previewed with no body fell through the guard
+    // entirely and left Approve enabled. "We were shown no body" is not "no body
+    // will be sent": on an unpinned call the preview is not what runs, so no body
+    // shape can establish anything.
+    //
+    // Reachable by contract, not just in theory — PendingToolCallView documents
+    // requestPinned as "independent of whether requestPreview itself is present:
+    // a best-effort preview can exist while this is false", and
+    // ResolvedRequestPreview.body is `?: string | null`.
+    for (const body of [null, undefined, "", "   ", llmBody({}), "{not json"]) {
+      const found = findGateCarryingCalls([call("c1", { body }, false)]);
+      expect(found, `body=${JSON.stringify(body)}`).toEqual([
+        { callId: "c1", reason: "unpinned-request" },
+      ]);
+    }
+  });
+
+  it("refuses an UNPINNED write ahead of the truncated-body reason", () => {
+    // Both conditions hold; unpinned is the more fundamental one and must win,
+    // so the approver is told the request can still change rather than merely
+    // that it is too big to display.
+    const found = findGateCarryingCalls([
+      call("c1", { body: llmBody({}), bodyTruncated: true }, false),
+    ]);
+    expect(found).toEqual([{ callId: "c1", reason: "unpinned-request" }]);
   });
 
   it("ignores a call with no preview at all — it carries its own unpinned warning", () => {

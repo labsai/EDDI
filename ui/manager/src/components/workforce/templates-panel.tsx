@@ -22,7 +22,7 @@ export function TemplatesPanel({ onUseTemplate }: TemplatesPanelProps) {
       <div className="flex items-center gap-2">
         <Bookmark className="h-4 w-4 text-muted-foreground" />
         <h3 className="text-sm font-semibold">
-          {t("Workforce.templates", "Templates")}
+          {t("Workforce.nav.templates", "Templates")}
         </h3>
         {templates.length > 0 && (
           <Badge variant="secondary" className="text-xs">

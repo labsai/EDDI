@@ -4,9 +4,9 @@
 
 | Version | Supported              |
 | ------- | ---------------------- |
-| 6.2.x   | ✅ Active development  |
-| 6.0–6.1 | ⚠️ Security fixes only |
-| < 6.0   | ❌ End of life         |
+| 6.3.x   | ✅ Active development  |
+| 6.1–6.2 | ⚠️ Security fixes only |
+| < 6.1   | ❌ End of life         |
 
 ## Reporting a Vulnerability
 

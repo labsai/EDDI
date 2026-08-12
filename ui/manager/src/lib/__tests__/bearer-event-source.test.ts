@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BearerEventSource } from "@/lib/bearer-event-source";
+import {
+  SSE_RECONNECT_MAX_ATTEMPTS,
+  SSE_RECONNECT_MAX_DELAY_MS,
+} from "@/lib/constants";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -206,6 +210,99 @@ describe("BearerEventSource", () => {
 
     // No new fetch should have been made
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("backs off exponentially rather than retrying at a flat 5s", async () => {
+    fetchSpy.mockResolvedValue(new Response(null, { status: 502 }));
+    const es = new BearerEventSource("http://test/sse");
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // 1st retry after 5s
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    // 2nd retry is NOT another 5s away — it waits 10s.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+
+    es.close();
+  });
+
+  it("gives up after the attempt budget and fires onexhausted", async () => {
+    // Regression: reconnection was unbounded, so a stream the backend refuses
+    // outright — a 403 on /administration/logs without the eddi-admin role — was
+    // re-requested every five seconds for the lifetime of the session.
+    fetchSpy.mockResolvedValue(new Response(null, { status: 403 }));
+    const exhausted = vi.fn();
+    const es = new BearerEventSource("http://test/sse");
+    es.onexhausted = exhausted;
+
+    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < SSE_RECONNECT_MAX_ATTEMPTS; i++) {
+      await vi.advanceTimersByTimeAsync(SSE_RECONNECT_MAX_DELAY_MS);
+    }
+
+    expect(exhausted).toHaveBeenCalledTimes(1);
+    const callsAtGiveUp = fetchSpy.mock.calls.length;
+    expect(callsAtGiveUp).toBe(SSE_RECONNECT_MAX_ATTEMPTS + 1);
+
+    // Nothing more, however long we wait.
+    await vi.advanceTimersByTimeAsync(SSE_RECONNECT_MAX_DELAY_MS * 20);
+    expect(fetchSpy).toHaveBeenCalledTimes(callsAtGiveUp);
+
+    es.close();
+  });
+
+  it("does NOT refill the budget on a 200 that closes without sending anything", async () => {
+    // Regression, from review: the budget used to reset as soon as response
+    // headers arrived. A server answering 200 and immediately closing the body
+    // therefore reset the counter, fell out of the read loop, and retried at
+    // attempt zero — an unbounded 5s loop again, just wearing a success status.
+    // Bytes on the wire are the earliest honest signal that the stream works.
+    fetchSpy.mockResolvedValue(new Response(createSSEStream([]), { status: 200 }));
+    const exhausted = vi.fn();
+    const es = new BearerEventSource("http://test/sse");
+    es.onexhausted = exhausted;
+
+    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < SSE_RECONNECT_MAX_ATTEMPTS; i++) {
+      await vi.advanceTimersByTimeAsync(SSE_RECONNECT_MAX_DELAY_MS);
+    }
+
+    expect(exhausted).toHaveBeenCalledTimes(1);
+    const callsAtGiveUp = fetchSpy.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(SSE_RECONNECT_MAX_DELAY_MS * 20);
+    expect(fetchSpy).toHaveBeenCalledTimes(callsAtGiveUp);
+
+    es.close();
+  });
+
+  it("refills the retry budget once a connection succeeds", async () => {
+    // A long-lived stream that blips occasionally must never walk up to the cap.
+    fetchSpy
+      .mockResolvedValueOnce(new Response(null, { status: 502 }))
+      // A frame on the wire is what proves the stream healthy now, so this
+      // success must actually deliver one.
+      .mockResolvedValueOnce(
+        new Response(createSSEStream(["event: log\ndata: {}\n\n"]), { status: 200 }),
+      )
+      .mockResolvedValue(new Response(null, { status: 502 }));
+
+    const es = new BearerEventSource("http://test/sse");
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(5000); // retry -> succeeds, budget resets
+    await vi.advanceTimersByTimeAsync(0);
+
+    const afterSuccess = fetchSpy.mock.calls.length;
+    // The next failure retries at the BASE delay again, not the escalated one.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(afterSuccess);
+
+    es.close();
   });
 
   it("schedules reconnect on non-OK response", async () => {

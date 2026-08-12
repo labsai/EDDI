@@ -204,7 +204,8 @@ export function CreateResourceDialog({
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder={t(
                   "resources.descriptionPlaceholder",
-                  `Describe this ${typeName.toLowerCase()} configuration...`
+                  "Describe this {{type}} configuration...",
+                  { type: typeName.toLowerCase() }
                 )}
                 rows={3}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"

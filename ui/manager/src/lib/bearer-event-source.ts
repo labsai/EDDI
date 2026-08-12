@@ -8,18 +8,29 @@
  * (addEventListener, onmessage, onerror, onopen, close) while using fetch internally.
  */
 
+import { createReconnectScheduler } from "./sse-reconnect";
+
 type EventHandler = (event: MessageEvent) => void;
 
 export class BearerEventSource {
   private abortController: AbortController | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners: Map<string, EventHandler[]> = new Map();
   private _closed = false;
+  private readonly reconnects = createReconnectScheduler(() => this.connect());
 
   onmessage: EventHandler | null = null;
   onerror: (() => void) | null = null;
   onopen: (() => void) | null = null;
+  /**
+   * Fired once the retry budget is spent and this source has stopped trying.
+   *
+   * Distinct from `onerror`, which fires on every failed attempt. A consumer
+   * that shows "reconnecting…" needs to know when that stops being true —
+   * otherwise a permanently refused stream (a 403 from `/administration/logs`
+   * for a user without `eddi-admin`) shows a spinner forever.
+   */
+  onexhausted: (() => void) | null = null;
 
   constructor(
     private readonly url: string,
@@ -35,10 +46,7 @@ export class BearerEventSource {
 
   close(): void {
     this._closed = true;
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.reconnects.cancel();
     if (this.inactivityTimer !== null) {
       clearTimeout(this.inactivityTimer);
       this.inactivityTimer = null;
@@ -83,6 +91,7 @@ export class BearerEventSource {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let receivedData = false;
 
       this.resetInactivityTimer();
 
@@ -90,7 +99,23 @@ export class BearerEventSource {
         const { done, value } = await reader.read();
         this.resetInactivityTimer();
         if (done) break;
-        
+
+        // Refill the retry budget only once the stream has actually produced
+        // bytes — NOT when the response headers arrive.
+        //
+        // Resetting on headers looked equivalent and was not: a server that
+        // answers 200 and closes the body immediately would reset the counter,
+        // fall out of this loop, and schedule another attempt at zero. That
+        // reinstates the unbounded 5s retry loop the attempt cap exists to
+        // prevent, just behind a success status. Bytes on the wire are the
+        // earliest point at which the connection is demonstrably working; EDDI's
+        // log stream sends a heartbeat comment every 15s, so a genuinely healthy
+        // idle stream still refills promptly.
+        if (!receivedData) {
+          receivedData = true;
+          this.reconnects.reset();
+        }
+
         const chunk = decoder.decode(value, { stream: true });
         buffer += chunk;
 
@@ -131,10 +156,19 @@ export class BearerEventSource {
     }
   }
 
+  /**
+   * Report the failure, then queue a retry on the shared policy.
+   *
+   * Bounded on purpose. This used to be an unconditional
+   * `setTimeout(connect, 5000)` with no attempt counter, so a stream the backend
+   * will never serve was re-requested every five seconds for the whole session.
+   */
   private scheduleReconnect(): void {
     if (this._closed) return;
     this.onerror?.();
-    this.reconnectTimer = setTimeout(() => this.connect(), 5000);
+    if (!this.reconnects.schedule()) {
+      this.onexhausted?.();
+    }
   }
 
   private parseBlock(block: string): MessageEvent | null {
