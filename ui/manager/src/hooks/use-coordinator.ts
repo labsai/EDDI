@@ -91,13 +91,8 @@ export function useCoordinatorSSE() {
   const [sseConnected, setSseConnected] = useState(false);
   const [eventHistory, setEventHistory] = useState<CoordinatorSnapshot[]>([]);
   const eventSourceRef = useRef<BearerEventSource | null>(null);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const connect = useCallback(() => {
-    if (reconnectTimerRef.current !== null) {
-      clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
     try {
       const es = createCoordinatorEventSource();
       eventSourceRef.current = es;
@@ -124,14 +119,12 @@ export function useCoordinatorSSE() {
         }
       });
 
+      // BearerEventSource reconnects on the bounded policy in
+      // `sse-reconnect.ts`; closing and re-creating it here would duplicate that
+      // and hand every retry a fresh attempt budget, which is how the old
+      // unbounded `setTimeout(connect, 5000)` never stopped.
       es.onerror = () => {
         setSseConnected(false);
-        es.close();
-        // Reconnect after 5 seconds
-        if (reconnectTimerRef.current !== null) {
-          clearTimeout(reconnectTimerRef.current);
-        }
-        reconnectTimerRef.current = setTimeout(connect, 5000);
       };
 
       es.onopen = () => {
@@ -146,9 +139,6 @@ export function useCoordinatorSSE() {
     connect();
     return () => {
       eventSourceRef.current?.close();
-      if (reconnectTimerRef.current !== null) {
-        clearTimeout(reconnectTimerRef.current);
-      }
     };
   }, [connect]);
 

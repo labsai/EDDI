@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { useLocation, Link } from "react-router-dom";
 import {
   Moon,
@@ -128,6 +129,26 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
     { value: "system" as const, icon: Monitor, label: t("theme.system") },
   ];
 
+  /**
+   * Switch language, tolerating a locale chunk that fails to arrive.
+   *
+   * Locales are code-split (`src/i18n/config.ts`), so `changeLanguage` now
+   * performs a network fetch and its promise can genuinely reject — a tab held
+   * open across a deploy asks for a hashed chunk that no longer exists. Left
+   * floating, that surfaces as an unhandled rejection and the select silently
+   * snaps back. i18next keeps the previous language on a failed load, so the UI
+   * stays usable; this just makes the failure visible instead of silent.
+   */
+  async function handleLanguageChange(code: string) {
+    try {
+      await i18n.changeLanguage(code);
+    } catch {
+      toast.error(
+        t("language.switchFailed", "Could not load that language. Please try again."),
+      );
+    }
+  }
+
   const languages = [
     { code: "en", label: t("language.en") },
     { code: "de", label: t("language.de") },
@@ -213,7 +234,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
             <Globe className="h-4 w-4 text-muted-foreground" />
             <select
               value={i18n.language}
-              onChange={(e) => i18n.changeLanguage(e.target.value)}
+              onChange={(e) => void handleLanguageChange(e.target.value)}
               data-testid="language-selector"
               className="appearance-none rounded-md bg-transparent px-2 py-1.5 text-sm text-foreground outline-none transition-colors hover:bg-secondary focus:ring-2 focus:ring-ring"
             >

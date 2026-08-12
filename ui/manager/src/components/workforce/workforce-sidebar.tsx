@@ -157,11 +157,11 @@ export function WorkforceSidebar({
               ? "bg-muted text-foreground font-medium"
               : "text-muted-foreground hover:bg-muted hover:text-foreground",
           )}
-          title={collapsed ? t("Workforce.dashboard", "Dashboard") : undefined}
+          title={collapsed ? t("Workforce.nav.dashboard", "Dashboard") : undefined}
           {...(location.pathname === "/workforce" ? { "aria-current": "page" as const } : {})}
         >
           <LayoutDashboard className="h-4 w-4 shrink-0" />
-          {!collapsed && <span>{t("Workforce.dashboard", "Dashboard")}</span>}
+          {!collapsed && <span>{t("Workforce.nav.dashboard", "Dashboard")}</span>}
         </Link>
       </div>
 

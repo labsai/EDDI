@@ -810,6 +810,16 @@ function LlmStep({
    Step 3B: OpenAPI Spec (API Agent only)
    ================================================================ */
 
+/** Give up rather than leave the button spinning against an unreachable host. */
+const SPEC_FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * Refuse a spec far larger than any real OpenAPI document. Monaco chokes well
+ * before this, and a multi-megabyte body from a URL the user half-remembered is
+ * more likely a mistake than a spec.
+ */
+const SPEC_MAX_BYTES = 5 * 1024 * 1024;
+
 function ApiSpecStep({
   spec,
   specUrl,
@@ -847,18 +857,66 @@ function ApiSpecStep({
     { id: "paste" as const, icon: FileCode2, label: t("setupWizard.specByPaste", "Paste") },
   ];
 
+  /**
+   * Fetch an OpenAPI spec from a URL the user typed.
+   *
+   * This is the ONE request the Manager makes to a host neither it nor the
+   * backend chose, so it is deliberately treated like `updates.ts` treats
+   * GitHub rather than like a same-origin API call:
+   *
+   *  - **`credentials: "omit"`** — the browser would otherwise attach cookies
+   *    for whatever host was typed. A spec URL is not a reason to authenticate.
+   *  - **`referrerPolicy: "no-referrer"`** — a self-hosted deployment's own
+   *    hostname is deployment data; there is no reason to hand it to a third
+   *    party just to read a JSON document.
+   *  - **an explicit http/https check** — `fetch` will happily take `blob:` or
+   *    `data:` URLs, which are not "fetch a spec from a server" in any sense a
+   *    user means.
+   *  - **a timeout** — without one a black-holed host leaves the button
+   *    spinning with no way back except a reload.
+   */
   async function fetchSpec() {
-    if (!specUrl.trim()) return;
-    setFetching(true);
+    const url = specUrl.trim();
+    if (!url) return;
+
+    let parsed: URL;
     try {
-      const res = await fetch(specUrl);
+      parsed = new URL(url);
+    } catch {
+      toast.error(t("setupWizard.specUrlInvalid", "That is not a valid URL"));
+      return;
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      toast.error(
+        t("setupWizard.specUrlScheme", "Only http:// and https:// URLs are supported"),
+      );
+      return;
+    }
+
+    setFetching(true);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), SPEC_FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(parsed.toString(), {
+        signal: controller.signal,
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+        headers: { Accept: "application/json, application/yaml, text/plain;q=0.9" },
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
+      if (text.length > SPEC_MAX_BYTES) {
+        toast.error(
+          t("setupWizard.specTooLarge", "That specification is too large to load here"),
+        );
+        return;
+      }
       onSpecChange(text);
       toast.success(t("setupWizard.specFetched", "Specification loaded!"));
     } catch {
       toast.error(t("setupWizard.specFetchError", "Failed to fetch specification"));
     } finally {
+      clearTimeout(timeout);
       setFetching(false);
     }
   }

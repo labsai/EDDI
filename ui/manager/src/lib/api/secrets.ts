@@ -66,6 +66,54 @@ export interface VaultHealth {
 
 const BASE = "/secretstore/secrets";
 
+/**
+ * Stable code for "the backend has no secret provider configured".
+ *
+ * The API layer cannot call `t()` — it has no React context — so it raises a
+ * code and the UI translates it. Before this, seven copies of one English
+ * sentence were thrown straight at the user from here, which in an app that
+ * ships eleven locales meant the vault always failed in English.
+ */
+export const VAULT_NOT_CONFIGURED = "VAULT_NOT_CONFIGURED";
+
+/** An error carrying a translatable code alongside its fallback message. */
+export class SecretsError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = "SecretsError";
+  }
+}
+
+/**
+ * Turn a non-OK vault response into a thrown `SecretsError`.
+ *
+ * Every call in this module needs the identical four steps — special-case 503,
+ * otherwise read the body's `error` field, otherwise fall back to the status.
+ * They were copy-pasted seven times; one of the copies is how a past bug
+ * swallowed vault failures into an empty state.
+ *
+ * @param action verb for the fallback message, e.g. "list secrets"
+ */
+async function throwVaultError(res: Response, action: string): Promise<never> {
+  if (res.status === 503) {
+    throw new SecretsError(
+      "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
+      VAULT_NOT_CONFIGURED,
+      503,
+    );
+  }
+  const body = await res.json().catch(() => ({}) as { error?: string });
+  throw new SecretsError(
+    body.error || `Failed to ${action} (HTTP ${res.status})`,
+    undefined,
+    res.status,
+  );
+}
+
 /** List all secrets for a given tenant. */
 export async function listSecrets(
   tenantId: string,
@@ -78,13 +126,7 @@ export async function listSecrets(
   // from a genuinely empty vault ([]). Swallowing errors here made every
   // backend failure render as the misleading "No secrets found" empty state.
   if (!res.ok) {
-    if (res.status === 503) {
-      throw new Error(
-        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
-      );
-    }
-    const err = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(err.error || `Failed to list secrets (HTTP ${res.status})`);
+    await throwVaultError(res, "list secrets");
   }
   return res.json();
 }
@@ -110,13 +152,7 @@ export async function storeSecret(
     },
   );
   if (!res.ok) {
-    if (res.status === 503) {
-      throw new Error(
-        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
-      );
-    }
-    const err = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(err.error || `Failed to store secret (HTTP ${res.status})`);
+    await throwVaultError(res, "store secret");
   }
   return res.json();
 }
@@ -131,15 +167,7 @@ export async function deleteSecret(
     { method: "DELETE", headers: api.getAuthHeader() },
   );
   if (!res.ok && res.status !== 204) {
-    if (res.status === 503) {
-      throw new Error(
-        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
-      );
-    }
-    const err = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(
-      err.error || `Failed to delete secret (HTTP ${res.status})`,
-    );
+    await throwVaultError(res, "delete secret");
   }
 }
 
@@ -188,17 +216,13 @@ export async function rotateSecret(
     },
   );
   if (!res.ok) {
-    if (res.status === 503) {
-      throw new Error(
-        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
-      );
-    }
-    // Fallback: if the rotate endpoint doesn't exist, use PUT
+    // Ordered deliberately: a 503 is a configuration problem and must surface as
+    // one, while a 404/405 only means this backend predates the rotate endpoint
+    // and a plain PUT achieves the same thing.
     if (res.status === 404 || res.status === 405) {
       return storeSecret(tenantId, keyName, newValue, description);
     }
-    const err = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(err.error || `Failed to rotate secret (HTTP ${res.status})`);
+    await throwVaultError(res, "rotate secret");
   }
   return res.json();
 }
@@ -216,13 +240,7 @@ export async function rotateDek(tenantId: string): Promise<RotateDekResponse> {
     { method: "POST", headers: api.getAuthHeader() },
   );
   if (!res.ok) {
-    if (res.status === 503) {
-      throw new Error(
-        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
-      );
-    }
-    const err = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(err.error || `Failed to rotate DEK (HTTP ${res.status})`);
+    await throwVaultError(res, "rotate DEK");
   }
   return res.json();
 }
@@ -250,13 +268,7 @@ export async function rotateKek(args: {
     },
   );
   if (!res.ok) {
-    if (res.status === 503) {
-      throw new Error(
-        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
-      );
-    }
-    const err = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(err.error || `Failed to rotate master key (HTTP ${res.status})`);
+    await throwVaultError(res, "rotate master key");
   }
   return res.json();
 }
@@ -275,13 +287,7 @@ export async function resetTenant(
     { method: "POST", headers: api.getAuthHeader() },
   );
   if (!res.ok) {
-    if (res.status === 503) {
-      throw new Error(
-        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
-      );
-    }
-    const err = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(err.error || `Failed to reset vault (HTTP ${res.status})`);
+    await throwVaultError(res, "reset vault");
   }
   return res.json();
 }

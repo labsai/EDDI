@@ -4,10 +4,19 @@
 
 .DESCRIPTION
     1. Runs `npm run build` to produce the production bundle
-    2. Cleans up old hashed assets from previous builds.
+    2. Removes hashed assets in EDDI that the new build did not produce.
     3. Copies the entire new assets folder into EDDI's assets/ directory.
     4. Updates manage.html, welcome.html, and workforce.html with the new hashed filenames
     Note: index.html is a smart redirect page and does not reference asset bundles.
+
+    NOTE ON CHUNK COUNT
+    The build is route-code-split, so dist/assets holds ~240 JS chunks plus the
+    font and Monaco files - around 700 files in total. That is normal and the
+    copy has always been wholesale; only ONE index-*.js and ONE index-*.css
+    exist, and those are still the only two names patched into the HTML shells.
+    Lazy chunks are referenced RELATIVELY ("./dashboard-<hash>.js") from the
+    entry chunk, which the backend serves from /assets/, so they resolve under
+    /assets/ no matter which SPA path the user is on.
 
 .PARAMETER EddiPath
     Path to the EDDI repository root. Default: ..\EDDI
@@ -62,7 +71,7 @@ Write-Host "  CSS: $($newCss.Name)"
 Write-Host "  Total assets: $($distFiles.Count)" -ForegroundColor DarkGray
 
 # ─── Step 3: Remove old files selectively ────────────────────────────────────
-Write-Host "`n[3/4] Cleaning old Manager assets (selectively)..." -ForegroundColor Cyan
+Write-Host "`n[3/4] Cleaning stale Manager assets..." -ForegroundColor Cyan
 
 $removedFiles = @()
 
@@ -86,23 +95,31 @@ if (-not (Test-Path $AssetsDir)) {
     New-Item -ItemType Directory -Force -Path $AssetsDir | Out-Null
 }
 
-# Clean old versions of the currently generated files in assets/
-# Match files with 8-character hashes: [prefix]-[hash].[ext]
-foreach ($f in $distFiles) {
-    if ($f.Name -match "^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$") {
-        $prefix = $matches[1]
-        $ext = $matches[3]
-        $oldMatches = Get-ChildItem -Path $AssetsDir -Filter "$prefix-*.$ext" -ErrorAction SilentlyContinue
-        foreach ($old in $oldMatches) {
-            # ensure it has an 8-character hash to avoid accidentally removing e.g. index-xyz-abc.js
-            if ($old.Name -match "^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$") {
-                if ($old.Name -ne $f.Name) {
-                    Write-Host "  Removing old asset $($old.Name)" -ForegroundColor Yellow
-                    $removedFiles += "src/main/resources/META-INF/resources/assets/$($old.Name)"
-                    Remove-Item $old.FullName -Force
-                }
-            }
-        }
+# Clean hashed assets that the new build did not produce.
+#
+# This is a SET DIFFERENCE against the new dist, not a per-prefix sweep. The
+# per-prefix version only deleted an old file when a same-prefixed new one
+# existed, so a chunk that vanished between builds — a page renamed, a component
+# removed, a lazy boundary moved — was never cleaned and silted up in the EDDI
+# repo forever. That was survivable when the build emitted a handful of chunks.
+# Route-level code splitting emits ~240, all content-hashed, so a stale set now
+# accumulates fast enough to matter.
+#
+# Only files matching Vite's `name-<8charhash>.ext` shape are considered, so
+# anything hand-placed in assets/ is left alone.
+# Keep this in step with the same block in deploy-to-local-eddi-repo.sh.
+$hashRe = "^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$"
+$newAssetNames = [System.Collections.Generic.HashSet[string]]::new(
+    [string[]]($distFiles | ForEach-Object { $_.Name }),
+    [System.StringComparer]::Ordinal
+)
+
+foreach ($old in (Get-ChildItem -Path $AssetsDir -File -ErrorAction SilentlyContinue)) {
+    if ($old.Name -notmatch $hashRe) { continue }
+    if (-not $newAssetNames.Contains($old.Name)) {
+        Write-Host "  Removing stale asset $($old.Name)" -ForegroundColor Yellow
+        $removedFiles += "src/main/resources/META-INF/resources/assets/$($old.Name)"
+        Remove-Item $old.FullName -Force
     }
 }
 

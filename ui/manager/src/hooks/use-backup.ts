@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { agentKeys } from "@/lib/query-keys";
 import {
   exportAndDownloadAgent,
   exportAgentSelective,
@@ -22,7 +23,6 @@ import type {
   DocumentDescriptor,
 } from "@/lib/api/backup";
 
-const AGENTS_KEY = ["agents"] as const;
 
 // ==================== Existing Hooks ====================
 
@@ -38,7 +38,7 @@ export function useImportAgent() {
   return useMutation({
     mutationFn: (file: File) => importAgent(file),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },
   });
 }
@@ -60,7 +60,7 @@ export function useImportAgentMerge() {
       selectedSourceIds?: string[];
     }) => importAgentMerge(file, selectedSourceIds),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },
   });
 }
@@ -119,7 +119,7 @@ export function useImportUpgrade() {
       workflowOrder?: string[];
     }) => importAgentUpgrade(file, targetAgentId, selectedSourceIds, workflowOrder),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },
   });
 }
@@ -200,7 +200,7 @@ export function useExecuteSync() {
         sourceAuth
       ),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },
   });
 }
@@ -218,7 +218,7 @@ export function useExecuteSyncBatch() {
       sourceAuth: string;
     }) => executeSyncBatch(sourceUrl, requests, sourceAuth),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },
   });
 }

@@ -92,8 +92,13 @@ Before pushing or completing a phase, also verify:
 
 ```bash
 npm run test         # All Vitest tests pass
+npm run i18n:check   # No locale/code drift
 npm run build        # Production build succeeds (includes tsc -b)
 ```
+
+`npm run lint` covers `src/` **and** `e2e/` at `--max-warnings 0`, and
+`npm run typecheck` (`tsc -b`) now includes `tsconfig.e2e.json`, so a type error
+in a Playwright spec fails the build instead of surfacing at run time.
 
 ### i18n — MANDATORY
 
@@ -103,8 +108,14 @@ The project has **11 locales**: `en`, `de`, `fr`, `es`, `ar`, `zh`, `th`, `ja`, 
 
 1. Add new keys to `src/i18n/locales/en.json` first
 2. **Immediately** propagate translated versions to all other 10 locale files
-3. Verify with: `Get-ChildItem src/i18n/locales/*.json | Where-Object { Select-String -Path $_ -Pattern '"YOUR_KEY"' -Quiet } | Measure-Object` → must be **11**
+3. Verify with `npm run i18n:check` — it fails on a key the code uses that `en.json` lacks, a key `en.json` has that a locale lacks, a leftover key in a locale, and a key called with two different English defaults
 4. Do NOT leave this as a follow-up step — it must be done in the **same commit**
+
+> An inline fallback (`t("key", "Fallback")`) keeps the UI readable while you
+> work, but it is **not** a translation: it renders the same English in all
+> eleven locales and looks identical to a real translation when you read the
+> code. 349 keys accumulated that way before the gate existed — the whole
+> Workforce namespace and the Analytics screen shipped in English everywhere.
 
 ### After Completing Work
 
@@ -159,7 +170,7 @@ export const EDITOR_MAP: Record<string, EditorRenderFn> = {
   rules:    (p, o, r) => <RulesEditor data={p} onChange={o} readOnly={r} />,
   llm:      (p, o, r) => <LlmEditor data={p} onChange={o} readOnly={r} />,
   apicalls: (p, o, r) => <ApiCallsEditor data={p} onChange={o} readOnly={r} />,
-  // ... output, dictionary, propertysetter, mcpcalls, rag, snippets
+  // ... output, dictionary, propertysetter, mcpcalls, rag, snippets, parser
 };
 ```
 
@@ -167,7 +178,7 @@ export const EDITOR_MAP: Record<string, EditorRenderFn> = {
 
 #### 2. Resource Type Config
 
-All 9 resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
+All 10 resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
 
 | Slug             | Store                  | Plural           |
 | ---------------- | ---------------------- | ---------------- |
@@ -180,6 +191,7 @@ All 9 resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYPE
 | `mcpcalls`       | `mcpcallsstore`        | `mcpcalls`        |
 | `rag`            | `ragstore`             | `rags`            |
 | `snippets`       | `snippetstore`         | `snippets`        |
+| `parser`         | `parserstore`          | `parsers`         |
 
 > **⚠️ Parser vs Dictionary — separate stores!**
 >
@@ -190,7 +202,7 @@ All 9 resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYPE
 >
 > - Workflows reference a **parser** → parsers reference **dictionaries**
 > - The Manager's `dictionary` slug maps to `dictionarystore` (what users edit)
-> - `parserstore` has **no mapping** in `pipeline-builder.tsx` — parser extensions show "Editor not available" because parsers don't have a standalone editor (they are infrastructure binding dictionaries to the pipeline)
+> - `parserstore` **does** map to the `parser` slug in `pipeline-builder.tsx`, and `parser` is registered in `EDITOR_MAP`. A parser step with an embedded config is edited inline; one with a `config.uri` is edited as an ordinary resource
 
 #### 3. MSW Mock Handlers
 
@@ -240,7 +252,34 @@ what it finds. Off by default. Worth knowing before touching it:
 - **Activation runs a canary** — one probe read counting tool calls — because a
   READY deployment badge says nothing about whether the tools can authenticate.
 
-#### 6. Tests
+#### 6. Route-level code splitting
+
+Every page in `app.tsx` is loaded through `lazyPage()` (`src/lib/lazy-page.ts`);
+the layouts, the landing page and the command palette are deliberately eager.
+Two consequences worth knowing:
+
+- **Add a route → use `lazyPage`.** A static page import puts that page back in
+  the entry chunk, which is how it reached 8.5 MB before the split.
+- **Monaco is not in the entry chunk.** It is imported by
+  `src/lib/monaco-setup.ts`, which the four editor components import for its side
+  effect. That file must stay a side-effect import — `@monaco-editor/react` falls
+  back to the jsDelivr CDN if `loader.config()` has not run before `<Editor>`
+  mounts, and tests mock it out via `vi.mock("@/lib/monaco-setup")` in
+  `src/test/setup.ts`.
+- **Locales are code-split too.** Only `en.json` is bundled (it is `fallbackLng`,
+  so it must resolve synchronously); the other ten load through a tiny i18next
+  backend in `src/i18n/config.ts`. Add a locale by adding it to
+  `SUPPORTED_LANGUAGES` **and** `LOCALE_LOADERS` — the types make a missed entry
+  a compile error. `main.tsx` awaits `i18nReady` before the first render so a
+  non-English user never sees a flash of English, and `i18n.changeLanguage()` is
+  now genuinely async: await it, and handle rejection (a chunk can 404 across a
+  deploy).
+
+Chunks are content-hashed, so `deploy-to-local-eddi-repo.*` removes any hashed
+asset the new build did not produce, and `lazyPage` reloads once if a chunk 404s
+(a tab held open across a deploy).
+
+#### 7. Tests
 
 - Unit tests in `src/pages/__tests__/` — naming: `resource-detail-{type}.test.tsx`
 - Use `renderPage(type)` helper with `MemoryRouter` + `QueryClient` + `ThemeProvider`
@@ -253,8 +292,8 @@ what it finds. Off by default. Worth knowing before touching it:
 - Vite proxy forwards all store paths to EDDI backend in dev mode
 - **Default to `src/lib/api-client.ts`** (`ApiClient` class) for API calls — it injects the Keycloak auth token automatically
 - Some call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`sse-utils.ts`, `bearer-event-source.ts`), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **Every raw `fetch` must spread `api.getAuthHeader()` itself** — forgetting it is a 401 that only appears once OIDC is switched on
-- `updates.ts` holds the only raw `fetch` that must **not** carry the auth header: it calls `api.github.com` for the latest EDDI release, and attaching this deployment's Keycloak token would hand it to a third party. It is also the only call that is not same-origin, so `ApiClient` could not express it anyway. **`api.github.com` is the only host the Manager ever contacts off-origin, and it stays that way** — the Docker image shown beside the release is *derived* from the release version, never looked up, because EDDI's CI pushes the image before it cuts the release. Do not add a relay (shields.io or similar) to "verify" the tag: every first-party Docker endpoint is CORS-blocked from a browser, so anything that appears to work is a third party in the path. A test in `update-check-card.test.tsx` fails if a second host appears
-- `secrets.ts` is the exception that is *not* justified: its eight call sites are ordinary JSON CRUD on raw `fetch` for historical reasons. They do pass `api.getAuthHeader()`, and they check `!res.ok` (a past bug swallowed vault failures into an empty state). Treat it as debt to migrate onto `ApiClient`, not as the pattern to copy
+- `updates.ts` holds the only raw `fetch` that must **not** carry the auth header: it calls `api.github.com` for the latest EDDI release, and attaching this deployment's Keycloak token would hand it to a third party. It is also the only call that is not same-origin, so `ApiClient` could not express it anyway. **`api.github.com` is the only host the Manager contacts off-origin on its own initiative, and it stays that way** — the Docker image shown beside the release is *derived* from the release version, never looked up, because EDDI's CI pushes the image before it cuts the release. Do not add a relay (shields.io or similar) to "verify" the tag: every first-party Docker endpoint is CORS-blocked from a browser, so anything that appears to work is a third party in the path. A test in `update-check-card.test.tsx` fails if a second host appears **for the update card** — note that it guards those two components, not the whole app. The one other off-origin request is `agent-wizard.tsx`'s OpenAPI-spec fetch, which goes to a URL the *user* types; it is hardened the same way (`credentials: "omit"`, `referrerPolicy: "no-referrer"`, an http/https check, a timeout and a size cap) precisely because it leaves the origin
+- `secrets.ts` is the exception that is *not* justified: its eight call sites are ordinary JSON CRUD on raw `fetch` for historical reasons. They do pass `api.getAuthHeader()`, and they check `!res.ok` (a past bug swallowed vault failures into an empty state). Error handling now runs through one `throwVaultError` helper raising a `SecretsError` with a translatable `code`, rather than seven copies of an English sentence. Treat the raw `fetch` itself as debt to migrate onto `ApiClient`, not as the pattern to copy
 - For a new ordinary JSON call, use `ApiClient`
 - Server state via TanStack Query hooks in `src/hooks/`
 

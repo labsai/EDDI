@@ -1,5 +1,6 @@
 import { api } from "../api-client";
 import { deleteAgent, type AgentDescriptor } from "./agents";
+import { parseSseFrame } from "./sse-utils";
 
 // ─── Enums & Types ───────────────────────────────────────────────
 
@@ -909,7 +910,7 @@ export interface GroupConversation {
   /** Agent IDs retained by creators (agent-decides policy) */
   retainedAgentIds: string[];
   /**
-   * Current discussion round (1-based). Incremented by continueGroupDiscussion();
+   * Current discussion round (1-based). Incremented by streamGroupContinue();
    * `undefined` on legacy documents that predate the field.
    */
   round?: number;
@@ -1120,7 +1121,7 @@ export const MAX_GROUP_QUESTION_CHARS = 50_000;
 
 /**
  * Body of a start/continue discussion request. `attachments` is only accepted by
- * the START endpoints — see {@link continueGroupDiscussion}.
+ * the START endpoints — see {@link streamGroupContinue}.
  */
 function discussBody(
   question: string,
@@ -1210,29 +1211,6 @@ export function followupGroupMember(
   return api.post<GroupConversation>(
     `/groups/${groupId}/conversations/${gcId}/followup`,
     { question, targetAgentId, userId: userId || "manager-user" },
-  );
-}
-
-/**
- * Continue a COMPLETED discussion with a new question — re-runs all phases as a
- * NEW round (the round counter increments) with every agent retaining memory of
- * prior rounds. This is distinct from starting a brand-new discussion.
- * POST /groups/{groupId}/conversations/{gcId}/continue
- * Body: DiscussRequest { question, userId }.
- * NOTE: attachments are NOT supported on a continuation — the backend rejects a
- * request that carries them with 400 (they are only shared with member agents
- * when the discussion first starts), so this binding never sends them.
- * Failures: 400 (missing question / attachments supplied), 404, 409, 502, 504.
- */
-export function continueGroupDiscussion(
-  groupId: string,
-  gcId: string,
-  question: string,
-  userId?: string,
-): Promise<GroupConversation> {
-  return api.post<GroupConversation>(
-    `/groups/${groupId}/conversations/${gcId}/continue`,
-    { question, userId: userId || "manager-user" },
   );
 }
 
@@ -1463,8 +1441,34 @@ export interface ArtifactUpdatedPayload {
 }
 
 /**
+ * Sentinel for "this frame carried no `event:` line".
+ *
+ * `parseSseFrame` always returns a type, falling back to the default it is
+ * given. Group events are dispatched by name, so a frame without an explicit
+ * type has nothing to dispatch on and is skipped — passing a sentinel is how we
+ * tell the two cases apart without re-parsing.
+ */
+const NO_EVENT_TYPE = " no-event-type";
+
+/**
  * Read a Server-Sent Events response body as a stream of parsed group events.
  * Shared by the initial-discussion and approve/resume streaming endpoints.
+ *
+ * Framing is delegated to {@link parseSseFrame}, the one spec-correct parser in
+ * this repo. This function used to hand-roll it and got three things wrong that
+ * `sse-utils.ts` had already documented:
+ *
+ *  - it `.trim()`ed every `data:` line, so a payload's leading and trailing
+ *    whitespace was destroyed — meaningful in a token stream where a lone " " is
+ *    a chunk;
+ *  - it normalised CRLF per decoded chunk, so a `\r\n` straddling two
+ *    `reader.read()` calls was missed and the frame silently failed to split;
+ *  - it never flushed the buffer on stream end, so a server that closed without
+ *    a trailing blank line lost its final event — typically `group_complete`,
+ *    the one the UI waits for.
+ *
+ * The one deliberate divergence from the generic parser is kept: a frame with no
+ * explicit `event:` line is skipped rather than dispatched as "message".
  */
 async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> {
   if (!response.ok) {
@@ -1478,37 +1482,40 @@ async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> 
   const decoder = new TextDecoder();
   let buffer = "";
 
+  /** Split off every COMPLETE frame in the buffer, leaving the partial tail. */
+  function takeFrames(): string[] {
+    // Normalise on the accumulated buffer, not per chunk, and hold back a
+    // trailing lone \r: it may be the first half of a \r\n that lands next read.
+    buffer = buffer.replace(/\r\n/g, "\n").replace(/\r(?!$)/g, "\n");
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+    return parts;
+  }
+
+  function toEvent(frame: string): GroupSSEEvent | null {
+    const parsed = parseSseFrame(frame, NO_EVENT_TYPE);
+    if (!parsed || parsed.type === NO_EVENT_TYPE) return null;
+    return { type: parsed.type as GroupSSEEventType, data: parsed.data };
+  }
+
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      // Normalise CRLF → LF so the split works regardless of server line-ending style
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-
-      // Parse SSE lines: "event: <type>\ndata: <data>\n\n"
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() ?? "";
-
-      for (const part of parts) {
-        if (!part.trim()) continue;
-        let eventType: GroupSSEEventType | null = null;
-        let eventData = "";
-
-        for (const line of part.split("\n")) {
-          if (line.startsWith("event:")) {
-            eventType = line.slice(6).trim() as GroupSSEEventType;
-          } else if (line.startsWith("data:")) {
-            // C3 fix: concatenate multiple data: lines per SSE spec (§9.2.4)
-            eventData += (eventData ? "\n" : "") + line.slice(5).trim();
-          }
-        }
-
-        // Only yield events with an explicit event: type (skip bare data-only chunks)
-        if (eventType) {
-          yield { type: eventType, data: eventData };
-        }
+      buffer += decoder.decode(value, { stream: true });
+      for (const frame of takeFrames()) {
+        const event = toEvent(frame);
+        if (event) yield event;
       }
+    }
+
+    // Flush whatever the stream ended on. A server that closes without a final
+    // blank line still meant to send that frame.
+    buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    for (const frame of buffer.split("\n\n")) {
+      const event = toEvent(frame);
+      if (event) yield event;
     }
   } finally {
     reader.releaseLock();
@@ -1554,7 +1561,8 @@ export async function* streamGroupDiscussion(
  * Emits `round_start` (new round marker) followed by the same events as the
  * initial discussion stream (phase_start, speaker_*, group_complete, …) plus the
  * HITL events. Mirrors `streamGroupDiscussion`. As with the non-streaming
- * `continueGroupDiscussion`, attachments are unsupported on a continuation, so
+ * the non-streaming continue endpoint, attachments are unsupported on a
+ * continuation, so
  * none are sent here (the backend would emit a terminal `group_error`).
  */
 export async function* streamGroupContinue(

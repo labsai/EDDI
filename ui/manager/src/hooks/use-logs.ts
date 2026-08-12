@@ -74,7 +74,6 @@ export function useLogStream(filters: LogFilters = {}) {
   const eventSourceRef = useRef<BearerEventSource | null>(null);
   const pausedRef = useRef(false);
   const filterKey = JSON.stringify(filters);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep ref in sync
   useEffect(() => {
@@ -82,10 +81,6 @@ export function useLogStream(filters: LogFilters = {}) {
   }, [paused]);
 
   const connect = useCallback(() => {
-    if (reconnectTimerRef.current !== null) {
-      clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
     try {
       const es = createLogEventSource(filters);
       eventSourceRef.current = es;
@@ -109,13 +104,14 @@ export function useLogStream(filters: LogFilters = {}) {
       // Fallback for backends that send unnamed SSE events
       es.onmessage = handleEvent;
 
+      // BearerEventSource reconnects on the bounded policy in
+      // `sse-reconnect.ts`. Closing it here and re-creating it on an unbounded
+      // `setTimeout(connect, 5000)` — as this used to — both duplicated that
+      // mechanism and defeated its attempt cap, because each new instance got a
+      // fresh budget. A filtered stream the backend refuses now backs off and
+      // eventually stops instead of retrying for the life of the page.
       es.onerror = () => {
         setFilteredConnected(false);
-        es.close();
-        if (reconnectTimerRef.current !== null) {
-          clearTimeout(reconnectTimerRef.current);
-        }
-        reconnectTimerRef.current = setTimeout(connect, 5000);
       };
 
       es.onopen = () => {
@@ -135,9 +131,6 @@ export function useLogStream(filters: LogFilters = {}) {
     connect();
     return () => {
       eventSourceRef.current?.close();
-      if (reconnectTimerRef.current !== null) {
-        clearTimeout(reconnectTimerRef.current);
-      }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey, filtered]);

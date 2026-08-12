@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, fireEvent, render } from "@testing-library/react";
+import { screen, fireEvent, render, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { TopBar } from "@/components/layout/top-bar";
 import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
@@ -163,7 +163,35 @@ describe("TopBar", () => {
     const select = screen.getByTestId("language-selector") as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "de" } });
 
-    expect(select.value).toBe("de");
+    // Awaited, not synchronous: locales are code-split, so `changeLanguage`
+    // fetches a chunk before `languageChanged` fires and the controlled <select>
+    // re-renders. One tick, imperceptible to a user, but the assertion has to
+    // wait for it.
+    await waitFor(() => expect(select.value).toBe("de"));
+  });
+
+  it("keeps the previous language and warns when a locale chunk fails to load", async () => {
+    // A tab held open across a deploy asks for a hashed locale chunk that no
+    // longer exists. i18next keeps the current language, so the UI stays usable —
+    // this pins that the failure is surfaced rather than swallowed as an
+    // unhandled rejection.
+    const i18nModule = await import("@/i18n/config");
+    const spy = vi
+      .spyOn(i18nModule.default, "changeLanguage")
+      .mockRejectedValueOnce(new Error("Failed to fetch dynamically imported module"));
+
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+    const select = screen.getByTestId("language-selector") as HTMLSelectElement;
+    const before = select.value;
+    fireEvent.change(select, { target: { value: "ja" } });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("ja"));
+    // No unhandled rejection, and the selector did not move to a language whose
+    // strings never arrived.
+    await waitFor(() => expect(select.value).toBe(before));
+    spy.mockRestore();
   });
 
   // ── Mobile menu ────────────────────────────────────────────────────

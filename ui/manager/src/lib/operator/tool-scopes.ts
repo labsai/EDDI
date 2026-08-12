@@ -295,11 +295,13 @@ export const WRITE_ENDPOINTS: readonly string[] = [
  * broadly, exempt narrowly, so a missed update costs an approval prompt rather
  * than an ungated write.
  *
- * Sent for `read_only` too. Today that gates zero real tools (no write endpoint
- * is allow-listed), but it installs a REAL, verifiable document — `read_write`
- * later reuses the identical config unchanged, and every operator agent this
- * screen has ever created is provably running the same gate shape from day one,
- * not just the ones activated after writes shipped.
+ * Sent for `read_only` too, where it gates zero real tools — that scope resolves
+ * to `READ_ENDPOINTS` alone, so there is no `http.post`/`put`/`patch`/`delete`
+ * tool for the patterns to match. It is still installed, and deliberately: it is
+ * a REAL, verifiable document, `read_write` reuses the identical config
+ * unchanged, and every operator agent this screen has ever created is provably
+ * running the same gate shape from day one, not just the ones activated after
+ * writes shipped.
  *
  * `timeoutPolicy` is hardcoded to `WAIT_INDEFINITELY` and not exposed as a
  * parameter: the operator must never be configurable into `AUTO_APPROVE`, which
@@ -361,9 +363,10 @@ export function endpointsForScope(scope: OperatorScope): readonly string[] {
  * Whether a granted endpoint set contains anything that can change state.
  *
  * Takes the resolved set rather than a scope so the answer describes what was
- * actually granted: `read_write` grants no writes at all while `WRITE_ENDPOINTS`
- * is empty, and anything derived from this — the operator's own system prompt
- * above all — must say so rather than describing an intent.
+ * actually granted, not what a scope name implies. `read_write` grants exactly
+ * what `WRITE_ENDPOINTS` holds at the time — nothing at all if it were ever
+ * emptied — and anything derived from this, the operator's own system prompt
+ * above all, must describe that rather than an intent.
  *
  * Fail-safe by construction: only a literal `GET` counts as a read. An entry
  * this function cannot parse, or one using a method nobody updated it for,
@@ -396,11 +399,12 @@ export function grantsAgentCreation(endpoints: readonly string[]): boolean {
  * outputs, tool wiring, or pipeline — any workflow or writable
  * workflow-extension store's update verb.
  *
- * Checks {@link WRITABLE_EXTENSION_STORES}, not the full read list: a granted
- * `PUT /llmstore/llms/{id}` is not something this should ever report as
- * ordinary modify capability, because it is never granted (it can strip the
- * gate — see that constant). Reading the writable list keeps this predicate
- * honest by construction rather than by a comment.
+ * Checks {@link WRITABLE_EXTENSION_STORES} rather than the full read list, so
+ * this predicate tracks what is actually writable by construction instead of by
+ * a comment that can rot. That set currently includes `llmstore/llms`, which IS
+ * granted and IS reported here — its gate-carrying `Task.toolApprovals` field is
+ * neutralised by `gate-guard.ts`, not by withholding the endpoint. Should the
+ * store ever leave the writable set, this answer follows automatically.
  *
  * Deliberately silent on `PUT /agentstore/agents/{id}` and
  * `PUT /groupstore/groups/{id}`: neither is ever granted, so checking for them

@@ -22,13 +22,13 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ### 🐛 Reporting Bugs
 
-- Use the [Bug Report](https://github.com/labsai/EDDI-Manager/issues/new) issue template
+- Open a [new issue](https://github.com/labsai/EDDI-Manager/issues/new)
 - Include steps to reproduce, expected vs actual behavior, and your environment details
 - Check [existing issues](https://github.com/labsai/EDDI-Manager/issues) first to avoid duplicates
 
 ### 💡 Requesting Features
 
-- Use the [Feature Request](https://github.com/labsai/EDDI-Manager/issues/new) issue template
+- Open a [new issue](https://github.com/labsai/EDDI-Manager/issues/new)
 - Describe the problem you're trying to solve, not just the solution
 
 ### 🔧 Code Contributions
@@ -118,7 +118,8 @@ npm run build
 
 - All user-facing strings must use `react-i18next`
 - Add new keys to `src/i18n/locales/en.json` first, then propagate to all 10 other locale files
-- Use inline fallbacks: `t("key", "Fallback")`
+- Use inline fallbacks: `t("key", "Fallback")` — but treat the fallback as a safety net, **not** a substitute for the key. `npm run i18n:check` fails on any key that never reaches `en.json`, because a fallback is indistinguishable from a translation when you are reading the code
+- One key, one English string. Calling the same key with two different defaults means one call site silently renders the other's text
 
 ### What to Avoid
 
@@ -189,7 +190,7 @@ chore(deps): bump React to 19.1
 ### PR Guidelines
 
 - **One concern per PR** — don't mix refactoring with features
-- **Write a clear PR description** using the template
+- **Write a clear PR description** — what changed, why, and how you verified it
 - **Link the related issue** with `Closes #123`
 - **Keep commits clean** — squash fixup commits before requesting review
 
@@ -197,13 +198,15 @@ chore(deps): bump React to 19.1
 
 Every PR runs through these automated gates:
 
-| Check          | What It Does                                       | Must Pass? |
-| -------------- | -------------------------------------------------- | ---------- |
-| **Lint**       | ESLint with `--max-warnings 0`                     | ✅ Yes     |
-| **Type Check** | `tsc -b` (build-mode full project type-check)      | ✅ Yes     |
-| **Unit Tests** | Vitest with 630+ component tests                   | ✅ Yes     |
-| **Build**      | Production build via `tsc -b && vite build`        | ✅ Yes     |
-| **E2E Tests**  | Playwright UI tests with MSW mocks                 | ✅ Yes     |
+| Check          | What It Does                                          | Must Pass? |
+| -------------- | ----------------------------------------------------- | ---------- |
+| **Audit**      | `npm run audit:prod` — production advisories only      | ✅ Yes     |
+| **Lint**       | ESLint over `src/` and `e2e/`, `--max-warnings 0`      | ✅ Yes     |
+| **i18n**       | `npm run i18n:check` — locale ↔ code drift             | ✅ Yes     |
+| **Type Check** | `tsc -b` — the app, the node configs, AND `e2e/`       | ✅ Yes     |
+| **Unit Tests** | Vitest, with coverage thresholds enforced              | ✅ Yes     |
+| **Build**      | Production build via `tsc -b && vite build`            | ✅ Yes     |
+| **E2E Tests**  | Playwright UI tests with MSW mocks                     | ✅ Yes     |
 
 ## Security
 

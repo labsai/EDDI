@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { agentKeys } from "@/lib/query-keys";
 import { useQuery } from "@tanstack/react-query";
 import { getAgent, getAgentDescriptors, parseResourceUri } from "@/lib/api/agents";
 import { getResource, RESOURCE_TYPES } from "@/lib/api/resources";
@@ -66,7 +67,7 @@ export function AgentDetailsPanel({
 
   // Direct descriptor fetch by agent ID — avoids dedup/filter issues in useDeployedAgents
   const { data: directDescriptors } = useQuery({
-    queryKey: ["agent-descriptor-direct", agentId],
+    queryKey: agentKeys.descriptor(agentId),
     queryFn: () => getAgentDescriptors(1, 0, agentId!),
     enabled: !!agentId && !matchedDescriptor,
     staleTime: 60_000,

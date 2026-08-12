@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Outlet } from "react-router-dom";
 import { Sidebar } from "./sidebar";
+import { SuspendedOutlet } from "./suspended-outlet";
 import { TopBar } from "./top-bar";
 import { ChatDrawer } from "@/components/chat/chat-drawer";
 import { WelcomeModal } from "@/components/onboarding/welcome-modal";
@@ -92,7 +92,7 @@ export function AppLayout() {
           )}
         >
           <div className="@container/main mx-auto max-w-screen-2xl">
-            <Outlet />
+            <SuspendedOutlet />
           </div>
         </main>
       </div>

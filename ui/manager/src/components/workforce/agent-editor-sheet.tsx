@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { agentKeys, agentWriteInvalidations } from "@/lib/query-keys";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { X, Plus, RefreshCw, Loader2, Brain } from "lucide-react";
@@ -62,7 +63,7 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
     isError: descriptorError,
     refetch: refetchDescriptor,
   } = useQuery({
-    queryKey: ["agent-descriptor", agentId],
+    queryKey: agentKeys.descriptor(agentId),
     queryFn: () => getAgentDescriptors(1, 0, agentId!),
     enabled: !!agentId,
   });
@@ -230,11 +231,10 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
     } finally {
       setSaving(false);
       // Always re-sync to pick up version bumps, even on partial failures
-      await queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
-      await queryClient.invalidateQueries({
-        queryKey: ["agent-descriptor", agentId],
-      });
-      await queryClient.invalidateQueries({ queryKey: ["agents"] });
+      // One list, shared with every other agent writer — see query-keys.ts.
+      for (const queryKey of agentWriteInvalidations(agentId)) {
+        await queryClient.invalidateQueries({ queryKey });
+      }
       setPromptSynced(false);
     }
   }, [

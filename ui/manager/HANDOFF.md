@@ -1,6 +1,6 @@
 # EDDI Manager Project Handoff
 
-## Current Status (v6.0.0 Feature Work)
+## Current Status (v6.3.0)
 
 ### Completed Phases
 - **EDDI Update Check** (branch: `feat/eddi-update-check`): Opt-in "is a newer EDDI released?" section at the bottom of the dashboard, plus the banner it can raise.
@@ -188,7 +188,7 @@
 - LLM types: `src/components/editors/llm/types.ts` (systemMessage in `tasks[0].parameters`)
 - Secrets API: `src/lib/api/secrets.ts`, `src/hooks/use-secrets.ts`
 - Language selector pattern: `src/components/layout/top-bar.tsx` (L188-202)
-- Boardroom files: `src/pages/boardroom/`, `src/components/boardroom/`, `src/styles/advisory.css`
+- Workforce files: `src/pages/workforce/`, `src/components/workforce/`, `src/styles/advisory.css` (the `boardroom/` directories these notes used to name were renamed to `workforce/`)
 
 ### Test Counts
 - Frontend: run `npm test` for the authoritative count. Hardcoding it here meant
@@ -196,7 +196,15 @@
 - 112 Backend tenancy tests passing (`mvn test`)
 
 ### Last Commit Focus
-- Frontend: `feat(operator): render the backend's resolved-request preview in the approval banner` (`6f47e835`) on `feat/operator-write-scope` — see the "Platform Operator — Approval Gate + Write Capability" phase above for the full arc. Not yet pushed; ask before pushing.
+- Frontend: repo-wide review remediation on `claude/repo-code-review-06ded0`. What it changed, and why each mattered:
+  - **`gate-guard.ts` check order.** The `requestPinned` test sat *below* the empty-body early return, so an unpinned llmstore write previewed with no body fell straight through the control and left Approve enabled. Reachable by contract: `PendingToolCallView` documents that "a best-effort preview can exist while this is false", and `ResolvedRequestPreview.body` is optional. Pinned is now checked first, with a regression test over every body shape.
+  - **Route-level code splitting.** The app shipped as one 8.5 MB chunk (2.35 MB gzipped) that every user downloaded to see any single screen. `app.tsx` now loads pages through `lazyPage()`, and Monaco moved out of the entry chunk into `src/lib/monaco-setup.ts`. Combined with the locale split below, the entry chunk went 8.89 MB / 2.35 MB gzipped → 1.14 MB / 344 KB gzipped — an 85% cut in what a cold visit pays.
+  - **i18n drift, closed and gated.** 349 keys were passed to `t()` and present in no locale file, rendering their English fallback in all eleven languages (the whole Workforce namespace, the Analytics screen). All 456 gaps — including the 34 `variables.*` keys the old parity test explicitly waived — are now translated in all 10 locales, and `npm run i18n:check` fails CI on any of four drift classes. Also fixed: `Workforce.dashboard` was a leaf AND a namespace (i18next can resolve only one), and two keys were called with conflicting English defaults.
+  - **SSE reconnect.** Four separate unbounded `setTimeout(connect, 5000)` loops — one of them running from app boot — hammered a refused endpoint every five seconds for the whole session. One shared policy now backs off and gives up, finally using the three `SSE_RECONNECT_*` constants that had been exported and unused. `readGroupSSE` also lost its final event on a stream that closed without a blank line, and mis-split CRLF straddling a chunk boundary.
+  - **Query-key staleness.** `["agent-descriptor-direct", id]` was read by two Workforce components and invalidated by nothing, so saving an agent left them stale. Keys now come from `src/lib/query-keys.ts`.
+  - **RTL/`lang`.** `RTL_LANGUAGES` claimed `he`/`fa`/`ur` with no bundles behind them, so a Hebrew browser got English text laid out right-to-left under `lang="he-IL"`. Direction and `lang` now follow i18next's *resolved* language.
+  - **Locale code-splitting.** `i18n/config.ts` statically imported all 11 locale files, so every user downloaded all of them — 2.7 MB raw / ~710 KB gzipped, which had become larger than the application code itself. Only `en.json` is bundled now (it is `fallbackLng`, so it must resolve synchronously); the other ten arrive through a ~15-line i18next backend, one chunk each. `main.tsx` awaits `i18nReady` before the first render, so a non-English user never sees a flash of English. Entry chunk **997 KB → 344 KB gzipped**.
+  - Plus: `e2e/` is type-checked at last, lint covers it at `--max-warnings 0`, dead code and dead CI config removed, and the docs below corrected against the code.
 - Earlier frontend: `feat(operator): add the Platform Operator agent (P1, read-only)` on `feat/platform-operator-agent`
   - Opt-in, admin-activated agent that inspects this EDDI deployment through its own REST API, exposed as tools via `setup-api`. Read-only allow-list (`src/lib/operator/tool-scopes.ts`), non-editable safety preamble, single-blob `platform.operator` config, activation flow with a post-provision spec check, operator screen with a live tool-activity trace, dashboard discovery card, kill switch, `operator.*` i18n across 11 locales.
   - **Design correction:** the design assumed EDDI forwards the caller's token to an API agent's tool calls. It did not. That gap is now closed in the backend (labsai/EDDI#613) by a `${caller:token}` resolver, and the operator's `authMode: "caller-identity"` uses it: EDDI substitutes the token while building the request, releasing it only for a same-origin call, only into a header, and never persisting it. `"none"` remains the default and is blocked at activation when OIDC is on, since every tool call would 401.

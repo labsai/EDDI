@@ -1,3 +1,4 @@
+import { agentWriteInvalidations } from "@/lib/query-keys";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAgent, parseResourceUri } from "@/lib/api/agents";
 import { getWorkflow } from "@/lib/api/workflows";
@@ -140,11 +141,9 @@ export function useUpdateAgentPrompt() {
       queryClient.invalidateQueries({
         queryKey: ["agent-prompt", vars.agentId],
       });
-      queryClient.invalidateQueries({ queryKey: ["agent", vars.agentId] });
-      queryClient.invalidateQueries({
-        queryKey: ["agent-descriptor", vars.agentId],
-      });
-      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      for (const queryKey of agentWriteInvalidations(vars.agentId)) {
+        queryClient.invalidateQueries({ queryKey });
+      }
     },
   });
 }

@@ -9,6 +9,9 @@ import {
   Settings,
   Maximize2,
 } from "lucide-react";
+// Configures the self-hosted Monaco instance before <Editor> can look for one.
+// Side-effect import: without it @monaco-editor/react falls back to the jsDelivr CDN.
+import "@/lib/monaco-setup";
 import Editor from "@monaco-editor/react";
 
 // ─── Types matching PropertySetterConfiguration backend model ────────────────

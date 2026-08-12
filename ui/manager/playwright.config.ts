@@ -59,19 +59,12 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
 
-    // ── Cross-browser (UI tier only, CI/optional) ──
-    {
-      name: "firefox",
-      testDir: "./e2e",
-      testIgnore: ["**/integration/**", "**/fullstack/**"],
-      use: { ...devices["Desktop Firefox"] },
-    },
-    {
-      name: "webkit",
-      testDir: "./e2e",
-      testIgnore: ["**/integration/**", "**/fullstack/**"],
-      use: { ...devices["Desktop Safari"] },
-    },
+    // No `firefox` / `webkit` projects. Two existed and neither could ever run:
+    // no npm script referenced them, and `e2e.yml` installs `--with-deps
+    // chromium` only, so `npx playwright test --project=firefox` fails on a
+    // missing browser. Configuration that reads as cross-browser coverage while
+    // providing none is worse than none at all. Reinstate them together with the
+    // browser install and a script that invokes them.
   ],
   webServer: {
     command: "npm run dev",

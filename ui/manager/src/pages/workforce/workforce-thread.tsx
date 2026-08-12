@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useParams, useLocation, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { agentKeys } from "@/lib/query-keys";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -619,7 +620,7 @@ function WorkforceThread() {
   // Fallback: if the member isn't in the group config, fetch the agent descriptor
   // to resolve the display name (avoids showing raw ObjectIds).
   const { data: descriptorResults } = useQuery({
-    queryKey: ["agent-descriptor-direct", memberId],
+    queryKey: agentKeys.descriptor(memberId),
     queryFn: () => getAgentDescriptors(1, 0, memberId),
     enabled: !!memberId && !member,
     staleTime: 60_000,
@@ -1117,7 +1118,11 @@ function WorkforceThread() {
           conversationId={conversationId}
           placeholder={
             inputPrefill ||
-            t("Workforce.thread.placeholder", "Message {{name}}...", {
+            // Distinct key from the generic `Workforce.thread.placeholder`
+            // below: one key cannot hold two different English strings, and
+            // whichever landed in en.json first would silently win for the
+            // other call site.
+            t("Workforce.thread.placeholderNamed", "Message {{name}}...", {
               name: memberName,
             })
           }

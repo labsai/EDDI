@@ -2034,9 +2034,13 @@ export function ApiCallsEditor({
                 >
                   <ShieldAlert className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
                   <p className="flex-1 text-xs text-amber-700 dark:text-amber-300">
+                    {/* i18next interpolation, not a template literal: baking the
+                        count into the FALLBACK means any locale that translates
+                        this key loses the number entirely. */}
                     {t(
                       "apiCallsEditor.replaceConfirmMessage",
-                      `This will replace ${(data.httpCalls ?? []).length} existing call(s). Are you sure?`
+                      "This will replace {{count}} existing call(s). Are you sure?",
+                      { count: (data.httpCalls ?? []).length }
                     )}
                   </p>
                   <button

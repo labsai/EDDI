@@ -15,11 +15,16 @@ export const CONFIDENCE_COLORS: Record<string, string> = {
   low: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
 };
 
-/** Base delay for SSE reconnection (ms). Doubles on each retry up to MAX_SSE_RECONNECT_ATTEMPTS. */
+/**
+ * SSE reconnect policy. Applied by `sse-reconnect.ts`, which is the only place
+ * these are read — change the numbers here, not the behaviour there.
+ */
+
+/** Delay before the first retry (ms). Doubles each attempt, capped by MAX_DELAY. */
 export const SSE_RECONNECT_BASE_MS = 5000;
 
-/** Maximum number of SSE reconnection attempts before giving up. */
+/** Retries before giving up. A stream that is refused will stay refused. */
 export const SSE_RECONNECT_MAX_ATTEMPTS = 10;
 
-/** Maximum delay between SSE reconnection attempts (ms). Caps exponential backoff. */
+/** Ceiling on the doubling (ms), so a long outage settles at one try a minute. */
 export const SSE_RECONNECT_MAX_DELAY_MS = 60_000;

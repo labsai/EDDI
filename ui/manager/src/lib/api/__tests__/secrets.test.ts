@@ -111,7 +111,7 @@ describe("storeSecret", () => {
     ).rejects.toThrow("Bad request");
   });
 
-  it("throws generic message when error body cannot be parsed", async () => {
+  it("names the operation and status when the error body cannot be parsed", async () => {
     server.use(
       http.put("*/secretstore/secrets/:tenantId/:keyName", () =>
         new HttpResponse("not json", {
@@ -120,9 +120,12 @@ describe("storeSecret", () => {
         })
       )
     );
+    // "Unknown error" told the user nothing. When the body is unreadable the
+    // only real information is which operation failed and with what status, so
+    // that is what the shared `throwVaultError` helper reports.
     await expect(
       storeSecret("default", "test-key", "val")
-    ).rejects.toThrow(/Unknown error/);
+    ).rejects.toThrow(/Failed to store secret \(HTTP 400\)/);
   });
 });
 

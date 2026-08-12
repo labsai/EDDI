@@ -5,9 +5,18 @@
 #
 # DESCRIPTION
 #    1. Runs `npm run build` to produce the production bundle
-#    2. Cleans up old hashed assets from previous builds.
+#    2. Removes hashed assets in EDDI that the new build did not produce.
 #    3. Copies the entire new assets folder into EDDI's assets/ directory.
 #    4. Updates manage.html, welcome.html, and workforce.html with the new hashed filenames
+#
+# NOTE ON CHUNK COUNT
+#    The build is route-code-split, so dist/assets holds ~240 JS chunks plus the
+#    font and Monaco files — around 700 files in total. That is normal and the
+#    copy has always been wholesale; only ONE index-*.js and ONE index-*.css
+#    exist, and those are still the only two names patched into the HTML shells.
+#    Lazy chunks are referenced RELATIVELY ("./dashboard-<hash>.js") from the
+#    entry chunk, which the backend serves from /assets/, so they resolve under
+#    /assets/ no matter which SPA path the user is on.
 #
 # USAGE
 #    ./deploy-to-local-eddi-repo.sh
@@ -77,7 +86,7 @@ echo "  CSS: $NEW_CSS_NAME"
 echo -e "  Total assets: $TOTAL_ASSETS" -e "${DARK_GRAY}"
 
 # ─── Step 3: Remove old files selectively ────────────────────────────────────
-echo -e "\n${CYAN}[3/4] Cleaning old Manager assets (selectively)...${NC}"
+echo -e "\n${CYAN}[3/4] Cleaning stale Manager assets...${NC}"
 
 REMOVED_FILES=()
 
@@ -101,29 +110,43 @@ fi
 # Ensure destination assets dir exists
 mkdir -p "$ASSETS_DIR"
 
-# Clean old versions of the currently generated files in assets/
-# Match files with 8-character hashes: [prefix]-[hash].[ext]
-while IFS= read -r -d '' f; do
-    filename=$(basename "$f")
-    # Check if filename matches pattern with 8-char hash
-    if [[ "$filename" =~ ^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$ ]]; then
-        prefix="${BASH_REMATCH[1]}"
-        ext="${BASH_REMATCH[3]}"
+# Clean hashed assets that the new build did not produce.
+#
+# This is a SET DIFFERENCE against the new dist, not a per-prefix sweep. The
+# per-prefix version only deleted an old file when a same-prefixed new one
+# existed, so a chunk that vanished between builds — a page renamed, a component
+# removed, a lazy boundary moved — was never cleaned and silted up in the EDDI
+# repo forever. That was survivable when the build emitted a handful of chunks.
+# Route-level code splitting emits ~240, all content-hashed, so a stale set now
+# accumulates fast enough to matter.
+#
+# Only files matching Vite's `name-<8charhash>.ext` shape are considered, so
+# anything hand-placed in assets/ is left alone.
+HASH_RE='^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$'
 
-        # Find matching old files in assets dir
-        while IFS= read -r -d '' old; do
-            oldname=$(basename "$old")
-            # Check if old file also has 8-char hash pattern
-            if [[ "$oldname" =~ ^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$ ]]; then
-                if [[ "$oldname" != "$filename" ]]; then
-                    echo -e "  ${YELLOW}Removing old asset $oldname${NC}"
-                    REMOVED_FILES+=("src/main/resources/META-INF/resources/assets/$oldname")
-                    rm -f "$old"
-                fi
-            fi
-        done < <(find "$ASSETS_DIR" -maxdepth 1 -name "$prefix-*.$ext" -type f -print0 2>/dev/null)
-    fi
+# Build the set of filenames the new build produced.
+NEW_ASSET_NAMES=()
+while IFS= read -r -d '' f; do
+    NEW_ASSET_NAMES+=("$(basename "$f")")
 done < <(find "$DIST_ASSETS" -maxdepth 1 -type f -print0)
+
+is_in_new_build() {
+    local needle="$1" name
+    for name in "${NEW_ASSET_NAMES[@]}"; do
+        [[ "$name" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
+while IFS= read -r -d '' old; do
+    oldname=$(basename "$old")
+    [[ "$oldname" =~ $HASH_RE ]] || continue
+    if ! is_in_new_build "$oldname"; then
+        echo -e "  ${YELLOW}Removing stale asset $oldname${NC}"
+        REMOVED_FILES+=("src/main/resources/META-INF/resources/assets/$oldname")
+        rm -f "$old"
+    fi
+done < <(find "$ASSETS_DIR" -maxdepth 1 -type f -print0 2>/dev/null)
 
 # ─── Step 4: Copy new assets + update manage.html ──────────────────────────
 echo -e "\n${CYAN}[4/4] Deploying new assets...${NC}"

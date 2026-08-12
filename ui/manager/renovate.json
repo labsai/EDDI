@@ -1,19 +1,29 @@
 {
-  "pinVersions": true,
-  "semanticCommits": true,
-  "depTypes": [
-    {
-      "depType": "dependencies",
-      "pinVersions": false
-    }
-  ],
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
   "timezone": "Europe/Oslo",
-  "schedule": ["after 10pm and before 5am on every weekday", "every weekend"],
-  "rebaseStalePrs": true,
+  "schedule": ["after 10pm and before 5am every weekday", "every weekend"],
+  "rebaseWhen": "behind-base-branch",
   "prHourlyLimit": 5,
   "prConcurrentLimit": 3,
-  "automerge": "minor",
   "labels": ["tooling", "dependencies"],
-  "assignees": ["@kennethlynne"],
-  "reviewers": ["@kennethlynne"]
+  "assignees": ["kennethlynne"],
+  "reviewers": ["kennethlynne"],
+  "packageRules": [
+    {
+      "description": "Pin devDependencies exactly; let runtime deps float within their range.",
+      "matchDepTypes": ["devDependencies"],
+      "rangeStrategy": "pin"
+    },
+    {
+      "description": "Automerge minor and patch bumps once CI is green.",
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "description": "Never auto-bump react-router. SECURITY.md documents an accepted advisory whose only real fix is a v8 migration, and an automated bump would either reintroduce GHSA-wrjc-x8rr-h8h6 or break every react-router-dom import.",
+      "matchPackageNames": ["react-router", "react-router-dom"],
+      "enabled": false
+    }
+  ]
 }

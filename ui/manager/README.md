@@ -14,8 +14,8 @@ EDDI Manager is a modern React SPA that ships **inside** the EDDI Docker image. 
 
 - **Agent Builder** — Create and configure agents with a drag-and-drop workflow pipeline
 - **Agent Studio** — 3-panel workspace with live chat, debug drawer, and pipeline inspector
-- **Group Discussions** — Orchestrate multi-agent conversations with 5 discussion styles
-- **LLM Configuration** — Connect to 12 providers (OpenAI, Anthropic, Gemini, Ollama, etc.)
+- **Group Discussions** — Orchestrate multi-agent conversations across 8 discussion styles
+- **LLM Configuration** — Connect to 11 providers (OpenAI, Anthropic, Gemini, Ollama, etc.)
 - **Resource Editors** — Form-based editors for rules, API calls, LLM configs, dictionaries, RAG, MCP, and more
 - **Secrets Vault** — Manage encrypted API keys with vault references
 - **Global Variables** — Deploy-wide configuration values for all agents (`${vars:<key>}` / `{{vars.<key>}}`)
@@ -42,13 +42,13 @@ If you want to develop the Manager UI itself:
 ```bash
 # Prerequisites: Node.js ≥ 20, EDDI backend on localhost:7070
 npm install
-npm run dev          # Vite dev server on http://localhost:5173
+npm run dev          # Vite dev server on http://localhost:3000
 ```
 
 The Vite dev proxy forwards API calls to the EDDI backend. If no backend is available, the Manager auto-starts in **standalone mode** with mock data (via [MSW](https://mswjs.io/)).
 
 ```bash
-npm run test         # 4,000+ Vitest unit/component tests
+npm run test         # Vitest unit/component suite (run it for the current count)
 npm run build        # Production build
 ```
 

@@ -1,5 +1,6 @@
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { updateDescriptor } from "@/lib/api/descriptors";
+import { agentKeys } from "@/lib/query-keys";
 import {
   getAgentDescriptors,
   getAgentDescriptorsWithVersions,
@@ -18,7 +19,6 @@ import {
   parseResourceUri,
 } from "@/lib/api/agents";
 
-const AGENTS_KEY = ["agents"] as const;
 const PAGE_SIZE = 50;
 
 export function useAgentDescriptors(
@@ -27,7 +27,7 @@ export function useAgentDescriptors(
   filter = ""
 ) {
   return useQuery({
-    queryKey: [...AGENTS_KEY, "descriptors", { limit, index, filter }],
+    queryKey: agentKeys.descriptors(limit, index, filter),
     queryFn: () => getAgentDescriptors(limit, index, filter),
   });
 }
@@ -35,7 +35,7 @@ export function useAgentDescriptors(
 /** Infinite-scroll agent list with offset-based pagination */
 export function useInfiniteAgentDescriptors(filter = "") {
   return useInfiniteQuery({
-    queryKey: [...AGENTS_KEY, "descriptors-infinite", { filter }],
+    queryKey: agentKeys.descriptorsInfinite(filter),
     queryFn: ({ pageParam = 0 }) => getAgentDescriptors(PAGE_SIZE, pageParam, filter),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
@@ -50,7 +50,7 @@ export function useInfiniteAgentDescriptors(filter = "") {
 
 export function useAgent(id: string, version?: number) {
   return useQuery({
-    queryKey: [...AGENTS_KEY, id, version],
+    queryKey: [...agentKeys.all, id, version],
     queryFn: () => getAgent(id, version),
     enabled: !!id,
     placeholderData: keepPreviousData,
@@ -59,7 +59,7 @@ export function useAgent(id: string, version?: number) {
 
 export function useDeploymentStatus(agentId: string, version: number, environment = "production") {
   return useQuery({
-    queryKey: [...AGENTS_KEY, "deployment", environment, agentId, version],
+    queryKey: [...agentKeys.all, "deployment", environment, agentId, version],
     queryFn: () => getDeploymentStatus(environment, agentId, version),
     enabled: !!agentId && version > 0,
     placeholderData: keepPreviousData,
@@ -72,7 +72,7 @@ export function useDeploymentStatus(agentId: string, version: number, environmen
 
 export function useAgentVersions(agentId: string) {
   return useQuery({
-    queryKey: [...AGENTS_KEY, "versions", agentId],
+    queryKey: [...agentKeys.all, "versions", agentId],
     queryFn: () => getAgentDescriptorsWithVersions(agentId),
     enabled: !!agentId,
     // `getAgentDescriptorsWithVersions` issues one descriptor query per version
@@ -117,14 +117,14 @@ export function useUpdateAgent() {
       agent: Agent;
     }) => updateAgent(id, version, agent),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },
   });
 }
 
 export function useDeploymentStatuses(agentId: string, version: number) {
   return useQuery({
-    queryKey: [...AGENTS_KEY, "deploymentStatuses", agentId, version],
+    queryKey: [...agentKeys.all, "deploymentStatuses", agentId, version],
     queryFn: () => getDeploymentStatuses(agentId, version),
     enabled: !!agentId && version > 0,
     placeholderData: keepPreviousData,
@@ -161,7 +161,7 @@ export function useCreateAgent() {
       return response;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },
   });
 }
@@ -172,7 +172,7 @@ export function useDeleteAgent() {
     mutationFn: ({ id, version }: { id: string; version: number }) =>
       deleteAgent(id, version),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },
   });
 }
@@ -190,7 +190,7 @@ export function useDuplicateAgent() {
       deepCopy?: boolean;
     }) => duplicateAgent(id, version, deepCopy),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },
   });
 }
@@ -208,8 +208,8 @@ export function useDeployAgent() {
       version: number;
     }) => deployAgent(environment, agentId, version),
     onMutate: async ({ environment = "production", agentId, version }) => {
-      const depKey = [...AGENTS_KEY, "deployment", environment, agentId, version];
-      const depsKey = [...AGENTS_KEY, "deploymentStatuses", agentId, version];
+      const depKey = [...agentKeys.all, "deployment", environment, agentId, version];
+      const depsKey = [...agentKeys.all, "deploymentStatuses", agentId, version];
       await queryClient.cancelQueries({ queryKey: depKey });
       await queryClient.cancelQueries({ queryKey: depsKey });
 
@@ -230,11 +230,11 @@ export function useDeployAgent() {
       }
     },
     onSuccess: (_, { environment = "production", agentId, version }) => {
-      queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
       queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
 
-      const depKey = [...AGENTS_KEY, "deployment", environment, agentId, version];
-      const depsKey = [...AGENTS_KEY, "deploymentStatuses", agentId, version];
+      const depKey = [...agentKeys.all, "deployment", environment, agentId, version];
+      const depsKey = [...agentKeys.all, "deploymentStatuses", agentId, version];
 
       [1000, 2500, 4500, 7000].forEach((delay) => {
         setTimeout(() => {
@@ -267,8 +267,8 @@ export function useUndeployAgent() {
         undeployAllPreviousVersions,
       }),
     onMutate: async ({ environment = "production", agentId, version }) => {
-      const depKey = [...AGENTS_KEY, "deployment", environment, agentId, version];
-      const depsKey = [...AGENTS_KEY, "deploymentStatuses", agentId, version];
+      const depKey = [...agentKeys.all, "deployment", environment, agentId, version];
+      const depsKey = [...agentKeys.all, "deploymentStatuses", agentId, version];
       await queryClient.cancelQueries({ queryKey: depKey });
       await queryClient.cancelQueries({ queryKey: depsKey });
 
@@ -289,11 +289,11 @@ export function useUndeployAgent() {
       }
     },
     onSuccess: (_, { environment = "production", agentId, version }) => {
-      queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
       queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
 
-      const depKey = [...AGENTS_KEY, "deployment", environment, agentId, version];
-      const depsKey = [...AGENTS_KEY, "deploymentStatuses", agentId, version];
+      const depKey = [...agentKeys.all, "deployment", environment, agentId, version];
+      const depsKey = [...agentKeys.all, "deploymentStatuses", agentId, version];
 
       [1000, 2500].forEach((delay) => {
         setTimeout(() => {
