@@ -109,6 +109,8 @@ export interface DockerImage {
 export type UpdateCheckErrorReason =
   /** GitHub's anonymous 60-requests-per-hour budget is spent for this IP. */
   | "rate-limited"
+  /** The page's own Content-Security-Policy refused the request. */
+  | "blocked-by-csp"
   /** No response at all — offline, DNS, or an egress firewall. */
   | "unreachable"
   /** A response we cannot use (non-2xx, or a body in an unexpected shape). */
@@ -149,6 +151,51 @@ interface GitHubRelease {
 }
 
 /**
+ * Notice the browser refusing this request under the page's *own* CSP.
+ *
+ * A request blocked by Content-Security-Policy rejects with exactly the same
+ * `TypeError` as a dead network, so without this the card tells the operator to
+ * check their proxy when nothing ever left the browser and no proxy was
+ * involved. That is not a corner case here: EDDI serves the Manager with
+ * `connect-src 'self'` (`application.properties`, the `csp-default` filter), so
+ * on a stock deployment this is the *expected* outcome — the check works in
+ * `npm run dev` (no CSP) and fails everywhere it actually ships.
+ *
+ * Matching on the blocked origin alone, not the directive: anything of ours the
+ * browser blocks at this URL is a CSP problem the operator has to fix in the
+ * header, whichever directive names it.
+ */
+function watchForCspBlock(url: string) {
+  const origin = new URL(url).origin;
+  let blocked = false;
+
+  const onViolation = (event: SecurityPolicyViolationEvent) => {
+    // `blockedURI` is the origin alone for most fetch violations, the full URL
+    // in some browsers — so accept both, but only those two. A bare
+    // `startsWith(origin)` would also swallow `https://api.github.com.example`,
+    // an unrelated host whose violation would then explain away a genuine
+    // GitHub outage as a CSP problem.
+    if (event.blockedURI === origin || event.blockedURI?.startsWith(`${origin}/`)) {
+      blocked = true;
+    }
+  };
+  document.addEventListener("securitypolicyviolation", onViolation);
+
+  return {
+    stop: () => document.removeEventListener("securitypolicyviolation", onViolation),
+    /**
+     * The violation event and the fetch rejection are not ordered against each
+     * other, so yield a macrotask before reading the flag rather than racing it.
+     * Only ever awaited on the failure path.
+     */
+    wasBlocked: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return blocked;
+    },
+  };
+}
+
+/**
  * The one outbound request this module makes, with its two contracts named:
  * it carries no credentials, and it gives up rather than hanging.
  *
@@ -161,6 +208,7 @@ async function getWithoutCredentials(url: string, accept: string): Promise<Respo
   // timeout is wired by hand.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const csp = watchForCspBlock(url);
 
   try {
     return await fetch(url, {
@@ -176,9 +224,16 @@ async function getWithoutCredentials(url: string, accept: string): Promise<Respo
       referrerPolicy: "no-referrer",
     });
   } catch {
+    if (await csp.wasBlocked()) {
+      throw new UpdateCheckError(
+        "blocked-by-csp",
+        `The page's Content-Security-Policy blocked the request to ${new URL(url).host}`,
+      );
+    }
     throw new UpdateCheckError("unreachable", `Could not reach ${new URL(url).host}`);
   } finally {
     clearTimeout(timer);
+    csp.stop();
   }
 }
 

@@ -54,6 +54,7 @@ function useBreadcrumbs() {
     capabilities: t("nav.capabilities", "Capabilities"),
     sync: t("nav.sync", "Sync"),
     gdpr: t("nav.gdpr", "GDPR"),
+    updates: t("nav.updates", "Updates"),
     wizard: t("wizard.title", "Agent Wizard"),
     agentview: t("nav.agents"),
     workflowview: t("nav.packages"),

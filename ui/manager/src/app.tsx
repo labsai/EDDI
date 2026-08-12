@@ -40,6 +40,7 @@ import { ChannelDetailPage } from "@/pages/channel-detail";
 import { ApprovalsPage } from "@/pages/approvals";
 import { LandingPage } from "@/pages/landing-page";
 import { OperatorPage } from "@/pages/operator";
+import { UpdatesPage } from "@/pages/updates";
 
 import { WorkforceLayout } from "@/components/workforce/workforce-layout";
 import { WorkforceDashboard } from "@/pages/workforce/workforce-dashboard";
@@ -117,6 +118,7 @@ export function App() {
         <Route path="/manage/channels" element={<ChannelsPage />} />
         <Route path="/manage/channels/:id" element={<ChannelDetailPage />} />
         <Route path="/manage/approvals" element={<ApprovalsPage />} />
+        <Route path="/manage/updates" element={<UpdatesPage />} />
         {/* Redirects from old standalone user-data pages */}
         <Route path="/manage/memories" element={<Navigate to="/manage/userdata?tab=memories" replace />} />
         <Route path="/manage/properties" element={<Navigate to="/manage/userdata?tab=properties" replace />} />

@@ -17,11 +17,16 @@ import {
   Info,
   Server,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUpdateCheck } from "@/hooks/use-update-check";
-import { EDDI_DOCKER_TAGS_URL, EDDI_RELEASES_URL, previewReleaseNotes } from "@/lib/api/updates";
+import {
+  EDDI_DOCKER_TAGS_URL,
+  EDDI_RELEASES_URL,
+  previewReleaseNotes,
+  type UpdateCheckErrorReason,
+} from "@/lib/api/updates";
 import { cn } from "@/lib/utils";
 
 /** The exact commands EDDI's own README documents for an upgrade. */
@@ -33,11 +38,12 @@ const MANUAL_UPDATE_COMMANDS = [
 ].join("\n");
 
 /**
- * Opt-in "is there a newer EDDI?" section.
+ * Opt-in "is there a newer EDDI?" panel.
  *
- * Sits at the bottom of the dashboard because it is a maintenance concern, not
- * a daily one. Nothing here talks to the network until the operator presses the
- * button or ticks the checkbox.
+ * The body of the Updates page (`/manage/updates`), which owns the heading —
+ * this renders only the controls and results, so it does not repeat the title.
+ * Nothing here talks to the network until the operator presses the button or
+ * ticks the checkbox.
  */
 export function UpdateCheckCard() {
   const { t, i18n } = useTranslation();
@@ -68,25 +74,8 @@ export function UpdateCheckCard() {
   }, [latest?.publishedAt, i18n.language]);
 
   return (
-    <Card
-      id="updates"
-      data-testid="update-check-card"
-      className={cn("scroll-mt-6", updateAvailable && "border-primary/40")}
-    >
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <ArrowUpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-          {t("updates.title", "EDDI Updates")}
-        </CardTitle>
-        <p className="text-sm text-muted-foreground">
-          {t(
-            "updates.description",
-            "Check whether a newer EDDI release is available. Nothing is sent until you ask.",
-          )}
-        </p>
-      </CardHeader>
-
-      <CardContent className="space-y-4 pt-4">
+    <Card data-testid="update-check-card" className={cn(updateAvailable && "border-primary/40")}>
+      <CardContent className="space-y-4">
         {/* The three versions that matter, each from its own source */}
         <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
           {/* testid on the value rather than the cell, unlike the two below:
@@ -144,22 +133,7 @@ export function UpdateCheckCard() {
         <div className="space-y-3" data-testid="update-check-result" aria-live="polite">
           {errorReason ? (
             <ResultRow tone="warning" icon={AlertTriangle}>
-              <span>
-                {errorReason === "rate-limited"
-                  ? t(
-                      "updates.errorRateLimited",
-                      "GitHub's rate limit for unauthenticated requests was reached. Try again later, or open the releases page.",
-                    )
-                  : errorReason === "unreachable"
-                    ? t(
-                        "updates.errorUnreachable",
-                        "Could not reach api.github.com. Check your network or any outbound proxy.",
-                      )
-                    : t(
-                        "updates.errorFailed",
-                        "The update check failed. Open the releases page to check manually.",
-                      )}
-              </span>
+              <ErrorText reason={errorReason} />
             </ResultRow>
           ) : !hasChecked ? (
             <p className="text-sm text-muted-foreground">
@@ -279,6 +253,63 @@ export function UpdateCheckCard() {
       </CardContent>
     </Card>
   );
+}
+
+/* ─── Failure copy ────────────────────────────────────────────────────────── */
+
+/**
+ * What went wrong, and what the operator can do about it.
+ *
+ * A switch rather than a ternary chain: each reason carries different advice,
+ * and the four of them nested read as one unreadable expression. The generic
+ * message is the `default` rather than its own case, so a reason added later
+ * degrades to "the check failed, here is the link" instead of rendering an
+ * icon with no text beside it.
+ */
+function ErrorText({ reason }: { reason: UpdateCheckErrorReason }) {
+  const { t } = useTranslation();
+
+  switch (reason) {
+    case "rate-limited":
+      return (
+        <span>
+          {t(
+            "updates.errorRateLimited",
+            "GitHub's rate limit for unauthenticated requests was reached. Try again later, or open the releases page.",
+          )}
+        </span>
+      );
+    case "blocked-by-csp":
+      // The failure a stock EDDI deployment gets: `connect-src 'self'` refuses
+      // the request in the browser, so naming the network or a proxy would send
+      // the operator after everything except the header that has to change.
+      return (
+        <span>
+          {t(
+            "updates.errorBlockedByCsp",
+            "This deployment's Content-Security-Policy blocks the browser from reaching api.github.com, so the check cannot run. Add api.github.com to the connect-src directive to allow it, or use the releases link below.",
+          )}
+        </span>
+      );
+    case "unreachable":
+      return (
+        <span>
+          {t(
+            "updates.errorUnreachable",
+            "Could not reach api.github.com. Check your network or any outbound proxy.",
+          )}
+        </span>
+      );
+    default:
+      return (
+        <span>
+          {t(
+            "updates.errorFailed",
+            "The update check failed. Open the releases page to check manually.",
+          )}
+        </span>
+      );
+  }
 }
 
 /* ─── Release notes ───────────────────────────────────────────────────────── */
