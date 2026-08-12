@@ -11,9 +11,12 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -70,22 +73,46 @@ class DocumentationLinksTest {
         return root;
     }
 
+    /**
+     * Collects every markdown file, <em>pruning</em> the directories in
+     * {@link #SKIPPED_DIRS} rather than walking them and filtering afterwards.
+     * <p>
+     * The distinction is not cosmetic here. {@code target/} always exists when
+     * these tests run and holds tens of thousands of class files, {@code .git/} is
+     * comparably large, and this repository's own agent worktrees live under
+     * {@code .claude/} — so a filter-after-walk pays the full I/O cost of all three
+     * on every run, and would recurse through nested checkouts.
+     */
     private static List<Path> markdownFiles(Path root) {
-        try (Stream<Path> paths = Files.walk(root)) {
-            return paths.filter(Files::isRegularFile)
-                    .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".md"))
-                    .filter(p -> {
-                        for (Path part : root.relativize(p)) {
-                            if (SKIPPED_DIRS.contains(part.toString())) {
-                                return false;
-                            }
-                        }
-                        return true;
-                    })
-                    .toList();
+        List<Path> found = new ArrayList<>();
+        try {
+            Files.walkFileTree(root, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    if (!dir.equals(root) && SKIPPED_DIRS.contains(dir.getFileName().toString())) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    if (attrs.isRegularFile()
+                            && file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".md")) {
+                        found.add(file);
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                    return FileVisitResult.CONTINUE; // an unreadable entry is not this test's business
+                }
+            });
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+        return found;
     }
 
     /**
