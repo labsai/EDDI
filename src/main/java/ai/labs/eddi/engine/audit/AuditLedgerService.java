@@ -25,6 +25,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.nio.file.*;
 import java.time.Instant;
 import java.nio.charset.StandardCharsets;
@@ -59,11 +60,14 @@ public class AuditLedgerService {
 
     /**
      * Cap on how many conversations are tracked for sequence assignment at once. On
-     * overflow the whole table is dropped; the next entry for a conversation then
-     * re-seeds from the store, which costs one count query and keeps the sequence
-     * gap-free.
+     * overflow, counters whose positions are all accounted for are evicted and
+     * re-seeded from the store on next use — see
+     * {@link #evictSequenceCountersIfFull} for why only those are safe to drop.
+     * <p>
+     * Package-visible so the eviction tests can reach the threshold instead of
+     * hard-coding a copy of it that would drift.
      */
-    private static final int MAX_TRACKED_CONVERSATIONS = 50_000;
+    static final int MAX_TRACKED_CONVERSATIONS = 50_000;
 
     /**
      * Cap on how many chain positions are remembered as "consumed but never
@@ -103,6 +107,21 @@ public class AuditLedgerService {
      */
     private final ConcurrentHashMap<String, Set<Long>> undelivered = new ConcurrentHashMap<>();
     private final AtomicInteger undeliveredTracked = new AtomicInteger(0);
+    /**
+     * Serialises sequence-table eviction against sequence assignment. Submitters
+     * take the read lock (shared, so they never contend with one another) for the
+     * whole span between consuming a chain position and making the entry visible in
+     * {@link #queue}; {@link #evictSequenceCountersIfFull} takes the write lock.
+     * Without it, eviction could drop a counter in that window and the next entry
+     * would re-seed from a store that has not yet seen the outstanding one.
+     */
+    private final ReentrantReadWriteLock sequenceLock = new ReentrantReadWriteLock();
+    /**
+     * The batch {@link #flush()} has polled off the queue but not yet persisted.
+     * Those entries own chain positions that are in neither the queue nor the
+     * store, so eviction has to treat their conversations as live.
+     */
+    private volatile List<AuditEntry> inFlightBatch = List.of();
     private ScheduledExecutorService flushExecutor;
 
     @Inject
@@ -210,7 +229,17 @@ public class AuditLedgerService {
             return;
         }
 
+        // Make room in the sequence table BEFORE taking the assignment lock —
+        // eviction needs the write lock and this thread is about to hold the read
+        // lock, which a ReentrantReadWriteLock cannot upgrade.
+        evictSequenceCountersIfFull(entry.conversationId());
+
         boolean queued = false;
+        // Read lock (shared — submitters never contend with each other) spans
+        // "position consumed" → "entry visible in the queue". Eviction takes the
+        // write lock, so it can never observe a conversation as idle while this
+        // thread holds a number for it that nothing can see yet.
+        sequenceLock.readLock().lock();
         try {
             // Scrub secrets from string values in maps
             AuditEntry scrubbed = scrubSecrets(entry);
@@ -237,6 +266,7 @@ public class AuditLedgerService {
             queue.offer(signed);
             queued = true;
         } finally {
+            sequenceLock.readLock().unlock();
             if (!queued) {
                 // Signing/scrubbing blew up: give the reservation back rather than
                 // leaking capacity that no entry occupies.
@@ -291,6 +321,72 @@ public class AuditLedgerService {
     }
 
     /**
+     * Drop sequence counters for conversations that can be re-seeded from the store
+     * without risk, once the table reaches {@link #MAX_TRACKED_CONVERSATIONS}.
+     * <p>
+     * The table used to be {@code clear()}ed wholesale, on the reasoning that
+     * "re-seeding is correct, only slower". It is not: the counter is seeded from
+     * {@code countByConversation}, which sees only what the store already holds.
+     * Entries sit in {@link #queue} for up to one flush interval — longer while a
+     * failing store is being retried — so clearing mid-flight re-issued positions
+     * those entries had already consumed. Duplicates are graded exactly like gaps
+     * ({@code ChainStatus.BROKEN}), and unlike a gap there is no exculpatory record
+     * for them: the ledger would report the deployment as tampered because its own
+     * bookkeeping wrapped around.
+     * <p>
+     * A counter is safe to drop only when every position it handed out is already
+     * accounted for somewhere the re-seed can see: persisted in the store, or
+     * attributed in {@link #undelivered}. So conversations still represented in the
+     * queue, in the in-flight flush batch, or in the undelivered table are retained
+     * and everything else goes. Called under no lock and takes the write lock
+     * itself, so it cannot run while a submitter holds an assigned-but-not-
+     * yet-queued position.
+     * <p>
+     * One residual case is deliberate: past {@link #MAX_TRACKED_UNDELIVERED} the
+     * undelivered table stops recording, so a dead-lettered position may be reused.
+     * That window already reports {@code BROKEN} by the documented fail-strict
+     * rule, so the verdict is unchanged — only its reason is.
+     */
+    private void evictSequenceCountersIfFull(String conversationId) {
+        // Fast path: nothing to do until the table is full, and a conversation
+        // already tracked does not grow it.
+        if (conversationSequences.size() < MAX_TRACKED_CONVERSATIONS || conversationSequences.containsKey(conversationId)) {
+            return;
+        }
+
+        sequenceLock.writeLock().lock();
+        try {
+            if (conversationSequences.size() < MAX_TRACKED_CONVERSATIONS) {
+                return;
+            }
+
+            Set<String> retain = new HashSet<>(undelivered.keySet());
+            collectConversationIds(queue, retain);
+            collectConversationIds(inFlightBatch, retain);
+
+            int before = conversationSequences.size();
+            conversationSequences.keySet().removeIf(id -> !retain.contains(id));
+            int evicted = before - conversationSequences.size();
+
+            if (evicted > 0) {
+                LOGGER.infov("Audit sequence table hit {0} conversations — evicted {1} fully-persisted counters; "
+                        + "{2} retained as in flight", MAX_TRACKED_CONVERSATIONS, evicted, conversationSequences.size());
+            }
+        } finally {
+            sequenceLock.writeLock().unlock();
+        }
+    }
+
+    /** Add every non-null conversation id in {@code entries} to {@code target}. */
+    private static void collectConversationIds(Iterable<AuditEntry> entries, Set<String> target) {
+        for (AuditEntry entry : entries) {
+            if (entry != null && entry.conversationId() != null) {
+                target.add(entry.conversationId());
+            }
+        }
+    }
+
+    /**
      * Next 0-based position for {@code conversationId}, or
      * {@link AuditEntry#UNSEQUENCED} when the entry cannot be chained.
      * <p>
@@ -303,11 +399,16 @@ public class AuditLedgerService {
             return AuditEntry.UNSEQUENCED;
         }
 
-        if (conversationSequences.size() >= MAX_TRACKED_CONVERSATIONS) {
-            // Bounded by construction: re-seeding is correct, only slower.
-            LOGGER.warnv("Audit sequence table hit {0} conversations — resetting; sequences will be re-seeded from the store",
-                    MAX_TRACKED_CONVERSATIONS);
-            conversationSequences.clear();
+        // Still full after eviction means every remaining counter belongs to a
+        // conversation with entries in flight. Re-seeding one of those from the
+        // store would hand out a position it already used, and a DUPLICATE is
+        // reported as BROKEN — the ledger accusing the deployment of tampering
+        // because its own table filled up. An unsequenced entry instead degrades
+        // the window to UNAVAILABLE ("cannot be established"), which is honest.
+        if (!conversationSequences.containsKey(conversationId) && conversationSequences.size() >= MAX_TRACKED_CONVERSATIONS) {
+            LOGGER.warnv("Audit sequence table is full ({0} conversations, all with entries in flight) — "
+                    + "new conversations are recorded unsequenced until it drains", MAX_TRACKED_CONVERSATIONS);
+            return AuditEntry.UNSEQUENCED;
         }
 
         try {
@@ -324,15 +425,31 @@ public class AuditLedgerService {
     /**
      * Flush pending entries to the audit store in a batch.
      */
-    void flush() {
+    // synchronized: the scheduled writer thread and the @PreDestroy final flush
+    // can otherwise poll interleaved halves of the queue into two batches, and
+    // `inFlightBatch` below would only describe one of them.
+    synchronized void flush() {
         if (queue.isEmpty())
             return;
 
         List<AuditEntry> batch = new ArrayList<>();
-        AuditEntry entry;
-        while ((entry = queue.poll()) != null) {
-            queueSize.decrementAndGet();
-            batch.add(entry);
+        // Draining and publishing must be atomic WITH RESPECT TO EVICTION: an
+        // entry that has been polled but not yet published is in neither `queue`
+        // nor `inFlightBatch`, and an eviction landing in that window would read
+        // its conversation as fully persisted and re-seed it — reintroducing the
+        // duplicate this whole mechanism exists to prevent. The read lock is the
+        // same one submitters hold, so this only ever contends with eviction, and
+        // no I/O happens inside it.
+        sequenceLock.readLock().lock();
+        try {
+            AuditEntry entry;
+            while ((entry = queue.poll()) != null) {
+                queueSize.decrementAndGet();
+                batch.add(entry);
+            }
+            inFlightBatch = batch;
+        } finally {
+            sequenceLock.readLock().unlock();
         }
 
         if (!batch.isEmpty()) {
@@ -365,6 +482,10 @@ public class AuditLedgerService {
                     writeToDeadLetter(batch);
                     consecutiveFailures.set(0);
                 }
+            } finally {
+                // Every outcome has put these positions somewhere eviction can see
+                // again: persisted, re-queued, or recorded in `undelivered`.
+                inFlightBatch = List.of();
             }
         }
     }

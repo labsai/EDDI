@@ -142,13 +142,24 @@ class AgentGroupStoreTest {
         assertTrue(ex.getMessage().contains("2 options"), ex.getMessage());
     }
 
+    /**
+     * The rejection stands, but its stated reason must not: HUMAN members ship (I6
+     * — this same class validates them), so blaming their absence tells a config
+     * author a shipped feature is missing. What is actually absent is the resume
+     * path a paused tie-break would need. Asserting on the alternatives rather than
+     * on prose keeps this test from pinning the wording again.
+     */
     @Test
-    void votePhase_humanDecides_isRejectedUntilI6() {
+    void votePhase_humanDecides_isRejectedPendingResumePath() {
         var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateVotePhases(voteGroup(
                 votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
                         new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
                                 TiePolicy.HUMAN_DECIDES)))));
-        assertTrue(ex.getMessage().contains("I6"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("HUMAN_DECIDES"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("MODERATOR_DECIDES"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("NO_DECISION"), ex.getMessage());
+        assertFalse(ex.getMessage().contains("not available yet"),
+                "must not claim HUMAN members are unavailable — they ship: " + ex.getMessage());
     }
 
     @Test

@@ -36,10 +36,10 @@ Closes #
 
 ## Checklist
 
-- [ ] My code follows the project's [code style](CONTRIBUTING.md#code-style)
+- [ ] My code follows the project's [code style](https://github.com/labsai/EDDI/blob/main/CONTRIBUTING.md#code-style)
 - [ ] I have added tests that prove my fix/feature works
 - [ ] Existing tests pass locally (`./mvnw clean verify -DskipITs`)
 - [ ] I have updated documentation if needed
-- [ ] My commit messages follow [conventional commits](CONTRIBUTING.md#commit-convention)
+- [ ] My commit messages follow [conventional commits](https://github.com/labsai/EDDI/blob/main/CONTRIBUTING.md#commit-convention)
 - [ ] I have not committed any secrets, API keys, or tokens
 - [ ] This PR has a clear, focused scope (one concern per PR)

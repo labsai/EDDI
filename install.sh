@@ -620,6 +620,7 @@ resolve_compose_files() {
       "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml"
       "docs/monitoring/grafana-provisioning/datasources/datasources.yml"
       "docs/monitoring/eddi-grafana-dashboard.json"
+      "docs/monitoring/eddi-operations-dashboard.json"
     )
     for mf in "${monitoring_files[@]}"; do
       local mf_target="$EDDI_DIR/$mf"

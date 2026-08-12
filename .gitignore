@@ -57,6 +57,11 @@ fabric.properties
 docker/data/
 /tmp/
 
+# Grafana runtime state. The monitoring stack uses a named Docker volume and
+# provisions from docs/monitoring/, so anything written here is local scratch —
+# grafana.db (a 1.4 MB SQLite file) used to be committed from the bind-mount era.
+/grafana-data/
+
 # Kubernetes — user-specific values and Helm packaging output
 helm/eddi/charts/
 *.tgz
