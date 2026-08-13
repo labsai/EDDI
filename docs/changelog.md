@@ -7,6 +7,58 @@
 
 
 
+## 🔒 fix(hitl): a failed policy read left the approval gate inert (2026-08-13)
+
+**Repo:** EDDI (`chore/remove-agent-father`)
+
+The fail-open flagged in the operator audit, now closed.
+
+`ConversationHitlService.populateToolApprovalsConfig` could not tell **"this agent has no approval
+policy"** from **"I could not read the agent's approval policy"**. Both produced a null carrier, and
+a null carrier makes `ToolApprovalGate` *wholly inert* — every tool call, writes included, executes
+with no approval. So a transient store error while resuming an operator conversation opened an
+ungated-write window, silently.
+
+Worse than first described: the null did not come from the `catch` in `populateToolApprovalsConfig`
+at all. `readAgentConfigPinned` **already swallowed** the exception and returned null, so the
+fail-open ran through the ordinary `agentConfig == null` branch — the path that looks like the
+benign case.
+
+**Fix — three parts, because a sentinel is only as good as the paths that preserve it:**
+
+1. **Distinguish the two outcomes.** New `AgentConfigLookup(config, readFailed)` record and
+   `lookupAgentConfigPinned`; `readAgentConfigPinned` now delegates to it and keeps its
+   best-effort contract for its other caller. `readFailed` is true **only when the store threw** —
+   an agent that genuinely does not exist yields `(null, false)`, because that is an answer rather
+   than a failure to obtain one. Scoping it to thrown errors is deliberate: failing closed on
+   "absent" would make every agent that never opted into HITL start pausing.
+2. **Fail closed on not-knowing.** `ToolApprovalsConfig.UNDETERMINED`, set on the carrier when the
+   read failed. Identity is the contract (`isUndetermined`, reference equality — a hand-written
+   `["*"]` config is an ordinary strict policy, not a failed read), but the **values** fail closed
+   too: `requireApproval: ["*"]`, no exemptions, and a `pauseReason` that says the policy could not
+   be read. Defence in depth — losing this open is silent, losing it closed is loud.
+3. **Stop the task level from undoing it.** `TaskToolApprovalsResolver.resolve` returns the sentinel
+   before anything else. `Mode.REPLACE` hands the task config back wholesale and would otherwise
+   have restored an ungated config — and a task-level config is authored inside the very agent whose
+   policy could not be loaded, so it is no evidence that gating is unnecessary.
+
+The `catch` in `populateToolApprovalsConfig` now also sets the sentinel; previously it left the
+carrier untouched, which on a fresh memory is null — the same fail-open by a second route.
+
+**All three downstream consumers were checked** rather than assumed: `McpCallsTask` gates on a
+non-null config (so MCP calls fail closed too), `Conversation`'s pause message picks up the
+sentinel's `pauseReason`, and `resolveMaxAutoApprovals` falls back to its default. Nothing mutates
+the shared instance.
+
+**Tests.** Both directions, since only asserting the closed case would let "gate everything, always"
+pass: a thrown store error yields `UNDETERMINED`; a genuinely absent agent still yields null and an
+inert gate. Plus resolver coverage that the sentinel survives `REPLACE` and a task-level
+`exempt: ["*"]`, and that a look-alike `["*"]` config is *not* treated as undetermined. **1327 tests
+pass** across the HITL, gate, tool-loop, MCP-calls and LLM-task suites.
+
+---
+
+
 ## 🔒 fix(httpcalls): a tool argument could rewrite which endpoint an httpcall hits (2026-08-13)
 
 **Repo:** EDDI (`chore/remove-agent-father`)

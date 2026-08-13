@@ -1261,23 +1261,57 @@ class ConversationHitlService {
      */
     void populateToolApprovalsConfig(IConversationMemory memory) {
         try {
-            AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
+            var lookup = lookupAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
+            // A FAILED read is not "no policy". Collapsing the two left the carrier
+            // null, which makes the gate wholly inert — so a store blip while
+            // resuming became a window in which every write executed unapproved.
+            // Fail closed on not-knowing; see ToolApprovalsConfig#UNDETERMINED.
+            if (lookup.readFailed()) {
+                LOGGER.warnf("Could not read the tool-approval policy for %s — gating every tool call until it can be read",
+                        memory.getConversationId());
+                memory.setAgentToolApprovalsConfig(ToolApprovalsConfig.UNDETERMINED);
+                return;
+            }
+            AgentConfiguration agentConfig = lookup.config();
             if (agentConfig == null || agentConfig.getHitlConfig() == null) {
                 memory.setAgentToolApprovalsConfig(null);
                 return;
             }
             memory.setAgentToolApprovalsConfig(agentConfig.getHitlConfig().getToolApprovals());
         } catch (Exception e) {
-            LOGGER.warnf("Could not populate tool-approval config for %s: %s",
+            // Same reasoning: this catch used to leave the carrier untouched (null on
+            // a fresh memory), which is the fail-open again by a different route.
+            LOGGER.warnf("Could not populate tool-approval config for %s: %s — gating every tool call",
                     memory.getConversationId(), e.getMessage());
+            memory.setAgentToolApprovalsConfig(ToolApprovalsConfig.UNDETERMINED);
         }
     }
 
     /** Reads the agent config at the pinned version, falling back to the latest. */
     AgentConfiguration readAgentConfigPinned(String agentId, Integer agentVersion) {
+        return lookupAgentConfigPinned(agentId, agentVersion).config();
+    }
+
+    /**
+     * An agent-config read, together with whether it actually FAILED.
+     * <p>
+     * {@link #readAgentConfigPinned} collapses both outcomes to {@code null}, which
+     * is fine for callers that only want a best-effort config. It is not fine for
+     * the approval gate: there, "no config" means run ungated, and "could not read"
+     * has to mean the opposite. See {@link #populateToolApprovalsConfig}.
+     *
+     * @param readFailed
+     *            true only when the store threw. An agent that genuinely does not
+     *            exist yields {@code (null, false)} — that is an answer, not a
+     *            failure to obtain one.
+     */
+    record AgentConfigLookup(AgentConfiguration config, boolean readFailed) {
+    }
+
+    AgentConfigLookup lookupAgentConfigPinned(String agentId, Integer agentVersion) {
         try {
             if (agentVersion != null && agentVersion > 0) {
-                return agentStore.read(agentId, agentVersion);
+                return new AgentConfigLookup(agentStore.read(agentId, agentVersion), false);
             }
         } catch (Exception pinnedMiss) {
             LOGGER.debugf("Pinned agent config %s v%s unavailable, falling back to latest: %s",
@@ -1285,10 +1319,10 @@ class ConversationHitlService {
         }
         try {
             IResourceStore.IResourceId currentId = agentStore.getCurrentResourceId(agentId);
-            return currentId != null ? agentStore.read(agentId, currentId.getVersion()) : null;
+            return new AgentConfigLookup(currentId != null ? agentStore.read(agentId, currentId.getVersion()) : null, false);
         } catch (Exception e) {
             LOGGER.warnf("Could not read agent config %s: %s", agentId, e.getMessage());
-            return null;
+            return new AgentConfigLookup(null, true);
         }
     }
     public ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)

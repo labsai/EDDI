@@ -574,6 +574,46 @@ class ConversationServiceHitlCoverageTest {
 
             assertNotNull(mem.get().getAgentToolApprovalsConfig());
         }
+
+        /**
+         * The distinction the sentinel exists for: a store that THROWS is not an agent
+         * without a policy. Both used to leave the carrier null, and a null carrier
+         * makes the gate wholly inert — so a database blip during resume was a window
+         * in which every tool call, writes included, ran unapproved.
+         */
+        @Test
+        @DisplayName("both reads throw → carrier fails CLOSED, not to null")
+        void bothReadsThrow_failsClosed() throws Exception {
+            doThrow(new ResourceStoreException("pinned gone")).when(agentStore).read(AGENT_ID, AGENT_VERSION);
+            // getCurrentResourceId only declares ResourceNotFoundException, so the
+            // store-is-down case surfaces here as an unchecked one.
+            doThrow(new RuntimeException("store down")).when(agentStore).getCurrentResourceId(AGENT_ID);
+
+            AtomicReference<IConversationMemory> mem = drivePlainResume(null);
+
+            var carrier = mem.get().getAgentToolApprovalsConfig();
+            assertNotNull(carrier, "a failed policy read left the gate inert");
+            assertTrue(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig.isUndetermined(carrier),
+                    "a failed policy read must fail closed, not degrade to 'no policy'");
+        }
+
+        /**
+         * The counterpart, and the reason this is scoped to thrown errors only: an
+         * agent that genuinely has no policy must stay ungated. Failing closed on THAT
+         * would gate every tool call for every agent that never opted into HITL.
+         */
+        @Test
+        @DisplayName("agent genuinely absent (no throw) → still null, gate stays inert")
+        void agentAbsentWithoutError_staysInert() throws Exception {
+            doReturn(null).when(agentStore).read(AGENT_ID, AGENT_VERSION);
+            doReturn(null).when(agentStore).getCurrentResourceId(AGENT_ID);
+
+            AtomicReference<IConversationMemory> mem = drivePlainResume(null);
+
+            assertNull(mem.get().getAgentToolApprovalsConfig(),
+                    "an absent agent is an answer, not a failure to obtain one — gating here would "
+                            + "make every non-HITL agent pause");
+        }
     }
 
     // =========================================================================
