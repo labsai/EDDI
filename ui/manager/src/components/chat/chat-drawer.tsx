@@ -11,9 +11,11 @@ import {
   type ReadyAttachment,
 } from "@/hooks/use-attachment-staging";
 import { ChatMessage } from "./chat-message";
+import { ChatActivity } from "./chat-activity";
 import { FileDropOverlay, PendingAttachmentChip } from "./attachment-chip";
 import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer as DebugPanel } from "@/components/debugger/debug-drawer";
+import { useDebugStore } from "@/hooks/use-debug-events";
 import { InputHint } from "@/components/chat/input-hint";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { cn } from "@/lib/utils";
@@ -79,6 +81,7 @@ export function ChatDrawer() {
   const conversationId = useChatStore((s) => s.conversationId);
   const isProcessing = useChatStore((s) => s.isProcessing);
   const isThinking = useChatStore((s) => s.isThinking);
+  const currentTurnEvents = useDebugStore((s) => s.currentTurnEvents);
 
   const startConversation = useStartConversation();
 
@@ -235,12 +238,17 @@ export function ChatDrawer() {
                       {messages.map((msg) => (
                         <ChatMessage key={msg.id} message={msg} />
                       ))}
-                      {isThinking && (
+                      {/* Live status — the same "Thinking…" / "Using {tool}…"
+                          line the operator and main chat show; the plain
+                          indicator covers the gap before the first event. */}
+                      {(isProcessing || isThinking) && currentTurnEvents.length > 0 ? (
+                        <ChatActivity events={currentTurnEvents} isLive showInternalSteps={false} />
+                      ) : isThinking ? (
                         <div className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground animate-pulse">
                           <Loader2 className="h-4 w-4 animate-spin" />
                           <span className="italic">{t("chat.thinking")}</span>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   )}
                 </div>

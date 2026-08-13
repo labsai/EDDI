@@ -24,6 +24,7 @@ import {
 } from "@/hooks/use-attachment-staging";
 import { FileDropOverlay, PendingAttachmentChip } from "./attachment-chip";
 import { ChatMessage } from "./chat-message";
+import { ChatActivity } from "./chat-activity";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer } from "@/components/debugger/debug-drawer";
@@ -499,10 +500,16 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                 <ChatMessage key={msg.id} message={msg} />
               ))}
 
-              {/* Inline thinking / tool-use indicator — replaces old activity card */}
-              {(isProcessing || isThinking) && (
-                <InlineThinkingIndicator events={currentTurnEvents} />
-              )}
+              {/* Live status — the SAME line the operator chat shows:
+                  "Thinking…" / "Using {tool}…" + tool-call count, from the
+                  turn's live events. The dots indicator covers only the gap
+                  before the first event arrives. */}
+              {(isProcessing || isThinking) &&
+                (currentTurnEvents.length > 0 ? (
+                  <ChatActivity events={currentTurnEvents} isLive showInternalSteps={false} />
+                ) : (
+                  <InlineThinkingIndicator events={currentTurnEvents} />
+                ))}
 
               {/* Rerun button — shown when last message is an error */}
               {showRerun && !isProcessing && (
