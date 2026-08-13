@@ -17,6 +17,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -89,7 +91,7 @@ class ToolLoopStreamingChatModelTest {
         var response = bridge.chat(jsonRequest);
 
         assertSame(COMPLETE, response);
-        verify(eventSink, never()).onToken(org.mockito.ArgumentMatchers.anyString());
+        verify(eventSink, never()).onToken(anyString());
         assertEquals("", bridge.lastForwardedText(), "a round that forwarded nothing must not claim it streamed");
     }
 
@@ -99,7 +101,7 @@ class ToolLoopStreamingChatModelTest {
         // First round streams text; second round completes without partials, the
         // shape of a pure tool-call round. If the record survived the second call,
         // LlmTask would suppress the fallback emit against STALE evidence.
-        var rounds = new java.util.ArrayDeque<>(List.of(true, false));
+        var rounds = new ArrayDeque<>(List.of(true, false));
         StreamingChatModel model = new StreamingChatModel() {
             @Override
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
@@ -155,7 +157,7 @@ class ToolLoopStreamingChatModelTest {
         // after abandonment must not reach the shared sink, where it would
         // interleave with a retry's stream.
         handlerRef.get().onPartialResponse("late token");
-        verify(eventSink, never()).onToken(org.mockito.ArgumentMatchers.anyString());
+        verify(eventSink, never()).onToken(anyString());
     }
 
     @Test

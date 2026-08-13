@@ -49,6 +49,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -280,7 +281,7 @@ class LlmTaskToolLoopStreamingTest {
     void noStreamingBuilderFallsBackToSynchronousModel() throws Exception {
         when(chatModelRegistry.getOrCreateStreaming(anyString(), any())).thenReturn(null);
         // doReturn: a when() re-stub would run the setUp thenAnswer during stubbing.
-        org.mockito.Mockito.doReturn(new AgentOrchestrator.ExecutionResult(FINAL_ANSWER, new ArrayList<>()))
+        doReturn(new AgentOrchestrator.ExecutionResult(FINAL_ANSWER, new ArrayList<>()))
                 .when(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
 
         llmTask.execute(memory, new LlmConfiguration(List.of(toolTask())));
@@ -297,7 +298,7 @@ class LlmTaskToolLoopStreamingTest {
     void killSwitchOffKeepsPreviousBehaviour() throws Exception {
         llmTask.toolLoopStreamingEnabled = false;
         // doReturn: a when() re-stub would run the setUp thenAnswer during stubbing.
-        org.mockito.Mockito.doReturn(new AgentOrchestrator.ExecutionResult(FINAL_ANSWER, new ArrayList<>()))
+        doReturn(new AgentOrchestrator.ExecutionResult(FINAL_ANSWER, new ArrayList<>()))
                 .when(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
 
         llmTask.execute(memory, new LlmConfiguration(List.of(toolTask())));
