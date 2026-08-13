@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
-import { runOperatorWriteCanary, enforceWriteCanaryGate, WRITE_CANARY_TARGET_ENDPOINT } from "../write-canary";
+import {
+  runOperatorWriteCanary,
+  enforceWriteCanaryGate,
+  buildWriteCanaryPrompt,
+  WRITE_CANARY_TARGET_ENDPOINT,
+} from "../write-canary";
 import { WRITE_ENDPOINTS } from "../tool-scopes";
 import type { OperatorConfig, FetchedSpec } from "@/lib/api/operator";
 
@@ -282,6 +287,37 @@ describe("runOperatorWriteCanary", () => {
   });
 });
 
+/**
+ * The prompt is the whole reason the probe used to fail against a healthy
+ * operator: asked to pick "any ONE" agent and rename it, with no stated reason,
+ * Claude Sonnet 5 reproducibly listed the agents and then asked which one —
+ * correct behaviour for an agent hardened against loosely-specified
+ * instructions, and fatal for a probe that reads silence as "unproven".
+ */
+describe("buildWriteCanaryPrompt", () => {
+  it("names the resolved tool, so the model does not have to guess which one to call", () => {
+    expect(buildWriteCanaryPrompt("patchDescriptor")).toContain("patchDescriptor");
+  });
+
+  it("removes the two reasons the model stopped: ambiguity and asking first", () => {
+    const prompt = buildWriteCanaryPrompt("patchDescriptor");
+
+    // "any ONE of them" invited a clarifying question; naming the first does not.
+    expect(prompt).toMatch(/FIRST agent/);
+    expect(prompt).not.toMatch(/any ONE/i);
+    expect(prompt).toMatch(/without asking me anything first/i);
+    // And it must say the pause is expected, or a careful model reads an
+    // interception as an error worth reporting back instead of a success.
+    expect(prompt).toMatch(/intercepted for human approval/i);
+  });
+
+  it("still asks for the exact marker the failure message tells admins to search for", () => {
+    // If these drift apart, the "search your agents for that text" advice on the
+    // destructive path points at a string that was never written.
+    expect(buildWriteCanaryPrompt("patchDescriptor")).toContain(" [operator-write-canary]");
+  });
+});
+
 describe("enforceWriteCanaryGate", () => {
   const VAR_URL = "*/variablestore/variables/default/platform.operator";
 
@@ -370,7 +406,7 @@ describe("enforceWriteCanaryGate", () => {
       }),
     );
 
-    await expect(enforceWriteCanaryGate(config(), spec())).rejects.toThrow(/write canary did not pass/i);
+    await expect(enforceWriteCanaryGate(config(), spec())).rejects.toThrow(/did NOT hold/);
 
     expect(undeployed).toBe(true);
     expect(deleted).toBe(true);
@@ -384,8 +420,45 @@ describe("enforceWriteCanaryGate", () => {
     let deleted = false;
     server.use(http.delete("*/agentstore/agents/:id", () => { deleted = true; return new HttpResponse(null, { status: 200 }); }));
 
-    await expect(enforceWriteCanaryGate(config(), spec())).rejects.toThrow(/write canary did not pass \(unknown\)/i);
+    await expect(enforceWriteCanaryGate(config(), spec())).rejects.toThrow(/could not verify the approval gate/i);
     expect(deleted).toBe(true);
+  });
+
+  /**
+   * Rolling back on "unknown" is right; calling it a gate failure was not.
+   * Nothing was demonstrated about the gate, and an admin told the gate broke
+   * goes hunting a security problem that may not exist. The commonest cause is
+   * the operator answering in prose instead of calling the tool.
+   */
+  it("distinguishes an UNPROVEN gate from a broken one, and says what to do next", async () => {
+    serveTurn(["event: token\ndata: nothing useful\n\n", doneWith("READY")]);
+    server.use(http.delete("*/agentstore/agents/:id", () => new HttpResponse(null, { status: 200 })));
+
+    const error = String(await enforceWriteCanaryGate(config(), spec()).catch((e: unknown) => e));
+
+    expect(error).toMatch(/not evidence that it is broken/i);
+    expect(error).not.toMatch(/did NOT hold/);
+    // An admin left with no operator needs a way forward, not just a verdict.
+    expect(error).toMatch(/try activating again/i);
+    expect(error).toMatch(/read-only/i);
+  });
+
+  it("says the gate did NOT hold — and does not offer a retry — on a confirmed fail", async () => {
+    serveTurn([
+      taskComplete([
+        { type: "tool_call", tool: "patchDescriptor" },
+        { type: "tool_result", tool: "patchDescriptor", result: '{"status":"ok"}' },
+      ]),
+      doneWith("READY"),
+    ]);
+    server.use(http.delete("*/agentstore/agents/:id", () => new HttpResponse(null, { status: 200 })));
+
+    const error = String(await enforceWriteCanaryGate(config(), spec()).catch((e: unknown) => e));
+
+    expect(error).toMatch(/did NOT hold/);
+    // Nudging a retry at a broken gate is the one thing this must never do.
+    expect(error).not.toMatch(/try activating again/i);
+    expect(error).toMatch(/do not re-activate with write access/i);
   });
 
   it("the thrown error names the outcome and carries the canary's own error detail", async () => {
@@ -427,6 +500,6 @@ describe("enforceWriteCanaryGate", () => {
     expect(String(error)).toMatch(/still deployed/i);
     expect(String(error)).toMatch(/remove it manually/i);
     // The original reason must survive too — the admin needs both facts.
-    expect(String(error)).toMatch(/write canary did not pass/i);
+    expect(String(error)).toMatch(/did NOT hold/);
   });
 });
