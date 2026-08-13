@@ -318,6 +318,147 @@ returns the latest release and its notes.
 
 
 
+## 🛠 fix(setup): the Platform Operator could not survive its own write canary — four defects (2026-08-11)
+
+**Repo:** EDDI (`fix/operator-setup-api-defects`)
+
+Activating the Platform Operator from the Manager produced *"Write canary did not pass (unknown):
+The operator never called a tool"*, and the Manager correctly tore the agent down again rather than
+leave an unverified write gate deployed. The diagnostic was a symptom: the operator never got as far
+as a tool call. Three unrelated backend defects sit between `POST /administration/agents/setup-api`
+and a working agent — plus a fourth, in the escape the first fix relies on, found by reviewing that
+fix rather than by the outage. All fire on the default path; the Manager sends nothing unusual and
+needed no changes.
+
+**1. The generated API summary is a Qute template, and nobody meant it to be.**
+`AgentSetupService` appends `McpApiToolBuilder`'s endpoint summary to the caller's system prompt so
+the model knows which endpoints exist. Those lines are raw OpenAPI paths, and a path parameter is
+*valid Qute*: `/administration/docs/{name}` **is** `{name}`. `LlmTask` renders the system prompt on
+every turn, so every turn produced:
+
+```
+Template rendering failed: Key "name" not found in the template data map
+with keys [conversationLog, userInfo, memory, conversationInfo, vars]
+```
+
+— a key nobody wrote, in a prompt fragment the agent's author never saw. `/administration/docs/{name}`
+sorts first among the granted endpoints, so it was the one that surfaced; every `{id}` path behind it
+was equally broken.
+
+**This one does not fail the turn, which is worse.** `runTemplateEngineOnParams` catches per
+parameter, logs, and leaves the **raw** value in the map — so the model was handed the entire system
+prompt unrendered, including the caller's own `{#if context.screen}…{/if}` sections verbatim. A
+quietly degraded operator prompt on every turn, plus a stack trace per turn, rather than a clean
+failure. (Defect 2 below is what actually killed the turn.)
+
+The generated half is now wrapped in a Qute unparsed block (`{|…|}`) and the caller's half is not,
+which is the whole point: the Manager's operator prompt is *supposed* to be a template. Escaping one
+side only is what keeps both properties. The escape itself already existed as a private method in
+`PromptSnippetService` (for `templateEnabled=false` snippets, including the delicate trick of
+splitting an embedded `|}` across a block boundary so it cannot close the block early); it is now
+`TemplateEscaping.unparsedBlock` in `modules/templating`, and `PromptSnippetService` delegates to it.
+Two call sites had the same hazard and only one of them knew about it.
+
+**1b. …and the escape had a hole of its own, found while reviewing 1.** `TemplatingEngine`
+short-circuits templates containing no control characters, and its pattern required a letter, `#`,
+`/` or `!` after the brace — none of which `{|` has. So a template whose *only* marker was an
+unparsed block was returned untouched, **delimiters and all**. The escape therefore worked only when
+something else in the same template happened to trigger a render: an OpenAPI spec with no path
+parameters, plus a caller prompt with no markers, would have shipped a literal `{|…|}` into the
+system prompt. Fixing only defect 1 would have traded one leak for another on that path. The pattern
+now counts `{|`, which also makes `templateEnabled=false` snippets behave consistently instead of
+depending on their neighbours.
+
+**2. A hard-coded `temperature: 0.3` that current models reject.**
+`createLlmConfig` pinned `temperature=0.3` into every config it wrote, for every provider and every
+model. Anthropic's current models refuse it outright — `` `temperature` is deprecated for this
+model `` — a 400 on the wizard's own `DEFAULT_MODEL`, so **every turn of every agent this wizard has
+created** failed with a non-retryable `InvalidRequestException`. The parameter is no longer written
+at all. This is deliberately not a per-model exception list: a sampling temperature is not a value
+this service is in a position to have an opinion about, and OpenAI's reasoning models reject a
+non-default one too. Each provider's own default now applies, and an agent designer who wants a
+specific temperature sets it explicitly on the generated config — where it is a visible choice
+rather than an invisible inherited one.
+
+*Behaviour change:* agents created by `setup-api`/`setup-agent` from here on sample at their
+provider's default rather than 0.3. Agents created **before** this fix keep the stored `0.3` (and
+the unescaped summary) in their LLM config; there is no migration, because the operator is recreated
+on activation and any other wizard-built agent is editable in the Manager.
+
+**3. The one dangling `$ref` in EDDI's own OpenAPI document.**
+`SimpleConversationMemorySnapshot.conversationProperties` was declared as the *interface*
+`IConversationMemory.IConversationProperties`. smallrye emitted `$ref:
+'#/components/schemas/IConversationProperties'` for it and never generated the schema — so any
+client that dereferences the spec errors on it. EDDI is such a client: `setup-api` parses EDDI's own
+spec through swagger-parser, which logged a full stack trace on every operator activation. Declared
+as the plain `Map<String, Property>` now, matching the sibling `ConversationMemorySnapshot`; the wire
+format is unchanged (`ConversationProperties` *is* a `LinkedHashMap`), and it deserialises properly
+for the first time. Verified by regenerating the spec: `conversationProperties` is now
+`additionalProperties: $ref Property`, and a sweep of all 228 schemas finds **zero** dangling
+references.
+
+**Tests.** `SetupPromptTemplateSafetyTest` builds a summary from a spec carrying `{name}` and `{id}`
+paths and renders the enriched prompt through the real `TemplatingEngine` — under a *strict* engine
+(where raw concatenation throws, the shipped failure) and a *lenient* one (where it silently deletes
+the path parameter instead). Pinning both means the test keeps its meaning if
+`quarkus.qute.strict-rendering` or the property-not-found strategy is ever changed. A third case
+covers 1b from the wizard's own entry point: a spec with no path parameters and a prompt with no
+markers, asserting neither delimiter survives. `PlaceholderSyntaxContractTest` pins the same property
+at the engine level. A loop over all seven provider branches asserts none of them pins a temperature.
+
+Every assertion was mutation-checked — reinstating any of the four defects fails its test, including
+the strict-engine one, whose original `contains("name")` would have passed vacuously (the exception
+message embeds a preview of the template, which itself contains `{name}`); it now asserts on the
+cause alone. The targeted sweep around the touched classes is otherwise green.
+
+**Review round (PR #673).** Three findings, two applied and one rejected with evidence.
+
+**1c. The snippet escaping was not just unnecessary, it was the leak.** Copilot pointed out that
+`PromptSnippetService` puts its wrapped content into the template DATA map, and Qute does not
+re-parse what an expression resolved to — so `{snippets.foo}` emitted the `{|…|}` delimiters
+verbatim into the system prompt, and no amount of fixing the engine's control-character pattern
+could help, because that scans the source template. Probed against the real engine, which settled
+it and went one better:
+
+```
+escaped-as-data   = [{|Use {properties.company_name} here|}]   ← delimiters leak
+unescaped-as-data = [Use {properties.company_name} here]       ← already literal, for free
+```
+
+The second line is the point: data substitution *already* gives `templateEnabled=false` exactly the
+guarantee it promises. The wrapping protected nothing and was the only thing putting `{|` in a
+prompt. Snippets are now stored raw, `TemplateEscaping` has one caller — the wizard's
+source-concatenation, which genuinely needs it — and both javadocs stop claiming otherwise. The
+corollary is documented rather than quietly left: `templateEnabled=true` does not make markers
+resolve either, so the flag is currently inert; honouring it would mean a second evaluation pass
+over data, which is a design decision with an injection surface, not a bug fix.
+
+**Copilot's other finding — no automated regression for the dangling `$ref` — was right, and is the
+one this changelog itself had papered over** by saying "verified by regenerating the spec". That was
+a *manual* check; reverting the field type would have left every test green.
+`InfrastructureIT.openApiSpecHasNoDanglingSchemaRefs` now sweeps the real generated document for
+`$ref`s with no matching schema, plus a named assertion on the property shape. Verified without
+being able to run ITs locally, by running the walker over the pre-fix spec captured from a live
+instance: it reports exactly `[IConversationProperties]` and nothing else. Format-agnostic (YAML or
+JSON) so it does not depend on a content negotiation it has no stake in.
+
+**Rejected: "exposing internal representation" on `getConversationProperties`.** Tried it — an
+unmodifiable getter throws `UnsupportedOperationException` at
+`ConversationMemoryUtilities:191`, the line the finding itself cites, because that line populates the
+snapshot *by mutating through the getter*, on the `readConversation` path. 10 test errors. It is also
+not a regression here (the previous interface type was equally mutable), the sibling snapshot has the
+identical shape, and a DTO serialised straight to JSON has no invariant to protect. Answered on the
+PR with the stack trace.
+
+**Not fixed here (different repo):** the Manager's canary reports a failed turn as *"there may be no
+agents on this platform to test against"*, which is a plausible-but-wrong guess — the stream had
+errored. Worth noting the Manager already has the right branch (`streamError` wins over that
+fallback) and the deployed bundle contains it, so the real question is why a real stream error did
+not reach it; the wording is the second problem, not the first.
+
+---
+
+
 ## 🔢 docs(mcp): the MCP tool catalogue was eight tools short, and a count sweep of both READMEs (2026-08-11)
 
 **Repo:** EDDI (`docs/group-collaboration-refresh`)

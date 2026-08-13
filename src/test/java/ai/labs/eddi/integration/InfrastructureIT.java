@@ -4,13 +4,21 @@
  */
 package ai.labs.eddi.integration;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
 import org.junit.jupiter.api.*;
 
+import java.util.Set;
+import java.util.TreeSet;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Integration test for Infrastructure endpoints: health probes, metrics,
@@ -79,6 +87,74 @@ public class InfrastructureIT {
                 .statusCode(200)
                 .body(containsString("openapi"))
                 .body(containsString("/agentstore/agents"));
+    }
+
+    /**
+     * Every {@code $ref} in the generated document must point at a schema that
+     * actually exists.
+     * <p>
+     * This runs against the REAL generated spec because that is the only place the
+     * defect it guards can appear. Declaring a REST model field as an interface
+     * ({@code IConversationMemory.IConversationProperties}) made smallrye emit a
+     * {@code $ref} to a schema it then never generated — invisible to every
+     * assertion that only checks the endpoint returns a document, and invisible to
+     * unit tests, which use hand-written specs. It broke real consumers:
+     * swagger-parser dereferences, so EDDI's own {@code setup-api} wizard threw a
+     * stack trace on every run while reading EDDI's own spec.
+     * <p>
+     * Deliberately a whole-document sweep rather than an assertion about the one
+     * field that regressed — any model that acquires the same shape fails here.
+     */
+    @Test
+    @Order(12)
+    @DisplayName("OpenAPI spec should contain no dangling schema $refs")
+    void openApiSpecHasNoDanglingSchemaRefs() throws Exception {
+        String spec = given()
+                .get("/openapi")
+                .then().assertThat().statusCode(200)
+                .extract().asString();
+
+        // Format-agnostic on purpose, and no Accept header: /openapi serves YAML by
+        // default and JSON on request, and which one arrives is smallrye's business,
+        // not this test's — the property under test is identical either way.
+        // Sniffing the body beats asserting a content negotiation it has no stake in.
+        JsonNode root = (spec.stripLeading().startsWith("{") ? new ObjectMapper() : new YAMLMapper()).readTree(spec);
+        JsonNode schemas = root.path("components").path("schemas");
+        assertTrue(schemas.isObject() && !schemas.isEmpty(), "spec exposes no component schemas — the sweep would be vacuous");
+
+        Set<String> dangling = new TreeSet<>();
+        collectDanglingSchemaRefs(root, schemas, dangling);
+        assertTrue(dangling.isEmpty(), "OpenAPI document references schemas that were never generated: " + dangling);
+
+        // Named explicitly as well: the sweep above would still pass if the field
+        // stopped being emitted at all, which is a different kind of broken.
+        JsonNode properties = schemas.path("SimpleConversationMemorySnapshot").path("properties").path("conversationProperties");
+        assertEquals("object", properties.path("type").asText(),
+                "conversationProperties must serialise as a map, not a named type: " + properties);
+        assertEquals("#/components/schemas/Property", properties.path("additionalProperties").path("$ref").asText(),
+                "conversationProperties must be a map of Property: " + properties);
+    }
+
+    /**
+     * Collects every {@code #/components/schemas/X} reference where X is absent.
+     */
+    private static void collectDanglingSchemaRefs(JsonNode node, JsonNode schemas, Set<String> dangling) {
+        if (node.isObject()) {
+            var refNode = node.get("$ref");
+            if (refNode != null && refNode.isTextual()) {
+                String ref = refNode.asText();
+                String prefix = "#/components/schemas/";
+                if (ref.startsWith(prefix)) {
+                    String name = ref.substring(prefix.length());
+                    if (!schemas.has(name)) {
+                        dangling.add(name);
+                    }
+                }
+            }
+            node.forEach(child -> collectDanglingSchemaRefs(child, schemas, dangling));
+        } else if (node.isArray()) {
+            node.forEach(child -> collectDanglingSchemaRefs(child, schemas, dangling));
+        }
     }
 
     @Test
