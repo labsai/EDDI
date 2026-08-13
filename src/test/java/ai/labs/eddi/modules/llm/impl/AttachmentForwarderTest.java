@@ -63,11 +63,18 @@ class AttachmentForwarderTest {
         forwarder = newForwarder(10L * 1024 * 1024, 20L * 1024 * 1024);
     }
 
+    /**
+     * The registry backing the most recently built forwarder — for counter
+     * assertions.
+     */
+    private io.micrometer.core.instrument.simple.SimpleMeterRegistry meterRegistry;
+
     private AttachmentForwarder newForwarder(long perFile, long aggregate) {
         var capability = new ModelCapabilityService(k -> Optional.empty());
         var extractor = new AttachmentTextExtractor(10_000);
+        meterRegistry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
         return new AttachmentForwarder(store, capability, extractor, httpClient,
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), perFile, aggregate);
+                meterRegistry, perFile, aggregate);
     }
 
     // ==================== No-op cases ====================
@@ -182,6 +189,71 @@ class AttachmentForwarderTest {
             String note = ((TextContent) enhanced.contents().get(2)).text();
             assertTrue(note.contains("earlier.pdf"), note);
             assertFalse(note.contains("screenshot.png"), "a re-inlined image must not also be listed as unavailable: " + note);
+        }
+
+        /**
+         * A failed store load on the re-inline path must NOT be counted or metered as a
+         * re-inlined image: the failure note informs the model, but a permanently
+         * missing blob would otherwise claim a successful re-inline (and bump the
+         * counter) on every remaining turn.
+         */
+        @Test
+        void earlierTurnImage_storeLoadFailure_isANoteAndNotCountedAsReinlined() throws Exception {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            when(store.load(eq("img-1"), any()))
+                    .thenThrow(new IAttachmentStore.AttachmentStoreException("blob gone"));
+            mockPreviousTurnAttachments(storedImage("img-1", "screenshot.png"));
+            List<ChatMessage> messages = messages(UserMessage.from("the screenshot?"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            assertEquals(2, enhanced.contents().size());
+            assertInstanceOf(TextContent.class, enhanced.contents().get(1), "the model must be told, via a note");
+            assertTrue(((TextContent) enhanced.contents().get(1)).text().contains("could not be loaded"));
+            assertEquals(0.0, meterRegistry.counter("eddi.attachment.reinlined").count(),
+                    "a failed load is not a re-inline");
+            assertEquals(1.0, meterRegistry.counter("eddi.attachment.errors").count());
+        }
+
+        /**
+         * The override parameter this path explicitly threads through must be honored —
+         * vision=OFF on a vision-capable model keeps the note.
+         */
+        @Test
+        void earlierTurnImage_visionOverrideOff_staysANote() {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            mockPreviousTurnAttachments(storedImage("img-1", "screenshot.png"));
+            List<ChatMessage> messages = messages(UserMessage.from("the screenshot?"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o",
+                    ModelCapabilityService.Support.OFF,
+                    ModelCapabilityService.Support.AUTO,
+                    ModelCapabilityService.Support.AUTO);
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            assertEquals(2, enhanced.contents().size());
+            String note = ((TextContent) enhanced.contents().get(1)).text();
+            assertTrue(note.contains("screenshot.png"), note);
+        }
+
+        @Test
+        void earlierTurnImages_aggregateCapSkipsTheOverflowWithANote() throws Exception {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            when(store.load(any(), any())).thenReturn("12345678".getBytes());
+            mockPreviousTurnAttachments(storedImage("img-1", "first.png"), storedImage("img-2", "second.png"));
+            List<ChatMessage> messages = messages(UserMessage.from("both screenshots?"));
+
+            // Aggregate budget fits exactly one 8-byte image.
+            var capped = newForwarder(1024, 10);
+            capped.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            long images = enhanced.contents().stream().filter(c -> c instanceof ImageContent).count();
+            assertEquals(1, images, "only what fits the aggregate budget is re-inlined");
+            assertTrue(enhanced.contents().stream().anyMatch(
+                    c -> c instanceof TextContent tc && tc.text().contains("second.png")),
+                    "the skipped image must be reported, not silently dropped");
         }
 
         @Test

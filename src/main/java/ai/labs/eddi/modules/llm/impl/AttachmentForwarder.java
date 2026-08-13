@@ -83,6 +83,7 @@ public class AttachmentForwarder {
     private final long maxForwardBytes;
     private final long maxAggregateBytes;
     private final Counter forwardedCounter;
+    private final Counter reinlinedCounter;
     private final Counter errorsCounter;
 
     @Inject
@@ -100,6 +101,11 @@ public class AttachmentForwarder {
         this.textExtractor = textExtractor;
         this.httpClient = httpClient;
         this.forwardedCounter = meterRegistry != null ? meterRegistry.counter("eddi.attachment.forwarded") : null;
+        // Separate from `forwarded`: a re-inline repeats every attachment-free
+        // turn, so folding it into the first-time counter would quietly turn one
+        // screenshot in a 20-turn conversation into ~20 "forwarded" attachments
+        // for anyone alerting on that meter.
+        this.reinlinedCounter = meterRegistry != null ? meterRegistry.counter("eddi.attachment.reinlined") : null;
         this.errorsCounter = meterRegistry != null ? meterRegistry.counter("eddi.attachment.errors") : null;
         this.maxForwardBytes = maxForwardBytes;
         this.maxAggregateBytes = maxAggregateBytes;
@@ -241,7 +247,14 @@ public class AttachmentForwarder {
                     ModelCapabilityService.Support.AUTO, ModelCapabilityService.Support.AUTO);
             if (content != null) {
                 contents.add(content);
-                inlined++;
+                // Only an actual image counts as re-inlined: a failed store load
+                // or cap skip comes back as a TextContent note — the model is
+                // told, but counting it would claim "1 image re-inlined" (and
+                // increment the counter) on every remaining turn of a
+                // conversation whose blob is permanently gone.
+                if (content instanceof ImageContent) {
+                    inlined++;
+                }
             }
         }
 
@@ -267,10 +280,17 @@ public class AttachmentForwarder {
             contents.add(TextContent.from(note.toString()));
         }
 
-        if (inlined > 0 || !noteOnly.isEmpty()) {
+        // The message is updated whenever ANYTHING was added — including a
+        // failure note for an image that could not be re-inlined.
+        if (contents.size() > original.contents().size()) {
             messages.set(lastUserIdx, UserMessage.from(contents));
         }
-        recordMetrics(inlined, errors.size());
+        if (reinlinedCounter != null && inlined > 0) {
+            reinlinedCounter.increment(inlined);
+        }
+        if (errorsCounter != null && !errors.isEmpty()) {
+            errorsCounter.increment(errors.size());
+        }
         persist(memory.getCurrentStep(), List.of(), errors);
         LOGGER.debugf("Earlier-turn attachments for conversation='%s': %d image(s) re-inlined, %d noted",
                 LogSanitizer.sanitize(memory.getConversationId()), inlined, noteOnly.size());

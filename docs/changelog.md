@@ -7,6 +7,29 @@
 
 
 
+## 🎯 fix(attachments): review follow-ups on the re-inline path (2026-08-14)
+
+**Repo:** EDDI (`chore/remove-agent-father`)
+
+Adversarial review of the re-inline commit surfaced two MEDIUMs, both fixed:
+
+- **A failed store load no longer counts as a re-inlined image.** The failure note still reaches
+  the model, but only actual `ImageContent` increments the count — a permanently missing blob no
+  longer claims "1 image re-inlined" (and bumps the counter) on every remaining turn.
+- **Re-inlines get their own meter** (`eddi.attachment.reinlined`): folding them into
+  `eddi.attachment.forwarded` would have turned one screenshot in a 20-turn conversation into ~20
+  "forwarded" attachments for anyone alerting on that counter.
+- **`readAttachment`'s image answer no longer overclaims.** "The most recent images are already
+  shown to you" is false exactly on mixed turns (re-inline only runs on turns with no new
+  attachments) — the reworded message states the rule and tells the model not to describe an image
+  it cannot currently see.
+- The two `readAttachment` debug logs sanitize the LLM-supplied name (same CodeQL pattern as the
+  forwarder fix), and three new tests cover the previously untested edges: store-load failure
+  during re-inline (not counted, errors metered), `visionOverride=OFF` on the earlier-turns path,
+  and the aggregate byte cap skipping the overflow with a note.
+
+---
+
 ## 🎯 fix(attachments): earlier-turn images are re-inlined for vision models (2026-08-13)
 
 **Repo:** EDDI (`chore/remove-agent-father`)
