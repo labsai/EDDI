@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -100,7 +101,7 @@ class AgentOrchestratorExtendedTest {
                 userMemoryStore, mock(ToolResponseTruncator.class),
                 mock(TenantQuotaService.class), memorySnapshotService,
                 null, null, null, null, null,
-                mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
+                mock(IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
 
         mockMemory = mock(IConversationMemory.class);
         when(mockMemory.getUserMemoryConfig()).thenReturn(null);

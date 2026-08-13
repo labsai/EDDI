@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -86,7 +87,7 @@ class ConversationMemoryStoreResilienceTest {
     @Test
     @DisplayName("G11 — a context entry without a 'type' does not fail the whole conversation load")
     void contextWithoutTypeDoesNotFailTheLoad() throws Exception {
-        assertLoadsWith(new LinkedHashMap<>(java.util.Map.of("value", "de")));
+        assertLoadsWith(new LinkedHashMap<>(Map.of("value", "de")));
     }
 
     @Test

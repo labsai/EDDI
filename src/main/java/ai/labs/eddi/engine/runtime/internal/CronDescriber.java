@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Converts 5-field cron expressions to human-readable descriptions.
@@ -156,7 +157,7 @@ public final class CronDescriber {
             return v >= 0 && v < labels.length ? labels[v] : String.valueOf(v);
         }
         return values.stream().map(v -> v >= 0 && v < labels.length ? labels[v] : String.valueOf(v))
-                .collect(java.util.stream.Collectors.joining(", "));
+                .collect(Collectors.joining(", "));
     }
 
     private static String substituteNames(String field, Map<String, String> names) {

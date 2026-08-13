@@ -31,6 +31,9 @@ import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -229,7 +232,7 @@ class ConversationServiceExtendedTest {
         @Test
         @DisplayName("with memoryConfig — stores config correctly")
         void withMemoryConfig() {
-            var config = new ai.labs.eddi.configs.agents.model.AgentConfiguration.UserMemoryConfig();
+            var config = new AgentConfiguration.UserMemoryConfig();
             config.setMaxRecallEntries(100);
 
             var handler = conversationService.createPropertiesHandler(USER_ID, config);
@@ -265,7 +268,7 @@ class ConversationServiceExtendedTest {
             when(mockAgent.startConversation(anyString(), anyMap(), any(), any()))
                     .thenThrow(new InstantiationException("Agent init failed"));
 
-            assertThrows(ai.labs.eddi.datastore.IResourceStore.ResourceStoreException.class,
+            assertThrows(IResourceStore.ResourceStoreException.class,
                     () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, new LinkedHashMap<>()));
         }
     }
@@ -330,8 +333,8 @@ class ConversationServiceExtendedTest {
             step.setWorkflows(new ArrayList<>());
             snapshot.setConversationSteps(new ArrayList<>(List.of(step, step)));
             snapshot.setConversationOutputs(new ArrayList<>(List.of(
-                    new ai.labs.eddi.engine.memory.model.ConversationOutput(),
-                    new ai.labs.eddi.engine.memory.model.ConversationOutput())));
+                    new ConversationOutput(),
+                    new ConversationOutput())));
             when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
 
             Boolean result = conversationService.isUndoAvailable(ENV, AGENT_ID, CONVERSATION_ID);

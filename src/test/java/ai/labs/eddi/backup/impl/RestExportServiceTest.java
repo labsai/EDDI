@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.util.*;
+import java.util.ArrayList;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -600,7 +601,7 @@ class RestExportServiceTest {
         void multipleSnippets() {
             String config = "{{snippets.intro}} and {{snippets.outro}} and {snippets.middle_part}";
             var matcher = SNIPPET_REF_PATTERN.matcher(config);
-            var names = new java.util.ArrayList<String>();
+            var names = new ArrayList<String>();
             while (matcher.find()) {
                 names.add(matcher.group(1));
             }

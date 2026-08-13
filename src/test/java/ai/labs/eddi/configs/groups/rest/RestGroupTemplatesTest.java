@@ -17,6 +17,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -60,7 +61,7 @@ class RestGroupTemplatesTest {
         var response = rest.listTemplates();
 
         assertEquals(200, response.getStatus());
-        assertEquals(5, ((java.util.List<?>) response.getEntity()).size());
+        assertEquals(5, ((List<?>) response.getEntity()).size());
     }
 
     @Test

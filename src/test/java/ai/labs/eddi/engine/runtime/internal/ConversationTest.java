@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
+import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -123,7 +124,7 @@ class ConversationTest {
 
             var entry = new UserMemoryEntry(null, "user1", "language", "en",
                     "fact", Property.Visibility.self, "agent1", List.of(), "conv1",
-                    false, 0, java.time.Instant.now(), java.time.Instant.now());
+                    false, 0, Instant.now(), Instant.now());
             when(store.getVisibleEntries(eq("user1"), eq("agent1"), anyList(), anyString(), anyInt()))
                     .thenReturn(List.of(entry));
 

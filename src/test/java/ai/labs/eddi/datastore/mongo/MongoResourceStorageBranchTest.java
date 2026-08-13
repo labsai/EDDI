@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -100,10 +101,10 @@ class MongoResourceStorageBranchTest {
             when(historyCollection.find(any(Document.class))).thenReturn(iterable);
 
             doAnswer(inv -> {
-                java.util.function.Consumer<Document> consumer = inv.getArgument(0);
+                Consumer<Document> consumer = inv.getArgument(0);
                 consumer.accept(doc);
                 return null;
-            }).when(iterable).forEach(any(java.util.function.Consumer.class));
+            }).when(iterable).forEach(any(Consumer.class));
 
             List<IResourceStore.IResourceId> result = storage.findHistoryResourceIdsContaining("path", "value");
             assertEquals(1, result.size());
@@ -121,10 +122,10 @@ class MongoResourceStorageBranchTest {
             when(historyCollection.find(any(Document.class))).thenReturn(iterable);
 
             doAnswer(inv -> {
-                java.util.function.Consumer<Document> consumer = inv.getArgument(0);
+                Consumer<Document> consumer = inv.getArgument(0);
                 consumer.accept(doc);
                 return null;
-            }).when(iterable).forEach(any(java.util.function.Consumer.class));
+            }).when(iterable).forEach(any(Consumer.class));
 
             List<IResourceStore.IResourceId> result = storage.findHistoryResourceIdsContaining("path", "value");
             assertEquals(0, result.size());
@@ -156,10 +157,10 @@ class MongoResourceStorageBranchTest {
             when(iterable.skip(anyInt())).thenReturn(iterable);
 
             doAnswer(inv -> {
-                java.util.function.Consumer<Document> consumer = inv.getArgument(0);
+                Consumer<Document> consumer = inv.getArgument(0);
                 consumer.accept(doc);
                 return null;
-            }).when(iterable).forEach(any(java.util.function.Consumer.class));
+            }).when(iterable).forEach(any(Consumer.class));
 
             List<IResourceStore.IResourceId> result = storage.findResources(
                     new IResourceFilter.QueryFilters[]{qfs}, "name", 0, 10);
@@ -184,7 +185,7 @@ class MongoResourceStorageBranchTest {
             when(iterable.sort(any(Document.class))).thenReturn(iterable);
             when(iterable.limit(anyInt())).thenReturn(iterable);
             when(iterable.skip(anyInt())).thenReturn(iterable);
-            doNothing().when(iterable).forEach(any(java.util.function.Consumer.class));
+            doNothing().when(iterable).forEach(any(Consumer.class));
 
             List<IResourceStore.IResourceId> result = storage.findResources(
                     new IResourceFilter.QueryFilters[]{qfs}, null, -1, 0);
@@ -208,7 +209,7 @@ class MongoResourceStorageBranchTest {
             when(iterable.sort(any(Document.class))).thenReturn(iterable);
             when(iterable.limit(anyInt())).thenReturn(iterable);
             when(iterable.skip(anyInt())).thenReturn(iterable);
-            doNothing().when(iterable).forEach(any(java.util.function.Consumer.class));
+            doNothing().when(iterable).forEach(any(Consumer.class));
 
             // sortField=null, skip=0, limit=0 → "no caller limit" → the ceiling
             List<IResourceStore.IResourceId> result = storage.findResources(

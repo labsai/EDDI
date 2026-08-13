@@ -3,20 +3,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.mcp;
+import ai.labs.eddi.configs.agents.IRestAgentStore;
 
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
+import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.runtime.BoundedLogStore;
+import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
+import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -24,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -59,12 +68,12 @@ class McpConversationToolsHitlTest {
                 mock(IConversationDescriptorStore.class));
 
         tools = new McpConversationTools(
-                conversationService, mock(ai.labs.eddi.engine.api.IRestAgentAdministration.class),
-                mock(ai.labs.eddi.configs.agents.IRestAgentStore.class),
-                mock(ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory.class),
-                new JsonSerialization(ai.labs.eddi.datastore.serialization.SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false)),
-                mock(ai.labs.eddi.engine.runtime.BoundedLogStore.class),
-                mock(ai.labs.eddi.engine.audit.rest.IRestAuditStore.class),
+                conversationService, mock(IRestAgentAdministration.class),
+                mock(IRestAgentStore.class),
+                mock(IRestInterfaceFactory.class),
+                new JsonSerialization(SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false)),
+                mock(BoundedLogStore.class),
+                mock(IRestAuditStore.class),
                 agentTriggerStore, userConversationStore, restAgentEngine,
                 identity, conversationAccessGuard, false);
     }
@@ -76,7 +85,7 @@ class McpConversationToolsHitlTest {
         when(userConversationStore.readUserConversation("customer_support", "U1")).thenReturn(existing);
         // Trigger still exists (no exception), conversation not ENDED → existing reused
         when(agentTriggerStore.readAgentTrigger("customer_support"))
-                .thenReturn(mock(ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration.class));
+                .thenReturn(mock(AgentTriggerConfiguration.class));
         when(restAgentEngine.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
         // say throws — conversation already paused
         doThrow(new IConversationService.ConversationAwaitingApprovalException("paused"))
@@ -102,7 +111,7 @@ class McpConversationToolsHitlTest {
                 Deployment.Environment.production, "agent-1", "conv-1");
         when(userConversationStore.readUserConversation("customer_support", "U1")).thenReturn(existing);
         when(agentTriggerStore.readAgentTrigger("customer_support"))
-                .thenReturn(mock(ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration.class));
+                .thenReturn(mock(AgentTriggerConfiguration.class));
         when(restAgentEngine.getConversationState("conv-1")).thenReturn(ConversationState.READY);
 
         // say completes with an AWAITING_HUMAN snapshot (this turn paused)
@@ -126,7 +135,7 @@ class McpConversationToolsHitlTest {
                 Deployment.Environment.production, "agent-1", "conv-1");
         when(userConversationStore.readUserConversation("customer_support", "U1")).thenReturn(existing);
         when(agentTriggerStore.readAgentTrigger("customer_support"))
-                .thenReturn(mock(ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration.class));
+                .thenReturn(mock(AgentTriggerConfiguration.class));
         when(restAgentEngine.getConversationState("conv-1")).thenReturn(ConversationState.READY);
 
         // H7: say skips the queued turn (IN_PROGRESS busy) — must NOT be reported as
@@ -152,7 +161,7 @@ class McpConversationToolsHitlTest {
                 Deployment.Environment.production, "agent-1", "conv-1");
         when(userConversationStore.readUserConversation("customer_support", "U1")).thenReturn(existing);
         when(agentTriggerStore.readAgentTrigger("customer_support"))
-                .thenReturn(mock(ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration.class));
+                .thenReturn(mock(AgentTriggerConfiguration.class));
         when(restAgentEngine.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
 
         // H7: a skip whose state is AWAITING_HUMAN → pending approval, not busy.
@@ -228,13 +237,13 @@ class McpConversationToolsHitlTest {
         // Task 13: a TOOL_CALL pause must additively include pauseType + tool NAMES
         // (names only) in the PAUSED_FOR_APPROVAL envelope, without breaking the
         // existing fields (suggestNextTool, conversationState, /resume).
-        var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
-        var call1 = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+        var batch = new PendingToolCallBatch();
+        var call1 = new PendingToolCallBatch.PendingToolCall();
         call1.setToolName("delete_production_db");
         call1.setArgumentsRaw("{\"token\":\"topsecret\"}");
-        var call2 = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+        var call2 = new PendingToolCallBatch.PendingToolCall();
         call2.setToolName("wire_transfer");
-        batch.setCalls(java.util.List.of(call1, call2));
+        batch.setCalls(List.of(call1, call2));
 
         var snapshot = new SimpleConversationMemorySnapshot();
         snapshot.setConversationState(ConversationState.AWAITING_HUMAN);

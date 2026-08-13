@@ -48,6 +48,7 @@ import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
+import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -468,7 +469,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     // otherwise the store-level validation only fires at agent
                     // creation, after all extensions already landed (partial
                     // import), and surfaced as a 500 instead of a 400.
-                    ai.labs.eddi.configs.hitl.HitlConfigValidation.validate(agentConfig.getHitlConfig());
+                    HitlConfigValidation.validate(agentConfig.getHitlConfig());
 
                     agentConfig.getWorkflows()
                             .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet, transaction));

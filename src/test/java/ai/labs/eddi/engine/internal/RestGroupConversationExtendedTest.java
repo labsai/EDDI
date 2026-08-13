@@ -7,10 +7,14 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IRestGroupConversation.DiscussRequest;
+import ai.labs.eddi.engine.api.IRestGroupConversation;
+import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -50,10 +54,10 @@ class RestGroupConversationExtendedTest {
         identity = mock(SecurityIdentity.class);
         ownershipValidator = mock(OwnershipValidator.class);
         when(ownershipValidator.validateAndResolveUserId(any(), any())).thenAnswer(inv -> inv.getArgument(1));
-        var hitlAccessGuard = new ai.labs.eddi.engine.hitl.HitlAccessGuard(
+        var hitlAccessGuard = new HitlAccessGuard(
                 identity, ownershipValidator,
-                mock(ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore.class),
-                mock(ai.labs.eddi.engine.api.IConversationService.class),
+                mock(IConversationDescriptorStore.class),
+                mock(IConversationService.class),
                 groupService);
         restGroupConversation = new RestGroupConversation(
                 groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard);
@@ -482,7 +486,7 @@ class RestGroupConversationExtendedTest {
 
             restGroupConversation.continueDiscussionStreaming("group-1", "gc-1",
                     new DiscussRequest("q", "user-1",
-                            List.of(new ai.labs.eddi.engine.api.IRestGroupConversation.AttachmentRef(
+                            List.of(new IRestGroupConversation.AttachmentRef(
                                     "image/png", "aGVsbG8=", null, "d.png"))),
                     eventSink, sse);
 

@@ -385,7 +385,7 @@ class InMemoryConversationCoordinatorTest {
         smallCoordinator.submitInOrder("conv-2", task2);
 
         // Third NEW conversation should be rejected
-        assertThrows(java.util.concurrent.RejectedExecutionException.class,
+        assertThrows(RejectedExecutionException.class,
                 () -> smallCoordinator.submitInOrder("conv-3", task3));
     }
 

@@ -132,7 +132,7 @@ class EngineModelsTest {
     @Test
     void coordinatorStatus_record() {
         var status = new CoordinatorStatus(
-                "in-memory", true, "ok", 5, 100L, 2L, java.util.Map.of("c1", 3));
+                "in-memory", true, "ok", 5, 100L, 2L, Map.of("c1", 3));
         assertEquals("in-memory", status.coordinatorType());
         assertTrue(status.connected());
         assertEquals(5, status.activeConversations());

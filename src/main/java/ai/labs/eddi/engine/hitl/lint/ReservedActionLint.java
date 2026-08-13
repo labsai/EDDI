@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalPatterns;
 import ai.labs.eddi.engine.lifecycle.IConversation;
+import java.util.ArrayList;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -67,7 +68,7 @@ public final class ReservedActionLint {
         }
 
         Set<String> flaggedActions = new LinkedHashSet<>();
-        List<String> warnings = new java.util.ArrayList<>();
+        List<String> warnings = new ArrayList<>();
 
         for (RuleGroupConfiguration group : ruleSet.getBehaviorGroups()) {
             if (group == null || group.getRules() == null) {

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.internal;
+import ai.labs.eddi.configs.agents.IAgentStore;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -19,6 +20,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -29,6 +31,7 @@ import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -38,6 +41,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -60,7 +64,7 @@ class GroupConversationServiceExtendedTest {
     private IJsonSerialization jsonSerialization;
     private GroupConversationService service;
 
-    private ai.labs.eddi.configs.agents.IAgentStore agentStore;
+    private IAgentStore agentStore;
 
     private static final String GROUP_ID = "test-group";
     private static final String USER_ID = "test-user";
@@ -75,7 +79,7 @@ class GroupConversationServiceExtendedTest {
         templatingEngine = mock(ITemplatingEngine.class);
         jsonSerialization = mock(IJsonSerialization.class);
 
-        agentStore = mock(ai.labs.eddi.configs.agents.IAgentStore.class);
+        agentStore = mock(IAgentStore.class);
         service = new GroupConversationService(groupStore, conversationStore,
                 conversationService, agentFactory, templatingEngine,
                 jsonSerialization, new SimpleMeterRegistry(),
@@ -589,7 +593,7 @@ class GroupConversationServiceExtendedTest {
             // proves nothing about what a crashed-and-recovered pod would see
             // (review finding: a captor would hold the same mutable instance, so
             // the value is recorded AT persist time instead).
-            var basesAtPersistTime = new java.util.ArrayList<Integer>();
+            var basesAtPersistTime = new ArrayList<Integer>();
             doAnswer(inv -> {
                 basesAtPersistTime.add(((GroupConversation) inv.getArgument(0)).getPausedRepeatSliceBase());
                 return null;
@@ -622,9 +626,9 @@ class GroupConversationServiceExtendedTest {
             gc.setState(GroupConversationState.IN_PROGRESS);
             gc.setOriginalQuestion(QUESTION);
             gc.getTranscript().add(new TranscriptEntry("a1", "Alice", "Opinion A", 0, "Discuss",
-                    TranscriptEntryType.OPINION, java.time.Instant.now(), null, null));
+                    TranscriptEntryType.OPINION, Instant.now(), null, null));
             gc.getTranscript().add(new TranscriptEntry("h1", "Hannah", "Human view", 0, "Discuss",
-                    TranscriptEntryType.OPINION, java.time.Instant.now(), null, null));
+                    TranscriptEntryType.OPINION, Instant.now(), null, null));
             gc.setResumePoint(new GroupConversation.ResumePoint(0, 0, 2, GroupConversation.RESUME_KIND_HUMAN_TURN));
             gc.setPausedRepeatSliceBase(0);
 
@@ -685,7 +689,7 @@ class GroupConversationServiceExtendedTest {
 
             // Gate the first agent response so the async thread blocks until we release it.
             // This guarantees the state is still IN_PROGRESS when we assert.
-            var gate = new java.util.concurrent.CountDownLatch(1);
+            var gate = new CountDownLatch(1);
 
             when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1")))
                     .thenReturn(mock(IAgent.class));
@@ -1111,7 +1115,7 @@ class GroupConversationServiceExtendedTest {
             // executeDiscussion must surface an execution failure as
             // GroupExecutionException
             // (which REST maps to 5xx), not a bare GroupDiscussionException (409).
-            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException.class,
+            assertThrows(IGroupConversationService.GroupExecutionException.class,
                     () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0));
         }
 
@@ -1127,7 +1131,7 @@ class GroupConversationServiceExtendedTest {
             when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1")))
                     .thenThrow(new RuntimeException("Agent check failed"));
 
-            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException.class,
+            assertThrows(IGroupConversationService.GroupExecutionException.class,
                     () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0));
         }
 
@@ -1203,7 +1207,7 @@ class GroupConversationServiceExtendedTest {
             // to
             // 504 (not the 502 an ordinary execution failure gets). executeDiscussion's
             // re-wrap preserves the subtype.
-            assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupTimeoutException.class,
+            assertThrows(IGroupConversationService.GroupTimeoutException.class,
                     () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0));
         }
     }
@@ -1236,7 +1240,7 @@ class GroupConversationServiceExtendedTest {
             setupStore(cfg);
 
             assertThrows(
-                    ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededException.class,
+                    IGroupConversationService.GroupDepthExceededException.class,
                     () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 4));
         }
     }

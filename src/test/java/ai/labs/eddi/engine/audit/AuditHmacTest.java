@@ -21,6 +21,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -75,7 +76,7 @@ class AuditHmacTest {
         @DisplayName("different master keys produce different HMAC keys")
         void differentKeys() {
             byte[] key2 = AuditHmac.deriveHmacKey("different-master-key");
-            assertFalse(java.util.Arrays.equals(hmacKey, key2));
+            assertFalse(Arrays.equals(hmacKey, key2));
         }
     }
 

@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.agents;
 
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -309,12 +310,12 @@ class AgentSigningServiceTest {
         }
 
         @Override
-        public ai.labs.eddi.secrets.model.SecretMetadata getMetadata(SecretReference reference) {
+        public SecretMetadata getMetadata(SecretReference reference) {
             return null;
         }
 
         @Override
-        public List<ai.labs.eddi.secrets.model.SecretMetadata> listKeys(String tenantId) {
+        public List<SecretMetadata> listKeys(String tenantId) {
             return List.of();
         }
 

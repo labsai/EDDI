@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.model.Deployment;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
@@ -68,7 +69,7 @@ class RestAgentManagementTest {
         @DisplayName("should return 200 and end conversation when found")
         void endsConversation() throws Exception {
             var userConv = new UserConversation("intent-1", "user-1",
-                    ai.labs.eddi.engine.model.Deployment.Environment.production, "agent-1", "conv-1");
+                    Deployment.Environment.production, "agent-1", "conv-1");
             when(userConversationStore.readUserConversation("intent-1", "user-1"))
                     .thenReturn(userConv);
 
@@ -363,6 +364,6 @@ class RestAgentManagementTest {
 
     private UserConversation createUserConversation() {
         return new UserConversation("intent-1", "user-1",
-                ai.labs.eddi.engine.model.Deployment.Environment.production, "agent-1", "conv-1");
+                Deployment.Environment.production, "agent-1", "conv-1");
     }
 }

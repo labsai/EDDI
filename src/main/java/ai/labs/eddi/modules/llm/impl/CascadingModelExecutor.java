@@ -31,7 +31,9 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Executes a multi-model cascade: tries a cheap/fast model first, evaluates
@@ -669,7 +671,7 @@ class CascadingModelExecutor {
             throws LifecycleException {
 
         List<ChatMessage> chatMessagesWithoutSystem = originalMessages.stream().filter(m -> !(m instanceof SystemMessage))
-                .collect(java.util.stream.Collectors.toList());
+                .collect(Collectors.toList());
 
         var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
                 effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, jsonPolicy);
@@ -902,7 +904,7 @@ class CascadingModelExecutor {
     private static boolean isRetryableError(Exception e) {
         Throwable current = e;
         while (current != null) {
-            if (current instanceof java.net.SocketTimeoutException || current instanceof java.util.concurrent.TimeoutException
+            if (current instanceof java.net.SocketTimeoutException || current instanceof TimeoutException
                     || current instanceof java.net.ConnectException || current instanceof java.net.UnknownHostException) {
                 return true;
             }

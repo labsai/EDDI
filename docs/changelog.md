@@ -7,6 +7,41 @@
 
 
 
+## 🔤 chore: replace 575 inline fully-qualified names with imports (2026-08-12)
+
+**Repo:** EDDI (`chore/inline-fqn-cleanup`, stacked on `fix/review-defects`)
+
+The mechanical half of the repository review, split from it so the substantive fixes could be
+reviewed at all — at 302 files both CodeRabbit (>100) and Copilot (>300) decline outright, and this
+is the part that does not need line-by-line reading.
+
+AGENTS.md §4.7 asks for a top-level import and the simple name. These were **not** the permitted
+disambiguation case: `PendingApprovalSummary`, `HitlDecision`, `ToolApprovalsConfig`,
+`ConversationMemorySnapshot` and `ControlSignal` each resolve to exactly one class, and
+`IConversationService` imported `java.util.List` on line 17 while writing `java.util.List<…>`
+fully-qualified on line 355. The two genuine cases — `mongo.HistorizedResourceStore extends
+datastore.HistorizedResourceStore` and its Modifiable twin — were detected and left alone.
+
+**`ImportStyleTest` ships with the cleanup rather than after it**, because it is what stops the
+problem recurring: these accumulate precisely because nothing fails when one is added — the code
+compiles either way, so the rule was advice only a reviewer's eye enforced. Writing it also showed
+the original audit had **under-counted**: its pattern required a package segment after `java.util`,
+so `java.util.List` never matched. The real total was 575, not the 141 first reported. The one
+permitted exception is an explicit allowlist, so adding to it is a reviewable act rather than drift.
+
+Verified beyond a green build:
+
+- **Clean** `test-compile`, not incremental — a reused stale class hides exactly this kind of break
+  in a caller that was never edited.
+- **Every string literal in all 273 changed files compared against `origin/main`: byte-identical.**
+  This is the check that matters for a rewrite this broad. A substitution that reached inside a
+  literal — a reflective class name, a config key, a log format — would still compile, still pass
+  every test, and show up nowhere else.
+
+---
+
+
+
 ## 🧪 test: regression cover for every fix in this branch, and a bug the coverage work found (2026-08-12)
 
 **Repo:** EDDI (`fix/code-review-defects-and-docs`)

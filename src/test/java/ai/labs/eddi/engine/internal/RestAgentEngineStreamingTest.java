@@ -7,10 +7,12 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.utils.LogSanitizer;
 import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
@@ -54,10 +56,10 @@ class RestAgentEngineStreamingTest {
         @Test
         @DisplayName("should replace newlines, carriage returns, and tabs")
         void replacesControlChars() {
-            assertEquals("hello_world", ai.labs.eddi.utils.LogSanitizer.sanitize("hello\nworld"));
-            assertEquals("hello_world", ai.labs.eddi.utils.LogSanitizer.sanitize("hello\rworld"));
-            assertEquals("hello_world", ai.labs.eddi.utils.LogSanitizer.sanitize("hello\tworld"));
-            assertEquals("null", ai.labs.eddi.utils.LogSanitizer.sanitize(null));
+            assertEquals("hello_world", LogSanitizer.sanitize("hello\nworld"));
+            assertEquals("hello_world", LogSanitizer.sanitize("hello\rworld"));
+            assertEquals("hello_world", LogSanitizer.sanitize("hello\tworld"));
+            assertEquals("null", LogSanitizer.sanitize(null));
         }
     }
 
@@ -115,7 +117,7 @@ class RestAgentEngineStreamingTest {
             method.setAccessible(true);
 
             var snapshot = new SimpleConversationMemorySnapshot();
-            snapshot.setConversationState(ai.labs.eddi.engine.memory.model.ConversationState.READY);
+            snapshot.setConversationState(ConversationState.READY);
 
             String json = (String) method.invoke(streaming, snapshot);
 
@@ -129,8 +131,8 @@ class RestAgentEngineStreamingTest {
             method.setAccessible(true);
 
             var snapshot = new SimpleConversationMemorySnapshot();
-            snapshot.setConversationState(ai.labs.eddi.engine.memory.model.ConversationState.READY);
-            var output = new ai.labs.eddi.engine.memory.model.ConversationOutput();
+            snapshot.setConversationState(ConversationState.READY);
+            var output = new ConversationOutput();
             output.put("output", List.of("Hello!"));
             snapshot.setConversationOutputs(List.of(output));
 

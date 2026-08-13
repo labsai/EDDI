@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.apicalls.model.*;
+import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
@@ -389,7 +390,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // attempt 1. Keyed on the instruction being present and actually able
         // to fire (maxRetries >= 1), which is exactly what retryCall() tests.
         var postResponse = call.getPostResponse();
-        if (postResponse instanceof ai.labs.eddi.configs.apicalls.model.HttpPostResponse httpPostResponse) {
+        if (postResponse instanceof HttpPostResponse httpPostResponse) {
             var retry = httpPostResponse.getRetryApiCallInstruction();
             return retry != null && retry.getMaxRetries() >= 1;
         }

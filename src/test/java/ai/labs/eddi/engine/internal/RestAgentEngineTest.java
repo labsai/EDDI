@@ -8,8 +8,11 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -34,6 +37,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -59,11 +63,11 @@ class RestAgentEngineTest {
         // Default: descriptor not found → ownership check skipped gracefully
         when(descriptorStore.readDescriptor(anyString(), anyInt()))
                 .thenThrow(new ResourceNotFoundException("test default"));
-        var conversationMemoryStore = mock(ai.labs.eddi.engine.memory.IConversationMemoryStore.class);
+        var conversationMemoryStore = mock(IConversationMemoryStore.class);
         var hitlAccessGuard = new HitlAccessGuard(identity, ownershipValidator, descriptorStore, conversationService,
-                mock(ai.labs.eddi.engine.api.IGroupConversationService.class));
+                mock(IGroupConversationService.class));
         var conversationAccessGuard = new ConversationAccessGuard(identity, ownershipValidator, descriptorStore);
-        var hitlToolJournalStore = mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class);
+        var hitlToolJournalStore = mock(IHitlToolJournalStore.class);
         restAgentEngine = new RestAgentEngine(conversationService, conversationMemoryStore, identity, ownershipValidator,
                 conversationAccessGuard, hitlAccessGuard, hitlToolJournalStore, 30);
     }
@@ -271,7 +275,7 @@ class RestAgentEngineTest {
             restAgentEngine.sayWithinContext("conv-1", false, false,
                     List.of(), inputData, asyncResponse);
 
-            verify(asyncResponse).setTimeout(30, java.util.concurrent.TimeUnit.SECONDS);
+            verify(asyncResponse).setTimeout(30, TimeUnit.SECONDS);
             verify(conversationService).say(eq("conv-1"), eq(false), eq(false),
                     eq(List.of()), eq(inputData), eq(false), any());
         }
@@ -458,7 +462,7 @@ class RestAgentEngineTest {
 
             restAgentEngine.say("conv-1", false, false, List.of(), "Hello world", asyncResponse);
 
-            verify(asyncResponse).setTimeout(30, java.util.concurrent.TimeUnit.SECONDS);
+            verify(asyncResponse).setTimeout(30, TimeUnit.SECONDS);
             verify(conversationService).say(eq("conv-1"), eq(false), eq(false),
                     eq(List.of()), any(InputData.class), eq(false), any());
         }
@@ -476,7 +480,7 @@ class RestAgentEngineTest {
             restAgentEngine.rerunLastConversationStep("conv-1", "en", false, false,
                     List.of(), asyncResponse);
 
-            verify(asyncResponse).setTimeout(30, java.util.concurrent.TimeUnit.SECONDS);
+            verify(asyncResponse).setTimeout(30, TimeUnit.SECONDS);
             var captor = ArgumentCaptor.forClass(InputData.class);
             verify(conversationService).say(eq("conv-1"), eq(false), eq(false),
                     eq(List.of()), captor.capture(), eq(true), any());

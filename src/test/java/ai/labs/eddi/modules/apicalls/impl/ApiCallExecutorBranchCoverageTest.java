@@ -25,6 +25,10 @@ import org.mockito.Mock;
 
 import java.net.URI;
 import java.util.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -716,20 +720,20 @@ class ApiCallExecutorBranchCoverageTest {
             call.setPreRequest(preRequest);
             setupSuccessResponse(200, "ok", "text/plain");
 
-            var scheduledExecutorService = mock(java.util.concurrent.ScheduledExecutorService.class);
+            var scheduledExecutorService = mock(ScheduledExecutorService.class);
             when(runtime.getScheduledExecutorService()).thenReturn(scheduledExecutorService);
 
             @SuppressWarnings("unchecked")
-            java.util.concurrent.ScheduledFuture<IResponse> future = mock(java.util.concurrent.ScheduledFuture.class);
+            ScheduledFuture<IResponse> future = mock(ScheduledFuture.class);
             when(future.get()).thenReturn(mockResponse);
-            when(scheduledExecutorService.schedule(any(java.util.concurrent.Callable.class), eq(500L),
-                    eq(java.util.concurrent.TimeUnit.MILLISECONDS)))
+            when(scheduledExecutorService.schedule(any(Callable.class), eq(500L),
+                    eq(TimeUnit.MILLISECONDS)))
                     .thenReturn(future);
 
             Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
-            verify(scheduledExecutorService).schedule(any(java.util.concurrent.Callable.class), eq(500L),
-                    eq(java.util.concurrent.TimeUnit.MILLISECONDS));
+            verify(scheduledExecutorService).schedule(any(Callable.class), eq(500L),
+                    eq(TimeUnit.MILLISECONDS));
             assertNotNull(result);
         }
     }

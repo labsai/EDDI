@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -544,11 +545,11 @@ class WebSearchToolTest {
 
             var apiKeyField = WebSearchTool.class.getDeclaredField("googleApiKey");
             apiKeyField.setAccessible(true);
-            apiKeyField.set(mockedTool, java.util.Optional.of("test-key"));
+            apiKeyField.set(mockedTool, Optional.of("test-key"));
 
             var cxField = WebSearchTool.class.getDeclaredField("googleCx");
             cxField.setAccessible(true);
-            cxField.set(mockedTool, java.util.Optional.of("test-cx"));
+            cxField.set(mockedTool, Optional.of("test-cx"));
 
             var response = (java.net.http.HttpResponse<String>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
             org.mockito.Mockito.when(response.statusCode()).thenReturn(200);

@@ -31,6 +31,7 @@ import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import java.time.Instant;
 import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
@@ -399,7 +400,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             var schedules = scheduleStore.readSchedulesByAgentId(agentId);
             for (var schedule : schedules) {
                 if (!schedule.isEnabled()) {
-                    var nextFire = schedule.getNextFire() != null ? schedule.getNextFire() : java.time.Instant.now();
+                    var nextFire = schedule.getNextFire() != null ? schedule.getNextFire() : Instant.now();
                     scheduleStore.setScheduleEnabled(schedule.getId(), true, nextFire);
                     log.infof("[SCHEDULE] Auto-enabled schedule '%s' (id=%s) on Agent %s deploy", schedule.getName(), schedule.getId(), agentId);
                 }

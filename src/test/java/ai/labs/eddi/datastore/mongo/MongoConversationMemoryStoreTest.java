@@ -23,6 +23,8 @@ import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
 import de.undercouch.bson4jackson.BsonFactory;
 import de.undercouch.bson4jackson.BsonParser;
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import org.bson.codecs.*;
 import org.bson.codecs.configuration.CodecRegistry;
 import org.junit.jupiter.api.*;
@@ -31,6 +33,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.bson.codecs.configuration.CodecRegistries.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -399,7 +402,7 @@ class MongoConversationMemoryStoreTest {
         @DisplayName("findPendingApprovalSummaries projects the bookmark incl. approvalTimeout and honors the limit")
         void findPendingApprovalSummaries() throws IResourceStore.ResourceStoreException {
             var paused = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
-            paused.setHitlPausedAt(java.time.Instant.now());
+            paused.setHitlPausedAt(Instant.now());
             paused.setHitlPauseReason("needs review");
             paused.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             paused.setHitlApprovalTimeout("PT30M");
@@ -472,7 +475,7 @@ class MongoConversationMemoryStoreTest {
             // plain JSON to BSON.
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
             snapshot.setHitlPauseType("TOOL_CALL");
-            snapshot.setHitlPausedAt(java.time.Instant.now());
+            snapshot.setHitlPausedAt(Instant.now());
             snapshot.setHitlPauseReason("gated tool calls awaiting review");
             snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             snapshot.setHitlApprovalTimeout("PT30M");
@@ -513,16 +516,16 @@ class MongoConversationMemoryStoreTest {
             // traceSoFar: a nested Map<String,Object> — the field most likely to lose
             // fidelity across a BSON round-trip (numeric widening, boolean/string
             // coercion, nested structures).
-            var nested = new java.util.LinkedHashMap<String, Object>();
+            var nested = new LinkedHashMap<String, Object>();
             nested.put("stringField", "value");
             nested.put("intField", 42);
             nested.put("boolField", true);
             nested.put("nestedList", List.of("a", "b", "c"));
-            var traceEntry1 = new java.util.LinkedHashMap<String, Object>();
+            var traceEntry1 = new LinkedHashMap<String, Object>();
             traceEntry1.put("type", "tool_call");
             traceEntry1.put("tool", "readOnlyLookup");
             traceEntry1.put("detail", nested);
-            var traceEntry2 = new java.util.LinkedHashMap<String, Object>();
+            var traceEntry2 = new LinkedHashMap<String, Object>();
             traceEntry2.put("type", "hitl_gate_tripped");
             traceEntry2.put("gatedCount", 2);
             batch.setTraceSoFar(List.of(traceEntry1, traceEntry2));
@@ -572,7 +575,7 @@ class MongoConversationMemoryStoreTest {
             assertEquals("tool_call", loadedTrace1.get("type"));
             assertEquals("readOnlyLookup", loadedTrace1.get("tool"));
             @SuppressWarnings("unchecked")
-            var loadedNested = (java.util.Map<String, Object>) loadedTrace1.get("detail");
+            var loadedNested = (Map<String, Object>) loadedTrace1.get("detail");
             assertNotNull(loadedNested, "the nested Map<String,Object> inside traceSoFar must survive");
             assertEquals("value", loadedNested.get("stringField"));
             assertEquals(42, ((Number) loadedNested.get("intField")).intValue());
@@ -608,7 +611,7 @@ class MongoConversationMemoryStoreTest {
         @DisplayName("clearHitlBookmark removes the bookmark fields but keeps the conversation")
         void clearHitlBookmark() throws IResourceStore.ResourceStoreException {
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
-            snapshot.setHitlPausedAt(java.time.Instant.now());
+            snapshot.setHitlPausedAt(Instant.now());
             snapshot.setHitlPauseReason("needs review");
             snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             snapshot.setHitlApprovalTimeout("PT30M");

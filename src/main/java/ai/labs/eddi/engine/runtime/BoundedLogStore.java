@@ -17,6 +17,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
+import java.util.logging.LogRecord;
 
 /**
  * In-memory ring buffer that captures log records with MDC context. Provides:
@@ -135,7 +136,7 @@ public class BoundedLogStore {
      * @param record
      *            the JUL LogRecord (actually a JBoss ExtLogRecord at runtime)
      */
-    public void capture(java.util.logging.LogRecord record) {
+    public void capture(LogRecord record) {
         if (record == null)
             return;
 
@@ -327,7 +328,7 @@ public class BoundedLogStore {
      * {@link org.jboss.logmanager.ExtLogRecord#getFormattedMessage()}. For plain
      * JUL LogRecords, we fall back to manual MessageFormat.
      */
-    private static String formatRecord(java.util.logging.LogRecord record) {
+    private static String formatRecord(LogRecord record) {
         String msg = record.getMessage();
         if (msg == null)
             return "";

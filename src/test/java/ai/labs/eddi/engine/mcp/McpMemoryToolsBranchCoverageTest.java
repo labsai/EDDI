@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.identity.SecurityIdentity;
+import java.util.ArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -83,7 +84,7 @@ class McpMemoryToolsBranchCoverageTest {
                     mock(UserMemoryEntry.class),
                     mock(UserMemoryEntry.class),
                     mock(UserMemoryEntry.class));
-            when(userMemoryStore.getAllEntries("user1")).thenReturn(new java.util.ArrayList<>(entries));
+            when(userMemoryStore.getAllEntries("user1")).thenReturn(new ArrayList<>(entries));
             when(jsonSerialization.serialize(any())).thenReturn("{\"count\":2}");
 
             String result = tools.listUserMemories("user1", 2);
