@@ -5,6 +5,7 @@ import { useChatStore, useStartConversation, useSendMessage } from "@/hooks/use-
 import { ChatMessage } from "./chat-message";
 import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer as DebugPanel } from "@/components/debugger/debug-drawer";
+import { InputHint } from "@/components/chat/input-hint";
 import { cn } from "@/lib/utils";
 import {
   Bot,
@@ -341,6 +342,7 @@ function DrawerChatInput({
           )}
         </button>
       </div>
+      <InputHint />
     </div>
   );
 }

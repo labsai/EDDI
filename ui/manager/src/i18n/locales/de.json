@@ -705,7 +705,9 @@
     "agentTyping": "Agent tippt",
     "copy": "Kopieren",
     "emptyConversation": "Diese Konversation enthält noch keine Nachrichten.",
-    "loadConversationFailed": "Konversation konnte nicht geladen werden: {{error}}"
+    "loadConversationFailed": "Konversation konnte nicht geladen werden: {{error}}",
+    "multilineHint": "Enter zum Senden · Shift+Enter für eine neue Zeile",
+    "multilineHintCtrlEnter": "Strg+Enter zum Senden · Enter für eine neue Zeile"
   },
   "resources": {
     "backToWorkflow": "Zurück zum Workflow",

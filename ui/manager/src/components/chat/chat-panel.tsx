@@ -31,6 +31,7 @@ import { DebugDrawer } from "@/components/debugger/debug-drawer";
 import { useDebugStore, type PipelineEvent } from "@/hooks/use-debug-events";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { cn } from "@/lib/utils";
+import { InputHint } from "@/components/chat/input-hint";
 import {
   Bot,
   ChevronDown,
@@ -1082,6 +1083,9 @@ function ChatInputWithSecretToggle({
           )}
         </button>
       </div>
+      {/* Secret mode is a single-line password field — a newline hint there
+          would promise something the input cannot do. */}
+      {!isSecretMode && <InputHint />}
     </div>
   );
 }

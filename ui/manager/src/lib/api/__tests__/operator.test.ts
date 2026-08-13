@@ -613,6 +613,12 @@ describe("deactivateOperator", () => {
     // The endpoint rejects a versionless undeploy, so the version must be threaded through.
     expect(undeployUrl).toContain("/administration/test/undeploy/op-1");
     expect(undeployUrl).toContain("version=5");
+    // Without this flag the backend 409s whenever the operator has an active
+    // conversation — and the admin's own operator chat IS one, so having used
+    // the operator at all made the kill switch fail with a bare 409. The
+    // conversations ended are this operator's own; the admin is explicitly
+    // shutting it down.
+    expect(undeployUrl).toContain("endAllActiveConversations=true");
     expect(result.enabled).toBe(false);
     expect(saved?.enabled).toBe(false);
     // The agent pointer survives so the operator can be switched back on.

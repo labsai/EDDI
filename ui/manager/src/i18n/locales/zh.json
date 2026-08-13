@@ -705,7 +705,9 @@
     "agentTyping": "代理正在输入",
     "copy": "复制",
     "emptyConversation": "此对话还没有消息。",
-    "loadConversationFailed": "无法加载此对话：{{error}}"
+    "loadConversationFailed": "无法加载此对话：{{error}}",
+    "multilineHint": "Enter 发送 · Shift+Enter 换行",
+    "multilineHintCtrlEnter": "Ctrl+Enter 发送 · Enter 换行"
   },
   "resources": {
     "backToWorkflow": "返回工作流",

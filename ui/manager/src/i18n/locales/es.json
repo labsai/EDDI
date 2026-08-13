@@ -713,7 +713,9 @@
     "agentTyping": "El agente está escribiendo",
     "copy": "Copiar",
     "emptyConversation": "Esta conversación aún no tiene mensajes.",
-    "loadConversationFailed": "No se pudo cargar esta conversación: {{error}}"
+    "loadConversationFailed": "No se pudo cargar esta conversación: {{error}}",
+    "multilineHint": "Enter para enviar · Shift+Enter para nueva línea",
+    "multilineHintCtrlEnter": "Ctrl+Enter para enviar · Enter para nueva línea"
   },
   "resources": {
     "backToWorkflow": "Volver al workflow",

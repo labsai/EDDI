@@ -705,7 +705,9 @@
     "agentTyping": "エージェントが入力中",
     "copy": "コピー",
     "emptyConversation": "この会話にはまだメッセージがありません。",
-    "loadConversationFailed": "この会話を読み込めませんでした: {{error}}"
+    "loadConversationFailed": "この会話を読み込めませんでした: {{error}}",
+    "multilineHint": "Enterで送信 · Shift+Enterで改行",
+    "multilineHintCtrlEnter": "Ctrl+Enterで送信 · Enterで改行"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",

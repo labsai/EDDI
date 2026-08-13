@@ -574,3 +574,98 @@ describe("a turn orphaned by a mid-stream reset", () => {
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+/**
+ * A turn can fail with NO stream-level error: the backend emits task_failed for
+ * the failing step, streams zero tokens, and closes normally. That combination
+ * used to leave an empty agent bubble and nothing else — the admin had to read
+ * the server log to learn the turn failed at all (seen live when a provider
+ * rejected the stored LLM config's temperature).
+ */
+describe("a failed turn that streams nothing", () => {
+  it("surfaces the failing step and its summary as the chat error", async () => {
+    h.frames = [
+      {
+        type: "task_failed",
+        data: JSON.stringify({
+          taskId: "t9",
+          taskType: "ai.labs.langchain",
+          index: 9,
+          errorType: "unknown",
+          errorSummary: "`temperature` is deprecated for this model.",
+        }),
+      },
+      { type: "done", data: JSON.stringify({ conversationState: "READY" }) },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.error).toMatch(/langchain step failed/);
+    expect(result.current.error).toMatch(/temperature/);
+  });
+
+  it("points at the server log when the failure carries no summary", async () => {
+    h.frames = [
+      {
+        type: "task_failed",
+        data: JSON.stringify({ taskId: "t9", taskType: "ai.labs.langchain", index: 9 }),
+      },
+      { type: "done", data: JSON.stringify({ conversationState: "READY" }) },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.error).toMatch(/server log has the full error/i);
+  });
+
+  it("stays quiet when a step failed but the turn still answered", async () => {
+    // A recovered turn (retry, fallback content) must not append a scary error
+    // to a visible answer.
+    h.frames = [
+      {
+        type: "task_failed",
+        data: JSON.stringify({ taskId: "t2", taskType: "ai.labs.httpcalls", index: 2 }),
+      },
+      { type: "token", data: "Here is your answer." },
+      { type: "done", data: JSON.stringify({ conversationState: "READY" }) },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.error).toBeNull();
+  });
+
+  it("does not double-report when the turn paused instead of failing", async () => {
+    h.frames = [
+      {
+        type: "task_failed",
+        data: JSON.stringify({ taskId: "t2", taskType: "ai.labs.httpcalls", index: 2 }),
+      },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          hitlPauseReason: "review",
+          conversationOutputs: [textOutput("Waiting…")],
+        }),
+      },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("do a write");
+    });
+
+    expect(result.current.isPaused).toBe(true);
+    expect(result.current.error).toBeNull();
+  });
+});

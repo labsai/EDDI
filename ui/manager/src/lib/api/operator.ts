@@ -664,23 +664,47 @@ export async function reactivateOperator(
   return next;
 }
 
-/** Kill switch — undeploy the agent and mark the config disabled. */
+/**
+ * Kill switch — undeploy the agent and mark the config disabled.
+ *
+ * `endAllActiveConversations` is deliberate, not a shortcut. The backend refuses
+ * to undeploy an agent that still has active conversations (409, carrying a
+ * TEXT_PLAIN explanation), and the operator's active conversation is almost
+ * always the admin's own operator chat — on the very screen the deactivate
+ * button lives on. Without the flag, having *used* the operator made it
+ * undeployable: you had to find and end your own chat first, with only a bare
+ * 409 to say why. The conversations ended belong to this operator at this
+ * version, and the admin is explicitly asking for it to stop.
+ */
 export async function deactivateOperator(
   config: OperatorConfig,
 ): Promise<OperatorConfig> {
   if (config.agentId && config.version != null) {
-    await undeployAgent(config.environment, config.agentId, config.version);
+    await undeployAgent(config.environment, config.agentId, config.version, {
+      endAllActiveConversations: true,
+    });
   }
   const next: OperatorConfig = { ...config, enabled: false };
   await writeOperatorConfig(next);
   return next;
 }
 
-/** Full reset — undeploy, delete the agent and its resources, drop the config. */
+/**
+ * Full reset — undeploy, delete the agent and its resources, drop the config.
+ *
+ * Same `endAllActiveConversations` reasoning as {@link deactivateOperator}, and
+ * here it also removes a misleading failure: the catch below swallows the 409,
+ * so a reset triggered while an operator chat was open still SUCCEEDED, but left
+ * a red request in the network panel for an operation that worked. Deleting the
+ * agent moments later ends those conversations regardless — asking for it up
+ * front just makes the intent explicit instead of incidental.
+ */
 export async function resetOperator(config: OperatorConfig): Promise<void> {
   if (config.agentId && config.version != null) {
     try {
-      await undeployAgent(config.environment, config.agentId, config.version);
+      await undeployAgent(config.environment, config.agentId, config.version, {
+        endAllActiveConversations: true,
+      });
     } catch {
       // Already undeployed, or the environment is gone — deletion is what matters.
     }

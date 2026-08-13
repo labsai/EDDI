@@ -59,3 +59,51 @@ describe("OperatorChat — pauseSurface", () => {
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
   });
 });
+
+/**
+ * The operator's answers are status reports full of headings, bold and inline
+ * code. They rendered as literal ## and ** markers — every other chat surface
+ * in the Manager renders markdown, and this one silently did not.
+ */
+describe("OperatorChat — markdown rendering", () => {
+  it("renders agent markdown as markup, not literal markers", () => {
+    renderChat({
+      isPaused: false,
+      messages: [
+        {
+          id: "a1",
+          role: "agent",
+          content: "## Current state\n\n**Coordinator** is `CONNECTED`",
+          timestamp: Date.now(),
+        },
+      ],
+    });
+
+    expect(screen.getByRole("heading", { name: "Current state" })).toBeInTheDocument();
+    expect(screen.getByText("Coordinator").tagName).toBe("STRONG");
+    expect(screen.getByText("CONNECTED").tagName).toBe("CODE");
+    expect(screen.queryByText(/##/)).not.toBeInTheDocument();
+  });
+
+  it("keeps USER input literal — a user typing markdown syntax sees what they typed", () => {
+    renderChat({
+      isPaused: false,
+      messages: [
+        { id: "u1", role: "user", content: "what does **bold** mean here?", timestamp: Date.now() },
+      ],
+    });
+
+    expect(screen.getByText(/\*\*bold\*\*/)).toBeInTheDocument();
+  });
+});
+
+describe("OperatorChat — input affordances", () => {
+  it("is a textarea (multi-line capable), with the Shift+Enter hint visible", () => {
+    renderChat({ isPaused: false });
+
+    // An <input> silently swallows Shift+Enter — the old element's own keydown
+    // handler even special-cased it, for a newline that could never happen.
+    expect(screen.getByTestId("operator-input").tagName).toBe("TEXTAREA");
+    expect(screen.getByTestId("input-hint")).toHaveTextContent(/shift\+enter/i);
+  });
+});

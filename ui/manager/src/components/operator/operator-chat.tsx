@@ -1,9 +1,13 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { formatMarkdownText } from "@/components/groups/group-utils";
 import { Send, Square, RotateCcw, AlertTriangle, Bot, User, PauseCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatActivity } from "@/components/chat/chat-activity";
+import { InputHint } from "@/components/chat/input-hint";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { OPERATOR_STARTER_PROMPTS } from "@/lib/operator/system-prompt";
 import type { ChatMessage } from "@/lib/api/chat";
@@ -108,16 +112,27 @@ export function OperatorChat({
   const { t } = useTranslation();
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, events]);
+
+  /** Grow with content up to the same 120px ceiling as chat-drawer. */
+  function autoResizeInput() {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }
 
   function submit(text: string) {
     const value = text.trim();
     if (!value || isStreaming || isPaused) return;
     onSend(value);
     setInput("");
+    // The height was sized to the multi-line draft just sent — snap it back.
+    requestAnimationFrame(autoResizeInput);
   }
 
   return (
@@ -162,13 +177,27 @@ export function OperatorChat({
             )}
             <div
               className={cn(
-                "max-w-[80%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap",
+                "max-w-[80%] rounded-lg px-3 py-2 text-sm",
                 message.role === "user"
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-primary text-primary-foreground whitespace-pre-wrap"
                   : "bg-muted",
               )}
             >
-              {message.content}
+              {message.role === "agent" && message.content ? (
+                /* Same rendering contract as chat-message.tsx: markdown via
+                   remark-gfm, through formatMarkdownText to repair the glued
+                   headings/bold LLMs emit, and deliberately NO rehypeRaw —
+                   operator output is LLM output built from tool results, i.e.
+                   untrusted, so raw HTML stays escaped. Previously plain text,
+                   which showed status reports as literal ## and ** markers. */
+                <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden break-words [&_pre]:rounded-lg [&_pre]:bg-background/60 [&_pre]:p-3 [&_pre]:overflow-x-auto [&_code]:rounded [&_code]:bg-background/60 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {formatMarkdownText(message.content)}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                message.content
+              )}
               {message.isStreaming && !message.content && (
                 <span className="text-muted-foreground">…</span>
               )}
@@ -270,10 +299,18 @@ export function OperatorChat({
         <div ref={endRef} />
       </div>
 
-      <div className="flex items-center gap-2 border-t border-border p-3">
-        <input
+      <div className="flex items-end gap-2 border-t border-border p-3">
+        {/* A textarea, not an input: the old input's own keydown handler already
+            special-cased !e.shiftKey, but an <input> cannot hold a second line,
+            so Shift+Enter silently did nothing. Same Enter-sends /
+            Shift+Enter-newline contract and auto-resize as chat-drawer. */}
+        <textarea
+          ref={inputRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            autoResizeInput();
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -281,13 +318,14 @@ export function OperatorChat({
             }
           }}
           disabled={isPaused}
+          rows={1}
           placeholder={
             isPaused
               ? t("operator.chat.pausedPlaceholder", "Awaiting a decision above before the operator can continue…")
               : t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")
           }
           aria-label={t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")}
-          className="h-10 flex-1 rounded-md border border-input bg-background px-3 text-sm disabled:opacity-50"
+          className="max-h-[120px] min-h-[40px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2.5 text-sm disabled:opacity-50"
           data-testid="operator-input"
         />
         {isStreaming ? (
@@ -316,6 +354,7 @@ export function OperatorChat({
           <RotateCcw className="h-4 w-4" />
         </Button>
       </div>
+      <InputHint className="px-3 pb-2 -mt-1" />
     </div>
   );
 }

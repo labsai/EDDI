@@ -182,3 +182,78 @@ describe("ChatActivity", () => {
     expect(mockWriteText).toHaveBeenCalledWith("4");
   });
 });
+
+/**
+ * httpcalls is plumbing, not activity. An OpenAPI-provisioned agent (the
+ * Platform Operator) carries one httpcalls workflow step per endpoint group, so
+ * before this filter its every turn opened with dozens of identical unnamed
+ * rows — "44 steps" for a greeting — burying the one row that mattered.
+ */
+describe("ChatActivity — httpcalls pipeline steps", () => {
+  const httpcallsStep = (id: string, extra: Partial<PipelineEvent> = {}): PipelineEvent[] => [
+    { type: "task_start", taskType: "ai.labs.httpcalls", taskId: id, index: 0, timestamp: Date.now() },
+    { type: "task_complete", taskType: "ai.labs.httpcalls", taskId: id, index: 0, timestamp: Date.now(), ...extra },
+  ];
+
+  it("hides bare httpcalls steps in end-user mode", () => {
+    renderWithProviders(
+      <ChatActivity
+        events={[...httpcallsStep("h1"), ...httpcallsStep("h2")]}
+        isLive={false}
+        showInternalSteps={false}
+      />,
+    );
+    expect(screen.queryByText("httpcalls")).not.toBeInTheDocument();
+  });
+
+  it("still shows an httpcalls step that failed", () => {
+    const events: PipelineEvent[] = [
+      { type: "task_start", taskType: "ai.labs.httpcalls", taskId: "h1", index: 0, timestamp: Date.now() },
+      { type: "task_failed", taskType: "ai.labs.httpcalls", taskId: "h1", index: 0, timestamp: Date.now() },
+    ];
+    renderWithProviders(<ChatActivity events={events} isLive={false} showInternalSteps={false} />);
+    expect(screen.getByText("httpcalls")).toBeInTheDocument();
+  });
+
+  it("keeps them all in debug mode", () => {
+    renderWithProviders(
+      <ChatActivity events={httpcallsStep("h1")} isLive={false} showInternalSteps={true} />,
+    );
+    expect(screen.getByText("httpcalls")).toBeInTheDocument();
+  });
+});
+
+/**
+ * "unknown" is the backend classifier's shrug, not a diagnosis. Rendered alone
+ * as a badge it looked like the error itself — an admin saw "UNKNOWN" and
+ * nothing else, and had to go to the server log to learn the turn failed.
+ */
+describe("ChatActivity — failed step detail", () => {
+  const failed = (extra: Partial<PipelineEvent>): PipelineEvent[] => [
+    { type: "task_start", taskType: "ai.labs.langchain", taskId: "l1", index: 0, timestamp: Date.now() },
+    { type: "task_failed", taskType: "ai.labs.langchain", taskId: "l1", index: 0, timestamp: Date.now(), ...extra },
+  ];
+
+  it("suppresses the meaningless 'unknown' badge but keeps the summary", () => {
+    renderWithProviders(
+      <ChatActivity
+        events={failed({ errorType: "unknown", errorSummary: "temperature is deprecated for this model" })}
+        isLive={false}
+      />,
+    );
+    expect(screen.queryByText("unknown")).not.toBeInTheDocument();
+    expect(screen.getByText(/temperature is deprecated/)).toBeInTheDocument();
+  });
+
+  it("points at the server log when the failure arrives with no detail at all", () => {
+    renderWithProviders(<ChatActivity events={failed({})} isLive={false} />);
+    expect(screen.getByTestId("task-error-detail")).toHaveTextContent(/server log has the full error/i);
+  });
+
+  it("still shows a REAL classification as a badge", () => {
+    renderWithProviders(
+      <ChatActivity events={failed({ errorType: "timeout", errorSummary: "took too long" })} isLive={false} />,
+    );
+    expect(screen.getByText("timeout")).toBeInTheDocument();
+  });
+});

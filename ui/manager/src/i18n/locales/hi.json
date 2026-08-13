@@ -705,7 +705,9 @@
     "agentTyping": "एजेंट टाइप कर रहा है",
     "copy": "कॉपी करें",
     "emptyConversation": "इस वार्तालाप में अभी कोई संदेश नहीं है।",
-    "loadConversationFailed": "यह वार्तालाप लोड नहीं हो सका: {{error}}"
+    "loadConversationFailed": "यह वार्तालाप लोड नहीं हो सका: {{error}}",
+    "multilineHint": "भेजने के लिए Enter · नई पंक्ति के लिए Shift+Enter",
+    "multilineHintCtrlEnter": "भेजने के लिए Ctrl+Enter · नई पंक्ति के लिए Enter"
   },
   "resources": {
     "backToWorkflow": "Workflow पर वापस जाएं",

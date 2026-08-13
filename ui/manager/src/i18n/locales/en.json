@@ -684,6 +684,8 @@
     "selectAgent": "Select an agent...",
     "noAgents": "No deployed agents available. Deploy an agent first.",
     "placeholder": "Type a message...",
+    "multilineHint": "Enter to send · Shift+Enter for a new line",
+    "multilineHintCtrlEnter": "Ctrl+Enter to send · Enter for a new line",
     "send": "Send",
     "newConversation": "New Conversation",
     "endConversation": "End Conversation",

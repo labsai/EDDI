@@ -414,6 +414,31 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
               // Non-JSON done payload — nothing to inspect, same as before.
             }
           }
+          // A turn can fail WITHOUT a stream-level error event: the backend
+          // reports the failing step as task_failed, streams no tokens, and
+          // closes the stream normally. That left an empty agent bubble and no
+          // explanation anywhere in the chat — the admin had to open the server
+          // log to learn the turn had failed at all (observed with a provider
+          // rejecting the stored LLM config: "`temperature` is deprecated").
+          // If nothing was streamed, nothing paused, and a step failed, say so
+          // where the answer should have been.
+          set((s) => {
+            const bubble = s.messages.find((m) => m.id === agentId);
+            if (s.isPaused || s.error || bubble?.content.trim()) {
+              return s;
+            }
+            const failure = [...s.events].reverse().find((e) => e.type === "task_failed");
+            if (!failure) {
+              return s;
+            }
+            const detail = failure.errorSummary
+              ? ` ${failure.errorSummary}`
+              : " The server log has the full error.";
+            return {
+              ...s,
+              error: `The operator could not answer — the ${failure.taskType.replace("ai.labs.", "")} step failed.${detail}`,
+            };
+          });
           break;
         }
 
