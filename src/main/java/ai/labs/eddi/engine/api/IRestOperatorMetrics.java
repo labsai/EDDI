@@ -79,6 +79,15 @@ public interface IRestOperatorMetrics {
      * What it does NOT prove: that the runtime wiring delivers the policy to the
      * gate on a real turn. That end-to-end property is what the empirical probe is
      * for — the two checks answer different questions, and the Manager runs both.
+     * <p>
+     * Scope: classification runs against the AGENT-LEVEL
+     * {@code hitlConfig.toolApprovals} only. At runtime,
+     * {@code TaskToolApprovalsResolver} may resolve a different effective config
+     * when the agent's LLM task carries its own {@code toolApprovals} (in
+     * {@code replace} mode a looser task-level config wins wholesale). The operator
+     * provisioned via setup-api carries no task-level approvals, so its verdicts
+     * are exact; for hand-authored agents with task-level approvals this endpoint
+     * answers about the agent-level policy, not the resolved one.
      */
     @POST
     @Path("/gate-dry-run")
@@ -86,10 +95,12 @@ public interface IRestOperatorMetrics {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Classify a synthetic tool call against an agent's approval policy",
                description = "Runs the runtime gate classification (ToolApprovalGate.classify) for one synthetic tool call against the "
-                       + "agent document's stored toolApprovals, without executing anything. Deterministic: same policy plus same call "
-                       + "address always yields the same answer.")
+                       + "agent document's stored AGENT-LEVEL toolApprovals, without executing anything. Deterministic: same policy plus "
+                       + "same call address always yields the same answer. Task-level toolApprovals overrides are not resolved here.")
     @APIResponse(responseCode = "200", description = "Classification result.")
-    @APIResponse(responseCode = "400", description = "agentId, version or toolName missing or invalid.")
+    @APIResponse(responseCode = "400", description = "agentId, version or toolName missing or invalid, or an unknown source.")
     @APIResponse(responseCode = "404", description = "No agent document at that id and version.")
+    @APIResponse(responseCode = "500", description = "The agent document could not be read. Deliberately NOT policyPresent:false — "
+            + "a store failure must never read as having no policy.")
     OperatorGateDryRunResult gateDryRun(OperatorGateDryRunRequest request);
 }

@@ -9,12 +9,14 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
@@ -46,6 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -291,6 +294,46 @@ class LlmTaskToolLoopStreamingTest {
         assertSame(chatModel, modelCaptor.getValue());
         verify(eventSink).onToken(FINAL_ANSWER);
         assertEquals(1.0, downgradeCount());
+    }
+
+    @Test
+    @DisplayName("addToOutput=false → no bridge: the postResponse owns the output, live tokens would leak it")
+    void addToOutputFalseNeverStreams() throws Exception {
+        var task = toolTask();
+        task.getParameters().put("addToOutput", "false");
+        doReturn(new AgentOrchestrator.ExecutionResult(FINAL_ANSWER, new ArrayList<>()))
+                .when(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(task)));
+
+        verify(chatModelRegistry, times(0)).getOrCreateStreaming(anyString(), any());
+        verify(eventSink, times(0)).onToken(anyString());
+    }
+
+    /**
+     * The HITL continuation streams too — reverting the {@code resumeBridge} wiring
+     * in {@code executeResume} silently loses live streaming for exactly the turns
+     * a human just approved.
+     */
+    @Test
+    @DisplayName("the resume loop also receives the bridge")
+    void resumeLoopReceivesTheBridge() throws Exception {
+        when(chatModelRegistry.getOrCreateStreaming(anyString(), any())).thenReturn(streamingModel());
+        var batch = new PendingToolCallBatch();
+        batch.setLlmTaskId("taskA");
+        batch.setLlmTaskIndex(0);
+        var resumeDecision = new HitlDecision();
+        resumeDecision.setVerdict(HitlDecision.HitlVerdict.APPROVED);
+        when(memory.getHitlPendingToolCalls()).thenReturn(batch);
+        when(memory.getHitlResumeDecision()).thenReturn(resumeDecision);
+        doReturn(new AgentOrchestrator.ExecutionResult(FINAL_ANSWER, new ArrayList<>()))
+                .when(agentOrchestrator).resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any());
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(toolTask())));
+
+        ArgumentCaptor<ChatModel> modelCaptor = ArgumentCaptor.forClass(ChatModel.class);
+        verify(agentOrchestrator).resumeToolLoop(modelCaptor.capture(), any(), any(), any(), any(), anyBoolean(), any());
+        assertInstanceOf(ToolLoopStreamingChatModel.class, modelCaptor.getValue());
     }
 
     @Test

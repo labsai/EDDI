@@ -7,6 +7,40 @@
 
 
 
+## 🎯 fix(review): findings from the three-agent branch review (2026-08-13)
+
+**Repo:** EDDI (`chore/remove-agent-father`)
+
+A structured adversarial review (security/correctness + quality/test-coverage agents over the full
+branch diff) surfaced two HIGHs and a set of coverage gaps, all addressed:
+
+- **Streaming-bridge timeout is retryable again (HIGH).** The bridge's timeout threw a bare
+  `RuntimeException` — no `TimeoutException` cause, and a message ("timed out") that misses even
+  the `"timeout"` string fallback — so under the default-on kill-switch a provider timeout on a
+  tool-enabled streaming turn failed the turn immediately while the synchronous path retried with
+  backoff. Now carries the typed cause, pinned by a test asserting
+  `RetryConfiguration.isRetryableError`.
+- **gate-dry-run normalizes exactly like the runtime (HIGH).** It lower-cased the whole
+  `method:path` while discovery lower-cases only the method and preserves path case — so for any
+  camelCase path (EDDI's own API is full of them) the "deterministic" verifier could certify a
+  broken policy as gated, or flag a sound one. Now `lowerCaseMethodOnly`; a case-preservation test
+  pins it. An unknown `source` is now a 400 instead of a confident ungated answer
+  (`KNOWN_SOURCES` validation), and the interface documents the agent-level-only scope (task-level
+  `toolApprovals` overrides are not resolved here) plus the fail-closed 500.
+- **Coverage gaps closed:** resume-path bridge wiring (captures the model handed to
+  `resumeToolLoop`), `addToOutput=false` never builds the bridge, interrupted-thread flag
+  restoration, mcp/bare-name/null-source/uppercase-source dry-run forms,
+  exemption-beats-require at the endpoint boundary, `maxToolIterations` accepted at exactly 1 and
+  100, and the MCP `@Blocking` sweep now covers all 8 tool classes instead of 3.
+- **Drift-prevention:** the duplicated agent-mode leg of the skipCascade/standard branches is now
+  one shared `runToolLoopIfEnabled` helper; `StreamingLegacyChatExecutor` carries a reciprocal
+  keep-in-sync note; the stale F10/cascade comments describe the post-streaming world; the
+  kill-switch is documented in `application.properties`.
+
+---
+
+
+
 ## 🎯 feat(llm): tool-enabled turns stream token-by-token (2026-08-13)
 
 **Repo:** EDDI (`chore/remove-agent-father`)

@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.api.model.OperatorGateDryRunRequest;
 import ai.labs.eddi.engine.api.model.OperatorGateDryRunResult;
 import ai.labs.eddi.engine.api.model.OperatorGateStatusReport;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalPatterns;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -114,13 +115,26 @@ public class RestOperatorMetrics implements IRestOperatorMetrics {
 
         // Exactly the shapes ToolLoopRunner hands to classify(): the source map the
         // registry builds per tool, and — for http tools — the method:path endpoint
-        // McpApiToolBuilder records at discovery. Lower-cased like generateSlug does,
-        // so "PATCH:/x" classifies the same as "patch:/x".
-        String source = request.source() == null || request.source().isBlank() ? "http" : request.source().trim();
+        // recorded at discovery. Discovery lower-cases ONLY the method
+        // (HttpCallToolsProvider builds method.toLowerCase() + ":" + path with the
+        // path case preserved), so this endpoint must do the same: lower-casing the
+        // whole string would make the dry-run classify differently from the runtime
+        // gate for any spec with an upper-case path segment. The path is taken
+        // verbatim and must be supplied in discovery's normalized form.
+        String source = request.source() == null || request.source().isBlank()
+                ? "http"
+                : request.source().trim().toLowerCase(Locale.ROOT);
+        // An unknown source can never match a source-qualified pattern, so it would
+        // classify as ungated with full confidence — the same silent fail-open the
+        // method-case normalization exists to prevent, one field over. Reject it.
+        if (!ToolApprovalPatterns.KNOWN_SOURCES.contains(source)) {
+            throw new BadRequestException("unknown source '" + source + "' — known sources: "
+                    + String.join(", ", ToolApprovalPatterns.KNOWN_SOURCES));
+        }
         Map<String, String> toolSources = Map.of(request.toolName(), source);
         Map<String, String> toolEndpoints = request.endpoint() == null || request.endpoint().isBlank()
                 ? Map.of()
-                : Map.of(request.toolName(), request.endpoint().trim().toLowerCase(Locale.ROOT));
+                : Map.of(request.toolName(), lowerCaseMethodOnly(request.endpoint().trim()));
 
         ToolExecutionRequest synthetic = ToolExecutionRequest.builder()
                 .id("gate-dry-run")
@@ -132,5 +146,19 @@ public class RestOperatorMetrics implements IRestOperatorMetrics {
 
         boolean gated = !result.gated().isEmpty();
         return new OperatorGateDryRunResult(true, gated, gated ? result.gateReasonByCallId().get("gate-dry-run") : null);
+    }
+
+    /**
+     * {@code "PATCH:/Descriptors/{id}"} → {@code "patch:/Descriptors/{id}"} — the
+     * exact normalization discovery applies when it records an endpoint. The path
+     * keeps its case; an endpoint without a {@code :} is returned lower-cased
+     * whole, since it can only be a bare method.
+     */
+    private static String lowerCaseMethodOnly(String endpoint) {
+        int colon = endpoint.indexOf(':');
+        if (colon < 0) {
+            return endpoint.toLowerCase(Locale.ROOT);
+        }
+        return endpoint.substring(0, colon).toLowerCase(Locale.ROOT) + endpoint.substring(colon);
     }
 }

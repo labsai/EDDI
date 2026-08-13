@@ -849,6 +849,28 @@ class AgentSetupServiceTest {
             }
         }
 
+        /**
+         * Both bounds must be ACCEPTED, not just the outside rejected: a {@code >} →
+         * {@code >=} regression would refuse exactly
+         * {@link AgentSetupService#MAX_TOOL_ITERATIONS} — the value the Manager
+         * provisions the operator with — while every rejection test stays green. The
+         * invalid spec text guarantees a later failure whose message must NOT be about
+         * the iterations bound.
+         */
+        @Test
+        @DisplayName("maxToolIterations at 1 and at MAX passes validation")
+        void maxToolIterationsBoundariesAccepted() {
+            for (int ok : new int[]{1, AgentSetupService.MAX_TOOL_ITERATIONS}) {
+                var request = new CreateApiAgentRequest(
+                        "My Agent", "You are helpful", "not-even-openapi", "openai", "gpt-4",
+                        "sk-key", null, null, null, null, null, null, null, null, null, null, ok);
+                var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                        () -> service.createApiAgent(request), "value " + ok + " must reach the spec parse");
+                assertFalse(ex.getMessage().contains("maxToolIterations"),
+                        "boundary value " + ok + " must pass validation; failed with: " + ex.getMessage());
+            }
+        }
+
         @Test
         @DisplayName("an unusable approval pattern is refused BEFORE any resource is created")
         void invalidHitlConfigRefusedBeforeAnyResourceIsCreated() throws Exception {

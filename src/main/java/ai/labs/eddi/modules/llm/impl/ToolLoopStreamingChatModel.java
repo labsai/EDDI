@@ -14,6 +14,7 @@ import org.jboss.logging.Logger;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -161,9 +162,13 @@ class ToolLoopStreamingChatModel implements ChatModel {
             synchronized (streamLock) {
                 abandoned.set(true);
             }
-            // Same shape as ObservableChatModel's timeout so the loop's retry and
-            // failure handling see an identical signal.
-            throw new RuntimeException(String.format("[%s] Chat request timed out after %dms", modelType, timeoutSeconds * 1000));
+            // Same shape as ObservableChatModel's timeout — including the typed
+            // TimeoutException CAUSE, which is what RetryConfiguration
+            // .isRetryableError keys on. Without it a provider timeout on the
+            // streaming transport would fail the turn immediately while the
+            // synchronous path retries with backoff.
+            throw new RuntimeException(String.format("[%s] Chat request timed out after %dms", modelType, timeoutSeconds * 1000),
+                    new TimeoutException("streaming chat exceeded " + timeoutSeconds + "s backstop"));
         }
 
         Throwable error = errorRef.get();

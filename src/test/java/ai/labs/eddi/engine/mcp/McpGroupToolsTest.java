@@ -509,7 +509,11 @@ class McpGroupToolsTest {
      */
     @Test
     void noMcpToolMethodCarriesBlocking() {
-        for (Class<?> toolClass : List.of(McpGroupTools.class, McpHitlTools.class, McpConversationTools.class)) {
+        // EVERY class carrying @Tool methods — the javadoc's "any MCP tool method"
+        // claim was previously a 3-of-8 sweep, so a @Blocking added to the other
+        // five broke quarkus:dev with no unit-test red.
+        for (Class<?> toolClass : List.of(McpGroupTools.class, McpHitlTools.class, McpConversationTools.class,
+                McpAdminTools.class, McpSetupTools.class, McpMemoryTools.class, McpDocTools.class, McpGdprTools.class)) {
             for (var method : toolClass.getDeclaredMethods()) {
                 assertNull(method.getAnnotation(io.smallrye.common.annotation.Blocking.class),
                         toolClass.getSimpleName() + "." + method.getName() + " carries @Blocking. It is redundant "

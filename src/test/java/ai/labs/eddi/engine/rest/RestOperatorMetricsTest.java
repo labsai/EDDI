@@ -143,6 +143,29 @@ class RestOperatorMetricsTest {
         }
 
         /**
+         * Unlike the operator-shaped case above (whose require list can never match a
+         * GET anyway), this one is allowed ONLY because exemption wins over a matching
+         * require — deleting the exempt consultation turns it red.
+         */
+        @Test
+        @DisplayName("exemption beats a matching require pattern at this boundary")
+        void exemptBeatsRequireHere() throws Exception {
+            var approvals = new ToolApprovalsConfig();
+            approvals.setRequireApproval(List.of("*"));
+            approvals.setExempt(List.of("http.get:*"));
+            var hitl = new AgentConfiguration.HitlConfig();
+            hitl.setToolApprovals(approvals);
+            var config = new AgentConfiguration();
+            config.setHitlConfig(hitl);
+            doReturn(config).when(agentStore).read("op-1", 1);
+
+            var result = rest.gateDryRun(new OperatorGateDryRunRequest("op-1", 1, "readAgent", "http",
+                    "get:/agentstore/agents/{id}"));
+
+            assertFalse(result.gated(), "an exempt read must stay allowed even under require [\"*\"]");
+        }
+
+        /**
          * Same normalization as discovery ({@code generateSlug} lower-cases): an
          * upper-case method in the request must not silently classify as ungated.
          */
@@ -155,6 +178,87 @@ class RestOperatorMetricsTest {
                     "PATCH:/descriptorstore/descriptors/{id}"));
 
             assertTrue(result.gated());
+        }
+
+        /**
+         * Discovery lower-cases ONLY the method when recording an endpoint — the path
+         * keeps its case. A dry-run that lower-cased the whole string classified
+         * differently from the runtime gate for any spec with an upper-case path
+         * segment: deterministic, and deterministically wrong.
+         */
+        @Test
+        @DisplayName("path case is preserved — only the method is normalized")
+        void pathCaseIsPreserved() throws Exception {
+            var approvals = new ToolApprovalsConfig();
+            approvals.setRequireApproval(List.of("http.patch:/CaseSensitive/*"));
+            var hitl = new AgentConfiguration.HitlConfig();
+            hitl.setToolApprovals(approvals);
+            var config = new AgentConfiguration();
+            config.setHitlConfig(hitl);
+            doReturn(config).when(agentStore).read("op-1", 1);
+
+            var result = rest.gateDryRun(new OperatorGateDryRunRequest("op-1", 1, "patchThing", "http",
+                    "PATCH:/CaseSensitive/{id}"));
+
+            assertTrue(result.gated(), "lower-casing the path would break the match against a case-preserving pattern");
+        }
+
+        @Test
+        @DisplayName("an mcp-source call classifies against mcp patterns")
+        void mcpSourceClassifies() throws Exception {
+            var approvals = new ToolApprovalsConfig();
+            approvals.setRequireApproval(List.of("mcp:*"));
+            var hitl = new AgentConfiguration.HitlConfig();
+            hitl.setToolApprovals(approvals);
+            var config = new AgentConfiguration();
+            config.setHitlConfig(hitl);
+            doReturn(config).when(agentStore).read("op-1", 1);
+
+            var result = rest.gateDryRun(new OperatorGateDryRunRequest("op-1", 1, "createAgent", "mcp", null));
+
+            assertTrue(result.gated());
+            assertEquals("mcp:*", result.matchedPattern());
+        }
+
+        @Test
+        @DisplayName("a bare tool-name pattern matches without any endpoint")
+        void bareToolNamePatternMatches() throws Exception {
+            var approvals = new ToolApprovalsConfig();
+            approvals.setRequireApproval(List.of("delete_*"));
+            var hitl = new AgentConfiguration.HitlConfig();
+            hitl.setToolApprovals(approvals);
+            var config = new AgentConfiguration();
+            config.setHitlConfig(hitl);
+            doReturn(config).when(agentStore).read("op-1", 1);
+
+            var result = rest.gateDryRun(new OperatorGateDryRunRequest("op-1", 1, "delete_agent", "http", null));
+
+            assertTrue(result.gated());
+        }
+
+        @Test
+        @DisplayName("a null source defaults to http; an upper-case source is normalized")
+        void sourceDefaultsAndNormalizes() throws Exception {
+            doReturn(operatorLikeAgent()).when(agentStore).read("op-1", 1);
+
+            assertTrue(rest.gateDryRun(new OperatorGateDryRunRequest("op-1", 1, "patchDescriptor", null,
+                    "patch:/descriptorstore/descriptors/{id}")).gated());
+            assertTrue(rest.gateDryRun(new OperatorGateDryRunRequest("op-1", 1, "patchDescriptor", "HTTP",
+                    "patch:/descriptorstore/descriptors/{id}")).gated());
+        }
+
+        /**
+         * An unknown source can never match a source-qualified pattern, so it would
+         * classify as ungated with full confidence — reject it instead.
+         */
+        @Test
+        @DisplayName("an unknown source is a 400, never a confident ungated answer")
+        void unknownSourceIsRejected() throws Exception {
+            doReturn(operatorLikeAgent()).when(agentStore).read("op-1", 1);
+
+            assertThrows(BadRequestException.class,
+                    () -> rest.gateDryRun(new OperatorGateDryRunRequest("op-1", 1, "patchDescriptor", "htpp",
+                            "patch:/descriptorstore/descriptors/{id}")));
         }
 
         @Test

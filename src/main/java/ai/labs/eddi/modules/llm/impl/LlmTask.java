@@ -36,6 +36,7 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.model.chat.ChatModel;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -548,9 +549,12 @@ public class LlmTask implements ILifecycleTask {
             responseMetadata.put("cascadeConfidence", cascadeResult.confidence());
 
             // Emit the final response to the stream unless the executor already streamed
-            // it live token-by-token (legacy final-step streaming). Agent-mode results are
-            // emitted here as a single chunk, matching the standard (non-cascade) agent
-            // path.
+            // it live token-by-token (legacy final-step streaming). Agent-mode results
+            // are emitted here as a single chunk — the cascade is now the deliberate
+            // EXCEPTION to tool-loop streaming: CascadingModelExecutor owns per-step
+            // model construction, timeouts and escalation, so the streaming bridge the
+            // two non-cascade branches hand to the loop stops at this boundary rather
+            // than threading a second transport through the cascade's own machinery.
             if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse && !cascadeResult.streamedLive()) {
                 // F10: this is the same single-chunk downgrade the two non-cascade agent
                 // paths record. Agent mode is the DEFAULT here (enableInAgentMode defaults
@@ -582,30 +586,15 @@ public class LlmTask implements ILifecycleTask {
 
         } else if (skipCascade) {
             // Agent mode with cascade disabled — use normal agent flow. The streaming
-            // bridge is handed ONLY to the tool loop: executeIfToolsEnabled returns null
-            // before any model call when no tools are configured, so the legacy fallback
-            // below never sees it (passing it there would double-emit every token).
-            var toolLoopBridge = createToolLoopStreamingBridge(eventSink, addToOutputExplicitlyFalse, resolvedType, processedParams, task);
-            var agentResult = agentOrchestrator.executeIfToolsEnabled(toolLoopBridge != null ? toolLoopBridge : chatModel, systemMessage,
-                    new ArrayList<>(chatMessagesWithoutSystem), task,
-                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
-            if (agentResult != null) {
-                responseContent = agentResult.response();
-                // Null-guarded to match executeResume. No production path returns a null
-                // trace today (both ExecutionResult sites pass a fresh list), but the
-                // record does not enforce it and toolTrace.isEmpty() below would NPE.
-                toolTrace = agentResult.trace() != null ? agentResult.trace() : new ArrayList<>();
-                // AgentOrchestrator sums TokenUsage across every model call in the tool
-                // loop and returns it here; not reading it dropped all agent-mode token
-                // accounting on the floor while the legacy branches below kept theirs.
-                // Copied, not aliased: ExecutionResult's two-arg constructor yields an
-                // immutable Map.of(), so assigning it directly would make any later
-                // metadata write throw only on the agent path, only in production.
-                responseMetadata = new HashMap<>(agentResult.responseMetadata());
+            // bridge is handed ONLY to the tool loop — see runToolLoopIfEnabled.
+            var outcome = runToolLoopIfEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
+                    effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
+                    resolvedType, processedParams);
+            if (outcome != null) {
+                responseContent = outcome.response();
+                toolTrace = outcome.trace();
+                responseMetadata = outcome.responseMetadata();
                 usedToolMode = true;
-                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
-                    emitAgentResponseUnlessStreamedLive(eventSink, responseContent, responseMetadata, task, toolLoopBridge);
-                }
             } else {
                 var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
                 responseContent = chatResult.response();
@@ -619,27 +608,15 @@ public class LlmTask implements ILifecycleTask {
 
         } else {
             // === Standard (non-cascade) execution path ===
-            // Bridge only reaches the tool loop — see the skipCascade branch above.
-            var toolLoopBridge = createToolLoopStreamingBridge(eventSink, addToOutputExplicitlyFalse, resolvedType, processedParams, task);
-            var agentResult = agentOrchestrator.executeIfToolsEnabled(toolLoopBridge != null ? toolLoopBridge : chatModel, systemMessage,
-                    new ArrayList<>(chatMessagesWithoutSystem), task,
-                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
+            var outcome = runToolLoopIfEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
+                    effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
+                    resolvedType, processedParams);
 
-            if (agentResult != null) {
-                // Agent mode — tools execute synchronously, stream final response if sink
-                // available
-                responseContent = agentResult.response();
-                // Null-guarded, as in the skipCascade branch above.
-                toolTrace = agentResult.trace() != null ? agentResult.trace() : new ArrayList<>();
-                // See the skipCascade branch above: without this, agent-mode token usage
-                // is computed by AgentOrchestrator and then silently discarded. Copied
-                // for the same mutability reason.
-                responseMetadata = new HashMap<>(agentResult.responseMetadata());
+            if (outcome != null) {
+                responseContent = outcome.response();
+                toolTrace = outcome.trace();
+                responseMetadata = outcome.responseMetadata();
                 usedToolMode = true;
-                // Stream the final agent response if streaming is active
-                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
-                    emitAgentResponseUnlessStreamedLive(eventSink, responseContent, responseMetadata, task, toolLoopBridge);
-                }
             } else if (eventSink != null) {
                 // Legacy mode with streaming — try to get a streaming model
                 var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
@@ -1341,10 +1318,14 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
-     * Finding F10: a tool-enabled task can never stream token-by-token — the agent
-     * loop runs synchronously and the whole answer is pushed through a single
-     * {@code onToken}. From the client's point of view that is a long silence
-     * followed by one enormous token event, indistinguishable from a slow stream.
+     * Finding F10: a tool-enabled turn that did NOT stream token-by-token pushes
+     * its whole answer through a single {@code onToken} — a long silence followed
+     * by one enormous token event, indistinguishable from a slow stream. Since the
+     * {@link ToolLoopStreamingChatModel} bridge, the non-cascade agent paths
+     * usually stream live and skip this record; it still fires whenever the
+     * single-chunk fallback runs — kill-switch off, no streaming builder, a
+     * buffered provider, a JSON-formatted final round, a synthetic iteration-budget
+     * message, and the whole cascade agent path.
      * <p>
      * Record the downgrade so it is observable: a {@code streamingDowngraded} flag
      * in {@code responseMetadata} (surfaced through
@@ -1361,6 +1342,52 @@ public class LlmTask implements ILifecycleTask {
         }
         LOGGER.infof("Streaming downgraded to a single chunk for task '%s': the tool-calling loop is synchronous (%d chars emitted at once)",
                 task.getId(), responseContent.length());
+    }
+
+    /**
+     * The agent-mode leg shared verbatim by the skipCascade and standard branches
+     * (extracted so the two cannot drift): build the streaming bridge, run the tool
+     * loop with it, package the outcome and emit the final response unless it
+     * already streamed live. Returns null when the task has no tools — the caller
+     * then runs its own legacy fallback, which must NEVER see the bridge
+     * ({@code executeIfToolsEnabled} returns before any model call in that case, so
+     * no token has been forwarded; handing the bridge to a legacy executor would
+     * double-emit every token).
+     */
+    private AgentModeOutcome runToolLoopIfEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessagesWithoutSystem,
+                                                  LlmConfiguration.Task task, IConversationMemory memory,
+                                                  ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
+                                                  JsonResponseFormatPolicy jsonPolicy, ConversationEventSink eventSink,
+                                                  boolean addToOutputExplicitlyFalse, String resolvedType,
+                                                  Map<String, String> processedParams)
+            throws LifecycleException, ChatModelRegistry.UnsupportedLlmTaskException {
+        var toolLoopBridge = createToolLoopStreamingBridge(eventSink, addToOutputExplicitlyFalse, resolvedType, processedParams, task);
+        var agentResult = agentOrchestrator.executeIfToolsEnabled(toolLoopBridge != null ? toolLoopBridge : chatModel, systemMessage,
+                new ArrayList<>(chatMessagesWithoutSystem), task,
+                memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
+        if (agentResult == null) {
+            return null;
+        }
+        String responseContent = agentResult.response();
+        // Null-guarded to match executeResume. No production path returns a null
+        // trace today (both ExecutionResult sites pass a fresh list), but the
+        // record does not enforce it and toolTrace.isEmpty() would NPE later.
+        List<Map<String, Object>> trace = agentResult.trace() != null ? agentResult.trace() : new ArrayList<>();
+        // AgentOrchestrator sums TokenUsage across every model call in the tool
+        // loop and returns it here; not reading it dropped all agent-mode token
+        // accounting on the floor while the legacy branches kept theirs.
+        // Copied, not aliased: ExecutionResult's two-arg constructor yields an
+        // immutable Map.of(), so assigning it directly would make any later
+        // metadata write throw only on the agent path, only in production.
+        Map<String, Object> responseMetadata = new HashMap<>(agentResult.responseMetadata());
+        if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
+            emitAgentResponseUnlessStreamedLive(eventSink, responseContent, responseMetadata, task, toolLoopBridge);
+        }
+        return new AgentModeOutcome(responseContent, trace, responseMetadata);
+    }
+
+    /** What the tool loop produced, ready for the caller's four locals. */
+    private record AgentModeOutcome(String response, List<Map<String, Object>> trace, Map<String, Object> responseMetadata) {
     }
 
     /**

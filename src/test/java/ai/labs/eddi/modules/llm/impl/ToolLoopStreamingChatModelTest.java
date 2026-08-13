@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -19,9 +20,11 @@ import org.mockito.InOrder;
 
 import java.util.ArrayDeque;
 import java.util.List;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -172,10 +175,44 @@ class ToolLoopStreamingChatModelTest {
 
         var thrown = assertThrows(RuntimeException.class, () -> bridge.chat(request()));
         assertTrue(thrown.getMessage().contains("timed out"), thrown.getMessage());
+        // The typed TimeoutException cause is what RetryConfiguration keys on
+        // ("timed out" does NOT hit the "timeout" message fallback). Without it,
+        // streamed tool-loop timeouts fail the turn while the sync path retries.
+        assertInstanceOf(TimeoutException.class, thrown.getCause());
+        assertTrue(RetryConfiguration.isRetryableError(thrown),
+                "a provider timeout on the streaming transport must stay retryable, exactly like the sync path");
 
         // The provider's callback thread cannot be cancelled — a token arriving
         // after abandonment must not reach the shared sink, where it would
         // interleave with a retry's stream.
+        handlerRef.get().onPartialResponse("late token");
+        verify(eventSink, never()).onToken(anyString());
+    }
+
+    @Test
+    @DisplayName("an interrupt restores the flag — a cancelled turn must abort, not retry into more tool calls")
+    void interruptRestoresFlagAndSilencesLateTokens() {
+        var handlerRef = new AtomicReference<StreamingChatResponseHandler>();
+        StreamingChatModel neverAnswers = new StreamingChatModel() {
+            @Override
+            public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                handlerRef.set(handler);
+            }
+        };
+        var bridge = new ToolLoopStreamingChatModel(neverAnswers, eventSink, 30, "openai");
+
+        Thread.currentThread().interrupt();
+        try {
+            var thrown = assertThrows(RuntimeException.class, () -> bridge.chat(request()));
+            assertTrue(thrown.getMessage().contains("interrupted"), thrown.getMessage());
+            // The restored flag is what makes the loop's retry backoff and its
+            // loop-top Thread.interrupted() checks abort the cancelled turn.
+            assertTrue(Thread.currentThread().isInterrupted(), "the interrupt flag must be restored");
+        } finally {
+            // Clear so the flag never leaks into the next test on this worker.
+            Thread.interrupted();
+        }
+
         handlerRef.get().onPartialResponse("late token");
         verify(eventSink, never()).onToken(anyString());
     }

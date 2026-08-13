@@ -354,6 +354,9 @@ class StreamingLegacyChatExecutor {
             // memory. Once an attempt is abandoned its handler goes silent.
             var abandoned = new AtomicBoolean(false);
             // Appending, emitting and abandoning must be mutually exclusive.
+            // KEEP IN SYNC: ToolLoopStreamingChatModel mirrors this whole
+            // latch/abandoned/lock skeleton for the tool loop; a concurrency fix
+            // here almost certainly applies there too.
             // fullResponse is written only by the provider's callback thread and read
             // only here; on the normal path latch.countDown()/await() publishes those
             // writes, but the timeout/interrupt path has no such edge — abandoned is a
