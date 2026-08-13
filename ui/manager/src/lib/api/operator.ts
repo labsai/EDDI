@@ -79,6 +79,15 @@ export interface OperatorConfig {
  */
 export const OPERATOR_VARIABLE_KEY = "platform.operator";
 
+/**
+ * Tool-loop budget provisioned onto the operator's LLM task — the backend
+ * ceiling (`AgentSetupService.MAX_TOOL_ITERATIONS`), on purpose. One operator
+ * turn is one admin task of arbitrary length; the safety mechanism is the HITL
+ * gate on every write, not a scarce round budget. Ordinary agents keep the
+ * engine default (10). See provisionOperator for the incident this fixes.
+ */
+export const OPERATOR_MAX_TOOL_ITERATIONS = 100;
+
 export function defaultOperatorConfig(promptBody?: string): OperatorConfig {
   // Derived from the scope set here rather than restated by callers, so the
   // seeded body can never describe a capability this config does not grant.
@@ -267,6 +276,15 @@ export async function provisionOperator(
     // AUTO_APPROVE to WAIT_INDEFINITELY for tool pauses anyway — setting it here
     // too would only be redundant, not safer.
     hitlConfig: { toolApprovals: buildToolApprovals() },
+    // The engine default (10) suits a conversational agent with a handful of
+    // tools. The operator's whole toolset is this deployment's API, and one
+    // admin task is a long chain — an agent build via granular endpoints was
+    // observed dying at the default cap after 22 calls, answering only "max
+    // tool iterations reached". 100 is the backend ceiling
+    // (AgentSetupService.MAX_TOOL_ITERATIONS), chosen deliberately: budget is
+    // not the safety mechanism here, the HITL gate is — every write pauses for
+    // approval no matter how many rounds remain.
+    maxToolIterations: OPERATOR_MAX_TOOL_ITERATIONS,
   });
 }
 

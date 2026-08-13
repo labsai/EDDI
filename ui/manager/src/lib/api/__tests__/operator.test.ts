@@ -227,6 +227,23 @@ describe("provisionOperator", () => {
     expect(captured).not.toHaveProperty("name");
   });
 
+  /**
+   * The engine default of 10 rounds killed real operator tasks mid-work — an
+   * agent build died at the cap after 22 calls with only "max tool iterations
+   * reached" as the answer. The operator provisions at the backend ceiling:
+   * one turn is one admin task of arbitrary length, and the HITL gate (not the
+   * round budget) is what paces its writes.
+   */
+  it("provisions the operator with the raised tool-iteration budget", async () => {
+    await provisionOperator({
+      agentName: "EDDI Platform Operator",
+      config: config(),
+      apiKey: "sk-test",
+      spec: fetchedSpec(),
+    });
+    expect(captured?.maxToolIterations).toBe(100);
+  });
+
   it("prepends the non-editable safety preamble to the editable body", async () => {
     await provisionOperator({
       agentName: "Op",
