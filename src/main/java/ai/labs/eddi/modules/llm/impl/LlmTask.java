@@ -146,6 +146,18 @@ public class LlmTask implements ILifecycleTask {
     @ConfigProperty(name = "eddi.hitl.tool.transcript-max-bytes", defaultValue = "2000000")
     int toolTranscriptMaxBytes;
 
+    /**
+     * When true (the default) and the conversation has an event sink, tool-enabled
+     * turns run their model rounds over the provider's streaming transport via
+     * {@link ToolLoopStreamingChatModel}, so the final answer (and any interim
+     * commentary) reaches the client token-by-token instead of as one chunk after
+     * the whole loop finishes. Kill-switch, not a feature flag: turning it off
+     * restores the previous single-chunk behaviour exactly.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.llm.tool-loop.streaming.enabled", defaultValue = "true")
+    boolean toolLoopStreamingEnabled;
+
     private static final Logger LOGGER = Logger.getLogger(LlmTask.class);
 
     @Inject
@@ -569,8 +581,13 @@ public class LlmTask implements ILifecycleTask {
             }
 
         } else if (skipCascade) {
-            // Agent mode with cascade disabled — use normal agent flow
-            var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
+            // Agent mode with cascade disabled — use normal agent flow. The streaming
+            // bridge is handed ONLY to the tool loop: executeIfToolsEnabled returns null
+            // before any model call when no tools are configured, so the legacy fallback
+            // below never sees it (passing it there would double-emit every token).
+            var toolLoopBridge = createToolLoopStreamingBridge(eventSink, addToOutputExplicitlyFalse, resolvedType, processedParams, task);
+            var agentResult = agentOrchestrator.executeIfToolsEnabled(toolLoopBridge != null ? toolLoopBridge : chatModel, systemMessage,
+                    new ArrayList<>(chatMessagesWithoutSystem), task,
                     memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
             if (agentResult != null) {
                 responseContent = agentResult.response();
@@ -587,8 +604,7 @@ public class LlmTask implements ILifecycleTask {
                 responseMetadata = new HashMap<>(agentResult.responseMetadata());
                 usedToolMode = true;
                 if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
-                    recordStreamingDowngrade(responseMetadata, task, responseContent);
-                    eventSink.onToken(responseContent);
+                    emitAgentResponseUnlessStreamedLive(eventSink, responseContent, responseMetadata, task, toolLoopBridge);
                 }
             } else {
                 var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
@@ -603,7 +619,10 @@ public class LlmTask implements ILifecycleTask {
 
         } else {
             // === Standard (non-cascade) execution path ===
-            var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
+            // Bridge only reaches the tool loop — see the skipCascade branch above.
+            var toolLoopBridge = createToolLoopStreamingBridge(eventSink, addToOutputExplicitlyFalse, resolvedType, processedParams, task);
+            var agentResult = agentOrchestrator.executeIfToolsEnabled(toolLoopBridge != null ? toolLoopBridge : chatModel, systemMessage,
+                    new ArrayList<>(chatMessagesWithoutSystem), task,
                     memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
 
             if (agentResult != null) {
@@ -619,8 +638,7 @@ public class LlmTask implements ILifecycleTask {
                 usedToolMode = true;
                 // Stream the final agent response if streaming is active
                 if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
-                    recordStreamingDowngrade(responseMetadata, task, responseContent);
-                    eventSink.onToken(responseContent);
+                    emitAgentResponseUnlessStreamedLive(eventSink, responseContent, responseMetadata, task, toolLoopBridge);
                 }
             } else if (eventSink != null) {
                 // Legacy mode with streaming — try to get a streaming model
@@ -1037,7 +1055,14 @@ public class LlmTask implements ILifecycleTask {
         var jsonPolicy = JsonResponseFormatPolicy.of(Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)), resolvedType,
                 task.getJsonResponseFormat());
 
-        var result = agentOrchestrator.resumeToolLoop(chatModel, task, memory, batch, resumeDecision,
+        // Stream the continuation's model rounds too. Replayed transcript rounds
+        // never call the model, so the bridge only ever forwards NEW tokens — text
+        // streamed before the pause cannot be re-emitted. The resume path has no
+        // single-chunk fallback emit, so no suppression bookkeeping is needed here.
+        var resumeBridge = createToolLoopStreamingBridge(memory.getEventSink(),
+                "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task);
+
+        var result = agentOrchestrator.resumeToolLoop(resumeBridge != null ? resumeBridge : chatModel, task, memory, batch, resumeDecision,
                 toolHitlEnabled, jsonPolicy);
 
         String responseContent = result != null ? result.response() : null;
@@ -1336,6 +1361,52 @@ public class LlmTask implements ILifecycleTask {
         }
         LOGGER.infof("Streaming downgraded to a single chunk for task '%s': the tool-calling loop is synchronous (%d chars emitted at once)",
                 task.getId(), responseContent.length());
+    }
+
+    /**
+     * Build the streaming bridge for a tool-enabled turn, or return null when the
+     * turn should keep the synchronous single-chunk path: kill-switch off, no event
+     * sink, output suppressed ({@code addToOutput=false} — the postResponse owns
+     * the output, live tokens would leak the raw response), or the provider has no
+     * streaming builder.
+     */
+    private ToolLoopStreamingChatModel createToolLoopStreamingBridge(ConversationEventSink eventSink, boolean addToOutputExplicitlyFalse,
+                                                                     String resolvedType, Map<String, String> processedParams,
+                                                                     LlmConfiguration.Task task)
+            throws ChatModelRegistry.UnsupportedLlmTaskException {
+        if (!toolLoopStreamingEnabled || eventSink == null || addToOutputExplicitlyFalse) {
+            return null;
+        }
+        var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
+        if (streamingModel == null) {
+            return null;
+        }
+        return new ToolLoopStreamingChatModel(streamingModel, eventSink,
+                StreamingLegacyChatExecutor.resolveTimeoutSeconds(task), resolvedType);
+    }
+
+    /**
+     * Emit an agent-mode final response as a single chunk — unless the streaming
+     * bridge already delivered exactly this text token-by-token, in which case
+     * emitting it again would duplicate the whole answer on the client.
+     * <p>
+     * The comparison is an exact text match against the bridge's last completed
+     * model round, not a "did anything stream" boolean, because the final response
+     * is not always that round's text: an exhausted iteration budget substitutes a
+     * synthetic message, a JSON-formatted round forwards nothing, and a provider
+     * that buffers (never emits partials) completes without streaming a character.
+     * In all those cases the single-chunk fallback below still runs — and still
+     * counts as a downgrade, because that is what the client experienced.
+     */
+    private void emitAgentResponseUnlessStreamedLive(ConversationEventSink eventSink, String responseContent,
+                                                     Map<String, Object> responseMetadata, LlmConfiguration.Task task,
+                                                     ToolLoopStreamingChatModel toolLoopBridge) {
+        if (toolLoopBridge != null && responseContent.equals(toolLoopBridge.lastForwardedText())) {
+            responseMetadata.put("streamedLive", true);
+            return;
+        }
+        recordStreamingDowngrade(responseMetadata, task, responseContent);
+        eventSink.onToken(responseContent);
     }
 
     /**

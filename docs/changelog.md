@@ -7,6 +7,51 @@
 
 
 
+## 🎯 feat(llm): tool-enabled turns stream token-by-token (2026-08-13)
+
+**Repo:** EDDI (`chore/remove-agent-father`)
+
+A tool-enabled task (the operator included) could never stream: the agent loop ran on the
+synchronous `ChatModel`, so the client saw a long silence and then the whole answer as one
+`onToken` — the F10 downgrade, observable but unfixed. Now the model rounds inside the tool loop
+run over the provider's streaming transport.
+
+**How:** a new `ToolLoopStreamingChatModel` adapts `StreamingChatModel` to the synchronous
+`ChatModel` contract — forwards partial tokens to the conversation's event sink as they arrive,
+blocks on the complete response. `LlmTask` hands it to `executeIfToolsEnabled` (and to
+`resumeToolLoop` for HITL continuations) in place of the synchronous model. **`ToolLoopRunner` is
+untouched**: retries, iteration budget, approval gate, pause/resume all keep working because from
+the loop's point of view nothing changed but the transport.
+
+Decisions that matter:
+
+- **Double-emit prevention is an exact-match comparison**, not a "did anything stream" boolean:
+  the fallback single-chunk emit is suppressed only when the final response text equals exactly
+  what the bridge's last completed round forwarded. A synthetic iteration-budget message, a
+  JSON-formatted round (partial JSON is unrenderable — not forwarded), and a buffered provider
+  that never emits partials all still get the fallback emit — and still count as the F10
+  downgrade, because that is what the client experienced.
+- **The bridge only ever reaches the tool loop.** `executeIfToolsEnabled` returns null before any
+  model call when no tools are configured, so the legacy fallback path never sees the bridge
+  (there it would double-emit every token).
+- **Resume streams too, and cannot re-emit:** replayed transcript rounds never call the model, so
+  the bridge only forwards post-resume tokens.
+- **Concurrency mirrors `StreamingLegacyChatExecutor`** — abandoned-gate + lock, so a timed-out
+  attempt's late tokens never interleave with a retry's stream; timeout reuses
+  `resolveTimeoutSeconds` (same backstop semantics) and throws in `ObservableChatModel`'s shape.
+- **Kill-switch:** `eddi.llm.tool-loop.streaming.enabled` (default true) restores the previous
+  single-chunk behaviour exactly. Direct-constructed unit tests default to off, keeping every
+  existing LlmTask test on pre-streaming behaviour.
+- **Known, documented limitation:** the loop retries whole attempts; a provider flake after some
+  tokens were forwarded can show a repeated prefix on the client. Memory stores only the final
+  returned text. Cascade agent mode (a different executor) still downgrades — out of scope here.
+
+11 new tests (6 bridge, 5 LlmTask-level) + the 6 F10 regression tests stay green; suppression
+mutation-checked (reverting it turns the double-emit test red). 710 tests across the affected
+suites pass.
+
+---
+
 ## 🎯 feat(operator): deterministic gate verification — POST /administration/operator/gate-dry-run (2026-08-13)
 
 **Repo:** EDDI (`chore/remove-agent-father`)
