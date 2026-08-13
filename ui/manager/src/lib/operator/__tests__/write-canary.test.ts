@@ -296,15 +296,20 @@ describe("runOperatorWriteCanary", () => {
  */
 describe("buildWriteCanaryPrompt", () => {
   it("names the resolved tool, so the model does not have to guess which one to call", () => {
-    expect(buildWriteCanaryPrompt("patchDescriptor")).toContain("patchDescriptor");
+    expect(buildWriteCanaryPrompt("patchDescriptor", "op-1")).toContain("patchDescriptor");
   });
 
-  it("removes the two reasons the model stopped: ambiguity and asking first", () => {
-    const prompt = buildWriteCanaryPrompt("patchDescriptor");
+  it("removes the reasons the model stopped: ambiguity, asking first, and a spare listing step", () => {
+    const prompt = buildWriteCanaryPrompt("patchDescriptor", "op-1");
 
-    // "any ONE of them" invited a clarifying question; naming the first does not.
-    expect(prompt).toMatch(/FIRST agent/);
+    // Self-targeting: the probe names the operator's OWN descriptor id, so there
+    // is no "pick one" ambiguity and no listing round-trip to stall on — and the
+    // one catastrophic path (gate broken, write executes) marks an agent the
+    // rollback deletes anyway instead of a production agent.
+    expect(prompt).toContain("op-1");
+    expect(prompt).toMatch(/your own agent/i);
     expect(prompt).not.toMatch(/any ONE/i);
+    expect(prompt).not.toMatch(/FIRST agent/);
     expect(prompt).toMatch(/without asking me anything first/i);
     // And it must say the pause is expected, or a careful model reads an
     // interception as an error worth reporting back instead of a success.
@@ -314,15 +319,23 @@ describe("buildWriteCanaryPrompt", () => {
   it("still asks for the exact marker the failure message tells admins to search for", () => {
     // If these drift apart, the "search your agents for that text" advice on the
     // destructive path points at a string that was never written.
-    expect(buildWriteCanaryPrompt("patchDescriptor")).toContain(" [operator-write-canary]");
+    expect(buildWriteCanaryPrompt("patchDescriptor", "op-1")).toContain(" [operator-write-canary]");
   });
 });
 
 describe("enforceWriteCanaryGate", () => {
   const VAR_URL = "*/variablestore/variables/default/platform.operator";
 
+  /** Default: the deterministic check verifies the stored policy. Individual
+   *  tests override this to drive the not-gated / old-backend / error paths. */
+  const dryRunGated = () =>
+    http.post("*/administration/operator/gate-dry-run", () =>
+      HttpResponse.json({ policyPresent: true, gated: true, matchedPattern: "http.patch:*" }),
+    );
+
   beforeEach(() => {
     server.use(
+      dryRunGated(),
       http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
       http.post("*/agents/:conversationId/endConversation", () => new HttpResponse(null, { status: 200 })),
     );
@@ -413,34 +426,84 @@ describe("enforceWriteCanaryGate", () => {
     expect(configCleared).toBe(true);
   });
 
-  it("still rolls back when the canary is merely inconclusive (unknown), not just on a confirmed fail", async () => {
-    // "Not proven safe" is the bar for rollback, not "proven unsafe" — an
-    // agent this activation cannot vouch for must not stay live either way.
+  /**
+   * THE core semantic change of the dry-run integration: an operator whose
+   * stored policy verified deterministically is not deleted just because the
+   * model declined to attempt the probe's write. That deletion was the original
+   * defect — activation as a coin flip on an LLM's tool choice.
+   */
+  it("proceeds — does NOT roll back — when the policy verified and the probe was merely inconclusive", async () => {
     serveTurn(["event: token\ndata: nothing useful\n\n", doneWith("READY")]);
     let deleted = false;
     server.use(http.delete("*/agentstore/agents/:id", () => { deleted = true; return new HttpResponse(null, { status: 200 }); }));
 
-    await expect(enforceWriteCanaryGate(config(), spec())).rejects.toThrow(/could not verify the approval gate/i);
-    expect(deleted).toBe(true);
+    const result = await enforceWriteCanaryGate(config(), spec());
+
+    expect(deleted).toBe(false);
+    expect(result?.outcome).toBe("unknown");
+    // Honest, not upgraded: the caller sees exactly what was and wasn't proven.
+    expect(result?.error).toMatch(/verified deterministically/i);
+    expect(result?.error).toMatch(/probe was inconclusive/i);
   });
 
   /**
-   * Rolling back on "unknown" is right; calling it a gate failure was not.
-   * Nothing was demonstrated about the gate, and an admin told the gate broke
-   * goes hunting a security problem that may not exist. The commonest cause is
-   * the operator answering in prose instead of calling the tool.
+   * Deterministically broken configuration: the probe is NOT run — provoking a
+   * write against a policy known not to gate it would execute it for real.
    */
-  it("distinguishes an UNPROVEN gate from a broken one, and says what to do next", async () => {
-    serveTurn(["event: token\ndata: nothing useful\n\n", doneWith("READY")]);
-    server.use(http.delete("*/agentstore/agents/:id", () => new HttpResponse(null, { status: 200 })));
+  it("rolls back without running the probe when the dry-run says the write is not gated", async () => {
+    server.use(
+      http.post("*/administration/operator/gate-dry-run", () =>
+        HttpResponse.json({ policyPresent: true, gated: false, matchedPattern: null }),
+      ),
+      http.delete("*/agentstore/agents/:id", () => new HttpResponse(null, { status: 200 })),
+    );
+    let probeStarted = false;
+    server.use(
+      http.post("*/agents/:agentId/start", () => {
+        probeStarted = true;
+        return HttpResponse.json({ location: "/agents/conv-1" }, { status: 201 });
+      }),
+    );
 
     const error = String(await enforceWriteCanaryGate(config(), spec()).catch((e: unknown) => e));
 
+    expect(probeStarted).toBe(false);
+    expect(error).toMatch(/did NOT hold/);
+    expect(error).toMatch(/no probe was run and nothing was written/i);
+  });
+
+  /**
+   * A backend that predates gate-dry-run (404) restores the old semantics
+   * wholesale: with nothing verified, "unknown" must keep rolling back — "not
+   * proven safe" stays the bar when there is no other evidence.
+   */
+  it("still rolls back an inconclusive probe against an old backend without gate-dry-run", async () => {
+    server.use(http.post("*/administration/operator/gate-dry-run", () => new HttpResponse(null, { status: 404 })));
+    serveTurn(["event: token\ndata: nothing useful\n\n", doneWith("READY")]);
+    let deleted = false;
+    server.use(http.delete("*/agentstore/agents/:id", () => { deleted = true; return new HttpResponse(null, { status: 200 }); }));
+
+    const error = String(await enforceWriteCanaryGate(config(), spec()).catch((e: unknown) => e));
+
+    expect(deleted).toBe(true);
     expect(error).toMatch(/not evidence that it is broken/i);
     expect(error).not.toMatch(/did NOT hold/);
     // An admin left with no operator needs a way forward, not just a verdict.
     expect(error).toMatch(/try activating again/i);
     expect(error).toMatch(/read-only/i);
+  });
+
+  it("fails closed when the dry-run itself errors (not 404) — verification failure, not breach", async () => {
+    server.use(
+      http.post("*/administration/operator/gate-dry-run", () => HttpResponse.json({ message: "boom" }, { status: 500 })),
+      http.delete("*/agentstore/agents/:id", () => new HttpResponse(null, { status: 200 })),
+    );
+
+    const error = String(await enforceWriteCanaryGate(config(), spec()).catch((e: unknown) => e));
+
+    expect(error).toMatch(/could not verify the approval gate/i);
+    expect(error).toMatch(/deterministic check failed/i);
+    expect(error).not.toMatch(/did NOT hold/);
   });
 
   it("says the gate did NOT hold — and does not offer a retry — on a confirmed fail", async () => {

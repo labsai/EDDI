@@ -160,7 +160,8 @@ export async function clearOperatorConfig(): Promise<void> {
   await deleteVariable(OPERATOR_VARIABLE_KEY);
 }
 
-function isNotFound(error: unknown): boolean {
+/** Exported for the write canary, which must tell an old backend (404) from a broken one. */
+export function isNotFound(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
@@ -763,4 +764,38 @@ export async function reportOperatorGateStatus(verified: boolean): Promise<void>
   } catch {
     // Best-effort — see reportOperatorCanaryResult.
   }
+}
+
+/** Backend answer to a gate dry-run classification. */
+export interface GateDryRunResult {
+  policyPresent: boolean;
+  gated: boolean;
+  matchedPattern: string | null;
+}
+
+/**
+ * Deterministically classify one synthetic tool call against the operator's
+ * STORED approval policy, using the backend's own runtime gate
+ * (`ToolApprovalGate.classify`) — nothing executed, nothing written.
+ *
+ * NOT best-effort, unlike the two reporters above: this answer gates
+ * activation, so a transport failure must surface to the caller rather than
+ * be swallowed into a guess. Backends older than the endpoint 404 here — the
+ * caller decides what that means for it.
+ */
+export async function gateDryRun(
+  config: OperatorConfig,
+  toolName: string,
+  endpoint: string,
+): Promise<GateDryRunResult> {
+  const [method = "", path = ""] = endpoint.split(" ", 2);
+  return api.post<GateDryRunResult>("/administration/operator/gate-dry-run", {
+    agentId: config.agentId,
+    version: config.version,
+    toolName,
+    source: "http",
+    // Backend address form: lowercase `method:path`, the same shape discovery
+    // records into toolEndpoints.
+    endpoint: `${method.toLowerCase()}:${path}`,
+  });
 }
