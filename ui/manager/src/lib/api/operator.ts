@@ -79,6 +79,15 @@ export interface OperatorConfig {
  */
 export const OPERATOR_VARIABLE_KEY = "platform.operator";
 
+/**
+ * Tool-loop budget provisioned onto the operator's LLM task — the backend
+ * ceiling (`AgentSetupService.MAX_TOOL_ITERATIONS`), on purpose. One operator
+ * turn is one admin task of arbitrary length; the safety mechanism is the HITL
+ * gate on every write, not a scarce round budget. Ordinary agents keep the
+ * engine default (10). See provisionOperator for the incident this fixes.
+ */
+export const OPERATOR_MAX_TOOL_ITERATIONS = 100;
+
 export function defaultOperatorConfig(promptBody?: string): OperatorConfig {
   // Derived from the scope set here rather than restated by callers, so the
   // seeded body can never describe a capability this config does not grant.
@@ -151,7 +160,8 @@ export async function clearOperatorConfig(): Promise<void> {
   await deleteVariable(OPERATOR_VARIABLE_KEY);
 }
 
-function isNotFound(error: unknown): boolean {
+/** Exported for the write canary, which must tell an old backend (404) from a broken one. */
+export function isNotFound(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
@@ -267,6 +277,15 @@ export async function provisionOperator(
     // AUTO_APPROVE to WAIT_INDEFINITELY for tool pauses anyway — setting it here
     // too would only be redundant, not safer.
     hitlConfig: { toolApprovals: buildToolApprovals() },
+    // The engine default (10) suits a conversational agent with a handful of
+    // tools. The operator's whole toolset is this deployment's API, and one
+    // admin task is a long chain — an agent build via granular endpoints was
+    // observed dying at the default cap after 22 calls, answering only "max
+    // tool iterations reached". 100 is the backend ceiling
+    // (AgentSetupService.MAX_TOOL_ITERATIONS), chosen deliberately: budget is
+    // not the safety mechanism here, the HITL gate is — every write pauses for
+    // approval no matter how many rounds remain.
+    maxToolIterations: OPERATOR_MAX_TOOL_ITERATIONS,
   });
 }
 
@@ -664,23 +683,47 @@ export async function reactivateOperator(
   return next;
 }
 
-/** Kill switch — undeploy the agent and mark the config disabled. */
+/**
+ * Kill switch — undeploy the agent and mark the config disabled.
+ *
+ * `endAllActiveConversations` is deliberate, not a shortcut. The backend refuses
+ * to undeploy an agent that still has active conversations (409, carrying a
+ * TEXT_PLAIN explanation), and the operator's active conversation is almost
+ * always the admin's own operator chat — on the very screen the deactivate
+ * button lives on. Without the flag, having *used* the operator made it
+ * undeployable: you had to find and end your own chat first, with only a bare
+ * 409 to say why. The conversations ended belong to this operator at this
+ * version, and the admin is explicitly asking for it to stop.
+ */
 export async function deactivateOperator(
   config: OperatorConfig,
 ): Promise<OperatorConfig> {
   if (config.agentId && config.version != null) {
-    await undeployAgent(config.environment, config.agentId, config.version);
+    await undeployAgent(config.environment, config.agentId, config.version, {
+      endAllActiveConversations: true,
+    });
   }
   const next: OperatorConfig = { ...config, enabled: false };
   await writeOperatorConfig(next);
   return next;
 }
 
-/** Full reset — undeploy, delete the agent and its resources, drop the config. */
+/**
+ * Full reset — undeploy, delete the agent and its resources, drop the config.
+ *
+ * Same `endAllActiveConversations` reasoning as {@link deactivateOperator}, and
+ * here it also removes a misleading failure: the catch below swallows the 409,
+ * so a reset triggered while an operator chat was open still SUCCEEDED, but left
+ * a red request in the network panel for an operation that worked. Deleting the
+ * agent moments later ends those conversations regardless — asking for it up
+ * front just makes the intent explicit instead of incidental.
+ */
 export async function resetOperator(config: OperatorConfig): Promise<void> {
   if (config.agentId && config.version != null) {
     try {
-      await undeployAgent(config.environment, config.agentId, config.version);
+      await undeployAgent(config.environment, config.agentId, config.version, {
+        endAllActiveConversations: true,
+      });
     } catch {
       // Already undeployed, or the environment is gone — deletion is what matters.
     }
@@ -721,4 +764,38 @@ export async function reportOperatorGateStatus(verified: boolean): Promise<void>
   } catch {
     // Best-effort — see reportOperatorCanaryResult.
   }
+}
+
+/** Backend answer to a gate dry-run classification. */
+export interface GateDryRunResult {
+  policyPresent: boolean;
+  gated: boolean;
+  matchedPattern: string | null;
+}
+
+/**
+ * Deterministically classify one synthetic tool call against the operator's
+ * STORED approval policy, using the backend's own runtime gate
+ * (`ToolApprovalGate.classify`) — nothing executed, nothing written.
+ *
+ * NOT best-effort, unlike the two reporters above: this answer gates
+ * activation, so a transport failure must surface to the caller rather than
+ * be swallowed into a guess. Backends older than the endpoint 404 here — the
+ * caller decides what that means for it.
+ */
+export async function gateDryRun(
+  config: OperatorConfig,
+  toolName: string,
+  endpoint: string,
+): Promise<GateDryRunResult> {
+  const [method = "", path = ""] = endpoint.split(" ", 2);
+  return api.post<GateDryRunResult>("/administration/operator/gate-dry-run", {
+    agentId: config.agentId,
+    version: config.version,
+    toolName,
+    source: "http",
+    // Backend address form: lowercase `method:path`, the same shape discovery
+    // records into toolEndpoints.
+    endpoint: `${method.toLowerCase()}:${path}`,
+  });
 }

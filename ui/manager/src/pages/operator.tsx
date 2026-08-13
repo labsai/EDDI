@@ -180,9 +180,15 @@ export function OperatorPage() {
               // (read_only) or passed — a non-"pass" result throws, landing in
               // onError below with the agent already rolled back.
               toast.success(
-                outcome.writeCanary
+                // "verified" is earned only by a passing probe. An "unknown"
+                // outcome survives activation (the deterministic dry-run held),
+                // but the live probe was inconclusive — say that, not "verified".
+                outcome.writeCanary?.outcome === "pass"
                   ? t("operator.toast.activatedReadWrite", "Platform Operator activated — write access verified")
-                  : t("operator.toast.activated", "Platform Operator activated"),
+                  : outcome.writeCanary
+                    ? t("operator.toast.activatedReadWriteUnverified",
+                        "Platform Operator activated — approval gate verified; the live write probe was inconclusive")
+                    : t("operator.toast.activated", "Platform Operator activated"),
               );
             } else {
               setCanaryWarning(outcome.canary.error ?? t("operator.canary.genericFailure", "The connection check did not succeed."));
@@ -407,9 +413,11 @@ export function OperatorPage() {
           tracesByMessageId={chat.tracesByMessageId}
           isStreaming={chat.isStreaming}
           error={chat.error}
-          onSend={chat.send}
+          onSend={(input, attachments) => chat.send(input, undefined, attachments)}
           onStop={chat.stop}
           onReset={chat.reset}
+          conversationId={chat.conversationId}
+          onEnsureConversation={chat.ensureConversation}
           isPaused={chat.isPaused}
           // approval-status first: the chat hook derives its own pauseReason from
           // getSimpleConversationLog, which does not carry one — so on the 409 and

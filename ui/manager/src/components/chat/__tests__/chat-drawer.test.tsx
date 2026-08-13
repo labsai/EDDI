@@ -250,3 +250,81 @@ describe("ChatDrawer", () => {
     });
   });
 });
+
+describe("ChatDrawer — attachments", () => {
+  beforeEach(() => {
+    window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    useChatDrawerStore.setState({
+      isOpen: true,
+      agentId: "agent-1",
+      agentName: "Agent One",
+      step: "ready",
+      errorMessage: null,
+    });
+    useChatStore.getState().reset();
+    useChatStore.getState().setSelectedAgent("agent-1", "Agent One");
+    useChatStore.getState().setConversationId("conv-d1");
+    useChatStore.setState({ streamingEnabled: false });
+    server.use(
+      http.post("*/conversations/conv-d1/attachments", () =>
+        HttpResponse.json(
+          {
+            storageRef: "drawer-ref-1",
+            fileName: "notes.txt",
+            mimeType: "text/plain",
+            sizeBytes: 5,
+            forwardableInline: true,
+          },
+          { status: 201 },
+        ),
+      ),
+    );
+  });
+
+  it("stages a picked file and forwards it as attachment_* context on send", async () => {
+    const user = userEvent.setup();
+    let sentBody:
+      | { input?: string; context?: Record<string, { value?: { storageRef?: string } }> }
+      | null = null;
+    server.use(
+      http.post("*/agents/conv-d1", async ({ request }) => {
+        sentBody = (await request.json()) as typeof sentBody;
+        return HttpResponse.json({ conversationOutputs: [] });
+      }),
+    );
+
+    renderWithProviders(<ChatDrawer />);
+
+    await user.upload(
+      screen.getByTestId("drawer-file-input"),
+      new File(["hello"], "notes.txt", { type: "text/plain" }),
+    );
+    await screen.findByTestId("attachment-chip");
+
+    await user.type(screen.getByTestId("drawer-chat-input"), "see file");
+    await user.click(screen.getByTestId("drawer-chat-send"));
+
+    await waitFor(() => {
+      expect(sentBody?.context?.attachment_0?.value?.storageRef).toBe("drawer-ref-1");
+    });
+    expect(screen.queryByTestId("attachment-chip")).not.toBeInTheDocument();
+  });
+
+  it("allows an attachment-only send once the upload is ready", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post("*/agents/conv-d1", async () => HttpResponse.json({ conversationOutputs: [] })),
+    );
+    renderWithProviders(<ChatDrawer />);
+
+    const sendBtn = screen.getByTestId("drawer-chat-send");
+    expect(sendBtn).toBeDisabled();
+
+    await user.upload(
+      screen.getByTestId("drawer-file-input"),
+      new File(["hello"], "notes.txt", { type: "text/plain" }),
+    );
+    await screen.findByTestId("attachment-chip");
+    await waitFor(() => expect(sendBtn).toBeEnabled());
+  });
+});

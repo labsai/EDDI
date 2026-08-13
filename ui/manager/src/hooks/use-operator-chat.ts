@@ -7,6 +7,8 @@ import {
   type SSEEvent,
 } from "@/lib/api/chat";
 import { getSimpleConversationLog, extractOutputParts } from "@/lib/api/conversations";
+import { buildAttachmentContext } from "@/lib/api/attachments";
+import { revokeMessagePreviews, type SentAttachment } from "@/hooks/use-chat";
 import { resumeConversation, type HitlVerdict, type ToolCallDecision } from "@/lib/api/hitl";
 import type { PipelineEvent } from "@/hooks/use-debug-events";
 import type { OperatorConfig } from "@/lib/api/operator";
@@ -88,7 +90,15 @@ interface OperatorChatActions {
     config: OperatorConfig | null | undefined,
     input: string,
     context?: Record<string, unknown>,
+    /** Already-uploaded attachments to forward (context refs) and display. */
+    attachments?: SentAttachment[],
   ) => Promise<void>;
+  /**
+   * Create (or return) the active conversation. Exposed so attachment uploads
+   * — which need a conversation to upload INTO — can lazily create it before
+   * the first message, exactly the way send() itself does.
+   */
+  ensureConversation: (config: OperatorConfig | null | undefined) => Promise<string>;
   stop: () => void;
   reset: () => void;
   resolveApproval: (
@@ -112,6 +122,12 @@ type OperatorChatStore = OperatorChatState & OperatorChatInternal & OperatorChat
  * session.
  */
 const CONVERSATION_STORAGE_KEY = "eddi.operator.conversationId";
+
+/**
+ * The one in-flight conversation create, when any — module-level because the
+ * store is module-level and every surface shares it. See ensureConversation.
+ */
+let creatingConversation: Promise<string> | null = null;
 
 function readStoredConversationId(): string | null {
   try {
@@ -275,7 +291,14 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
   reset: () => {
     get().abortController?.abort();
     get().resolveAbortController?.abort();
+    // Discard any in-flight lazy create — its resolution must not resurrect a
+    // conversation into the clean slate (see ensureConversation).
+    creatingConversation = null;
     storeConversationId(null);
+    // Free the sent bubbles' attachment preview URLs before dropping them —
+    // takeForSend keeps them alive for the bubble thumbnails, so without this
+    // every sent image leaks its blob (pinning the File) until page unload.
+    revokeMessagePreviews(get().messages);
     set({
       messages: [],
       events: [],
@@ -299,20 +322,85 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
     set({ abortController: null, isStreaming: false });
   },
 
-  send: async (config, input, context) => {
-    if (!config?.agentId || !input.trim()) return;
+  ensureConversation: async (config) => {
+    const existing = get().conversationId;
+    if (existing) return existing;
+    if (!config?.agentId) throw new Error("Operator is not configured");
+    // In-flight dedupe: two attach gestures before the first create resolves
+    // (drop then paste, or page + drawer) must share ONE conversation — a
+    // second create would re-key the staging area mid-upload and orphan the
+    // first gesture's file in a conversation nothing references.
+    const inFlight = creatingConversation;
+    if (inFlight) return inFlight;
+    const agentId = config.agentId;
+    // Nullable `let` + closure read instead of referencing a const inside its
+    // own initializer: the comparisons only run after the first await, by
+    // which point the assignment below has long happened.
+    let creating: Promise<string> | null = null;
+    creating = (async () => {
+      try {
+        const conversationId = await startConversation(config.environment, agentId);
+        // A reset() while the create was in flight cleared the slot — the user
+        // asked for a clean slate, so do not resurrect this conversation into
+        // the store (callers still get the id; their uploads just target a
+        // conversation the UI no longer tracks, exactly like any other
+        // discarded staging).
+        if (creatingConversation === creating) {
+          storeConversationId(conversationId);
+          set({ conversationId });
+        }
+        return conversationId;
+      } finally {
+        if (creatingConversation === creating) creatingConversation = null;
+      }
+    })();
+    creatingConversation = creating;
+    return creating;
+  },
+
+  send: async (config, input, context, attachments) => {
+    // An attachment-only turn is legitimate (matching the main chat panel) —
+    // block only when there is neither text nor a file.
+    if (!config?.agentId || (!input.trim() && !attachments?.length)) {
+      // The caller already drained its staging area — free the previews so a
+      // refused turn does not leak them (the files stay stored server-side).
+      if (attachments?.length) {
+        attachments.forEach((a) => {
+          if (a.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(a.previewUrl);
+        });
+      }
+      return;
+    }
     // `set` below applies synchronously (unlike React's setState), so this
     // also closes a race a second mounted surface (the drawer, alongside the
     // full page) could otherwise trigger: a second send() invoked before this
     // one yields at its first `await` sees isStreaming already true here and
     // bails, before either has touched the network.
-    if (get().isStreaming) return;
+    if (get().isStreaming) {
+      // Same refusal cleanup as above: the caller's staging area is already
+      // drained, so the previews would otherwise leak.
+      attachments?.forEach((a) => {
+        if (a.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(a.previewUrl);
+      });
+      return;
+    }
 
     const userMessage: ChatMessage = {
       id: nextId("user"),
       role: "user",
       content: input,
       timestamp: Date.now(),
+      // Chips/thumbnails on the sent bubble — same display contract as the
+      // main chat panel's user messages.
+      attachments: attachments?.length
+        ? attachments.map((a) => ({
+            fileName: a.fileName,
+            mimeType: a.mimeType,
+            sizeBytes: a.sizeBytes,
+            previewUrl: a.previewUrl,
+            forwardableInline: a.forwardableInline,
+          }))
+        : undefined,
     };
     // Built before the updater for the same reason as in resolveApproval —
     // `nextId` and `Date.now()` must not run inside one.
@@ -344,16 +432,21 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
 
     try {
       if (!conversationId) {
-        conversationId = await startConversation(config.environment, config.agentId);
-        storeConversationId(conversationId);
-        set({ conversationId });
+        conversationId = await get().ensureConversation(config);
+      }
+
+      // Merge attachment_* refs into the turn context so the backend forwards
+      // the uploaded files to the model (same contract as the chat panel).
+      const turnContext: Record<string, unknown> = { ...(context ?? {}) };
+      if (attachments?.length) {
+        Object.assign(turnContext, buildAttachmentContext(attachments));
       }
 
       const stream = sendMessageStreaming(
         config.environment,
         config.agentId,
         conversationId,
-        context ? { input, context } : { input },
+        Object.keys(turnContext).length ? { input, context: turnContext } : { input },
         controller.signal,
       );
 
@@ -375,6 +468,13 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           // The turn's own outcome, including a pause, lives in this snapshot —
           // discarding it (as this used to) meant a turn that paused mid-stream
           // left the input enabled with no indication anything needed a decision.
+          //
+          // The final output text is extracted for BOTH branches below: the pause
+          // path back-fills the pending message from it, and the failure check
+          // needs it because a turn can answer entirely through the snapshot —
+          // no token frames at all — and an earlier recoverable task_failed must
+          // not overwrite that answer with an error.
+          let finalText = "";
           if (event.data) {
             try {
               const snapshot: {
@@ -383,11 +483,12 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
                 hitlPausedAt?: string;
                 conversationOutputs?: Record<string, unknown>[];
               } = JSON.parse(event.data);
+              const outputs = snapshot.conversationOutputs ?? [];
+              const lastOutput = outputs[outputs.length - 1];
+              const parts = lastOutput ? extractOutputParts(lastOutput) : [];
+              finalText = parts.join("\n\n");
               if (snapshot.conversationState === "AWAITING_HUMAN") {
-                const outputs = snapshot.conversationOutputs ?? [];
-                const lastOutput = outputs[outputs.length - 1];
-                const parts = lastOutput ? extractOutputParts(lastOutput) : [];
-                const pendingText = parts.join("\n\n");
+                const pendingText = finalText;
                 set((s) => ({
                   ...s,
                   isPaused: true,
@@ -399,13 +500,14 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
                   // any text.
                   pausedPlaceholderId: agentId,
                   // The backend writes its pending message into this same
-                  // step's output, exactly like an ordinary answer — back-fill
-                  // it the same way a structured-JSON turn is back-filled below,
-                  // so a turn that pauses without ever streaming a token still
-                  // shows why, not an empty bubble.
+                  // step's output, exactly like an ordinary answer — snap the
+                  // bubble to it, so a turn that paused after streaming interim
+                  // commentary rests on the pending message (what a reload
+                  // shows), and one that never streamed shows why it paused
+                  // instead of an empty bubble.
                   messages: pendingText
                     ? s.messages.map((m) =>
-                        m.id === agentId && !m.content.trim() ? { ...m, content: pendingText } : m,
+                        m.id === agentId && m.content !== pendingText ? { ...m, content: pendingText } : m,
                       )
                     : s.messages,
                 }));
@@ -414,6 +516,51 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
               // Non-JSON done payload — nothing to inspect, same as before.
             }
           }
+          // A turn can fail WITHOUT a stream-level error event: the backend
+          // reports the failing step as task_failed, streams no tokens, and
+          // closes the stream normally. That left an empty agent bubble and no
+          // explanation anywhere in the chat — the admin had to open the server
+          // log to learn the turn had failed at all (observed with a provider
+          // rejecting the stored LLM config: "`temperature` is deprecated").
+          // If nothing was streamed, nothing paused, nothing arrived in the done
+          // snapshot, and a step failed, say so where the answer should have
+          // been. A snapshot that DOES carry the answer back-fills the bubble
+          // instead — the turn recovered, and an error banner over a visible
+          // answer would be a lie.
+          set((s) => {
+            const bubble = s.messages.find((m) => m.id === agentId);
+            if (s.isPaused || s.error) {
+              return s;
+            }
+            if (finalText) {
+              // Snap to the snapshot's canonical text. Tool-enabled turns now
+              // stream every model round live, so interim commentary ("Let me
+              // check…") can precede the final answer in the bubble — the
+              // stored transcript keeps only the final answer, and the resting
+              // bubble must match what a reload would show.
+              if (bubble && bubble.content !== finalText) {
+                return {
+                  ...s,
+                  messages: s.messages.map((m) => (m.id === agentId ? { ...m, content: finalText } : m)),
+                };
+              }
+              return s;
+            }
+            if (bubble?.content.trim()) {
+              return s;
+            }
+            const failure = [...s.events].reverse().find((e) => e.type === "task_failed");
+            if (!failure) {
+              return s;
+            }
+            const detail = failure.errorSummary
+              ? ` ${failure.errorSummary}`
+              : " The server log has the full error.";
+            return {
+              ...s,
+              error: `The operator could not answer — the ${failure.taskType.replace("ai.labs.", "")} step failed.${detail}`,
+            };
+          });
           break;
         }
 
@@ -435,6 +582,9 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
         // resumed answer rather than replace a bubble that isn't there. This
         // is the common shape after a page reload onto an already-paused
         // conversation.
+        // The dropped optimistic bubble may carry attachment previews — free
+        // them, the send never happened and no bubble will ever show them.
+        revokeMessagePreviews([userMessage]);
         set((s) => ({
           ...s,
           isPaused: true,
@@ -630,16 +780,22 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
   const pausedPlaceholderId = useOperatorChatStore((s) => s.pausedPlaceholderId);
 
   const rawSend = useOperatorChatStore((s) => s.send);
+  const rawEnsureConversation = useOperatorChatStore((s) => s.ensureConversation);
   const stop = useOperatorChatStore((s) => s.stop);
   const reset = useOperatorChatStore((s) => s.reset);
   const resolveApproval = useOperatorChatStore((s) => s.resolveApproval);
   const clearError = useOperatorChatStore((s) => s.clearError);
 
-  // The only action that needs config bound in: resolveApproval only ever
-  // needs the conversation id already in the store, same as today.
+  // The actions that need config bound in: resolveApproval only ever needs the
+  // conversation id already in the store, same as today.
   const send = useCallback(
-    (input: string, context?: Record<string, unknown>) => rawSend(config, input, context),
+    (input: string, context?: Record<string, unknown>, attachments?: SentAttachment[]) =>
+      rawSend(config, input, context, attachments),
     [rawSend, config],
+  );
+  const ensureConversation = useCallback(
+    () => rawEnsureConversation(config),
+    [rawEnsureConversation, config],
   );
 
   return {
@@ -655,6 +811,7 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
     resolveError,
     pausedPlaceholderId,
     send,
+    ensureConversation,
     stop,
     reset,
     resolveApproval,

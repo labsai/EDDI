@@ -685,6 +685,8 @@
     "attachLimit": "Puedes adjuntar hasta {{max}} archivos por mensaje.",
     "attachTooLargeToForward": "{{name}} se ha guardado, pero es demasiado grande para enviarlo al modelo de forma directa.",
     "attachNotForwarded": "No enviado al modelo",
+    "dropToAttach": "Suelta archivos para adjuntarlos",
+    "stepFailedFallback": "Este paso falló. El registro del servidor contiene el error completo.",
     "retry": "Reintentar último paso",
     "retrySuccess": "Paso re-ejecutado",
     "retryError": "Reintento fallido",
@@ -713,7 +715,9 @@
     "agentTyping": "El agente está escribiendo",
     "copy": "Copiar",
     "emptyConversation": "Esta conversación aún no tiene mensajes.",
-    "loadConversationFailed": "No se pudo cargar esta conversación: {{error}}"
+    "loadConversationFailed": "No se pudo cargar esta conversación: {{error}}",
+    "multilineHint": "Enter para enviar · Shift+Enter para nueva línea",
+    "multilineHintCtrlEnter": "Ctrl+Enter para enviar · Enter para nueva línea"
   },
   "resources": {
     "backToWorkflow": "Volver al workflow",
@@ -4044,6 +4048,7 @@
     "toast": {
       "activated": "Operador de plataforma activado",
       "activatedReadWrite": "Operador de la plataforma activado — acceso de escritura verificado",
+      "activatedReadWriteUnverified": "Operador de plataforma activado — puerta de aprobación verificada; la sonda de escritura en vivo no fue concluyente",
       "deactivated": "Operador de plataforma desactivado",
       "reset": "Operador de plataforma eliminado",
       "activatedButUnreachable": "Operador desplegado, pero no pudo leer tu plataforma"

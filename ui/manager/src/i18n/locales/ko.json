@@ -677,6 +677,8 @@
     "attachLimit": "메시지당 최대 {{max}}개의 파일을 첨부할 수 있습니다.",
     "attachTooLargeToForward": "{{name}}은(는) 저장되었지만 모델에 직접 전송하기에는 너무 큽니다.",
     "attachNotForwarded": "모델에 전송되지 않음",
+    "dropToAttach": "파일을 끌어다 놓아 첨부",
+    "stepFailedFallback": "이 단계가 실패했습니다. 서버 로그에 전체 오류가 있습니다.",
     "retry": "마지막 단계 재시도",
     "retrySuccess": "단계 재실행 완료",
     "retryError": "재시도 실패",
@@ -705,7 +707,9 @@
     "agentTyping": "에이전트가 입력 중",
     "copy": "복사",
     "emptyConversation": "이 대화에는 아직 메시지가 없습니다.",
-    "loadConversationFailed": "이 대화를 불러올 수 없습니다: {{error}}"
+    "loadConversationFailed": "이 대화를 불러올 수 없습니다: {{error}}",
+    "multilineHint": "Enter로 보내기 · Shift+Enter로 줄바꿈",
+    "multilineHintCtrlEnter": "Ctrl+Enter로 보내기 · Enter로 줄바꿈"
   },
   "resources": {
     "backToWorkflow": "워크플로로 돌아가기",
@@ -4016,6 +4020,7 @@
     "toast": {
       "activated": "플랫폼 오퍼레이터를 활성화했습니다",
       "activatedReadWrite": "플랫폼 오퍼레이터가 활성화되었습니다 — 쓰기 권한이 확인되었습니다",
+      "activatedReadWriteUnverified": "플랫폼 오퍼레이터 활성화됨 — 승인 게이트 검증됨; 실시간 쓰기 프로브는 결론에 이르지 못했습니다",
       "deactivated": "플랫폼 오퍼레이터를 비활성화했습니다",
       "reset": "플랫폼 오퍼레이터를 삭제했습니다",
       "activatedButUnreachable": "오퍼레이터를 배포했지만 플랫폼을 읽지 못했습니다"

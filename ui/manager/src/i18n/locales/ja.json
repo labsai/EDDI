@@ -677,6 +677,8 @@
     "attachLimit": "1つのメッセージにつき最大{{max}}件のファイルを添付できます。",
     "attachTooLargeToForward": "{{name}} は保存されましたが、サイズが大きすぎてモデルに直接送信できません。",
     "attachNotForwarded": "モデルに送信されません",
+    "dropToAttach": "ファイルをドロップして添付",
+    "stepFailedFallback": "このステップは失敗しました。サーバーログに完全なエラーが記録されています。",
     "retry": "最後のステップをリトライ",
     "retrySuccess": "ステップを再実行しました",
     "retryError": "リトライ失敗",
@@ -705,7 +707,9 @@
     "agentTyping": "エージェントが入力中",
     "copy": "コピー",
     "emptyConversation": "この会話にはまだメッセージがありません。",
-    "loadConversationFailed": "この会話を読み込めませんでした: {{error}}"
+    "loadConversationFailed": "この会話を読み込めませんでした: {{error}}",
+    "multilineHint": "Enterで送信 · Shift+Enterで改行",
+    "multilineHintCtrlEnter": "Ctrl+Enterで送信 · Enterで改行"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",
@@ -4016,6 +4020,7 @@
     "toast": {
       "activated": "プラットフォームオペレーターを有効にしました",
       "activatedReadWrite": "プラットフォームオペレーターを有効化しました — 書き込み権限を確認済みです",
+      "activatedReadWriteUnverified": "プラットフォームオペレーターを有効化しました — 承認ゲートは検証済み。ライブ書き込みプローブは結論が出ませんでした",
       "deactivated": "プラットフォームオペレーターを無効にしました",
       "reset": "プラットフォームオペレーターを削除しました",
       "activatedButUnreachable": "オペレーターをデプロイしましたが、環境を読み取れませんでした"

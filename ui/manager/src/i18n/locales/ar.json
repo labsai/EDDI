@@ -709,6 +709,8 @@
     "attachLimit": "يمكنك إرفاق ما يصل إلى {{max}} ملفات لكل رسالة.",
     "attachTooLargeToForward": "تم تخزين {{name}} لكنه أكبر من أن يُرسل إلى النموذج مباشرةً.",
     "attachNotForwarded": "لم يُرسل إلى النموذج",
+    "dropToAttach": "أفلت الملفات لإرفاقها",
+    "stepFailedFallback": "فشلت هذه الخطوة. يحتوي سجل الخادم على الخطأ الكامل.",
     "retry": "إعادة محاولة الخطوة الأخيرة",
     "retrySuccess": "تم إعادة تنفيذ الخطوة",
     "retryError": "فشلت إعادة المحاولة",
@@ -737,7 +739,9 @@
     "agentTyping": "الوكيل يكتب",
     "copy": "نسخ",
     "emptyConversation": "لا تحتوي هذه المحادثة على رسائل بعد.",
-    "loadConversationFailed": "تعذّر تحميل هذه المحادثة: {{error}}"
+    "loadConversationFailed": "تعذّر تحميل هذه المحادثة: {{error}}",
+    "multilineHint": "Enter للإرسال · Shift+Enter لسطر جديد",
+    "multilineHintCtrlEnter": "Ctrl+Enter للإرسال · Enter لسطر جديد"
   },
   "resources": {
     "backToWorkflow": "العودة إلى مسار العمل",
@@ -4128,6 +4132,7 @@
     "toast": {
       "activated": "تم تفعيل مُشغّل المنصة",
       "activatedReadWrite": "تم تفعيل مُشغّل المنصة — تم التحقق من صلاحية الكتابة",
+      "activatedReadWriteUnverified": "تم تفعيل مشغّل المنصة — تم التحقق من بوابة الموافقة؛ كان مسبار الكتابة المباشر غير حاسم",
       "deactivated": "تم إلغاء تفعيل مُشغّل المنصة",
       "reset": "تم حذف مُشغّل المنصة",
       "activatedButUnreachable": "تم نشر المُشغّل، لكنه لم يتمكن من قراءة منصتك"

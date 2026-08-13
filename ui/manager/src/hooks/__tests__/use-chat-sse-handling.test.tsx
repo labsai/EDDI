@@ -98,3 +98,63 @@ describe("use-chat handleSSEEvent — task_failed / error-JSON handling", () => 
     expect(lastAgent?.content).not.toContain('{"message"');
   });
 });
+
+describe("use-chat handleSSEEvent — canonical snapshot text on done", () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    useDebugStore.getState().reset();
+    h.frames = [];
+    useChatStore.setState({
+      selectedAgentId: "agent1",
+      conversationId: "conv1",
+      streamingEnabled: true,
+    });
+  });
+
+  it("snaps the streamed bubble to the done snapshot's text when interim rounds streamed", async () => {
+    // Tool-enabled turns stream every model round live — interim commentary
+    // precedes the final answer in the bubble, but the stored transcript keeps
+    // only the final answer. At rest the bubble must equal a reload.
+    h.frames = [
+      { type: "token", data: "Let me look that up… " },
+      { type: "token", data: "The deployment is healthy." },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "READY",
+          conversationOutputs: [{ output: [{ type: "text", text: "The deployment is healthy." }] }],
+        }),
+      },
+    ];
+
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ message: "status?" });
+    });
+
+    const messages = useChatStore.getState().messages;
+    const agentMessage = [...messages].reverse().find((m) => m.role === "agent");
+    expect(agentMessage?.content).toBe("The deployment is healthy.");
+  });
+
+  it("still back-fills an empty bubble from the snapshot (structured-JSON turns)", async () => {
+    h.frames = [
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "READY",
+          conversationOutputs: [{ output: [{ type: "text", text: "Structured answer" }] }],
+        }),
+      },
+    ];
+
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ message: "go" });
+    });
+
+    const messages = useChatStore.getState().messages;
+    const agentMessage = [...messages].reverse().find((m) => m.role === "agent");
+    expect(agentMessage?.content).toBe("Structured answer");
+  });
+});

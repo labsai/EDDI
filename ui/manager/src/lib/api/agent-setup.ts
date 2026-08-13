@@ -53,6 +53,13 @@ export interface CreateApiAgentRequest {
    * generated from `openApiSpec`, so one agent can hold both.
    */
   mcpServerUrls?: string;
+  /**
+   * Tool-loop iteration budget for the generated LLM task. Omitted keeps the
+   * engine default (10), which suits ordinary agents. Bounded by the backend
+   * (`AgentSetupService.MAX_TOOL_ITERATIONS` — out-of-range is a 400 before any
+   * resource is created).
+   */
+  maxToolIterations?: number;
 }
 
 // ---------- Response type ----------

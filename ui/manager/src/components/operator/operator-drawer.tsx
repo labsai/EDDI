@@ -224,9 +224,11 @@ export function OperatorDrawer() {
                 tracesByMessageId={chat.tracesByMessageId}
                 isStreaming={chat.isStreaming}
                 error={chat.error}
-                onSend={(input) => chat.send(input, toContextPayload(screenContext))}
+                onSend={(input, attachments) => chat.send(input, toContextPayload(screenContext), attachments)}
                 onStop={chat.stop}
                 onReset={chat.reset}
+                conversationId={chat.conversationId}
+                onEnsureConversation={chat.ensureConversation}
                 isPaused={chat.isPaused}
                 pauseReason={approvalStatus.data?.pauseReason ?? chat.pauseReason}
                 isResolvingPause={chat.isResolvingPause}

@@ -684,6 +684,8 @@
     "selectAgent": "Select an agent...",
     "noAgents": "No deployed agents available. Deploy an agent first.",
     "placeholder": "Type a message...",
+    "multilineHint": "Enter to send · Shift+Enter for a new line",
+    "multilineHintCtrlEnter": "Ctrl+Enter to send · Enter for a new line",
     "send": "Send",
     "newConversation": "New Conversation",
     "endConversation": "End Conversation",
@@ -704,6 +706,8 @@
     "attachLimit": "You can attach up to {{max}} files per message.",
     "attachTooLargeToForward": "{{name}} is stored but too large to send to the model inline.",
     "attachNotForwarded": "Not sent to model",
+    "dropToAttach": "Drop files to attach",
+    "stepFailedFallback": "This step failed. The server log has the full error.",
     "retry": "Retry Last Step",
     "retrySuccess": "Step re-executed",
     "retryError": "Retry failed",
@@ -4016,6 +4020,7 @@
     "toast": {
       "activated": "Platform Operator activated",
       "activatedReadWrite": "Platform Operator activated — write access verified",
+      "activatedReadWriteUnverified": "Platform Operator activated — approval gate verified; the live write probe was inconclusive",
       "deactivated": "Platform Operator deactivated",
       "reset": "Platform Operator deleted",
       "activatedButUnreachable": "Operator deployed, but it could not read your platform"

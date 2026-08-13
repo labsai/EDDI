@@ -677,6 +677,8 @@
     "attachLimit": "每条消息最多可附加 {{max}} 个文件。",
     "attachTooLargeToForward": "{{name}} 已存储，但太大，无法直接发送给模型。",
     "attachNotForwarded": "未发送给模型",
+    "dropToAttach": "拖放文件以附加",
+    "stepFailedFallback": "此步骤失败。服务器日志中有完整的错误信息。",
     "retry": "重试上一步",
     "retrySuccess": "步骤已重新执行",
     "retryError": "重试失败",
@@ -705,7 +707,9 @@
     "agentTyping": "代理正在输入",
     "copy": "复制",
     "emptyConversation": "此对话还没有消息。",
-    "loadConversationFailed": "无法加载此对话：{{error}}"
+    "loadConversationFailed": "无法加载此对话：{{error}}",
+    "multilineHint": "Enter 发送 · Shift+Enter 换行",
+    "multilineHintCtrlEnter": "Ctrl+Enter 发送 · Enter 换行"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -4016,6 +4020,7 @@
     "toast": {
       "activated": "平台操作员已启用",
       "activatedReadWrite": "平台操作员已激活——写入权限已验证",
+      "activatedReadWriteUnverified": "平台操作员已激活 — 审批门已验证；实时写入探测未能得出结论",
       "deactivated": "平台操作员已停用",
       "reset": "平台操作员已删除",
       "activatedButUnreachable": "操作员已部署，但无法读取你的平台"

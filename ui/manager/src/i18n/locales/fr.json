@@ -685,6 +685,8 @@
     "attachLimit": "Vous pouvez joindre jusqu'à {{max}} fichiers par message.",
     "attachTooLargeToForward": "{{name}} est enregistré mais trop volumineux pour être envoyé directement au modèle.",
     "attachNotForwarded": "Non envoyé au modèle",
+    "dropToAttach": "Déposez des fichiers pour les joindre",
+    "stepFailedFallback": "Cette étape a échoué. Le journal du serveur contient l'erreur complète.",
     "retry": "Réessayer la dernière étape",
     "retrySuccess": "Étape ré-exécutée",
     "retryError": "Échec de la tentative",
@@ -713,7 +715,9 @@
     "agentTyping": "L’agent rédige",
     "copy": "Copier",
     "emptyConversation": "Cette conversation ne contient encore aucun message.",
-    "loadConversationFailed": "Impossible de charger cette conversation : {{error}}"
+    "loadConversationFailed": "Impossible de charger cette conversation : {{error}}",
+    "multilineHint": "Entrée pour envoyer · Maj+Entrée pour une nouvelle ligne",
+    "multilineHintCtrlEnter": "Ctrl+Entrée pour envoyer · Entrée pour une nouvelle ligne"
   },
   "resources": {
     "backToWorkflow": "Retour au workflow",
@@ -4044,6 +4048,7 @@
     "toast": {
       "activated": "Opérateur de plateforme activé",
       "activatedReadWrite": "Opérateur de plateforme activé — accès en écriture vérifié",
+      "activatedReadWriteUnverified": "Opérateur de plateforme activé — barrière d'approbation vérifiée ; la sonde d'écriture en direct n'a pas été concluante",
       "deactivated": "Opérateur de plateforme désactivé",
       "reset": "Opérateur de plateforme supprimé",
       "activatedButUnreachable": "Opérateur déployé, mais il n'a pas pu lire votre plateforme"

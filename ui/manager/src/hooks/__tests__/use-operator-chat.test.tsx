@@ -11,6 +11,8 @@ import type { SimpleConversationMemorySnapshot } from "@/lib/api/conversations";
 const h = vi.hoisted(() => ({
   frames: [] as Array<{ type: string; data: string }>,
   sendError: null as { status: number; message: string } | null,
+  /** InputData bodies handed to sendMessageStreaming, in call order. */
+  sentInputs: [] as Array<{ input: string; context?: Record<string, unknown> }>,
   conversationLogs: [] as Array<Partial<SimpleConversationMemorySnapshot>>,
   resumeCalls: [] as Array<{ conversationId: string; decision: unknown }>,
   /** Runs inside a conversation-log read, before it resolves — lets a test act
@@ -26,7 +28,13 @@ vi.mock("@/lib/api/chat", async (importOriginal) => {
   return {
     ...actual,
     startConversation: vi.fn(async () => "conv-1"),
-    sendMessageStreaming: async function* () {
+    sendMessageStreaming: async function* (
+      _env: string,
+      _agent: string,
+      _conv: string,
+      inputData: { input: string; context?: Record<string, unknown> },
+    ) {
+      h.sentInputs.push(inputData);
       if (h.sendError) throw h.sendError;
       for (const frame of h.frames) {
         yield frame as SSEEvent;
@@ -84,6 +92,7 @@ function textOutput(text: string) {
 beforeEach(() => {
   h.frames = [];
   h.sendError = null;
+  h.sentInputs = [];
   h.conversationLogs = [];
   h.resumeCalls = [];
   h.duringLogRead = null;
@@ -573,4 +582,404 @@ describe("a turn orphaned by a mid-stream reset", () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+/**
+ * A turn can fail with NO stream-level error: the backend emits task_failed for
+ * the failing step, streams zero tokens, and closes normally. That combination
+ * used to leave an empty agent bubble and nothing else — the admin had to read
+ * the server log to learn the turn failed at all (seen live when a provider
+ * rejected the stored LLM config's temperature).
+ */
+describe("a failed turn that streams nothing", () => {
+  it("surfaces the failing step and its summary as the chat error", async () => {
+    h.frames = [
+      {
+        type: "task_failed",
+        data: JSON.stringify({
+          taskId: "t9",
+          taskType: "ai.labs.langchain",
+          index: 9,
+          errorType: "unknown",
+          errorSummary: "`temperature` is deprecated for this model.",
+        }),
+      },
+      { type: "done", data: JSON.stringify({ conversationState: "READY" }) },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.error).toMatch(/langchain step failed/);
+    expect(result.current.error).toMatch(/temperature/);
+  });
+
+  it("points at the server log when the failure carries no summary", async () => {
+    h.frames = [
+      {
+        type: "task_failed",
+        data: JSON.stringify({ taskId: "t9", taskType: "ai.labs.langchain", index: 9 }),
+      },
+      { type: "done", data: JSON.stringify({ conversationState: "READY" }) },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.error).toMatch(/server log has the full error/i);
+  });
+
+  it("stays quiet when a step failed but the turn still answered", async () => {
+    // A recovered turn (retry, fallback content) must not append a scary error
+    // to a visible answer.
+    h.frames = [
+      {
+        type: "task_failed",
+        data: JSON.stringify({ taskId: "t2", taskType: "ai.labs.httpcalls", index: 2 }),
+      },
+      { type: "token", data: "Here is your answer." },
+      { type: "done", data: JSON.stringify({ conversationState: "READY" }) },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.error).toBeNull();
+  });
+
+  it("does not double-report when the turn paused instead of failing", async () => {
+    h.frames = [
+      {
+        type: "task_failed",
+        data: JSON.stringify({ taskId: "t2", taskType: "ai.labs.httpcalls", index: 2 }),
+      },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          hitlPauseReason: "review",
+          conversationOutputs: [textOutput("Waiting…")],
+        }),
+      },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("do a write");
+    });
+
+    expect(result.current.isPaused).toBe(true);
+    expect(result.current.error).toBeNull();
+  });
+});
+
+/**
+ * CodeRabbit (PR #143): a turn can answer entirely through the done snapshot —
+ * zero token frames — and an earlier recoverable task_failed must not overwrite
+ * that answer with an error banner.
+ */
+describe("a turn that answers via the done snapshot despite an earlier task_failed", () => {
+  it("backfills the answer and raises no error", async () => {
+    h.frames = [
+      {
+        type: "task_failed",
+        data: JSON.stringify({ taskId: "t2", taskType: "ai.labs.httpcalls", index: 2 }),
+      },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "READY",
+          conversationOutputs: [textOutput("Recovered — here is the answer.")],
+        }),
+      },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.error).toBeNull();
+    const agentMessage = result.current.messages.find((m) => m.role === "agent");
+    expect(agentMessage?.content).toBe("Recovered — here is the answer.");
+  });
+
+  it("still reports the failure when the snapshot carries no output either", async () => {
+    h.frames = [
+      {
+        type: "task_failed",
+        data: JSON.stringify({ taskId: "t2", taskType: "ai.labs.langchain", index: 2 }),
+      },
+      { type: "done", data: JSON.stringify({ conversationState: "READY", conversationOutputs: [] }) },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.error).toMatch(/langchain step failed/);
+  });
+});
+
+describe("attachments on a turn", () => {
+  it("merges attachment_* refs into the turn context and shows chips on the user bubble", async () => {
+    h.frames = [{ type: "done", data: JSON.stringify({ conversationState: "READY" }) }];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("look at this", undefined, [
+        {
+          storageRef: "ref-9",
+          fileName: "shot.png",
+          mimeType: "image/png",
+          sizeBytes: 4,
+          forwardableInline: true,
+          previewUrl: "blob:preview",
+        },
+      ]);
+    });
+
+    // The backend contract: attachment_N context entries carrying the ref.
+    expect(h.sentInputs[0]?.context?.attachment_0).toEqual({
+      type: "object",
+      value: { storageRef: "ref-9", fileName: "shot.png" },
+    });
+    // The sent bubble carries the display chips.
+    const userMessage = result.current.messages.find((m) => m.role === "user");
+    expect(userMessage?.attachments?.[0]?.fileName).toBe("shot.png");
+    expect(userMessage?.attachments?.[0]?.previewUrl).toBe("blob:preview");
+  });
+
+  it("allows an attachment-only turn (no text)", async () => {
+    h.frames = [{ type: "done", data: JSON.stringify({ conversationState: "READY" }) }];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("", undefined, [
+        { storageRef: "ref-1", fileName: "doc.pdf", mimeType: "application/pdf", sizeBytes: 10 },
+      ]);
+    });
+
+    expect(h.sentInputs).toHaveLength(1);
+    expect(h.sentInputs[0]?.context?.attachment_0).toBeDefined();
+  });
+
+  it("still refuses a turn with neither text nor attachments", async () => {
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("", undefined, []);
+    });
+    expect(h.sentInputs).toHaveLength(0);
+  });
+
+  it("ensureConversation creates the conversation once and then reuses it", async () => {
+    const { result } = renderHook(() => useOperatorChat(config()));
+
+    let first = "";
+    let second = "";
+    await act(async () => {
+      first = await result.current.ensureConversation();
+      second = await result.current.ensureConversation();
+    });
+
+    expect(first).toBe("conv-1");
+    expect(second).toBe("conv-1");
+    // send() must then REUSE the lazily-created conversation, not start another.
+    h.frames = [{ type: "done", data: JSON.stringify({ conversationState: "READY" }) }];
+    await act(async () => {
+      await result.current.send("hi");
+    });
+    const { startConversation } = await import("@/lib/api/chat");
+    expect(vi.mocked(startConversation)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("streamed interim text vs the canonical answer", () => {
+  it("snaps the bubble to the done snapshot's text when rounds streamed interim commentary", async () => {
+    // Tool-enabled turns stream every model round: "Let me check…" (interim,
+    // discarded from memory) then the final answer. The resting bubble must
+    // equal what a reload would show — the snapshot text alone.
+    h.frames = [
+      { type: "token", data: "Let me check the agents… " },
+      { type: "token", data: "There are 3 agents deployed." },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "READY",
+          conversationOutputs: [textOutput("There are 3 agents deployed.")],
+        }),
+      },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("how many agents?");
+    });
+
+    const agentMessage = result.current.messages.find((m) => m.role === "agent");
+    expect(agentMessage?.content).toBe("There are 3 agents deployed.");
+  });
+
+  it("leaves the bubble alone when the streamed text already equals the snapshot", async () => {
+    h.frames = [
+      { type: "token", data: "Same answer" },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "READY",
+          conversationOutputs: [textOutput("Same answer")],
+        }),
+      },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    const agentMessage = result.current.messages.find((m) => m.role === "agent");
+    expect(agentMessage?.content).toBe("Same answer");
+  });
+
+  it("a paused turn's bubble rests on the pending message even after interim streaming", async () => {
+    h.frames = [
+      { type: "token", data: "I will rename the agent now… " },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          hitlPauseReason: "Gated write",
+          conversationOutputs: [textOutput("Waiting for your approval to rename the agent.")],
+        }),
+      },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("rename it");
+    });
+
+    const agentMessage = result.current.messages.find((m) => m.role === "agent");
+    expect(agentMessage?.content).toBe("Waiting for your approval to rename the agent.");
+    expect(result.current.isPaused).toBe(true);
+  });
+});
+
+describe("attachment preview lifecycle in the store", () => {
+  it("reset() revokes sent-bubble preview URLs before dropping the messages", async () => {
+    const revoked: string[] = [];
+    const original = URL.revokeObjectURL;
+    URL.revokeObjectURL = (url: string) => revoked.push(url);
+    try {
+      h.frames = [{ type: "done", data: JSON.stringify({ conversationState: "READY" }) }];
+      const { result } = renderHook(() => useOperatorChat(config()));
+      await act(async () => {
+        await result.current.send("here", undefined, [
+          { storageRef: "r1", fileName: "img.png", mimeType: "image/png", sizeBytes: 3, previewUrl: "blob:img-1" },
+        ]);
+      });
+
+      await act(async () => {
+        result.current.reset();
+      });
+
+      expect(revoked).toContain("blob:img-1");
+    } finally {
+      URL.revokeObjectURL = original;
+    }
+  });
+
+  it("a 409-refused send revokes the dropped optimistic bubble's previews", async () => {
+    const revoked: string[] = [];
+    const original = URL.revokeObjectURL;
+    URL.revokeObjectURL = (url: string) => revoked.push(url);
+    try {
+      h.sendError = { status: 409, message: "Conflict" };
+      // The 409 path reads the pause reason afterwards.
+      h.conversationLogs = [{ conversationState: "AWAITING_HUMAN" }];
+      const { result } = renderHook(() => useOperatorChat(config()));
+      await act(async () => {
+        await result.current.send("try", undefined, [
+          { storageRef: "r2", fileName: "shot.png", mimeType: "image/png", sizeBytes: 3, previewUrl: "blob:img-2" },
+        ]);
+      });
+
+      expect(revoked).toContain("blob:img-2");
+    } finally {
+      URL.revokeObjectURL = original;
+    }
+  });
+
+  it("a send refused while another surface streams revokes the drained previews", async () => {
+    const revoked: string[] = [];
+    const original = URL.revokeObjectURL;
+    URL.revokeObjectURL = (url: string) => revoked.push(url);
+    try {
+      useOperatorChatStore.setState({ isStreaming: true });
+      const { result } = renderHook(() => useOperatorChat(config()));
+      await act(async () => {
+        await result.current.send("busy", undefined, [
+          { storageRef: "r3", fileName: "doc.pdf", mimeType: "application/pdf", sizeBytes: 3, previewUrl: "blob:img-3" },
+        ]);
+      });
+
+      expect(h.sentInputs).toHaveLength(0);
+      expect(revoked).toContain("blob:img-3");
+    } finally {
+      URL.revokeObjectURL = original;
+      useOperatorChatStore.setState({ isStreaming: false });
+    }
+  });
+});
+
+describe("ensureConversation concurrency", () => {
+  it("two concurrent calls share one create — the second must not orphan the first gesture's upload", async () => {
+    const { startConversation } = await import("@/lib/api/chat");
+    vi.mocked(startConversation).mockClear();
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    let first = "";
+    let second = "";
+    await act(async () => {
+      const [a, b] = await Promise.all([
+        result.current.ensureConversation(),
+        result.current.ensureConversation(),
+      ]);
+      first = a;
+      second = b;
+    });
+
+    expect(first).toBe("conv-1");
+    expect(second).toBe("conv-1");
+    expect(vi.mocked(startConversation)).toHaveBeenCalledTimes(1);
+  });
+
+  it("a reset() during the in-flight create does not resurrect the conversation", async () => {
+    const { startConversation } = await import("@/lib/api/chat");
+    vi.mocked(startConversation).mockClear();
+    let release: (id: string) => void = () => {};
+    vi.mocked(startConversation).mockImplementationOnce(
+      () => new Promise<string>((resolve) => { release = resolve; }),
+    );
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    let created: Promise<string>;
+    act(() => {
+      created = result.current.ensureConversation();
+    });
+    await act(async () => {
+      result.current.reset();
+      release("conv-late");
+      await created!;
+    });
+
+    expect(useOperatorChatStore.getState().conversationId).toBeNull();
+  });
 });

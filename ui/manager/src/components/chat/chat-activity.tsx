@@ -118,6 +118,19 @@ function buildTaskSummaries(events: PipelineEvent[]): TaskSummary[] {
   return tasks;
 }
 
+/**
+ * Workflow steps that are plumbing, not activity. Filtered out of end-user chat
+ * unless the step made a tool call or failed (see `tasks` below).
+ *
+ * `httpcalls` belongs here and was missing — which is why the Platform Operator
+ * rendered "45 steps" for a plain greeting. An OpenAPI-provisioned agent gets
+ * one httpcalls workflow step per endpoint group, so its pipeline is dozens of
+ * identical unnamed rows deep before the model does anything; ordinary agents
+ * have one or two, which is how the gap went unnoticed. Nothing is lost by
+ * filtering them: the model's actual calls surface via the langchain task's
+ * toolTrace, and an httpcalls step that errors is still shown by the hasError
+ * branch.
+ */
 const INTERNAL_INFRA_TASKS = new Set([
   "expressions",
   "behavior_rules",
@@ -126,6 +139,7 @@ const INTERNAL_INFRA_TASKS = new Set([
   "propertysetter",
   "parser",
   "output",
+  "httpcalls",
   "ai.labs.expressions",
   "ai.labs.behavior_rules",
   "ai.labs.langchain",
@@ -133,6 +147,7 @@ const INTERNAL_INFRA_TASKS = new Set([
   "ai.labs.propertysetter",
   "ai.labs.parser",
   "ai.labs.output",
+  "ai.labs.httpcalls",
 ]);
 
 interface ChatActivityProps {
@@ -175,6 +190,15 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
     });
   }, [rawTasks, showInternalSteps]);
 
+  // The RESTING summary describes the VISIBLE list — filtering the rows while
+  // summarising the unfiltered set re-created the exact complaint the filter
+  // fixed: an operator greeting showed one visible row under a header still
+  // boasting "46 steps". Three metrics deliberately stay raw because they
+  // describe the TURN, not the list: the live progress fraction (a stable
+  // "step 3 of 5" over the whole pipeline — a visible-only denominator would
+  // crawl and jump as rows stream in), totalDuration (the turn really took
+  // that long; hiding plumbing must not under-report latency), and the pulse
+  // (hidden steps running are still work in progress).
   const completedCount = rawTasks.filter((t) => t.status === "complete").length;
   const hasRunning = rawTasks.some((t) => t.status === "running");
 
@@ -233,7 +257,7 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
             ) : (
               <span>
                 <span className="font-medium text-foreground">
-                  {rawTasks.length} {t("chat.activity.steps", "steps")}
+                  {tasks.length} {t("chat.activity.steps", "steps")}
                 </span>
                 <span className="mx-1.5 text-border">·</span>
                 <span className="font-mono">{formatDuration(totalDuration)}</span>
@@ -285,6 +309,7 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
 // ==================== Task Row ====================
 
 function TaskRow({ task }: { task: TaskSummary }) {
+  const { t } = useTranslation();
   const [toolsExpanded, setToolsExpanded] = useState(false);
   const Icon = getExtensionIcon(task.taskType);
   const color = getExtensionColor(task.taskType);
@@ -339,18 +364,28 @@ function TaskRow({ task }: { task: TaskSummary }) {
         </span>
       </div>
 
-      {/* Failure detail (classified errorType + redacted summary) */}
-      {task.status === "error" && (task.errorType || task.errorSummary) && (
+      {/* Failure detail (classified errorType + redacted summary). Always
+          rendered for a failed step: this used to require errorType/errorSummary,
+          so a failure that arrived with neither collapsed to a red icon and
+          nothing else. And "unknown" is the classifier's shrug, not information —
+          shown alone it reads like a diagnosis ("UNKNOWN") while telling the
+          admin nothing, so it is dropped in favour of the summary or a pointer
+          to the server log. */}
+      {task.status === "error" && (
         <div
           className="ms-8 mb-1 flex items-start gap-1.5 text-[10px] text-destructive"
           data-testid="task-error-detail"
         >
-          {task.errorType && (
+          {task.errorType && task.errorType.toLowerCase() !== "unknown" && (
             <span className="shrink-0 rounded bg-destructive/10 px-1 py-0.5 font-mono uppercase">
               {task.errorType}
             </span>
           )}
-          {task.errorSummary && <span>{truncate(task.errorSummary, 140)}</span>}
+          <span>
+            {task.errorSummary
+              ? truncate(task.errorSummary, 140)
+              : t("chat.stepFailedFallback", "This step failed. The server log has the full error.")}
+          </span>
         </div>
       )}
 

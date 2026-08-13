@@ -12,6 +12,7 @@ import {
   defaultOperatorConfig,
   deactivateOperator,
   reactivateOperator,
+  resetOperator,
   assertProvisioned,
   runOperatorCanary,
   verifyGateInstalled,
@@ -225,6 +226,23 @@ describe("provisionOperator", () => {
     });
     expect(captured?.agentName).toBe("EDDI Platform Operator");
     expect(captured).not.toHaveProperty("name");
+  });
+
+  /**
+   * The engine default of 10 rounds killed real operator tasks mid-work — an
+   * agent build died at the cap after 22 calls with only "max tool iterations
+   * reached" as the answer. The operator provisions at the backend ceiling:
+   * one turn is one admin task of arbitrary length, and the HITL gate (not the
+   * round budget) is what paces its writes.
+   */
+  it("provisions the operator with the raised tool-iteration budget", async () => {
+    await provisionOperator({
+      agentName: "EDDI Platform Operator",
+      config: config(),
+      apiKey: "sk-test",
+      spec: fetchedSpec(),
+    });
+    expect(captured?.maxToolIterations).toBe(100);
   });
 
   it("prepends the non-editable safety preamble to the editable body", async () => {
@@ -613,6 +631,12 @@ describe("deactivateOperator", () => {
     // The endpoint rejects a versionless undeploy, so the version must be threaded through.
     expect(undeployUrl).toContain("/administration/test/undeploy/op-1");
     expect(undeployUrl).toContain("version=5");
+    // Without this flag the backend 409s whenever the operator has an active
+    // conversation — and the admin's own operator chat IS one, so having used
+    // the operator at all made the kill switch fail with a bare 409. The
+    // conversations ended are this operator's own; the admin is explicitly
+    // shutting it down.
+    expect(undeployUrl).toContain("endAllActiveConversations=true");
     expect(result.enabled).toBe(false);
     expect(saved?.enabled).toBe(false);
     // The agent pointer survives so the operator can be switched back on.
@@ -625,6 +649,32 @@ describe("deactivateOperator", () => {
     );
     const result = await deactivateOperator(config({ enabled: true }));
     expect(result.enabled).toBe(false);
+  });
+
+  /**
+   * Same flag on the reset path, and ORDER matters here: the undeploy (with its
+   * conversation teardown) must precede the delete, or the reset depends on the
+   * delete's cascade incidentally ending what the undeploy was refused for.
+   */
+  it("resetOperator also ends active conversations, before the delete runs", async () => {
+    const calls: string[] = [];
+    server.use(
+      http.post("*/administration/:env/undeploy/:agentId", ({ request }) => {
+        calls.push(`undeploy ${new URL(request.url).search}`);
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.delete("*/agentstore/agents/:id", () => {
+        calls.push("delete");
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.delete(`${BASE}/${OPERATOR_VARIABLE_KEY}`, () => new HttpResponse(null, { status: 204 })),
+    );
+
+    await resetOperator(config({ enabled: true, agentId: "op-1", version: 5, environment: "test" }));
+
+    expect(calls[0]).toContain("undeploy");
+    expect(calls[0]).toContain("endAllActiveConversations=true");
+    expect(calls[1]).toBe("delete");
   });
 });
 

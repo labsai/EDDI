@@ -131,7 +131,7 @@ export const ChatMessage = memo(function ChatMessage({
 // ==================== Attachments ====================
 
 /** Render the attachments a user sent with a message (image thumbnails / file chips). */
-function MessageAttachments({ attachments }: { attachments: MessageAttachment[] }) {
+export function MessageAttachments({ attachments }: { attachments: MessageAttachment[] }) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-wrap gap-2" data-testid="message-attachments">

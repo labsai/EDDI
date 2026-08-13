@@ -677,6 +677,8 @@
     "attachLimit": "आप प्रति संदेश {{max}} फ़ाइलें तक संलग्न कर सकते हैं।",
     "attachTooLargeToForward": "{{name}} संग्रहीत है लेकिन मॉडल को सीधे भेजने के लिए बहुत बड़ी है।",
     "attachNotForwarded": "मॉडल को नहीं भेजा गया",
+    "dropToAttach": "संलग्न करने के लिए फ़ाइलें छोड़ें",
+    "stepFailedFallback": "यह चरण विफल रहा। सर्वर लॉग में पूरी त्रुटि है।",
     "retry": "अंतिम चरण पुनः प्रयास करें",
     "retrySuccess": "चरण पुनः निष्पादित",
     "retryError": "पुनः प्रयास विफल",
@@ -705,7 +707,9 @@
     "agentTyping": "एजेंट टाइप कर रहा है",
     "copy": "कॉपी करें",
     "emptyConversation": "इस वार्तालाप में अभी कोई संदेश नहीं है।",
-    "loadConversationFailed": "यह वार्तालाप लोड नहीं हो सका: {{error}}"
+    "loadConversationFailed": "यह वार्तालाप लोड नहीं हो सका: {{error}}",
+    "multilineHint": "भेजने के लिए Enter · नई पंक्ति के लिए Shift+Enter",
+    "multilineHintCtrlEnter": "भेजने के लिए Ctrl+Enter · नई पंक्ति के लिए Enter"
   },
   "resources": {
     "backToWorkflow": "Workflow पर वापस जाएं",
@@ -4016,6 +4020,7 @@
     "toast": {
       "activated": "प्लेटफ़ॉर्म ऑपरेटर सक्रिय किया गया",
       "activatedReadWrite": "प्लेटफ़ॉर्म ऑपरेटर सक्रिय — लेखन एक्सेस सत्यापित",
+      "activatedReadWriteUnverified": "प्लेटफ़ॉर्म ऑपरेटर सक्रिय — अनुमोदन गेट सत्यापित; लाइव राइट प्रोब अनिर्णायक रही",
       "deactivated": "प्लेटफ़ॉर्म ऑपरेटर निष्क्रिय किया गया",
       "reset": "प्लेटफ़ॉर्म ऑपरेटर हटा दिया गया",
       "activatedButUnreachable": "ऑपरेटर परिनियोजित हुआ, पर आपका प्लेटफ़ॉर्म नहीं पढ़ सका"
