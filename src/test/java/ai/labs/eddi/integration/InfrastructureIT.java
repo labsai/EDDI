@@ -112,6 +112,12 @@ public class InfrastructureIT {
                 "Swagger UI CSP must allow 'unsafe-inline' for inline scripts: " + csp);
         Assertions.assertTrue(csp.contains("'unsafe-eval'"),
                 "Swagger UI CSP must allow 'unsafe-eval' for JSON schema rendering: " + csp);
+        // The GitHub exception belongs to the application policy alone. Swagger UI
+        // never calls GitHub, and the two headers sit in one properties block edited
+        // by hand — so a copy-paste that widens this one has to fail here.
+        var swaggerConnectSrc = extractDirective(csp, "connect-src");
+        Assertions.assertFalse(swaggerConnectSrc.contains("api.github.com"),
+                "Swagger UI connect-src must NOT carry the GitHub exception: " + swaggerConnectSrc);
     }
 
     @Test
@@ -130,6 +136,13 @@ public class InfrastructureIT {
         var scriptSrc = extractDirective(csp, "script-src");
         Assertions.assertFalse(scriptSrc.contains("'unsafe-inline'"),
                 "Non-Swagger script-src must NOT allow 'unsafe-inline': " + scriptSrc);
+        // The Manager's update check reads api.github.com from the browser. Without
+        // this source the browser refuses the request before it leaves the page, and
+        // the rejection is indistinguishable from an unreachable host — so tightening
+        // this back kills the feature quietly rather than loudly.
+        var connectSrc = extractDirective(csp, "connect-src");
+        Assertions.assertTrue(allowsSource(connectSrc, "https://api.github.com"),
+                "Non-Swagger connect-src must allow the Manager's release check: " + connectSrc);
     }
 
     /**
@@ -145,6 +158,22 @@ public class InfrastructureIT {
             }
         }
         return "";
+    }
+
+    /**
+     * Whether a CSP directive lists exactly this source. Sources are
+     * whitespace-delimited, and equality is the only safe test on the permissive
+     * side: a substring match would also accept https://api.github.com.evil, which
+     * is a different host permitting nothing we want. The prohibitive assertions
+     * stay substring checks, where matching more broadly is stricter.
+     */
+    private static boolean allowsSource(String directive, String source) {
+        for (var token : directive.trim().split("\\s+")) {
+            if (token.equals(source)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ==================== Coordinator Admin ====================
