@@ -257,3 +257,48 @@ describe("ChatActivity — failed step detail", () => {
     expect(screen.getByText("timeout")).toBeInTheDocument();
   });
 });
+
+/**
+ * Filtering the rows while summarising the unfiltered set re-created the exact
+ * complaint the filter fixed: one visible row under a header still boasting
+ * "46 steps". The summary must describe what the user can see — except the
+ * duration, which reports the TURN's real latency and deliberately includes
+ * hidden plumbing time.
+ */
+describe("ChatActivity — summary metrics follow the filtered list", () => {
+  it("hidden httpcalls steps do not inflate the step count", () => {
+    const events: PipelineEvent[] = [];
+    for (let i = 0; i < 45; i++) {
+      events.push(
+        { type: "task_start", taskType: "ai.labs.httpcalls", taskId: `h${i}`, index: i, timestamp: Date.now() },
+        { type: "task_complete", taskType: "ai.labs.httpcalls", taskId: `h${i}`, index: i, timestamp: Date.now(), durationMs: 2 },
+      );
+    }
+    events.push(
+      { type: "task_start", taskType: "ai.labs.langchain", taskId: "l1", index: 45, timestamp: Date.now() },
+      {
+        type: "task_complete", taskType: "ai.labs.langchain", taskId: "l1", index: 45, timestamp: Date.now(),
+        durationMs: 900,
+        toolTrace: [{ type: "tool_call", tool: "readAgentDescriptors" }],
+      },
+    );
+
+    renderWithProviders(<ChatActivity events={events} isLive={false} showInternalSteps={false} />);
+
+    expect(screen.getByText(/1 steps/)).toBeInTheDocument();
+    expect(screen.queryByText(/46 steps/)).not.toBeInTheDocument();
+    // The duration is the turn's, not the visible row's: 45×2ms + 900ms.
+    expect(screen.getByText("990ms")).toBeInTheDocument();
+  });
+
+  it("debug mode still reports every step", () => {
+    const events: PipelineEvent[] = [
+      { type: "task_start", taskType: "ai.labs.httpcalls", taskId: "h1", index: 0, timestamp: Date.now() },
+      { type: "task_complete", taskType: "ai.labs.httpcalls", taskId: "h1", index: 0, timestamp: Date.now() },
+      { type: "task_start", taskType: "ai.labs.parser", taskId: "p1", index: 1, timestamp: Date.now() },
+      { type: "task_complete", taskType: "ai.labs.parser", taskId: "p1", index: 1, timestamp: Date.now() },
+    ];
+    renderWithProviders(<ChatActivity events={events} isLive={false} showInternalSteps={true} />);
+    expect(screen.getByText(/2 steps/)).toBeInTheDocument();
+  });
+});

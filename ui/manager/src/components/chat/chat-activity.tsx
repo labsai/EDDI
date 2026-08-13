@@ -190,6 +190,15 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
     });
   }, [rawTasks, showInternalSteps]);
 
+  // The RESTING summary describes the VISIBLE list — filtering the rows while
+  // summarising the unfiltered set re-created the exact complaint the filter
+  // fixed: an operator greeting showed one visible row under a header still
+  // boasting "46 steps". Three metrics deliberately stay raw because they
+  // describe the TURN, not the list: the live progress fraction (a stable
+  // "step 3 of 5" over the whole pipeline — a visible-only denominator would
+  // crawl and jump as rows stream in), totalDuration (the turn really took
+  // that long; hiding plumbing must not under-report latency), and the pulse
+  // (hidden steps running are still work in progress).
   const completedCount = rawTasks.filter((t) => t.status === "complete").length;
   const hasRunning = rawTasks.some((t) => t.status === "running");
 
@@ -248,7 +257,7 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
             ) : (
               <span>
                 <span className="font-medium text-foreground">
-                  {rawTasks.length} {t("chat.activity.steps", "steps")}
+                  {tasks.length} {t("chat.activity.steps", "steps")}
                 </span>
                 <span className="mx-1.5 text-border">·</span>
                 <span className="font-mono">{formatDuration(totalDuration)}</span>

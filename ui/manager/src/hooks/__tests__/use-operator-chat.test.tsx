@@ -669,3 +669,52 @@ describe("a failed turn that streams nothing", () => {
     expect(result.current.error).toBeNull();
   });
 });
+
+/**
+ * CodeRabbit (PR #143): a turn can answer entirely through the done snapshot —
+ * zero token frames — and an earlier recoverable task_failed must not overwrite
+ * that answer with an error banner.
+ */
+describe("a turn that answers via the done snapshot despite an earlier task_failed", () => {
+  it("backfills the answer and raises no error", async () => {
+    h.frames = [
+      {
+        type: "task_failed",
+        data: JSON.stringify({ taskId: "t2", taskType: "ai.labs.httpcalls", index: 2 }),
+      },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "READY",
+          conversationOutputs: [textOutput("Recovered — here is the answer.")],
+        }),
+      },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.error).toBeNull();
+    const agentMessage = result.current.messages.find((m) => m.role === "agent");
+    expect(agentMessage?.content).toBe("Recovered — here is the answer.");
+  });
+
+  it("still reports the failure when the snapshot carries no output either", async () => {
+    h.frames = [
+      {
+        type: "task_failed",
+        data: JSON.stringify({ taskId: "t2", taskType: "ai.labs.langchain", index: 2 }),
+      },
+      { type: "done", data: JSON.stringify({ conversationState: "READY", conversationOutputs: [] }) },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.error).toMatch(/langchain step failed/);
+  });
+});

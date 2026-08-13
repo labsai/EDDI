@@ -12,6 +12,7 @@ import {
   defaultOperatorConfig,
   deactivateOperator,
   reactivateOperator,
+  resetOperator,
   assertProvisioned,
   runOperatorCanary,
   verifyGateInstalled,
@@ -648,6 +649,32 @@ describe("deactivateOperator", () => {
     );
     const result = await deactivateOperator(config({ enabled: true }));
     expect(result.enabled).toBe(false);
+  });
+
+  /**
+   * Same flag on the reset path, and ORDER matters here: the undeploy (with its
+   * conversation teardown) must precede the delete, or the reset depends on the
+   * delete's cascade incidentally ending what the undeploy was refused for.
+   */
+  it("resetOperator also ends active conversations, before the delete runs", async () => {
+    const calls: string[] = [];
+    server.use(
+      http.post("*/administration/:env/undeploy/:agentId", ({ request }) => {
+        calls.push(`undeploy ${new URL(request.url).search}`);
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.delete("*/agentstore/agents/:id", () => {
+        calls.push("delete");
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.delete(`${BASE}/${OPERATOR_VARIABLE_KEY}`, () => new HttpResponse(null, { status: 204 })),
+    );
+
+    await resetOperator(config({ enabled: true, agentId: "op-1", version: 5, environment: "test" }));
+
+    expect(calls[0]).toContain("undeploy");
+    expect(calls[0]).toContain("endAllActiveConversations=true");
+    expect(calls[1]).toBe("delete");
   });
 });
 

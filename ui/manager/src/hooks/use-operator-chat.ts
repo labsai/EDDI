@@ -375,6 +375,13 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           // The turn's own outcome, including a pause, lives in this snapshot —
           // discarding it (as this used to) meant a turn that paused mid-stream
           // left the input enabled with no indication anything needed a decision.
+          //
+          // The final output text is extracted for BOTH branches below: the pause
+          // path back-fills the pending message from it, and the failure check
+          // needs it because a turn can answer entirely through the snapshot —
+          // no token frames at all — and an earlier recoverable task_failed must
+          // not overwrite that answer with an error.
+          let finalText = "";
           if (event.data) {
             try {
               const snapshot: {
@@ -383,11 +390,12 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
                 hitlPausedAt?: string;
                 conversationOutputs?: Record<string, unknown>[];
               } = JSON.parse(event.data);
+              const outputs = snapshot.conversationOutputs ?? [];
+              const lastOutput = outputs[outputs.length - 1];
+              const parts = lastOutput ? extractOutputParts(lastOutput) : [];
+              finalText = parts.join("\n\n");
               if (snapshot.conversationState === "AWAITING_HUMAN") {
-                const outputs = snapshot.conversationOutputs ?? [];
-                const lastOutput = outputs[outputs.length - 1];
-                const parts = lastOutput ? extractOutputParts(lastOutput) : [];
-                const pendingText = parts.join("\n\n");
+                const pendingText = finalText;
                 set((s) => ({
                   ...s,
                   isPaused: true,
@@ -420,12 +428,23 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           // explanation anywhere in the chat — the admin had to open the server
           // log to learn the turn had failed at all (observed with a provider
           // rejecting the stored LLM config: "`temperature` is deprecated").
-          // If nothing was streamed, nothing paused, and a step failed, say so
-          // where the answer should have been.
+          // If nothing was streamed, nothing paused, nothing arrived in the done
+          // snapshot, and a step failed, say so where the answer should have
+          // been. A snapshot that DOES carry the answer back-fills the bubble
+          // instead — the turn recovered, and an error banner over a visible
+          // answer would be a lie.
           set((s) => {
             const bubble = s.messages.find((m) => m.id === agentId);
             if (s.isPaused || s.error || bubble?.content.trim()) {
               return s;
+            }
+            if (finalText) {
+              return {
+                ...s,
+                messages: s.messages.map((m) =>
+                  m.id === agentId && !m.content.trim() ? { ...m, content: finalText } : m,
+                ),
+              };
             }
             const failure = [...s.events].reverse().find((e) => e.type === "task_failed");
             if (!failure) {
