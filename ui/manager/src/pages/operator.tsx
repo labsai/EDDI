@@ -407,9 +407,11 @@ export function OperatorPage() {
           tracesByMessageId={chat.tracesByMessageId}
           isStreaming={chat.isStreaming}
           error={chat.error}
-          onSend={chat.send}
+          onSend={(input, attachments) => chat.send(input, undefined, attachments)}
           onStop={chat.stop}
           onReset={chat.reset}
+          conversationId={chat.conversationId}
+          onEnsureConversation={chat.ensureConversation}
           isPaused={chat.isPaused}
           // approval-status first: the chat hook derives its own pauseReason from
           // getSimpleConversationLog, which does not carry one — so on the 409 and

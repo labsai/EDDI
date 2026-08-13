@@ -4,13 +4,21 @@ import remarkGfm from "remark-gfm";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatMarkdownText } from "@/components/groups/group-utils";
-import { Send, Square, RotateCcw, AlertTriangle, Bot, User, PauseCircle } from "lucide-react";
+import { Send, Square, RotateCcw, AlertTriangle, Bot, User, PauseCircle, Loader2, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatActivity } from "@/components/chat/chat-activity";
 import { InputHint } from "@/components/chat/input-hint";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
+import { PendingAttachmentChip } from "@/components/chat/attachment-chip";
+import { MessageAttachments } from "@/components/chat/chat-message";
+import {
+  filesFromClipboard,
+  useAttachmentStaging,
+  type ReadyAttachment,
+} from "@/hooks/use-attachment-staging";
 import { OPERATOR_STARTER_PROMPTS } from "@/lib/operator/system-prompt";
 import type { ChatMessage } from "@/lib/api/chat";
+import type { SentAttachment } from "@/hooks/use-chat";
 import type { PipelineEvent } from "@/hooks/use-debug-events";
 import type { HitlVerdict, PauseDetails, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
 import { cn } from "@/lib/utils";
@@ -22,9 +30,17 @@ export interface OperatorChatProps {
   tracesByMessageId: Record<string, PipelineEvent[]>;
   isStreaming: boolean;
   error: string | null;
-  onSend: (input: string) => void;
+  onSend: (input: string, attachments?: SentAttachment[]) => void;
   onStop: () => void;
   onReset: () => void;
+  /**
+   * Attachment support (optional — surfaces that omit both render no attach
+   * affordance). `conversationId` addresses uploads; `onEnsureConversation`
+   * lazily creates the conversation when a file is attached before the first
+   * message, mirroring how send() itself starts one.
+   */
+  conversationId?: string | null;
+  onEnsureConversation?: () => Promise<string>;
   /** Whether the conversation is currently AWAITING_HUMAN. */
   isPaused: boolean;
   /**
@@ -108,11 +124,26 @@ export function OperatorChat({
   blockedCalls,
   renderCallExtra,
   pauseSurface = "banner",
+  conversationId,
+  onEnsureConversation,
 }: OperatorChatProps) {
   const { t } = useTranslation();
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Same staging as the main chat panel — picker, paste, chips, per-turn cap.
+  const {
+    pendingAttachments,
+    isUploading,
+    hasReadyAttachment,
+    stageFiles,
+    handleFileInput,
+    removeAttachment,
+    takeForSend,
+  } = useAttachmentStaging(conversationId ?? null, onEnsureConversation);
+  const attachEnabled = Boolean(onEnsureConversation || conversationId);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -128,8 +159,18 @@ export function OperatorChat({
 
   function submit(text: string) {
     const value = text.trim();
-    if (!value || isStreaming || isPaused) return;
-    onSend(value);
+    // Attachment-only turns are allowed once an upload is ready, matching the
+    // main chat panel; nothing sends while an upload is still in flight.
+    if ((!value && !hasReadyAttachment) || isStreaming || isPaused || isUploading) return;
+    const sent: SentAttachment[] = takeForSend().map((a: ReadyAttachment) => ({
+      storageRef: a.result.storageRef,
+      fileName: a.result.fileName || a.file.name,
+      mimeType: a.result.mimeType || a.file.type || "application/octet-stream",
+      sizeBytes: a.result.sizeBytes ?? a.file.size,
+      forwardableInline: a.result.forwardableInline,
+      previewUrl: a.previewUrl,
+    }));
+    onSend(value, sent.length ? sent : undefined);
     setInput("");
     // The height was sized to the multi-line draft just sent — snap it back.
     requestAnimationFrame(autoResizeInput);
@@ -201,6 +242,11 @@ export function OperatorChat({
               {message.isStreaming && !message.content && (
                 <span className="text-muted-foreground">…</span>
               )}
+              {message.role === "user" && message.attachments?.length ? (
+                <div className={cn(message.content && "mt-2")}>
+                  <MessageAttachments attachments={message.attachments} />
+                </div>
+              ) : null}
             </div>
             {message.role === "user" && (
               <User className="mt-1 h-5 w-5 shrink-0 text-muted-foreground" />
@@ -299,7 +345,38 @@ export function OperatorChat({
         <div ref={endRef} />
       </div>
 
-      <div className="flex items-end gap-2 border-t border-border p-3">
+      {/* Pending attachment chips (staged, uploading, errored) */}
+      {pendingAttachments.length > 0 && (
+        <div className="flex flex-wrap gap-2 border-t border-border px-3 pt-2" data-testid="operator-pending-attachments">
+          {pendingAttachments.map((att) => (
+            <PendingAttachmentChip key={att.id} att={att} onRemove={() => removeAttachment(att.id)} />
+          ))}
+        </div>
+      )}
+      <div className={cn("flex items-end gap-2 p-3", pendingAttachments.length === 0 && "border-t border-border")}>
+        {attachEnabled && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={handleFileInput}
+              data-testid="operator-file-input"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isPaused || isUploading}
+              title={t("chat.attach", "Attach file")}
+              aria-label={t("chat.attach", "Attach file")}
+              data-testid="operator-attach-btn"
+            >
+              {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+            </Button>
+          </>
+        )}
         {/* A textarea, not an input: the old input's own keydown handler already
             special-cased !e.shiftKey, but an <input> cannot hold a second line,
             so Shift+Enter silently did nothing. Same Enter-sends /
@@ -316,6 +393,14 @@ export function OperatorChat({
               e.preventDefault();
               submit(input);
             }
+          }}
+          onPaste={(e) => {
+            // Screenshots / copied files paste as attachments; text pastes
+            // (no files on the clipboard) fall through untouched.
+            const files = filesFromClipboard(e);
+            if (!files.length || !attachEnabled || isPaused) return;
+            e.preventDefault();
+            void stageFiles(files);
           }}
           disabled={isPaused}
           rows={1}
@@ -336,7 +421,7 @@ export function OperatorChat({
           <Button
             size="icon"
             onClick={() => submit(input)}
-            disabled={!input.trim() || isPaused}
+            disabled={(!input.trim() && !hasReadyAttachment) || isPaused || isUploading}
             title={t("operator.chat.send", "Send")}
             aria-label={t("operator.chat.send", "Send")}
             data-testid="operator-send"

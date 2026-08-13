@@ -11,6 +11,8 @@ import type { SimpleConversationMemorySnapshot } from "@/lib/api/conversations";
 const h = vi.hoisted(() => ({
   frames: [] as Array<{ type: string; data: string }>,
   sendError: null as { status: number; message: string } | null,
+  /** InputData bodies handed to sendMessageStreaming, in call order. */
+  sentInputs: [] as Array<{ input: string; context?: Record<string, unknown> }>,
   conversationLogs: [] as Array<Partial<SimpleConversationMemorySnapshot>>,
   resumeCalls: [] as Array<{ conversationId: string; decision: unknown }>,
   /** Runs inside a conversation-log read, before it resolves — lets a test act
@@ -26,7 +28,13 @@ vi.mock("@/lib/api/chat", async (importOriginal) => {
   return {
     ...actual,
     startConversation: vi.fn(async () => "conv-1"),
-    sendMessageStreaming: async function* () {
+    sendMessageStreaming: async function* (
+      _env: string,
+      _agent: string,
+      _conv: string,
+      inputData: { input: string; context?: Record<string, unknown> },
+    ) {
+      h.sentInputs.push(inputData);
       if (h.sendError) throw h.sendError;
       for (const frame of h.frames) {
         yield frame as SSEEvent;
@@ -84,6 +92,7 @@ function textOutput(text: string) {
 beforeEach(() => {
   h.frames = [];
   h.sendError = null;
+  h.sentInputs = [];
   h.conversationLogs = [];
   h.resumeCalls = [];
   h.duringLogRead = null;
@@ -716,5 +725,78 @@ describe("a turn that answers via the done snapshot despite an earlier task_fail
     });
 
     expect(result.current.error).toMatch(/langchain step failed/);
+  });
+});
+
+describe("attachments on a turn", () => {
+  it("merges attachment_* refs into the turn context and shows chips on the user bubble", async () => {
+    h.frames = [{ type: "done", data: JSON.stringify({ conversationState: "READY" }) }];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("look at this", undefined, [
+        {
+          storageRef: "ref-9",
+          fileName: "shot.png",
+          mimeType: "image/png",
+          sizeBytes: 4,
+          forwardableInline: true,
+          previewUrl: "blob:preview",
+        },
+      ]);
+    });
+
+    // The backend contract: attachment_N context entries carrying the ref.
+    expect(h.sentInputs[0]?.context?.attachment_0).toEqual({
+      type: "object",
+      value: { storageRef: "ref-9", fileName: "shot.png" },
+    });
+    // The sent bubble carries the display chips.
+    const userMessage = result.current.messages.find((m) => m.role === "user");
+    expect(userMessage?.attachments?.[0]?.fileName).toBe("shot.png");
+    expect(userMessage?.attachments?.[0]?.previewUrl).toBe("blob:preview");
+  });
+
+  it("allows an attachment-only turn (no text)", async () => {
+    h.frames = [{ type: "done", data: JSON.stringify({ conversationState: "READY" }) }];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("", undefined, [
+        { storageRef: "ref-1", fileName: "doc.pdf", mimeType: "application/pdf", sizeBytes: 10 },
+      ]);
+    });
+
+    expect(h.sentInputs).toHaveLength(1);
+    expect(h.sentInputs[0]?.context?.attachment_0).toBeDefined();
+  });
+
+  it("still refuses a turn with neither text nor attachments", async () => {
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("", undefined, []);
+    });
+    expect(h.sentInputs).toHaveLength(0);
+  });
+
+  it("ensureConversation creates the conversation once and then reuses it", async () => {
+    const { result } = renderHook(() => useOperatorChat(config()));
+
+    let first = "";
+    let second = "";
+    await act(async () => {
+      first = await result.current.ensureConversation();
+      second = await result.current.ensureConversation();
+    });
+
+    expect(first).toBe("conv-1");
+    expect(second).toBe("conv-1");
+    // send() must then REUSE the lazily-created conversation, not start another.
+    h.frames = [{ type: "done", data: JSON.stringify({ conversationState: "READY" }) }];
+    await act(async () => {
+      await result.current.send("hi");
+    });
+    const { startConversation } = await import("@/lib/api/chat");
+    expect(vi.mocked(startConversation)).toHaveBeenCalledTimes(1);
   });
 });

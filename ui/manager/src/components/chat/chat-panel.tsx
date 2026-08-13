@@ -14,16 +14,14 @@ import {
   useRedoConversation,
   useRerunConversation,
 } from "@/hooks/use-chat";
-import {
-  uploadAttachment,
-  deleteAttachment,
-  isImageMime,
-  formatBytes,
-  AttachmentError,
-  MAX_ATTACHMENTS_PER_TURN,
-  type AttachmentResult,
-} from "@/lib/api/attachments";
 import type { SentAttachment } from "@/hooks/use-chat";
+import {
+  filesFromClipboard,
+  useAttachmentStaging,
+  type PendingAttachment,
+  type ReadyAttachment,
+} from "@/hooks/use-attachment-staging";
+import { PendingAttachmentChip } from "./attachment-chip";
 import { ChatMessage } from "./chat-message";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
@@ -56,22 +54,8 @@ import {
   Clock,
   Layers,
   HandMetal,
-  X,
-  FileText,
-  AlertTriangle,
   Wrench,
 } from "lucide-react";
-
-/** A file the user picked, tracked through upload → ready/error. */
-interface PendingAttachment {
-  id: string;
-  file: File;
-  /** Object URL for image previews. */
-  previewUrl?: string;
-  status: "uploading" | "ready" | "error";
-  result?: AttachmentResult;
-  error?: string;
-}
 
 export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const { t } = useTranslation();
@@ -201,58 +185,24 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
     );
   }, [selectedAgentId, startConversation]);
 
-  // ── Attachment upload ──
+  // ── Attachment upload (shared staging hook — also used by the operator) ──
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
-  const isUploading = pendingAttachments.some((a) => a.status === "uploading");
-  const hasReadyAttachment = pendingAttachments.some((a) => a.status === "ready");
-
-  // Mirror the pending list in a ref so handleAttach can read a live count
-  // (for the per-turn cap) without being re-created on every change.
-  const pendingRef = useRef(pendingAttachments);
-  useEffect(() => {
-    pendingRef.current = pendingAttachments;
-  }, [pendingAttachments]);
-
-  // Reset (and free) pending attachments whenever the conversation changes, so a
-  // storageRef uploaded to a previous conversation is never sent to a new one.
-  useEffect(() => {
-    setPendingAttachments((prev) => {
-      prev.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
-      return [];
-    });
-  }, [conversationId]);
-
-  // Free any unsent preview URLs if the panel unmounts (route change / input
-  // swap) — those transitions don't change conversationId.
-  useEffect(
-    () => () => {
-      pendingRef.current.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
-    },
-    [],
-  );
-
-  // Discard a staged attachment: free its object URL and best-effort delete the
-  // uploaded blob server-side. Runs OUTSIDE any state updater (StrictMode
-  // double-invokes updaters, which would double-fire the revoke / DELETE).
-  const discardPending = useCallback(
-    (a: PendingAttachment) => {
-      if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
-      if (a.status === "ready" && a.result && conversationId) {
-        deleteAttachment(conversationId, a.result.storageRef).catch(() => {});
-      }
-    },
-    [conversationId],
-  );
+  const {
+    pendingAttachments,
+    isUploading,
+    hasReadyAttachment,
+    stageFiles,
+    handleFileInput,
+    removeAttachment,
+    discardAll,
+    takeForSend,
+  } = useAttachmentStaging(conversationId);
 
   // Secret mode and attachments are mutually exclusive — a masked turn must not
   // carry a file. Discard anything staged the moment secret mode switches on.
   useEffect(() => {
-    if (!isSecretMode || pendingRef.current.length === 0) return;
-    pendingRef.current.forEach(discardPending);
-    pendingRef.current = [];
-    setPendingAttachments([]);
-  }, [isSecretMode, discardPending]);
+    if (isSecretMode) discardAll();
+  }, [isSecretMode, discardAll]);
 
   const handleSend = useCallback(
     (message: string, isSecret?: boolean) => {
@@ -261,45 +211,32 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
       // best-effort deleting the blob) instead of forwarding or displaying it.
       if (isSecret) {
         if (!message.trim()) return; // nothing to send once attachments are dropped
-        pendingAttachments.forEach(discardPending);
-        pendingRef.current = [];
-        setPendingAttachments([]);
+        discardAll();
         sendMessage.mutate({ message, isSecret: true });
         return;
       }
 
-      // Forward only successfully-uploaded attachments as context this turn.
-      const sent: SentAttachment[] = pendingAttachments
-        .filter((a): a is PendingAttachment & { result: AttachmentResult } =>
-          a.status === "ready" && !!a.result)
-        .map((a) => ({
-          storageRef: a.result.storageRef,
-          fileName: a.result.fileName || a.file.name,
-          mimeType: a.result.mimeType || a.file.type || "application/octet-stream",
-          sizeBytes: a.result.sizeBytes ?? a.file.size,
-          forwardableInline: a.result.forwardableInline,
-          previewUrl: a.previewUrl,
-        }));
+      // Guard BEFORE draining the staging area: a no-op send must not clear
+      // the user's staged chips.
+      if (!message.trim() && !hasReadyAttachment) return;
 
-      // Guard: nothing to send.
-      if (!message.trim() && sent.length === 0) return;
+      // Forward only successfully-uploaded attachments as context this turn.
+      const sent: SentAttachment[] = takeForSend().map((a: ReadyAttachment) => ({
+        storageRef: a.result.storageRef,
+        fileName: a.result.fileName || a.file.name,
+        mimeType: a.result.mimeType || a.file.type || "application/octet-stream",
+        sizeBytes: a.result.sizeBytes ?? a.file.size,
+        forwardableInline: a.result.forwardableInline,
+        previewUrl: a.previewUrl,
+      }));
 
       sendMessage.mutate({
         message,
         isSecret,
         attachments: sent.length ? sent : undefined,
       });
-      // Ready attachments hand their preview URL to the sent message (kept alive
-      // for the bubble thumbnail); free the URLs of any not-forwarded (errored)
-      // chips being dropped here so they don't leak.
-      const forwarded = new Set(sent.map((s) => s.previewUrl).filter(Boolean));
-      pendingAttachments.forEach((a) => {
-        if (a.previewUrl && !forwarded.has(a.previewUrl)) URL.revokeObjectURL(a.previewUrl);
-      });
-      pendingRef.current = [];
-      setPendingAttachments([]);
     },
-    [sendMessage, pendingAttachments, discardPending]
+    [sendMessage, takeForSend, discardAll, hasReadyAttachment]
   );
 
   const handleQuickReply = useCallback(
@@ -309,78 +246,14 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
     [sendMessage]
   );
 
-  const handleAttach = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files ?? []);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      if (!files.length || !conversationId) return;
-
-      // Enforce the per-turn cap up front against the live count (errored chips
-      // don't get forwarded, so they don't consume a slot).
-      const activeCount = pendingRef.current.filter((a) => a.status !== "error").length;
-      const room = Math.max(0, MAX_ATTACHMENTS_PER_TURN - activeCount);
-      if (files.length > room) {
-        toast.error(
-          t("chat.attachLimit", "You can attach up to {{max}} files per message.", {
-            max: MAX_ATTACHMENTS_PER_TURN,
-          })
-        );
-      }
-      const accepted = files.slice(0, room);
-      if (!accepted.length) return;
-
-      // Build entries once — object URLs are created here, never inside a state
-      // updater (StrictMode double-invokes updaters and would orphan a blob URL).
-      const entries: PendingAttachment[] = accepted.map((file, i) => ({
-        id: `att-${Date.now()}-${i}-${Math.random().toString(36).slice(2)}`,
-        file,
-        previewUrl: isImageMime(file.type) ? URL.createObjectURL(file) : undefined,
-        status: "uploading",
-      }));
-      pendingRef.current = [...pendingRef.current, ...entries];
-      setPendingAttachments((prev) => [...prev, ...entries]);
-
-      await Promise.all(
-        entries.map(async (entry) => {
-          try {
-            const result = await uploadAttachment(conversationId, entry.file);
-            setPendingAttachments((prev) =>
-              prev.map((a) => (a.id === entry.id ? { ...a, status: "ready", result } : a))
-            );
-            if (result.forwardableInline === false) {
-              toast.warning(
-                t(
-                  "chat.attachTooLargeToForward",
-                  "{{name}} is stored but too large to send to the model inline.",
-                  { name: result.fileName || entry.file.name },
-                )
-              );
-            }
-          } catch (err) {
-            const message =
-              err instanceof AttachmentError
-                ? err.message
-                : t("chat.attachError", "Failed to upload file");
-            setPendingAttachments((prev) =>
-              prev.map((a) =>
-                a.id === entry.id ? { ...a, status: "error", error: message } : a
-              )
-            );
-            toast.error(message);
-          }
-        })
-      );
+  // Pasted files (screenshots via Ctrl/Cmd+V) go through the same staging as
+  // the picker. No-conversation and secret-mode cases are handled at the input.
+  const handlePasteFiles = useCallback(
+    (files: File[]) => {
+      if (!conversationId) return;
+      void stageFiles(files);
     },
-    [conversationId, t]
-  );
-
-  const handleRemoveAttachment = useCallback(
-    (id: string) => {
-      const target = pendingRef.current.find((a) => a.id === id);
-      if (target) discardPending(target);
-      setPendingAttachments((prev) => prev.filter((a) => a.id !== id));
-    },
-    [discardPending]
+    [conversationId, stageFiles],
   );
 
   // ── Rerun last step ──
@@ -732,11 +605,12 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             isSecretMode={isSecretMode}
             onToggleSecret={toggleSecretMode}
             fileInputRef={fileInputRef}
-            onFileChange={handleAttach}
+            onFileChange={handleFileInput}
+            onPasteFiles={handlePasteFiles}
             isUploading={isUploading}
             hasConversation={!!conversationId}
             pendingAttachments={pendingAttachments}
-            onRemoveAttachment={handleRemoveAttachment}
+            onRemoveAttachment={removeAttachment}
             hasReadyAttachment={hasReadyAttachment}
             onUndo={conversationId && undoAvailable && !isProcessing ? () => undoConversation.mutate() : undefined}
             onRedo={conversationId && redoAvailable && !isProcessing ? () => redoConversation.mutate() : undefined}
@@ -848,6 +722,7 @@ function ChatInputWithSecretToggle({
   onToggleSecret,
   fileInputRef,
   onFileChange,
+  onPasteFiles,
   isUploading = false,
   hasConversation = false,
   pendingAttachments = [],
@@ -864,6 +739,8 @@ function ChatInputWithSecretToggle({
   onToggleSecret: () => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  /** Files pasted into the textarea (screenshots, copied files). */
+  onPasteFiles?: (files: File[]) => void;
   isUploading?: boolean;
   hasConversation?: boolean;
   pendingAttachments?: PendingAttachment[];
@@ -1051,6 +928,14 @@ function ChatInputWithSecretToggle({
                 handleSend();
               }
             }}
+            onPaste={(e) => {
+              // Screenshots / copied files paste as attachments. Text pastes
+              // (no files on the clipboard) fall through untouched.
+              const files = filesFromClipboard(e);
+              if (!files.length || !onPasteFiles || !hasConversation) return;
+              e.preventDefault();
+              onPasteFiles(files);
+            }}
             placeholder={t("chat.placeholder")}
             disabled={disabled}
             rows={1}
@@ -1090,78 +975,6 @@ function ChatInputWithSecretToggle({
   );
 }
 
-/** A single pending-attachment chip: thumbnail/icon, name, size, status + remove. */
-function PendingAttachmentChip({
-  att,
-  onRemove,
-}: {
-  att: PendingAttachment;
-  onRemove: () => void;
-}) {
-  const { t } = useTranslation();
-  const isImage = isImageMime(att.file.type) && att.previewUrl;
-  const isError = att.status === "error";
-
-  return (
-    <div
-      className={cn(
-        "group relative flex items-center gap-2 rounded-lg border bg-card px-2 py-1.5 pe-7 text-xs",
-        isError ? "border-destructive/40" : "border-border"
-      )}
-      title={att.error ?? att.file.name}
-      data-testid="attachment-chip"
-    >
-      {/* Thumbnail / icon */}
-      {isImage ? (
-        <img
-          src={att.previewUrl}
-          alt=""
-          className="h-8 w-8 shrink-0 rounded object-cover"
-          onError={(e) => {
-            (e.target as HTMLElement).style.display = "none";
-          }}
-        />
-      ) : (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-muted">
-          {isError ? (
-            <AlertTriangle className="h-4 w-4 text-destructive" />
-          ) : (
-            <FileText className="h-4 w-4 text-muted-foreground" />
-          )}
-        </div>
-      )}
-
-      {/* Name + size / status */}
-      <div className="flex min-w-0 flex-col">
-        <span className="max-w-[140px] truncate font-medium text-foreground">
-          {att.file.name}
-        </span>
-        <span className={cn("truncate", isError ? "text-destructive" : "text-muted-foreground")}>
-          {att.status === "uploading"
-            ? t("chat.attachUploading", "Uploading...")
-            : isError
-              ? (att.error ?? t("chat.attachError", "Failed to upload file"))
-              : formatBytes(att.result?.sizeBytes ?? att.file.size)}
-        </span>
-      </div>
-
-      {/* Uploading spinner overlays the remove slot */}
-      {att.status === "uploading" ? (
-        <Loader2 className="absolute inset-e-1.5 top-1.5 h-4 w-4 animate-spin text-muted-foreground" />
-      ) : (
-        <button
-          type="button"
-          onClick={onRemove}
-          className="absolute inset-e-1 top-1 flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground/60 hover:bg-muted hover:text-foreground"
-          title={t("common.remove", "Remove")}
-          data-testid="attachment-remove"
-        >
-          <X className="h-3 w-3" />
-        </button>
-      )}
-    </div>
-  );
-}
 
 function EmptyState() {
   const { t } = useTranslation();

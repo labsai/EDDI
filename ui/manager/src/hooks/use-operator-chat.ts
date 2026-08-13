@@ -7,6 +7,8 @@ import {
   type SSEEvent,
 } from "@/lib/api/chat";
 import { getSimpleConversationLog, extractOutputParts } from "@/lib/api/conversations";
+import { buildAttachmentContext } from "@/lib/api/attachments";
+import type { SentAttachment } from "@/hooks/use-chat";
 import { resumeConversation, type HitlVerdict, type ToolCallDecision } from "@/lib/api/hitl";
 import type { PipelineEvent } from "@/hooks/use-debug-events";
 import type { OperatorConfig } from "@/lib/api/operator";
@@ -88,7 +90,15 @@ interface OperatorChatActions {
     config: OperatorConfig | null | undefined,
     input: string,
     context?: Record<string, unknown>,
+    /** Already-uploaded attachments to forward (context refs) and display. */
+    attachments?: SentAttachment[],
   ) => Promise<void>;
+  /**
+   * Create (or return) the active conversation. Exposed so attachment uploads
+   * — which need a conversation to upload INTO — can lazily create it before
+   * the first message, exactly the way send() itself does.
+   */
+  ensureConversation: (config: OperatorConfig | null | undefined) => Promise<string>;
   stop: () => void;
   reset: () => void;
   resolveApproval: (
@@ -299,8 +309,20 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
     set({ abortController: null, isStreaming: false });
   },
 
-  send: async (config, input, context) => {
-    if (!config?.agentId || !input.trim()) return;
+  ensureConversation: async (config) => {
+    const existing = get().conversationId;
+    if (existing) return existing;
+    if (!config?.agentId) throw new Error("Operator is not configured");
+    const conversationId = await startConversation(config.environment, config.agentId);
+    storeConversationId(conversationId);
+    set({ conversationId });
+    return conversationId;
+  },
+
+  send: async (config, input, context, attachments) => {
+    // An attachment-only turn is legitimate (matching the main chat panel) —
+    // block only when there is neither text nor a file.
+    if (!config?.agentId || (!input.trim() && !attachments?.length)) return;
     // `set` below applies synchronously (unlike React's setState), so this
     // also closes a race a second mounted surface (the drawer, alongside the
     // full page) could otherwise trigger: a second send() invoked before this
@@ -313,6 +335,17 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       role: "user",
       content: input,
       timestamp: Date.now(),
+      // Chips/thumbnails on the sent bubble — same display contract as the
+      // main chat panel's user messages.
+      attachments: attachments?.length
+        ? attachments.map((a) => ({
+            fileName: a.fileName,
+            mimeType: a.mimeType,
+            sizeBytes: a.sizeBytes,
+            previewUrl: a.previewUrl,
+            forwardableInline: a.forwardableInline,
+          }))
+        : undefined,
     };
     // Built before the updater for the same reason as in resolveApproval —
     // `nextId` and `Date.now()` must not run inside one.
@@ -344,16 +377,21 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
 
     try {
       if (!conversationId) {
-        conversationId = await startConversation(config.environment, config.agentId);
-        storeConversationId(conversationId);
-        set({ conversationId });
+        conversationId = await get().ensureConversation(config);
+      }
+
+      // Merge attachment_* refs into the turn context so the backend forwards
+      // the uploaded files to the model (same contract as the chat panel).
+      const turnContext: Record<string, unknown> = { ...(context ?? {}) };
+      if (attachments?.length) {
+        Object.assign(turnContext, buildAttachmentContext(attachments));
       }
 
       const stream = sendMessageStreaming(
         config.environment,
         config.agentId,
         conversationId,
-        context ? { input, context } : { input },
+        Object.keys(turnContext).length ? { input, context: turnContext } : { input },
         controller.signal,
       );
 
@@ -674,16 +712,22 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
   const pausedPlaceholderId = useOperatorChatStore((s) => s.pausedPlaceholderId);
 
   const rawSend = useOperatorChatStore((s) => s.send);
+  const rawEnsureConversation = useOperatorChatStore((s) => s.ensureConversation);
   const stop = useOperatorChatStore((s) => s.stop);
   const reset = useOperatorChatStore((s) => s.reset);
   const resolveApproval = useOperatorChatStore((s) => s.resolveApproval);
   const clearError = useOperatorChatStore((s) => s.clearError);
 
-  // The only action that needs config bound in: resolveApproval only ever
-  // needs the conversation id already in the store, same as today.
+  // The actions that need config bound in: resolveApproval only ever needs the
+  // conversation id already in the store, same as today.
   const send = useCallback(
-    (input: string, context?: Record<string, unknown>) => rawSend(config, input, context),
+    (input: string, context?: Record<string, unknown>, attachments?: SentAttachment[]) =>
+      rawSend(config, input, context, attachments),
     [rawSend, config],
+  );
+  const ensureConversation = useCallback(
+    () => rawEnsureConversation(config),
+    [rawEnsureConversation, config],
   );
 
   return {
@@ -699,6 +743,7 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
     resolveError,
     pausedPlaceholderId,
     send,
+    ensureConversation,
     stop,
     reset,
     resolveApproval,
