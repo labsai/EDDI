@@ -166,6 +166,71 @@ class ApiCallExecutorPathEncodingTest {
         assertEquals("http://localhost:7070/agentstore/agents/6a7d818a524a6102900dea0f", uri.toString());
     }
 
+    // ==================== nested (conversation-state) values ====================
+
+    /**
+     * The encoding cannot stop at tool arguments. A conversation property is
+     * routinely captured FROM user input — {@code PropertySetterTask} with
+     * {@code valueString: "{memory.current.input}"} is the documented slot-filling
+     * pattern — so a path of {@code /agentstore/agents/{properties.agentId}}
+     * substitutes whatever the user typed. Who authored the template is not who
+     * controls the value.
+     */
+    @Test
+    @DisplayName("a nested conversation property cannot escape its path segment either")
+    void nestedPropertyIsEncoded() throws Exception {
+        var call = new ApiCall();
+        call.setName("readAgent");
+        call.setSaveResponse(false);
+        call.setFireAndForget(false);
+        var request = new Request();
+        request.setPath("/agentstore/agents/{properties.agentId}");
+        request.setMethod("GET");
+        call.setRequest(request);
+
+        Map<String, Object> templateData = new HashMap<>();
+        templateData.put("properties", Map.of("agentId", "../../secretstore/secrets/default/masterkey"));
+
+        executor.execute(call, memory, templateData, "http://localhost:7070");
+
+        var captor = ArgumentCaptor.forClass(URI.class);
+        verify(httpClient).newRequest(captor.capture(), any());
+        URI uri = captor.getValue();
+
+        assertFalse(uri.getRawPath().contains("/secretstore/"),
+                "a user-captured property rewrote the endpoint — resolved to: " + uri);
+        assertEquals(3, uri.getRawPath().chars().filter(c -> c == '/').count(),
+                "the substituted property must remain a single path segment: " + uri);
+    }
+
+    /**
+     * Neither a number nor a boolean can render a {@code /}, {@code ?} or {@code #}
+     * via {@code toString()}, so encoding them would only mangle legitimate output.
+     */
+    @Test
+    @DisplayName("non-String scalars pass through untouched")
+    void nonStringScalarsAreLeftAlone() {
+        assertEquals(42, ApiCallExecutor.encodePathValue(42, 0));
+        assertEquals(true, ApiCallExecutor.encodePathValue(true, 0));
+    }
+
+    /**
+     * The depth bound exists so a pathological or self-referential structure cannot
+     * turn a request into a stack overflow. Passing the value through past the
+     * ceiling (rather than dropping it) keeps a legitimate deep template rendering
+     * what it always did.
+     */
+    @Test
+    @DisplayName("recursion is depth-bounded and terminates on a self-referential map")
+    void recursionIsDepthBounded() {
+        var selfReferential = new HashMap<String, Object>();
+        selfReferential.put("self", selfReferential);
+        selfReferential.put("value", "../escape");
+
+        assertDoesNotThrow(() -> ApiCallExecutor.encodePathValue(selfReferential, 0),
+                "a cyclic template structure must not blow the stack");
+    }
+
     // ==================== the encoder itself ====================
 
     @Test

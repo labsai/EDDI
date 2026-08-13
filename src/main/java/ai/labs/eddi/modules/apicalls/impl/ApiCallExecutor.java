@@ -27,6 +27,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -714,12 +715,27 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * the URL. Percent-encoding the substituted value makes it one literal path
      * segment, whatever it contains.
      * <p>
-     * <b>Why only top-level Strings:</b> that is exactly the model-controlled
-     * surface. Conversation state lives in nested maps under reserved keys
-     * ({@code properties}, {@code memory}, {@code context}, ... — see
-     * {@code HttpCallToolsProvider#RESERVED_TEMPLATE_KEYS}, which the merge refuses
-     * to overwrite), so hand-authored templates like {@code {properties.agentId}}
-     * keep their existing behaviour unchanged.
+     * <b>Nested values are encoded too.</b> An earlier version of this stopped at
+     * the top level, reasoning that tool arguments are the model-controlled surface
+     * while conversation state under {@code properties} / {@code memory} /
+     * {@code context} belongs to the agent author. That was wrong: a property is
+     * routinely captured FROM user input — {@code PropertySetterTask} with
+     * {@code valueString: "{memory.current.input}"} is the documented slot-filling
+     * pattern — so {@code /agentstore/agents/{properties.agentId}} substitutes
+     * whatever the user typed. The same injection, one indirection further out. Who
+     * <em>authored</em> the template is not who <em>controls</em> the value.
+     * <p>
+     * Recursion is depth-bounded ({@link #MAX_PATH_VIEW_DEPTH}). Template data is
+     * rebuilt per turn from conversation memory and is not expected to nest deeply;
+     * the bound exists so a pathological or self-referential structure cannot turn
+     * a request into a stack overflow. Past it the value is passed through
+     * unencoded rather than dropped: losing data would silently change what a
+     * legitimate template renders, and nothing that deep is reachable by a path
+     * expression in practice.
+     * <p>
+     * Non-String scalars (numbers, booleans) are left alone — Qute renders them via
+     * {@code toString()} and none can yield a {@code /}, {@code ?} or {@code #}.
+     * Lists are walked because {@code {items.0}} is a valid expression.
      * <p>
      * Applied inside {@code buildRequest}, which serves both {@code resolve()} and
      * {@code execute()} — the gate-time fingerprint and the executed request see
@@ -727,9 +743,36 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     private static Map<String, Object> pathSafeView(Map<String, Object> templateDataObjects) {
         var view = new HashMap<String, Object>(templateDataObjects.size());
-        templateDataObjects.forEach((key, value) -> view.put(key,
-                value instanceof String stringValue ? encodePathSegment(stringValue) : value));
+        templateDataObjects.forEach((key, value) -> view.put(key, encodePathValue(value, 0)));
         return view;
+    }
+
+    /**
+     * Depth ceiling for {@link #pathSafeView}'s recursion — see its javadoc for why
+     * the bound exists and why exceeding it passes the value through.
+     */
+    static final int MAX_PATH_VIEW_DEPTH = 10;
+
+    static Object encodePathValue(Object value, int depth) {
+        if (value instanceof String stringValue) {
+            return encodePathSegment(stringValue);
+        }
+        if (depth >= MAX_PATH_VIEW_DEPTH) {
+            return value;
+        }
+        if (value instanceof Map<?, ?> nested) {
+            var copy = new LinkedHashMap<Object, Object>(nested.size());
+            nested.forEach((nestedKey, nestedValue) -> copy.put(nestedKey, encodePathValue(nestedValue, depth + 1)));
+            return copy;
+        }
+        if (value instanceof List<?> items) {
+            var copy = new ArrayList<>(items.size());
+            for (Object item : items) {
+                copy.add(encodePathValue(item, depth + 1));
+            }
+            return copy;
+        }
+        return value;
     }
 
     /** Percent-encodes every byte outside RFC 3986 unreserved, UTF-8. */

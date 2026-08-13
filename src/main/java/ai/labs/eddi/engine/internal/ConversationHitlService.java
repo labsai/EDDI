@@ -1305,9 +1305,10 @@ class ConversationHitlService {
      * has to mean the opposite. See {@link #populateToolApprovalsConfig}.
      *
      * @param readFailed
-     *            true only when the store threw. An agent that genuinely does not
-     *            exist yields {@code (null, false)} — that is an answer, not a
-     *            failure to obtain one.
+     *            true when the store ERRORED, at either step. An agent (or a pinned
+     *            version) that genuinely does not exist yields
+     *            {@code (config, false)} — absence is an answer, not a failure to
+     *            obtain one.
      */
     record AgentConfigLookup(AgentConfiguration config, boolean readFailed) {
     }
@@ -1317,15 +1318,29 @@ class ConversationHitlService {
             if (agentVersion != null && agentVersion > 0) {
                 return new AgentConfigLookup(agentStore.read(agentId, agentVersion), false);
             }
-        } catch (Exception pinnedMiss) {
-            LOGGER.debugf("Pinned agent config %s v%s unavailable, falling back to latest: %s",
-                    agentId, agentVersion, pinnedMiss.getMessage());
+        } catch (IResourceStore.ResourceNotFoundException pinnedGone) {
+            // The pinned VERSION is genuinely absent (deleted, or never existed).
+            // That is an answer, so falling back to the latest is legitimate.
+            LOGGER.debugf("Pinned agent config %s v%s does not exist, falling back to latest", agentId, agentVersion);
+        } catch (Exception pinnedError) {
+            // Anything else means the store could not answer for the PINNED version.
+            // Falling through to the latest would then silently swap in a DIFFERENT
+            // version's policy — and a later version may have relaxed the gate the
+            // conversation is pinned to. Report the failure instead; the caller that
+            // cares (populateToolApprovalsConfig) fails closed on it.
+            LOGGER.warnf("Could not read the pinned agent config %s v%s: %s",
+                    sanitize(agentId), agentVersion, sanitize(pinnedError.getMessage()));
+            return new AgentConfigLookup(null, true);
         }
         try {
             IResourceStore.IResourceId currentId = agentStore.getCurrentResourceId(agentId);
             return new AgentConfigLookup(currentId != null ? agentStore.read(agentId, currentId.getVersion()) : null, false);
+        } catch (IResourceStore.ResourceNotFoundException absent) {
+            // The agent itself is gone — again an answer, not a store failure.
+            LOGGER.debugf("Agent config %s does not exist", agentId);
+            return new AgentConfigLookup(null, false);
         } catch (Exception e) {
-            LOGGER.warnf("Could not read agent config %s: %s", agentId, e.getMessage());
+            LOGGER.warnf("Could not read agent config %s: %s", sanitize(agentId), sanitize(e.getMessage()));
             return new AgentConfigLookup(null, true);
         }
     }
