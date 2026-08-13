@@ -1147,7 +1147,7 @@ class ConversationHitlService {
             memory.setHitlApprovalTimeout(hitlConfig.getApprovalTimeout());
         } catch (Exception e) {
             LOGGER.warnf("Could not populate HITL timeout bookmark for %s: %s",
-                    memory.getConversationId(), e.getMessage());
+                    sanitize(memory.getConversationId()), sanitize(e.getMessage()));
         }
     }
 
@@ -1272,7 +1272,7 @@ class ConversationHitlService {
             // Fail closed on not-knowing; see ToolApprovalsConfig#UNDETERMINED.
             if (lookup.readFailed()) {
                 LOGGER.warnf("Could not read the tool-approval policy for %s — gating every tool call until it can be read",
-                        memory.getConversationId());
+                        sanitize(memory.getConversationId()));
                 memory.setAgentToolApprovalsConfig(ToolApprovalsConfig.UNDETERMINED);
                 return;
             }
@@ -1286,7 +1286,7 @@ class ConversationHitlService {
             // Same reasoning: this catch used to leave the carrier untouched (null on
             // a fresh memory), which is the fail-open again by a different route.
             LOGGER.warnf("Could not populate tool-approval config for %s: %s — gating every tool call",
-                    memory.getConversationId(), e.getMessage());
+                    sanitize(memory.getConversationId()), sanitize(e.getMessage()));
             memory.setAgentToolApprovalsConfig(ToolApprovalsConfig.UNDETERMINED);
         }
     }
