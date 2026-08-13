@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { createEvent, fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { DiscussionInput } from "@/components/groups/discussion-input";
 
@@ -175,5 +175,57 @@ describe("DiscussionInput", () => {
       expect(screen.getByTestId("start-discussion-btn")).toBeDisabled();
       expect(onSubmit).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("DiscussionInput — paste and drag-drop", () => {
+  const pasteFile = (target: HTMLElement, file: File) => {
+    const pasteEvent = createEvent.paste(target);
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      value: { files: [file], types: ["Files"], getData: () => "" },
+    });
+    fireEvent(target, pasteEvent);
+  };
+
+  it("pasting a file stages it as an attachment chip", async () => {
+    renderWithProviders(<DiscussionInput onSubmit={vi.fn()} />);
+
+    pasteFile(
+      screen.getByTestId("discussion-input"),
+      new File(["png-bytes"], "screenshot.png", { type: "image/png" }),
+    );
+
+    expect(await screen.findByTestId("discussion-attachments")).toHaveTextContent("screenshot.png");
+  });
+
+  it("dropping a file on the input area stages it, with the overlay shown mid-drag", async () => {
+    renderWithProviders(<DiscussionInput onSubmit={vi.fn()} />);
+
+    const form = screen.getByTestId("discussion-input").closest("form")!;
+    const dataTransfer = {
+      files: [new File(["doc"], "notes.txt", { type: "text/plain" })],
+      types: ["Files"],
+    };
+    fireEvent.dragEnter(form, { dataTransfer });
+    expect(screen.getByTestId("file-drop-overlay")).toBeInTheDocument();
+    fireEvent.drop(form, { dataTransfer });
+
+    expect(await screen.findByTestId("discussion-attachments")).toHaveTextContent("notes.txt");
+    expect(screen.queryByTestId("file-drop-overlay")).not.toBeInTheDocument();
+  });
+
+  it("a continuation ignores paste and drop — the backend rejects attachments there", async () => {
+    renderWithProviders(<DiscussionInput onSubmit={vi.fn()} mode="continue" />);
+
+    pasteFile(
+      screen.getByTestId("discussion-input"),
+      new File(["x"], "late.png", { type: "image/png" }),
+    );
+    fireEvent.dragEnter(screen.getByTestId("discussion-input").closest("form")!, {
+      dataTransfer: { files: [], types: ["Files"] },
+    });
+
+    expect(screen.queryByTestId("file-drop-overlay")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("discussion-attachments")).not.toBeInTheDocument();
   });
 });
