@@ -347,8 +347,12 @@ describe("ChatDrawer — opens scrolled to the bottom", () => {
           timestamp: Date.now(),
         });
       }
+      // Mount CLOSED first: the real drawer stays mounted in the layout and
+      // only the isOpen dep makes the effect fire on open — rendering with
+      // isOpen pre-set would pass even with that dep deleted, because a fresh
+      // mount runs its effect unconditionally.
       useChatDrawerStore.setState({
-        isOpen: true,
+        isOpen: false,
         agentId: "agent-1",
         agentName: "Agent One",
         step: "ready",
@@ -356,6 +360,10 @@ describe("ChatDrawer — opens scrolled to the bottom", () => {
       });
 
       const { container } = renderWithProviders(<ChatDrawer />);
+      const { act } = await import("@testing-library/react");
+      act(() => {
+        useChatDrawerStore.setState({ isOpen: true });
+      });
       const scroller = container.querySelector('[aria-live="polite"]') as HTMLElement;
       expect(scroller).toBeTruthy();
       await waitFor(() => expect(scroller.scrollTop).toBe(500));

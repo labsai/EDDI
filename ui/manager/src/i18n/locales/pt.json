@@ -702,6 +702,9 @@
       "toolCall": "Chamada de ferramenta",
       "toolResult": "Resultado",
       "error": "Ocorreu um erro",
+      "toolCallsCount_one": "{{count}} chamada de ferramenta",
+      "toolCallsCount_many": "{{count}} chamadas de ferramentas",
+      "toolCallsCount_other": "{{count}} chamadas de ferramentas",
       "toolCallsCount": "{{count}} chamadas de ferramentas",
       "usingTool": "Usando {{tool}}…"
     },

@@ -431,6 +431,16 @@ export function useSendMessage() {
         // TanStack Query blocks all subsequent .mutate() calls.
         const abort = new AbortController();
 
+        // Turn boundary at turn START, not only on the happy endings: a
+        // previous turn that ended without a done/error frame (connection
+        // drop, thrown stream error) leaves its events in the debug store,
+        // and the live status line renders straight off that array — the new
+        // turn would open showing the previous turn's tools and keep a
+        // contaminated count throughout. finalizeTurn() moves any leftovers
+        // into the turn history (preserving the trace) and clears the live
+        // set; it is a no-op when the previous turn ended cleanly.
+        useDebugStore.getState().finalizeTurn();
+
         const events = sendMessageStreaming(
           "production",
           selectedAgentId,
@@ -459,12 +469,18 @@ export function useSendMessage() {
           }
         }
         // Safety-net: if the stream ended without a done event
-        // (e.g. connection drop), finalize it here.
+        // (e.g. connection drop), finalize it here — the debug turn too, so
+        // the next turn's live status line does not open on this turn's
+        // events.
         if (store.getState().isProcessing) {
           store.getState().finishStreaming();
+          useDebugStore.getState().finalizeTurn();
         }
       } else {
         // --- Non-streaming path — pass context for secret input ---
+        // Same turn boundary as the streaming path: stale events from an
+        // abnormally-ended streamed turn must not render over this one.
+        useDebugStore.getState().finalizeTurn();
         // Add a placeholder typing indicator while waiting for the response
         const typingId = `agent-typing-${Date.now()}`;
         state.addMessage({

@@ -723,6 +723,8 @@
       "toolCall": "Tool call",
       "toolResult": "Result",
       "error": "Error occurred",
+      "toolCallsCount_one": "{{count}} tool call",
+      "toolCallsCount_other": "{{count}} tool calls",
       "toolCallsCount": "{{count}} tool calls",
       "usingTool": "Using {{tool}}…"
     },

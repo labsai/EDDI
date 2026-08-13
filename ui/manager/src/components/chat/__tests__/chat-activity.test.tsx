@@ -163,7 +163,8 @@ describe("ChatActivity", () => {
 
     renderWithProviders(<ChatActivity events={events} isLive={false} />);
 
-    // Since isLive is true, it should start expanded
+    // Auto-expands because the toolTrace makes toolCallCount > 0 — the
+    // expansion effect, not liveness, drives it
     expect(screen.getByText("llm")).toBeInTheDocument();
     expect(screen.getByText("unknown")).toBeInTheDocument();
 

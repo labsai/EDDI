@@ -694,6 +694,8 @@
       "toolCall": "उपकरण कॉल",
       "toolResult": "परिणाम",
       "error": "त्रुटि हुई",
+      "toolCallsCount_one": "{{count}} टूल कॉल",
+      "toolCallsCount_other": "{{count}} टूल कॉल",
       "toolCallsCount": "{{count}} टूल कॉल",
       "usingTool": "{{tool}} का उपयोग हो रहा है…"
     },

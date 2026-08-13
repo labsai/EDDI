@@ -694,6 +694,8 @@
       "toolCall": "Werkzeugaufruf",
       "toolResult": "Ergebnis",
       "error": "Fehler aufgetreten",
+      "toolCallsCount_one": "{{count}} Tool-Aufruf",
+      "toolCallsCount_other": "{{count}} Tool-Aufrufe",
       "toolCallsCount": "{{count}} Tool-Aufrufe",
       "usingTool": "Verwendet {{tool}} …"
     },

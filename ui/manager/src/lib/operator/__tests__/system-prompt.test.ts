@@ -169,6 +169,9 @@ describe("buildOperatorPromptBody", () => {
     for (const body of [buildOperatorPromptBody(READ_ENDPOINTS), buildOperatorPromptBody(WITH_A_WRITE)]) {
       expect(body).toContain("help an administrator understand and operate this EDDI");
       expect(body).toContain("How to work:");
+      // The persona/formatting section — deleting it (or dropping its
+      // insertion from buildOperatorPromptBody) must fail here.
+      expect(body).toContain("Personality and formatting:");
     }
   });
 

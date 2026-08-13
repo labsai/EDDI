@@ -694,6 +694,8 @@
       "toolCall": "ツール呼び出し",
       "toolResult": "結果",
       "error": "エラーが発生しました",
+      "toolCallsCount_one": "{{count}} 件のツール呼び出し",
+      "toolCallsCount_other": "{{count}} 件のツール呼び出し",
       "toolCallsCount": "{{count}} 件のツール呼び出し",
       "usingTool": "{{tool}} を使用中…"
     },

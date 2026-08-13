@@ -471,10 +471,14 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
           </button>
         )}
 
-        {/* Messages */}
+        {/* Messages — the FAB must be a SIBLING of the scroller, anchored to
+            this wrapper: absolutely positioned inside an overflow container it
+            would scroll away with the content, vanishing exactly when the
+            user has scrolled up and needs it. */}
+        <div className="relative flex-1 min-h-0">
         <div
           ref={scrollContainerRef}
-          className="relative flex-1 overflow-y-auto min-h-0"
+          className="h-full overflow-y-auto"
           onScroll={handleScroll}
         >
           {!selectedAgentId ? (
@@ -529,6 +533,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
               <div ref={messagesEndRef} />
             </div>
           )}
+          </div>
 
           {/* Scroll-to-bottom FAB with new content pulse */}
           {showScrollFab && (
