@@ -686,6 +686,7 @@
     "attachTooLargeToForward": "{{name}} est enregistré mais trop volumineux pour être envoyé directement au modèle.",
     "attachNotForwarded": "Non envoyé au modèle",
     "dropToAttach": "Déposez des fichiers pour les joindre",
+    "stepFailedFallback": "Cette étape a échoué. Le journal du serveur contient l'erreur complète.",
     "retry": "Réessayer la dernière étape",
     "retrySuccess": "Étape ré-exécutée",
     "retryError": "Échec de la tentative",

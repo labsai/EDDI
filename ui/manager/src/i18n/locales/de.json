@@ -678,6 +678,7 @@
     "attachTooLargeToForward": "{{name}} wurde gespeichert, ist aber zu groß, um direkt an das Modell gesendet zu werden.",
     "attachNotForwarded": "Nicht an das Modell gesendet",
     "dropToAttach": "Dateien hier ablegen, um sie anzuhängen",
+    "stepFailedFallback": "Dieser Schritt ist fehlgeschlagen. Das Server-Log enthält den vollständigen Fehler.",
     "retry": "Letzten Schritt wiederholen",
     "retrySuccess": "Schritt erneut ausgeführt",
     "retryError": "Wiederholung fehlgeschlagen",

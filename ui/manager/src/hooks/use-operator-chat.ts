@@ -8,7 +8,7 @@ import {
 } from "@/lib/api/chat";
 import { getSimpleConversationLog, extractOutputParts } from "@/lib/api/conversations";
 import { buildAttachmentContext } from "@/lib/api/attachments";
-import type { SentAttachment } from "@/hooks/use-chat";
+import { revokeMessagePreviews, type SentAttachment } from "@/hooks/use-chat";
 import { resumeConversation, type HitlVerdict, type ToolCallDecision } from "@/lib/api/hitl";
 import type { PipelineEvent } from "@/hooks/use-debug-events";
 import type { OperatorConfig } from "@/lib/api/operator";
@@ -122,6 +122,12 @@ type OperatorChatStore = OperatorChatState & OperatorChatInternal & OperatorChat
  * session.
  */
 const CONVERSATION_STORAGE_KEY = "eddi.operator.conversationId";
+
+/**
+ * The one in-flight conversation create, when any — module-level because the
+ * store is module-level and every surface shares it. See ensureConversation.
+ */
+let creatingConversation: Promise<string> | null = null;
 
 function readStoredConversationId(): string | null {
   try {
@@ -285,7 +291,14 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
   reset: () => {
     get().abortController?.abort();
     get().resolveAbortController?.abort();
+    // Discard any in-flight lazy create — its resolution must not resurrect a
+    // conversation into the clean slate (see ensureConversation).
+    creatingConversation = null;
     storeConversationId(null);
+    // Free the sent bubbles' attachment preview URLs before dropping them —
+    // takeForSend keeps them alive for the bubble thumbnails, so without this
+    // every sent image leaks its blob (pinning the File) until page unload.
+    revokeMessagePreviews(get().messages);
     set({
       messages: [],
       events: [],
@@ -313,22 +326,64 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
     const existing = get().conversationId;
     if (existing) return existing;
     if (!config?.agentId) throw new Error("Operator is not configured");
-    const conversationId = await startConversation(config.environment, config.agentId);
-    storeConversationId(conversationId);
-    set({ conversationId });
-    return conversationId;
+    // In-flight dedupe: two attach gestures before the first create resolves
+    // (drop then paste, or page + drawer) must share ONE conversation — a
+    // second create would re-key the staging area mid-upload and orphan the
+    // first gesture's file in a conversation nothing references.
+    const inFlight = creatingConversation;
+    if (inFlight) return inFlight;
+    const agentId = config.agentId;
+    // Nullable `let` + closure read instead of referencing a const inside its
+    // own initializer: the comparisons only run after the first await, by
+    // which point the assignment below has long happened.
+    let creating: Promise<string> | null = null;
+    creating = (async () => {
+      try {
+        const conversationId = await startConversation(config.environment, agentId);
+        // A reset() while the create was in flight cleared the slot — the user
+        // asked for a clean slate, so do not resurrect this conversation into
+        // the store (callers still get the id; their uploads just target a
+        // conversation the UI no longer tracks, exactly like any other
+        // discarded staging).
+        if (creatingConversation === creating) {
+          storeConversationId(conversationId);
+          set({ conversationId });
+        }
+        return conversationId;
+      } finally {
+        if (creatingConversation === creating) creatingConversation = null;
+      }
+    })();
+    creatingConversation = creating;
+    return creating;
   },
 
   send: async (config, input, context, attachments) => {
     // An attachment-only turn is legitimate (matching the main chat panel) —
     // block only when there is neither text nor a file.
-    if (!config?.agentId || (!input.trim() && !attachments?.length)) return;
+    if (!config?.agentId || (!input.trim() && !attachments?.length)) {
+      // The caller already drained its staging area — free the previews so a
+      // refused turn does not leak them (the files stay stored server-side).
+      if (attachments?.length) {
+        attachments.forEach((a) => {
+          if (a.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(a.previewUrl);
+        });
+      }
+      return;
+    }
     // `set` below applies synchronously (unlike React's setState), so this
     // also closes a race a second mounted surface (the drawer, alongside the
     // full page) could otherwise trigger: a second send() invoked before this
     // one yields at its first `await` sees isStreaming already true here and
     // bails, before either has touched the network.
-    if (get().isStreaming) return;
+    if (get().isStreaming) {
+      // Same refusal cleanup as above: the caller's staging area is already
+      // drained, so the previews would otherwise leak.
+      attachments?.forEach((a) => {
+        if (a.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(a.previewUrl);
+      });
+      return;
+    }
 
     const userMessage: ChatMessage = {
       id: nextId("user"),
@@ -527,6 +582,9 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
         // resumed answer rather than replace a bubble that isn't there. This
         // is the common shape after a page reload onto an already-paused
         // conversation.
+        // The dropped optimistic bubble may carry attachment previews — free
+        // them, the send never happened and no bubble will ever show them.
+        revokeMessagePreviews([userMessage]);
         set((s) => ({
           ...s,
           isPaused: true,

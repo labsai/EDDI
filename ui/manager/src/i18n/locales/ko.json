@@ -678,6 +678,7 @@
     "attachTooLargeToForward": "{{name}}은(는) 저장되었지만 모델에 직접 전송하기에는 너무 큽니다.",
     "attachNotForwarded": "모델에 전송되지 않음",
     "dropToAttach": "파일을 끌어다 놓아 첨부",
+    "stepFailedFallback": "이 단계가 실패했습니다. 서버 로그에 전체 오류가 있습니다.",
     "retry": "마지막 단계 재시도",
     "retrySuccess": "단계 재실행 완료",
     "retryError": "재시도 실패",

@@ -470,6 +470,12 @@ describe("enforceWriteCanaryGate", () => {
     expect(probeStarted).toBe(false);
     expect(error).toMatch(/did NOT hold/);
     expect(error).toMatch(/no probe was run and nothing was written/i);
+    // Pins the RollbackFailure re-throw guard: without it the rollback's own
+    // throw is caught again and re-wrapped, so the admin reads a generic
+    // "could not verify / deterministic check failed" headline instead of the
+    // proven-broken-gate one (and the operator is rolled back twice).
+    expect(error).not.toMatch(/deterministic check failed/i);
+    expect(error).not.toMatch(/could not verify/i);
   });
 
   /**
@@ -564,5 +570,19 @@ describe("enforceWriteCanaryGate", () => {
     expect(String(error)).toMatch(/remove it manually/i);
     // The original reason must survive too — the admin needs both facts.
     expect(String(error)).toMatch(/did NOT hold/);
+  });
+});
+
+describe("stream ends without a done frame", () => {
+  it("reports unknown, never fail — a dropped stream proves nothing about the gate", async () => {
+    // Only tokens, then the stream closes: no done frame, no final state. A
+    // "fail" verdict here would tear down a healthy operator on a network
+    // blip; the composite check's deterministic verdict carries the decision.
+    serveTurn(["event: token\ndata: working on it\n\n"]);
+
+    const result = await runOperatorWriteCanary(config(), spec());
+
+    expect(result.outcome).toBe("unknown");
+    expect(result.error).toMatch(/without a final conversation state/i);
   });
 });

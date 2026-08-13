@@ -199,7 +199,10 @@ async function runProbe(
         }
         break;
       }
-      if (event.type !== "task_complete") continue;
+      // task_failed frames carry a toolTrace too: a write attempted in a task
+      // that then died (provider failure mid-loop) must still count as
+      // attempted, or a real gate miss downgrades to "did not attempt".
+      if (event.type !== "task_complete" && event.type !== "task_failed") continue;
       try {
         const parsed = JSON.parse(event.data) as { toolTrace?: ToolTraceEntry[] };
         for (const entry of parsed.toolTrace ?? []) {
@@ -214,6 +217,20 @@ async function runProbe(
 
     if (streamError) {
       return { outcome: "unknown", toolCalls, error: streamError, durationMs: Date.now() - startedAt };
+    }
+
+    // A stream that closed without a done frame (connection drop, backend
+    // restart) proves nothing: the turn may well have paused correctly and we
+    // simply never heard. "fail" here would tear down a healthy operator on a
+    // network blip — report unknown and let the deterministic dry-run verdict
+    // carry the decision.
+    if (finalState === undefined) {
+      return {
+        outcome: "unknown",
+        toolCalls,
+        error: "The probe stream ended without a final conversation state — the outcome could not be observed.",
+        durationMs: Date.now() - startedAt,
+      };
     }
 
     if (finalState === "AWAITING_HUMAN") {
@@ -285,12 +302,14 @@ async function handlePause(
   startedAt: number,
 ): Promise<WriteCanaryResult> {
   let provokedTheExpectedWrite = false;
+  let statusReadFailed = false;
   try {
     const status = await getApprovalStatus(conversationId);
     provokedTheExpectedWrite =
       status.pauseDetails?.type === "TOOL_CALL" &&
       status.pauseDetails.calls.some((c) => c.toolName === expectedToolName);
   } catch {
+    statusReadFailed = true;
     // Falls through to reject below regardless — an unread pause must not be
     // left open on the platform just because its detail failed to load.
   }
@@ -308,10 +327,16 @@ async function handlePause(
   if (provokedTheExpectedWrite) {
     return { outcome: "pass", toolCalls, durationMs: Date.now() - startedAt };
   }
+  // Two different unknowns: "we read the pause and it was about something
+  // else" vs "we could not read the pause at all". Claiming the first while
+  // the second happened asserts knowledge the probe does not have — and on a
+  // legacy backend that misleading diagnosis accompanies a rollback.
   return {
     outcome: "unknown",
     toolCalls,
-    error: "The turn paused, but not on the expected descriptor-patch call — could not confirm what the gate actually caught.",
+    error: statusReadFailed
+      ? "The turn paused, but its detail could not be read — could not confirm what the gate actually caught."
+      : "The turn paused, but not on the expected descriptor-patch call — could not confirm what the gate actually caught.",
     durationMs: Date.now() - startedAt,
   };
 }

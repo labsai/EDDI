@@ -871,3 +871,115 @@ describe("streamed interim text vs the canonical answer", () => {
     expect(result.current.isPaused).toBe(true);
   });
 });
+
+describe("attachment preview lifecycle in the store", () => {
+  it("reset() revokes sent-bubble preview URLs before dropping the messages", async () => {
+    const revoked: string[] = [];
+    const original = URL.revokeObjectURL;
+    URL.revokeObjectURL = (url: string) => revoked.push(url);
+    try {
+      h.frames = [{ type: "done", data: JSON.stringify({ conversationState: "READY" }) }];
+      const { result } = renderHook(() => useOperatorChat(config()));
+      await act(async () => {
+        await result.current.send("here", undefined, [
+          { storageRef: "r1", fileName: "img.png", mimeType: "image/png", sizeBytes: 3, previewUrl: "blob:img-1" },
+        ]);
+      });
+
+      await act(async () => {
+        result.current.reset();
+      });
+
+      expect(revoked).toContain("blob:img-1");
+    } finally {
+      URL.revokeObjectURL = original;
+    }
+  });
+
+  it("a 409-refused send revokes the dropped optimistic bubble's previews", async () => {
+    const revoked: string[] = [];
+    const original = URL.revokeObjectURL;
+    URL.revokeObjectURL = (url: string) => revoked.push(url);
+    try {
+      h.sendError = { status: 409, message: "Conflict" };
+      // The 409 path reads the pause reason afterwards.
+      h.conversationLogs = [{ conversationState: "AWAITING_HUMAN" }];
+      const { result } = renderHook(() => useOperatorChat(config()));
+      await act(async () => {
+        await result.current.send("try", undefined, [
+          { storageRef: "r2", fileName: "shot.png", mimeType: "image/png", sizeBytes: 3, previewUrl: "blob:img-2" },
+        ]);
+      });
+
+      expect(revoked).toContain("blob:img-2");
+    } finally {
+      URL.revokeObjectURL = original;
+    }
+  });
+
+  it("a send refused while another surface streams revokes the drained previews", async () => {
+    const revoked: string[] = [];
+    const original = URL.revokeObjectURL;
+    URL.revokeObjectURL = (url: string) => revoked.push(url);
+    try {
+      useOperatorChatStore.setState({ isStreaming: true });
+      const { result } = renderHook(() => useOperatorChat(config()));
+      await act(async () => {
+        await result.current.send("busy", undefined, [
+          { storageRef: "r3", fileName: "doc.pdf", mimeType: "application/pdf", sizeBytes: 3, previewUrl: "blob:img-3" },
+        ]);
+      });
+
+      expect(h.sentInputs).toHaveLength(0);
+      expect(revoked).toContain("blob:img-3");
+    } finally {
+      URL.revokeObjectURL = original;
+      useOperatorChatStore.setState({ isStreaming: false });
+    }
+  });
+});
+
+describe("ensureConversation concurrency", () => {
+  it("two concurrent calls share one create — the second must not orphan the first gesture's upload", async () => {
+    const { startConversation } = await import("@/lib/api/chat");
+    vi.mocked(startConversation).mockClear();
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    let first = "";
+    let second = "";
+    await act(async () => {
+      const [a, b] = await Promise.all([
+        result.current.ensureConversation(),
+        result.current.ensureConversation(),
+      ]);
+      first = a;
+      second = b;
+    });
+
+    expect(first).toBe("conv-1");
+    expect(second).toBe("conv-1");
+    expect(vi.mocked(startConversation)).toHaveBeenCalledTimes(1);
+  });
+
+  it("a reset() during the in-flight create does not resurrect the conversation", async () => {
+    const { startConversation } = await import("@/lib/api/chat");
+    vi.mocked(startConversation).mockClear();
+    let release: (id: string) => void = () => {};
+    vi.mocked(startConversation).mockImplementationOnce(
+      () => new Promise<string>((resolve) => { release = resolve; }),
+    );
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    let created: Promise<string>;
+    act(() => {
+      created = result.current.ensureConversation();
+    });
+    await act(async () => {
+      result.current.reset();
+      release("conv-late");
+      await created!;
+    });
+
+    expect(useOperatorChatStore.getState().conversationId).toBeNull();
+  });
+});

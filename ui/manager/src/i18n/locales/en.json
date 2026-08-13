@@ -707,6 +707,7 @@
     "attachTooLargeToForward": "{{name}} is stored but too large to send to the model inline.",
     "attachNotForwarded": "Not sent to model",
     "dropToAttach": "Drop files to attach",
+    "stepFailedFallback": "This step failed. The server log has the full error.",
     "retry": "Retry Last Step",
     "retrySuccess": "Step re-executed",
     "retryError": "Retry failed",

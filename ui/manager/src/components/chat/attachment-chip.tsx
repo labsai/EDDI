@@ -20,6 +20,9 @@ export function FileDropOverlay() {
     <div
       className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-background/80"
       data-testid="file-drop-overlay"
+      // Purely visual drag affordance for a pointer interaction — announcing
+      // it would only interrupt the adjacent aria-live transcript.
+      aria-hidden="true"
     >
       <div className="flex items-center gap-2 text-sm font-medium text-primary">
         <Paperclip className="h-5 w-5" />
@@ -92,6 +95,7 @@ export function PendingAttachmentChip({
           onClick={onRemove}
           className="absolute inset-e-1 top-1 flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground/60 hover:bg-muted hover:text-foreground"
           title={t("common.remove", "Remove")}
+          aria-label={`${t("common.remove", "Remove")} ${att.file.name}`}
           data-testid="attachment-remove"
         >
           <X className="h-3 w-3" />

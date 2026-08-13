@@ -59,7 +59,7 @@ function toMessageAttachment(att: SentAttachment): MessageAttachment {
 }
 
 /** Free the object URLs held by message attachment previews before messages are dropped. */
-function revokeMessagePreviews(messages: ChatMessage[]): void {
+export function revokeMessagePreviews(messages: ChatMessage[]): void {
   for (const message of messages) {
     message.attachments?.forEach((a) => {
       if (a.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(a.previewUrl);

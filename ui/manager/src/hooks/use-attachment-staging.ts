@@ -169,24 +169,10 @@ export function useAttachmentStaging(
     conversationIdRef.current = conversationId;
   }, [conversationId]);
 
-  // Reset (and free) pending attachments whenever the conversation changes, so
-  // a storageRef uploaded to a previous conversation is never sent to a new
-  // one.
-  useEffect(() => {
-    setPendingAttachments((prev) => {
-      prev.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
-      return [];
-    });
-  }, [conversationId]);
-
-  // Free any unsent preview URLs if the surface unmounts (route change / input
-  // swap) — those transitions don't change conversationId.
-  useEffect(
-    () => () => {
-      pendingRef.current.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
-    },
-    [],
-  );
+  // The id stageFiles itself lazily created, when any. The conversation-switch
+  // reset below must NOT treat that id arriving as the prop as a switch — it
+  // is the very conversation the staged chips were uploaded to.
+  const lazyCreatedIdRef = useRef<string | null>(null);
 
   // Discard a staged attachment: free its object URL and best-effort delete
   // the uploaded blob server-side. Runs OUTSIDE any state updater (StrictMode
@@ -199,6 +185,37 @@ export function useAttachmentStaging(
     }
   }, []);
 
+  // Reset pending attachments whenever the conversation changes, so a
+  // storageRef uploaded to a previous conversation is never sent to a new one.
+  // Full discard, not a bare revoke: ready chips' blobs are best-effort
+  // DELETEd server-side too (discardPending targets a.result.conversationId,
+  // i.e. the conversation they were uploaded to), matching what removing a
+  // chip by hand does — otherwise every conversation switch with staged files
+  // orphans blobs on the server.
+  useEffect(() => {
+    // A lazily-created conversation's id propagating back as the prop is not a
+    // switch — the staged chips were uploaded to exactly this conversation and
+    // must survive it.
+    if (conversationId && conversationId === lazyCreatedIdRef.current) {
+      lazyCreatedIdRef.current = null;
+      return;
+    }
+    const previous = pendingRef.current;
+    if (previous.length === 0) return;
+    pendingRef.current = [];
+    previous.forEach(discardPending);
+    setPendingAttachments([]);
+  }, [conversationId, discardPending]);
+
+  // Free any unsent preview URLs if the surface unmounts (route change / input
+  // swap) — those transitions don't change conversationId.
+  useEffect(
+    () => () => {
+      pendingRef.current.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+    },
+    [],
+  );
+
   const stageFiles = useCallback(
     async (files: File[]) => {
       if (!files.length) return;
@@ -209,6 +226,7 @@ export function useAttachmentStaging(
         try {
           targetId = await ensureConversation();
           conversationIdRef.current = targetId;
+          lazyCreatedIdRef.current = targetId;
         } catch {
           toast.error(t("chat.attachError", "Failed to upload file"));
           return;

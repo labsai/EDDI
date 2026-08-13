@@ -309,6 +309,7 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
 // ==================== Task Row ====================
 
 function TaskRow({ task }: { task: TaskSummary }) {
+  const { t } = useTranslation();
   const [toolsExpanded, setToolsExpanded] = useState(false);
   const Icon = getExtensionIcon(task.taskType);
   const color = getExtensionColor(task.taskType);
@@ -383,7 +384,7 @@ function TaskRow({ task }: { task: TaskSummary }) {
           <span>
             {task.errorSummary
               ? truncate(task.errorSummary, 140)
-              : "This step failed — the server log has the full error."}
+              : t("chat.stepFailedFallback", "This step failed. The server log has the full error.")}
           </span>
         </div>
       )}

@@ -101,6 +101,35 @@ describe("OperatorChat — attachments", () => {
     expect(onEnsureConversation).toHaveBeenCalledTimes(1);
   });
 
+  it("the staged chip survives the lazily-created id propagating back as a prop", async () => {
+    // Production sequence: attach with conversationId=null → ensureConversation
+    // resolves → the store re-renders the surface with the new id. The staging
+    // hook's conversation-switch reset must not wipe the chip that triggered
+    // the create.
+    const user = userEvent.setup();
+    const onEnsureConversation = vi.fn().mockResolvedValue("conv-created");
+    stubUpload("conv-created");
+    const view = render(
+      <MemoryRouter>
+        <OperatorChat {...baseProps} conversationId={null} onEnsureConversation={onEnsureConversation} />
+      </MemoryRouter>,
+    );
+
+    await user.upload(
+      screen.getByTestId("operator-file-input"),
+      new File(["x"], "notes.txt", { type: "text/plain" }),
+    );
+    await screen.findByTestId("attachment-chip");
+
+    view.rerender(
+      <MemoryRouter>
+        <OperatorChat {...baseProps} conversationId="conv-created" onEnsureConversation={onEnsureConversation} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId("attachment-chip")).toBeInTheDocument();
+  });
+
   it("pasting a file stages it as an attachment", async () => {
     stubUpload("conv-op");
     renderChat({ conversationId: "conv-op" });
