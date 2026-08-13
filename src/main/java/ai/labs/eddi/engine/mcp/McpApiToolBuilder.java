@@ -120,7 +120,7 @@ public final class McpApiToolBuilder {
                     endpointCount++;
 
                     String desc = operation.getSummary() != null ? operation.getSummary() : httpCall.getName();
-                    summaryLines.add("- " + method.toUpperCase() + " " + path + ": " + desc);
+                    summaryLines.add("- " + method.toUpperCase() + " " + neutralizePathPlaceholders(path) + ": " + desc);
                 }
             }
         }
@@ -331,6 +331,29 @@ public final class McpApiToolBuilder {
         }
         matcher.appendTail(sb);
         return sb.toString();
+    }
+
+    /**
+     * Rewrites OpenAPI path placeholders ({@code /users/{id}}) to colon notation
+     * ({@code /users/:id}) for the human-readable API summary.
+     * <p>
+     * The summary is appended to the agent's {@code systemMessage}, and
+     * {@code LlmTask.runTemplateEngineOnParams} runs Qute over that parameter every
+     * turn. Qute parses {@code {id}}, {@code {name}}, {@code {environment}} as
+     * expressions; any placeholder that does not resolve against the template data
+     * map throws, which aborts templating for the WHOLE parameter — so one OpenAPI
+     * placeholder silently un-templates every legitimate {@code {memory.x}} or
+     * {@code {context.x}} expression an author put in the same prompt. EDDI's own
+     * spec triggers this on every {@code setup-api} agent (e.g. {@code GET
+     * /docs/{name}}), the Platform Operator included.
+     * <p>
+     * Colon notation is the common REST-doc convention for path parameters and has
+     * no meaning to Qute. Only the summary is rewritten — the {@code HttpCall}
+     * configs keep brace placeholders, because there the braces ARE Qute
+     * expressions, resolved against tool arguments at execution time.
+     */
+    static String neutralizePathPlaceholders(String path) {
+        return path.replaceAll("\\{([^}]+)}", ":$1");
     }
 
     /**

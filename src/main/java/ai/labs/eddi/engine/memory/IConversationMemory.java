@@ -11,6 +11,8 @@ import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
 
 import java.io.Serializable;
 import java.time.Instant;
@@ -355,6 +357,20 @@ public interface IConversationMemory extends Serializable {
         void addConversationOutputMap(String key, Map<String, Object> map);
     }
 
+    /**
+     * OpenAPI: declared explicitly as a {@code Property}-valued map. Without this,
+     * smallrye-openapi emits a named schema whose only content is a {@code $ref} to
+     * itself — a Map-extending interface gives the scanner no properties to
+     * describe (same family of problem as {@code ConversationOutput extends
+     * LinkedHashMap}, see the reflection-free-serializer note in
+     * application.properties). The self-reference makes EDDI's own
+     * {@code /q/openapi} undereferenceable: swagger-parser logs "Could not find
+     * /components/schemas/IConversationProperties in contents of
+     * #/components/schemas/IConversationProperties" — an ERROR on every
+     * {@code setup-api} provisioning, the Platform Operator's included.
+     */
+    @Schema(type = SchemaType.OBJECT, additionalProperties = Property.class,
+            description = "Conversation-scoped properties, keyed by property name")
     interface IConversationProperties extends Map<String, Property> {
         Map<String, Object> toMap();
     }
