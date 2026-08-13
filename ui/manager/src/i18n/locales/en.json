@@ -723,7 +723,8 @@
       "toolCall": "Tool call",
       "toolResult": "Result",
       "error": "Error occurred",
-      "toolCallsCount": "{{count}} tool calls"
+      "toolCallsCount": "{{count}} tool calls",
+      "usingTool": "Using {{tool}}…"
     },
     "context": {
       "conversationId": "Conversation ID",

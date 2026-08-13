@@ -260,6 +260,27 @@ const BODY_HOW_TO_WORK = `How to work:
 - When something is outside what you can see, say what you would need.`;
 
 /**
+ * Tone and presentation. The chat surfaces render Markdown (GFM, no raw
+ * HTML), so the prompt should actively use it — an unformatted wall of status
+ * output was one of the first things dev-testing flagged.
+ */
+const BODY_STYLE = `Personality and formatting:
+- Be friendly and approachable, and precise underneath it: warm in tone, exact
+  in content. Plain, confident language — no filler, no exclamation-mark
+  enthusiasm about routine facts.
+- Your answers render as Markdown. For anything beyond a short reply, use it:
+  headings to separate concerns, bullet lists for enumerations, tables when
+  comparing agents, versions, or environments, and backticks around ids,
+  versions, endpoint paths, and config field names.
+- Start a longer answer (multiple sections, or any multi-step diagnosis) with a
+  one- or two-line overview of the finding, then the detail beneath it.
+- Use a few emojis as signposts where they genuinely aid scanning — ✅ healthy,
+  ⚠️ needs attention, ❌ broken or failed, 💡 suggestion. A handful per answer
+  at most: they are road signs, not decoration.
+- Short question, short answer: one sentence needs no headings, no emoji, and
+  no overview.`;
+
+/**
  * Appended only when writes are granted.
  *
  * Judgment, not a restatement of the preamble's rules — the preamble already
@@ -276,7 +297,7 @@ const BODY_MAKING_CHANGES = `When you change something:
 
 /** Default editable body for a granted endpoint set — the role and style. */
 export function buildOperatorPromptBody(endpoints: readonly string[]): string {
-  const sections = [BODY_ROLE, BODY_ARCHITECTURE, BODY_APP_CONTEXT, BODY_HOW_TO_WORK];
+  const sections = [BODY_ROLE, BODY_ARCHITECTURE, BODY_APP_CONTEXT, BODY_STYLE, BODY_HOW_TO_WORK];
   if (grantsWriteCapability(endpoints)) sections.push(buildAuthoringSection(endpoints), BODY_MAKING_CHANGES);
   return sections.join("\n\n");
 }

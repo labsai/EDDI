@@ -527,7 +527,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
           {showScrollFab && (
             <button
               onClick={() => scrollToBottom("smooth")}
-              className="absolute bottom-4 end-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all animate-in fade-in slide-in-from-bottom-2"
+              className="absolute bottom-4 inset-x-0 mx-auto z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all animate-in fade-in slide-in-from-bottom-2"
               title={t("chat.scrollToBottom", "Scroll to bottom")}
               data-testid="scroll-to-bottom"
             >
@@ -1061,7 +1061,7 @@ function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
           ? t("chat.activity.error", "Error occurred")
           : activeToolNames.length > 0
             ? t("chat.usingTools", "Using tools")
-            : t("chat.thinking", "Thinking…")}
+            : t("chat.thinking", "Thinking...")}
       </span>
 
       {/* Tool names — inline, comma-separated */}

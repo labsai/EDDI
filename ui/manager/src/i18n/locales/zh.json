@@ -694,7 +694,8 @@
       "toolCall": "工具调用",
       "toolResult": "结果",
       "error": "发生错误",
-      "toolCallsCount": "{{count}} 次工具调用"
+      "toolCallsCount": "{{count}} 次工具调用",
+      "usingTool": "正在使用 {{tool}}…"
     },
     "context": {
       "conversationId": "对话 ID",

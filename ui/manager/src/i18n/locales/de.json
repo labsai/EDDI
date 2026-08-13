@@ -694,7 +694,8 @@
       "toolCall": "Werkzeugaufruf",
       "toolResult": "Ergebnis",
       "error": "Fehler aufgetreten",
-      "toolCallsCount": "{{count}} Tool-Aufrufe"
+      "toolCallsCount": "{{count}} Tool-Aufrufe",
+      "usingTool": "Verwendet {{tool}} …"
     },
     "context": {
       "conversationId": "Gesprächs-ID",

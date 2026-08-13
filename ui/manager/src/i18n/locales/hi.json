@@ -694,7 +694,8 @@
       "toolCall": "उपकरण कॉल",
       "toolResult": "परिणाम",
       "error": "त्रुटि हुई",
-      "toolCallsCount": "{{count}} टूल कॉल"
+      "toolCallsCount": "{{count}} टूल कॉल",
+      "usingTool": "{{tool}} का उपयोग हो रहा है…"
     },
     "context": {
       "conversationId": "बातचीत ID",

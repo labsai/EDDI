@@ -39,7 +39,26 @@ describe("ChatActivity", () => {
       },
     ];
 
+    // End-user live mode is now a single status line — no step fraction, no
+    // rows. The classic Processing bar lives on the debug surface.
     renderWithProviders(<ChatActivity events={events} isLive={true} totalSteps={5} />);
+    expect(screen.getByTestId("chat-activity-live-status")).toBeInTheDocument();
+    expect(screen.getByText(/Thinking/)).toBeInTheDocument();
+    expect(screen.queryByText("0/5")).not.toBeInTheDocument();
+  });
+
+  it("debug surface keeps the classic processing bar while live", () => {
+    const events: PipelineEvent[] = [
+      {
+        type: "task_start",
+        taskType: "ai.labs.rules",
+        taskId: "1",
+        index: 0,
+        timestamp: Date.now(),
+      },
+    ];
+
+    renderWithProviders(<ChatActivity events={events} isLive={true} totalSteps={5} showInternalSteps />);
     expect(screen.getByText(/Processing…/)).toBeInTheDocument();
     expect(screen.getByText("0/5")).toBeInTheDocument();
   });
@@ -116,6 +135,8 @@ describe("ChatActivity", () => {
   });
 
   it("renders details and supports tool tracing, expansion, and copying details", async () => {
+    // Details are a resting-state affordance in end-user mode now — live shows
+    // only the status line.
     const user = userEvent.setup();
     const events: PipelineEvent[] = [
       {
@@ -140,7 +161,7 @@ describe("ChatActivity", () => {
       },
     ];
 
-    renderWithProviders(<ChatActivity events={events} isLive={true} />);
+    renderWithProviders(<ChatActivity events={events} isLive={false} />);
 
     // Since isLive is true, it should start expanded
     expect(screen.getByText("llm")).toBeInTheDocument();
@@ -300,5 +321,74 @@ describe("ChatActivity — summary metrics follow the filtered list", () => {
     ];
     renderWithProviders(<ChatActivity events={events} isLive={false} showInternalSteps={true} />);
     expect(screen.getByText(/\b2 steps/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * End-user live mode is one status line: what the agent is doing right now.
+ * The wall of internal step rows (dozens of identical httpcalls entries, some
+ * spinning forever when their completion never pairs up) is debug-surface-only.
+ */
+describe("ChatActivity — end-user live status line", () => {
+  const start = (taskType: string, index: number): PipelineEvent => ({
+    type: "task_start",
+    taskType,
+    taskId: String(index),
+    index,
+    timestamp: Date.now(),
+  });
+
+  it("shows Thinking before any tool call, and never the step rows", () => {
+    const events: PipelineEvent[] = [
+      start("ai.labs.httpcalls", 0),
+      { ...start("ai.labs.httpcalls", 0), type: "task_complete", durationMs: 1 },
+      start("ai.labs.httpcalls", 1),
+    ];
+
+    renderWithProviders(<ChatActivity events={events} isLive={true} />);
+
+    expect(screen.getByTestId("chat-activity-live-status")).toBeInTheDocument();
+    expect(screen.getByText(/Thinking/)).toBeInTheDocument();
+    // No row list, no expander — the httpcalls wall must not render live.
+    expect(screen.queryByTestId("chat-activity-toggle")).not.toBeInTheDocument();
+    expect(screen.queryByText("httpCalls")).not.toBeInTheDocument();
+  });
+
+  it("names the tool currently in use once a toolTrace event arrives", () => {
+    const events: PipelineEvent[] = [
+      start("ai.labs.httpcalls", 0),
+      {
+        ...start("ai.labs.httpcalls", 0),
+        type: "task_complete",
+        durationMs: 2,
+        toolTrace: [
+          { type: "tool_call", tool: "readAgent", arguments: "{}" },
+          { type: "tool_result", tool: "readAgent", result: "ok" },
+        ],
+      },
+      start("ai.labs.httpcalls", 1),
+    ];
+
+    renderWithProviders(<ChatActivity events={events} isLive={true} />);
+
+    expect(screen.getByText(/readAgent/)).toBeInTheDocument();
+    expect(screen.getByText(/1 tool call/)).toBeInTheDocument();
+  });
+
+  it("a failed task breaks through the minimal line to the full view", () => {
+    const events: PipelineEvent[] = [
+      start("ai.labs.langchain", 0),
+      {
+        ...start("ai.labs.langchain", 0),
+        type: "task_failed",
+        errorType: "timeout",
+        errorSummary: "provider timed out",
+      },
+    ];
+
+    renderWithProviders(<ChatActivity events={events} isLive={true} />);
+
+    expect(screen.queryByTestId("chat-activity-live-status")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-activity-toggle")).toBeInTheDocument();
   });
 });

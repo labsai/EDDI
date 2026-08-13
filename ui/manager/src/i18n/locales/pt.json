@@ -702,7 +702,8 @@
       "toolCall": "Chamada de ferramenta",
       "toolResult": "Resultado",
       "error": "Ocorreu um erro",
-      "toolCallsCount": "{{count}} chamadas de ferramentas"
+      "toolCallsCount": "{{count}} chamadas de ferramentas",
+      "usingTool": "Usando {{tool}}…"
     },
     "context": {
       "conversationId": "ID da conversa",

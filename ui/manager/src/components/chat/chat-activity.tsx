@@ -204,6 +204,17 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
 
   const shouldPulse = isLive && hasRunning;
 
+  // The tool the agent is on right now — best live evidence is the last
+  // tool_call in the most recent event carrying a toolTrace. Null until the
+  // first tool call: the turn is purely "thinking" until then.
+  const currentTool = useMemo(() => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      const calls = events[i]?.toolTrace?.filter((e) => e.type === "tool_call");
+      if (calls?.length) return calls[calls.length - 1]!.tool;
+    }
+    return null;
+  }, [events]);
+
   // Auto-expand if tool calls, cascade steps, or errors are present
   useEffect(() => {
     if (toolCallCount > 0 || cascadeSteps.length > 0 || rawTasks.some((t) => t.status === "error")) {
@@ -214,6 +225,38 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
   // In end-user chat mode, if there are no tool calls, cascade steps, or errors, and processing is done, stay hidden
   if (!showInternalSteps && !isLive && tasks.length === 0 && cascadeSteps.length === 0) return null;
   if (rawTasks.length === 0 && cascadeSteps.length === 0) return null;
+
+  // End-user LIVE mode: a scrolling wall of internal step rows (an
+  // OpenAPI-provisioned agent's pipeline is dozens of identical httpcalls
+  // rows, and a row whose completion event never pairs up spins forever) says
+  // nothing a user can act on. Show one honest status line instead — what the
+  // agent is doing right now — and keep the step list for the debug surface
+  // and the resting summary. Two things still break through to the full view
+  // mid-turn, because they ARE actionable: a failed task (its classified
+  // error must not hide behind a cheerful spinner) and a model-cascade trace
+  // (escalations are the point of watching one).
+  const hasErrorTask = rawTasks.some((task) => task.status === "error");
+  if (!showInternalSteps && isLive && !hasErrorTask && cascadeSteps.length === 0) {
+    return (
+      <div className="flex justify-center px-4 py-1" data-testid="chat-activity">
+        <div className="w-full max-w-[85%] rounded-xl border border-primary/30 bg-primary/5">
+          <div className="flex items-center gap-2 px-3 py-2 text-xs" data-testid="chat-activity-live-status">
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+            <span className="font-medium text-primary">
+              {currentTool
+                ? t("chat.activity.usingTool", "Using {{tool}}…", { tool: currentTool })
+                : t("chat.thinking", "Thinking...")}
+            </span>
+            {toolCallCount > 0 && (
+              <span className="text-muted-foreground">
+                {t("chat.activity.toolCallsCount", "{{count}} tool calls", { count: toolCallCount })}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex justify-center px-4 py-1" data-testid="chat-activity">

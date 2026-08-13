@@ -726,7 +726,8 @@
       "toolCall": "استدعاء أداة",
       "toolResult": "النتيجة",
       "error": "حدث خطأ",
-      "toolCallsCount": "{{count}} من استدعاءات الأدوات"
+      "toolCallsCount": "{{count}} من استدعاءات الأدوات",
+      "usingTool": "جارٍ استخدام {{tool}}…"
     },
     "context": {
       "conversationId": "معرف المحادثة",
