@@ -4048,6 +4048,7 @@
     "toast": {
       "activated": "Operador da plataforma ativado",
       "activatedReadWrite": "Platform Operator ativado — acesso de escrita verificado",
+      "activatedReadWriteUnverified": "Operador de plataforma ativado — porta de aprovação verificada; a sonda de escrita ao vivo foi inconclusiva",
       "deactivated": "Operador da plataforma desativado",
       "reset": "Operador da plataforma eliminado",
       "activatedButUnreachable": "Operador implantado, mas não conseguiu ler a sua plataforma"

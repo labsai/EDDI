@@ -4048,6 +4048,7 @@
     "toast": {
       "activated": "Opérateur de plateforme activé",
       "activatedReadWrite": "Opérateur de plateforme activé — accès en écriture vérifié",
+      "activatedReadWriteUnverified": "Opérateur de plateforme activé — barrière d'approbation vérifiée ; la sonde d'écriture en direct n'a pas été concluante",
       "deactivated": "Opérateur de plateforme désactivé",
       "reset": "Opérateur de plateforme supprimé",
       "activatedButUnreachable": "Opérateur déployé, mais il n'a pas pu lire votre plateforme"

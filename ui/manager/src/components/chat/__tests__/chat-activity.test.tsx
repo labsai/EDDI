@@ -84,7 +84,7 @@ describe("ChatActivity", () => {
 
     renderWithProviders(<ChatActivity events={events} isLive={false} />);
 
-    expect(screen.getByText(/2 steps/)).toBeInTheDocument();
+    expect(screen.getByText(/\b2 steps/)).toBeInTheDocument();
     expect(screen.getByText("1.0s")).toBeInTheDocument(); // 150ms + 850ms = 1000ms = 1.0s
     expect(screen.getByText(/1 tool calls/)).toBeInTheDocument();
   });
@@ -285,8 +285,8 @@ describe("ChatActivity — summary metrics follow the filtered list", () => {
 
     renderWithProviders(<ChatActivity events={events} isLive={false} showInternalSteps={false} />);
 
-    expect(screen.getByText(/1 steps/)).toBeInTheDocument();
-    expect(screen.queryByText(/46 steps/)).not.toBeInTheDocument();
+    expect(screen.getByText(/\b1 steps/)).toBeInTheDocument();
+    expect(screen.queryByText(/\b46 steps/)).not.toBeInTheDocument();
     // The duration is the turn's, not the visible row's: 45×2ms + 900ms.
     expect(screen.getByText("990ms")).toBeInTheDocument();
   });
@@ -299,6 +299,6 @@ describe("ChatActivity — summary metrics follow the filtered list", () => {
       { type: "task_complete", taskType: "ai.labs.parser", taskId: "p1", index: 1, timestamp: Date.now() },
     ];
     renderWithProviders(<ChatActivity events={events} isLive={false} showInternalSteps={true} />);
-    expect(screen.getByText(/2 steps/)).toBeInTheDocument();
+    expect(screen.getByText(/\b2 steps/)).toBeInTheDocument();
   });
 });

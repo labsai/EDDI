@@ -220,15 +220,20 @@ async function runProbe(
     }
 
     // A stream that closed without a done frame (connection drop, backend
-    // restart) proves nothing: the turn may well have paused correctly and we
-    // simply never heard. "fail" here would tear down a healthy operator on a
-    // network blip — report unknown and let the deterministic dry-run verdict
-    // carry the decision.
+    // restart) proves nothing either way: a gated pause and an executed write
+    // BOTH emit the expected tool_call trace entry, so even an observed write
+    // attempt cannot be classified as "fail" without the final state — the
+    // turn may well have paused correctly and we simply never heard. Report
+    // unknown (with the attempt evidence when there is any) and let the
+    // deterministic dry-run verdict carry the decision.
     if (finalState === undefined) {
       return {
         outcome: "unknown",
         toolCalls,
-        error: "The probe stream ended without a final conversation state — the outcome could not be observed.",
+        error: sawExpectedToolCall
+          ? `The probe stream ended without a final conversation state — the ${expectedToolName} attempt was observed, ` +
+            "but whether the gate paused it could not be determined."
+          : "The probe stream ended without a final conversation state — the outcome could not be observed, and no write was attempted.",
         durationMs: Date.now() - startedAt,
       };
     }

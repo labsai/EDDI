@@ -110,8 +110,15 @@ export function useFileDrop(enabled: boolean, onFiles: (files: File[]) => void):
     [onFiles],
   );
 
+  // A disabled zone still needs inert handlers: without preventDefault the
+  // browser's default file-drop NAVIGATES the tab to the dropped file, losing
+  // the whole app state — strictly worse than a drop that does nothing.
+  const swallowFileDrag = useCallback((e: React.DragEvent) => {
+    if (dragHasFiles(e)) e.preventDefault();
+  }, []);
+
   if (!enabled) {
-    return { isDragOver: false, dropHandlers: {} };
+    return { isDragOver: false, dropHandlers: { onDragOver: swallowFileDrag, onDrop: swallowFileDrag } };
   }
   return { isDragOver, dropHandlers: { onDragEnter, onDragOver, onDragLeave, onDrop } };
 }

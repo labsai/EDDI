@@ -4020,6 +4020,7 @@
     "toast": {
       "activated": "平台操作员已启用",
       "activatedReadWrite": "平台操作员已激活——写入权限已验证",
+      "activatedReadWriteUnverified": "平台操作员已激活 — 审批门已验证；实时写入探测未能得出结论",
       "deactivated": "平台操作员已停用",
       "reset": "平台操作员已删除",
       "activatedButUnreachable": "操作员已部署，但无法读取你的平台"

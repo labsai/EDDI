@@ -4020,6 +4020,7 @@
     "toast": {
       "activated": "Platform Operator activated",
       "activatedReadWrite": "Platform Operator activated — write access verified",
+      "activatedReadWriteUnverified": "Platform Operator activated — approval gate verified; the live write probe was inconclusive",
       "deactivated": "Platform Operator deactivated",
       "reset": "Platform Operator deleted",
       "activatedButUnreachable": "Operator deployed, but it could not read your platform"

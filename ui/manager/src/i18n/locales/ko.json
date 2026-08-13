@@ -4020,6 +4020,7 @@
     "toast": {
       "activated": "플랫폼 오퍼레이터를 활성화했습니다",
       "activatedReadWrite": "플랫폼 오퍼레이터가 활성화되었습니다 — 쓰기 권한이 확인되었습니다",
+      "activatedReadWriteUnverified": "플랫폼 오퍼레이터 활성화됨 — 승인 게이트 검증됨; 실시간 쓰기 프로브는 결론에 이르지 못했습니다",
       "deactivated": "플랫폼 오퍼레이터를 비활성화했습니다",
       "reset": "플랫폼 오퍼레이터를 삭제했습니다",
       "activatedButUnreachable": "오퍼레이터를 배포했지만 플랫폼을 읽지 못했습니다"
