@@ -13,6 +13,7 @@ import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -173,7 +174,7 @@ class HitlConfigValidationWiringTest {
                     + "\"approvalTimeout\":\"30 minutes\"}}";
 
             // Deserialize via the SAME serializer the import service uses.
-            IJsonSerialization jsonSerialization = new ai.labs.eddi.datastore.serialization.JsonSerialization(
+            IJsonSerialization jsonSerialization = new JsonSerialization(
                     new com.fasterxml.jackson.databind.ObjectMapper());
             AgentConfiguration imported = jsonSerialization.deserialize(agentJson, AgentConfiguration.class);
 
@@ -186,7 +187,7 @@ class HitlConfigValidationWiringTest {
         @Test
         @DisplayName("an imported agent config with NO hitlConfig imports cleanly (backward compat)")
         void importAcceptsMissingHitl() throws Exception {
-            IJsonSerialization jsonSerialization = new ai.labs.eddi.datastore.serialization.JsonSerialization(
+            IJsonSerialization jsonSerialization = new JsonSerialization(
                     new com.fasterxml.jackson.databind.ObjectMapper());
             AgentConfiguration imported = jsonSerialization.deserialize("{}", AgentConfiguration.class);
 

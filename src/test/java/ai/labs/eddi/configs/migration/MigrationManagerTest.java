@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
 import java.util.*;
+import java.util.ArrayList;
 
 import static ai.labs.eddi.configs.migration.MigrationManager.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -1004,7 +1005,7 @@ class MigrationManagerTest {
         @DisplayName("should handle output with empty valueAlternatives")
         void emptyValueAlternatives() {
             var output = new HashMap<String, Object>();
-            output.put("valueAlternatives", new java.util.ArrayList<>());
+            output.put("valueAlternatives", new ArrayList<>());
 
             var outputContainer = new HashMap<String, Object>();
             outputContainer.put("outputs", List.of(output));

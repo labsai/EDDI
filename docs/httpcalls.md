@@ -790,4 +790,9 @@ _Response Code_
 
 ## Full Example
 
-Download the [Weather Agent Postman Collection](.gitbook/assets/EDDI%20-%20Weather%20bot.postman_collection.json) to run the full example.
+> **Run it yourself.** The GitBook-hosted Postman collections that used to be linked here
+> were lost in the migration. You do not need them: every request is shown inline above,
+> and Postman can import EDDI's own spec directly — **Import → Link →**
+> `<your-eddi-host>/openapi` (`http://localhost:7070/openapi` for a local install).
+> It is generated from the running build, so unlike a committed collection it cannot go
+> out of date. The same spec is browsable at `<your-eddi-host>/q/swagger-ui`.

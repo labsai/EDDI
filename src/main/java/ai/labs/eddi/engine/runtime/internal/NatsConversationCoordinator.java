@@ -27,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -241,7 +242,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
         if (!conversationQueues.containsKey(conversationId) && conversationQueues.size() >= maxActiveConversations) {
             log.warnf("Coordinator capacity exceeded (%d active conversations). Rejecting new conversationId=%s", maxActiveConversations,
                     safeConversationId);
-            throw new java.util.concurrent.RejectedExecutionException(
+            throw new RejectedExecutionException(
                     "Coordinator capacity exceeded: " + maxActiveConversations + " active conversations. Try again later.");
         }
 
@@ -269,7 +270,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 boolean enqueued = queue.offer(retryable);
                 if (!enqueued) {
                     log.warnf("Failed to enqueue task for conversationId=%s", safeConversationId);
-                    throw new java.util.concurrent.RejectedExecutionException(
+                    throw new RejectedExecutionException(
                             "Failed to enqueue task for conversationId=" + safeConversationId);
                 }
 

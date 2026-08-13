@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.groups.model.GroupWorkspace.Cadence;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -352,7 +353,7 @@ class TeamCadenceServiceTest {
         workspace.setRunningDiscussionId("gone-gc");
         workspace.setPulledTaskIds(List.of(taskA.id()));
         when(conversationStore.read("gone-gc")).thenThrow(
-                new ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException("gone"));
+                new IResourceStore.ResourceNotFoundException("gone"));
 
         assertTrue(service.reconcile(workspace));
 

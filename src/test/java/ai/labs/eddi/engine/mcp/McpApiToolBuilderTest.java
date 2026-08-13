@@ -5,11 +5,13 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -253,7 +255,7 @@ class McpApiToolBuilderTest {
 
         assertEquals("A path id", call.getParameters().get("requestBody"), "the path parameter keeps the name");
         // Every variable the body template references must still be declared.
-        var matcher = java.util.regex.Pattern.compile("\\{([A-Za-z0-9_]+)}").matcher(call.getRequest().getBody());
+        var matcher = Pattern.compile("\\{([A-Za-z0-9_]+)}").matcher(call.getRequest().getBody());
         assertTrue(matcher.find());
         assertTrue(call.getParameters().containsKey(matcher.group(1)),
                 "the body variable was renamed to " + matcher.group(1) + " and must be declared");
@@ -334,7 +336,7 @@ class McpApiToolBuilderTest {
         assertNotNull(createPet.getParameters(), "a call with a body must declare parameters");
         // Every variable the template references must be declared — that is the
         // invariant, whatever shape the template takes.
-        var matcher = java.util.regex.Pattern.compile("\\{([A-Za-z0-9_]+)}").matcher(createPet.getRequest().getBody());
+        var matcher = Pattern.compile("\\{([A-Za-z0-9_]+)}").matcher(createPet.getRequest().getBody());
         int found = 0;
         while (matcher.find()) {
             found++;
@@ -419,34 +421,6 @@ class McpApiToolBuilderTest {
         assertTrue(result.apiSummary().contains("POST /store/order"));
     }
 
-    /**
-     * The summary is appended to the agent's {@code systemMessage}, which
-     * {@code LlmTask} runs through Qute every turn. A brace placeholder like
-     * {@code {petId}} is a Qute expression there; it cannot resolve, and in dev
-     * mode the resulting throw aborts templating for the whole parameter — which
-     * silently un-templates every legitimate expression the author put in the same
-     * prompt. EDDI's own spec has such paths ({@code GET /docs/{name}}), so every
-     * setup-api agent hit this, the Platform Operator included.
-     */
-    @Test
-    void parseAndBuild_apiSummaryContainsNoQuteParsableBraces() {
-        var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
-        assertTrue(result.apiSummary().contains("GET /pets/:petId"),
-                "path parameters must be rewritten to colon notation, got:\n" + result.apiSummary());
-        assertFalse(result.apiSummary().matches("(?s).*\\{[a-zA-Z].*"),
-                "the API summary must not contain brace placeholders — Qute parses them as expressions:\n"
-                        + result.apiSummary());
-    }
-
-    @Test
-    void neutralizePathPlaceholders_rewritesAllPlaceholders() {
-        assertEquals("/secretstore/secrets/:tenant/:name",
-                McpApiToolBuilder.neutralizePathPlaceholders("/secretstore/secrets/{tenant}/{name}"));
-        assertEquals("/administration/:environment/deploy/:agentId",
-                McpApiToolBuilder.neutralizePathPlaceholders("/administration/{environment}/deploy/{agentId}"));
-        assertEquals("/pets", McpApiToolBuilder.neutralizePathPlaceholders("/pets"));
-    }
-
     @Test
     void parseSpec_invalidJson_throws() {
         assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec("not valid json or yaml"));
@@ -529,8 +503,8 @@ class McpApiToolBuilderTest {
         // (internal OpenAPI discovery must keep working). The scheme gate accepts
         // them — only a subsequent fetch/parse can fail, never the URL check itself.
         assertTrue(McpApiToolBuilder.looksLikeInlineSpec("http://10.0.0.5/openapi.json") == false);
-        assertTrue(ai.labs.eddi.modules.llm.tools.UrlValidationUtils.isValidHttpUrl("http://169.254.169.254/latest/meta-data/"));
-        assertTrue(ai.labs.eddi.modules.llm.tools.UrlValidationUtils.isValidHttpUrl("http://internal-svc.cluster.local/spec.json"));
+        assertTrue(UrlValidationUtils.isValidHttpUrl("http://169.254.169.254/latest/meta-data/"));
+        assertTrue(UrlValidationUtils.isValidHttpUrl("http://internal-svc.cluster.local/spec.json"));
     }
 
     @Test

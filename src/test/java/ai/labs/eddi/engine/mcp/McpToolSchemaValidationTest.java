@@ -3,6 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.mcp;
+import ai.labs.eddi.modules.llm.tools.EddiToolBridge;
+import ai.labs.eddi.modules.llm.tools.impl.CalculatorTool;
+import ai.labs.eddi.modules.llm.tools.impl.DataFormatterTool;
+import ai.labs.eddi.modules.llm.tools.impl.DateTimeTool;
+import ai.labs.eddi.modules.llm.tools.impl.PdfReaderTool;
+import ai.labs.eddi.modules.llm.tools.impl.TextSummarizerTool;
+import ai.labs.eddi.modules.llm.tools.impl.WeatherTool;
+import ai.labs.eddi.modules.llm.tools.impl.WebScraperTool;
+import ai.labs.eddi.modules.llm.tools.impl.WebSearchTool;
 
 import dev.langchain4j.agent.tool.P;
 import org.junit.jupiter.api.Test;
@@ -49,11 +58,11 @@ class McpToolSchemaValidationTest {
      */
     private static final Class<?>[] TOOL_CLASSES = {
             // Built-in langchain4j tools (use @P for parameter names)
-            ai.labs.eddi.modules.llm.tools.impl.CalculatorTool.class, ai.labs.eddi.modules.llm.tools.impl.DataFormatterTool.class,
-            ai.labs.eddi.modules.llm.tools.impl.DateTimeTool.class, ai.labs.eddi.modules.llm.tools.impl.PdfReaderTool.class,
-            ai.labs.eddi.modules.llm.tools.impl.TextSummarizerTool.class, ai.labs.eddi.modules.llm.tools.impl.WeatherTool.class,
-            ai.labs.eddi.modules.llm.tools.impl.WebScraperTool.class, ai.labs.eddi.modules.llm.tools.impl.WebSearchTool.class,
-            ai.labs.eddi.modules.llm.tools.EddiToolBridge.class,
+            CalculatorTool.class, DataFormatterTool.class,
+            DateTimeTool.class, PdfReaderTool.class,
+            TextSummarizerTool.class, WeatherTool.class,
+            WebScraperTool.class, WebSearchTool.class,
+            EddiToolBridge.class,
 
             // MCP tools (use @ToolArg — Java parameter names become keys)
             McpConversationTools.class, McpAdminTools.class, McpSetupTools.class,};

@@ -522,7 +522,8 @@ function Get-ComposeFiles {
             "docs/monitoring/prometheus.yml",
             "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml",
             "docs/monitoring/grafana-provisioning/datasources/datasources.yml",
-            "docs/monitoring/eddi-grafana-dashboard.json"
+            "docs/monitoring/eddi-grafana-dashboard.json",
+            "docs/monitoring/eddi-operations-dashboard.json"
         )
         foreach ($mf in $monitoringFiles) {
             $mfTarget = Join-Path -Path $EddiDir -ChildPath $mf
@@ -541,7 +542,16 @@ function Get-ComposeFiles {
                     Write-Information -MessageData "✅"
                 }
                 catch {
-                    Write-Warn "Failed to download $mf (monitoring may not work)"
+                    # Bind-mounted as a FILE by docker-compose.monitoring.yml, so a
+                    # missing one is worse than it sounds: Docker creates a
+                    # *directory* at the mount path and Grafana then fails to
+                    # provision, including the dashboards that did download. Same
+                    # reasoning as the Keycloak realm below.
+                    # -Recurse as well as -Force: what is in the way is most
+                    # likely a DIRECTORY left by a previous run's failed mount,
+                    # and -Force alone will not remove one.
+                    if (Test-Path $mfTarget) { Remove-Item -Path $mfTarget -Recurse -Force -ErrorAction SilentlyContinue }
+                    Write-Fail "Failed to download $mf (required for -WithMonitoring).`n     URL: $mfUrl"
                 }
             }
         }

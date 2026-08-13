@@ -11,8 +11,16 @@ import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
+import ai.labs.eddi.configs.llm.IRestLlmStore;
+import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
+import ai.labs.eddi.configs.output.IRestOutputStore;
+import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
+import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -357,28 +365,28 @@ public class StructuralMatcher {
 
         return switch (stepType) {
             case "ai.labs.dictionary" -> restInterfaceFactory.get(
-                    ai.labs.eddi.configs.dictionary.IRestDictionaryStore.class)
+                    IRestDictionaryStore.class)
                     .readRegularDictionary(resId.getId(), resId.getVersion(), "", "", 0, 0);
             case "ai.labs.rules" -> restInterfaceFactory.get(
-                    ai.labs.eddi.configs.rules.IRestRuleSetStore.class)
+                    IRestRuleSetStore.class)
                     .readRuleSet(resId.getId(), resId.getVersion());
             case "ai.labs.apicalls" -> restInterfaceFactory.get(
-                    ai.labs.eddi.configs.apicalls.IRestApiCallsStore.class)
+                    IRestApiCallsStore.class)
                     .readApiCalls(resId.getId(), resId.getVersion());
             case "ai.labs.llm" -> restInterfaceFactory.get(
-                    ai.labs.eddi.configs.llm.IRestLlmStore.class)
+                    IRestLlmStore.class)
                     .readLlm(resId.getId(), resId.getVersion());
             case "ai.labs.property" -> restInterfaceFactory.get(
-                    ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore.class)
+                    IRestPropertySetterStore.class)
                     .readPropertySetter(resId.getId(), resId.getVersion());
             case "ai.labs.output" -> restInterfaceFactory.get(
-                    ai.labs.eddi.configs.output.IRestOutputStore.class)
+                    IRestOutputStore.class)
                     .readOutputSet(resId.getId(), resId.getVersion(), "", "", 0, 0);
             case "ai.labs.mcpcalls" -> restInterfaceFactory.get(
-                    ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore.class)
+                    IRestMcpCallsStore.class)
                     .readMcpCalls(resId.getId(), resId.getVersion());
             case "ai.labs.rag" -> restInterfaceFactory.get(
-                    ai.labs.eddi.configs.rag.IRestRagStore.class)
+                    IRestRagStore.class)
                     .readRag(resId.getId(), resId.getVersion());
             default -> {
                 LOGGER.debugf("Unknown step type for typed read: %s", stepType);

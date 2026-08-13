@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -74,7 +75,7 @@ class RestAgentEngineToolPauseDetailsTest {
 
         var hitlAccessGuard = new HitlAccessGuard(
                 identity, ownershipValidator, conversationDescriptorStore, conversationService,
-                mock(ai.labs.eddi.engine.api.IGroupConversationService.class));
+                mock(IGroupConversationService.class));
         var conversationAccessGuard = new ConversationAccessGuard(
                 identity, ownershipValidator, conversationDescriptorStore);
         restAgentEngine = new RestAgentEngine(

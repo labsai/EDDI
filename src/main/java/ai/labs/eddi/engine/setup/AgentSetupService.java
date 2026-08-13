@@ -39,6 +39,7 @@ import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
+import ai.labs.eddi.modules.templating.TemplateEscaping;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -50,6 +51,7 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.util.*;
+import java.util.Map;
 
 /**
  * Service that encapsulates the business logic for setting up EDDI agents. Used
@@ -92,36 +94,6 @@ public class AgentSetupService {
     @Inject
     @ConfigProperty(name = "eddi.setup.llm.log-conversation-content", defaultValue = "false")
     boolean logConversationContent;
-
-    /**
-     * Optional {@code temperature} for a wizard-created LLM config. Unset by
-     * default.
-     * <p>
-     * This was hardcoded to {@code 0.3} on every generated config. That is no
-     * longer safe to send: newer models reject the parameter outright. Anthropic's
-     * Claude Sonnet 5 answers any request carrying it with
-     * {@code invalid_request_error: `temperature` is deprecated for this model}, so
-     * <em>every</em> turn of a wizard-created agent on such a model failed —
-     * including the Platform Operator's, which made it unusable from the moment it
-     * was provisioned.
-     * <p>
-     * A fixed sampling default is an opinion, not a requirement. Every builder
-     * applies this key only when present ({@code applyDouble} and friends), so
-     * leaving it out defers to the provider's own default rather than changing
-     * behaviour blindly.
-     * <p>
-     * Set {@code eddi.setup.llm.temperature} to put a fixed value back on every
-     * generated config, or set it per agent in the Manager — it stays a recognised
-     * parameter, it just is not written unasked.
-     * <p>
-     * Field-injected, like {@link #logConversationContent}, so a directly
-     * constructed instance (tests, non-CDI callers) still works; it reads
-     * {@code null} there, which the guard in {@link #createLlmConfig} treats as
-     * "not set".
-     */
-    @Inject
-    @ConfigProperty(name = "eddi.setup.llm.temperature", defaultValue = "")
-    String setupTemperature;
 
     @Inject
     public AgentSetupService(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin,
@@ -449,9 +421,7 @@ public class AgentSetupService {
             createdResources.put("behaviorLocation", behaviorLocation);
             patchDescriptor(extractIdFromLocation(behaviorLocation), extractVersionFromLocation(behaviorLocation), request.agentName());
 
-            // Enrich the system prompt with API endpoint summary so the LLM
-            // understands which endpoints are available and how to use them.
-            String enrichedPrompt = request.systemPrompt() + "\n\n" + buildResult.apiSummary();
+            String enrichedPrompt = enrichSystemPrompt(request.systemPrompt(), buildResult.apiSummary());
             boolean quickReplies = request.enableQuickReplies() != null && request.enableQuickReplies();
             boolean sentiment = request.enableSentimentAnalysis() != null && request.enableSentimentAnalysis();
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
@@ -608,6 +578,31 @@ public class AgentSetupService {
     }
 
     /**
+     * Appends the generated API endpoint summary to the caller's system prompt, so
+     * the LLM knows which endpoints exist and how to use them.
+     * <p>
+     * The summary is wrapped in a Qute unparsed block; the caller's own prompt is
+     * not. A summary line is a raw OpenAPI path, and a path parameter is
+     * indistinguishable from a Qute expression —
+     * {@code /administration/docs/{name}} <em>is</em> <code>{name}</code>.
+     * {@code LlmTask} renders the system prompt on every turn, so an unescaped
+     * summary failed the render with {@code Key "name" not found}, naming a key
+     * nobody wrote in a prompt fragment the agent's author never saw.
+     * <p>
+     * The turn then continued, which is the part worth knowing:
+     * {@code runTemplateEngineOnParams} logs the failure per parameter and leaves
+     * the RAW value in place, so the model was sent the whole system prompt
+     * unrendered — including the caller's own <code>{#if}</code> sections,
+     * verbatim. A silently degraded prompt on every turn, plus a stack trace per
+     * turn, rather than a clean failure. Escaping only the generated half leaves
+     * the caller's prompt a live template, which is what it is meant to be: the
+     * Manager's operator prompt uses <code>{#if context.screen}</code>.
+     */
+    static String enrichSystemPrompt(String systemPrompt, String apiSummary) {
+        return systemPrompt + "\n\n" + TemplateEscaping.unparsedBlock(apiSummary);
+    }
+
+    /**
      * Create LLM config with the specified model, system prompt, and tool settings.
      */
     public LlmConfiguration createLlmConfig(String modelType, String modelId, String apiKey, String systemPrompt, boolean enableTooling,
@@ -628,11 +623,14 @@ public class AgentSetupService {
         params.put("systemMessage", effectiveSystemPrompt);
         params.put("addToOutput", promptResponseJson == null ? "true" : "false");
         params.put("timeout", "60000");
-        // Written only when configured — see #setupTemperature. A hardcoded 0.3 broke
-        // every turn on models that reject the parameter (Claude Sonnet 5 and later).
-        if (setupTemperature != null && !setupTemperature.isBlank()) {
-            params.put("temperature", setupTemperature.trim());
-        }
+        // No "temperature" is written. It used to be pinned to 0.3 for every provider
+        // and every model, which is not a value this service is in a position to have
+        // an opinion about: current frontier models REJECT the parameter outright
+        // ("`temperature` is deprecated for this model" — a 400 from Anthropic on the
+        // default model, so every turn of a wizard-created agent failed). Omitting it
+        // lets each provider apply its own default; an agent designer who wants a
+        // specific sampling temperature adds it to the generated config, where it is
+        // an explicit choice rather than an invisible inherited one.
         // Written explicitly (rather than omitted) so the setting is visible and
         // flippable on the generated config in the Manager. See
         // #logConversationContent for why the default is off.
@@ -1188,7 +1186,7 @@ public class AgentSetupService {
             if (httpStatus == 200) {
                 try {
                     @SuppressWarnings("unchecked")
-                    var body = (java.util.Map<String, Object>) response.getEntity();
+                    var body = (Map<String, Object>) response.getEntity();
                     String deployStatus = body != null && body.containsKey("status") ? body.get("status").toString() : "UNKNOWN";
                     result.put("deployed", "READY".equals(deployStatus));
                     result.put("deploymentStatus", deployStatus);

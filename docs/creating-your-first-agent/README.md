@@ -6,7 +6,40 @@ _Prerequisites: Up and Running instance of **EDDI** (see:_ [_Getting started_](.
 
 In order to build an Agent with **EDDI**, you will have to create a few configuration files and `POST` them to the corresponding REST APIs.
 
-![](<../.gitbook/assets/eddi-tech-overview-2 (2).jpg>)
+An **Agent** points at one or more **Workflows**, and each Workflow lists the
+lifecycle steps to run in order. Every step reads its own JSON configuration, so
+what the agent *does* lives in configuration rather than in code:
+
+```mermaid
+flowchart TD
+    subgraph cfg ["What you POST (JSON configuration)"]
+        direction LR
+        A["Agent"] --> W["Workflow<br/><i>which steps, in what order</i>"]
+        W --> D["Dictionary"]
+        W --> B["Behavior Rules"]
+        W --> H["Http Connector"]
+        W --> O["Output"]
+    end
+
+    subgraph run ["What happens on every user message"]
+        direction TB
+        I["User input"] --> P["Parser<br/><i>text → expressions</i>"]
+        P --> R["Behavior Rules<br/><i>conditions → actions</i>"]
+        R --> C["Http Connector<br/><i>call an API</i>"]
+        R --> G["Output Generation<br/><i>pick a reply</i>"]
+        C --> G
+        G --> Resp["Reply to the user"]
+    end
+
+    D -.configures.-> P
+    B -.configures.-> R
+    H -.configures.-> C
+    O -.configures.-> G
+```
+
+The **actions** emitted by Behavior Rules are the whole orchestration mechanism:
+steps never call each other directly, they just react to actions. That is why
+adding a capability usually means adding a rule and an output, not writing Java.
 
 A agent can consists of the following elements:
 

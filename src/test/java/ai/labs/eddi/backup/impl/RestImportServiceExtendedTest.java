@@ -10,11 +10,14 @@ import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.backup.model.SyncMapping;
 import ai.labs.eddi.backup.model.SyncRequest;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
+import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
+import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -572,26 +575,26 @@ class RestImportServiceExtendedTest {
                     .thenThrow(new IResourceStore.ResourceNotFoundException("nf"));
 
             // Snippet deserialization
-            var snippet = new ai.labs.eddi.configs.snippets.model.PromptSnippet();
+            var snippet = new PromptSnippet();
             snippet.setName("cautious_mode");
             snippet.setContent("Be cautious");
             when(jsonSerialization.deserialize(
                     eq("{\"name\":\"cautious_mode\",\"content\":\"Be cautious\"}"),
-                    eq(ai.labs.eddi.configs.snippets.model.PromptSnippet.class)))
+                    eq(PromptSnippet.class)))
                     .thenReturn(snippet);
 
             // Mock CDI for IRestPromptSnippetStore (used by addSnippetDiffs →
             // getRestResourceStore)
-            var snippetStore = mock(ai.labs.eddi.configs.snippets.IRestPromptSnippetStore.class);
+            var snippetStore = mock(IRestPromptSnippetStore.class);
             // readSnippetDescriptors returns empty → no existing snippets
             when(snippetStore.readSnippetDescriptors(eq(""), eq(0), eq(0))).thenReturn(List.of());
 
             try (var cdiMock = org.mockito.Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
                 var cdi = mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdi);
-                var instance = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.snippets.IRestPromptSnippetStore>) mock(
+                var instance = (jakarta.enterprise.inject.Instance<IRestPromptSnippetStore>) mock(
                         jakarta.enterprise.inject.Instance.class);
-                when(cdi.select(ai.labs.eddi.configs.snippets.IRestPromptSnippetStore.class)).thenReturn(instance);
+                when(cdi.select(IRestPromptSnippetStore.class)).thenReturn(instance);
                 when(instance.get()).thenReturn(snippetStore);
 
                 ImportPreview result = importService.previewImport(
@@ -641,16 +644,16 @@ class RestImportServiceExtendedTest {
                     .thenThrow(new IResourceStore.ResourceNotFoundException("nf"));
 
             // Snippet deserialization
-            var snippet = new ai.labs.eddi.configs.snippets.model.PromptSnippet();
+            var snippet = new PromptSnippet();
             snippet.setName("safety_prompt");
             snippet.setContent("Be safe");
             when(jsonSerialization.deserialize(
                     eq("{\"name\":\"safety_prompt\",\"content\":\"Be safe\"}"),
-                    eq(ai.labs.eddi.configs.snippets.model.PromptSnippet.class)))
+                    eq(PromptSnippet.class)))
                     .thenReturn(snippet);
 
             // Mock CDI for snippet store
-            var snippetStore = mock(ai.labs.eddi.configs.snippets.IRestPromptSnippetStore.class);
+            var snippetStore = mock(IRestPromptSnippetStore.class);
             // Existing snippet descriptor
             String existingSnippetId = "eeee11112222333344445555";
             var existingDesc = new DocumentDescriptor();
@@ -660,16 +663,16 @@ class RestImportServiceExtendedTest {
                     .thenReturn(List.of(existingDesc));
 
             // readSnippet returns a snippet with the same name
-            var existingSnippet = new ai.labs.eddi.configs.snippets.model.PromptSnippet();
+            var existingSnippet = new PromptSnippet();
             existingSnippet.setName("safety_prompt");
             when(snippetStore.readSnippet(existingSnippetId, 1)).thenReturn(existingSnippet);
 
             try (var cdiMock = org.mockito.Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
                 var cdi = mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdi);
-                var instance = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.snippets.IRestPromptSnippetStore>) mock(
+                var instance = (jakarta.enterprise.inject.Instance<IRestPromptSnippetStore>) mock(
                         jakarta.enterprise.inject.Instance.class);
-                when(cdi.select(ai.labs.eddi.configs.snippets.IRestPromptSnippetStore.class)).thenReturn(instance);
+                when(cdi.select(IRestPromptSnippetStore.class)).thenReturn(instance);
                 when(instance.get()).thenReturn(snippetStore);
 
                 ImportPreview result = importService.previewImport(
@@ -833,7 +836,7 @@ class RestImportServiceExtendedTest {
                     .thenReturn(zipDescriptor);
 
             // Mock CDI for IAgentStore.create
-            var agentStore = mock(ai.labs.eddi.configs.agents.IAgentStore.class);
+            var agentStore = mock(IAgentStore.class);
             IResourceId createdId = testResourceId(newAgentId, 1);
             when(agentStore.create(any())).thenReturn(createdId);
 
@@ -851,9 +854,9 @@ class RestImportServiceExtendedTest {
                 var cdi = mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdi);
 
-                var agentStoreInstance = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.agents.IAgentStore>) mock(
+                var agentStoreInstance = (jakarta.enterprise.inject.Instance<IAgentStore>) mock(
                         jakarta.enterprise.inject.Instance.class);
-                when(cdi.select(ai.labs.eddi.configs.agents.IAgentStore.class)).thenReturn(agentStoreInstance);
+                when(cdi.select(IAgentStore.class)).thenReturn(agentStoreInstance);
                 when(agentStoreInstance.get()).thenReturn(agentStore);
 
                 Response response = importService.importAgent(

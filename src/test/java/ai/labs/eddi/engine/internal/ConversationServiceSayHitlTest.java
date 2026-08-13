@@ -35,6 +35,7 @@ import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -51,6 +52,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -363,7 +366,7 @@ class ConversationServiceSayHitlTest {
             IConversation conversation = mock(IConversation.class);
             doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
             doReturn(false).when(conversation).isEnded();
-            var memoryRef = new java.util.concurrent.atomic.AtomicReference<IConversationMemory>();
+            var memoryRef = new AtomicReference<IConversationMemory>();
             doAnswer(inv -> {
                 memoryRef.set(inv.getArgument(0));
                 return conversation;
@@ -429,7 +432,7 @@ class ConversationServiceSayHitlTest {
             doReturn(false).when(conversation).isEnded();
             // Capture the real live memory handed to continueConversation so we can
             // simulate the divergent-backend condition on it.
-            var memoryRef = new java.util.concurrent.atomic.AtomicReference<IConversationMemory>();
+            var memoryRef = new AtomicReference<IConversationMemory>();
             doAnswer(inv -> {
                 memoryRef.set(inv.getArgument(0));
                 return conversation;
@@ -485,7 +488,7 @@ class ConversationServiceSayHitlTest {
             IConversation conversation = mock(IConversation.class);
             doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
             doReturn(false).when(conversation).isEnded();
-            var memoryRef = new java.util.concurrent.atomic.AtomicReference<IConversationMemory>();
+            var memoryRef = new AtomicReference<IConversationMemory>();
             doAnswer(inv -> {
                 memoryRef.set(inv.getArgument(0));
                 return conversation;
@@ -521,8 +524,8 @@ class ConversationServiceSayHitlTest {
             // never used on the fresh-pause commit path.
             verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), eq(ConversationState.READY));
             verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
-            ArgumentCaptor<ai.labs.eddi.engine.schedule.model.ScheduleConfiguration> schedCaptor = ArgumentCaptor
-                    .forClass(ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.class);
+            ArgumentCaptor<ScheduleConfiguration> schedCaptor = ArgumentCaptor
+                    .forClass(ScheduleConfiguration.class);
             verify(scheduleStore).createSchedule(schedCaptor.capture());
             var schedule = schedCaptor.getValue();
             assertEquals("hitl-timeout-" + CONVERSATION_ID, schedule.getName());
@@ -571,7 +574,7 @@ class ConversationServiceSayHitlTest {
             IConversation conversation = mock(IConversation.class);
             doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
             doReturn(false).when(conversation).isEnded();
-            var memoryRef = new java.util.concurrent.atomic.AtomicReference<IConversationMemory>();
+            var memoryRef = new AtomicReference<IConversationMemory>();
             doAnswer(inv -> {
                 memoryRef.set(inv.getArgument(0));
                 return conversation;
@@ -649,10 +652,10 @@ class ConversationServiceSayHitlTest {
             try {
                 Object result = callable.call();
                 listener.onComplete(result);
-                return java.util.concurrent.CompletableFuture.completedFuture(result);
+                return CompletableFuture.completedFuture(result);
             } catch (Exception e) {
                 listener.onFailure(e);
-                return java.util.concurrent.CompletableFuture.failedFuture(e);
+                return CompletableFuture.failedFuture(e);
             }
         }).when(runtime).submitCallable(any(Callable.class), any(IRuntime.IFinishedExecution.class), any());
     }

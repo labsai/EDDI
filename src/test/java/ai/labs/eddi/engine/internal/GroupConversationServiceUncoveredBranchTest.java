@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.internal;
+import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -93,11 +96,11 @@ class GroupConversationServiceUncoveredBranchTest {
     @Mock
     private IJsonSerialization jsonSerialization;
     @Mock
-    private ai.labs.eddi.configs.agents.AgentSigningService agentSigningService;
+    private AgentSigningService agentSigningService;
     @Mock
-    private ai.labs.eddi.configs.agents.IAgentStore agentStore;
+    private IAgentStore agentStore;
     @Mock
-    private ai.labs.eddi.configs.agents.crypto.NonceCacheService nonceCacheService;
+    private NonceCacheService nonceCacheService;
     @Mock
     private io.micrometer.core.instrument.MeterRegistry meterRegistry;
     @Mock

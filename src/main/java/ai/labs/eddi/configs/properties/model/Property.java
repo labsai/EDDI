@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.properties.model;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public class Property {
     private String name;
@@ -177,15 +178,15 @@ public class Property {
         if (o == null || getClass() != o.getClass())
             return false;
         Property that = (Property) o;
-        return java.util.Objects.equals(name, that.name) && java.util.Objects.equals(valueString, that.valueString)
-                && java.util.Objects.equals(valueObject, that.valueObject) && java.util.Objects.equals(valueList, that.valueList)
-                && java.util.Objects.equals(valueInt, that.valueInt) && java.util.Objects.equals(valueFloat, that.valueFloat)
-                && java.util.Objects.equals(valueBoolean, that.valueBoolean) && java.util.Objects.equals(scope, that.scope)
-                && java.util.Objects.equals(visibility, that.visibility);
+        return Objects.equals(name, that.name) && Objects.equals(valueString, that.valueString)
+                && Objects.equals(valueObject, that.valueObject) && Objects.equals(valueList, that.valueList)
+                && Objects.equals(valueInt, that.valueInt) && Objects.equals(valueFloat, that.valueFloat)
+                && Objects.equals(valueBoolean, that.valueBoolean) && Objects.equals(scope, that.scope)
+                && Objects.equals(visibility, that.visibility);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(name, valueString, valueObject, valueList, valueInt, valueFloat, valueBoolean, scope, visibility);
+        return Objects.hash(name, valueString, valueObject, valueList, valueInt, valueFloat, valueBoolean, scope, visibility);
     }
 }

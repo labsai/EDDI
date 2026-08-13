@@ -9,6 +9,7 @@ import org.junit.jupiter.api.*;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.Set;
 import java.util.List;
 
@@ -273,7 +274,7 @@ class RestImportServiceHelpersTest {
         private void deleteRecursive(Path path) {
             try {
                 Files.walk(path)
-                        .sorted(java.util.Comparator.reverseOrder())
+                        .sorted(Comparator.reverseOrder())
                         .forEach(p -> {
                             try {
                                 Files.deleteIfExists(p);

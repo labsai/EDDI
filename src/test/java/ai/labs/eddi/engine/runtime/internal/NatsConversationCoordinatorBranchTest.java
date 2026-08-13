@@ -23,6 +23,7 @@ import org.mockito.ArgumentCaptor;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
 
@@ -197,7 +198,7 @@ class NatsConversationCoordinatorBranchTest {
 
         // The queue for conv-1 should have 2 entries
         var method = NatsConversationCoordinator.class
-                .getDeclaredMethod("computeTotalQueueDepth", java.util.Map.class);
+                .getDeclaredMethod("computeTotalQueueDepth", Map.class);
         method.setAccessible(true);
 
         var queuesField = NatsConversationCoordinator.class.getDeclaredField("conversationQueues");

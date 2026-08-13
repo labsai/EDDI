@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.configs.agents;
+import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -286,8 +287,7 @@ public class AgentSigningService {
     }
 
     /**
-     * Sign a {@link ai.labs.eddi.configs.agents.crypto.SignedEnvelope} using the
-     * agent's versioned key.
+     * Sign a {@link SignedEnvelope} using the agent's versioned key.
      *
      * @param tenantId
      *            the tenant identifier
@@ -301,10 +301,10 @@ public class AgentSigningService {
      * @throws AgentSigningException
      *             if signing fails
      */
-    public ai.labs.eddi.configs.agents.crypto.SignedEnvelope signEnvelope(
-                                                                          String tenantId, String agentId,
-                                                                          ai.labs.eddi.configs.agents.crypto.SignedEnvelope envelope,
-                                                                          int keyVersion)
+    public SignedEnvelope signEnvelope(
+                                       String tenantId, String agentId,
+                                       SignedEnvelope envelope,
+                                       int keyVersion)
             throws AgentSigningException {
         try {
             String canonicalForm = envelope.canonicalForm();
@@ -355,7 +355,7 @@ public class AgentSigningService {
      *            the Base64-encoded public key
      * @return true if the signature is valid
      */
-    public boolean verifyEnvelope(ai.labs.eddi.configs.agents.crypto.SignedEnvelope envelope, String publicKeyB64) {
+    public boolean verifyEnvelope(SignedEnvelope envelope, String publicKeyB64) {
         try {
             String canonicalForm = envelope.canonicalForm();
             return verify(publicKeyB64, canonicalForm, envelope.signature());

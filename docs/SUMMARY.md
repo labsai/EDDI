@@ -63,9 +63,11 @@
 - [Audit Ledger](audit-ledger.md)
 - [GDPR / CCPA Compliance](gdpr-compliance.md)
 - [HIPAA Compliance](hipaa-compliance.md)
+- [Business Associate Agreement (BAA) Template](templates/baa-template.md)
 - [EU AI Act Compliance](eu-ai-act-compliance.md)
 - [Compliance Data Flow](compliance-data-flow.md)
 - [Incident Response Plan](incident-response.md)
+- [Security Review](security-review.md)
 - [Privacy & Data Processing](../PRIVACY.md)
 
 ## Deployment & Infrastructure
@@ -76,6 +78,7 @@
 - [Setting Up EDDI on AWS with MongoDB Atlas](setup-eddi-on-aws-with-mongodb-atlas.md)
 - [Release & Versioning Strategy](release-versioning.md)
 - [Release Signing & Verification](release-signing.md)
+- [Release Notes — 6.0.2](release-notes-6.0.2.md)
 - [Metrics & Monitoring](metrics.md)
 - [Monitoring & Tracing Guide](monitoring/monitoring-guide.md)
 - [Log Administration](log-administration.md)

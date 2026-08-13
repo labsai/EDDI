@@ -10,7 +10,10 @@ import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
+import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.quarkus.qute.Engine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -27,7 +30,7 @@ import static org.mockito.Mockito.*;
 /**
  * Unit tests for {@link PromptSnippetService}.
  * <p>
- * Covers: snippet loading, caching, cache invalidation, template escaping, URI
+ * Covers: snippet loading, caching, cache invalidation, content fidelity, URI
  * extraction, and graceful error handling.
  */
 class PromptSnippetServiceTest {
@@ -167,13 +170,18 @@ class PromptSnippetServiceTest {
         }
     }
 
-    // ==================== Template Escaping ====================
+    // ==================== Content Fidelity ====================
 
+    /**
+     * Snippet content must reach the model byte-for-byte. The class once escaped
+     * template markers here; it no longer does, because a snippet is a template
+     * DATA value and Qute never re-parses one — see the service's class javadoc.
+     */
     @Nested
-    class TemplateEscaping {
+    class ContentFidelity {
 
         @Test
-        void shouldNotEscapeWhenTemplateEnabled() throws Exception {
+        void shouldStoreContentRawWhenTemplateEnabled() throws Exception {
             DocumentDescriptor desc = createDescriptor("s1", 1);
             when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
                     .thenReturn(List.of(desc));
@@ -187,16 +195,18 @@ class PromptSnippetServiceTest {
         }
 
         /**
-         * templateEnabled=false must stop Qute resolving the content. It previously
-         * wrapped it in Jinja2 {% raw %} tags, which Qute does not understand: the tags
-         * were emitted into the system prompt verbatim AND the {...} markers they were
-         * meant to protect were still resolved. Qute's unparsed block {|...|} is what
-         * actually protects it — see
-         * PlaceholderSyntaxContractTest#unparsedBlockProtectsContent, which renders
-         * both forms through the real engine.
+         * templateEnabled=false must stop Qute resolving the content — and it does,
+         * without the service doing anything, because a snippet is a template DATA
+         * value and Qute never re-parses what an expression resolved to.
+         * <p>
+         * The service used to wrap this content in an unparsed block. That was not
+         * merely redundant: the wrapper is part of the same resolved value, so it was
+         * not re-parsed either and its {|...|} delimiters rendered straight into the
+         * system prompt. See {@code rendersMarkersLiterallyWithoutLeakingDelimiters}
+         * below, which puts this exact map through the real engine.
          */
         @Test
-        void shouldEscapeWhenTemplateDisabledAndContentHasMarkers() throws Exception {
+        void shouldStoreContentRawWhenTemplateDisabled() throws Exception {
             DocumentDescriptor desc = createDescriptor("s1", 1);
             when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
                     .thenReturn(List.of(desc));
@@ -206,17 +216,46 @@ class PromptSnippetServiceTest {
 
             Map<String, Object> result = service.getAll();
 
-            assertEquals("{|Use {variable} in your code|}", result.get("code_example"));
+            assertEquals("Use {variable} in your code", result.get("code_example"));
         }
 
         /**
-         * Content carrying the unparsed-block terminator would otherwise close the
-         * block early and hand the rest back to the parser — reintroducing the very
-         * evaluation this is preventing. Verified against the real engine: a naive wrap
-         * of "a|} {properties.name} b" renders "a LEAKED b|}".
+         * The end-to-end property, through the real engine, the way a prompt actually
+         * consumes a snippet: {@code {snippets.<name>}} against the map this service
+         * produces.
+         * <p>
+         * Both halves matter. The content's own markers must survive literally (that is
+         * what {@code templateEnabled=false} promises), and no escape delimiter may
+         * appear — which is what the previous unparsed-block wrapping got wrong. A unit
+         * assertion on the map alone cannot see the second half at all.
          */
         @Test
-        void shouldSurviveContentContainingTheBlockTerminator() throws Exception {
+        void rendersMarkersLiterallyWithoutLeakingDelimiters() throws Exception {
+            DocumentDescriptor desc = createDescriptor("s1", 1);
+            when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
+                    .thenReturn(List.of(desc));
+            when(snippetStore.read("s1", 1))
+                    .thenReturn(new PromptSnippet("code_example", "custom", null,
+                            "Use {properties.company_name} in your code", null, false));
+
+            var engine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());
+            String rendered = engine.processTemplate("Rules: {snippets.code_example}",
+                    Map.of("snippets", service.getAll(), "properties", Map.of("company_name", "ACME")),
+                    ITemplatingEngine.TemplateMode.TEXT);
+
+            assertEquals("Rules: Use {properties.company_name} in your code", rendered);
+            assertFalse(rendered.contains("{|"), "escape delimiters must not reach the prompt: " + rendered);
+            assertFalse(rendered.contains("ACME"), "templateEnabled=false content must not resolve: " + rendered);
+        }
+
+        /**
+         * Content carrying an unparsed-block terminator is now unremarkable — nothing
+         * wraps it, so there is no block for it to close. Kept as a regression pin: it
+         * is the input that made the old escaping subtle, and it must now round-trip
+         * completely untouched.
+         */
+        @Test
+        void shouldLeaveBlockTerminatorInContentAlone() throws Exception {
             DocumentDescriptor desc = createDescriptor("s1", 1);
             when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
                     .thenReturn(List.of(desc));
@@ -224,20 +263,17 @@ class PromptSnippetServiceTest {
                     .thenReturn(new PromptSnippet("t", "custom", null,
                             "a|} {properties.name} b", null, false));
 
-            String escaped = (String) service.getAll().get("t");
-
-            assertFalse(escaped.startsWith("{|a|} "),
-                    "the terminator must not be left able to close the block early: " + escaped);
-            assertTrue(escaped.startsWith("{|") && escaped.endsWith("|}"), escaped);
+            assertEquals("a|} {properties.name} b", service.getAll().get("t"));
         }
 
         /**
-         * The marker being looked for is Qute's "{", not Jinja2's "{{". Content
-         * carrying a real Qute expression is exactly what needs protecting, and it used
-         * not to be detected at all.
+         * A single-brace Qute expression is the content that looks most like it needs
+         * protecting, and gets none — correctly. It is delivered as a data value, and
+         * {@code rendersMarkersLiterallyWithoutLeakingDelimiters} is the test that
+         * shows the model receives it unresolved regardless.
          */
         @Test
-        void shouldEscapeSingleBraceQuteMarkers() throws Exception {
+        void shouldStoreSingleBraceQuteMarkersRaw() throws Exception {
             DocumentDescriptor desc = createDescriptor("s1", 1);
             when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
                     .thenReturn(List.of(desc));
@@ -245,11 +281,11 @@ class PromptSnippetServiceTest {
                     .thenReturn(new PromptSnippet("q", "custom", null,
                             "Hello {properties.name}", null, false));
 
-            assertEquals("{|Hello {properties.name}|}", service.getAll().get("q"));
+            assertEquals("Hello {properties.name}", service.getAll().get("q"));
         }
 
         @Test
-        void shouldNotEscapeWhenTemplateDisabledButNoMarkers() throws Exception {
+        void shouldStoreContentRawWhenNoMarkers() throws Exception {
             DocumentDescriptor desc = createDescriptor("s1", 1);
             when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
                     .thenReturn(List.of(desc));

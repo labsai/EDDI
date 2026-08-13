@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -217,7 +218,7 @@ class A2AToolProviderManagerExtendedTest {
         @DisplayName("CachedAgentInfo stores card and timestamp")
         void cachedAgentInfo() {
             var info = new A2AToolProviderManager.CachedAgentInfo(
-                    java.util.Map.of("name", "agent"), 123456L);
+                    Map.of("name", "agent"), 123456L);
             assertEquals("agent", info.agentCard().get("name"));
             assertEquals(123456L, info.timestamp());
         }
@@ -234,7 +235,7 @@ class A2AToolProviderManagerExtendedTest {
         @DisplayName("A2AToolsResult stores specs and executors")
         void a2aToolsResult() {
             var result = new A2AToolProviderManager.A2AToolsResult(
-                    List.of(), java.util.Map.of());
+                    List.of(), Map.of());
             assertTrue(result.toolSpecs().isEmpty());
             assertTrue(result.executors().isEmpty());
         }

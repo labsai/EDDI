@@ -9,6 +9,8 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
@@ -58,7 +60,7 @@ public class ScheduleFireExecutor {
     IScheduleStore scheduleStore;
 
     @Inject
-    ai.labs.eddi.engine.internal.HitlTimeoutHandler hitlTimeoutHandler;
+    HitlTimeoutHandler hitlTimeoutHandler;
 
     @Inject
     DreamService dreamService;
@@ -80,7 +82,7 @@ public class ScheduleFireExecutor {
      */
     public ScheduleFireLog fire(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
         Map<String, Object> md = schedule.getMetadata();
-        if (ai.labs.eddi.engine.hitl.HitlSchedules.isHitlTimeout(md)) {
+        if (HitlSchedules.isHitlTimeout(md)) {
             // HITL timeout fast-path — isolate exceptions and record a fire log for
             // parity with the normal path (observability + retry diagnostics).
             Instant hitlStartedAt = Instant.now();
@@ -96,7 +98,7 @@ public class ScheduleFireExecutor {
             var hitlFireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(),
                     schedule.getFireId(), schedule.getNextFire(), hitlStartedAt, Instant.now(),
                     hitlStatus, instanceId,
-                    (String) md.get(ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_CONVERSATION_ID_KEY),
+                    (String) md.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY),
                     hitlError, attemptNumber, 0.0);
             try {
                 scheduleStore.logFire(hitlFireLog);

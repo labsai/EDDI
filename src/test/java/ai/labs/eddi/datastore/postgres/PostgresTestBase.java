@@ -10,6 +10,8 @@ import javax.sql.DataSource;
 import jakarta.enterprise.inject.Instance;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.Iterator;
+import java.util.List;
 
 /**
  * Shared Testcontainers base for PostgreSQL adapter integration tests.
@@ -127,8 +129,8 @@ public abstract class PostgresTestBase {
             throw new UnsupportedOperationException();
         }
         @Override
-        public java.util.Iterator<DataSource> iterator() {
-            return java.util.List.of(ds).iterator();
+        public Iterator<DataSource> iterator() {
+            return List.of(ds).iterator();
         }
     }
 }

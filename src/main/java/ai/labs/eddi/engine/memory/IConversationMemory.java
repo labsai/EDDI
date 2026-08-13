@@ -6,13 +6,14 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
-import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
-import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 
 import java.io.Serializable;
 import java.time.Instant;
@@ -210,30 +211,30 @@ public interface IConversationMemory extends Serializable {
      * The interrupted tool-call batch (durable); null unless a tool pause is
      * active.
      */
-    default ai.labs.eddi.engine.memory.model.PendingToolCallBatch getHitlPendingToolCalls() {
+    default PendingToolCallBatch getHitlPendingToolCalls() {
         return null;
     }
-    default void setHitlPendingToolCalls(ai.labs.eddi.engine.memory.model.PendingToolCallBatch batch) {
+    default void setHitlPendingToolCalls(PendingToolCallBatch batch) {
     }
 
     /**
      * Agent-level tool-approval config carried onto memory at conversation start
      * (NOT persisted).
      */
-    default ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig getAgentToolApprovalsConfig() {
+    default ToolApprovalsConfig getAgentToolApprovalsConfig() {
         return null;
     }
-    default void setAgentToolApprovalsConfig(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig config) {
+    default void setAgentToolApprovalsConfig(ToolApprovalsConfig config) {
     }
 
     /**
      * The human decision being applied during an in-JVM tool-pause resume (NOT
      * persisted).
      */
-    default ai.labs.eddi.engine.lifecycle.model.HitlDecision getHitlResumeDecision() {
+    default HitlDecision getHitlResumeDecision() {
         return null;
     }
-    default void setHitlResumeDecision(ai.labs.eddi.engine.lifecycle.model.HitlDecision decision) {
+    default void setHitlResumeDecision(HitlDecision decision) {
     }
 
     // === Deferred user-memory writes ===
@@ -357,20 +358,6 @@ public interface IConversationMemory extends Serializable {
         void addConversationOutputMap(String key, Map<String, Object> map);
     }
 
-    /**
-     * OpenAPI: declared explicitly as a {@code Property}-valued map. Without this,
-     * smallrye-openapi emits a named schema whose only content is a {@code $ref} to
-     * itself — a Map-extending interface gives the scanner no properties to
-     * describe (same family of problem as {@code ConversationOutput extends
-     * LinkedHashMap}, see the reflection-free-serializer note in
-     * application.properties). The self-reference makes EDDI's own
-     * {@code /q/openapi} undereferenceable: swagger-parser logs "Could not find
-     * /components/schemas/IConversationProperties in contents of
-     * #/components/schemas/IConversationProperties" — an ERROR on every
-     * {@code setup-api} provisioning, the Platform Operator's included.
-     */
-    @Schema(type = SchemaType.OBJECT, additionalProperties = Property.class,
-            description = "Conversation-scoped properties, keyed by property name")
     interface IConversationProperties extends Map<String, Property> {
         Map<String, Object> toMap();
     }

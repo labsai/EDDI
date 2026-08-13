@@ -11,6 +11,7 @@ import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
+import ai.labs.eddi.secrets.persistence.PersistenceException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.runtime.StartupEvent;
 import org.junit.jupiter.api.BeforeEach;
@@ -411,7 +412,7 @@ class SecretVaultIntegrationTest {
         @DisplayName("persistence failure on store throws SecretProviderException")
         void persistenceFailureOnStore() {
             setupDekMocking();
-            doThrow(new ai.labs.eddi.secrets.persistence.PersistenceException("DB down")).when(persistence).upsertSecret(any());
+            doThrow(new PersistenceException("DB down")).when(persistence).upsertSecret(any());
             when(persistence.findSecret(anyString(), anyString())).thenReturn(Optional.empty());
 
             assertThrows(ISecretProvider.SecretProviderException.class,
@@ -421,7 +422,7 @@ class SecretVaultIntegrationTest {
         @Test
         @DisplayName("persistence failure on resolve throws SecretProviderException")
         void persistenceFailureOnResolve() {
-            when(persistence.findSecret(anyString(), anyString())).thenThrow(new ai.labs.eddi.secrets.persistence.PersistenceException("DB down"));
+            when(persistence.findSecret(anyString(), anyString())).thenThrow(new PersistenceException("DB down"));
 
             assertThrows(ISecretProvider.SecretProviderException.class, () -> provider.resolve(new SecretReference(TENANT, KEY_NAME)));
         }

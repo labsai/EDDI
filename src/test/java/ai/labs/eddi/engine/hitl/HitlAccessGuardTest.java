@@ -296,7 +296,7 @@ class HitlAccessGuardTest {
     void readAccess_pendingMemberMayReadTheStatusOfTheirTurn() throws Exception {
         var gc = humanPausedGc();
         gc.setPendingHumanInput(new GroupConversation.PendingHumanInput("hannah", "Hannah", 0, 0, 1,
-                "OPINION", "the prompt", "SKIP_TURN", java.time.Instant.now()));
+                "OPINION", "the prompt", "SKIP_TURN", Instant.now()));
         callerNamed("hannah");
         // Not owner, not admin, not approver — the strict guard would refuse.
         doThrow(new ForbiddenException("no"))
@@ -309,7 +309,7 @@ class HitlAccessGuardTest {
     void readAccess_strangerStillRefused_andWrongGroup404s() throws Exception {
         var gc = humanPausedGc();
         gc.setPendingHumanInput(new GroupConversation.PendingHumanInput("hannah", "Hannah", 0, 0, 1,
-                "OPINION", "the prompt", "SKIP_TURN", java.time.Instant.now()));
+                "OPINION", "the prompt", "SKIP_TURN", Instant.now()));
         callerNamed("mallory");
         doThrow(new ForbiddenException("no"))
                 .when(ownershipValidator).requireOwnerAdminOrApprover(any(), any(), any());

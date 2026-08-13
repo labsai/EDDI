@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.groups.templates.GroupTemplateService;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -24,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -41,8 +43,8 @@ class McpGroupToolsTest {
     private IGroupWorkspaceStore workspaceStore;
     private McpGroupTools tools;
 
-    private static ai.labs.eddi.configs.groups.templates.GroupTemplateService templateService() {
-        var service = new ai.labs.eddi.configs.groups.templates.GroupTemplateService(
+    private static GroupTemplateService templateService() {
+        var service = new GroupTemplateService(
                 new com.fasterxml.jackson.databind.ObjectMapper());
         service.loadTemplates();
         return service;
@@ -361,7 +363,7 @@ class McpGroupToolsTest {
         gc.setId("gc-async-1");
         gc.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
         when(groupConversationService.startAndDiscussAsync("g1", "Build it", "user1", null)).thenReturn(gc);
-        when(jsonSerialization.serialize(any(java.util.Map.class))).thenReturn(
+        when(jsonSerialization.serialize(any(Map.class))).thenReturn(
                 "{\"groupConversationId\":\"gc-async-1\",\"state\":\"IN_PROGRESS\",\"message\":\"Discussion started.\"}");
 
         String result = tools.start_group_discussion("g1", "Build it", "user1");
@@ -372,7 +374,7 @@ class McpGroupToolsTest {
 
         // Verify the Map passed to serialize contains the right keys
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<java.util.Map<String, Object>> captor = ArgumentCaptor.forClass(java.util.Map.class);
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
         verify(jsonSerialization).serialize(captor.capture());
         var map = captor.getValue();
         assertEquals("gc-async-1", map.get("groupConversationId"));

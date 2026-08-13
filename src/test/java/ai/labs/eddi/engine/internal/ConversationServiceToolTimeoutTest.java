@@ -53,7 +53,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -154,10 +156,10 @@ class ConversationServiceToolTimeoutTest {
                     try {
                         Object result = callable.call();
                         listener.onComplete(result);
-                        return java.util.concurrent.CompletableFuture.completedFuture(result);
+                        return CompletableFuture.completedFuture(result);
                     } catch (Exception e) {
                         listener.onFailure(e);
-                        return java.util.concurrent.CompletableFuture.failedFuture(e);
+                        return CompletableFuture.failedFuture(e);
                     }
                 });
 
@@ -406,7 +408,7 @@ class ConversationServiceToolTimeoutTest {
             Object toolDecisionsObj = approval.output().get("toolDecisions");
             assertInstanceOf(List.class, toolDecisionsObj, "toolDecisions summary must be present");
             @SuppressWarnings("unchecked")
-            List<java.util.Map<String, Object>> toolDecisions = (List<java.util.Map<String, Object>>) toolDecisionsObj;
+            List<Map<String, Object>> toolDecisions = (List<Map<String, Object>>) toolDecisionsObj;
             assertFalse(toolDecisions.isEmpty());
 
             var first = toolDecisions.get(0);
