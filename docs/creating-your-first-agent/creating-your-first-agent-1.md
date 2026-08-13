@@ -610,7 +610,12 @@ By the way you can use the attached **postman collection** below to do all of th
 7. Create conversation
 8. Say Hello to the agent
 
-Download the [Postman collection](../.gitbook/assets/Creating%20and%20chatting%20with%20a%20bot.postman_collection.json) to run through all the steps above.
+> **Run it yourself.** The GitBook-hosted Postman collections that used to be linked here
+> were lost in the migration. You do not need them: every request is shown inline above,
+> and Postman can import EDDI's own spec directly — **Import → Link →**
+> `<your-eddi-host>/openapi` (`http://localhost:7070/openapi` for a local install).
+> It is generated from the running build, so unlike a committed collection it cannot go
+> out of date. The same spec is browsable at `<your-eddi-host>/q/swagger-ui`.
 
 ### External Links
 

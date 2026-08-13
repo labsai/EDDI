@@ -7,6 +7,240 @@
 
 
 
+## 🧪 test: regression cover for every fix in this branch, and a bug the coverage work found (2026-08-12)
+
+**Repo:** EDDI (`fix/code-review-defects-and-docs`)
+
+Writing the tests found a defect in the fix they were written for, which is the argument for writing
+them.
+
+**The flush window.** The eviction fix retains any conversation whose chain positions are still
+in flight — queued, in the flush batch, or dead-lettered. But `flush()` published its batch to
+`inFlightBatch` *after* draining the queue. Between those two statements the entries were in
+**neither** collection, so an eviction landing in that window read their conversations as fully
+persisted and re-seeded them — reintroducing the exact duplicate the fix exists to prevent, through
+a narrower door. The drain and the publish now happen under the same read lock submitters take, so
+eviction cannot observe the intermediate state. No I/O is inside the lock.
+
+**Every fix whose failure mode a test can express is mutation-checked.** Not merely "a test that
+passes" — in each case the fix was reverted and the test confirmed to fail, with the message it
+would print to whoever broke it:
+
+| Fix | Test | Reverting the fix produces |
+| --- | --- | --- |
+| Sequence eviction | `sequenceEvictionKeepsQueuedConversationsUnique` | `expected <[0, 1]> but was <[0, 0]>` — the duplicate itself |
+| In-flight batch retention | `sequenceEvictionRetainsTheInFlightBatch` | `expected <1> but was <-1>` (UNSEQUENCED) |
+| Eviction still reclaims | `sequenceEvictionReclaimsPersistedConversations` | guards the opposite failure — a "fix" that never evicts |
+| Rate-limiter overflow | `idleBucketRefillsRatherThanLatchingShut` | a bucket that denies every call after a long idle |
+| `HUMAN_DECIDES` message | `votePhase_humanDecidesIsRejectedPendingResumePath` | fails if the message claims HUMAN members are unavailable |
+| MCP class-list drift | `everyToolClassInThePackageIsListed` | names the `Mcp*Tools` class missing from `TOOL_CLASSES` |
+| Link rot | `everyRelativeLinkResolves` | names the file and the target that does not resolve |
+| ToC drift | `everyDocIsListedInSummary` | names the unreachable page |
+| Inline FQNs | `noInlineFullyQualifiedNames` | names file, line and the offending name |
+
+The rest are covered differently, and it is worth being exact about how rather than letting the
+sentence above imply more than it should:
+
+- **`SafeHttpClient`'s timeout backstop** has five direct unit cases (`SafeHttpClientTimeoutTest`)
+  covering the bound, the caller's own timeout winning, and the rebuild preserving method, headers
+  and body. They are not mutation-checked in the same sense — the defect was an *absent* bound, so
+  reverting it is what the "unbounded request is bounded" case already asserts.
+- **`ConversationStepRunner`'s registration move** has no dedicated test on purpose: only an
+  `Error` can reach the window, since the intervening call swallows `Exception`. A test would have
+  to inject a `StackOverflowError` to prove a hardening change, which pins the mechanism rather than
+  the behaviour.
+- **`ThreadLocalRandom`** is behaviour-preserving; the existing selection tests cover it.
+- **The installer CI and the rescued dashboard** are verified by the pipeline itself — `shell-lint`
+  runs against `install.sh` and passes, and the compose mount is exercised by the monitoring stack
+  rather than by a unit test.
+
+Two of the tests above deserve note as *class-of-bug* guards rather than single-defect regressions.
+
+`DocumentationLinksTest` walks every markdown file in the repository and resolves every relative
+link. Link rot is invisible to every other check in this build — markdown compiles to nothing, so a
+wrong path is indistinguishable from a right one until a human clicks it, which is how 38 of them
+accumulated. It found one immediately that the initial sweep had missed: the README banner uses a
+repository-root-relative `/screenshots/…`, which a naive resolver sends to the filesystem root. The
+link was fine; the resolver was wrong, and now handles the leading `/` the way the forge does.
+Documentation *of* link syntax (the `` `![alt](uri)` `` rows in the output-format tables) is excluded
+by stripping code spans and fences, not by an ignore list that would rot in turn.
+
+`ImportStyleTest` and the 575-name cleanup it guards ship on a separate branch, so they are
+described in that branch's own entry rather than claimed here. Writing it did change one fact
+recorded above: the original audit had under-counted, because its pattern required a package
+segment after `java.util`, so `java.util.List` never matched.
+
+**Two seams were widened for testability, both deliberately.** `RateLimitBucket` became
+package-private with a `backdateLastRefill` hook, because a ~107-day idle bucket cannot be reached
+through the public API and reflecting into a private field pins the field name rather than the
+behaviour. `SafeHttpClient.withDefaultTimeout` became package-private so its five cases can run
+without an embedded server — the existing `SafeHttpClientTest` binds a loopback socket in
+`@BeforeEach` and therefore only runs where those are available.
+
+
+
+---
+
+
+
+## 🧹 chore: close the gaps outside the build — installer CI, link rot, dead code (2026-08-12)
+
+**Repo:** EDDI (`fix/code-review-defects-and-docs`)
+
+The second half of the repository review. The pattern in it is worth naming: the engineering
+*inside* the pipeline is strong, and nearly every problem found sat in something no automated check
+covered.
+
+**`install.sh` and `install.ps1` had no verification of any kind.** 95 KB of shipped script, the
+README's headline `curl … | bash` path, and they were in **no** path filter — so a PR touching only
+the installer skipped the entire pipeline, and a skipped required check still satisfies branch
+protection. There was no shellcheck, no lint, not even a syntax parse anywhere in `.github/`. A new
+`shell-lint` job now runs `bash -n`, ShellCheck (`--severity=warning`, using the runner's own
+binary rather than adding a third-party action to pin), a PowerShell **parse-only** check, and
+PSScriptAnalyzer. A `scripts` path filter drives it, so installer-only PRs get CI instead of a free
+pass. Verified rather than assumed: `install.sh` is already clean at warning severity, so the gate
+lands green and any regression is the script's own.
+
+**The auto-approve workflow treated an absent check as a passing one.** It required every check-run
+present on the head commit to be green, but never asserted the gating jobs had *run*. A
+merge-conflicted PR never triggers CI/CD at all, so the loop saw only CodeQL et al., found nothing
+failing, and would have approved with a body asserting "all CI checks passed" on a commit that was
+never built. It now requires `Build & Test` and `Integration Tests` to be present by name. Note this
+deliberately still auto-approves docs-only PRs: a job skipped by its `if` still reports a check-run,
+so absence means *CI did not run*, not *CI had nothing to do*.
+
+**A 1.4 MB SQLite file, and a dashboard nobody could see.** The top-level `grafana-data/` was left
+over from a bind-mount era — the monitoring stack has since moved to a named Docker volume
+provisioned from `docs/monitoring/`, so nothing referenced the directory at all. It held
+`grafana.db` (runtime state, committed), superseded provisioning copies, and
+`eddi-operations.json`: a genuinely different, richer dashboard ("Operations Command Center", 21
+panels) that was being maintained while being provisioned by nothing. Deleting it would have thrown
+away the useful part, so it moved to `docs/monitoring/eddi-operations-dashboard.json`, is mounted
+alongside the existing dashboard (the provider globs the directory, so no provisioning change), and
+is downloaded by both installers. The rest is gone and the path is now git-ignored.
+
+**Dead code.** `CannotExecuteException` had no reference anywhere in main or test. `ILogoutEndpoint`
+was a JAX-RS interface declaring `/user/isAuthenticated` and `/user/securityType` with **no
+implementing class** — the only `@Path("/user")` in the codebase, so those endpoints were advertised
+to OpenAPI and served by nothing. Both removed.
+
+**Inline fully-qualified names** were also found in breach of AGENTS.md §4.7, but that cleanup does
+not ship here — it is a separate branch and its own changelog entry, so this one does not claim
+work it did not carry.
+
+**Link rot: 38 broken links, now zero.** Every `planning/*.md` file computed `../` and `../../` as
+though it lived under `docs/planning/`, but the directory is at the repo root — so `../../AGENTS.md`
+pointed outside the repository. That one mistake accounted for 32 of them; two more were genuinely
+stale paths (`LifecycleManager` moved to `lifecycle/internal/`, and a `WebScraperToolSsrfTest` that
+no longer exists). The `.gitbook/assets/` directory referenced by the tutorials does not exist at
+all, which broke the **onboarding** path specifically: the "creating your first agent" pages linked
+to a Postman collection, and `conversations.md`/`httpcalls.md` to sample agents. Rather than
+re-point at files that are gone, those now tell the reader to import EDDI's own `/openapi` into
+Postman — generated from the running build, so it cannot go stale the way a committed collection
+did. The first diagram a new user meets was a broken image; it is now a Mermaid diagram of the
+actual config-and-pipeline model (Mermaid already renders in `docs/architecture.md`).
+
+`docs/SUMMARY.md` was missing `security-review.md` and `release-notes-6.0.2.md`; every page under
+`docs/` is now in the table of contents. The PR template's two `CONTRIBUTING.md` links resolve
+correctly in a rendered PR body but 404 in the file's own blob view — neither relative form is right
+in both, so they are absolute now.
+
+**Smaller items.** `.githooks/**` gained a `text eol=lf` attribute: `*.sh` does not match an
+extensionless hook, so the force-push guard was LF-in-repo by luck, and a CRLF hook does not merely
+look untidy — it fails to execute on Linux and macOS, silently disarming itself. Three
+`new Random()` allocations on request paths in application-scoped beans became
+`ThreadLocalRandom.current()`.
+
+**And the guard that guards the guard.** `McpToolFilterCoverageTest` pins both directions of the MCP
+allowlist, but both start from a hand-maintained `TOOL_CLASSES` list — so a brand-new `Mcp*Tools`
+class nobody added would have its tools invisible *and* leave every assertion green, which is the
+exact failure mode the file exists to prevent, one level up. The file documented this as the one
+thing it could not check. It can: the compiled classes are already on disk next to the ones under
+test, so counting them needs no indexing dependency. Mutation-checked by dropping `McpDocTools` from
+the list — the new test fails, and it names the missing class.
+
+---
+
+
+
+## 🛡️ fix: the audit ledger could report itself as tampered, plus four smaller defects from a full-repo review (2026-08-12)
+
+**Repo:** EDDI (`fix/code-review-defects-and-docs`)
+
+A critical review of the whole repository. Most of what it looked for was not there — no swallowed
+exceptions, no non-thread-safe statics, no mutable state in the singleton lifecycle tasks, zero
+`@Disabled` tests across 14,301 of them — so the findings are few but one of them matters.
+
+**The audit ledger manufactured `ChainStatus.BROKEN` under load.** `AuditLedgerService` caps its
+sequence table at 50,000 conversations and used to `clear()` the whole thing on overflow, on the
+stated reasoning that re-seeding from `countByConversation` was *"correct, only slower"*. It is not.
+Entries sit in the in-memory queue for up to a flush interval (longer while a failing store is being
+retried), so a conversation with queued entries has consumed chain positions the store cannot see
+yet. Re-seeding from the store count therefore **hands the same position out twice** — and the
+verifier grades a duplicate exactly like a gap: *"Reporting INTACT here would hand an auditor a
+false assurance."* The `undelivered` table exists precisely so the ledger's own back-pressure cannot
+read as tampering, but it only exculpates **gaps**; duplicates had no such channel. On a busy
+deployment the queue is never empty, so essentially every overflow produced them.
+
+The fix replaces the wholesale `clear()` with an eviction that only drops counters whose positions
+are all accounted for somewhere a re-seed can see them — persisted in the store, or attributed in
+`undelivered`. Conversations still represented in the queue, in the in-flight flush batch, or in the
+undelivered table are retained. Three supporting changes make that sound rather than merely
+plausible:
+
+- A `ReentrantReadWriteLock` spans "position consumed" → "entry visible in the queue" on the
+  submit path (read lock — submitters never contend with each other) against eviction (write lock).
+  Without it, eviction could still read a conversation as idle while a submitter held a number for
+  it that nothing could see yet. The window was not theoretical: it contains HMAC and Ed25519
+  signing.
+- `flush()` publishes the batch it has polled but not yet persisted, because between the poll and a
+  successful append those positions exist in neither the queue nor the store. It is now
+  `synchronized` too — the scheduled writer and the `@PreDestroy` final flush could otherwise poll
+  interleaved halves of the queue into two batches.
+- When the table is *still* full after eviction (every counter genuinely in flight), new
+  conversations get `UNSEQUENCED` rather than a re-seeded collision. That degrades the window to
+  `UNAVAILABLE` — "the chain cannot be established" — which is honest, where a duplicate is an
+  accusation.
+
+One residual case is left deliberately: past `MAX_TRACKED_UNDELIVERED` the undelivered table stops
+recording, so a dead-lettered position may be reused. That window already reports `BROKEN` by the
+documented fail-strict rule, so the verdict is unchanged — only its reason is.
+
+Two regression tests, both mutation-checked. With the retain set emptied (simulating the old
+`clear()`), `sequenceEvictionKeepsQueuedConversationsUnique` fails with `expected <[0, 1]> but was
+<[0, 0]>` — the duplicate itself. Its counterpart pins the opposite direction, so the fix cannot
+"pass" by simply never evicting and stranding every later conversation on `UNSEQUENCED`.
+
+**`HUMAN_DECIDES` blamed a feature that ships.** `AgentGroupStore` rejected the tie policy with
+*"needs human group members (I6), which are not available yet"* — roughly 150 lines below its own
+"I6 save-time matrix for HUMAN members", which accepts them, validates their `displayName` and warns
+about HUMAN moderators. Humans as group members shipped in 10c; what is actually missing is the
+resume path a paused tie-break would need. The message now says that. The test pinned the word
+"I6", so it was rewritten to assert on the offered alternatives and to fail if the message ever
+claims HUMAN members are unavailable again.
+
+**`SafeHttpClient` documented a guarantee it did not provide.** The class claimed an "overall
+wall-clock timeout enforced across all hops", but the budget is only checked *between* hops, so a
+single hop that accepts the connection and then trickles its body hung indefinitely and the budget
+never fired. Redirect hops already had a 15 s fallback; the initial request had whatever the caller
+set, or nothing. Both are now bounded by one `DEFAULT_REQUEST_TIMEOUT`, and the Javadoc states what
+is actually true — a per-hop response timeout plus a budget checked between hops. Every in-tree
+caller already set its own timeout, so this is a backstop for the next one that does not.
+
+**A rate-limit bucket could lock shut permanently.** `ToolRateLimiter.refill()` computed
+`elapsedNanos * limit` in long arithmetic, which overflows after ~107 idle days at the default limit
+of 1000; the wrapped negative drives `tokens` below zero and `tryAcquire` refuses every subsequent
+call. One cast.
+
+**Hardening.** `ConversationStepRunner` registered the in-flight conversation one statement above
+the `try` whose `finally` unregisters it. Only an `Error` could strand the entry — the intervening
+call swallows `Exception` — but a stranded entry keeps a finished turn's memory reachable and makes
+a later cancel signal a dead pipeline, so the registration moved inside.
+
+---
+
+
+
 ## 🔓 fix(csp): the Manager's update check was blocked by our own CSP, in every production deployment (2026-08-12)
 
 **Repo:** EDDI (`fix/csp-allow-github-release-check`)

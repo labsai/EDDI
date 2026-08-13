@@ -207,11 +207,14 @@ class ConversationStepRunner {
         // #2: register the live memory so cancelConversation can signal the
         // running pipeline via setCancelled (checked at task boundaries).
         inFlightConversations.put(conversationId, conversationMemory);
-        // Carry the agent-level tool-approval config onto memory BEFORE the
-        // pipeline (LlmTask) runs, so the tool-approval gate can resolve its
-        // effective config. Transient — never persisted; re-resolved each turn.
-        conversationService.conversationHitlService.populateToolApprovalsConfig(conversationMemory);
         try {
+            // Carry the agent-level tool-approval config onto memory BEFORE the
+            // pipeline (LlmTask) runs, so the tool-approval gate can resolve its
+            // effective config. Transient — never persisted; re-resolved each turn.
+            // Inside the try so an Error here cannot strand the registration above:
+            // a stranded entry would keep a finished turn's memory reachable AND
+            // make a later cancel signal the wrong (dead) pipeline.
+            conversationService.conversationHitlService.populateToolApprovalsConfig(conversationMemory);
             runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
                     executeConversation, memoryStateAtSubmit, persistedState);
         } finally {
