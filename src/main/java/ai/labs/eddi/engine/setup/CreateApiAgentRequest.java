@@ -46,5 +46,23 @@ public record CreateApiAgentRequest(@JsonProperty(required = true) String agentN
          * needing both — REST endpoints the spec describes AND an MCP server's tools —
          * was unreachable through this wizard and had to be assembled by hand.
          */
-        String mcpServerUrls) {
+        String mcpServerUrls,
+        /*
+         * Tool-loop iteration budget for the generated LLM task
+         * (LlmConfiguration.Task.maxToolIterations). Null keeps the engine default (10,
+         * ToolLoopRunner). That default suits a conversational agent with a handful of
+         * tools; an agent whose ENTIRE toolset is a spec's endpoints — the Platform
+         * Operator above all — routinely needs a longer chain for one legitimate task
+         * (an agent build via granular store endpoints is ~8 creates plus descriptor
+         * patches plus verification reads), and at the default it dies mid-work on the
+         * iteration cap.
+         *
+         * Bounded by AgentSetupService.MAX_TOOL_ITERATIONS: every iteration is an LLM
+         * round-trip carrying the full tool context, so an absurd value is a cost and
+         * latency hazard, not a capability.
+         *
+         * Appended last for the same positional-constructor reason as llmBaseUrl; the
+         * MCP create_api_agent tool passes null.
+         */
+        Integer maxToolIterations) {
 }

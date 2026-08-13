@@ -826,8 +826,17 @@ class AgentOrchestratorCoverageTest {
         var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
 
         assertNotNull(result);
-        // Last message is a tool result (not an AiMessage) -> sentinel string.
-        assertEquals("Max tool iterations reached", result.response());
+        // Last message is a tool result (not an AiMessage) → the budget-spent
+        // message. Equality against the producer keeps the wording in ONE place;
+        // the properties that matter are pinned separately: the user must learn
+        // the configured cap, that completed work stands, and how to resume.
+        assertEquals(ToolLoopRunner.iterationBudgetSpentMessage(2), result.response());
+        assertTrue(result.response().contains("2 tool-calling rounds"),
+                "the message must name the configured cap, not a generic limit");
+        assertTrue(result.response().contains("not rolled back"),
+                "the user must learn that completed calls have taken effect");
+        assertTrue(result.response().toLowerCase().contains("continue"),
+                "the message must say how to resume the work");
     }
 
     @Test

@@ -863,7 +863,7 @@ class McpSetupToolsTest {
         hitl.setToolApprovals(toolApprovals);
 
         service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
-                null, null, null, null, null, false, null, null, hitl, null));
+                null, null, null, null, null, false, null, null, hitl, null, null));
 
         var agentCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
         verify(AgentStore).createAgent(agentCaptor.capture());
@@ -879,11 +879,45 @@ class McpSetupToolsTest {
         stubApiAgentStores();
 
         service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
-                null, null, null, null, null, false, null, null, null, null));
+                null, null, null, null, null, false, null, null, null, null, null));
 
         var agentCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
         verify(AgentStore).createAgent(agentCaptor.capture());
         assertNull(agentCaptor.getValue().getHitlConfig());
+    }
+
+    /**
+     * The engine default of 10 tool iterations suits a conversational agent with a
+     * handful of tools. An agent whose whole toolset is a spec's endpoints — the
+     * Platform Operator — needs longer chains for one legitimate task, and at the
+     * default it died mid-work with "max tool iterations reached" (observed live:
+     * an agent build stopped at the cap after 22 calls). This is the provisioning
+     * half of that fix.
+     */
+    @Test
+    void createApiAgent_withMaxToolIterations_setsItOnTheGeneratedLlmTask() throws Exception {
+        stubApiAgentStores();
+
+        service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
+                null, null, null, null, null, false, null, null, null, null, 30));
+
+        var llmCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
+        verify(langchainStore).createLlm(llmCaptor.capture());
+        assertEquals(30, llmCaptor.getValue().tasks().getFirst().getMaxToolIterations());
+    }
+
+    @Test
+    void createApiAgent_withoutMaxToolIterations_keepsTheEngineDefault() throws Exception {
+        stubApiAgentStores();
+
+        service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
+                null, null, null, null, null, false, null, null, null, null, null));
+
+        var llmCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
+        verify(langchainStore).createLlm(llmCaptor.capture());
+        // Null on the config means ToolLoopRunner's own default applies — the field
+        // must not be written unasked.
+        assertNull(llmCaptor.getValue().tasks().getFirst().getMaxToolIterations());
     }
 
     @Test
@@ -895,7 +929,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/mcpcallstore/mcpcalls/mcp-1?version=1")).build());
 
         service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
-                null, null, null, null, null, false, null, null, null, "https://mcp.example.com/sse"));
+                null, null, null, null, null, false, null, null, null, "https://mcp.example.com/sse", null));
 
         var packageCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
         verify(WorkflowStore).createWorkflow(packageCaptor.capture());

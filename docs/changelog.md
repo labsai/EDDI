@@ -7,6 +7,38 @@
 
 
 
+## 🔁 feat(setup): caller-set tool-iteration budget on setup-api — the operator was dying at 10 rounds (2026-08-13)
+
+**Repo:** EDDI (`chore/remove-agent-father`)
+
+Asking the Platform Operator to build an agent ended, after 157s and 22 tool calls, with the
+four-word answer *"Max tool iterations reached"*. Both halves of that are defects.
+
+**The cap.** `ToolLoopRunner` defaults to 10 iterations and nothing on the setup path could set
+`LlmConfiguration.Task.maxToolIterations`, so every wizard-created agent got the default — sized for
+a conversational agent with a handful of tools, not for one whose entire toolset is a spec's
+endpoints. `CreateApiAgentRequest` gains a trailing `maxToolIterations` (positional-constructor
+convention; the MCP `create_api_agent` tool passes null — a model provisioning an agent must not
+raise its own budget). Validated up front like `hitlConfig` (reject before the first resource
+exists), bounded by `MAX_TOOL_ITERATIONS = 100`; set post-build on the task rather than threading a
+12th parameter through `createLlmConfig`. The Manager provisions the operator at the ceiling —
+deliberate: one operator turn is one admin task of arbitrary length, and the HITL gate paces every
+write regardless of budget, so the budget is not the safety mechanism.
+
+**The four words.** When the loop exhausts mid-tool-call, the fallback string is the turn's whole
+answer. The bare version hid the two facts the user needed: completed calls HAVE taken effect
+(nothing rolls back — the failed build had already created real resources), and the work is
+resumable. `iterationBudgetSpentMessage(maxIterations)` now says what stopped, that completed work
+stands, how to continue, and which knob exists. The existing coverage test asserted the old string
+verbatim; it now asserts equality with the producer plus the three properties that matter (names
+the cap, states nothing rolls back, says how to resume) so the wording can evolve in one place.
+
+**Not changed:** `setupAgent` — same conservatism as the `hitlConfig` change; the operator only
+uses `setup-api`, and a smaller surface is easier to review.
+
+---
+
+
 ## 🔒 fix(hitl): a failed policy read left the approval gate inert (2026-08-13)
 
 **Repo:** EDDI (`chore/remove-agent-father`)

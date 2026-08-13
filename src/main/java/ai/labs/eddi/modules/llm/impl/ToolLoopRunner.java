@@ -431,12 +431,35 @@ class ToolLoopRunner {
             // Loop exhausted its iteration budget. The last message is usually the
             // model's final AiMessage; on resume with a spent budget it may instead be
             // a verdict-applied tool result — guard the cast either way.
+            //
+            // The fallback is user-visible: it becomes the turn's whole answer when
+            // the model was still mid-tool-call at the cap. The old bare "Max tool
+            // iterations reached" read like an internal error code and hid the two
+            // facts the user actually needs — the tool calls that already ran HAVE
+            // taken effect (nothing rolls back), and the work can be resumed by
+            // asking to continue. Observed live: the Platform Operator building an
+            // agent died at the cap after 22 calls, with real resources created and a
+            // four-word answer.
             ChatMessage last = currentMessages.get(currentMessages.size() - 1);
-            if (last instanceof AiMessage aiLast) {
-                return aiLast.text() != null ? aiLast.text() : "Max tool iterations reached";
+            if (last instanceof AiMessage aiLast && aiLast.text() != null) {
+                return aiLast.text();
             }
-            return "Max tool iterations reached";
+            return iterationBudgetSpentMessage(maxIterations);
         }, task, "Agent execution");
+    }
+
+    /**
+     * The turn's answer when the tool loop hits its iteration cap mid-work. Kept
+     * honest and actionable rather than apologetic: what stopped, what state the
+     * work is in, and how to go on. The cap itself is configurable per task
+     * ({@code maxToolIterations}) — mentioning it here is deliberate, so an agent
+     * designer seeing this repeatedly knows which knob exists.
+     */
+    static String iterationBudgetSpentMessage(int maxIterations) {
+        return "I stopped after reaching the limit of " + maxIterations + " tool-calling rounds for a single turn, "
+                + "before finishing the task. Everything I already did has taken effect — completed calls are not "
+                + "rolled back. Say \"continue\" and I will pick up where I stopped. If this task regularly needs "
+                + "more rounds, the agent's maxToolIterations setting can be raised.";
     }
 
     /**

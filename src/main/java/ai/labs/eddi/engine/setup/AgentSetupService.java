@@ -376,6 +376,9 @@ public class AgentSetupService {
             throw new AgentSetupException("Invalid hitlConfig: " + e.getMessage(), e);
         }
         validateMcpServerUrls(request.mcpServerUrls());
+        // Same up-front reasoning as hitlConfig: an out-of-range value must fail
+        // before the first resource exists, not after six of them do.
+        validateMaxToolIterations(request.maxToolIterations());
 
         var params = resolveParamsValidated(request.provider(), request.model(), request.deploy(), request.environment());
         var createdResources = new LinkedHashMap<String, Object>();
@@ -432,6 +435,13 @@ public class AgentSetupService {
             // (Ollama, Jlama) with no endpoint to reach.
             var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, enrichedPrompt, false, null,
                     request.llmBaseUrl(), promptResponseJson, quickReplies, sentiment, httpCallsLocations);
+            // Set post-build rather than threading a 12th parameter through
+            // createLlmConfig: the task is mutable, only this path accepts the value,
+            // and every other caller (setupAgent, four test sites) keeps the engine
+            // default untouched. Validated up front — see validateMaxToolIterations.
+            if (request.maxToolIterations() != null) {
+                llmConfig.tasks().getFirst().setMaxToolIterations(request.maxToolIterations());
+            }
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
@@ -483,6 +493,35 @@ public class AgentSetupService {
         } catch (Exception e) {
             rollbackCreatedResources(createdResources, request.agentName(), e);
             throw new AgentSetupException("Failed to create API agent: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Ceiling for a caller-supplied {@code maxToolIterations}. Each iteration is a
+     * full LLM round-trip carrying the tool context, so the value multiplies both
+     * cost and worst-case turn latency; nothing in the engine bounds the task field
+     * itself ({@code ToolLoopRunner} honours whatever the config says). 100 is ten
+     * times the engine default — and deliberately exactly the value the Platform
+     * Operator provisions with: an operator turn is one admin task of arbitrary
+     * length (an agent build via granular endpoints already burns ~22 calls), and
+     * it runs under the HITL gate, which paces every write regardless of budget.
+     * The ceiling exists to cap a typo like 5000, not to second-guess a legitimate
+     * long chain; raising it is a deliberate one-line change, not a config knob.
+     */
+    public static final int MAX_TOOL_ITERATIONS = 100;
+
+    /**
+     * Same up-front contract as the other validators: reject before the first
+     * resource exists. {@code null} is valid and keeps the engine default.
+     */
+    private void validateMaxToolIterations(Integer maxToolIterations) throws AgentSetupException {
+        if (maxToolIterations == null) {
+            return;
+        }
+        if (maxToolIterations < 1 || maxToolIterations > MAX_TOOL_ITERATIONS) {
+            throw new AgentSetupException(
+                    "maxToolIterations must be between 1 and " + MAX_TOOL_ITERATIONS + " (was " + maxToolIterations
+                            + "); omit it to use the engine default");
         }
     }
 
