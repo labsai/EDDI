@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.runtime.internal;
+import java.time.DayOfWeek;
 
 import org.junit.jupiter.api.Test;
 
@@ -114,7 +115,7 @@ class CronParserTest {
         assertEquals(9, nextZdt.getHour());
         assertEquals(0, nextZdt.getMinute());
         // Should be Monday
-        assertEquals(java.time.DayOfWeek.MONDAY, nextZdt.getDayOfWeek());
+        assertEquals(DayOfWeek.MONDAY, nextZdt.getDayOfWeek());
     }
 
     @Test
@@ -174,7 +175,7 @@ class CronParserTest {
         // 2024-01-06 is a Saturday; the next Sunday is 2024-01-07.
         Instant saturday = ZonedDateTime.of(2024, 1, 6, 12, 0, 0, 0, UTC).toInstant();
         Instant next = CronParser.computeNextFire("0 0 * * 7", saturday, UTC);
-        assertEquals(java.time.DayOfWeek.SUNDAY, next.atZone(UTC).getDayOfWeek());
+        assertEquals(DayOfWeek.SUNDAY, next.atZone(UTC).getDayOfWeek());
     }
 
     @Test
@@ -216,7 +217,7 @@ class CronParserTest {
         Instant next = CronParser.computeNextFire("0 0 13 * 5", base, UTC);
         ZonedDateTime z = next.atZone(UTC);
         assertEquals(13, z.getDayOfMonth());
-        assertEquals(java.time.DayOfWeek.SATURDAY, z.getDayOfWeek());
+        assertEquals(DayOfWeek.SATURDAY, z.getDayOfWeek());
     }
 
     @Test
@@ -226,7 +227,7 @@ class CronParserTest {
         Instant base = ZonedDateTime.of(2024, 1, 1, 0, 0, 0, 0, UTC).toInstant();
         Instant next = CronParser.computeNextFire("0 0 13 * 5", base, UTC);
         ZonedDateTime z = next.atZone(UTC);
-        assertEquals(java.time.DayOfWeek.FRIDAY, z.getDayOfWeek());
+        assertEquals(DayOfWeek.FRIDAY, z.getDayOfWeek());
         assertEquals(5, z.getDayOfMonth());
     }
 

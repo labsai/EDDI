@@ -27,6 +27,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -40,6 +41,7 @@ import org.mockito.Mock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -392,10 +394,10 @@ class GroupConversationServiceTaskForceTest {
         @DisplayName("Setter wraps plain HashMap into ConcurrentHashMap")
         void setter_wrapsInConcurrentHashMap() {
             var gc = new GroupConversation();
-            gc.setMemberConversationIds(new java.util.LinkedHashMap<>(
+            gc.setMemberConversationIds(new LinkedHashMap<>(
                     Map.of("agent-1", "conv-1")));
 
-            assertTrue(gc.getMemberConversationIds() instanceof java.util.concurrent.ConcurrentHashMap,
+            assertTrue(gc.getMemberConversationIds() instanceof ConcurrentHashMap,
                     "Must be ConcurrentHashMap after setter");
             assertEquals("conv-1", gc.getMemberConversationIds().get("agent-1"));
         }
@@ -407,7 +409,7 @@ class GroupConversationServiceTaskForceTest {
             gc.setMemberConversationIds(null);
 
             assertNotNull(gc.getMemberConversationIds());
-            assertTrue(gc.getMemberConversationIds() instanceof java.util.concurrent.ConcurrentHashMap);
+            assertTrue(gc.getMemberConversationIds() instanceof ConcurrentHashMap);
             assertTrue(gc.getMemberConversationIds().isEmpty());
         }
     }
@@ -427,7 +429,7 @@ class GroupConversationServiceTaskForceTest {
             var member = new GroupMember("agent-1", "Agent One", 0, "MEMBER");
             var gc = new GroupConversation();
             gc.setTranscript(new ArrayList<>());
-            gc.setMemberConversationIds(new java.util.concurrent.ConcurrentHashMap<>());
+            gc.setMemberConversationIds(new ConcurrentHashMap<>());
 
             var protocol = new AgentGroupConfiguration.ProtocolConfig(
                     60, AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy.SKIP, 2,
@@ -437,7 +439,7 @@ class GroupConversationServiceTaskForceTest {
                     false, null, 1);
 
             // Agent is available but startConversation throws quota error
-            when(agentFactory.getLatestReadyAgent(any(), eq("agent-1"))).thenReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class));
+            when(agentFactory.getLatestReadyAgent(any(), eq("agent-1"))).thenReturn(mock(IAgent.class));
             when(conversationService.startConversation(any(), eq("agent-1"), any(), any()))
                     .thenThrow(new QuotaExceededException("Conversation limit reached"));
 
@@ -456,7 +458,7 @@ class GroupConversationServiceTaskForceTest {
             var gc = new GroupConversation();
             gc.setTranscript(new ArrayList<>());
             // Pre-set a conversation ID so startConversation is skipped
-            gc.setMemberConversationIds(new java.util.concurrent.ConcurrentHashMap<>(
+            gc.setMemberConversationIds(new ConcurrentHashMap<>(
                     Map.of("agent-1", "existing-conv")));
 
             var protocol = new AgentGroupConfiguration.ProtocolConfig(
@@ -467,7 +469,7 @@ class GroupConversationServiceTaskForceTest {
                     false, null, 1);
 
             // Agent is available
-            when(agentFactory.getLatestReadyAgent(any(), eq("agent-1"))).thenReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class));
+            when(agentFactory.getLatestReadyAgent(any(), eq("agent-1"))).thenReturn(mock(IAgent.class));
             // say() throws quota error
             doThrow(new QuotaExceededException("API call limit reached"))
                     .when(conversationService).say(any(), eq("agent-1"), eq("existing-conv"),
@@ -487,7 +489,7 @@ class GroupConversationServiceTaskForceTest {
             var member = new GroupMember("agent-1", "Agent One", 0, "MEMBER");
             var gc = new GroupConversation();
             gc.setTranscript(new ArrayList<>());
-            gc.setMemberConversationIds(new java.util.concurrent.ConcurrentHashMap<>(
+            gc.setMemberConversationIds(new ConcurrentHashMap<>(
                     Map.of("agent-1", "existing-conv")));
 
             // RETRY policy with 5 retries — quota should still abort immediately
@@ -498,7 +500,7 @@ class GroupConversationServiceTaskForceTest {
                     AgentGroupConfiguration.TurnOrder.PARALLEL, AgentGroupConfiguration.ContextScope.TASK_ONLY,
                     false, null, 1);
 
-            when(agentFactory.getLatestReadyAgent(any(), eq("agent-1"))).thenReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class));
+            when(agentFactory.getLatestReadyAgent(any(), eq("agent-1"))).thenReturn(mock(IAgent.class));
             doThrow(new QuotaExceededException("API call limit reached"))
                     .when(conversationService).say(any(), eq("agent-1"), eq("existing-conv"),
                             any(), any(), any(), any(), anyBoolean(), any());

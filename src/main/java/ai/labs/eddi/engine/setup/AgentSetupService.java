@@ -51,6 +51,7 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.util.*;
+import java.util.Map;
 
 /**
  * Service that encapsulates the business logic for setting up EDDI agents. Used
@@ -1184,7 +1185,7 @@ public class AgentSetupService {
             if (httpStatus == 200) {
                 try {
                     @SuppressWarnings("unchecked")
-                    var body = (java.util.Map<String, Object>) response.getEntity();
+                    var body = (Map<String, Object>) response.getEntity();
                     String deployStatus = body != null && body.containsKey("status") ? body.get("status").toString() : "UNKNOWN";
                     result.put("deployed", "READY".equals(deployStatus));
                     result.put("deploymentStatus", deployStatus);

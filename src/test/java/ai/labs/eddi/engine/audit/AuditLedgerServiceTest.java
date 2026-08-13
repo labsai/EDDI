@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -109,6 +110,234 @@ class AuditLedgerServiceTest {
 
         verify(auditStore).appendBatch(argThat(batch -> batch.size() == 2));
         assertEquals(0, service.getQueueSize());
+    }
+
+    // ==================== sequence-table eviction ====================
+
+    /**
+     * The table used to be {@code clear()}ed on overflow, on the reasoning that
+     * re-seeding from {@code countByConversation} was "correct, only slower". It is
+     * not: an entry that is still queued has consumed a position the store cannot
+     * see yet, so the re-seed hands the same number out twice — and the verifier
+     * grades a duplicate as {@code BROKEN}, i.e. the ledger reporting the
+     * deployment as tampered because its own bookkeeping wrapped around.
+     */
+    @Test
+    @DisplayName("sequence eviction — a conversation with queued entries is never re-seeded into a duplicate")
+    void sequenceEvictionKeepsQueuedConversationsUnique() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation(anyString())).thenReturn(0L);
+        service = createService(true, null);
+
+        // Consume position 0 for "live" and leave it sitting in the queue.
+        service.submit(entry("live-1", "live", "agent1"));
+
+        // Overflow the table. Nothing is flushed, so "live" is still queued when
+        // eviction runs — exactly the window the old clear() got wrong.
+        for (int i = 0; i < AuditLedgerService.MAX_TRACKED_CONVERSATIONS + 5; i++) {
+            service.submit(entry("fill-" + i, "filler-" + i, "agent1"));
+        }
+
+        service.submit(entry("live-2", "live", "agent1"));
+        service.flush();
+
+        var persisted = ArgumentCaptor.forClass(List.class);
+        verify(auditStore).appendBatch(persisted.capture());
+        @SuppressWarnings("unchecked")
+        List<Long> liveSequences = ((List<AuditEntry>) persisted.getValue()).stream()
+                .filter(e -> "live".equals(e.conversationId()))
+                .map(AuditEntry::sequence)
+                .toList();
+
+        assertEquals(List.of(0L, 1L), liveSequences,
+                "the second entry must continue the chain, not restart it at a position already taken");
+    }
+
+    /**
+     * The other half of the contract: once the queue has drained, those counters
+     * ARE safe to drop, so the table must actually shrink. Without this the fix
+     * could "pass" by simply never evicting, which would strand every later
+     * conversation on UNSEQUENCED.
+     */
+    @Test
+    @DisplayName("sequence eviction — fully-persisted conversations are evicted so new ones still chain")
+    void sequenceEvictionReclaimsPersistedConversations() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation(anyString())).thenReturn(0L);
+        service = createService(true, null);
+
+        for (int i = 0; i < AuditLedgerService.MAX_TRACKED_CONVERSATIONS + 5; i++) {
+            service.submit(entry("fill-" + i, "filler-" + i, "agent1"));
+        }
+        service.flush(); // everything is now durably in the store
+
+        service.submit(entry("fresh-1", "fresh", "agent1"));
+        service.flush();
+
+        var persisted = ArgumentCaptor.forClass(List.class);
+        verify(auditStore, times(2)).appendBatch(persisted.capture());
+        @SuppressWarnings("unchecked")
+        List<AuditEntry> lastBatch = (List<AuditEntry>) persisted.getValue();
+        var fresh = lastBatch.stream().filter(e -> "fresh".equals(e.conversationId())).findFirst().orElseThrow();
+
+        assertEquals(0L, fresh.sequence(),
+                "with the queue drained the table must have room again, so this chains normally");
+        assertNotEquals(AuditEntry.UNSEQUENCED, fresh.sequence());
+    }
+
+    /**
+     * The third place a consumed chain position can live. Once
+     * {@link AuditLedgerService#flush()} has polled a batch off the queue, those
+     * positions are in neither the queue nor the store until the append returns —
+     * so an eviction landing in that window would read their conversations as fully
+     * persisted and re-seed them straight into a duplicate.
+     * <p>
+     * Driven from inside the mocked {@code appendBatch}, which is precisely when
+     * the batch is in flight.
+     */
+    @Test
+    @DisplayName("sequence eviction — a conversation in the in-flight flush batch is not re-seeded")
+    void sequenceEvictionRetainsTheInFlightBatch() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation(anyString())).thenReturn(0L);
+        service = createService(true, null);
+
+        // Position 0 for "live", then force it out of the queue and into the
+        // in-flight batch by flushing with an append that overflows the table
+        // while it is still executing.
+        service.submit(entry("live-1", "live", "agent1"));
+        doAnswer(invocation -> {
+            for (int i = 0; i < AuditLedgerService.MAX_TRACKED_CONVERSATIONS + 5; i++) {
+                service.submit(entry("fill-" + i, "filler-" + i, "agent1"));
+            }
+            return null;
+        }).when(auditStore).appendBatch(any());
+
+        service.flush();
+
+        // The append has returned, so "live" is genuinely persisted now; what
+        // matters is that eviction did not drop its counter mid-flight.
+        doAnswer(invocation -> null).when(auditStore).appendBatch(any());
+        service.submit(entry("live-2", "live", "agent1"));
+
+        var persisted = ArgumentCaptor.forClass(List.class);
+        service.flush();
+        verify(auditStore, atLeastOnce()).appendBatch(persisted.capture());
+        @SuppressWarnings("unchecked")
+        var live2 = ((List<AuditEntry>) persisted.getValue()).stream()
+                .filter(e -> "live".equals(e.conversationId()))
+                .findFirst().orElseThrow();
+
+        assertEquals(1L, live2.sequence(),
+                "the counter must have survived an eviction that ran while its entry was in the flush batch");
+    }
+
+    /**
+     * When every tracked conversation is genuinely live, a scan evicts nothing —
+     * and without a barrier the next submit for an unseen conversation would take
+     * the write lock and traverse the whole queue (bounded at 100k) to reach the
+     * same conclusion, with every other submitter blocked behind it on the read
+     * lock. Only a flush can change the answer, so only a flush lifts the barrier.
+     */
+    @Test
+    @DisplayName("sequence eviction — a futile scan is not repeated until a flush could change the answer")
+    void futileEvictionScanIsNotRepeatedUntilFlush() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation(anyString())).thenReturn(0L);
+        service = createService(true, null);
+
+        // Fill the table with conversations that are all still queued, so nothing
+        // is evictable.
+        for (int i = 0; i < AuditLedgerService.MAX_TRACKED_CONVERSATIONS + 5; i++) {
+            service.submit(entry("fill-" + i, "filler-" + i, "agent1"));
+        }
+        int trackedAfterFill = service.getTrackedConversationCount();
+
+        // Further unseen conversations must not each re-scan; they degrade to
+        // UNSEQUENCED, which is the honest verdict rather than a duplicate.
+        for (int i = 0; i < 50; i++) {
+            service.submit(entry("late-" + i, "late-conv-" + i, "agent1"));
+        }
+        assertEquals(trackedAfterFill, service.getTrackedConversationCount(),
+                "a barred scan must not grow the table either");
+        assertEquals(1, service.getFutileEvictionScans(),
+                "the scan should have run once and then been barred, not once per submit");
+
+        // A flush moves entries out of the queue, so the next scan is worthwhile
+        // again — and this time it can actually evict.
+        service.flush();
+        service.submit(entry("after-1", "after-flush", "agent1"));
+
+        assertTrue(service.getTrackedConversationCount() < trackedAfterFill,
+                "once the queue drained, the barrier must lift and eviction reclaim the table");
+    }
+
+    /**
+     * A conversation with a dead-lettered position can never be re-seeded — the
+     * store count is smaller than the next free position once there is a gap, so
+     * re-seeding would hand the same numbers out twice. Those counters are
+     * therefore pinned for the process lifetime, which is only safe because they
+     * cannot fill the table: the undelivered cap counts <em>sequences</em>, so the
+     * worst case is one pinned conversation per tracked sequence.
+     * <p>
+     * The failure this guards is a plausible future edit — raising
+     * {@code MAX_TRACKED_UNDELIVERED} to or past {@code MAX_TRACKED_CONVERSATIONS}
+     * — after which a long store outage could pin every slot and strand every later
+     * conversation on {@code UNSEQUENCED} until restart, with nothing failing to
+     * say so.
+     */
+    @Test
+    @DisplayName("sequence eviction — pinned undelivered conversations do not block reclamation")
+    void undeliveredPinCannotExhaustTheTable() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation(anyString())).thenReturn(0L);
+        service = createService(true, null);
+
+        // A store outage dead-letters this conversation, so position 0 is
+        // consumed but never persisted. Its counter is pinned from here on: the
+        // store count can no longer tell us where the chain resumes.
+        doThrow(new RuntimeException("db error")).when(auditStore).appendBatch(anyList());
+        service.submit(entry("pinned-1", "pinned", "agent1"));
+        service.flush();
+        service.flush();
+        service.flush(); // dead-lettered
+        assertEquals(Set.of(0L), service.undeliveredSequences("pinned"),
+                "precondition: the outage left an unattributed position for this conversation");
+
+        // Store recovers. Fill the table with conversations that DO persist.
+        doAnswer(invocation -> null).when(auditStore).appendBatch(anyList());
+        for (int i = 0; i < AuditLedgerService.MAX_TRACKED_CONVERSATIONS + 5; i++) {
+            service.submit(entry("fill-" + i, "filler-" + i, "agent1"));
+        }
+        service.flush();
+
+        // The pinned conversation is retained while the persisted ones are
+        // reclaimed, so a new conversation still gets a real chain position
+        // rather than being stranded on UNSEQUENCED.
+        service.submit(entry("fresh-1", "fresh", "agent1"));
+        service.flush();
+
+        var persisted = ArgumentCaptor.forClass(List.class);
+        verify(auditStore, atLeastOnce()).appendBatch(persisted.capture());
+        @SuppressWarnings("unchecked")
+        var fresh = ((List<AuditEntry>) persisted.getValue()).stream()
+                .filter(e -> "fresh".equals(e.conversationId()))
+                .findFirst().orElseThrow();
+        assertNotEquals(AuditEntry.UNSEQUENCED, fresh.sequence(),
+                "a pinned conversation must not cost later conversations their chain position");
+        assertEquals(0L, fresh.sequence());
+
+        // And the pin did its job: the dead-lettered position is not handed out
+        // a second time.
+        service.submit(entry("pinned-2", "pinned", "agent1"));
+        service.flush();
+        verify(auditStore, atLeastOnce()).appendBatch(persisted.capture());
+        @SuppressWarnings("unchecked")
+        var pinnedSecond = ((List<AuditEntry>) persisted.getValue()).stream()
+                .filter(e -> "pinned".equals(e.conversationId()))
+                .findFirst().orElseThrow();
+        assertEquals(1L, pinnedSecond.sequence(),
+                "the counter survived, so the chain resumes past the dead-lettered 0 rather than reusing it");
     }
 
     @Test
@@ -256,7 +485,7 @@ class AuditLedgerServiceTest {
         svc.submit(entry("id-3", "conv-1", "agent-1")); // queued → must be sequence 1
         svc.flush();
 
-        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        var captor = ArgumentCaptor.forClass(List.class);
         verify(auditStore, times(2)).appendBatch(captor.capture());
         List<Long> writtenSequences = ((List<List<AuditEntry>>) (List<?>) captor.getAllValues()).stream().flatMap(List::stream)
                 .map(AuditEntry::sequence).toList();
@@ -360,7 +589,7 @@ class AuditLedgerServiceTest {
         service.submit(entry("id-3", "conv-b", "agent-1"));
         service.flush();
 
-        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        var captor = ArgumentCaptor.forClass(List.class);
         verify(auditStore).appendBatch(captor.capture());
         @SuppressWarnings("unchecked")
         List<AuditEntry> written = captor.getValue();
@@ -380,7 +609,7 @@ class AuditLedgerServiceTest {
         service.submit(entry("id-1", "conv-a", "agent-1"));
         service.flush();
 
-        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        var captor = ArgumentCaptor.forClass(List.class);
         verify(auditStore).appendBatch(captor.capture());
         @SuppressWarnings("unchecked")
         List<AuditEntry> written = captor.getValue();
@@ -400,7 +629,7 @@ class AuditLedgerServiceTest {
         service.submit(entry("id-1", "conv-a", "agent-1"));
         service.flush();
 
-        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        var captor = ArgumentCaptor.forClass(List.class);
         verify(auditStore).appendBatch(captor.capture());
         @SuppressWarnings("unchecked")
         List<AuditEntry> written = captor.getValue();
@@ -417,7 +646,7 @@ class AuditLedgerServiceTest {
         service.submit(entry("id-1", "conv-a", "agent-1"));
         service.flush();
 
-        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        var captor = ArgumentCaptor.forClass(List.class);
         verify(auditStore).appendBatch(captor.capture());
         @SuppressWarnings("unchecked")
         List<AuditEntry> written = captor.getValue();
@@ -442,7 +671,7 @@ class AuditLedgerServiceTest {
         service.submit(entry("id-1", "conv-a", "agent-1"));
         service.flush();
 
-        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        var captor = ArgumentCaptor.forClass(List.class);
         verify(auditStore).appendBatch(captor.capture());
         @SuppressWarnings("unchecked")
         List<AuditEntry> written = captor.getValue();

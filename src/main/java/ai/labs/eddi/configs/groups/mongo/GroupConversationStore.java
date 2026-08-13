@@ -16,6 +16,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -112,10 +113,10 @@ public class GroupConversationStore implements IGroupConversationStore {
             // Anchored exact match (see SAFE_ID): findResources turns a String
             // filter value into an unanchored regex, so a raw groupId would
             // substring-match other groups.
-            var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
-                    java.util.List.of(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter(
+            var filter = new IResourceFilter.QueryFilters(
+                    List.of(new IResourceFilter.QueryFilter(
                             "groupId", "^" + groupId + "$")));
-            var resourceIds = storage.findResources(new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{filter}, "lastModified", index, limit);
+            var resourceIds = storage.findResources(new IResourceFilter.QueryFilters[]{filter}, "lastModified", index, limit);
             for (var resourceId : resourceIds) {
                 try {
                     var resource = storage.read(resourceId.getId(), SINGLE_VERSION);
@@ -144,7 +145,7 @@ public class GroupConversationStore implements IGroupConversationStore {
             return false;
         }
         gc.setState(newState);
-        gc.setLastModified(java.time.Instant.now());
+        gc.setLastModified(Instant.now());
         try {
             // Conditional write — the persisted state must STILL be expectedState. The
             // read-check above alone was a read-check-update (single-node only): two
@@ -311,8 +312,8 @@ public class GroupConversationStore implements IGroupConversationStore {
     @Override
     public List<GroupConversation> findByState(GroupConversation.GroupConversationState state, String groupId, int limit)
             throws IResourceStore.ResourceStoreException {
-        var filterList = new ArrayList<ai.labs.eddi.datastore.IResourceFilter.QueryFilter>();
-        filterList.add(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("state", "^" + state.name() + "$"));
+        var filterList = new ArrayList<IResourceFilter.QueryFilter>();
+        filterList.add(new IResourceFilter.QueryFilter("state", "^" + state.name() + "$"));
         if (groupId != null) {
             if (!SAFE_ID.matcher(groupId).matches()) {
                 LOGGER.warnf("findByState called with non-id groupId — returning empty");
@@ -320,11 +321,11 @@ public class GroupConversationStore implements IGroupConversationStore {
             }
             // Anchored exact match (see SAFE_ID): a raw groupId would leak
             // conversations from other groups whose id contains it as a substring.
-            filterList.add(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter(
+            filterList.add(new IResourceFilter.QueryFilter(
                     "groupId", "^" + groupId + "$"));
         }
-        var filters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{
-                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(filterList)};
+        var filters = new IResourceFilter.QueryFilters[]{
+                new IResourceFilter.QueryFilters(filterList)};
         List<IResourceStore.IResourceId> ids = storage.findResources(filters, "lastModified", 0, limit);
         List<GroupConversation> out = new ArrayList<>();
         for (var id : ids) {

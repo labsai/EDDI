@@ -22,6 +22,7 @@ import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import java.time.DateTimeException;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -239,7 +240,7 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
             return Response.status(Response.Status.CREATED).entity(cadence).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
-        } catch (IllegalArgumentException | java.time.DateTimeException e) {
+        } catch (IllegalArgumentException | DateTimeException e) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(Map.of("error", "Invalid cadence definition: " + e.getMessage())).build();
         } catch (Exception e) {

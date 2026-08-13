@@ -11,11 +11,13 @@ import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
+import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
@@ -105,7 +107,7 @@ class AgentOrchestratorBranchTest {
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
                 null, null, null, null, null,
-                mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
+                mock(IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
     }
 
     // =========================================================
@@ -165,7 +167,7 @@ class AgentOrchestratorBranchTest {
                 // A real Attachment, not a placeholder Object: the gate counts
                 // coerced attachments, so a stand-in would not represent a turn
                 // that actually carries a file.
-                var attachment = new ai.labs.eddi.engine.memory.model.Attachment();
+                var attachment = new Attachment();
                 attachment.setStorageRef("ref-current");
                 attachment.setFileName("current.pdf");
                 attachment.setMimeType("application/pdf");
@@ -187,7 +189,7 @@ class AgentOrchestratorBranchTest {
         @SuppressWarnings({"rawtypes", "unchecked"})
         private void withAttachmentsOnAnEarlierTurnOnly() {
             withAttachments(false);
-            var attachment = new ai.labs.eddi.engine.memory.model.Attachment();
+            var attachment = new Attachment();
             attachment.setStorageRef("ref-1");
             attachment.setFileName("report.pdf");
             attachment.setMimeType("application/pdf");
@@ -342,11 +344,11 @@ class AgentOrchestratorBranchTest {
             when(memory.getCurrentStep()).thenReturn(step);
             when(memory.getConversationId()).thenReturn("conv-1");
 
-            var inline = new ai.labs.eddi.engine.memory.model.Attachment();
+            var inline = new Attachment();
             inline.setMimeType("application/pdf");
             inline.setFileName("inline.pdf");
             inline.setBase64Data("JVBERi0=");
-            var byUrl = new ai.labs.eddi.engine.memory.model.Attachment();
+            var byUrl = new Attachment();
             byUrl.setMimeType("image/png");
             byUrl.setUrl("https://example.com/a.png");
 

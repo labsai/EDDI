@@ -5,6 +5,8 @@
 package ai.labs.eddi.integrations.openai;
 
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * Shared fixtures for the OpenAI adapter tests.
@@ -28,7 +30,7 @@ final class OpenAiTestFixtures {
         });
     }
 
-    static OpenAiCompatConfig config(java.util.function.Consumer<ConfigBuilder> customizer) {
+    static OpenAiCompatConfig config(Consumer<ConfigBuilder> customizer) {
         ConfigBuilder builder = new ConfigBuilder();
         customizer.accept(builder);
         return builder.build();
@@ -49,7 +51,7 @@ final class OpenAiTestFixtures {
         boolean exposeStatelessVariants = true;
 
         OpenAiCompatConfig build() {
-            return new OpenAiCompatConfig(enabled, java.util.Optional.ofNullable(apiKey), httpPolicy,
+            return new OpenAiCompatConfig(enabled, Optional.ofNullable(apiKey), httpPolicy,
                     trustUserHeaders, allowAnonymous, defaultUser, environment, requestTimeoutSeconds,
                     maxConcurrentRequests, modelCacheSeconds, exposeStatelessVariants);
         }

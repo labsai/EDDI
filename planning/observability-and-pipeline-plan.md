@@ -4,9 +4,9 @@
 
 ## Prerequisite Reading
 
-1. [`docs/architecture.md`](../architecture.md) — Pipeline lifecycle, task model
-2. [`docs/changelog.md`](../changelog.md) — Recent changes for context
-3. [`AGENTS.md`](../../AGENTS.md) — §4.2 "Core Architecture" for the lifecycle pipeline model
+1. [`docs/architecture.md`](../docs/architecture.md) — Pipeline lifecycle, task model
+2. [`docs/changelog.md`](../docs/changelog.md) — Recent changes for context
+3. [`AGENTS.md`](../AGENTS.md) — §4.2 "Core Architecture" for the lifecycle pipeline model
 
 ---
 
@@ -28,7 +28,7 @@
 
 ### 1b. Instrument the LifecycleManager
 
-The main execution path is in [`LifecycleManager.executeLifecycle()`](../../src/main/java/ai/labs/eddi/engine/lifecycle/LifecycleManager.java). Add span-per-task:
+The main execution path is in [`LifecycleManager.executeLifecycle()`](../src/main/java/ai/labs/eddi/engine/lifecycle/internal/LifecycleManager.java). Add span-per-task:
 
 ```java
 Span span = tracer.spanBuilder("eddi.task." + task.getId().name())
@@ -67,7 +67,7 @@ quarkus.otel.service.name=eddi
 ```
 
 **Key files:**
-- `src/main/java/ai/labs/eddi/engine/lifecycle/LifecycleManager.java`
+- `src/main/java/ai/labs/eddi/engine/lifecycle/internal/LifecycleManager.java`
 - `src/main/java/ai/labs/eddi/engine/httpclient/SafeHttpClient.java`
 - `src/main/resources/application.properties`
 

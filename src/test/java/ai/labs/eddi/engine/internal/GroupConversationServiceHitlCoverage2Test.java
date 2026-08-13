@@ -30,8 +30,10 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -47,6 +49,7 @@ import org.mockito.MockitoAnnotations;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -162,9 +165,9 @@ class GroupConversationServiceHitlCoverage2Test {
     private SimpleConversationMemorySnapshot snapshot(ConversationState state, String text) {
         var snap = new SimpleConversationMemorySnapshot();
         snap.setConversationState(state);
-        var output = new ai.labs.eddi.engine.memory.model.ConversationOutput();
+        var output = new ConversationOutput();
         output.put("output", List.of(text));
-        snap.setConversationOutputs(new java.util.ArrayList<>(List.of(output)));
+        snap.setConversationOutputs(new ArrayList<>(List.of(output)));
         return snap;
     }
 
@@ -305,7 +308,7 @@ class GroupConversationServiceHitlCoverage2Test {
         // placeholder
         var errSnap = new SimpleConversationMemorySnapshot();
         errSnap.setConversationState(ConversationState.ERROR);
-        errSnap.setConversationOutputs(new java.util.ArrayList<>());
+        errSnap.setConversationOutputs(new ArrayList<>());
         doAnswer(inv -> {
             IConversationService.ConversationResponseHandler h = inv.getArgument(2);
             h.onComplete(errSnap);
@@ -959,7 +962,7 @@ class GroupConversationServiceHitlCoverage2Test {
     void propagateEmptySteps() {
         var gc = pausedPhaseGc("gc-prop-empty");
         var snap = new SimpleConversationMemorySnapshot();
-        snap.setConversationSteps(new java.util.ArrayList<>());
+        snap.setConversationSteps(new ArrayList<>());
         GroupConversationService.propagateDynamicAgentTracking(snap, gc);
         assertTrue(gc.getCreatedAgentIds().isEmpty());
     }
@@ -998,7 +1001,7 @@ class GroupConversationServiceHitlCoverage2Test {
                 AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy.ABORT, 2,
                 AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy.SKIP);
 
-        assertThrows(ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException.class,
+        assertThrows(IGroupConversationService.GroupDiscussionException.class,
                 () -> invoke(m, member(), 0, phase(PhaseType.OPINION), protocol,
                         new RuntimeException("fail"), "Agent failed", null));
     }

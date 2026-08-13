@@ -9,6 +9,7 @@ import dev.langchain4j.data.message.*;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 import static ai.labs.eddi.engine.memory.model.PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT;
@@ -93,7 +94,7 @@ class ChatTranscriptCodecTest {
         // legally: ...AiMessage(with requests) -> results for every request id.
         var codec = new ChatTranscriptCodec();
         var result = codec.serialize(fullConversation(), 2_000_000);
-        List<ChatMessage> restored = new java.util.ArrayList<>(codec.deserialize(result.json()));
+        List<ChatMessage> restored = new ArrayList<>(codec.deserialize(result.json()));
         AiMessage pending = (AiMessage) restored.get(2);
         // simulate resume: answer the still-unanswered request (call_abc)
         restored.add(3 + 1, ToolExecutionResultMessage.from(pending.toolExecutionRequests().get(0),

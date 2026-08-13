@@ -7,8 +7,10 @@ package ai.labs.eddi.engine.memory;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -103,7 +105,7 @@ public interface IConversationMemoryStore {
      * @throws IResourceStore.ResourceStoreException
      *             on persistence failures
      */
-    List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit)
+    List<PendingApprovalSummary> findPendingApprovalSummaries(int limit)
             throws IResourceStore.ResourceStoreException;
 
     /**
@@ -122,11 +124,11 @@ public interface IConversationMemoryStore {
      * @throws IResourceStore.ResourceStoreException
      *             on persistence failures
      */
-    default List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(
-                                                                                                String ownerUserId, int limit)
+    default List<PendingApprovalSummary> findPendingApprovalSummaries(
+                                                                      String ownerUserId, int limit)
             throws IResourceStore.ResourceStoreException {
         return findPendingApprovalSummaries(limit).stream()
-                .filter(summary -> java.util.Objects.equals(ownerUserId, summary.getUserId()))
+                .filter(summary -> Objects.equals(ownerUserId, summary.getUserId()))
                 .toList();
     }
 

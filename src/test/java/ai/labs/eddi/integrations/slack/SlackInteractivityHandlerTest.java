@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.HashMap;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -53,7 +54,7 @@ class SlackInteractivityHandlerTest {
         var cfg = new ChannelIntegrationConfiguration();
         cfg.setName(name);
         cfg.setChannelType("slack");
-        var pc = new java.util.HashMap<String, String>();
+        var pc = new HashMap<String, String>();
         pc.put("channelId", "C_MAIN");
         pc.put("botToken", "xoxb-token");
         pc.put("signingSecret", signingSecret);

@@ -9,6 +9,7 @@ import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -100,7 +101,7 @@ class BackupModelsTest {
     @Test
     void syncRequest_allFieldsAccessible() {
         var request = new SyncRequest("srcAgent", 2, "tgtAgent",
-                java.util.Set.of("res1", "res2"), List.of("wf1", "wf2"));
+                Set.of("res1", "res2"), List.of("wf1", "wf2"));
 
         assertEquals("srcAgent", request.sourceAgentId());
         assertEquals(2, request.sourceAgentVersion());

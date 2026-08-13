@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.setup.AgentSetupService;
@@ -30,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.Objects;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 
 /**
  * LLM tool for dynamically creating sub-agents during group conversations.
@@ -373,8 +375,8 @@ public class CreateSubAgentTool {
      * Extracts the human-readable text from a conversation memory snapshot.
      * Delegates to shared utility.
      */
-    private String extractResponse(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
-        return ai.labs.eddi.engine.memory.ConversationOutputExtractor.extractResponse(snapshot);
+    private String extractResponse(SimpleConversationMemorySnapshot snapshot) {
+        return ConversationOutputExtractor.extractResponse(snapshot);
     }
 
     /**
@@ -382,7 +384,7 @@ public class CreateSubAgentTool {
      * the gated tool NAMES (names ONLY — never arguments, raw or redacted). Empty
      * for a RULE pause so the existing message shape is preserved.
      */
-    private String toolPauseSuffix(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
+    private String toolPauseSuffix(SimpleConversationMemorySnapshot snapshot) {
         if (snapshot == null || !"TOOL_CALL".equals(snapshot.getHitlPauseType())) {
             return "";
         }
@@ -390,7 +392,7 @@ public class CreateSubAgentTool {
         var batch = snapshot.getHitlPendingToolCalls();
         if (batch != null && batch.getCalls() != null) {
             var toolNames = batch.getCalls().stream()
-                    .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
+                    .map(PendingToolCallBatch.PendingToolCall::getToolName)
                     .filter(Objects::nonNull)
                     .toList();
             if (!toolNames.isEmpty()) {

@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.memory.model.ConversationLog.ConversationPart.ContentType.*;
@@ -122,7 +123,7 @@ public class ConversationLogGenerator {
                             var mapList = (List<Map<String, Object>>) outputList;
                             var joinedOutput = mapList.stream()
                                     .map(item -> item.get(KEY_TEXT))
-                                    .filter(java.util.Objects::nonNull)
+                                    .filter(Objects::nonNull)
                                     .map(Object::toString)
                                     .collect(Collectors.joining(" "));
                             content.setType(text);

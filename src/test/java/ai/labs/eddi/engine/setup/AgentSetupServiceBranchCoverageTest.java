@@ -614,7 +614,7 @@ class AgentSetupServiceBranchCoverageTest {
         @Test
         @DisplayName("tool URIs set tools list")
         void toolUris() {
-            var uris = java.util.List.of("/httpcalls/loc1", "/httpcalls/loc2");
+            var uris = List.of("/httpcalls/loc1", "/httpcalls/loc2");
             var config = service.createLlmConfig("anthropic", "claude-3", "key", "prompt",
                     false, null, null, null, false, false, uris);
             var task = config.tasks().get(0);
@@ -667,8 +667,8 @@ class AgentSetupServiceBranchCoverageTest {
         void fullPipeline() {
             var config = service.createWorkflowConfig(
                     "/parser/loc", "/behavior/loc",
-                    java.util.List.of("/http1", "/http2"),
-                    java.util.List.of("/mcp1"),
+                    List.of("/http1", "/http2"),
+                    List.of("/mcp1"),
                     "/langchain/loc", "/output/loc");
             // parser + behavior + 2 httpcalls + 1 mcpcalls + langchain + output = 7
             assertEquals(7, config.getWorkflowSteps().size());

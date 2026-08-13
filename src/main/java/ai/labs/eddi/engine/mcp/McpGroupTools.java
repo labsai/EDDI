@@ -454,7 +454,7 @@ public class McpGroupTools {
         try {
             String user = resolveOwner(userId);
             GroupConversation gc = groupConversationService.startAndDiscussAsync(groupId, question, user, null);
-            return jsonSerialization.serialize(java.util.Map.of(
+            return jsonSerialization.serialize(Map.of(
                     "groupConversationId", gc.getId(),
                     "state", String.valueOf(gc.getState()),
                     "message", "Discussion started. Poll read_group_conversation with this ID to check progress."));

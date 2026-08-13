@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -39,7 +40,7 @@ class RestCoordinatorAdminTest {
         @Test
         @DisplayName("should delegate to coordinator")
         void delegatesToCoordinator() {
-            var status = new CoordinatorStatus("in-memory", true, "OK", 5, 100L, 0L, java.util.Map.of());
+            var status = new CoordinatorStatus("in-memory", true, "OK", 5, 100L, 0L, Map.of());
             when(coordinator.getStatus()).thenReturn(status);
 
             CoordinatorStatus result = restCoordinatorAdmin.getStatus();
@@ -147,7 +148,7 @@ class RestCoordinatorAdminTest {
         @Test
         @DisplayName("should send initial status and register client")
         void sendsInitialStatus() {
-            var status = new CoordinatorStatus("in-memory", true, "OK", 0, 0L, 0L, java.util.Map.of());
+            var status = new CoordinatorStatus("in-memory", true, "OK", 0, 0L, 0L, Map.of());
             when(coordinator.getStatus()).thenReturn(status);
 
             var eventSink = mock(jakarta.ws.rs.sse.SseEventSink.class);

@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.security.OwnershipValidator;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -38,7 +40,7 @@ class RestScheduleStoreExpandedTest {
     private IScheduleStore scheduleStore;
     private ScheduleFireExecutor fireExecutor;
     private SchedulePollerService pollerService;
-    private ai.labs.eddi.engine.security.OwnershipValidator ownershipValidator;
+    private OwnershipValidator ownershipValidator;
     private RestScheduleStore sut;
 
     @BeforeEach
@@ -46,7 +48,7 @@ class RestScheduleStoreExpandedTest {
         scheduleStore = mock(IScheduleStore.class);
         fireExecutor = mock(ScheduleFireExecutor.class);
         pollerService = mock(SchedulePollerService.class);
-        ownershipValidator = mock(ai.labs.eddi.engine.security.OwnershipValidator.class);
+        ownershipValidator = mock(OwnershipValidator.class);
         // admin by default: the HITL redaction/guards are tested in
         // RestScheduleStoreTest — these tests exercise the general surface
         doReturn(true).when(ownershipValidator).isAdmin(any());
@@ -90,7 +92,7 @@ class RestScheduleStoreExpandedTest {
     private static ScheduleConfiguration hitlSchedule(String id) {
         var s = makeCronSchedule(id);
         s.setName("hitl-timeout-conv-" + id);
-        s.setMetadata(java.util.Map.of("hitlType", "hitl_timeout", "policy", "AUTO_REJECT",
+        s.setMetadata(Map.of("hitlType", "hitl_timeout", "policy", "AUTO_REJECT",
                 "surface", "regular", "conversationId", "conv-" + id));
         return s;
     }

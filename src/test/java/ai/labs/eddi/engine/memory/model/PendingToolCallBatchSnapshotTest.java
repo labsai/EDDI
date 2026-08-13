@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.memory.model;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -70,17 +72,17 @@ class PendingToolCallBatchSnapshotTest {
         batch.setAutoApproveCount(1);
         batch.setPauseCountThisTurn(2);
 
-        var effective = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+        var effective = new ToolApprovalsConfig();
         effective.setRequireApproval(List.of("delete_*", "mcp:*"));
-        effective.setTimeoutPolicy(ai.labs.eddi.configs.hitl.HitlTimeoutPolicy.AUTO_REJECT);
+        effective.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
         effective.setApprovalTimeout("PT1H");
         effective.setOnNoProgress("AUTO_REJECT");
         effective.setPendingMessage("Awaiting review for {toolNames}");
         batch.setEffectiveToolApprovals(effective);
 
-        var rule = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig.ApprovalRule();
+        var rule = new ToolApprovalsConfig.ApprovalRule();
         rule.setMatch("mcp:delete_*");
-        rule.setTimeoutPolicy(ai.labs.eddi.configs.hitl.HitlTimeoutPolicy.WAIT_INDEFINITELY);
+        rule.setTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
         rule.setPauseReason("Deleting a record — check the id");
         rule.setPendingMessage("Waiting on a reviewer for {toolNames}");
         batch.setEffectiveRule(rule);
@@ -116,7 +118,7 @@ class PendingToolCallBatchSnapshotTest {
         // Fix #1: the effective tool-approval config round-trips on the batch.
         assertNotNull(batch.getEffectiveToolApprovals());
         assertEquals(List.of("delete_*", "mcp:*"), batch.getEffectiveToolApprovals().getRequireApproval());
-        assertEquals(ai.labs.eddi.configs.hitl.HitlTimeoutPolicy.AUTO_REJECT,
+        assertEquals(HitlTimeoutPolicy.AUTO_REJECT,
                 batch.getEffectiveToolApprovals().getTimeoutPolicy());
         assertEquals("PT1H", batch.getEffectiveToolApprovals().getApprovalTimeout());
         assertEquals("AUTO_REJECT", batch.getEffectiveToolApprovals().getOnNoProgress());
@@ -131,7 +133,7 @@ class PendingToolCallBatchSnapshotTest {
         // dropPendingApprovalPlaceholder removes it by recomputing that exact string.
         assertNotNull(batch.getEffectiveRule());
         assertEquals("mcp:delete_*", batch.getEffectiveRule().getMatch());
-        assertEquals(ai.labs.eddi.configs.hitl.HitlTimeoutPolicy.WAIT_INDEFINITELY,
+        assertEquals(HitlTimeoutPolicy.WAIT_INDEFINITELY,
                 batch.getEffectiveRule().getTimeoutPolicy());
         assertEquals("Deleting a record — check the id", batch.getEffectiveRule().getPauseReason());
         assertEquals("Waiting on a reviewer for {toolNames}", batch.getEffectiveRule().getPendingMessage());

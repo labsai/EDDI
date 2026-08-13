@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.secrets.crypto;
+import java.util.Arrays;
 
 import org.junit.jupiter.api.Test;
 
@@ -74,7 +75,7 @@ class EnvelopeCryptoTest {
         byte[] key1 = EnvelopeCrypto.deriveKeyFromString("passphrase-a");
         byte[] key2 = EnvelopeCrypto.deriveKeyFromString("passphrase-b");
 
-        assertFalse(java.util.Arrays.equals(key1, key2));
+        assertFalse(Arrays.equals(key1, key2));
     }
 
     @Test

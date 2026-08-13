@@ -620,6 +620,7 @@ resolve_compose_files() {
       "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml"
       "docs/monitoring/grafana-provisioning/datasources/datasources.yml"
       "docs/monitoring/eddi-grafana-dashboard.json"
+      "docs/monitoring/eddi-operations-dashboard.json"
     )
     for mf in "${monitoring_files[@]}"; do
       local mf_target="$EDDI_DIR/$mf"
@@ -635,7 +636,20 @@ resolve_compose_files() {
         if curl -fsSL "${mf_url}" -o "$mf_target"; then
           echo -e "${GREEN}✅${RESET}"
         else
-          warn "Failed to download ${mf} (monitoring may not work)"
+          # Every one of these is bind-mounted as a FILE by
+          # docker-compose.monitoring.yml, so a missing one is worse than it
+          # sounds: Docker creates a *directory* at the mount path, and Grafana
+          # then fails to provision — including the dashboards that did
+          # download. Same reasoning as the Keycloak realm below; a half-built
+          # monitoring stack is not better than a refusal to build one.
+          # -rf, not -f: the thing in the way is most likely a DIRECTORY that a
+          # previous run's failed mount left behind, and `rm -f` cannot remove
+          # one. Under `set -e` that turns this cleanup into the script's exit
+          # point, so the user sees "rm: cannot remove ...: Is a directory"
+          # instead of the message below, and the stale path survives to break
+          # the next run too.
+          rm -rf "$mf_target"
+          fail "Failed to download ${mf} (required for --with-monitoring).\n     URL: ${mf_url}"
         fi
       fi
     done

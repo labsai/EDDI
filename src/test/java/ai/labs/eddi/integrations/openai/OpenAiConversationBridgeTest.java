@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
@@ -26,6 +27,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static ai.labs.eddi.integrations.openai.OpenAiTestFixtures.AGENT_ID_SUPPORT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -122,7 +124,7 @@ class OpenAiConversationBridgeTest {
     }
 
     /** Drive sayStreaming's handler with the given script. */
-    private void givenStreamingEmits(java.util.function.Consumer<IConversationService.StreamingResponseHandler> script)
+    private void givenStreamingEmits(Consumer<IConversationService.StreamingResponseHandler> script)
             throws Exception {
         doAnswer(invocation -> {
             script.accept(invocation.getArgument(5));
@@ -690,7 +692,7 @@ class OpenAiConversationBridgeTest {
 
         bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
 
-        ArgumentCaptor<Map<String, ai.labs.eddi.engine.model.Context>> captor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map<String, Context>> captor = ArgumentCaptor.forClass(Map.class);
         verify(conversationService).startConversation(any(), any(), any(), captor.capture());
         assertTrue(captor.getValue().containsKey(OpenAiConversationBridge.CONTEXT_CHANNEL_INTENT));
     }

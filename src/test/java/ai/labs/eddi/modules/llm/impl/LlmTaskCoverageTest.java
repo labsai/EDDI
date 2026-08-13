@@ -10,8 +10,10 @@ import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.*;
@@ -707,7 +709,7 @@ class LlmTaskCoverageTest {
     void auditCollectorPresent_storesAuditKeys() throws Exception {
         wireStandardMemory(List.of("action1"));
         agentReturns("audited answer");
-        when(memory.getAuditCollector()).thenReturn(mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class));
+        when(memory.getAuditCollector()).thenReturn(mock(IAuditEntryCollector.class));
 
         var t = task("taskA", List.of("action1"), null);
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
@@ -795,7 +797,7 @@ class LlmTaskCoverageTest {
     void resume_auditKeysStored() throws Exception {
         var b = batch("taskA", 0);
         wireResumeMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
-        when(memory.getAuditCollector()).thenReturn(mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class));
+        when(memory.getAuditCollector()).thenReturn(mock(IAuditEntryCollector.class));
         when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
 
@@ -848,7 +850,7 @@ class LlmTaskCoverageTest {
     @Test
     @DisplayName("configure() with no URI → throws WorkflowConfigurationException")
     void configure_noUri_throws() {
-        assertThrows(ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException.class,
+        assertThrows(WorkflowConfigurationException.class,
                 () -> llmTask.configure(new HashMap<>(), new HashMap<>()));
     }
 

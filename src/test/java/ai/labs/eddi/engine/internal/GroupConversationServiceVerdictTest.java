@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -148,7 +149,7 @@ class GroupConversationServiceVerdictTest {
     }
 
     private void stubTurns(Function<String, String> responder) throws Exception {
-        doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class)).when(agentFactory).getLatestReadyAgent(any(), anyString());
+        doReturn(mock(IAgent.class)).when(agentFactory).getLatestReadyAgent(any(), anyString());
         doReturn(new IConversationService.ConversationResult("member-conv", null))
                 .when(conversationService).startConversation(any(), any(), any(), any());
         doAnswer(inv -> {

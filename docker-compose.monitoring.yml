@@ -40,6 +40,10 @@ services:
       - "3000:3000"
     volumes:
       - ./docs/monitoring/eddi-grafana-dashboard.json:/var/lib/grafana/dashboards/eddi.json:ro
+      # The provider globs this directory, so a second dashboard needs no
+      # provisioning change. Was stranded in a top-level grafana-data/ left over
+      # from the bind-mount era and provisioned by nothing.
+      - ./docs/monitoring/eddi-operations-dashboard.json:/var/lib/grafana/dashboards/eddi-operations.json:ro
       - ./docs/monitoring/grafana-provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./docs/monitoring/grafana-provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - grafana-data:/var/lib/grafana

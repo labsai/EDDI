@@ -7,6 +7,7 @@ package ai.labs.eddi.integration;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
+import java.util.List;
 import org.junit.jupiter.api.*;
 
 import static io.restassured.RestAssured.given;
@@ -50,7 +51,7 @@ public class LogAdminIT {
     @DisplayName("GET /administration/logs should return recent log entries from ring buffer")
     void getRecentLogs_returnsEntries() {
         // By the time this test runs, Quarkus boot has already generated log entries
-        given().get(BASE).then().assertThat().statusCode(200).contentType(ContentType.JSON).body("$", instanceOf(java.util.List.class));
+        given().get(BASE).then().assertThat().statusCode(200).contentType(ContentType.JSON).body("$", instanceOf(List.class));
     }
 
     @Test
@@ -83,7 +84,7 @@ public class LogAdminIT {
     @Order(6)
     @DisplayName("GET /administration/logs/history should return list (may be empty if DB logging is off)")
     void getHistoryLogs_returnsListOrEmpty() {
-        given().get(BASE + "/history").then().assertThat().statusCode(200).contentType(ContentType.JSON).body("$", instanceOf(java.util.List.class));
+        given().get(BASE + "/history").then().assertThat().statusCode(200).contentType(ContentType.JSON).body("$", instanceOf(List.class));
     }
 
     @Test

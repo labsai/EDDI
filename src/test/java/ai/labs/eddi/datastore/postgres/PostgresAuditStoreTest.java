@@ -6,6 +6,7 @@ package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
@@ -36,7 +37,7 @@ class PostgresAuditStoreTest extends PostgresTestBase {
         var dsInstance = createDataSourceInstance();
         ds = dsInstance.get();
         IJsonSerialization json = new JsonSerialization(
-                ai.labs.eddi.datastore.serialization.SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
+                SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
         store = new PostgresAuditStore(dsInstance, json);
     }
 

@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -235,12 +236,12 @@ class NatsConversationCoordinatorIT {
         }
 
         @Override
-        public <T> Future<T> submitCallable(Callable<T> callable, java.util.Map<Object, Object> threadBindings) {
+        public <T> Future<T> submitCallable(Callable<T> callable, Map<Object, Object> threadBindings) {
             return executor.submit(callable);
         }
 
         @Override
-        public <T> Future<T> submitCallable(Callable<T> callable, IFinishedExecution<T> callback, java.util.Map<Object, Object> threadBindings) {
+        public <T> Future<T> submitCallable(Callable<T> callable, IFinishedExecution<T> callback, Map<Object, Object> threadBindings) {
             return executor.submit(() -> {
                 try {
                     T result = callable.call();

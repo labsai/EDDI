@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.modules.llm.rest;
+import ai.labs.eddi.datastore.IResourceStore;
 
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -119,7 +120,7 @@ public class RestToolHistory {
 
             return Response.ok(trace).build();
 
-        } catch (ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException e) {
+        } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Conversation not found")).build();
         } catch (Exception e) {
             return internalError("Error retrieving tool history", e);

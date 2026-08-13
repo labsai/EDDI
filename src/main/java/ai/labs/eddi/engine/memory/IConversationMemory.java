@@ -6,11 +6,14 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 
 import java.io.Serializable;
 import java.time.Instant;
@@ -208,30 +211,30 @@ public interface IConversationMemory extends Serializable {
      * The interrupted tool-call batch (durable); null unless a tool pause is
      * active.
      */
-    default ai.labs.eddi.engine.memory.model.PendingToolCallBatch getHitlPendingToolCalls() {
+    default PendingToolCallBatch getHitlPendingToolCalls() {
         return null;
     }
-    default void setHitlPendingToolCalls(ai.labs.eddi.engine.memory.model.PendingToolCallBatch batch) {
+    default void setHitlPendingToolCalls(PendingToolCallBatch batch) {
     }
 
     /**
      * Agent-level tool-approval config carried onto memory at conversation start
      * (NOT persisted).
      */
-    default ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig getAgentToolApprovalsConfig() {
+    default ToolApprovalsConfig getAgentToolApprovalsConfig() {
         return null;
     }
-    default void setAgentToolApprovalsConfig(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig config) {
+    default void setAgentToolApprovalsConfig(ToolApprovalsConfig config) {
     }
 
     /**
      * The human decision being applied during an in-JVM tool-pause resume (NOT
      * persisted).
      */
-    default ai.labs.eddi.engine.lifecycle.model.HitlDecision getHitlResumeDecision() {
+    default HitlDecision getHitlResumeDecision() {
         return null;
     }
-    default void setHitlResumeDecision(ai.labs.eddi.engine.lifecycle.model.HitlDecision decision) {
+    default void setHitlResumeDecision(HitlDecision decision) {
     }
 
     // === Deferred user-memory writes ===

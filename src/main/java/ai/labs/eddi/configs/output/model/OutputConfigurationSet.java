@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.output.model;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -38,11 +39,11 @@ public class OutputConfigurationSet {
         if (o == null || getClass() != o.getClass())
             return false;
         OutputConfigurationSet that = (OutputConfigurationSet) o;
-        return java.util.Objects.equals(lang, that.lang) && java.util.Objects.equals(outputSet, that.outputSet);
+        return Objects.equals(lang, that.lang) && Objects.equals(outputSet, that.outputSet);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(lang, outputSet);
+        return Objects.hash(lang, outputSet);
     }
 }

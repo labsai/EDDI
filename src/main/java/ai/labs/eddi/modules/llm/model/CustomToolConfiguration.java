@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.model;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Configuration for custom tools defined via JSON config. Phase 4: Allows users
@@ -126,14 +127,14 @@ public class CustomToolConfiguration {
             if (o == null || getClass() != o.getClass())
                 return false;
             ToolParameter that = (ToolParameter) o;
-            return java.util.Objects.equals(name, that.name) && java.util.Objects.equals(description, that.description)
-                    && java.util.Objects.equals(type, that.type) && required == that.required
-                    && java.util.Objects.equals(defaultValue, that.defaultValue);
+            return Objects.equals(name, that.name) && Objects.equals(description, that.description)
+                    && Objects.equals(type, that.type) && required == that.required
+                    && Objects.equals(defaultValue, that.defaultValue);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(name, description, type, required, defaultValue);
+            return Objects.hash(name, description, type, required, defaultValue);
         }
 
         @Override
@@ -268,16 +269,16 @@ public class CustomToolConfiguration {
         if (o == null || getClass() != o.getClass())
             return false;
         CustomToolConfiguration that = (CustomToolConfiguration) o;
-        return java.util.Objects.equals(name, that.name) && java.util.Objects.equals(description, that.description)
-                && java.util.Objects.equals(type, that.type) && java.util.Objects.equals(parameters, that.parameters)
-                && java.util.Objects.equals(config, that.config) && requiresAuth == that.requiresAuth
-                && Double.compare(that.costPerExecution, costPerExecution) == 0 && java.util.Objects.equals(cacheTtlMs, that.cacheTtlMs)
-                && java.util.Objects.equals(rateLimit, that.rateLimit);
+        return Objects.equals(name, that.name) && Objects.equals(description, that.description)
+                && Objects.equals(type, that.type) && Objects.equals(parameters, that.parameters)
+                && Objects.equals(config, that.config) && requiresAuth == that.requiresAuth
+                && Double.compare(that.costPerExecution, costPerExecution) == 0 && Objects.equals(cacheTtlMs, that.cacheTtlMs)
+                && Objects.equals(rateLimit, that.rateLimit);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(name, description, type, parameters, config, requiresAuth, costPerExecution, cacheTtlMs, rateLimit);
+        return Objects.hash(name, description, type, parameters, config, requiresAuth, costPerExecution, cacheTtlMs, rateLimit);
     }
 
     @Override

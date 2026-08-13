@@ -13,6 +13,8 @@ import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
+import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
@@ -110,7 +112,7 @@ public class McpAdminTools {
             Response response = agentAdmin.deployAgent(env, agentId, ver, true, true);
             int httpStatus = response.getStatus();
 
-            var result = new java.util.LinkedHashMap<String, Object>();
+            var result = new LinkedHashMap<String, Object>();
             result.put("agentId", agentId);
             result.put("version", ver);
             result.put("environment", env.name());
@@ -120,7 +122,7 @@ public class McpAdminTools {
                 // Read actual deployment status from response body
                 try {
                     @SuppressWarnings("unchecked")
-                    var body = (java.util.Map<String, Object>) response.getEntity();
+                    var body = (Map<String, Object>) response.getEntity();
                     if (body != null && body.containsKey("status")) {
                         String deployStatus = body.get("status").toString();
                         result.put("deploymentStatus", deployStatus);
@@ -1192,7 +1194,7 @@ public class McpAdminTools {
             int limitInt = limit != null ? limit : 20;
             String filterStr = filter != null ? filter : "";
             var channelStore = getRestStore(
-                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+                    IRestChannelIntegrationStore.class);
             var descriptors = channelStore.readChannelDescriptors(filterStr, 0, limitInt);
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
@@ -1211,7 +1213,7 @@ public class McpAdminTools {
             return errorJson("resourceId is required");
         try {
             var channelStore = getRestStore(
-                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+                    IRestChannelIntegrationStore.class);
             int ver = version != null ? version : channelStore.getCurrentVersion(resourceId);
             var config = channelStore.readChannel(resourceId, ver);
 
@@ -1236,9 +1238,9 @@ public class McpAdminTools {
             return errorJson("config is required");
         try {
             var channelConfig = jsonSerialization.deserialize(config,
-                    ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration.class);
+                    ChannelIntegrationConfiguration.class);
             var channelStore = getRestStore(
-                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+                    IRestChannelIntegrationStore.class);
             Response response = channelStore.createChannel(channelConfig);
             String location = response.getHeaderString("Location");
             String newId = extractIdFromLocation(location);
@@ -1269,9 +1271,9 @@ public class McpAdminTools {
         try {
             int ver = version != null ? version : 1;
             var channelConfig = jsonSerialization.deserialize(config,
-                    ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration.class);
+                    ChannelIntegrationConfiguration.class);
             var channelStore = getRestStore(
-                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+                    IRestChannelIntegrationStore.class);
             Response response = channelStore.updateChannel(resourceId, ver, channelConfig);
             String location = response.getHeaderString("Location");
             int newVersion = extractVersionFromLocation(location);
@@ -1299,7 +1301,7 @@ public class McpAdminTools {
             int ver = version != null ? version : 1;
             boolean isPermanent = permanent != null ? permanent : false;
             var channelStore = getRestStore(
-                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+                    IRestChannelIntegrationStore.class);
             Response response = channelStore.deleteChannel(resourceId, ver, isPermanent);
 
             return resultJson("deleted", Map.of(

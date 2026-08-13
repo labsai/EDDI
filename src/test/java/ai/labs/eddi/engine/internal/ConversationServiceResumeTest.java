@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapsho
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -53,8 +54,10 @@ import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -141,10 +144,10 @@ class ConversationServiceResumeTest {
                     try {
                         Object result = callable.call();
                         listener.onComplete(result);
-                        return java.util.concurrent.CompletableFuture.completedFuture(result);
+                        return CompletableFuture.completedFuture(result);
                     } catch (Exception e) {
                         listener.onFailure(e);
-                        return java.util.concurrent.CompletableFuture.failedFuture(e);
+                        return CompletableFuture.failedFuture(e);
                     }
                 });
 
@@ -623,14 +626,14 @@ class ConversationServiceResumeTest {
 
             var snapshot = createResumeSnapshot();
             snapshot.setHitlPauseType("TOOL_CALL");
-            var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+            var batch = new PendingToolCallBatch();
             batch.setPauseEpoch("epoch-undeploy-1");
-            var call = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+            var call = new PendingToolCallBatch.PendingToolCall();
             call.setCallId("call-1");
             call.setToolName("chargeCard");
             call.setSource("mcp");
             call.setArgumentsRaw("{}");
-            batch.setCalls(java.util.List.of(call));
+            batch.setCalls(List.of(call));
             snapshot.setHitlPendingToolCalls(batch);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
 

@@ -22,6 +22,7 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -234,7 +235,7 @@ class GroupContextBuilderTest {
         // Expected visibility for an entry belonging to the CURRENT
         // (still-running) phase — the strictest case for VOTE/BID, which are
         // only conditionally hidden (see the two dedicated tests below).
-        var expected = new java.util.LinkedHashMap<TranscriptEntryType, Boolean>();
+        var expected = new LinkedHashMap<TranscriptEntryType, Boolean>();
         expected.put(TranscriptEntryType.QUESTION, false);
         expected.put(TranscriptEntryType.OPINION, true);
         expected.put(TranscriptEntryType.CRITIQUE, true);

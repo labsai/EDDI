@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.api;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,7 +59,7 @@ class OperatorMetricsServiceTest {
 
         var timer = registry.find("eddi.operator.canary.duration").timer();
         assertEquals(1, timer.count());
-        assertEquals(250.0, timer.totalTime(java.util.concurrent.TimeUnit.MILLISECONDS), 0.001);
+        assertEquals(250.0, timer.totalTime(TimeUnit.MILLISECONDS), 0.001);
     }
 
     @Test

@@ -9,6 +9,8 @@ import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -16,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 import java.security.Principal;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -108,9 +111,9 @@ class OpenAiAuthFilterTest {
         // application.properties, which shadows the production one and declares
         // none of these keys — a classpath lookup would assert nothing about the
         // file the justification actually depends on.
-        var productionConfig = java.nio.file.Path.of("src", "main", "resources", "application.properties");
-        var properties = new java.util.Properties();
-        try (var in = java.nio.file.Files.newInputStream(productionConfig)) {
+        var productionConfig = Path.of("src", "main", "resources", "application.properties");
+        var properties = new Properties();
+        try (var in = Files.newInputStream(productionConfig)) {
             properties.load(in);
         }
 

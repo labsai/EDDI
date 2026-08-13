@@ -15,6 +15,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.*;
+import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -189,9 +190,9 @@ public class CapabilityRegistryService {
                     return false;
                 }
                 // Support comma-separated lists: "en,de,fr" matches "de"
-                var items = java.util.Arrays.stream(attrValue.split(","))
+                var items = Arrays.stream(attrValue.split(","))
                         .map(String::trim)
-                        .collect(java.util.stream.Collectors.toSet());
+                        .collect(Collectors.toSet());
                 if (!items.contains(req.getValue())) {
                     return false;
                 }

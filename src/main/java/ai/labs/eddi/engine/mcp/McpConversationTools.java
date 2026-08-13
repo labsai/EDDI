@@ -20,13 +20,16 @@ import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.model.*;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
@@ -45,7 +48,10 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.*;
+import java.util.ArrayList;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
@@ -332,7 +338,7 @@ public class McpConversationTools {
                 if (!requestedFullSection) {
                     var filteredOutputs = snapshot.getConversationOutputs().stream()
                             .map(output -> {
-                                var filtered = new ai.labs.eddi.engine.memory.model.ConversationOutput();
+                                var filtered = new ConversationOutput();
                                 output.forEach((key, value) -> {
                                     if (key instanceof String s && trimmedFields.stream().anyMatch(f -> s.equals(f) || s.startsWith(f + ":"))) {
                                         filtered.put(key, value);
@@ -782,8 +788,8 @@ public class McpConversationTools {
         var batch = snapshot.getHitlPendingToolCalls();
         if (batch != null && batch.getCalls() != null) {
             var toolNames = batch.getCalls().stream()
-                    .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
-                    .filter(java.util.Objects::nonNull)
+                    .map(PendingToolCallBatch.PendingToolCall::getToolName)
+                    .filter(Objects::nonNull)
                     .toList();
             if (!toolNames.isEmpty()) {
                 result.put("tools", toolNames);
@@ -851,7 +857,7 @@ public class McpConversationTools {
         // Start a new conversation — use ConversationService directly to avoid
         // the JAX-RS layer which converts exceptions to HTTP responses that are
         // hard to inspect programmatically.
-        var initialContext = new HashMap<String, ai.labs.eddi.engine.model.Context>(deployment.getInitialContext());
+        var initialContext = new HashMap<String, Context>(deployment.getInitialContext());
         var convResult = conversationService.startConversation(usedEnv, agentId, userId, initialContext);
         String conversationId = convResult.conversationId();
 
@@ -901,7 +907,7 @@ public class McpConversationTools {
 
         try {
             return responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (java.util.concurrent.ExecutionException e) {
+        } catch (ExecutionException e) {
             // Unwrap the skip signal so callers can catch it directly.
             if (e.getCause() instanceof ConversationSkippedException cse) {
                 throw cse;
@@ -972,7 +978,7 @@ public class McpConversationTools {
             // Agent response text — extract text strings from output items
             var outputItems = lastOutput.get("output");
             if (outputItems instanceof List<?> items) {
-                var texts = new java.util.ArrayList<String>();
+                var texts = new ArrayList<String>();
                 for (var item : items) {
                     if (item instanceof Map<?, ?> map && map.containsKey("text")) {
                         texts.add(String.valueOf(map.get("text")));
@@ -989,7 +995,7 @@ public class McpConversationTools {
             // QuickReplies — extract value strings for easy AI consumption
             var quickReplies = lastOutput.get("quickReplies");
             if (quickReplies instanceof List<?> qrList && !qrList.isEmpty()) {
-                var qrValues = new java.util.ArrayList<String>();
+                var qrValues = new ArrayList<String>();
                 for (var qr : qrList) {
                     if (qr instanceof Map<?, ?> map && map.containsKey("value")) {
                         qrValues.add(String.valueOf(map.get("value")));

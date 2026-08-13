@@ -3,11 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.setup;
+import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.configs.llm.IRestLlmStore;
 
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
+import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
+import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -46,9 +54,9 @@ class AgentSetupServiceTest {
     @BeforeEach
     void setUp() {
         service = new AgentSetupService(
-                mock(ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory.class),
-                mock(ai.labs.eddi.engine.api.IRestAgentAdministration.class),
-                mock(ai.labs.eddi.secrets.ISecretProvider.class),
+                mock(IRestInterfaceFactory.class),
+                mock(IRestAgentAdministration.class),
+                mock(ISecretProvider.class),
                 "http://localhost:11434");
     }
 
@@ -617,8 +625,8 @@ class AgentSetupServiceTest {
             var guardedService = new AgentSetupService(restInterfaceFactory,
                     mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
 
-            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             toolApprovals.setRequireApproval(List.of("mcp:/agentstore/agents"));
             hitl.setToolApprovals(toolApprovals);
 
@@ -640,8 +648,8 @@ class AgentSetupServiceTest {
             var guardedService = new AgentSetupService(restInterfaceFactory,
                     mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
 
-            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.delete:*"));
             toolApprovals.setExempt(List.of("http.get:*"));
             hitl.setToolApprovals(toolApprovals);
@@ -679,7 +687,7 @@ class AgentSetupServiceTest {
         }
 
         private IRestInterfaceFactory wireMinimalHappyPath(
-                                                           org.mockito.ArgumentCaptor<ai.labs.eddi.configs.agents.model.AgentConfiguration> agentCaptor)
+                                                           org.mockito.ArgumentCaptor<AgentConfiguration> agentCaptor)
                 throws Exception {
             var factory = mock(IRestInterfaceFactory.class);
 
@@ -690,34 +698,34 @@ class AgentSetupServiceTest {
             // leaves BOTH unfinished (UnfinishedStubbingException) — not a
             // compile error, only a test-time one, so this is worth spelling out.
             var parserResponse = located("/parserstore/parsers/000000000000000000000001?version=1");
-            var parserStore = mock(ai.labs.eddi.configs.parser.IRestParserStore.class);
+            var parserStore = mock(IRestParserStore.class);
             when(parserStore.createParser(any())).thenReturn(parserResponse);
-            when(factory.get(ai.labs.eddi.configs.parser.IRestParserStore.class)).thenReturn(parserStore);
+            when(factory.get(IRestParserStore.class)).thenReturn(parserStore);
 
             var ruleSetResponse = located("/rulestore/rulesets/000000000000000000000002?version=1");
-            var ruleSetStore = mock(ai.labs.eddi.configs.rules.IRestRuleSetStore.class);
+            var ruleSetStore = mock(IRestRuleSetStore.class);
             when(ruleSetStore.createRuleSet(any())).thenReturn(ruleSetResponse);
-            when(factory.get(ai.labs.eddi.configs.rules.IRestRuleSetStore.class)).thenReturn(ruleSetStore);
+            when(factory.get(IRestRuleSetStore.class)).thenReturn(ruleSetStore);
 
             var llmResponse = located("/llmstore/llms/000000000000000000000003?version=1");
-            var llmStore = mock(ai.labs.eddi.configs.llm.IRestLlmStore.class);
+            var llmStore = mock(IRestLlmStore.class);
             when(llmStore.createLlm(any())).thenReturn(llmResponse);
-            when(factory.get(ai.labs.eddi.configs.llm.IRestLlmStore.class)).thenReturn(llmStore);
+            when(factory.get(IRestLlmStore.class)).thenReturn(llmStore);
 
             var workflowResponse = located("/workflowstore/workflows/000000000000000000000004?version=1");
-            var workflowStore = mock(ai.labs.eddi.configs.workflows.IRestWorkflowStore.class);
+            var workflowStore = mock(IRestWorkflowStore.class);
             when(workflowStore.createWorkflow(any())).thenReturn(workflowResponse);
-            when(factory.get(ai.labs.eddi.configs.workflows.IRestWorkflowStore.class)).thenReturn(workflowStore);
+            when(factory.get(IRestWorkflowStore.class)).thenReturn(workflowStore);
 
             var agentResponse = located("/agentstore/agents/000000000000000000000005?version=1");
-            var agentStore = mock(ai.labs.eddi.configs.agents.IRestAgentStore.class);
+            var agentStore = mock(IRestAgentStore.class);
             when(agentStore.createAgent(agentCaptor.capture())).thenReturn(agentResponse);
-            when(factory.get(ai.labs.eddi.configs.agents.IRestAgentStore.class)).thenReturn(agentStore);
+            when(factory.get(IRestAgentStore.class)).thenReturn(agentStore);
 
             // patchDescriptor fires after every creation; an unstubbed mock returning
             // null for it is fine, but factory.get(...) still has to resolve the class.
-            when(factory.get(ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore.class))
-                    .thenReturn(mock(ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore.class));
+            when(factory.get(IRestDocumentDescriptorStore.class))
+                    .thenReturn(mock(IRestDocumentDescriptorStore.class));
 
             return factory;
         }
@@ -725,13 +733,13 @@ class AgentSetupServiceTest {
         @Test
         @DisplayName("a configured hitlConfig is set on the AgentConfiguration handed to createAgent")
         void hitlConfigReachesTheCreatedAgentConfiguration() throws Exception {
-            var agentCaptor = org.mockito.ArgumentCaptor.forClass(ai.labs.eddi.configs.agents.model.AgentConfiguration.class);
+            var agentCaptor = org.mockito.ArgumentCaptor.forClass(AgentConfiguration.class);
             var factory = wireMinimalHappyPath(agentCaptor);
             var wiredService = new AgentSetupService(factory, mock(IRestAgentAdministration.class), mock(ISecretProvider.class),
                     "http://localhost:11434");
 
-            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.delete:*"));
             toolApprovals.setExempt(List.of("http.get:*"));
             hitl.setToolApprovals(toolApprovals);
@@ -754,7 +762,7 @@ class AgentSetupServiceTest {
             // The mirror of the test above: this field is opt-in. A caller that
             // supplies none must not have one silently invented for them — that
             // would be a correctness bug in the other direction.
-            var agentCaptor = org.mockito.ArgumentCaptor.forClass(ai.labs.eddi.configs.agents.model.AgentConfiguration.class);
+            var agentCaptor = org.mockito.ArgumentCaptor.forClass(AgentConfiguration.class);
             var factory = wireMinimalHappyPath(agentCaptor);
             var wiredService = new AgentSetupService(factory, mock(IRestAgentAdministration.class), mock(ISecretProvider.class),
                     "http://localhost:11434");
@@ -829,8 +837,8 @@ class AgentSetupServiceTest {
             var guardedService = new AgentSetupService(restInterfaceFactory,
                     mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
 
-            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             // 'mcp' tools carry no endpoint, so this pattern can never match — it would
             // save as a gate that gates nothing.
             toolApprovals.setRequireApproval(List.of("mcp:/agentstore/agents"));
@@ -897,8 +905,8 @@ class AgentSetupServiceTest {
             var guardedService = new AgentSetupService(restInterfaceFactory,
                     mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
 
-            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.delete:*"));
             toolApprovals.setExempt(List.of("http.get:*"));
             hitl.setToolApprovals(toolApprovals);
