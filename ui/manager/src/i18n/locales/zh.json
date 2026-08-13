@@ -677,6 +677,7 @@
     "attachLimit": "每条消息最多可附加 {{max}} 个文件。",
     "attachTooLargeToForward": "{{name}} 已存储，但太大，无法直接发送给模型。",
     "attachNotForwarded": "未发送给模型",
+    "dropToAttach": "拖放文件以附加",
     "retry": "重试上一步",
     "retrySuccess": "步骤已重新执行",
     "retryError": "重试失败",

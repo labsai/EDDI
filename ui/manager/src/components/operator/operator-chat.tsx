@@ -9,11 +9,12 @@ import { Button } from "@/components/ui/button";
 import { ChatActivity } from "@/components/chat/chat-activity";
 import { InputHint } from "@/components/chat/input-hint";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
-import { PendingAttachmentChip } from "@/components/chat/attachment-chip";
+import { FileDropOverlay, PendingAttachmentChip } from "@/components/chat/attachment-chip";
 import { MessageAttachments } from "@/components/chat/chat-message";
 import {
   filesFromClipboard,
   useAttachmentStaging,
+  useFileDrop,
   type ReadyAttachment,
 } from "@/hooks/use-attachment-staging";
 import { OPERATOR_STARTER_PROMPTS } from "@/lib/operator/system-prompt";
@@ -144,6 +145,9 @@ export function OperatorChat({
     takeForSend,
   } = useAttachmentStaging(conversationId ?? null, onEnsureConversation);
   const attachEnabled = Boolean(onEnsureConversation || conversationId);
+  const { isDragOver, dropHandlers } = useFileDrop(attachEnabled && !isPaused, (files) => {
+    void stageFiles(files);
+  });
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -177,7 +181,8 @@ export function OperatorChat({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col rounded-xl border border-border">
+    <div className="relative flex h-full min-h-0 flex-col rounded-xl border border-border" {...dropHandlers}>
+      {isDragOver && <FileDropOverlay />}
       <div
         className="flex-1 space-y-4 overflow-y-auto p-4"
         data-testid="operator-messages"

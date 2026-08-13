@@ -677,6 +677,7 @@
     "attachLimit": "1つのメッセージにつき最大{{max}}件のファイルを添付できます。",
     "attachTooLargeToForward": "{{name}} は保存されましたが、サイズが大きすぎてモデルに直接送信できません。",
     "attachNotForwarded": "モデルに送信されません",
+    "dropToAttach": "ファイルをドロップして添付",
     "retry": "最後のステップをリトライ",
     "retrySuccess": "ステップを再実行しました",
     "retryError": "リトライ失敗",

@@ -677,6 +677,7 @@
     "attachLimit": "Sie können bis zu {{max}} Dateien pro Nachricht anhängen.",
     "attachTooLargeToForward": "{{name}} wurde gespeichert, ist aber zu groß, um direkt an das Modell gesendet zu werden.",
     "attachNotForwarded": "Nicht an das Modell gesendet",
+    "dropToAttach": "Dateien hier ablegen, um sie anzuhängen",
     "retry": "Letzten Schritt wiederholen",
     "retrySuccess": "Schritt erneut ausgeführt",
     "retryError": "Wiederholung fehlgeschlagen",

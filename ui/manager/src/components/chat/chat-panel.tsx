@@ -18,10 +18,11 @@ import type { SentAttachment } from "@/hooks/use-chat";
 import {
   filesFromClipboard,
   useAttachmentStaging,
+  useFileDrop,
   type PendingAttachment,
   type ReadyAttachment,
 } from "@/hooks/use-attachment-staging";
-import { PendingAttachmentChip } from "./attachment-chip";
+import { FileDropOverlay, PendingAttachmentChip } from "./attachment-chip";
 import { ChatMessage } from "./chat-message";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
@@ -256,6 +257,13 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
     [conversationId, stageFiles],
   );
 
+  // Dropping files anywhere on the chat area stages them, same as the picker
+  // and paste. Secret mode blocks it — a masked turn must not carry a file.
+  const { isDragOver, dropHandlers } = useFileDrop(
+    Boolean(conversationId) && !isSecretMode,
+    handlePasteFiles,
+  );
+
   // ── Rerun last step ──
   const rerunConversation = useRerunConversation();
   const lastMessage = messages[messages.length - 1];
@@ -281,8 +289,9 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
         />
       )}
 
-      {/* Main chat area */}
-      <div className="flex flex-1 flex-col min-w-0 min-h-0">
+      {/* Main chat area — also the file drop zone */}
+      <div className="relative flex flex-1 flex-col min-w-0 min-h-0" {...dropHandlers}>
+        {isDragOver && <FileDropOverlay />}
         {/* Top bar */}
         <div className={cn(
           "flex items-center border-b border-border",

@@ -4,10 +4,30 @@
  * chat-panel when the operator input gained attachments.
  */
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, FileText, Loader2, X } from "lucide-react";
+import { AlertTriangle, FileText, Loader2, Paperclip, X } from "lucide-react";
 import { formatBytes, isImageMime } from "@/lib/api/attachments";
 import type { PendingAttachment } from "@/hooks/use-attachment-staging";
 import { cn } from "@/lib/utils";
+
+/**
+ * Full-container overlay shown while a file drag hovers a chat drop zone.
+ * The container must be `position: relative`; pointer events pass through so
+ * the drop lands on the container's own handlers.
+ */
+export function FileDropOverlay() {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-background/80"
+      data-testid="file-drop-overlay"
+    >
+      <div className="flex items-center gap-2 text-sm font-medium text-primary">
+        <Paperclip className="h-5 w-5" />
+        {t("chat.dropToAttach", "Drop files to attach")}
+      </div>
+    </div>
+  );
+}
 
 export function PendingAttachmentChip({
   att,

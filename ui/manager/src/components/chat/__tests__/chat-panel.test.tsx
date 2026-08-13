@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, beforeAll, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, fireEvent } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { ChatPanel } from "../chat-panel";
 import { useChatStore } from "@/hooks/use-chat";
@@ -244,6 +244,32 @@ describe("ChatPanel", () => {
 
     // User message shown in chat should be masked
     expect(await screen.findByText("●●●●●●●●")).toBeInTheDocument();
+  });
+
+  it("dropping a file on the chat area stages it as an attachment", async () => {
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+    server.use(
+      http.post("*/conversations/conv1/attachments", () =>
+        HttpResponse.json(
+          { storageRef: "drop-ref-1", fileName: "dropped.txt", mimeType: "text/plain", sizeBytes: 3, forwardableInline: true },
+          { status: 201 },
+        ),
+      ),
+    );
+    renderWithProviders(<ChatPanel />);
+
+    const zone = screen.getByTestId("chat-input").closest(".relative")!;
+    const dataTransfer = {
+      files: [new File(["abc"], "dropped.txt", { type: "text/plain" })],
+      types: ["Files"],
+    };
+    fireEvent.dragEnter(zone, { dataTransfer });
+    expect(screen.getByTestId("file-drop-overlay")).toBeInTheDocument();
+    fireEvent.drop(zone, { dataTransfer });
+
+    expect(await screen.findByTestId("attachment-chip")).toBeInTheDocument();
+    expect(screen.queryByTestId("file-drop-overlay")).not.toBeInTheDocument();
   });
 
   it("blocks attachments in secret mode — disables attach, drops staged files, never forwards", async () => {

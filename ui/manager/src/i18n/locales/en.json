@@ -706,6 +706,7 @@
     "attachLimit": "You can attach up to {{max}} files per message.",
     "attachTooLargeToForward": "{{name}} is stored but too large to send to the model inline.",
     "attachNotForwarded": "Not sent to model",
+    "dropToAttach": "Drop files to attach",
     "retry": "Retry Last Step",
     "retrySuccess": "Step re-executed",
     "retryError": "Retry failed",

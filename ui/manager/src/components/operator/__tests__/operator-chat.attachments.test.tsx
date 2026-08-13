@@ -118,6 +118,42 @@ describe("OperatorChat — attachments", () => {
     expect(await screen.findByTestId("attachment-chip")).toBeInTheDocument();
   });
 
+  it("dropping a file on the chat stages it, with the overlay shown only mid-drag", async () => {
+    stubUpload("conv-op");
+    renderChat({ conversationId: "conv-op" });
+
+    const zone = screen.getByTestId("operator-messages").parentElement!;
+    const file = new File(["x"], "dropped.txt", { type: "text/plain" });
+    const dataTransfer = { files: [file], types: ["Files"] };
+
+    fireEvent.dragEnter(zone, { dataTransfer });
+    expect(screen.getByTestId("file-drop-overlay")).toBeInTheDocument();
+
+    fireEvent.drop(zone, { dataTransfer });
+    expect(screen.queryByTestId("file-drop-overlay")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("attachment-chip")).toBeInTheDocument();
+  });
+
+  it("ignores drops while paused, and text drags never trigger the overlay", () => {
+    renderChat({ conversationId: "conv-op", isPaused: true });
+    const zone = screen.getByTestId("operator-messages").parentElement!;
+
+    fireEvent.dragEnter(zone, { dataTransfer: { files: [], types: ["Files"] } });
+    expect(screen.queryByTestId("file-drop-overlay")).not.toBeInTheDocument();
+
+    fireEvent.drop(zone, {
+      dataTransfer: { files: [new File(["x"], "a.txt", { type: "text/plain" })], types: ["Files"] },
+    });
+    expect(screen.queryByTestId("attachment-chip")).not.toBeInTheDocument();
+  });
+
+  it("a text-selection drag does not raise the overlay", () => {
+    renderChat({ conversationId: "conv-op" });
+    const zone = screen.getByTestId("operator-messages").parentElement!;
+    fireEvent.dragEnter(zone, { dataTransfer: { files: [], types: ["text/plain"] } });
+    expect(screen.queryByTestId("file-drop-overlay")).not.toBeInTheDocument();
+  });
+
   it("allows an attachment-only send once the upload is ready", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn();

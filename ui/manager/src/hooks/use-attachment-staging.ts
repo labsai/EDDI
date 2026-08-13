@@ -43,6 +43,79 @@ export function filesFromClipboard(e: React.ClipboardEvent): File[] {
   return Array.from(e.clipboardData?.files ?? []);
 }
 
+/** Whether a drag carries files (vs. text/selection drags, which chat drop
+ *  zones must ignore so in-page text dragging keeps working). */
+function dragHasFiles(e: React.DragEvent): boolean {
+  return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+}
+
+export interface FileDropZone {
+  /** True while a file drag hovers the zone — render the drop overlay. */
+  isDragOver: boolean;
+  /** Spread onto the drop-zone container element. */
+  dropHandlers: {
+    onDragEnter?: (e: React.DragEvent) => void;
+    onDragOver?: (e: React.DragEvent) => void;
+    onDragLeave?: (e: React.DragEvent) => void;
+    onDrop?: (e: React.DragEvent) => void;
+  };
+}
+
+/**
+ * Turn a container into a file drop zone feeding {@link AttachmentStaging}'s
+ * `stageFiles` (or any file consumer).
+ *
+ * The enter/leave depth counter exists because dragenter/dragleave fire for
+ * every child element crossed — without it the overlay flickers off the moment
+ * the cursor moves from the container onto a message bubble. Non-file drags
+ * (text selections) pass through untouched.
+ */
+export function useFileDrop(enabled: boolean, onFiles: (files: File[]) => void): FileDropZone {
+  const [isDragOver, setIsDragOver] = useState(false);
+  const depth = useRef(0);
+
+  // Disabling mid-drag (e.g. secret mode toggled on) must not strand the
+  // overlay in its "on" state.
+  useEffect(() => {
+    if (!enabled) {
+      depth.current = 0;
+      setIsDragOver(false);
+    }
+  }, [enabled]);
+
+  const onDragEnter = useCallback((e: React.DragEvent) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    depth.current += 1;
+    setIsDragOver(true);
+  }, []);
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    // preventDefault is what makes the element a legal drop target at all.
+    if (dragHasFiles(e)) e.preventDefault();
+  }, []);
+  const onDragLeave = useCallback((e: React.DragEvent) => {
+    if (!dragHasFiles(e)) return;
+    depth.current = Math.max(0, depth.current - 1);
+    if (depth.current === 0) setIsDragOver(false);
+  }, []);
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (!dragHasFiles(e)) return;
+      e.preventDefault();
+      depth.current = 0;
+      setIsDragOver(false);
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length) onFiles(files);
+    },
+    [onFiles],
+  );
+
+  if (!enabled) {
+    return { isDragOver: false, dropHandlers: {} };
+  }
+  return { isDragOver, dropHandlers: { onDragEnter, onDragOver, onDragLeave, onDrop } };
+}
+
 export interface AttachmentStaging {
   pendingAttachments: PendingAttachment[];
   isUploading: boolean;

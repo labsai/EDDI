@@ -685,6 +685,7 @@
     "attachLimit": "Vous pouvez joindre jusqu'à {{max}} fichiers par message.",
     "attachTooLargeToForward": "{{name}} est enregistré mais trop volumineux pour être envoyé directement au modèle.",
     "attachNotForwarded": "Non envoyé au modèle",
+    "dropToAttach": "Déposez des fichiers pour les joindre",
     "retry": "Réessayer la dernière étape",
     "retrySuccess": "Étape ré-exécutée",
     "retryError": "Échec de la tentative",
