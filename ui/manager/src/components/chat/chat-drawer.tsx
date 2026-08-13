@@ -2,7 +2,16 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useChatDrawerStore, type ChatDrawerStep } from "@/hooks/use-chat-drawer";
 import { useChatStore, useStartConversation, useSendMessage } from "@/hooks/use-chat";
+import type { SentAttachment } from "@/hooks/use-chat";
+import {
+  filesFromClipboard,
+  useAttachmentStaging,
+  useFileDrop,
+  type AttachmentStaging,
+  type ReadyAttachment,
+} from "@/hooks/use-attachment-staging";
 import { ChatMessage } from "./chat-message";
+import { FileDropOverlay, PendingAttachmentChip } from "./attachment-chip";
 import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer as DebugPanel } from "@/components/debugger/debug-drawer";
 import { InputHint } from "@/components/chat/input-hint";
@@ -12,6 +21,7 @@ import {
   X,
   MessageSquarePlus,
   Loader2,
+  Paperclip,
   Send,
   AlertCircle,
   RefreshCw,
@@ -70,6 +80,14 @@ export function ChatDrawer() {
 
   const startConversation = useStartConversation();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Attachment staging shared between the drop zone (drawer body) and the
+  // input's picker/paste — one staging area, same as the main panel.
+  const staging = useAttachmentStaging(conversationId);
+  const { isDragOver, dropHandlers } = useFileDrop(
+    Boolean(conversationId),
+    (files) => void staging.stageFiles(files),
+  );
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -148,8 +166,9 @@ export function ChatDrawer() {
             </button>
           </div>
 
-          {/* Body */}
-          <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Body — also the file drop zone once a conversation exists */}
+          <div className="relative flex flex-1 flex-col overflow-hidden" {...dropHandlers}>
+            {isDragOver && <FileDropOverlay />}
             {/* Progress steps */}
             {showProgress && (
               <div className="flex flex-1 items-center justify-center">
@@ -228,6 +247,7 @@ export function ChatDrawer() {
                 <DrawerChatInput
                   disabled={!conversationId}
                   isProcessing={isProcessing}
+                  staging={staging}
                 />
               </>
             )}
@@ -267,24 +287,38 @@ function QuickRepliesBar() {
 function DrawerChatInput({
   disabled = false,
   isProcessing = false,
+  staging,
 }: {
   disabled?: boolean;
   isProcessing?: boolean;
+  staging: AttachmentStaging;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const sendMessage = useSendMessage();
+  const { pendingAttachments, isUploading, hasReadyAttachment } = staging;
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
-    if (!trimmed || disabled || isProcessing) return;
-    sendMessage.mutate({ message: trimmed });
+    // Attachment-only turns are allowed, matching the main panel; the guard
+    // runs BEFORE draining so a no-op send never clears staged chips.
+    if ((!trimmed && !hasReadyAttachment) || disabled || isProcessing || isUploading) return;
+    const sent: SentAttachment[] = staging.takeForSend().map((a: ReadyAttachment) => ({
+      storageRef: a.result.storageRef,
+      fileName: a.result.fileName || a.file.name,
+      mimeType: a.result.mimeType || a.file.type || "application/octet-stream",
+      sizeBytes: a.result.sizeBytes ?? a.file.size,
+      forwardableInline: a.result.forwardableInline,
+      previewUrl: a.previewUrl,
+    }));
+    sendMessage.mutate({ message: trimmed, attachments: sent.length ? sent : undefined });
     setValue("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [value, disabled, isProcessing, sendMessage]);
+  }, [value, disabled, isProcessing, isUploading, hasReadyAttachment, staging, sendMessage]);
 
   const handleInput = useCallback(() => {
     const el = textareaRef.current;
@@ -293,11 +327,44 @@ function DrawerChatInput({
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, []);
 
-  const canSend = value.trim().length > 0 && !disabled && !isProcessing;
+  const canSend =
+    (value.trim().length > 0 || hasReadyAttachment) && !disabled && !isProcessing && !isUploading;
 
   return (
     <div className="border-t border-border bg-background p-3 shrink-0">
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={staging.handleFileInput}
+        data-testid="drawer-file-input"
+      />
+      {pendingAttachments.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2" data-testid="drawer-pending-attachments">
+          {pendingAttachments.map((att) => (
+            <PendingAttachmentChip key={att.id} att={att} onRemove={() => staging.removeAttachment(att.id)} />
+          ))}
+        </div>
+      )}
       <div className="flex items-end gap-2">
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled || isUploading}
+          className={cn(
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors",
+            isUploading
+              ? "bg-primary/10 text-primary animate-pulse"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            disabled && "cursor-not-allowed opacity-40",
+          )}
+          title={t("chat.attach", "Attach file")}
+          aria-label={t("chat.attach", "Attach file")}
+          data-testid="drawer-attach-btn"
+        >
+          {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+        </button>
         <textarea
           ref={textareaRef}
           data-testid="drawer-chat-input"
@@ -311,6 +378,14 @@ function DrawerChatInput({
               e.preventDefault();
               handleSend();
             }
+          }}
+          onPaste={(e) => {
+            // Screenshots / copied files paste as attachments; text pastes
+            // fall through untouched.
+            const files = filesFromClipboard(e);
+            if (!files.length || disabled) return;
+            e.preventDefault();
+            void staging.stageFiles(files);
           }}
           placeholder={t("chat.placeholder")}
           disabled={disabled}

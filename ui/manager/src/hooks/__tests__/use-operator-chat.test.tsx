@@ -800,3 +800,74 @@ describe("attachments on a turn", () => {
     expect(vi.mocked(startConversation)).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("streamed interim text vs the canonical answer", () => {
+  it("snaps the bubble to the done snapshot's text when rounds streamed interim commentary", async () => {
+    // Tool-enabled turns stream every model round: "Let me check…" (interim,
+    // discarded from memory) then the final answer. The resting bubble must
+    // equal what a reload would show — the snapshot text alone.
+    h.frames = [
+      { type: "token", data: "Let me check the agents… " },
+      { type: "token", data: "There are 3 agents deployed." },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "READY",
+          conversationOutputs: [textOutput("There are 3 agents deployed.")],
+        }),
+      },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("how many agents?");
+    });
+
+    const agentMessage = result.current.messages.find((m) => m.role === "agent");
+    expect(agentMessage?.content).toBe("There are 3 agents deployed.");
+  });
+
+  it("leaves the bubble alone when the streamed text already equals the snapshot", async () => {
+    h.frames = [
+      { type: "token", data: "Same answer" },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "READY",
+          conversationOutputs: [textOutput("Same answer")],
+        }),
+      },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    const agentMessage = result.current.messages.find((m) => m.role === "agent");
+    expect(agentMessage?.content).toBe("Same answer");
+  });
+
+  it("a paused turn's bubble rests on the pending message even after interim streaming", async () => {
+    h.frames = [
+      { type: "token", data: "I will rename the agent now… " },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          hitlPauseReason: "Gated write",
+          conversationOutputs: [textOutput("Waiting for your approval to rename the agent.")],
+        }),
+      },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("rename it");
+    });
+
+    const agentMessage = result.current.messages.find((m) => m.role === "agent");
+    expect(agentMessage?.content).toBe("Waiting for your approval to rename the agent.");
+    expect(result.current.isPaused).toBe(true);
+  });
+});

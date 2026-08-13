@@ -614,15 +614,18 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
             ];
             newQuickReplies = extractQuickReplies(lastOutput);
 
-            // When the backend uses structured JSON output (addToOutput=false
-            // with postResponse), no tokens are streamed — the actual text
-            // only appears in the done snapshot's conversationOutputs.
-            // Back-fill the agent message if it's still empty.
+            // Snap the bubble to the snapshot's canonical text. Two cases:
+            // (1) structured JSON output streams no tokens — the text exists
+            // only here (the original back-fill); (2) a tool-enabled turn now
+            // streams every model round live, so interim commentary ("Let me
+            // check…") can precede the final answer in the bubble, while the
+            // stored transcript keeps only the final answer. Replacing on done
+            // makes the resting bubble identical to what a reload would show.
             const msgs = store.getState().messages;
             const lastMsg = msgs[msgs.length - 1];
-            if (lastMsg?.role === "agent" && !lastMsg.content.trim()) {
+            if (lastMsg?.role === "agent") {
               const snapshotText = extractOutput(lastOutput);
-              if (snapshotText) {
+              if (snapshotText && lastMsg.content !== snapshotText) {
                 store.setState((s) => {
                   const updated = [...s.messages];
                   const prev = updated[updated.length - 1];

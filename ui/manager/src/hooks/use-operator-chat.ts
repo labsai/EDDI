@@ -445,13 +445,14 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
                   // any text.
                   pausedPlaceholderId: agentId,
                   // The backend writes its pending message into this same
-                  // step's output, exactly like an ordinary answer — back-fill
-                  // it the same way a structured-JSON turn is back-filled below,
-                  // so a turn that pauses without ever streaming a token still
-                  // shows why, not an empty bubble.
+                  // step's output, exactly like an ordinary answer — snap the
+                  // bubble to it, so a turn that paused after streaming interim
+                  // commentary rests on the pending message (what a reload
+                  // shows), and one that never streamed shows why it paused
+                  // instead of an empty bubble.
                   messages: pendingText
                     ? s.messages.map((m) =>
-                        m.id === agentId && !m.content.trim() ? { ...m, content: pendingText } : m,
+                        m.id === agentId && m.content !== pendingText ? { ...m, content: pendingText } : m,
                       )
                     : s.messages,
                 }));
@@ -473,16 +474,25 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           // answer would be a lie.
           set((s) => {
             const bubble = s.messages.find((m) => m.id === agentId);
-            if (s.isPaused || s.error || bubble?.content.trim()) {
+            if (s.isPaused || s.error) {
               return s;
             }
             if (finalText) {
-              return {
-                ...s,
-                messages: s.messages.map((m) =>
-                  m.id === agentId && !m.content.trim() ? { ...m, content: finalText } : m,
-                ),
-              };
+              // Snap to the snapshot's canonical text. Tool-enabled turns now
+              // stream every model round live, so interim commentary ("Let me
+              // check…") can precede the final answer in the bubble — the
+              // stored transcript keeps only the final answer, and the resting
+              // bubble must match what a reload would show.
+              if (bubble && bubble.content !== finalText) {
+                return {
+                  ...s,
+                  messages: s.messages.map((m) => (m.id === agentId ? { ...m, content: finalText } : m)),
+                };
+              }
+              return s;
+            }
+            if (bubble?.content.trim()) {
+              return s;
             }
             const failure = [...s.events].reverse().find((e) => e.type === "task_failed");
             if (!failure) {
