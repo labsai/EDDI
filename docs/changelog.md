@@ -7,6 +7,73 @@
 
 
 
+## 🔒 fix(httpcalls): a tool argument could rewrite which endpoint an httpcall hits (2026-08-13)
+
+**Repo:** EDDI (`chore/remove-agent-father`)
+
+Found while auditing the Platform Operator end to end.
+
+LLM tool arguments are merged into the template data as **top-level** entries
+(`HttpCallToolsProvider.safeTemplateMerge`) and substituted into path templates like
+`/agentstore/agents/{id}` as raw text. Nothing encoded them. An argument of
+`../../secretstore/secrets/default/masterkey` therefore rewrote the target path, and `?` / `#`
+could bolt on a query string or truncate the URL.
+
+**Why this matters most for the operator.** The HITL gate classifies on the **configured**
+endpoint (`ToolApprovalGate.addressesOf` reads `toolEndpoints`, recorded at discovery time from
+`ApiCall.request`), not on the path that ends up being requested. The operator's gate exempts
+`http.get:*`. So a *read* tool — approval-exempt by design — could be steered to any other
+same-host GET endpoint, executing with no human in the loop and carrying whatever `Authorization`
+the config resolves. Prompt injection reaches this: the arguments are model-chosen.
+
+**Fix:** `ApiCallExecutor.buildRequest` now renders the PATH through a `pathSafeView` of the
+template data — top-level String values percent-encoded as single path segments. Body, query and
+headers are untouched.
+
+Three details that make it correct rather than approximately correct:
+
+- **Only top-level Strings are encoded**, which is exactly the model-controlled surface.
+  Conversation state lives in nested maps under reserved keys (`properties`, `memory`, `context`, …
+  — `RESERVED_TEMPLATE_KEYS`, which the merge refuses to overwrite), so hand-authored templates
+  like `{properties.agentId}` are unchanged.
+- **`.` is excluded from the unreserved set**, so a value of exactly `..` encodes to `%2E%2E`.
+  Encoding only the slashes would not have been enough: dot-segment removal (RFC 3986 §5.2.4) runs
+  on the raw path *before* percent-decoding, so a surviving `..` still normalizes one level up.
+  Ordinary identifiers like `6.2.0` round-trip fine.
+- **Applied inside `buildRequest`**, which serves both `resolve()` and `execute()` — so the
+  gate-time fingerprint and the executed request see identical encoding and request pinning is
+  unaffected.
+
+**Tests.** New `ApiCallExecutorPathEncodingTest` drives a **real** Qute engine and a real
+`PrePostUtils` — the sibling executor tests mock `templateValues`, which would step straight over
+the substitution under test. It asserts on `URI.getRawPath()`, never `getPath()`: `getPath()`
+percent-*decodes*, so it echoes the attacker's original string and reads like a failure even when
+the wire format is correctly encoded. 128 tests pass across the executor, task and injection suites;
+318 across the HITL/gate suites confirm pinning still holds.
+
+### Also audited, no change needed
+
+- **Endpoint-less tools cannot slip the gate.** A require-pattern of `http.post:*` only matches the
+  `source.method:path` address form, so a tool with no recorded endpoint would escape it — but
+  `toolEndpoints` is only skipped when `method` or `path` is null, and `buildRequest` NPEs on either
+  before a request is sent. Bounded: such a tool errors, it does not execute ungated.
+- **Source tagging is unconditional** (`ToolSourceRegistry` writes `provider.source()` for every
+  accepted tool), and a name collision **drops** the incoming tool with a warning rather than
+  registering it untagged. Both fail closed.
+
+### Flagged, not changed — a fail-open worth a decision
+
+`ConversationHitlService.populateToolApprovalsConfig` catches any exception from
+`readAgentConfigPinned` and logs a warning, leaving the carrier **null** — and a null carrier makes
+the gate **fully inert**, so every write executes without approval. A transient store error while
+resuming an operator conversation is therefore an ungated-write window. "Could not read the policy"
+and "there is no policy" are indistinguishable to the gate, which is the actual defect. The honest
+fix is to fail the turn when the policy cannot be determined, but that changes turn semantics for
+every agent, not just the operator — so it is reported rather than taken unilaterally.
+
+---
+
+
 ## 🌡️ fix(setup): stop writing a hardcoded `temperature` — it makes newer models reject every turn (2026-08-13)
 
 **Repo:** EDDI (`chore/remove-agent-father`)

@@ -609,7 +609,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             path = SLASH_CHAR + path;
         }
         var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
-        var targetUriStr = prePostUtils.templateValues(targetDestination, templateDataObjects);
+        var targetUriStr = prePostUtils.templateValues(targetDestination, pathSafeView(templateDataObjects));
         // Resolve global variable references, then vault references in URL
         targetUriStr = globalVariableResolver.resolveValue(targetUriStr);
         targetUriStr = secretResolver.resolveValue(targetUriStr);
@@ -679,6 +679,70 @@ public class ApiCallExecutor implements IApiCallExecutor {
             request.setQueryParam(queryParam, qpValue);
         }
         return request;
+    }
+
+    /**
+     * Bytes that may appear un-encoded in a substituted path value: RFC 3986
+     * "unreserved", minus {@code .} — everything else is percent-encoded, including
+     * {@code /}, {@code ?} and {@code #}, which is the point.
+     * <p>
+     * The dot is excluded deliberately: a substituted value of exactly {@code ..}
+     * would otherwise survive as a dot-segment and normalize one level up even with
+     * every slash encoded. Dot-segment removal (RFC 3986 §5.2.4) runs on the raw
+     * path BEFORE percent-decoding, so {@code %2E%2E} is not a dot-segment; the
+     * server then decodes it back to the literal value. Identifiers like
+     * {@code 6.2.0} round-trip unchanged.
+     */
+    private static final String PATH_SEGMENT_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~";
+
+    /**
+     * A view of the template data whose top-level String values are percent-encoded
+     * as single path segments. Used for rendering the request PATH only — never the
+     * body or query.
+     * <p>
+     * <b>Why:</b> LLM tool arguments are merged into the template data as top-level
+     * entries ({@code HttpCallToolsProvider#safeTemplateMerge}) and are substituted
+     * into path templates like {@code /agentstore/agents/{id}} as raw text. A
+     * model- or prompt-injection-supplied value of
+     * {@code ../../secretstore/secrets/default/key} therefore rewrites which
+     * endpoint the call hits — and because read patterns are commonly exempt from
+     * the HITL gate (gate classification uses the CONFIGURED endpoint, not the
+     * resolved one), a GET tool could be steered to any same-host GET endpoint with
+     * no human in the loop, carrying whatever Authorization the config resolves.
+     * {@code ?} and {@code #} similarly let a value rewrite the query or truncate
+     * the URL. Percent-encoding the substituted value makes it one literal path
+     * segment, whatever it contains.
+     * <p>
+     * <b>Why only top-level Strings:</b> that is exactly the model-controlled
+     * surface. Conversation state lives in nested maps under reserved keys
+     * ({@code properties}, {@code memory}, {@code context}, ... — see
+     * {@code HttpCallToolsProvider#RESERVED_TEMPLATE_KEYS}, which the merge refuses
+     * to overwrite), so hand-authored templates like {@code {properties.agentId}}
+     * keep their existing behaviour unchanged.
+     * <p>
+     * Applied inside {@code buildRequest}, which serves both {@code resolve()} and
+     * {@code execute()} — the gate-time fingerprint and the executed request see
+     * identical encoding, so request pinning is unaffected.
+     */
+    private static Map<String, Object> pathSafeView(Map<String, Object> templateDataObjects) {
+        var view = new HashMap<String, Object>(templateDataObjects.size());
+        templateDataObjects.forEach((key, value) -> view.put(key,
+                value instanceof String stringValue ? encodePathSegment(stringValue) : value));
+        return view;
+    }
+
+    /** Percent-encodes every byte outside RFC 3986 unreserved, UTF-8. */
+    static String encodePathSegment(String value) {
+        var out = new StringBuilder(value.length());
+        for (byte b : value.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+            char c = (char) (b & 0xFF);
+            if (PATH_SEGMENT_UNRESERVED.indexOf(c) >= 0) {
+                out.append(c);
+            } else {
+                out.append('%').append(String.format("%02X", b & 0xFF));
+            }
+        }
+        return out.toString();
     }
 
 }
