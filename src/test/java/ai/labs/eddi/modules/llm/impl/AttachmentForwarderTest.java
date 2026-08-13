@@ -133,6 +133,76 @@ class AttachmentForwarderTest {
         }
 
         /**
+         * Images are the exception to note-only: there is no OCR, so a note plus
+         * readAttachment dead-ends in "no readable content" — the exact reply that made
+         * an operator user believe upload was broken. A vision model gets the recent
+         * images again as real image content.
+         */
+        @Test
+        void earlierTurnImage_isReinlinedForAVisionModel() throws Exception {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            when(store.load(eq("img-1"), any())).thenReturn("pngbytes".getBytes());
+            mockPreviousTurnAttachments(storedImage("img-1", "screenshot.png"));
+            List<ChatMessage> messages = messages(UserMessage.from("what does the image say?"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            assertEquals(2, enhanced.contents().size(), "the image must ride the message again, not a note");
+            assertInstanceOf(ImageContent.class, enhanced.contents().get(1));
+        }
+
+        @Test
+        void earlierTurnImage_staysANoteForANonVisionModel() {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            mockPreviousTurnAttachments(storedImage("img-1", "screenshot.png"));
+            List<ChatMessage> messages = messages(UserMessage.from("what does the image say?"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-3.5-turbo");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            assertEquals(2, enhanced.contents().size());
+            String note = ((TextContent) enhanced.contents().get(1)).text();
+            assertTrue(note.contains("screenshot.png"), note);
+        }
+
+        @Test
+        void earlierTurnMixedFiles_reinlinesTheImageAndNotesTheRest() throws Exception {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            when(store.load(eq("img-1"), any())).thenReturn("pngbytes".getBytes());
+            mockPreviousTurnAttachments(storedImage("img-1", "screenshot.png"), storedPdf("ref-1", "earlier.pdf"));
+            List<ChatMessage> messages = messages(UserMessage.from("and the pdf?"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            // text + re-inlined image + note about the pdf
+            assertEquals(3, enhanced.contents().size());
+            assertInstanceOf(ImageContent.class, enhanced.contents().get(1));
+            String note = ((TextContent) enhanced.contents().get(2)).text();
+            assertTrue(note.contains("earlier.pdf"), note);
+            assertFalse(note.contains("screenshot.png"), "a re-inlined image must not also be listed as unavailable: " + note);
+        }
+
+        @Test
+        void earlierTurnImages_reinliningIsCappedAtTheMostRecentThree() throws Exception {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            when(store.load(any(), any())).thenReturn("pngbytes".getBytes());
+            mockPreviousTurnAttachments(
+                    storedImage("img-1", "newest.png"), storedImage("img-2", "second.png"),
+                    storedImage("img-3", "third.png"), storedImage("img-4", "oldest.png"));
+            List<ChatMessage> messages = messages(UserMessage.from("the screenshots?"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            long images = enhanced.contents().stream().filter(c -> c instanceof ImageContent).count();
+            assertEquals(3, images, "the gallery must not be re-paid whole every turn");
+            String note = ((TextContent) enhanced.contents().get(enhanced.contents().size() - 1)).text();
+            assertTrue(note.contains("oldest.png"), "the capped-out image must stay reachable via the note: " + note);
+        }
+
+        /**
          * A HITL resume re-enters the SAME step of a conversation reloaded from the
          * store, so "current step" does not imply "live objects" — the entries are
          * plain maps there. Casting instead of coercing dropped every attachment on a
@@ -656,6 +726,14 @@ class AttachmentForwarderTest {
         att.setStorageRef(ref);
         att.setFileName(fileName);
         att.setMimeType("application/pdf");
+        return att;
+    }
+
+    private static Attachment storedImage(String ref, String fileName) {
+        Attachment att = new Attachment();
+        att.setStorageRef(ref);
+        att.setFileName(fileName);
+        att.setMimeType("image/png");
         return att;
     }
 

@@ -82,6 +82,15 @@ public class ReadAttachmentTool {
                 text = textExtractor.extractPdfText(bytes, page, page, textExtractor.getDefaultMaxChars());
             } else if (textExtractor.canExtractText(match.mimeType())) {
                 text = textExtractor.extractText(bytes, match.mimeType());
+            } else if (mime.startsWith("image/")) {
+                // Dead-ending in "no extractable text" made models tell users that
+                // OCR was missing. Say what actually works: vision models are shown
+                // recent images directly (the forwarder re-inlines them on later
+                // turns); this tool can never substitute for that.
+                return "Attachment '" + display(match) + "' is an image (" + match.mimeType()
+                        + ") — there is no OCR, so it cannot be read as text. If you have vision, the most recent "
+                        + "images are already shown to you directly; for older ones, ask the user to re-attach the "
+                        + "image to their next message.";
             } else {
                 return "Attachment '" + display(match) + "' is a " + match.mimeType()
                         + " and has no extractable text.";

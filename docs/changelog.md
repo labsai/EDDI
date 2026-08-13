@@ -7,6 +7,27 @@
 
 
 
+## 🎯 fix(attachments): earlier-turn images are re-inlined for vision models (2026-08-13)
+
+**Repo:** EDDI (`chore/remove-agent-father`)
+
+Dev-testing the operator: attach a screenshot, then ask about it — the model answered "no OCR
+available, the attachment tool returned no readable content". Root cause: a file is inlined only on
+the turn it arrives; later turns get a name-note pointing at `readAttachment`. That is right for
+documents (their text stays reachable through the tool) and a dead end for images — there is no
+OCR, so nothing can substitute for seeing them.
+
+Fix: on a turn with no attachments of its own, the forwarder now re-inlines the most recent
+earlier-turn images (up to 3, most-recent-first, same byte caps and vision gating as a current-turn
+image) as real `ImageContent`; everything else keeps the note. `readAttachment` on an image also
+stops dead-ending in "no extractable text" — it now says there is no OCR, that vision models see
+recent images directly, and to ask the user to re-attach older ones.
+
+5 new forwarder tests (re-inline, non-vision note, mixed files, cap-at-3, note excludes re-inlined)
+plus the retargeted tool test.
+
+---
+
 ## 🎯 fix(review): findings from the three-agent branch review (2026-08-13)
 
 **Repo:** EDDI (`chore/remove-agent-father`)
