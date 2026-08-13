@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.AttachmentExtractionException;
+import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.data.message.AudioContent;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.Content;
@@ -272,7 +273,7 @@ public class AttachmentForwarder {
         recordMetrics(inlined, errors.size());
         persist(memory.getCurrentStep(), List.of(), errors);
         LOGGER.debugf("Earlier-turn attachments for conversation='%s': %d image(s) re-inlined, %d noted",
-                memory.getConversationId(), inlined, noteOnly.size());
+                LogSanitizer.sanitize(memory.getConversationId()), inlined, noteOnly.size());
     }
 
     private void recordMetrics(int forwarded, int errored) {
