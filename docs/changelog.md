@@ -7,6 +7,41 @@
 
 
 
+## 🎯 feat(operator): deterministic gate verification — POST /administration/operator/gate-dry-run (2026-08-13)
+
+**Repo:** EDDI (`chore/remove-agent-father`)
+
+The Manager's write canary proves the approval gate empirically: a synthetic conversation provokes
+a real gated write and checks that the turn pauses. That check depends on an LLM *choosing* to call
+a tool — probabilistic by construction. A cautious model that listed the agents and asked which one
+to rename (correct operator behaviour) produced outcome `unknown`, and activation deleted a healthy
+operator. Prompt hardening (#143) made that far less likely; it cannot make it impossible.
+
+**New: `POST /administration/operator/gate-dry-run`** (`eddi-admin`). Takes one synthetic tool call
+(`agentId`, pinned `version`, `toolName`, `source`, `method:path` endpoint) and answers from the
+stored agent document using the very same `ToolApprovalGate.classify` the tool loop runs at
+execution time — pure function of policy + call address, nothing executed, nothing written. Returns
+`{policyPresent, gated, matchedPattern}`.
+
+Decisions that matter:
+
+- **`version` is required and pinned** — a conversation classifies against the version it pinned,
+  so "latest" would answer a different question than the one that matters.
+- **A store error is a 500, never `policyPresent: false`.** "Could not read the policy" reported as
+  "there is no policy" is the exact fail-open the HITL carrier fix closed on the conversation path;
+  this endpoint refuses to reintroduce it one layer up.
+- **Method case is normalized** (`PATCH:/x` ≡ `patch:/x`), matching discovery's `generateSlug`,
+  so a caller's casing cannot silently produce an ungated verdict.
+- **What it does NOT prove** is stated in the javadoc: that runtime wiring delivers the policy to
+  the gate on a real turn. The empirical probe keeps that job — the two checks answer different
+  questions and the Manager runs both.
+
+12 endpoint tests, including both fail-closed edges (404 for an absent document, 500 for a store
+error).
+
+---
+
+
 ## 🔁 feat(setup): caller-set tool-iteration budget on setup-api — the operator was dying at 10 rounds (2026-08-13)
 
 **Repo:** EDDI (`chore/remove-agent-father`)
