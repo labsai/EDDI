@@ -65,6 +65,16 @@ class ToolLoopStreamingChatModel implements ChatModel {
      */
     private volatile String lastForwardedText = "";
 
+    /**
+     * Whether ANY earlier round of this turn forwarded text — the trigger for the
+     * inter-round separator. Without it, interim commentary and the final answer
+     * run together on the live stream ("Let me check…There are 3"). The separator
+     * goes to the sink only, never into the per-call forwarded record, so the
+     * caller's exact-match suppression still compares pure round text. Written
+     * under {@code streamLock}.
+     */
+    private volatile boolean anyRoundForwarded;
+
     ToolLoopStreamingChatModel(StreamingChatModel delegate, ConversationEventSink eventSink, long timeoutSeconds, String modelType) {
         this.delegate = delegate;
         this.eventSink = eventSink;
@@ -109,12 +119,17 @@ class ToolLoopStreamingChatModel implements ChatModel {
                     if (abandoned.get()) {
                         return;
                     }
+                    boolean firstForwardOfThisCall = forwarded.isEmpty();
                     forwarded.append(partialResponse);
                     try {
+                        if (firstForwardOfThisCall && anyRoundForwarded) {
+                            eventSink.onToken("\n\n");
+                        }
                         eventSink.onToken(partialResponse);
                     } catch (Exception e) {
                         LOGGER.warnf("Error sending token event: %s", e.getMessage());
                     }
+                    anyRoundForwarded = true;
                 }
             }
 

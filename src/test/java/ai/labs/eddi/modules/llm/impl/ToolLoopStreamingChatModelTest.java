@@ -121,6 +121,26 @@ class ToolLoopStreamingChatModelTest {
     }
 
     @Test
+    @DisplayName("a separator is streamed between rounds that both forward text — but never recorded as forwarded")
+    void interRoundSeparatorIsStreamedButNotRecorded() {
+        var bridge = new ToolLoopStreamingChatModel(streaming("interim commentary"), eventSink, 30, "openai");
+
+        bridge.chat(request());
+        var secondRound = new ToolLoopStreamingChatModel(streaming("final answer"), eventSink, 30, "openai");
+        // Same bridge instance across rounds is the production shape — reuse it.
+        bridge.chat(request());
+
+        InOrder inOrder = inOrder(eventSink);
+        inOrder.verify(eventSink).onToken("interim commentary");
+        inOrder.verify(eventSink).onToken("\n\n");
+        inOrder.verify(eventSink).onToken("interim commentary");
+        // The suppression record stays pure round text — the separator would
+        // otherwise break the caller's exact-match comparison.
+        assertEquals("interim commentary", bridge.lastForwardedText());
+        assertEquals("", secondRound.lastForwardedText(), "a fresh bridge has forwarded nothing");
+    }
+
+    @Test
     @DisplayName("a provider error is rethrown synchronously, as the loop's retry expects")
     void errorIsPropagated() {
         var boom = new IllegalStateException("provider failed");

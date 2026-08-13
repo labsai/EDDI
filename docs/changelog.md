@@ -45,6 +45,10 @@ Decisions that matter:
 - **Known, documented limitation:** the loop retries whole attempts; a provider flake after some
   tokens were forwarded can show a repeated prefix on the client. Memory stores only the final
   returned text. Cascade agent mode (a different executor) still downgrades — out of scope here.
+- **Inter-round separator (follow-up):** when two rounds of one turn both forward text (interim
+  commentary, then the final answer), the bridge streams `\n\n` between them so the live view does
+  not run them together. The separator goes to the sink only — never into the per-call forwarded
+  record — so the exact-match suppression still compares pure round text.
 
 11 new tests (6 bridge, 5 LlmTask-level) + the 6 F10 regression tests stay green; suppression
 mutation-checked (reverting it turns the double-emit test red). 710 tests across the affected
