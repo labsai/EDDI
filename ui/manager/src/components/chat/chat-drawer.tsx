@@ -100,7 +100,10 @@ export function ChatDrawer() {
     scrollToBottom,
     handleScroll,
   } = useSmartAutoScroll<HTMLDivElement>({
-    deps: [messages, isThinking, isProcessing],
+    // isOpen: the scroll container mounts only when the drawer opens, so
+    // without it an existing transcript opens scrolled to the TOP with no
+    // way down but manual scrolling.
+    deps: [messages, isThinking, isProcessing, isOpen],
     bottomThreshold: 80,
   });
 

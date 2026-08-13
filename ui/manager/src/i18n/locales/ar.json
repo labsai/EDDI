@@ -726,7 +726,7 @@
       "toolCall": "استدعاء أداة",
       "toolResult": "النتيجة",
       "error": "حدث خطأ",
-      "toolCallsCount": "{{count}} من استدعاءات الأدوات",
+      "toolCallsCount": "عدد استدعاءات الأدوات: {{count}}",
       "usingTool": "جارٍ استخدام {{tool}}…"
     },
     "context": {
