@@ -93,6 +93,36 @@ public class AgentSetupService {
     @ConfigProperty(name = "eddi.setup.llm.log-conversation-content", defaultValue = "false")
     boolean logConversationContent;
 
+    /**
+     * Optional {@code temperature} for a wizard-created LLM config. Unset by
+     * default.
+     * <p>
+     * This was hardcoded to {@code 0.3} on every generated config. That is no
+     * longer safe to send: newer models reject the parameter outright. Anthropic's
+     * Claude Sonnet 5 answers any request carrying it with
+     * {@code invalid_request_error: `temperature` is deprecated for this model}, so
+     * <em>every</em> turn of a wizard-created agent on such a model failed —
+     * including the Platform Operator's, which made it unusable from the moment it
+     * was provisioned.
+     * <p>
+     * A fixed sampling default is an opinion, not a requirement. Every builder
+     * applies this key only when present ({@code applyDouble} and friends), so
+     * leaving it out defers to the provider's own default rather than changing
+     * behaviour blindly.
+     * <p>
+     * Set {@code eddi.setup.llm.temperature} to put a fixed value back on every
+     * generated config, or set it per agent in the Manager — it stays a recognised
+     * parameter, it just is not written unasked.
+     * <p>
+     * Field-injected, like {@link #logConversationContent}, so a directly
+     * constructed instance (tests, non-CDI callers) still works; it reads
+     * {@code null} there, which the guard in {@link #createLlmConfig} treats as
+     * "not set".
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.setup.llm.temperature", defaultValue = "")
+    String setupTemperature;
+
     @Inject
     public AgentSetupService(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin,
             ISecretProvider secretProvider,
@@ -598,7 +628,11 @@ public class AgentSetupService {
         params.put("systemMessage", effectiveSystemPrompt);
         params.put("addToOutput", promptResponseJson == null ? "true" : "false");
         params.put("timeout", "60000");
-        params.put("temperature", "0.3");
+        // Written only when configured — see #setupTemperature. A hardcoded 0.3 broke
+        // every turn on models that reject the parameter (Claude Sonnet 5 and later).
+        if (setupTemperature != null && !setupTemperature.isBlank()) {
+            params.put("temperature", setupTemperature.trim());
+        }
         // Written explicitly (rather than omitted) so the setting is visible and
         // flippable on the generated config in the Manager. See
         // #logConversationContent for why the default is off.

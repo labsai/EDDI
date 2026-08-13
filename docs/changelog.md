@@ -7,6 +7,56 @@
 
 
 
+## 🌡️ fix(setup): stop writing a hardcoded `temperature` — it makes newer models reject every turn (2026-08-13)
+
+**Repo:** EDDI (`chore/remove-agent-father`)
+
+Activating the Platform Operator against **Claude Sonnet 5** left the Manager stuck on
+*"Checking the operator can reach your platform…"*, and the server log showed every turn dying:
+
+```
+invalid_request_error: `temperature` is deprecated for this model.
+```
+
+`AgentSetupService.createLlmConfig` wrote `params.put("temperature", "0.3")` unconditionally onto
+**every** config it generated — since `5e0851fe6` (2026-03-24), so this is long-standing rather than a
+regression. Newer models do not merely ignore the parameter, they **reject the request**, so an agent
+created by the wizard on such a model could not complete a single turn. The Platform Operator was
+unusable from the moment it was provisioned.
+
+**Fix: only write `temperature` when someone asks for it.** New optional property
+`eddi.setup.llm.temperature`, unset by default. Every builder applies the key only when present
+(`applyDouble(parameters, KEY_TEMPERATURE, builder::temperature)` and its equivalents), so omitting
+it defers to the provider's own default rather than substituting another guess. `temperature`
+remains a fully recognised parameter — it is simply no longer written unasked, and can still be set
+per agent in the Manager.
+
+A fixed sampling default was always an opinion rather than a requirement; what changed is that the
+opinion is now actively invalid on current models.
+
+**Two consequences worth knowing:**
+
+- **Already-provisioned agents keep the bad parameter.** The value is baked into their stored LLM
+  config, so this fix only affects agents created from here on. An existing operator must be
+  re-activated (which re-provisions it) or have `temperature` removed from its config in the Manager.
+- **The stuck screen is the write canary, and it does eventually resolve.** `write-canary.ts`
+  carries a 60s `WRITE_CANARY_TIMEOUT_MS` and rolls the activation back on anything but a clean
+  pause, so a failed activation cleans up after itself rather than hanging forever. It just cannot
+  say *why* it failed, because the cause is an LLM error several layers down.
+
+**Still open, from the same log, not addressed here:**
+
+- `Template processing failed for LLM parameter 'systemMessage': Key "name" not found` — the
+  operator's system prompt contains a literal `{name}`, which Qute parses as an expression. Logged
+  as an ERROR but non-fatal (the turn continued to the LLM call), so it is noise rather than a
+  blocker — but it means part of the system prompt may not survive templating intact.
+- `Could not find /components/schemas/IConversationProperties` — EDDI's own OpenAPI spec has an
+  unresolvable self-reference, hit by `McpApiToolBuilder.parseSpec` while generating the operator's
+  tools. Degrades to a warning; the operator still got 47 httpcall tools.
+
+---
+
+
 ## 🔧 fix(build): Quarkus 3.38 rejected 19 redundant `@Blocking` annotations — deleted, not suppressed (2026-08-13)
 
 **Repo:** EDDI (`chore/remove-agent-father`)
