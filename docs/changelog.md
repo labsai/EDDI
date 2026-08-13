@@ -7,57 +7,61 @@
 
 
 
-## 🔧 fix(build): Quarkus 3.38's new @Blocking lint stops `quarkus:dev` — relaxed in %dev only (2026-08-13)
+## 🔧 fix(build): Quarkus 3.38 rejected 19 redundant `@Blocking` annotations — deleted, not suppressed (2026-08-13)
 
 **Repo:** EDDI (`chore/remove-agent-father`)
 
 `quarkus:dev` refused to start: *"Wrong usage(s) of @Blocking found"*, listing 19 methods across
-`McpConversationTools`, `McpGroupTools` and `McpHitlTools` — which is **every** `@Blocking` in the
-MCP layer; no other MCP class uses the annotation.
+`McpConversationTools`, `McpGroupTools` and `McpHitlTools` — **every** `@Blocking` in the MCP layer;
+no other MCP class uses the annotation.
 
-**Cause is a dependency bump, not any code change.** The annotations date from 2026-03 to 2026-08
-and were fine throughout. `de15e41d8` (2026-08-10, dependabot) moved Quarkus **3.37.4 → 3.38.1**,
-which added `ExecutionModelAnnotationsProcessor` — a build-time lint rejecting `@Blocking` on any
-method not registered as a framework "entrypoint".
+**Cause is a dependency bump, not a code change.** The annotations date from 2026-03 to 2026-08 and
+were fine throughout. `de15e41d8` (2026-08-10, dependabot) moved Quarkus **3.37.4 → 3.38.1**, which
+added `ExecutionModelAnnotationsProcessor` — a build-time lint rejecting `@Blocking` on any method
+not registered as a framework "entrypoint".
 
-**It is a false positive.** quarkus-mcp-server 1.13.1 *does* produce the whitelist Quarkus expects
-(`ExecutionModelAnnotationsAllowedBuildItem`, wrapping a predicate that tests each method's
-annotations against the MCP feature-annotation set), and every flagged method carries `@Tool`
-immediately above `@Blocking`. Those two should agree and don't — an upstream mismatch between
-mcp-server 1.13.1 and Quarkus 3.38.1. The exact reason the predicate misses was not pinned down.
-There is no stable way out: 1.13.1 is the newest 1.x, and the next published artifact is
-`2.0.0.CR1`.
+**The 19 annotations were no-ops.** `McpServerProcessor.executionModel` resolves a `@Tool` method's
+execution model in this order: `@RunOnVirtualThread` → `@Blocking` → `@NonBlocking` →
+`@Transactional` → `hasBlockingSignature()`. That last step returns *true* for any non-parameterized
+return type (only `Uni`/`Multi` and Kotlin `suspend` count as non-blocking). Every one of the 19
+methods returns `String`, so each already resolved to `WORKER_THREAD` on signature alone. Removing
+`@Blocking` changes the resolved execution model **not at all** — verified against the decompiled
+1.13.1 deployment jar, method by method.
 
-**Fix: `%dev.quarkus.execution-model-annotations.detection-mode=warn`** — scoped to dev, not global.
+So they are deleted, along with the three now-unused imports. Net effect: 22 lines removed, zero
+behaviour change, lint satisfied without suppressing it.
 
-Two facts make that the right shape rather than a blanket suppression:
+**A `%dev.quarkus.execution-model-annotations.detection-mode=warn` suppression was committed first
+(`ed58d91b3`) and is reverted here.** It worked — dev mode reached "E.D.D.I is ready!" with it in
+place — but it was the wrong fix: it silenced a correct-in-outcome lint to preserve annotations that
+did nothing, and left a 20-line apologia in `application.properties` explaining why a build check was
+being disabled. Deleting dead annotations is the smaller and more honest change. Kept here as the
+record of a wrong turn rather than quietly dropped.
 
-- **Prod augmentation passes.** CI's Integration Tests job runs `mvnw verify`, whose log shows
-  `--- quarkus:3.38.1:build (default) @ eddi ---` followed by
-  `Quarkus augmentation completed in 9067ms`. The lint is an unconditional build step, so it ran
-  there and found nothing. Only dev-mode augmentation misfires, so the check stays enforcing
-  everywhere else — promoting this to a global setting would silence a genuine `@Blocking` misuse
-  in production code.
-- **The check is pure lint.** Its build step is annotated
-  `@Produce(GeneratedClassBuildItem.class) // only to make sure this build step is executed`, and
-  `doCheck` only throws or logs. It never alters the execution model, so `warn` preserves the prior
-  behaviour exactly. Removing the `@Blocking` annotations instead would have been the dangerous
-  fix — they were added deliberately (`244b17c76`, "fix(mcp): add @Blocking to chatManaged") and
-  these tools do blocking work.
+**Not the upstream mismatch it first appeared to be, either.** quarkus-mcp-server 1.13.1 *does*
+register `ExecutionModelAnnotationsAllowedBuildItem`, and the methods *do* carry `@Tool` — so the
+lint firing at all still looks like a dev-mode-only false positive, and neither the Quarkus nor the
+quarkus-mcp-server issue tracker has it reported. That question is now moot for EDDI: with the
+annotations gone there is nothing for the lint to flag. Worth knowing if it resurfaces:
+**no mcp-server release targets Quarkus past 3.33.x** — 1.13.1 targets 3.33.2 and even `2.0.0.CR1`
+targets 3.33.3, while EDDI runs 3.38.1. Upgrading the extension would not have helped.
 
-**On "why didn't CI catch this?" — it is not a coverage gap in the build; it is that CI never runs
-dev mode.** The pipeline builds, tests, augments, packages and smoke-tests the *production*
-artifact, and all of that genuinely passes. Nothing anywhere runs `quarkus:dev`, so a
-dev-mode-only regression is structurally invisible to it. Worth considering a cheap dev-mode smoke
-step (start `quarkus:dev`, wait for readiness, kill it) if this recurs.
+**Tests.** `McpGroupToolsTest` asserted `@Blocking` was *present* on `discuss_with_group` and
+*absent* on `start_group_discussion`, "because start_group_discussion is async". Both premises were
+wrong: both methods return `String`, so both were already `WORKER_THREAD` — the tests were asserting
+an annotation, not the behaviour they cared about. Rewritten to assert what actually keeps these off
+the event loop (a non-reactive return type, and no `@NonBlocking`), plus a new
+`noMcpToolMethodCarriesBlocking` sweep so re-adding `@Blocking` fails in the plain unit suite instead
+of the next time someone starts dev mode. 1213 MCP tests pass.
 
-**Not verified locally.** Quarkus augmentation cannot run in this environment at all — `mvnw
-package` dies with `Unable to establish loopback connection: Invalid argument: connect` before
-reaching the lint — so this fix is reasoned from the 3.38.1 sources and the CI log, and needs a
-`quarkus:dev` start to confirm.
+**On "why didn't CI catch this?" — CI is not blind; it never runs dev mode.** The Integration Tests
+job runs `mvnw verify`, and its log shows `--- quarkus:3.38.1:build (default) @ eddi ---` followed by
+`Quarkus augmentation completed in 9067ms`. Full production augmentation ran, the lint is an
+unconditional build step, and it found nothing there. The failure is dev-mode-only, and nothing in
+the pipeline starts `quarkus:dev` — so it is structurally invisible to CI. A cheap dev-mode smoke
+step (start, wait for readiness, kill) would close that gap if it recurs.
 
 ---
-
 
 
 ## 🗑️ chore: remove the Agent Father, now that the Platform Operator has replaced it (2026-08-11)

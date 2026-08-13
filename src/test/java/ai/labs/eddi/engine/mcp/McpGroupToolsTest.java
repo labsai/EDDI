@@ -456,20 +456,65 @@ class McpGroupToolsTest {
         assertTrue(result.contains("Not found"));
     }
 
-    // --- @Blocking annotation ---
+    // --- execution model (must stay off the Vert.x event loop) ---
 
+    /**
+     * These two tests used to assert the presence/absence of {@code @Blocking}.
+     * That was asserting the wrong thing, and it became actively wrong twice over.
+     * <p>
+     * quarkus-mcp-server resolves a {@code @Tool} method's execution model in this
+     * order (see {@code McpServerProcessor.executionModel}):
+     * {@code @RunOnVirtualThread} → {@code @Blocking} → {@code @NonBlocking} →
+     * {@code @Transactional} → {@code hasBlockingSignature()}. That last step
+     * treats every non-parameterized return type as blocking, so a
+     * {@code String}-returning tool already resolves to {@code WORKER_THREAD} —
+     * {@code @Blocking} added nothing. It also means the old "no {@code @Blocking},
+     * therefore async" premise was false: {@code
+     * start_group_discussion} runs on a worker thread too, for exactly the same
+     * reason.
+     * <p>
+     * The redundant annotations were removed because Quarkus 3.38's
+     * {@code ExecutionModelAnnotationsProcessor} rejects them outright, which
+     * stopped {@code quarkus:dev} from starting at all. So assert the property that
+     * actually keeps these off the event loop: a blocking signature, and no
+     * {@code @NonBlocking}.
+     */
     @Test
-    void discussWithGroup_hasBlockingAnnotation() throws Exception {
+    void discussWithGroup_staysOffTheEventLoop() throws Exception {
         var method = McpGroupTools.class.getMethod("discuss_with_group", String.class, String.class, String.class);
-        assertNotNull(method.getAnnotation(io.smallrye.common.annotation.Blocking.class),
-                "discuss_with_group must be annotated with @Blocking to avoid blocking the Vert.x event loop");
+        assertEquals(String.class, method.getReturnType(),
+                "discuss_with_group must keep a non-reactive return type; returning Uni/Multi would make "
+                        + "quarkus-mcp-server schedule this blocking work on the Vert.x event loop");
+        assertNull(method.getAnnotation(io.smallrye.common.annotation.NonBlocking.class),
+                "discuss_with_group does blocking work and must never be marked @NonBlocking");
     }
 
     @Test
-    void startGroupDiscussion_doesNotHaveBlockingAnnotation() throws Exception {
+    void startGroupDiscussion_staysOffTheEventLoop() throws Exception {
         var method = McpGroupTools.class.getMethod("start_group_discussion", String.class, String.class, String.class);
-        assertNull(method.getAnnotation(io.smallrye.common.annotation.Blocking.class),
-                "start_group_discussion is async and should NOT have @Blocking");
+        assertEquals(String.class, method.getReturnType(),
+                "start_group_discussion must keep a non-reactive return type for the same reason");
+        assertNull(method.getAnnotation(io.smallrye.common.annotation.NonBlocking.class),
+                "start_group_discussion must never be marked @NonBlocking");
+    }
+
+    /**
+     * Regression guard for the dev-mode breakage: re-adding {@code @Blocking} to
+     * any MCP tool method makes Quarkus 3.38's lint fail the build, and
+     * {@code quarkus:dev} will not start. It buys nothing either — see the note
+     * above. Fails here, in the plain unit suite, rather than the next time someone
+     * runs dev mode.
+     */
+    @Test
+    void noMcpToolMethodCarriesBlocking() {
+        for (Class<?> toolClass : List.of(McpGroupTools.class, McpHitlTools.class, McpConversationTools.class)) {
+            for (var method : toolClass.getDeclaredMethods()) {
+                assertNull(method.getAnnotation(io.smallrye.common.annotation.Blocking.class),
+                        toolClass.getSimpleName() + "." + method.getName() + " carries @Blocking. It is redundant "
+                                + "(a non-reactive return type already resolves to WORKER_THREAD) and Quarkus 3.38's "
+                                + "ExecutionModelAnnotationsProcessor rejects it, breaking quarkus:dev.");
+            }
+        }
     }
 
     // --- ownership enforcement (MCP must match the REST surface) ---
