@@ -7,6 +7,41 @@
 
 
 
+## 🐛 fix(hitl): the pending-approval message was the same sentence on every pause (2026-08-14)
+
+**Repo:** EDDI (`fix/sse-data-line-padding`)
+
+Approving a gated batch and landing on the next pause looked like nothing had happened.
+
+A turn may pause up to `maxPausesPerTurn` times (default 3). Each pause writes a pending-approval
+placeholder into the step's `output`; the resume drops the previous one and the next pause writes
+its own. With no `toolApprovals.pendingMessage` configured, that text was a constant:
+
+> This action requires human approval before it can proceed. You will receive the result once a
+> reviewer decides.
+
+So the second pause re-rendered a bubble with byte-identical content. The approver clicked Approve,
+the turn genuinely advanced to a NEW gated call, and the screen showed the same sentence it had
+shown before the click — indistinguishable from a dead button.
+
+The default now names the gated tool ("I need your approval before I can run createAgent."), read
+off the pending batch via the `{toolNames}` substitution that configured templates already use. The
+name-free sentence is kept for a batch with no usable tool name, where "run ." would be worse.
+
+Determinism is the constraint that shaped this: `dropPendingApprovalPlaceholder` removes the
+placeholder by recomputing `resolvePendingMessage` and matching the exact string, so the default may
+only depend on the batch — which is still on memory at both call sites. A pause counter or a
+timestamp in the message would strand the placeholder above the answer. Four tests pin it: the
+default names the tool, two pauses on different tools do NOT render the same text, a nameless batch
+still falls back to the generic sentence, and an APPROVED resume drops the unconfigured default too.
+
+A configured `pendingMessage` (rule-level or scalar) is used exactly as before, with or without
+`{toolNames}` in it.
+
+---
+
+
+
 ## 🐛 fix(streaming): SSE data lines lost a leading space, mangling every streamed reply (2026-08-14)
 
 **Repo:** EDDI (`fix/sse-data-line-padding`)

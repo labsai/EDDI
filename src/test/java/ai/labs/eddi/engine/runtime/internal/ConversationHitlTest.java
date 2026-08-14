@@ -291,6 +291,73 @@ class ConversationHitlTest {
                     "a rule silent on pendingMessage must inherit the scalar; got: " + rendered);
         }
 
+        /**
+         * Arms a gated batch for {@code toolName} (no configured pendingMessage
+         * anywhere, so the DEFAULT applies) and runs one turn to the pause.
+         *
+         * @return the rendered {@code "output"} conversation-output of the paused step
+         */
+        private String pauseWithUnconfiguredMessage(String toolName) throws Exception {
+            memory.setConversationState(ConversationState.READY);
+            doAnswer(inv -> {
+                var call = new PendingToolCallBatch.PendingToolCall();
+                call.setToolName(toolName);
+                var batch = new PendingToolCallBatch();
+                batch.setCalls(List.of(call));
+                memory.setHitlPendingToolCalls(batch);
+                throw new ConversationPauseException("wf1", 2, "gated tool call",
+                        ConversationPauseException.PauseOrigin.TOOL_CALL);
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            createConversation().say("do it", Map.of());
+            return memory.getCurrentStep().getConversationOutput().get(MemoryKeys.OUTPUT_PREFIX).toString();
+        }
+
+        @Test
+        @DisplayName("with no pendingMessage configured, the default NAMES the gated tool")
+        void unconfiguredPendingMessageNamesTheTool() throws Exception {
+            String rendered = pauseWithUnconfiguredMessage("createAgent");
+
+            assertTrue(rendered.contains("createAgent"),
+                    "the default pending message must name the gated tool; got: " + rendered);
+            assertFalse(rendered.contains("{toolNames}"),
+                    "the placeholder token must be substituted, not rendered; got: " + rendered);
+        }
+
+        /**
+         * The regression this default exists for. A turn may pause up to
+         * maxPausesPerTurn times; each pause rewrites the placeholder into the same
+         * step. When the text was a constant, deciding one batch and landing on the
+         * next produced a byte-identical bubble — which reads as "I approved it and
+         * nothing happened". Two pauses on different tools must not render the same
+         * sentence.
+         */
+        @Test
+        @DisplayName("two pauses on different tools produce DIFFERENT pending messages")
+        void consecutivePausesOnDifferentToolsDiffer() throws Exception {
+            String first = pauseWithUnconfiguredMessage("createAgent");
+            // A fresh conversation stands in for the next pause of a multi-pause turn:
+            // what is under test is resolvePendingMessage's dependence on the batch,
+            // and the batch is the only thing that differs between the two.
+            String second = pauseWithUnconfiguredMessage("deployAgent");
+
+            assertNotEquals(first, second,
+                    "consecutive pauses on different tools must not render identical text; got: " + first);
+            assertTrue(second.contains("deployAgent") && !second.contains("createAgent"),
+                    "the second pause must name only its own gated tool; got: " + second);
+        }
+
+        @Test
+        @DisplayName("a batch with no usable tool name falls back to the generic default")
+        void unnamedCallsFallBackToGenericDefault() throws Exception {
+            // Legacy/degenerate batch: "run ." would be worse than saying nothing
+            // specific, so the name-free sentence is kept for exactly this case.
+            String rendered = pauseWithUnconfiguredMessage(null);
+
+            assertTrue(rendered.contains("This action requires human approval"),
+                    "a nameless batch must fall back to the generic default; got: " + rendered);
+        }
+
         @Test
         @DisplayName("normal (non-pause) turn DOES purge step-scoped properties — companion to Invariant 9")
         void normalTurnPurgesStepProperties() throws Exception {
