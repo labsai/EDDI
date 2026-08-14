@@ -141,6 +141,12 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                         }
 
                         @Override
+                        public void onToolCall(String toolName) {
+                            stream.send("tool_call",
+                                    String.format("{\"tool\":\"%s\"}", escapeJson(toolName)));
+                        }
+
+                        @Override
                         public void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary) {
                             var sb = new StringBuilder();
                             sb.append(String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"durationMs\":%d", taskId.getIdentifier(), taskType,

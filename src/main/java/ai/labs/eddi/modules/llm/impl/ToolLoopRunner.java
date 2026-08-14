@@ -506,6 +506,13 @@ class ToolLoopRunner {
                                        boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                        LlmConfiguration.Task task, boolean isLazy,
                                        List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
+        // Live "Using {tool}…" signal for streaming clients — name only, before
+        // execution, so the status line moves the moment work starts rather than
+        // when the whole loop summarizes at turn end.
+        if (memory != null && memory.getEventSink() != null) {
+            memory.getEventSink().onToolCall(toolRequest.name());
+        }
+
         // Auto-checkpoint before tool execution (Wave 4)
         if (memorySnapshotService != null) {
             try {

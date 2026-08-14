@@ -7,6 +7,30 @@
 
 
 
+## 🎯 feat(streaming): live `tool_call` SSE event for "Using {tool}…" status (2026-08-14)
+
+**Repo:** EDDI (`chore/remove-agent-father`)
+
+Dev-testing the operator: the status line showed only "Thinking…" through an entire tool-using
+turn. Root cause: tool names travel exclusively in the `toolTrace` of the final `task_complete`
+summary — by the time a client learns which tools ran, the turn is over. There was no live signal.
+
+New SSE event `tool_call` with payload `{"tool":"<name>"}`, emitted by `ToolLoopRunner` immediately
+before each tool executes:
+
+- `ConversationEventSink.onToolCall(String toolName)` — default no-op, so non-streaming sinks and
+  existing implementations are untouched.
+- `IConversationService.StreamingResponseHandler.onToolCall` — default no-op, forwarded by
+  `ConversationService`'s sink adapter.
+- `RestAgentEngineStreaming` serializes it as `event: tool_call` with the JSON-escaped name.
+- Only the NAME travels: arguments may hold user data and are already delivered, redacted, in the
+  task summary's `toolTrace` at turn end.
+
+Clients that ignore unknown SSE event types are unaffected; the Manager uses it to render
+"Using {tool}…" live.
+
+---
+
 ## 🎯 fix(attachments): review follow-ups on the re-inline path (2026-08-14)
 
 **Repo:** EDDI (`chore/remove-agent-father`)
