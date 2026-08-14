@@ -330,3 +330,58 @@ describe("detectEscalationFlags", () => {
     );
   });
 });
+
+/**
+ * The inline-credential flag: a credential-shaped literal where a ${vault:…}
+ * reference belongs. Signal 1 is the backend's own redaction marker (evidence,
+ * not heuristics); signal 2 is raw credential shapes for older backends.
+ */
+describe("inlineCredential", () => {
+  it("flags the backend's redaction marker outside a vault reference", () => {
+    const body = JSON.stringify({ llm: { provider: "anthropic", apiKey: "sk-ant-<REDACTED>" } });
+    const flags = detectEscalationFlags(body);
+    expect(flags.map((f) => f.id)).toContain("inlineCredential");
+    // The path slot carries the marker so the approver sees WHAT was masked.
+    expect(flags.find((f) => f.id === "inlineCredential")?.path).toContain("<REDACTED>");
+  });
+
+  it("does NOT flag a redacted vault reference — that is the correct way to pass a secret", () => {
+    const body = JSON.stringify({ llm: { apiKey: "${vault:<REDACTED>}" } });
+    expect(detectEscalationFlags(body)).toEqual([]);
+  });
+
+  it("flags a raw sk- key an older backend failed to redact, without echoing it", () => {
+    const key = "sk-ant-api03-CeIJ4onq59Mf_oN4mICgfgScyJO5bfxFSS3Sdvo1Zgo2F7zUfEvx";
+    const body = JSON.stringify({ llm: { apiKey: key } });
+    const flags = detectEscalationFlags(body);
+    const flag = flags.find((f) => f.id === "inlineCredential");
+    expect(flag).toBeTruthy();
+    // The full credential must never round-trip into the warning itself.
+    expect(flag!.path.length).toBeLessThan(15);
+    expect(flag!.path).not.toContain("CeIJ4onq59Mf_oN4");
+  });
+
+  it("flags a Bearer token literal", () => {
+    const flags = detectEscalationFlags('{"headers": {"Authorization": "Bearer abcdefghij1234567890abcdef"}}');
+    expect(flags.map((f) => f.id)).toContain("inlineCredential");
+  });
+
+  it("scans non-JSON bodies too — a credential in a form post is still a credential", () => {
+    const flags = detectEscalationFlags("api_key=sk-ant-api03-CeIJ4onq59Mf_oN4mICgfgScyJO5bfxFSS3Sdvo1Zgo2F7z");
+    expect(flags.map((f) => f.id)).toContain("inlineCredential");
+  });
+
+  it("stays quiet on an ordinary body", () => {
+    expect(detectEscalationFlags('{"name": "Test Agent", "description": "plain config"}')).toEqual([]);
+  });
+
+  it("composes with the setting checks — an ungated create with an embedded key raises both", () => {
+    const body = JSON.stringify({
+      agentName: "Test Agent",
+      systemPrompt: "Be helpful.",
+      llm: { apiKey: "sk-ant-<REDACTED>" },
+    });
+    const ids = detectEscalationFlags(body).map((f) => f.id).sort();
+    expect(ids).toEqual(["agentCreatedWithoutGate", "inlineCredential"].sort());
+  });
+});

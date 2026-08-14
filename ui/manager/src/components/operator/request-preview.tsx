@@ -22,6 +22,8 @@ const ESCALATION_TEXT: Record<string, string> = {
     "This agent is being created with write access to its API — not limited to reads.",
   agentCreatedWithExternalTools:
     "This agent is being created with every tool an external MCP server offers. That server decides what those are, and can change them later.",
+  inlineCredential:
+    "This request embeds what looks like a credential literal instead of a ${vault:…} reference. A written-in secret is stored in plain text and cannot be rotated from the vault — reject and ask for the vault reference.",
 };
 
 interface RequestPreviewProps {

@@ -4041,7 +4041,8 @@
         "agentCreatedWithoutGate": "Cet agent est créé sans passerelle d'approbation. Chaque écriture qu'il effectuera par la suite s'exécutera sans supervision.",
         "agentCreatedWithBroadEndpoints": "Cet agent est créé avec un accès en écriture à son API — non limité aux lectures.",
         "agentCreatedWithExternalTools": "Cet agent est créé avec l'ensemble des outils qu'un serveur MCP externe propose. C'est ce serveur qui décide lesquels, et il peut les modifier par la suite.",
-        "unchecked": "Le corps était trop long pour être analysé à la recherche d'octrois de capacités — lisez-le en entier avant d'approuver."
+        "unchecked": "Le corps était trop long pour être analysé à la recherche d'octrois de capacités — lisez-le en entier avant d'approuver.",
+        "inlineCredential": "Cette requête intègre ce qui ressemble à un identifiant en clair au lieu d'une référence ${vault:…}. Un secret écrit en dur est stocké en clair et ne peut pas être renouvelé depuis le vault — rejetez et demandez la référence du vault."
       },
       "blockedSelfTarget": "Un agent ne peut pas modifier sa propre définition, et cette requête vise l'agent de l'opérateur lui-même ({{agentId}}). Tant qu'elle est présente, l'ensemble du lot ne peut pas être approuvé — rejetez-la et effectuez cette modification depuis la page de cet agent.",
       "blockedGateCarrying": "Cette requête écrit une configuration LLM qui définit sa propre barrière d'approbation (toolApprovals), ce qui remplacerait la barrière qui l'examine. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et modifiez la barrière depuis la page de l'agent.",

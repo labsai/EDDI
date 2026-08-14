@@ -32,9 +32,11 @@ export interface EscalationFlag {
     | "autoApproveOnTimeout"
     | "agentCreatedWithoutGate"
     | "agentCreatedWithBroadEndpoints"
-    | "agentCreatedWithExternalTools";
+    | "agentCreatedWithExternalTools"
+    | "inlineCredential";
   /** Dotted path of the setting within the body, shown verbatim so the approver
-   *  can find it in the JSON below. */
+   *  can find it in the JSON below. For `inlineCredential` — a string-level
+   *  find, not a setting — this is the matched marker instead. */
   path: string;
 }
 
@@ -212,24 +214,71 @@ function isAgentCreationBody(body: unknown): boolean {
 }
 
 /**
+ * A credential-shaped literal embedded in the request body, where a
+ * `${vault:…}` reference belongs.
+ *
+ * Two signals, in order of confidence:
+ *
+ * 1. **The backend's own redaction marker.** The body arrives already filtered
+ *    through `SecretRedactionFilter`, which replaces a recognised secret with
+ *    `<REDACTED>` — and a masked VAULT REFERENCE with the distinct
+ *    `${vault:<REDACTED>}`. A bare `<REDACTED>` outside that wrapper therefore
+ *    means the backend itself concluded a secret LITERAL was embedded in the
+ *    request (the operator fabricating an `sk-ant-…` key into a create-agent
+ *    call is the observed case). This is evidence, not heuristics.
+ * 2. **Raw credential shapes** (`sk-…` keys, `Bearer` tokens), for a backend
+ *    old enough that its filter missed the literal entirely.
+ *
+ * Returns the matched marker (for the flag's `path` slot) or null. Runs on the
+ * raw STRING, before any JSON parsing — a credential does not become harmless
+ * by arriving in a form post.
+ */
+function findInlineCredential(body: string): string | null {
+  const nonVaultRedaction = /(?<!\$\{vault:)<REDACTED>/.exec(body);
+  if (nonVaultRedaction) {
+    // Include a short prefix (e.g. "sk-ant-") so the approver can see WHAT
+    // kind of secret was masked, without ever widening past the marker itself.
+    const start = Math.max(0, nonVaultRedaction.index - 8);
+    return body.slice(start, nonVaultRedaction.index + "<REDACTED>".length).trimStart();
+  }
+  const rawShape = /sk-[A-Za-z0-9_-]{20,}|Bearer\s+[A-Za-z0-9\-_.+/=]{20,}/.exec(body);
+  if (rawShape) {
+    // Never echo the credential itself — the first characters identify it.
+    return `${rawShape[0].slice(0, 10)}…`;
+  }
+  return null;
+}
+
+/**
  * Escalating settings in a resolved request body, in display order.
  *
- * Returns `[]` for a body that is absent, not JSON, or not a JSON object —
- * silently, because a non-JSON body is ordinary (a form post, plain text) and
- * not something to warn about.
+ * The setting CHECKS return `[]` for a body that is absent, not JSON, or not a
+ * JSON object — silently, because a non-JSON body is ordinary (a form post,
+ * plain text) and not something to warn about. The inline-credential scan runs
+ * regardless of shape: it is a string-level find.
  */
 export function detectEscalationFlags(body: string | null | undefined): EscalationFlag[] {
   if (!body) return [];
+
+  const flags: EscalationFlag[] = [];
+  const credential = findInlineCredential(body);
+  if (credential) {
+    flags.push({ id: "inlineCredential", path: credential });
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
   } catch {
-    return [];
+    return flags;
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return [];
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return flags;
 
-  return CHECKS.filter((check) => check.matches(at(parsed, check.path), parsed)).map((check) => ({
-    id: check.id,
-    path: check.path,
-  }));
+  return [
+    ...flags,
+    ...CHECKS.filter((check) => check.matches(at(parsed, check.path), parsed)).map((check) => ({
+      id: check.id,
+      path: check.path,
+    })),
+  ];
 }
