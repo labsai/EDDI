@@ -274,6 +274,35 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      * and at most once, so it never touches the Vert.x event loop and never
      * repeats.
      */
+    /**
+     * Prefix every line of an SSE payload with one space.
+     * <p>
+     * The SSE grammar is {@code field ":" [ space ] value}, and a consumer strips a
+     * single leading space from each {@code data:} line — it cannot tell a
+     * separator space from the payload's own first character. RESTEasy Reactive
+     * writes {@code data:} with NO separator, so a payload that begins with a space
+     * arrives one space short.
+     * <p>
+     * That is not cosmetic for a token stream. The model emits {@code "-"} then
+     * {@code " alpha"}; the client reassembled {@code "-alpha"}, which is no longer
+     * a Markdown list item, and words split across tokens ran together ("quota
+     * enforcement" → "quotaenforcement"). Whole replies rendered as one mangled
+     * paragraph.
+     * <p>
+     * Padding every line — not just the first — is what makes it correct: RESTEasy
+     * emits one {@code data:} line per {@code \n}, so an indented continuation line
+     * would otherwise lose a space of its own indentation. The consumer strips
+     * exactly the space added here and the payload survives byte for byte.
+     * Spec-compliant clients are unaffected by the change; this only makes EDDI's
+     * output match what they already assume.
+     */
+    static String padDataLines(String data) {
+        if (data == null || data.isEmpty()) {
+            return data;
+        }
+        return " " + data.replace("\n", "\n ");
+    }
+
     private final class SseStream {
         private final String conversationId;
         private final String safeConversationId;
@@ -308,7 +337,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                 return;
             }
             try {
-                eventSink.send(sse.newEventBuilder().name(eventName).data(String.class, data).build());
+                eventSink.send(sse.newEventBuilder().name(eventName).data(String.class, padDataLines(data)).build());
             } catch (Exception e) {
                 LOGGER.warnf("Failed to send SSE event '%s': %s", eventName, e.getMessage());
                 // RESTEasy Reactive throws IllegalStateException synchronously when the

@@ -521,4 +521,64 @@ class RestAgentEngineStreamingTest {
                     "the shipped default must keep the cost-saving cancel enabled");
         }
     }
+
+    /**
+     * The SSE grammar is `field ":" [ space ] value`, and every consumer strips one
+     * leading space per {@code data:} line — it cannot tell the separator from the
+     * payload's own first character. RESTEasy Reactive writes {@code data:} with no
+     * separator, so an unpadded payload beginning with a space arrived one space
+     * short.
+     * <p>
+     * Observed: the model emitted {@code "-"} then {@code " alpha"} and the client
+     * reassembled {@code "-alpha"} — no longer a Markdown list item — while words
+     * split across tokens ran together. Whole replies rendered as one mangled
+     * paragraph.
+     */
+    @org.junit.jupiter.api.Nested
+    @org.junit.jupiter.api.DisplayName("SSE data lines are padded so a leading space survives")
+    class DataLinePadding {
+
+        @org.junit.jupiter.api.Test
+        void aLeadingSpaceSurvivesTheConsumersStrip() {
+            String padded = RestAgentEngineStreaming.padDataLines(" alpha");
+            // What the consumer does: drop exactly one leading space per line.
+            assertEquals(" alpha", stripOneSpacePerLine(padded));
+        }
+
+        @org.junit.jupiter.api.Test
+        void everyLineIsPadded_notOnlyTheFirst() {
+            // RESTEasy emits one data: line per newline, so an indented continuation
+            // line loses a space of its own indentation unless each line is padded.
+            String value = "a\n  indented";
+            assertEquals(value, stripOneSpacePerLine(RestAgentEngineStreaming.padDataLines(value)));
+        }
+
+        @org.junit.jupiter.api.Test
+        void ordinaryPayloadsRoundTripUnchanged() {
+            for (String value : new String[]{"-", "plain token", "{\"taskId\":\"x\"}", "line1\nline2"}) {
+                assertEquals(value, stripOneSpacePerLine(RestAgentEngineStreaming.padDataLines(value)),
+                        "round-trip must be lossless for: " + value);
+            }
+        }
+
+        @org.junit.jupiter.api.Test
+        void nullAndEmptyAreLeftAlone() {
+            assertNull(RestAgentEngineStreaming.padDataLines(null));
+            assertEquals("", RestAgentEngineStreaming.padDataLines(""));
+        }
+
+        /** The consumer half of the contract, per the SSE spec. */
+        private String stripOneSpacePerLine(String wire) {
+            var out = new StringBuilder();
+            String[] lines = wire.split("\n", -1);
+            for (int i = 0; i < lines.length; i++) {
+                if (i > 0) {
+                    out.append('\n');
+                }
+                String line = lines[i];
+                out.append(line.startsWith(" ") ? line.substring(1) : line);
+            }
+            return out.toString();
+        }
+    }
 }

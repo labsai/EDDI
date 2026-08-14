@@ -791,17 +791,34 @@ public class Conversation implements IConversation {
 
     /**
      * Default end-user pending message used when the agent config does not supply a
-     * {@code toolApprovals.pendingMessage}.
+     * {@code toolApprovals.pendingMessage} <b>and</b> the gated call names are
+     * unknown (a legacy batch, or one whose calls carry no tool name).
      */
     private static final String DEFAULT_PENDING_MESSAGE = "This action requires human approval before it can proceed. "
+            + "You will receive the result once a reviewer decides.";
+
+    /**
+     * Default pending message when the gated call names ARE known — the normal
+     * case.
+     * <p>
+     * Naming them is what makes a multi-pause turn legible. A turn may pause up to
+     * {@code maxPausesPerTurn} times (default 3), and every pause writes this
+     * message into the same step's output while the previous one is dropped on
+     * resume. With a constant sentence, deciding a batch and landing on the very
+     * next pause re-rendered a bubble with byte-identical text — which reads as "I
+     * approved it and nothing happened". The gated tool is the thing that actually
+     * changed between the two, so it is the thing the message says.
+     */
+    private static final String DEFAULT_PENDING_MESSAGE_WITH_TOOLS = "I need your approval before I can run {toolNames}. "
             + "You will receive the result once a reviewer decides.";
 
     /**
      * Resolves the end-user-facing pending message for a tool pause: the governing
      * {@code toolApprovals.rules} entry's {@code pendingMessage} if it set one,
      * else {@code toolApprovals.pendingMessage}, with {@code {toolNames}}
-     * substituted from the pending batch's gated call names, falling back to a
-     * generic default.
+     * substituted from the pending batch's gated call names, falling back to
+     * {@link #DEFAULT_PENDING_MESSAGE_WITH_TOOLS} (or, with no names to show,
+     * {@link #DEFAULT_PENDING_MESSAGE}).
      * <p>
      * Must stay deterministic from the persisted batch alone —
      * {@code dropPendingApprovalPlaceholder} recomputes this exact string on resume
@@ -827,9 +844,6 @@ public class Conversation implements IConversation {
         } else if (cfg != null && !isNullOrEmpty(cfg.getPendingMessage())) {
             template = cfg.getPendingMessage();
         }
-        if (template == null) {
-            template = DEFAULT_PENDING_MESSAGE;
-        }
         String names = "";
         if (batch != null && batch.getCalls() != null) {
             names = batch.getCalls().stream()
@@ -838,6 +852,12 @@ public class Conversation implements IConversation {
                     .distinct()
                     .reduce((a, b) -> a + ", " + b)
                     .orElse("");
+        }
+        // Resolved AFTER the names, because which default applies depends on whether
+        // there are any. A configured template is used as-is either way — an operator
+        // who wrote their own wording keeps it, with or without {toolNames} in it.
+        if (template == null) {
+            template = names.isBlank() ? DEFAULT_PENDING_MESSAGE : DEFAULT_PENDING_MESSAGE_WITH_TOOLS;
         }
         return template.replace("{toolNames}", names);
     }

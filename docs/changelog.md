@@ -7,6 +7,76 @@
 
 
 
+## 🐛 fix(hitl): the pending-approval message was the same sentence on every pause (2026-08-14)
+
+**Repo:** EDDI (`fix/sse-data-line-padding`)
+
+Approving a gated batch and landing on the next pause looked like nothing had happened.
+
+A turn may pause up to `maxPausesPerTurn` times (default 3). Each pause writes a pending-approval
+placeholder into the step's `output`; the resume drops the previous one and the next pause writes
+its own. With no `toolApprovals.pendingMessage` configured, that text was a constant:
+
+> This action requires human approval before it can proceed. You will receive the result once a
+> reviewer decides.
+
+So the second pause re-rendered a bubble with byte-identical content. The approver clicked Approve,
+the turn genuinely advanced to a NEW gated call, and the screen showed the same sentence it had
+shown before the click — indistinguishable from a dead button.
+
+The default now names the gated tool ("I need your approval before I can run createAgent."), read
+off the pending batch via the `{toolNames}` substitution that configured templates already use. The
+name-free sentence is kept for a batch with no usable tool name, where "run ." would be worse.
+
+Determinism is the constraint that shaped this: `dropPendingApprovalPlaceholder` removes the
+placeholder by recomputing `resolvePendingMessage` and matching the exact string, so the default may
+only depend on the batch — which is still on memory at both call sites. A pause counter or a
+timestamp in the message would strand the placeholder above the answer. Four tests pin it: the
+default names the tool, two pauses on different tools do NOT render the same text, a nameless batch
+still falls back to the generic sentence, and an APPROVED resume drops the unconfigured default too.
+
+A configured `pendingMessage` (rule-level or scalar) is used exactly as before, with or without
+`{toolNames}` in it.
+
+---
+
+
+
+## 🐛 fix(streaming): SSE data lines lost a leading space, mangling every streamed reply (2026-08-14)
+
+**Repo:** EDDI (`fix/sse-data-line-padding`)
+
+Streamed answers rendered as one mangled paragraph: bullet lists collapsed, and words split across
+tokens ran together ("quota enforcement" -> "quotaenforcement").
+
+The SSE grammar is `field ":" [ space ] value`, and every consumer strips ONE leading space per
+`data:` line - it cannot tell the separator from the payload's own first character. RESTEasy
+Reactive writes `data:` with NO separator, so a payload beginning with a space arrived one short.
+Captured from the live wire:
+
+```
+event:token
+data:-
+data: alpha
+data:- beta
+```
+
+The model emitted `"-"` then `" alpha"`; the client reassembled `-alpha`, which is no longer a
+Markdown list item. Newlines were never the problem - they survive as separate `data:` lines.
+
+`padDataLines` now prefixes EVERY line of every payload with one space, so the consumer's strip
+removes ours rather than the payload's. Per-line matters because RESTEasy emits one `data:` line
+per newline, so an indented continuation line would otherwise lose a space of its own indentation.
+Spec-compliant clients are unaffected - this makes EDDI's output match what they already assume,
+and the Manager needed no change.
+
+Five tests pin the round trip (leading space, per-line padding, ordinary payloads, null/empty),
+and the existing `onTokenSendsEvent` assertion was updated to the corrected wire format.
+
+---
+
+
+
 ## ⬆️ chore(deps): langchain4j 1.18.1 → 1.19.0 (2026-08-14)
 
 **Repo:** EDDI (`chore/langchain4j-1.19.0`)

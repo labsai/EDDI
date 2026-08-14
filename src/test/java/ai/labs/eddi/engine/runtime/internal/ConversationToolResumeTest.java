@@ -322,6 +322,55 @@ class ConversationToolResumeTest {
                 "the resumed step must render ONLY the final answer, not [placeholder, answer]; got: " + out);
     }
 
+    /**
+     * The drop is by exact-string match against a RECOMPUTED
+     * {@code resolvePendingMessage}, so the DEFAULT message has to be just as
+     * deterministic as a configured one. It now names the gated tool — read off the
+     * batch, which is still on memory at both call sites — and this pins that: make
+     * the default depend on anything that changes between pause and resume (a pause
+     * counter, a timestamp, the decision) and the recomputed string stops matching,
+     * stranding the placeholder above the answer.
+     */
+    @Test
+    @DisplayName("APPROVED resume drops the placeholder for the UNCONFIGURED default too")
+    void approvedResumeDropsUnconfiguredDefaultPlaceholder() throws Exception {
+        memory.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("delete_record");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            // No effectiveToolApprovals and no agent-level config: the default applies.
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated tool call",
+                    ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conv = createConversation();
+        conv.say("delete it", Map.of());
+
+        var paused = outputList();
+        assertNotNull(paused);
+        assertTrue(paused.stream().anyMatch(o -> String.valueOf(o).contains("delete_record")),
+                "the default placeholder must name the gated tool; got: " + paused);
+
+        String finalAnswer = "Record deleted successfully.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(finalAnswer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        var out = outputList();
+        assertEquals(1, out.size(),
+                "the recomputed default must match and be removed, leaving only the answer; got: " + out);
+        assertTrue(out.stream().anyMatch(o -> String.valueOf(o).equals(finalAnswer)),
+                "the final answer must be present; got: " + out);
+    }
+
     @Test
     @DisplayName("REJECTED tool resume: the graceful answer replaces the placeholder (only the answer remains)")
     void rejectedResumeDropsPlaceholder() throws Exception {
