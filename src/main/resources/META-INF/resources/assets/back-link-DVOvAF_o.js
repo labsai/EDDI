@@ -1,0 +1,1 @@
+import{j as t,h as r,$ as o}from"./index-DH0Sy2o2.js";function a({to:e,label:s}){return t.jsxs(r,{to:e,className:"inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors","data-testid":"back-to-list",children:[t.jsx(o,{className:"h-4 w-4"}),s]})}export{a as B};
