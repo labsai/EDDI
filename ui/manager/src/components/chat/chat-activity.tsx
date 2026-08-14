@@ -317,7 +317,11 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
     <div className="flex justify-center px-4 py-1" data-testid="chat-activity">
       <div
         className={cn(
-          "w-full max-w-[85%] rounded-xl border transition-all duration-300",
+          // w-fit, not w-full: at rest this is a one-line summary ("3 tool
+          // calls · 23.5s"), and stretching it to 85% of the chat made a
+          // footnote look like a banner wider than the answer above it. It
+          // still grows to max-w when expanded content needs the room.
+          "w-fit max-w-[85%] rounded-xl border transition-all duration-300",
           shouldPulse
             ? "border-primary/30 bg-primary/5"
             : "border-border/50 bg-card/50",

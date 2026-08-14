@@ -5,6 +5,7 @@ import {
   grantsAgentModification,
   type OperatorScope,
 } from "./tool-scopes";
+import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
 
 /**
  * System prompt for the Platform Operator.
@@ -64,7 +65,11 @@ const RULES_WRITE_GATED: readonly string[] = [
   `Before calling a tool that changes something, say plainly what you are about
    to change, which resource it affects, and what you expect to happen. That
    message is what the approver decides on; a change they cannot evaluate is a
-   change they should reject.`,
+   change they should reject. Say it and then MAKE THE CALL in the same turn —
+   do not ask for confirmation in chat first. The pause your call triggers is
+   the confirmation: it shows the exact request and gives the person Approve
+   and Reject buttons. Asking "shall I proceed?" and waiting for a typed yes
+   just adds a second, weaker approval in front of the real one.`,
   `A rejection is final. If a change is rejected, do not retry it, do not
    rephrase it, do not split it into smaller changes, and do not reach for a
    different tool that arrives at the same result. Report the rejection and
@@ -251,6 +256,37 @@ If a question about which agent, workflow, group, or board is meant is
 ambiguous, assume this one unless told otherwise.
 {/if}`;
 
+/**
+ * The LLM models this deployment knows about, injected from the Manager's own
+ * catalogue at provisioning time.
+ *
+ * An operator asked to build an agent confidently told the admin that
+ * `claude-sonnet-5` "is not released" — its training data predates it, and a
+ * model's own knowledge of the model market is exactly the thing that ages
+ * fastest. The platform's catalogue is authoritative and newer, so it is stated
+ * rather than left to be recalled.
+ *
+ * A snapshot, deliberately: the body is stored on the agent at provisioning
+ * time and stays editable afterwards, like every other section. Re-activating
+ * refreshes it. The rule below is written so a stale list still behaves
+ * correctly — the operator must never argue a model out of existence, whether
+ * or not it appears here.
+ */
+function buildModelCatalogueSection(): string {
+  const lines = Object.entries(MODEL_SUGGESTIONS)
+    .filter(([, models]) => models.length > 0)
+    .map(([provider, models]) => `- ${provider}: ${models.join(", ")}`);
+  return `Models available on this platform:
+${lines.join("\n")}
+
+Your own training data has a cutoff and this list is newer than it. NEVER tell
+anyone a model does not exist, is unreleased, or is a typo, and never silently
+substitute one you recognise for one you were asked for. If a name is unfamiliar,
+it is a model released after your training — use it as given. To see what this
+deployment actually runs today, read the existing LLM configurations rather than
+recalling anything.`;
+}
+
 const BODY_HOW_TO_WORK = `How to work:
 - Prefer looking things up over asking. If the user names an agent, find it.
 - When diagnosing a problem, gather evidence first: check deployment status,
@@ -308,7 +344,18 @@ const BODY_MAKING_CHANGES = `When you change something:
 
 /** Default editable body for a granted endpoint set — the role and style. */
 export function buildOperatorPromptBody(endpoints: readonly string[]): string {
-  const sections = [BODY_ROLE, BODY_ARCHITECTURE, BODY_APP_CONTEXT, BODY_STYLE, BODY_HOW_TO_WORK];
+  // The model catalogue is included for every scope, not just the
+  // agent-authoring ones: "which models can I use here?" is a question a
+  // read-only operator gets asked too, and answering it from stale training
+  // data is wrong in exactly the same way.
+  const sections = [
+    BODY_ROLE,
+    BODY_ARCHITECTURE,
+    BODY_APP_CONTEXT,
+    buildModelCatalogueSection(),
+    BODY_STYLE,
+    BODY_HOW_TO_WORK,
+  ];
   if (grantsWriteCapability(endpoints)) sections.push(buildAuthoringSection(endpoints), BODY_MAKING_CHANGES);
   return sections.join("\n\n");
 }
