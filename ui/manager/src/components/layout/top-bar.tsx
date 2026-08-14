@@ -255,18 +255,24 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
         </nav>
       </div>
 
-      {/* Center: Platform Status */}
-      <PlatformStatus />
+      {/* Center: Platform Status — hidden on phones: with the operator
+          launcher and personalization controls the 16px-high bar simply has
+          no room for it, and it used to push the bar into horizontal
+          overflow. */}
+      <div className="hidden md:block">
+        <PlatformStatus />
+      </div>
 
       {/* Right: Operator launcher, then the personalization controls. The
           operator sits outside the tour target — the tour step is about theme
           and language, not about the operator. */}
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         <OperatorDrawer />
 
         <div className="flex items-center gap-2" data-tour="topbar-personalize">
-          {/* Language selector */}
-          <div className="relative flex items-center gap-1">
+          {/* Language selector — hidden on phones (reachable via settings);
+              keeping it inflated the bar past the viewport at 375px. */}
+          <div className="relative hidden items-center gap-1 sm:flex">
             <Globe className="h-4 w-4 text-muted-foreground" />
             <select
               value={i18n.language}

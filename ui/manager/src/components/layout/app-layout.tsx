@@ -87,7 +87,13 @@ export function AppLayout() {
         <main
           id="main-content"
           className={cn(
-            "flex-1 overflow-auto bg-background p-6",
+            // overflow-x-clip: the page never scrolls horizontally. Wide
+            // content must wrap, truncate, or scroll inside its own container
+            // — a page-level horizontal scrollbar is always a layout bug, and
+            // clip turns the failure mode from "whole page pans" into "one
+            // element is visibly clipped", which is both less harmful and
+            // easier to spot and fix.
+            "flex-1 overflow-y-auto overflow-x-clip bg-background p-6",
             "transition-all duration-300"
           )}
         >
