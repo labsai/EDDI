@@ -221,11 +221,13 @@ function isAgentCreationBody(body: unknown): boolean {
  *
  * 1. **The backend's own redaction marker.** The body arrives already filtered
  *    through `SecretRedactionFilter`, which replaces a recognised secret with
- *    `<REDACTED>` — and a masked VAULT REFERENCE with the distinct
- *    `${vault:<REDACTED>}`. A bare `<REDACTED>` outside that wrapper therefore
- *    means the backend itself concluded a secret LITERAL was embedded in the
- *    request (the operator fabricating an `sk-ant-…` key into a create-agent
- *    call is the observed case). This is evidence, not heuristics.
+ *    `<REDACTED>` while leaving a `${vault:…}` reference legible — a pointer is
+ *    not a secret, and an approver needs to see WHICH credential is in play. So
+ *    a `<REDACTED>` marker means the backend itself concluded a secret LITERAL
+ *    was embedded in the request (the operator fabricating an `sk-ant-…` key
+ *    into a create-agent call is the observed case). This is evidence, not
+ *    heuristics. The `${vault:<REDACTED>}` exclusion below is kept for backends
+ *    predating that change, which masked the reference too.
  * 2. **Raw credential shapes** (`sk-…` keys, `Bearer` tokens), for a backend
  *    old enough that its filter missed the literal entirely.
  *
