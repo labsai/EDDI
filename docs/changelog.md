@@ -7,6 +7,41 @@
 
 
 
+## 🐛 fix(streaming): SSE data lines lost a leading space, mangling every streamed reply (2026-08-14)
+
+**Repo:** EDDI (`fix/sse-data-line-padding`)
+
+Streamed answers rendered as one mangled paragraph: bullet lists collapsed, and words split across
+tokens ran together ("quota enforcement" -> "quotaenforcement").
+
+The SSE grammar is `field ":" [ space ] value`, and every consumer strips ONE leading space per
+`data:` line - it cannot tell the separator from the payload's own first character. RESTEasy
+Reactive writes `data:` with NO separator, so a payload beginning with a space arrived one short.
+Captured from the live wire:
+
+```
+event:token
+data:-
+data: alpha
+data:- beta
+```
+
+The model emitted `"-"` then `" alpha"`; the client reassembled `-alpha`, which is no longer a
+Markdown list item. Newlines were never the problem - they survive as separate `data:` lines.
+
+`padDataLines` now prefixes EVERY line of every payload with one space, so the consumer's strip
+removes ours rather than the payload's. Per-line matters because RESTEasy emits one `data:` line
+per newline, so an indented continuation line would otherwise lose a space of its own indentation.
+Spec-compliant clients are unaffected - this makes EDDI's output match what they already assume,
+and the Manager needed no change.
+
+Five tests pin the round trip (leading space, per-line padding, ordinary payloads, null/empty),
+and the existing `onTokenSendsEvent` assertion was updated to the corrected wire format.
+
+---
+
+
+
 ## ⬆️ chore(deps): langchain4j 1.18.1 → 1.19.0 (2026-08-14)
 
 **Repo:** EDDI (`chore/langchain4j-1.19.0`)
