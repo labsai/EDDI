@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
@@ -528,7 +529,12 @@ class ToolLoopRunner {
         Map<String, Object> callStep = new HashMap<>();
         callStep.put("type", "tool_call");
         callStep.put("tool", toolRequest.name());
-        callStep.put("arguments", toolRequest.arguments());
+        // The trace is a DISPLAY/audit record (task summaries, SSE, memory,
+        // traceSoFar merge on resume) — never an execution input, so it takes
+        // the redacted form. Execution keeps using toolRequest directly; a
+        // model that embeds a credential in its arguments must not have it
+        // echoed through every surface that renders the trace.
+        callStep.put("arguments", SecretRedactionFilter.redact(toolRequest.arguments()));
         trace.add(callStep);
 
         // Check per-conversation TOOL budget before executing tool.
@@ -608,7 +614,11 @@ class ToolLoopRunner {
         Map<String, Object> resultStep = new HashMap<>();
         resultStep.put("type", "tool_result");
         resultStep.put("tool", toolRequest.name());
-        resultStep.put("result", toolResult);
+        // Redacted for the same reason as the call step's arguments: an API
+        // response can echo a credential (its own, or one the request carried).
+        // The MODEL still receives the raw result — the return value below is
+        // untouched; only the display record is filtered.
+        resultStep.put("result", SecretRedactionFilter.redact(toolResult));
         trace.add(resultStep);
 
         // LAZY mode: after discover_tools returns, activate the matching built-in specs
