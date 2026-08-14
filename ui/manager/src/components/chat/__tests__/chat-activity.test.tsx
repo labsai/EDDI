@@ -583,11 +583,12 @@ describe("ChatActivity — live tool_call events", () => {
     expect(screen.queryByTestId("chat-activity-live-list")).not.toBeInTheDocument();
   });
 
-  it("a pill with no calls yet has nothing to expand", async () => {
-    const user = userEvent.setup();
+  it("a pill with no calls yet is disabled — no focusable no-op, no phantom disclosure", () => {
     renderWithProviders(<ChatActivity events={[start("langchain", 0)]} isLive={true} liveToolCalls={[]} />);
 
-    await user.click(screen.getByTestId("chat-activity-live-status"));
+    const pill = screen.getByTestId("chat-activity-live-status");
+    expect(pill).toBeDisabled();
+    expect(pill).not.toHaveAttribute("aria-expanded");
     expect(screen.queryByTestId("chat-activity-live-list")).not.toBeInTheDocument();
   });
 });

@@ -261,13 +261,17 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
         >
           <button
             type="button"
-            onClick={() => expandable && setLiveExpanded((v) => !v)}
+            onClick={() => setLiveExpanded((v) => !v)}
+            // Disabled (not merely inert) while there is nothing to disclose:
+            // an enabled no-op still takes keyboard focus, and aria-expanded
+            // would describe a disclosure that does not exist.
+            disabled={!expandable}
             className={cn(
               "flex items-center gap-2 px-3 py-2 text-xs",
               expandable ? "cursor-pointer" : "cursor-default",
             )}
             data-testid="chat-activity-live-status"
-            aria-expanded={liveExpanded}
+            aria-expanded={expandable ? liveExpanded : undefined}
           >
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
             <span className="font-medium text-primary">
