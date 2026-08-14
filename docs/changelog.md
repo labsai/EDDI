@@ -33,6 +33,16 @@ Six new tests: five on the approver sanitizer (raw-carrier strip, stale-redactio
 preview surfaces, fingerprint marker contract, null-safety) and one end-to-end orchestrator test
 pinning that a credential embedded in tool arguments never survives into the trace.
 
+**A `${vault:…}` reference is no longer redacted.** It is a POINTER to a secret — the correct,
+encouraged alternative to writing one down — and the key name it carries is ordinary configuration
+an admin reads in the agent document anyway. Masking it cost real information and bought nothing:
+on an approval card it hid *which* credential a request uses (exactly what an approver must judge),
+and it made every correctly vault-referencing request display a `<REDACTED>` marker — training
+approvers to read that marker as normal, when the marker is precisely the signal that a secret
+*literal* was embedded. A resolved secret does not look like a vault reference, so nothing is
+weakened. Three tests pin that references stay legible (plain, inside JSON, and the legacy
+`${eddivault:…}` spelling).
+
 ---
 
 

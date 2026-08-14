@@ -52,12 +52,27 @@ public final class SecretRedactionFilter {
             // inside escaped bodies. Quantifiers stay possessive (ReDoS).
             new RedactionRule(Pattern.compile(
                     "(?i)(api[_-]?key|token|secret|password|authorization)(?:\\\\*+[\"'])?+\\s*+[=:]\\s*+(?:\\\\*+[\"'])?+[^'\"\\\\\\s,;}{\\]]{8,}+"),
-                    "$1=" + REDACTED),
+                    "$1=" + REDACTED));
 
-            // Vault references (should never appear in logs, but defense-in-depth)
-            // Matches both ${vault:...} and legacy ${eddivault:...}
-            // Note: $ must be escaped in replacement strings for Matcher.replaceAll()
-            new RedactionRule(Pattern.compile("\\$\\{(?:vault|eddivault):[^}]++}"), "\\${vault:" + REDACTED + "}"));
+    // A `${vault:...}` reference is DELIBERATELY NOT redacted. It is a pointer to
+    // a secret — the correct, encouraged alternative to writing one down — and the
+    // key NAME it carries is ordinary configuration an admin reads in the agent
+    // document anyway. Masking it cost real information and bought nothing:
+    //
+    // - on an approval card it hid WHICH credential a request uses, which is
+    // exactly what an approver needs to judge it ("is this agent about to use
+    // the production key?");
+    // - it made every correct, vault-referencing request display a `<REDACTED>`
+    // marker, training approvers to read that marker as normal — and the marker
+    // is precisely the signal the Manager uses to warn that a request embedded a
+    // secret LITERAL. A control that fires on the safe case is a control people
+    // learn to ignore.
+    //
+    // A resolved secret does not look like a vault reference (it is the raw value,
+    // caught by the rules above), so nothing is weakened by leaving the pointer
+    // legible. The generic key=value rule above cannot match one either: its value
+    // class excludes `{`/`}`, so `apiKey: "${vault:x}"` never reaches its 8-char
+    // minimum.
 
     private SecretRedactionFilter() {
         // Utility class

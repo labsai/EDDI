@@ -103,13 +103,35 @@ class SecretRedactionFilterTest {
         assertEquals(input, SecretRedactionFilter.redact(input));
     }
 
+    /**
+     * A vault reference is a POINTER to a secret, not a secret — and the correct,
+     * encouraged alternative to writing one down. It is left legible on purpose:
+     * masking it hid which credential a request uses (exactly what an approver must
+     * judge), and made every correct request display a {@code <REDACTED>} marker —
+     * the very signal that is supposed to mean "a secret literal was embedded
+     * here".
+     */
     @Test
-    void redact_vaultReference() {
-        String input = "Resolved secret: ${vault:default/agent1/apiKey}";
+    void redact_vaultReference_leftLegible() {
+        String input = "Uses ${vault:default/agent1/apiKey} for auth";
+        assertEquals(input, SecretRedactionFilter.redact(input));
+    }
+
+    @Test
+    void redact_vaultReferenceInsideJson_leftLegible() {
+        String input = "{\"llm\": {\"apiKey\": \"${vault:anthropic-api-key}\"}}";
         String result = SecretRedactionFilter.redact(input);
 
-        assertTrue(result.contains("${vault:<REDACTED>}"));
-        assertFalse(result.contains("default/agent1/apiKey"));
+        assertTrue(result.contains("${vault:anthropic-api-key}"),
+                "the approver needs to see WHICH credential the request uses");
+        assertFalse(result.contains("<REDACTED>"),
+                "a correctly vault-referencing request must not display a redaction marker at all");
+    }
+
+    @Test
+    void redact_legacyVaultReference_leftLegible() {
+        String input = "Uses ${eddivault:legacy-key} for auth";
+        assertEquals(input, SecretRedactionFilter.redact(input));
     }
 
     @Test
