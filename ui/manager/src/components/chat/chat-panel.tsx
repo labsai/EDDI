@@ -92,6 +92,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const showActivity = useDebugStore((s) => s.showActivity);
   const toggleShowActivity = useDebugStore((s) => s.toggleShowActivity);
   const currentTurnEvents = useDebugStore((s) => s.currentTurnEvents);
+  const liveToolCalls = useDebugStore((s) => s.liveToolCalls);
 
   // Queries & mutations
   const { data: deployedAgents, isLoading: agentsLoading } = useDeployedAgents();
@@ -509,8 +510,13 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                   turn's live events. The dots indicator covers only the gap
                   before the first event arrives. */}
               {(isProcessing || isThinking) &&
-                (currentTurnEvents.length > 0 ? (
-                  <ChatActivity events={currentTurnEvents} isLive showInternalSteps={false} />
+                (currentTurnEvents.length > 0 || liveToolCalls.length > 0 ? (
+                  <ChatActivity
+                    events={currentTurnEvents}
+                    isLive
+                    showInternalSteps={false}
+                    liveToolCalls={liveToolCalls}
+                  />
                 ) : (
                   <InlineThinkingIndicator events={currentTurnEvents} />
                 ))}

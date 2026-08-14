@@ -3,7 +3,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
-import { useActivateOperator } from "@/hooks/use-operator";
+import { useActivateOperator, runPostActivationProbes } from "@/hooks/use-operator";
 import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY } from "@/lib/api/operator";
 import type { OperatorConfig } from "@/lib/api/operator";
 import { READ_ENDPOINTS, WRITE_ENDPOINTS, parseEndpoint } from "@/lib/operator/tool-scopes";
@@ -176,45 +176,28 @@ describe("useActivateOperator — gate read-back enforcement", () => {
   });
 });
 
-describe("useActivateOperator — parallel canaries", () => {
+describe("useActivateOperator — deterministic checks only; LLM probes moved to background", () => {
   beforeEach(() => {
     server.resetHandlers();
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it("aborts the read canary's stream when the write canary rolls the activation back", async () => {
-    // Promise.all rejects without cancelling siblings — without the explicit
-    // abort, the read canary's SSE fetch would sit pending against a deleted
-    // agent until its own timeout, long after activation error handling ended.
+  it("finishes WITHOUT starting any probe conversation, and reports the dry-run verdict", async () => {
+    // The read canary and the live write probe each drive a real model
+    // conversation — they were the bulk of the activation wait. Activation now
+    // ends at the deterministic checks; if any /agents/:id/start fires before
+    // success, a probe leaked back into the blocking path.
     const spy = { undeployed: false, deleted: false };
     serveProvisioning(GOOD_GATE, spy);
 
-    let readStreamAborted = false;
+    let probeConversationStarted = false;
     server.use(
-      // The deterministic check fails closed → write canary rolls back and
-      // rejects without ever probing.
-      http.post("*/administration/operator/gate-dry-run", () => new HttpResponse(null, { status: 500 })),
-      // The read canary's conversation: starts fine…
-      http.post("*/agents/:agentId/start", () =>
-        HttpResponse.json(null, {
-          status: 201,
-          headers: { Location: "eddi://ai.labs.conversation/conversationstore/conversations/conv-read" },
-        }),
+      http.post("*/administration/operator/gate-dry-run", () =>
+        HttpResponse.json({ policyPresent: true, gated: true, matchedPattern: "http.patch:*" }),
       ),
-      // …and its stream is held open until the client aborts it.
-      http.post("*/agents/:conversationId/stream", async ({ request }) => {
-        await new Promise<void>((resolve) => {
-          if (request.signal.aborted) {
-            readStreamAborted = true;
-            resolve();
-            return;
-          }
-          request.signal.addEventListener("abort", () => {
-            readStreamAborted = true;
-            resolve();
-          });
-        });
-        return new HttpResponse(null, { status: 200 });
+      http.post("*/agents/:agentId/start", () => {
+        probeConversationStarted = true;
+        return HttpResponse.json(null, { status: 201, headers: { Location: "/agents/conv-x" } });
       }),
     );
 
@@ -225,9 +208,100 @@ describe("useActivateOperator — parallel canaries", () => {
       apiKey: "sk-test",
     });
 
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(probeConversationStarted).toBe(false);
+    expect(result.current.data?.policyVerified).toBe(true);
+    // The spec is carried in the outcome so runPostActivationProbes can reuse
+    // it instead of fetching a copy that may have drifted.
+    expect(result.current.data?.spec).toBeTruthy();
+    expect(spy.deleted).toBe(false);
+  });
+
+  it("still fails closed — rolls back — when the dry-run itself errors (not 404)", async () => {
+    const spy = { undeployed: false, deleted: false };
+    serveProvisioning(GOOD_GATE, spy);
+    server.use(
+      http.post("*/administration/operator/gate-dry-run", () => new HttpResponse(null, { status: 500 })),
+    );
+
+    const { result } = renderHook(() => useActivateOperator(), { wrapper });
+    result.current.mutate({
+      agentName: "EDDI Platform Operator",
+      config: config({ scope: "read_write" }),
+      apiKey: "sk-test",
+    });
+
     await waitFor(() => expect(result.current.isError).toBe(true));
-    await waitFor(() => expect(readStreamAborted).toBe(true));
-    // The rollback itself still happened.
+    expect(result.current.error?.message).toMatch(/could not verify the approval gate/i);
     await waitFor(() => expect(spy.undeployed && spy.deleted).toBe(true));
+  });
+
+  it("proceeds UNVERIFIED — policyVerified false, nothing deleted — on an old backend (dry-run 404)", async () => {
+    const spy = { undeployed: false, deleted: false };
+    serveProvisioning(GOOD_GATE, spy);
+    server.use(
+      http.post("*/administration/operator/gate-dry-run", () => new HttpResponse(null, { status: 404 })),
+    );
+
+    const { result } = renderHook(() => useActivateOperator(), { wrapper });
+    result.current.mutate({
+      agentName: "EDDI Platform Operator",
+      config: config({ scope: "read_write" }),
+      apiKey: "sk-test",
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.policyVerified).toBe(false);
+    expect(spy.deleted).toBe(false);
+  });
+
+  it("read_only reports policyVerified null — there is nothing to verify", async () => {
+    const spy = { undeployed: false, deleted: false };
+    serveProvisioning(GOOD_GATE, spy);
+
+    const { result } = renderHook(() => useActivateOperator(), { wrapper });
+    result.current.mutate({
+      agentName: "EDDI Platform Operator",
+      config: config({ scope: "read_only" }),
+      apiKey: "sk-test",
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.policyVerified).toBeNull();
+  });
+});
+
+describe("runPostActivationProbes", () => {
+  beforeEach(() => {
+    server.resetHandlers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("reports the read canary through the callback and never runs a write probe for read_only", async () => {
+    // The read canary fails fast here (start 500) — what matters is the
+    // callback wiring, not the canary's own logic (tested in its own file).
+    server.use(
+      http.post("*/agents/:agentId/start", () => new HttpResponse(null, { status: 500 })),
+      http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
+    );
+
+    const readResults: unknown[] = [];
+    const writeReports: unknown[] = [];
+    await runPostActivationProbes(
+      {
+        config: { ...config({ scope: "read_only" }), agentId: "op-1", version: 1, enabled: true },
+        gate: { verified: true, checkedVersions: [1] },
+        policyVerified: null,
+        spec: { raw: { openapi: "3.1.0", paths: {} }, paths: {} },
+      },
+      {
+        onReadResult: (r) => readResults.push(r),
+        onWriteResult: (r) => writeReports.push(r),
+      },
+    );
+
+    expect(readResults).toHaveLength(1);
+    expect((readResults[0] as { ok: boolean }).ok).toBe(false);
+    expect(writeReports).toHaveLength(0);
   });
 });

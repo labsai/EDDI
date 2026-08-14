@@ -28,6 +28,8 @@ import { cn } from "@/lib/utils";
 export interface OperatorChatProps {
   messages: ChatMessage[];
   events: PipelineEvent[];
+  /** Live tool_call names for the turn in flight — drives "Using {tool}…". */
+  liveToolCalls?: string[];
   /** Completed turns' traces, keyed by the agent message they belong to. */
   tracesByMessageId: Record<string, PipelineEvent[]>;
   isStreaming: boolean;
@@ -105,6 +107,7 @@ export interface OperatorChatProps {
 export function OperatorChat({
   messages,
   events,
+  liveToolCalls,
   tracesByMessageId,
   isStreaming,
   error,
@@ -279,6 +282,7 @@ export function OperatorChat({
               events={message.isStreaming ? events : tracesByMessageId[message.id]!}
               isLive={Boolean(message.isStreaming) && isStreaming}
               showInternalSteps={false}
+              liveToolCalls={message.isStreaming ? liveToolCalls : undefined}
             />
           ) : null}
           </div>

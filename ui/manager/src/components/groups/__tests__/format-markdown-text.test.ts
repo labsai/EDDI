@@ -156,6 +156,21 @@ describe("formatMarkdownText", () => {
       expect(formatMarkdownText("** von der Strategie **")).toBe("**von der Strategie**");
     });
 
+    // The operator's group-overview reply rendered literal asterisks all over
+    // a table — every cell was `**Name **` (trailing space inside the closing
+    // delimiter, which CommonMark refuses to parse as emphasis).
+    it("repairs the trailing-space bold inside a table cell without eating the cell separator", () => {
+      expect(formatMarkdownText("| **SMC Recruitment Panel ** | PEER_REVIEW |")).toBe(
+        "| **SMC Recruitment Panel** | PEER_REVIEW |",
+      );
+    });
+
+    it("re-inserts a separator when dropping the inner space would glue the bold to the next word", () => {
+      expect(formatMarkdownText("two flavors: **real business use cases **(recruitment, grants)")).toBe(
+        "two flavors: **real business use cases** (recruitment, grants)",
+      );
+    });
+
     it("separates a heading glued to preceding text", () => {
       expect(formatMarkdownText("Schluss## Titel")).toBe("Schluss\n\n## Titel");
     });

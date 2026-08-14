@@ -724,7 +724,9 @@
       "toolResult": "Result",
       "error": "Error occurred",
       "toolCallsCount_one": "{{count}} tool call",
-      "stepsCount": "{{count}} steps", "stepsCount_one": "{{count}} step", "stepsCount_other": "{{count}} steps",
+      "stepsCount": "{{count}} steps",
+      "stepsCount_one": "{{count}} step",
+      "stepsCount_other": "{{count}} steps",
       "toolCallsCount_other": "{{count}} tool calls",
       "toolCallsCount": "{{count}} tool calls",
       "usingTool": "Using {{tool}}…"
@@ -3907,7 +3909,7 @@
           "label": "Read & write",
           "description": "Also lets it create and modify agents and agent groups, deploy, undeploy, disable a runaway schedule, and edit an agent's descriptor — each one paused for your approval first."
         },
-        "writeWarning": "Activating will run a write canary: a real, harmless test write that must pause for approval before this deployment finishes. If it does not pause, activation is refused and the operator is removed rather than left deployed with an unverified write gate."
+        "writeWarning": "Activation verifies the approval gate against the stored policy before it finishes. A real, harmless test write then runs in the background — if it ever executes without pausing for approval, the operator is removed immediately."
       },
       "safetyPreamble": "Safety rules (not editable)",
       "safetyPreambleHint": "Always prepended. It tells the operator to treat everything its tools return as untrusted data.",
@@ -3937,9 +3939,9 @@
       "saving": "Saving configuration…",
       "verifying-gate": "Verifying the approval gate…",
       "done": "Done",
-      "canary": "Checking the operator can reach your platform…",
-      "write-canary": "Running a real test write, which must pause for your approval…",
-      "longWait1": "Both connection checks run in parallel — this is the longest step…", "longWait2": "A real conversation is being run against the new operator — the model is thinking…", "longWait3": "Still working — this can take up to a minute on slower providers…"
+      "longWait1": "The operator agent is being built and deployed — this is the longest step…",
+      "longWait2": "Wiring up tools and the approval gate on the new agent…",
+      "longWait3": "Still working — deployment can take a while on a busy platform…"
     },
     "status": {
       "title": "Operator",
@@ -4024,11 +4026,14 @@
     },
     "toast": {
       "activated": "Platform Operator activated",
-      "activatedReadWrite": "Platform Operator activated — write access verified",
-      "activatedReadWriteUnverified": "Platform Operator activated — approval gate verified; the live write probe was inconclusive",
       "deactivated": "Platform Operator deactivated",
       "reset": "Platform Operator deleted",
-      "activatedButUnreachable": "Operator deployed, but it could not read your platform"
+      "activatedButUnreachable": "Operator deployed, but it could not read your platform",
+      "activatedGateVerified": "Platform Operator activated — approval gate verified. Connection checks are running in the background.",
+      "activatedChecking": "Platform Operator activated. Connection checks are running in the background.",
+      "writeProbeVerified": "Write access verified — a real gated write paused for approval.",
+      "writeProbeFailed": "The approval gate did not hold — the operator was removed.",
+      "writeProbeInconclusive": "The live write probe was inconclusive."
     },
     "canary": {
       "genericFailure": "The connection check did not succeed.",

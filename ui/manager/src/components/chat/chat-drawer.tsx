@@ -82,6 +82,7 @@ export function ChatDrawer() {
   const isProcessing = useChatStore((s) => s.isProcessing);
   const isThinking = useChatStore((s) => s.isThinking);
   const currentTurnEvents = useDebugStore((s) => s.currentTurnEvents);
+  const liveToolCalls = useDebugStore((s) => s.liveToolCalls);
 
   const startConversation = useStartConversation();
 
@@ -242,8 +243,13 @@ export function ChatDrawer() {
                       {/* Live status — the same "Thinking…" / "Using {tool}…"
                           line the operator and main chat show; the plain
                           indicator covers the gap before the first event. */}
-                      {(isProcessing || isThinking) && currentTurnEvents.length > 0 ? (
-                        <ChatActivity events={currentTurnEvents} isLive showInternalSteps={false} />
+                      {(isProcessing || isThinking) && (currentTurnEvents.length > 0 || liveToolCalls.length > 0) ? (
+                        <ChatActivity
+                          events={currentTurnEvents}
+                          isLive
+                          showInternalSteps={false}
+                          liveToolCalls={liveToolCalls}
+                        />
                       ) : isThinking ? (
                         <div className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground animate-pulse">
                           <Loader2 className="h-4 w-4 animate-spin" />

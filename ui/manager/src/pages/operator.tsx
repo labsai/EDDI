@@ -25,6 +25,8 @@ import {
   useOperatorCanary,
   useVerifyOperatorGate,
   seedConfig,
+  runPostActivationProbes,
+  operatorKeys,
   type ActivationStage,
 } from "@/hooks/use-operator";
 import { useOperatorChat } from "@/hooks/use-operator-chat";
@@ -174,26 +176,61 @@ export function OperatorPage() {
             setShowActivation(false);
             // The predecessor agent was hard-deleted; its conversation id is dead.
             chat.reset();
-            if (outcome.canary.ok) {
-              setCanaryWarning(null);
-              // A reachable onSuccess means the write canary either did not run
-              // (read_only) or passed — a non-"pass" result throws, landing in
-              // onError below with the agent already rolled back.
-              toast.success(
-                // "verified" is earned only by a passing probe. An "unknown"
-                // outcome survives activation (the deterministic dry-run held),
-                // but the live probe was inconclusive — say that, not "verified".
-                outcome.writeCanary?.outcome === "pass"
-                  ? t("operator.toast.activatedReadWrite", "Platform Operator activated — write access verified")
-                  : outcome.writeCanary
-                    ? t("operator.toast.activatedReadWriteUnverified",
-                        "Platform Operator activated — approval gate verified; the live write probe was inconclusive")
-                    : t("operator.toast.activated", "Platform Operator activated"),
-              );
-            } else {
-              setCanaryWarning(outcome.canary.error ?? t("operator.canary.genericFailure", "The connection check did not succeed."));
-              toast.warning(t("operator.toast.activatedButUnreachable", "Operator deployed, but it could not read your platform"));
-            }
+            // Activation now ends at the deterministic checks — the operator is
+            // live and usable RIGHT NOW. The LLM probes (read canary + live
+            // write probe) verify in the background and report as they land.
+            setCanaryWarning(null);
+            toast.success(
+              outcome.config.scope === "read_write" && outcome.policyVerified
+                ? t("operator.toast.activatedGateVerified",
+                    "Platform Operator activated — approval gate verified. Connection checks are running in the background.")
+                : t("operator.toast.activatedChecking",
+                    "Platform Operator activated. Connection checks are running in the background."),
+            );
+            void runPostActivationProbes(outcome, {
+              onReadResult: (result) => {
+                if (result.ok) {
+                  setCanaryWarning(null);
+                } else {
+                  setCanaryWarning(
+                    result.error ?? t("operator.canary.genericFailure", "The connection check did not succeed."),
+                  );
+                  toast.warning(
+                    t("operator.toast.activatedButUnreachable", "Operator deployed, but it could not read your platform"),
+                  );
+                }
+              },
+              onWriteResult: (report) => {
+                if (report.result.outcome === "pass") {
+                  toast.success(
+                    t("operator.toast.writeProbeVerified", "Write access verified — a real gated write paused for approval."),
+                  );
+                  return;
+                }
+                if (report.tornDown || report.result.outcome === "fail") {
+                  // Proven breach (or a breach whose teardown failed): this is
+                  // a failure state, not a warning — surface it where a failed
+                  // activation would land and re-read what the server now has.
+                  // The toast carries the report's OWN disposition: a failed
+                  // teardown says "still deployed — remove it manually", and a
+                  // fixed "was removed" here would falsely reassure the admin
+                  // (this toast can be the only visible result after
+                  // navigation, since the activation form is already closed).
+                  const message =
+                    report.message ??
+                    t("operator.toast.writeProbeFailed", "The approval gate did not hold — the operator was removed.");
+                  setActivationError(message);
+                  toast.error(message);
+                  void queryClient.invalidateQueries({ queryKey: operatorKeys.all });
+                  return;
+                }
+                // Inconclusive: absence of proof, reported honestly but quietly.
+                toast.warning(
+                  report.message ??
+                    t("operator.toast.writeProbeInconclusive", "The live write probe was inconclusive."),
+                );
+              },
+            });
           },
           onError: (err) => {
             setStage("idle");
@@ -410,6 +447,7 @@ export function OperatorPage() {
         <OperatorChat
           messages={chat.messages}
           events={chat.events}
+          liveToolCalls={chat.liveToolCalls}
           tracesByMessageId={chat.tracesByMessageId}
           isStreaming={chat.isStreaming}
           error={chat.error}

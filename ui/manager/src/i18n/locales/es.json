@@ -703,7 +703,10 @@
       "toolResult": "Resultado",
       "error": "Se produjo un error",
       "toolCallsCount_one": "{{count}} llamada a herramienta",
-      "stepsCount": "{{count}} pasos", "stepsCount_one": "{{count}} paso", "stepsCount_many": "{{count}} pasos", "stepsCount_other": "{{count}} pasos",
+      "stepsCount": "{{count}} pasos",
+      "stepsCount_one": "{{count}} paso",
+      "stepsCount_many": "{{count}} pasos",
+      "stepsCount_other": "{{count}} pasos",
       "toolCallsCount_many": "{{count}} llamadas a herramientas",
       "toolCallsCount_other": "{{count}} llamadas a herramientas",
       "toolCallsCount": "{{count}} llamadas a herramientas",
@@ -3936,7 +3939,7 @@
           "label": "Lectura y escritura",
           "description": "También le permite crear y modificar agentes y grupos de agentes, desplegar, retirar el despliegue, deshabilitar una programación descontrolada y editar el descriptor de un agente — cada una a la espera de tu aprobación."
         },
-        "writeWarning": "Al activar se ejecutará una prueba canario de escritura: una escritura de prueba real e inofensiva que debe quedar a la espera de aprobación antes de que termine este despliegue. Si no se pausa, la activación se rechaza y el operador se elimina en lugar de dejarlo desplegado con una puerta de escritura sin verificar."
+        "writeWarning": "La activación verifica la puerta de aprobación contra la política almacenada antes de finalizar. Después, una escritura de prueba real e inocua se ejecuta en segundo plano — si alguna vez se ejecuta sin pausarse para aprobación, el operador se elimina de inmediato."
       },
       "safetyPreamble": "Reglas de seguridad (no editables)",
       "safetyPreambleHint": "Se anteponen siempre. Indican al operador que trate todo lo que devuelvan sus herramientas como datos no fiables.",
@@ -3966,11 +3969,9 @@
       "saving": "Guardando la configuración…",
       "verifying-gate": "Verificando la puerta de aprobación…",
       "done": "Listo",
-      "canary": "Comprobando que el operador puede acceder a tu plataforma…",
-      "write-canary": "Ejecutando una escritura de prueba real, que debe esperar tu aprobación…",
-      "longWait1": "Ambas comprobaciones de conexión se ejecutan en paralelo — este es el paso más largo…",
-      "longWait2": "Se está ejecutando una conversación real con el nuevo operador — el modelo está pensando…",
-      "longWait3": "Sigue en curso — puede tardar hasta un minuto con proveedores lentos…"
+      "longWait1": "El agente operador se está creando y desplegando — este es el paso más largo…",
+      "longWait2": "Configurando las herramientas y la puerta de aprobación en el nuevo agente…",
+      "longWait3": "Aún en curso — el despliegue puede tardar en una plataforma ocupada…"
     },
     "status": {
       "title": "Operador",
@@ -4055,11 +4056,14 @@
     },
     "toast": {
       "activated": "Operador de plataforma activado",
-      "activatedReadWrite": "Operador de la plataforma activado — acceso de escritura verificado",
-      "activatedReadWriteUnverified": "Operador de plataforma activado — puerta de aprobación verificada; la sonda de escritura en vivo no fue concluyente",
       "deactivated": "Operador de plataforma desactivado",
       "reset": "Operador de plataforma eliminado",
-      "activatedButUnreachable": "Operador desplegado, pero no pudo leer tu plataforma"
+      "activatedButUnreachable": "Operador desplegado, pero no pudo leer tu plataforma",
+      "activatedGateVerified": "Operador de plataforma activado — puerta de aprobación verificada. Las comprobaciones de conexión se ejecutan en segundo plano.",
+      "activatedChecking": "Operador de plataforma activado. Las comprobaciones de conexión se ejecutan en segundo plano.",
+      "writeProbeVerified": "Acceso de escritura verificado — una escritura real protegida se pausó para aprobación.",
+      "writeProbeFailed": "La puerta de aprobación no resistió — el operador fue eliminado.",
+      "writeProbeInconclusive": "La prueba de escritura en vivo no fue concluyente."
     },
     "canary": {
       "genericFailure": "La comprobación de conexión no se completó correctamente.",

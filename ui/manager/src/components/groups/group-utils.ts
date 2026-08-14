@@ -209,12 +209,37 @@ export function formatMarkdownText(text: string): string {
   // 5. NORMALIZE WHITESPACE INSIDE DOUBLE ASTERISKS (**word ** -> **word**, ** word** -> **word**)
   // CommonMark explicitly disallows leading whitespace after opening ** or trailing whitespace before closing **.
   // Use [\s\u00a0] to also match non-breaking spaces and other Unicode whitespace.
+  // The inner whitespace is dropped, but a separator is re-inserted OUTSIDE the
+  // delimiter whenever dropping it would glue the bold to an adjacent word:
+  // "**cases **(recruitment" must become "**cases** (recruitment", while
+  // "mit ** Fett ** hier" keeps its single spaces rather than gaining doubles.
+  const needsSepAfter = (ch: string | undefined) => !!ch && !/[\s\u00a0.,;:!?)\]}|]/.test(ch);
+  const needsSepBefore = (ch: string | undefined) => !!ch && !/[\s\u00a0([{|]/.test(ch);
   // Pass A: both sides have whitespace (** word **)
-  formatted = formatted.replace(/\*\*[\s\u00a0]+([^*]+?)[\s\u00a0]+\*\*/g, (_m, inner: string) => `**${inner.trim()}**`);
+  formatted = formatted.replace(
+    /\*\*[\s\u00a0]+([^*]+?)[\s\u00a0]+\*\*/g,
+    (m, inner: string, offset: number, str: string) => {
+      const before = needsSepBefore(str[offset - 1]) ? " " : "";
+      const after = needsSepAfter(str[offset + m.length]) ? " " : "";
+      return `${before}**${inner.trim()}**${after}`;
+    },
+  );
   // Pass B: leading whitespace only (** word**)
-  formatted = formatted.replace(/\*\*[\s\u00a0]+([^*]+?)\*\*/g, (_m, inner: string) => `**${inner.trim()}**`);
+  formatted = formatted.replace(
+    /\*\*[\s\u00a0]+([^*]+?)\*\*/g,
+    (_m, inner: string, offset: number, str: string) => {
+      const before = needsSepBefore(str[offset - 1]) ? " " : "";
+      return `${before}**${inner.trim()}**`;
+    },
+  );
   // Pass C: trailing whitespace only (**word **)
-  formatted = formatted.replace(/\*\*([^*]+?)[\s\u00a0]+\*\*/g, (_m, inner: string) => `**${inner.trim()}**`);
+  formatted = formatted.replace(
+    /\*\*([^*]+?)[\s\u00a0]+\*\*/g,
+    (m, inner: string, offset: number, str: string) => {
+      const after = needsSepAfter(str[offset + m.length]) ? " " : "";
+      return `**${inner.trim()}**${after}`;
+    },
+  );
 
   // 6. Fix missing space BEFORE opening ** when glued to preceding word (e.g. "word**bold**" -> "word **bold**")
   formatted = formatted.replace(/([a-zA-Z0-9äöüßÄÖÜ,.:;!?])\*\*([^\s*])/g, "$1 **$2");

@@ -695,7 +695,9 @@
       "toolResult": "结果",
       "error": "发生错误",
       "toolCallsCount_one": "{{count}} 次工具调用",
-      "stepsCount": "{{count}} 个步骤", "stepsCount_one": "{{count}} 个步骤", "stepsCount_other": "{{count}} 个步骤",
+      "stepsCount": "{{count}} 个步骤",
+      "stepsCount_one": "{{count}} 个步骤",
+      "stepsCount_other": "{{count}} 个步骤",
       "toolCallsCount_other": "{{count}} 次工具调用",
       "toolCallsCount": "{{count}} 次工具调用",
       "usingTool": "正在使用 {{tool}}…"
@@ -3907,7 +3909,7 @@
           "label": "读写",
           "description": "还可以创建和修改智能体与智能体群组、部署、取消部署、禁用失控的计划任务，以及编辑智能体的描述——每一项都会先等待你的批准。"
         },
-        "writeWarning": "激活将运行一次写入金丝雀测试：一次真实、无害的测试写入，必须在此部署完成前等待批准。如果它没有暂停，激活将被拒绝，操作员将被移除，而不是带着未经验证的写入关卡继续部署。"
+        "writeWarning": "激活会在完成前根据已存储的策略验证审批门。随后会在后台执行一次真实且无害的测试写入 — 如果它在未暂停等待审批的情况下被执行，操作员将被立即移除。"
       },
       "safetyPreamble": "安全规则（不可编辑）",
       "safetyPreambleHint": "始终置于最前。它要求操作员将工具返回的一切内容视为不可信数据。",
@@ -3937,11 +3939,9 @@
       "saving": "正在保存配置……",
       "verifying-gate": "正在验证审批门禁…",
       "done": "完成",
-      "canary": "正在检查操作员能否访问你的平台……",
-      "write-canary": "正在执行一次真实的测试写入，需等待你的批准……",
-      "longWait1": "两项连接检查正在并行运行 — 这是耗时最长的步骤…",
-      "longWait2": "正在与新操作员进行真实对话 — 模型正在思考…",
-      "longWait3": "仍在进行中 — 在较慢的提供商上可能需要一分钟…"
+      "longWait1": "正在构建并部署操作员代理 — 这是耗时最长的一步…",
+      "longWait2": "正在为新代理配置工具和审批门…",
+      "longWait3": "仍在进行中 — 在繁忙的平台上部署可能需要一些时间…"
     },
     "status": {
       "title": "操作员",
@@ -4026,11 +4026,14 @@
     },
     "toast": {
       "activated": "平台操作员已启用",
-      "activatedReadWrite": "平台操作员已激活——写入权限已验证",
-      "activatedReadWriteUnverified": "平台操作员已激活 — 审批门已验证；实时写入探测未能得出结论",
       "deactivated": "平台操作员已停用",
       "reset": "平台操作员已删除",
-      "activatedButUnreachable": "操作员已部署，但无法读取你的平台"
+      "activatedButUnreachable": "操作员已部署，但无法读取你的平台",
+      "activatedGateVerified": "平台操作员已激活 — 审批门已验证。连接检查正在后台运行。",
+      "activatedChecking": "平台操作员已激活。连接检查正在后台运行。",
+      "writeProbeVerified": "写入权限已验证 — 一次受审批门保护的真实写入已暂停等待审批。",
+      "writeProbeFailed": "审批门未能拦截 — 操作员已被移除。",
+      "writeProbeInconclusive": "实时写入探测未得出结论。"
     },
     "canary": {
       "genericFailure": "连接检查未通过。",

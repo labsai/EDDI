@@ -244,9 +244,14 @@ describe("OperatorActivation", () => {
       expect(onActivate.mock.calls[0]![0]).toMatchObject({ scope: "read_write" });
     });
 
-    it("explains the write canary while read & write is selected", async () => {
+    it("explains the gate verification and background test write while read & write is selected", async () => {
       await toReviewStep();
-      expect(await screen.findByTestId("operator-scope-write-warning")).toHaveTextContent(/write canary/i);
+      const warning = await screen.findByTestId("operator-scope-write-warning");
+      // Honest about the new flow: the gate is verified before activation
+      // finishes, the empirical test write runs in the background afterwards.
+      expect(warning).toHaveTextContent(/verifies the approval gate/i);
+      expect(warning).toHaveTextContent(/background/i);
+      expect(warning).toHaveTextContent(/removed immediately/i);
     });
 
     it("can be opted down to read-only, and submits that choice", async () => {

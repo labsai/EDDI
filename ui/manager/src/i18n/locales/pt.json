@@ -703,7 +703,10 @@
       "toolResult": "Resultado",
       "error": "Ocorreu um erro",
       "toolCallsCount_one": "{{count}} chamada de ferramenta",
-      "stepsCount": "{{count}} etapas", "stepsCount_one": "{{count}} etapa", "stepsCount_many": "{{count}} etapas", "stepsCount_other": "{{count}} etapas",
+      "stepsCount": "{{count}} etapas",
+      "stepsCount_one": "{{count}} etapa",
+      "stepsCount_many": "{{count}} etapas",
+      "stepsCount_other": "{{count}} etapas",
       "toolCallsCount_many": "{{count}} chamadas de ferramentas",
       "toolCallsCount_other": "{{count}} chamadas de ferramentas",
       "toolCallsCount": "{{count}} chamadas de ferramentas",
@@ -3936,7 +3939,7 @@
           "label": "Leitura e escrita",
           "description": "Também permite criar e alterar agentes e grupos de agentes, implementar, remover a implementação, desativar uma agenda fora de controlo e editar o descritor de um agente — cada uma à espera da sua aprovação primeiro."
         },
-        "writeWarning": "Ativar irá executar um teste canário de escrita: uma escrita de teste real e inofensiva que tem de ficar em pausa à espera de aprovação antes de este deployment terminar. Se não pausar, a ativação é recusada e o operador é removido em vez de ficar implementado com um gate de escrita não verificado."
+        "writeWarning": "A ativação verifica o portão de aprovação contra a política armazenada antes de concluir. Uma escrita de teste real e inofensiva é então executada em segundo plano — se algum dia for executada sem pausar para aprovação, o operador é removido imediatamente."
       },
       "safetyPreamble": "Regras de segurança (não editáveis)",
       "safetyPreambleHint": "São sempre antepostas. Instruem o operador a tratar tudo o que as suas ferramentas devolvem como dados não fiáveis.",
@@ -3966,11 +3969,9 @@
       "saving": "A guardar a configuração…",
       "verifying-gate": "A verificar a barreira de aprovação…",
       "done": "Concluído",
-      "canary": "A verificar se o operador consegue aceder à sua plataforma…",
-      "write-canary": "A executar uma escrita de teste real, que tem de aguardar a sua aprovação…",
-      "longWait1": "As duas verificações de conexão executam em paralelo — esta é a etapa mais longa…",
-      "longWait2": "Uma conversa real está em andamento com o novo operador — o modelo está pensando…",
-      "longWait3": "Ainda em andamento — pode levar até um minuto em provedores mais lentos…"
+      "longWait1": "O agente operador está sendo criado e implantado — esta é a etapa mais longa…",
+      "longWait2": "Configurando as ferramentas e o portão de aprovação no novo agente…",
+      "longWait3": "Ainda em andamento — a implantação pode demorar em uma plataforma ocupada…"
     },
     "status": {
       "title": "Operador",
@@ -4055,11 +4056,14 @@
     },
     "toast": {
       "activated": "Operador da plataforma ativado",
-      "activatedReadWrite": "Platform Operator ativado — acesso de escrita verificado",
-      "activatedReadWriteUnverified": "Operador de plataforma ativado — porta de aprovação verificada; a sonda de escrita ao vivo foi inconclusiva",
       "deactivated": "Operador da plataforma desativado",
       "reset": "Operador da plataforma eliminado",
-      "activatedButUnreachable": "Operador implantado, mas não conseguiu ler a sua plataforma"
+      "activatedButUnreachable": "Operador implantado, mas não conseguiu ler a sua plataforma",
+      "activatedGateVerified": "Operador de plataforma ativado — portão de aprovação verificado. As verificações de conexão estão em execução em segundo plano.",
+      "activatedChecking": "Operador de plataforma ativado. As verificações de conexão estão em execução em segundo plano.",
+      "writeProbeVerified": "Acesso de escrita verificado — uma escrita real protegida pausou para aprovação.",
+      "writeProbeFailed": "O portão de aprovação não resistiu — o operador foi removido.",
+      "writeProbeInconclusive": "A sonda de escrita ao vivo foi inconclusiva."
     },
     "canary": {
       "genericFailure": "A verificação de ligação não foi bem-sucedida.",
