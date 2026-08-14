@@ -206,6 +206,11 @@ export function formatMarkdownText(text: string): string {
   // 4. Fix trailing hyphens/dashes attached to opening bold markers (e.g. "Das- **Logo" -> "Das - **Logo")
   formatted = formatted.replace(/([a-zA-Z0-9äöüßÄÖÜ])-\s*\*\*/g, "$1 - **");
 
+  // 4b. Fix a bullet marker glued to its bold ("-** Create" -> "- ** Create",
+  // which pass B below then normalizes to "- **Create"). Without the space the
+  // line is not a list item at all AND the delimiter cannot open.
+  formatted = formatted.replace(/(^|\n)([ \t]*)-\*\*/g, "$1$2- **");
+
   // 5. NORMALIZE WHITESPACE INSIDE DOUBLE ASTERISKS (**word ** -> **word**, ** word** -> **word**)
   // CommonMark explicitly disallows leading whitespace after opening ** or trailing whitespace before closing **.
   // Use [\s\u00a0] to also match non-breaking spaces and other Unicode whitespace.
@@ -241,8 +246,14 @@ export function formatMarkdownText(text: string): string {
     },
   );
 
-  // 6. Fix missing space BEFORE opening ** when glued to preceding word (e.g. "word**bold**" -> "word **bold**")
-  formatted = formatted.replace(/([a-zA-Z0-9äöüßÄÖÜ,.:;!?])\*\*([^\s*])/g, "$1 **$2");
+  // 6. Fix missing space BEFORE opening ** when glued to preceding word (e.g. "word**bold**" -> "word **bold**").
+  // The char AFTER the ** must be a letter/digit — evidence of an OPENER. The
+  // previous class ([^\s*]) also matched punctuation, so this fired on valid
+  // CLOSERS glued to punctuation ("**label**:" -> "**label **:"), un-pairing
+  // every bold label in a list and rendering the operator's answers as a mess
+  // of literal asterisks and misplaced bold — the whitespace-repair passes run
+  // BEFORE this rule, so the damage it did was never repaired.
+  formatted = formatted.replace(/([a-zA-Z0-9äöüßÄÖÜ,.:;!?])\*\*([\p{L}\p{N}])/gu, "$1 **$2");
 
   // 7. Fix missing space AFTER closing ** when glued to following word (e.g. "**bold**word" -> "**bold** word")
   formatted = formatted.replace(/\*\*([a-zA-Z0-9äöüßÄÖÜ][^*]*?)\*\*([a-zA-Z0-9äöüßÄÖÜ])/g, "**$1** $2");

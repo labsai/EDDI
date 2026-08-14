@@ -560,4 +560,34 @@ describe("ChatActivity — live tool_call events", () => {
     expect(screen.getByTestId("chat-activity-live-status")).toBeInTheDocument();
     expect(screen.getByText(/readGroups/)).toBeInTheDocument();
   });
+
+  it("expands to the full running list of calls, newest still spinning", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ChatActivity
+        events={[]}
+        isLive={true}
+        liveToolCalls={["readAgentDescriptors", "readGroups", "readConversations"]}
+      />,
+    );
+
+    expect(screen.queryByTestId("chat-activity-live-list")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("chat-activity-live-status"));
+
+    const list = screen.getByTestId("chat-activity-live-list");
+    expect(list).toHaveTextContent("readAgentDescriptors");
+    expect(list).toHaveTextContent("readGroups");
+    expect(list).toHaveTextContent("readConversations");
+    // Collapses again on a second click.
+    await user.click(screen.getByTestId("chat-activity-live-status"));
+    expect(screen.queryByTestId("chat-activity-live-list")).not.toBeInTheDocument();
+  });
+
+  it("a pill with no calls yet has nothing to expand", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ChatActivity events={[start("langchain", 0)]} isLive={true} liveToolCalls={[]} />);
+
+    await user.click(screen.getByTestId("chat-activity-live-status"));
+    expect(screen.queryByTestId("chat-activity-live-list")).not.toBeInTheDocument();
+  });
 });

@@ -171,6 +171,33 @@ describe("formatMarkdownText", () => {
       );
     });
 
+    // The repair itself was the vandal here: rule 6 (space before a glued
+    // OPENING **) also fired on closing delimiters glued to punctuation,
+    // turning every valid "**label**:" into the un-parseable "**label **:".
+    // The operator's capability list rendered as literal asterisks with the
+    // bold landing on the descriptions instead of the labels.
+    it("leaves a valid bold label glued to a colon alone", () => {
+      const line = "- **Agents & workflows**: list and inspect agent configs.";
+      expect(formatMarkdownText(line)).toBe(line);
+    });
+
+    it("leaves a valid bold run glued to sentence punctuation alone", () => {
+      expect(formatMarkdownText("**Disable schedules**.")).toBe("**Disable schedules**.");
+      expect(formatMarkdownText("See **Documentation**: it lists the endpoints.")).toBe(
+        "See **Documentation**: it lists the endpoints.",
+      );
+    });
+
+    it("still spaces a truly glued opener before a word", () => {
+      expect(formatMarkdownText("Das**Logo** ist neu")).toBe("Das **Logo** ist neu");
+    });
+
+    it("repairs a bullet marker glued to its bold opener", () => {
+      expect(formatMarkdownText("-** Create a new agent, or a group.** - Edit an existing agent.")).toBe(
+        "- **Create a new agent, or a group.** - Edit an existing agent.",
+      );
+    });
+
     it("separates a heading glued to preceding text", () => {
       expect(formatMarkdownText("Schluss## Titel")).toBe("Schluss\n\n## Titel");
     });

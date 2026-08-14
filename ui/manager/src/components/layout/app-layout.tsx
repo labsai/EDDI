@@ -91,7 +91,14 @@ export function AppLayout() {
             "transition-all duration-300"
           )}
         >
-          <div className="@container/main mx-auto max-w-screen-2xl">
+          {/* h-full: gives pages a real height reference. Chat-style pages
+              size themselves with h-full and scroll INTERNALLY — the old
+              h-[calc(100vh-…)] guesses broke whenever a banner or wrapped
+              header changed the arithmetic, leaving BOTH the page and <main>
+              scrolling, with the scroll-to-bottom arrow tracking the wrong
+              one. Pages taller than the viewport still overflow this wrapper
+              and scroll <main>, exactly as before. */}
+          <div className="@container/main mx-auto h-full max-w-screen-2xl">
             <SuspendedOutlet />
           </div>
         </main>

@@ -143,7 +143,9 @@ describe("runOperatorWriteCanary", () => {
 
     expect(result.outcome).toBe("unknown");
     expect(result.toolCalls).toBe(0);
-    expect(result.error).toMatch(/no agents on this platform/i);
+    // Not "no agents to test against" — the probe self-targets the operator's
+    // own descriptor, so the target always exists; the model just declined.
+    expect(result.error).toMatch(/declined to attempt the test write/i);
   });
 
   it("is unknown — not pass — when the pause is real but not on the expected tool, and still rejects it", async () => {

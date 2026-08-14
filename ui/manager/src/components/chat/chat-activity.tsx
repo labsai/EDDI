@@ -136,6 +136,8 @@ interface ChatActivityProps {
 export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = false, liveToolCalls }: ChatActivityProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  /** The live status pill's own expansion — the running list of tool calls. */
+  const [liveExpanded, setLiveExpanded] = useState(false);
 
   const rawTasks = useMemo(() => buildTaskSummaries(events), [events]);
   const cascadeSteps = useMemo(() => buildCascadeSteps(events), [events]);
@@ -243,12 +245,30 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
   // (escalations are the point of watching one).
   const hasErrorTask = rawTasks.some((task) => task.status === "error");
   if (!showInternalSteps && isLive && !hasErrorTask && cascadeSteps.length === 0) {
+    // Everything the turn has called so far, newest last. Live events are the
+    // primary record; the trace scan covers backends without them.
+    const liveNames = liveToolCalls?.length ? liveToolCalls : toolPairs.map((p) => p.call.tool);
+    const expandable = liveNames.length > 0;
     return (
       <div className="flex justify-center px-4 py-1" data-testid="chat-activity">
         {/* w-fit: a one-word status stretched to 85% of the chat reads as a
             banner, not a status line. */}
-        <div className="w-fit max-w-[85%] rounded-full border border-primary/30 bg-primary/5">
-          <div className="flex items-center gap-2 px-3 py-2 text-xs" data-testid="chat-activity-live-status">
+        <div
+          className={cn(
+            "w-fit max-w-[85%] border border-primary/30 bg-primary/5",
+            liveExpanded ? "rounded-xl" : "rounded-full",
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => expandable && setLiveExpanded((v) => !v)}
+            className={cn(
+              "flex items-center gap-2 px-3 py-2 text-xs",
+              expandable ? "cursor-pointer" : "cursor-default",
+            )}
+            data-testid="chat-activity-live-status"
+            aria-expanded={liveExpanded}
+          >
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
             <span className="font-medium text-primary">
               {currentTool
@@ -260,7 +280,30 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
                 {t("chat.activity.toolCallsCount", "{{count}} tool calls", { count: liveToolCallCount })}
               </span>
             )}
-          </div>
+            {expandable &&
+              (liveExpanded ? (
+                <ChevronUp className="h-3 w-3 shrink-0 text-muted-foreground/60" />
+              ) : (
+                <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/60" />
+              ))}
+          </button>
+          {liveExpanded && expandable && (
+            <div
+              className="max-h-48 space-y-0.5 overflow-y-auto border-t border-primary/20 px-3 pb-2 pt-1.5"
+              data-testid="chat-activity-live-list"
+            >
+              {liveNames.map((name, i) => (
+                <div key={`${name}-${i}`} className="flex items-center gap-1.5 text-[11px]">
+                  {i === liveNames.length - 1 ? (
+                    <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
+                  ) : (
+                    <Check className="h-3 w-3 shrink-0 text-emerald-500" />
+                  )}
+                  <span className="min-w-0 truncate font-mono text-foreground/80">{name}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );

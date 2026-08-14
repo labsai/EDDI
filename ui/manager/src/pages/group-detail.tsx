@@ -534,7 +534,7 @@ export function GroupDetailPage() {
       "flex flex-col",
       isFullscreen
         ? "fixed inset-0 z-50 bg-background p-4"
-        : "h-[calc(100vh-(--spacing(16))-(--spacing(12)))]"
+        : "h-full min-h-0"
     )}>
       {/* Header */}
       <div className="flex items-center gap-3 pb-3 border-b border-border shrink-0">

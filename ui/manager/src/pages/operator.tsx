@@ -404,7 +404,7 @@ export function OperatorPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] flex-col gap-4 py-4">
+    <div className="flex h-full min-h-0 flex-col gap-4 py-4">
       <header className="flex items-center gap-3">
         <Sparkles className="h-6 w-6 text-primary" />
         <div>

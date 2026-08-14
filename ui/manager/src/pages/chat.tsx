@@ -21,7 +21,7 @@ export function ChatPage() {
   }, [maybeAutoStart]);
 
   return (
-    <div className="flex h-[calc(100vh-(--spacing(16))-(--spacing(12)))] flex-col gap-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       <div>
         <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
           <MessageCircle className="h-8 w-8 text-primary" />
