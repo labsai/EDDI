@@ -3938,7 +3938,8 @@
       "verifying-gate": "Verifying the approval gate…",
       "done": "Done",
       "canary": "Checking the operator can reach your platform…",
-      "write-canary": "Running a real test write, which must pause for your approval…"
+      "write-canary": "Running a real test write, which must pause for your approval…",
+      "longWait1": "Both connection checks run in parallel — this is the longest step…", "longWait2": "A real conversation is being run against the new operator — the model is thinking…", "longWait3": "Still working — this can take up to a minute on slower providers…"
     },
     "status": {
       "title": "Operator",

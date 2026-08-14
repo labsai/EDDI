@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import {
   buildCascadeSteps,
+  isInternalTask,
   type PipelineEvent,
   type ToolTraceEntry,
 } from "@/hooks/use-debug-events";
@@ -118,47 +119,6 @@ function buildTaskSummaries(events: PipelineEvent[]): TaskSummary[] {
   return tasks;
 }
 
-/**
- * Workflow steps that are plumbing, not activity. Filtered out of end-user chat
- * unless the step made a tool call or failed (see `tasks` below).
- *
- * `httpcalls` belongs here and was missing — which is why the Platform Operator
- * rendered "45 steps" for a plain greeting. An OpenAPI-provisioned agent gets
- * one httpcalls workflow step per endpoint group, so its pipeline is dozens of
- * identical unnamed rows deep before the model does anything; ordinary agents
- * have one or two, which is how the gap went unnoticed. Nothing is lost by
- * filtering them: the model's actual calls surface via the langchain task's
- * toolTrace, and an httpcalls step that errors is still shown by the hasError
- * branch.
- */
-/*
- * Matched LOWERCASED against task.taskType. The authoritative list is each
- * ILifecycleTask.getType() in the EDDI backend: httpCalls, mcpCalls,
- * langchain, expressions, output, properties, behavior_rules — note the
- * camelCase ids, which an exact match silently missed. The extra entries keep
- * older/renamed variants covered.
- */
-const INTERNAL_INFRA_TASKS = new Set([
-  "expressions",
-  "behavior_rules",
-  "langchain",
-  "dictionary",
-  "properties",
-  "propertysetter",
-  "parser",
-  "output",
-  "httpcalls",
-  "mcpcalls",
-  "ai.labs.expressions",
-  "ai.labs.behavior_rules",
-  "ai.labs.langchain",
-  "ai.labs.dictionary",
-  "ai.labs.propertysetter",
-  "ai.labs.parser",
-  "ai.labs.output",
-  "ai.labs.httpcalls",
-]);
-
 interface ChatActivityProps {
   events: PipelineEvent[];
   isLive: boolean;
@@ -197,7 +157,7 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
       // Case-INSENSITIVE: the runtime emits camelCase ids ("httpCalls") while
       // this set is lowercase — an exact has() silently filtered nothing in
       // production while lowercase-mocked tests stayed green.
-      const isInternal = INTERNAL_INFRA_TASKS.has(task.taskType.toLowerCase());
+      const isInternal = isInternalTask(task.taskType);
       return !isInternal || hasTools || hasError;
     });
   }, [rawTasks, showInternalSteps]);

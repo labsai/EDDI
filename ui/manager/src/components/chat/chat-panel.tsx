@@ -28,7 +28,7 @@ import { ChatActivity } from "./chat-activity";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer } from "@/components/debugger/debug-drawer";
-import { useDebugStore, type PipelineEvent } from "@/hooks/use-debug-events";
+import { useDebugStore, isInternalTask, type PipelineEvent } from "@/hooks/use-debug-events";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { cn } from "@/lib/utils";
 import { InputHint } from "@/components/chat/input-hint";
@@ -1019,17 +1019,8 @@ function EmptyState() {
 
 // ==================== Inline Thinking Indicator ====================
 
-/** Internal pipeline tasks that should never surface in the UI. Matched
- *  LOWERCASED against ev.taskType — the runtime ids are camelCase (httpCalls,
- *  mcpCalls); see INTERNAL_INFRA_TASKS in chat-activity.tsx. */
-const INTERNAL_TASKS = new Set([
-  "expressions", "behavior_rules", "langchain", "dictionary",
-  "properties", "propertysetter", "parser", "output",
-  "httpcalls", "mcpcalls",
-  "ai.labs.expressions", "ai.labs.behavior_rules", "ai.labs.langchain",
-  "ai.labs.dictionary", "ai.labs.propertysetter", "ai.labs.parser",
-  "ai.labs.output",
-]);
+// One classifier, not a second hand-synced set — the two drifted once already
+// (this one lacked ai.labs.httpcalls while chat-activity had it).
 
 /**
  * Sleek inline indicator shown during agent processing.
@@ -1042,7 +1033,7 @@ function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
   const activeToolNames = useMemo(() => {
     const names: string[] = [];
     for (const ev of events) {
-      if (INTERNAL_TASKS.has(ev.taskType.toLowerCase())) continue;
+      if (isInternalTask(ev.taskType)) continue;
       if (ev.toolTrace) {
         for (const trace of ev.toolTrace) {
           if (trace.type === "tool_call" && trace.tool && !names.includes(trace.tool)) {
@@ -1056,7 +1047,7 @@ function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
 
   // Check for errors in visible events
   const hasError = events.some(
-    (e) => e.type === "task_failed" && !INTERNAL_TASKS.has(e.taskType.toLowerCase()),
+    (e) => e.type === "task_failed" && !isInternalTask(e.taskType),
   );
 
   return (

@@ -567,7 +567,10 @@ export async function runOperatorCanary(
   // but a page reload.
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), CANARY_TIMEOUT_MS);
-  const effectiveSignal = signal ?? timeout.signal;
+  // COMPOSED with the caller's signal, not replaced by it: `signal ??
+  // timeout.signal` silently disabled this ceiling for any caller passing an
+  // abort signal (the parallel-canary activation does).
+  const effectiveSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
 
   let conversationId = null;
   try {

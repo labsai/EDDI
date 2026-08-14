@@ -175,3 +175,59 @@ describe("useActivateOperator — gate read-back enforcement", () => {
     expect(spy.deleted).toBe(false);
   });
 });
+
+describe("useActivateOperator — parallel canaries", () => {
+  beforeEach(() => {
+    server.resetHandlers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("aborts the read canary's stream when the write canary rolls the activation back", async () => {
+    // Promise.all rejects without cancelling siblings — without the explicit
+    // abort, the read canary's SSE fetch would sit pending against a deleted
+    // agent until its own timeout, long after activation error handling ended.
+    const spy = { undeployed: false, deleted: false };
+    serveProvisioning(GOOD_GATE, spy);
+
+    let readStreamAborted = false;
+    server.use(
+      // The deterministic check fails closed → write canary rolls back and
+      // rejects without ever probing.
+      http.post("*/administration/operator/gate-dry-run", () => new HttpResponse(null, { status: 500 })),
+      // The read canary's conversation: starts fine…
+      http.post("*/agents/:agentId/start", () =>
+        HttpResponse.json(null, {
+          status: 201,
+          headers: { Location: "eddi://ai.labs.conversation/conversationstore/conversations/conv-read" },
+        }),
+      ),
+      // …and its stream is held open until the client aborts it.
+      http.post("*/agents/:conversationId/stream", async ({ request }) => {
+        await new Promise<void>((resolve) => {
+          if (request.signal.aborted) {
+            readStreamAborted = true;
+            resolve();
+            return;
+          }
+          request.signal.addEventListener("abort", () => {
+            readStreamAborted = true;
+            resolve();
+          });
+        });
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+
+    const { result } = renderHook(() => useActivateOperator(), { wrapper });
+    result.current.mutate({
+      agentName: "EDDI Platform Operator",
+      config: config({ scope: "read_write" }),
+      apiKey: "sk-test",
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => expect(readStreamAborted).toBe(true));
+    // The rollback itself still happened.
+    await waitFor(() => expect(spy.undeployed && spy.deleted).toBe(true));
+  });
+});

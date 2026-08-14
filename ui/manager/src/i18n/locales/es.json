@@ -3967,7 +3967,10 @@
       "verifying-gate": "Verificando la puerta de aprobación…",
       "done": "Listo",
       "canary": "Comprobando que el operador puede acceder a tu plataforma…",
-      "write-canary": "Ejecutando una escritura de prueba real, que debe esperar tu aprobación…"
+      "write-canary": "Ejecutando una escritura de prueba real, que debe esperar tu aprobación…",
+      "longWait1": "Ambas comprobaciones de conexión se ejecutan en paralelo — este es el paso más largo…",
+      "longWait2": "Se está ejecutando una conversación real con el nuevo operador — el modelo está pensando…",
+      "longWait3": "Sigue en curso — puede tardar hasta un minuto con proveedores lentos…"
     },
     "status": {
       "title": "Operador",

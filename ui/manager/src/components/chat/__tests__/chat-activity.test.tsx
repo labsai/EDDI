@@ -400,18 +400,21 @@ describe("ChatActivity — end-user live status line", () => {
  * spinner rows — while these tests' lowercase fixtures kept passing.
  */
 describe("ChatActivity — camelCase runtime task ids", () => {
-  it("filters the real 'httpCalls' casing at rest — nothing meaningful, nothing shown", () => {
-    const events: PipelineEvent[] = [
-      { type: "task_start", taskType: "httpCalls", taskId: "1", index: 0, timestamp: Date.now() },
-      { type: "task_complete", taskType: "httpCalls", taskId: "1", index: 0, durationMs: 1, timestamp: Date.now() },
-      // Unpaired start — the forever-spinner shape from the screenshot.
-      { type: "task_start", taskType: "httpCalls", taskId: "2", index: 1, timestamp: Date.now() },
-    ];
+  it.each(["httpCalls", "mcpCalls", "properties"])(
+    "filters the real '%s' casing at rest — nothing meaningful, nothing shown",
+    (taskType) => {
+      const events: PipelineEvent[] = [
+        { type: "task_start", taskType, taskId: "1", index: 0, timestamp: Date.now() },
+        { type: "task_complete", taskType, taskId: "1", index: 0, durationMs: 1, timestamp: Date.now() },
+        // Unpaired start — the forever-spinner shape from the screenshot.
+        { type: "task_start", taskType, taskId: "2", index: 1, timestamp: Date.now() },
+      ];
 
-    renderWithProviders(<ChatActivity events={events} isLive={false} />);
+      renderWithProviders(<ChatActivity events={events} isLive={false} />);
 
-    expect(screen.queryByTestId("chat-activity")).not.toBeInTheDocument();
-  });
+      expect(screen.queryByTestId("chat-activity")).not.toBeInTheDocument();
+    },
+  );
 
   it("keeps a camelCase row that actually made tool calls, and counts only visible steps", () => {
     const events: PipelineEvent[] = [

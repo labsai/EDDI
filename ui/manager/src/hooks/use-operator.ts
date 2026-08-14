@@ -226,11 +226,12 @@ export function useActivateOperator() {
       onStage?.("canary");
 
       // The write canary is the empirical proof, not just configuration: does
-      // a real gated write actually pause? A non-pass result rolls the whole
-      // activation back (undeploy, delete, clear the config variable) rather
-      // than merely reporting the failure — see enforceWriteCanaryGate's own
-      // doc comment for why a failed write canary can't be treated like a
-      // failed read canary or gate check.
+      // a real gated write actually pause? A `fail` — or an `unknown` the
+      // deterministic dry-run could not vouch for — rolls the whole activation
+      // back (undeploy, delete, clear the config variable) rather than merely
+      // reporting the failure; an `unknown` whose gate WAS verified
+      // deterministically proceeds with a warning. See enforceWriteCanaryGate's
+      // own doc comment for the full taxonomy.
       //
       // The scope check stays here (enforceWriteCanaryGate also no-ops for
       // read_only on its own) so the "write-canary" stage is never announced
@@ -246,14 +247,18 @@ export function useActivateOperator() {
       // In PARALLEL: each canary drives a real conversation (an LLM turn
       // apiece) in its own conversation, and neither depends on the other's
       // outcome — running them back to back was the bulk of the activation
-      // wait after provisioning. If the write canary fails and rolls the
-      // operator back while the read conversation is still in flight, that
-      // conversation dies with the agent and its result is discarded along
-      // with the rejection — the same outcome sequential execution produced,
-      // just sooner.
+      // wait after provisioning. When the write canary rejects (rollback), the
+      // read canary's stream is ABORTED rather than left dangling against a
+      // deleted agent: Promise.all rejects without cancelling its siblings, so
+      // without the explicit abort the read SSE fetch could sit pending until
+      // its own timeout long after activation error handling finished.
+      const readCanaryAbort = new AbortController();
       const [canary, writeCanary] = await Promise.all([
-        runOperatorCanary(next),
-        enforceWriteCanaryGate(next, spec),
+        runOperatorCanary(next, readCanaryAbort.signal),
+        enforceWriteCanaryGate(next, spec).catch((error: unknown) => {
+          readCanaryAbort.abort();
+          throw error;
+        }),
       ]);
 
       onStage?.("done");

@@ -228,3 +228,42 @@ export const useDebugStore = create<DebugState>((set) => ({
       selectedTurnIndex: null,
     }),
 }));
+
+/**
+ * Workflow steps that are plumbing, not activity — filtered out of end-user
+ * chat unless the step made a tool call or failed.
+ *
+ * Matched LOWERCASED against taskType: the authoritative list is each
+ * ILifecycleTask.getType() in the EDDI backend — httpCalls, mcpCalls,
+ * langchain, expressions, output, properties, behavior_rules — note the
+ * camelCase ids, which an exact match silently missed (the Platform Operator
+ * rendered a wall of "41 steps" for a greeting). The extra entries keep
+ * older/renamed variants covered. Lives here rather than in a component file
+ * so both ChatActivity and the panel's inline indicator share ONE classifier
+ * (two hand-synced sets already drifted once), and react-refresh stays happy.
+ */
+const INTERNAL_INFRA_TASKS = new Set([
+  "expressions",
+  "behavior_rules",
+  "langchain",
+  "dictionary",
+  "properties",
+  "propertysetter",
+  "parser",
+  "output",
+  "httpcalls",
+  "mcpcalls",
+  "ai.labs.expressions",
+  "ai.labs.behavior_rules",
+  "ai.labs.langchain",
+  "ai.labs.dictionary",
+  "ai.labs.propertysetter",
+  "ai.labs.parser",
+  "ai.labs.output",
+  "ai.labs.httpcalls",
+]);
+
+/** The one shared predicate for "is this pipeline task plumbing?". */
+export function isInternalTask(taskType: string): boolean {
+  return INTERNAL_INFRA_TASKS.has(taskType.toLowerCase());
+}
