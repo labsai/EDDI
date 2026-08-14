@@ -606,6 +606,8 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
   switch (event.type) {
     case "token":
       store.getState().setThinking(false);
+      // Output resuming IS the tool-finished signal — see liveToolsSettled.
+      debug.markToolsSettled();
       store.getState().appendToLastAgentMessage(event.data);
       return false;
     case "done": {

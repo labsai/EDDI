@@ -3152,7 +3152,8 @@
     "confirmRejectToolDescription": "아무것도 실행되지 않습니다. 대화는 계속되며 에이전트는 {{toolNames}} 없이 답변합니다.",
     "humanTurn": "구성원 차례",
     "humanTurnReason": "{{member}}님의 발언을 기다리는 중",
-    "humanTurnMemberFallback": "한 구성원"
+    "humanTurnMemberFallback": "한 구성원",
+    "decidedProgress": "{{total}}건 중 {{decided}}건 결정됨"
   },
   "chatDrawer": {
     "deploying": "에이전트 배포 중…",
@@ -4048,7 +4049,15 @@
       "action": "다시 켜기"
     },
     "managedAgentBadge": "오퍼레이터",
-    "managedAgentHint": "플랫폼 오퍼레이터 화면에서 생성하고 관리합니다. 여기서 편집하거나 삭제하면 그 화면이 동작하지 않습니다."
+    "managedAgentHint": "플랫폼 오퍼레이터 화면에서 생성하고 관리합니다. 여기서 편집하거나 삭제하면 그 화면이 동작하지 않습니다.",
+    "decisionLog": {
+      "approved": "이 요청을 승인했습니다",
+      "rejected": "이 요청을 거부했습니다",
+      "rePaused": "다시 일시 중지됨 — 추가 결정이 필요합니다",
+      "noReply": "응답 없이 턴이 종료되었습니다",
+      "partial_one": "승인됨 — 호출 {{count}}건 거부",
+      "partial_other": "승인됨 — 호출 {{count}}건 거부"
+    }
   },
   "groupWorkspace": {
     "addCadence": "케이던스 추가",

@@ -359,7 +359,11 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     await act(async () => {
       await result.current.resolveApproval("APPROVED");
     });
-    expect(result.current.messages.map((m) => m.content)).toEqual(["do a thing", "Part one.", "Part two."]);
+    // Conversation turns only — a decision also records a "system" entry now,
+    // which is a transcript fact rather than something anyone said.
+    expect(
+      result.current.messages.filter((m) => m.role !== "system").map((m) => m.content),
+    ).toEqual(["do a thing", "Part one.", "Part two."]);
 
     h.conversationLogs = [
       { conversationState: "READY", conversationOutputs: [textOutput("Final answer.")] },
@@ -368,11 +372,10 @@ describe("resolveApproval — reconciling the resumed turn", () => {
       await result.current.resolveApproval("APPROVED");
     });
 
-    expect(result.current.messages.map((m) => m.content)).toEqual([
-      "do a thing",
-      "Part one.",
-      "Final answer.",
-    ]);
+    // Conversation turns only — each decision also records a "system" entry.
+    expect(
+      result.current.messages.filter((m) => m.role !== "system").map((m) => m.content),
+    ).toEqual(["do a thing", "Part one.", "Final answer."]);
   });
 
   it("renders every part when the resumed step emits several outputs", async () => {
@@ -981,5 +984,130 @@ describe("ensureConversation concurrency", () => {
     });
 
     expect(useOperatorChatStore.getState().conversationId).toBeNull();
+  });
+});
+
+/**
+ * A decision must ALWAYS produce a visible continuation.
+ *
+ * Observed: the approver clicked Approve, the resumed turn came back with no
+ * output because it had paused again on the same tool, and NOTHING was added to
+ * the transcript — approving looked identical to nothing happening. The decision
+ * itself, and the reason there is no answer, are now recorded either way.
+ */
+describe("resolveApproval — every decision leaves a trace", () => {
+  async function pausedHook() {
+    h.frames = [
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          hitlPauseReason: "Approval required",
+          hitlPausedAt: "2026-08-01T10:00:00Z",
+          conversationOutputs: [textOutput("Waiting on a reviewer…")],
+        }),
+      },
+    ];
+    const rendered = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await rendered.result.current.send("do a thing");
+    });
+    expect(rendered.result.current.isPaused).toBe(true);
+    return rendered;
+  }
+
+  it("records the approval even when the resumed turn returns no text", async () => {
+    const { result } = await pausedHook();
+    h.conversationLogs = [{ conversationState: "READY", conversationOutputs: [] }];
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    const system = result.current.messages.filter((m) => m.role === "system");
+    expect(system.map((m) => m.code)).toEqual(["approved", "noReply"]);
+  });
+
+  it("says the turn paused again rather than going silent", async () => {
+    const { result } = await pausedHook();
+    h.conversationLogs = [
+      {
+        conversationState: "AWAITING_HUMAN",
+        hitlPausedAt: "2026-08-01T10:05:00Z",
+        hitlPauseReason: "Another batch needs approval",
+        conversationOutputs: [],
+      },
+    ];
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    const codes = result.current.messages.filter((m) => m.role === "system").map((m) => m.code);
+    expect(codes).toEqual(["approved", "rePaused"]);
+    expect(result.current.isPaused).toBe(true);
+  });
+
+  it("records a rejection too", async () => {
+    const { result } = await pausedHook();
+    h.conversationLogs = [{ conversationState: "READY", conversationOutputs: [textOutput("Stopped.")] }];
+
+    await act(async () => {
+      await result.current.resolveApproval("REJECTED");
+    });
+
+    const system = result.current.messages.filter((m) => m.role === "system");
+    expect(system).toHaveLength(1);
+    expect(system[0]!.code).toBe("rejected");
+  });
+
+  // The banner submits "approve these, not that one" as a top-level APPROVED
+  // carrying per-call REJECTEDs. Recording that as a flat "approved" would put a
+  // claim in the permanent transcript the approver never made.
+  it("calls a partly-rejected batch partial, not approved", async () => {
+    const { result } = await pausedHook();
+    h.conversationLogs = [{ conversationState: "READY", conversationOutputs: [textOutput("Did the rest.")] }];
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED", undefined, {
+        "call-1": { verdict: "APPROVED" },
+        "call-2": { verdict: "REJECTED" },
+        "call-3": { verdict: "REJECTED" },
+      });
+    });
+
+    const system = result.current.messages.filter((m) => m.role === "system");
+    expect(system).toHaveLength(1);
+    expect(system[0]!.code).toBe("partial");
+    expect(system[0]!.count).toBe(2);
+  });
+
+  it("stays 'approved' when the per-call map only amends, rejecting nothing", async () => {
+    const { result } = await pausedHook();
+    h.conversationLogs = [{ conversationState: "READY", conversationOutputs: [textOutput("Done.")] }];
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED", undefined, {
+        "call-1": { verdict: "APPROVED", amendedArguments: '{"n":1}' },
+      });
+    });
+
+    const system = result.current.messages.filter((m) => m.role === "system");
+    expect(system[0]!.code).toBe("approved");
+    // No count on a non-partial entry: it is the plural argument for exactly one key.
+    expect(system[0]!.count).toBeUndefined();
+  });
+
+  it("adds no outcome notice when there IS an answer — the answer is the continuation", async () => {
+    const { result } = await pausedHook();
+    h.conversationLogs = [{ conversationState: "READY", conversationOutputs: [textOutput("Created it.")] }];
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    const codes = result.current.messages.filter((m) => m.role === "system").map((m) => m.code);
+    expect(codes).toEqual(["approved"]);
+    expect(result.current.messages.some((m) => m.content === "Created it.")).toBe(true);
   });
 });

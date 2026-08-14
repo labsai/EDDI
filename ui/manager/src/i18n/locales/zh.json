@@ -3152,7 +3152,8 @@
     "confirmRejectToolDescription": "不会运行任何内容。对话将继续，智能体会在不使用 {{toolNames}} 的情况下作答。",
     "humanTurn": "成员发言",
     "humanTurnReason": "正在等待 {{member}} 发言",
-    "humanTurnMemberFallback": "某位成员"
+    "humanTurnMemberFallback": "某位成员",
+    "decidedProgress": "已决定 {{decided}}/{{total}}"
   },
   "chatDrawer": {
     "deploying": "正在部署智能体…",
@@ -4048,7 +4049,15 @@
       "action": "重新开启"
     },
     "managedAgentBadge": "操作员",
-    "managedAgentHint": "由平台操作员页面创建并管理。在此编辑或删除会导致该页面失效。"
+    "managedAgentHint": "由平台操作员页面创建并管理。在此编辑或删除会导致该页面失效。",
+    "decisionLog": {
+      "approved": "您已批准此请求",
+      "rejected": "您已拒绝此请求",
+      "rePaused": "再次暂停 — 需要另一个决定",
+      "noReply": "本轮结束但没有回复",
+      "partial_one": "已批准 — 拒绝了 {{count}} 个调用",
+      "partial_other": "已批准 — 拒绝了 {{count}} 个调用"
+    }
   },
   "groupWorkspace": {
     "addCadence": "添加节奏",

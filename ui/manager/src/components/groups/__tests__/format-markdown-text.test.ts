@@ -290,3 +290,37 @@ describe("formatMarkdownText", () => {
     expect(out).not.toContain(String.fromCharCode(0xe000));
   });
 });
+
+/**
+ * The repair must never corrupt emphasis that was already correct. The three
+ * regex passes it replaced could not tell an opener from a closer, so on a line
+ * with two bold spans they matched from the CLOSER of the first to the OPENER of
+ * the second and "fixed" whitespace that was never inside emphasis.
+ */
+describe("pairing awareness", () => {
+  it("leaves a second, already-correct bold span alone", () => {
+    // Observed: "…dead-lettered. **Quotas**: quota is currently** disabled**…"
+    const input = "0 dead-lettered.**Quotas**: quota is currently **disabled** for";
+    expect(formatMarkdownText(input)).toBe(
+      "0 dead-lettered. **Quotas**: quota is currently **disabled** for",
+    );
+  });
+
+  it("does not treat a closer as an opener across two spans", () => {
+    expect(formatMarkdownText("a.**B**: c **d** e")).toBe("a. **B**: c **d** e");
+  });
+
+  it("still repairs the span that genuinely needs it when another follows", () => {
+    expect(formatMarkdownText("**first ** and **second** end")).toBe("**first** and **second** end");
+  });
+
+  it("leaves an unpaired trailing delimiter's text untouched", () => {
+    expect(formatMarkdownText("**bold** then a stray ** and more text")).toBe(
+      "**bold** then a stray ** and more text",
+    );
+  });
+
+  it("ignores an empty span rather than inventing a pair around nothing", () => {
+    expect(formatMarkdownText("a **** b")).toBe("a **** b");
+  });
+});

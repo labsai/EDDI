@@ -83,6 +83,7 @@ export function ChatDrawer() {
   const isThinking = useChatStore((s) => s.isThinking);
   const currentTurnEvents = useDebugStore((s) => s.currentTurnEvents);
   const liveToolCalls = useDebugStore((s) => s.liveToolCalls);
+  const liveToolsSettled = useDebugStore((s) => s.liveToolsSettled);
 
   const startConversation = useStartConversation();
 
@@ -249,6 +250,7 @@ export function ChatDrawer() {
                           isLive
                           showInternalSteps={false}
                           liveToolCalls={liveToolCalls}
+                    liveToolsSettled={liveToolsSettled}
                         />
                       ) : isThinking ? (
                         <div className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground animate-pulse">

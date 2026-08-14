@@ -3192,7 +3192,8 @@
     "confirmRejectToolDescription": "Nothing will run. The conversation continues and the agent answers without {{toolNames}}.",
     "humanTurn": "Member's turn",
     "humanTurnReason": "Waiting on {{member}} to speak",
-    "humanTurnMemberFallback": "a member"
+    "humanTurnMemberFallback": "a member",
+    "decidedProgress": "{{decided}} of {{total}} decided"
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",
@@ -4048,7 +4049,15 @@
       "action": "Turn back on"
     },
     "managedAgentBadge": "Operator",
-    "managedAgentHint": "Provisioned and managed by the Platform Operator screen. Editing or deleting it here will break that screen."
+    "managedAgentHint": "Provisioned and managed by the Platform Operator screen. Editing or deleting it here will break that screen.",
+    "decisionLog": {
+      "approved": "You approved this request",
+      "rejected": "You rejected this request",
+      "rePaused": "Paused again — another decision is needed",
+      "noReply": "The turn finished without a reply",
+      "partial_one": "You approved this request — {{count}} call rejected",
+      "partial_other": "You approved this request — {{count}} calls rejected"
+    }
   },
   "groupWorkspace": {
     "taskAdded": "Task added to the backlog",

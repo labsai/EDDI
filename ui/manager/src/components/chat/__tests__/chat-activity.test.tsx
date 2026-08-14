@@ -591,4 +591,42 @@ describe("ChatActivity — live tool_call events", () => {
     expect(pill).not.toHaveAttribute("aria-expanded");
     expect(screen.queryByTestId("chat-activity-live-list")).not.toBeInTheDocument();
   });
+
+  /**
+   * There is no live per-call completion event — the result only reaches the
+   * client in the turn-end toolTrace — so the newest call was rendered as
+   * running forever, still spinning under an answer that had already arrived.
+   * Output resuming after a tool call IS the completion signal.
+   */
+  it("stops spinning the last call once output resumed, and says Thinking again", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ChatActivity
+        events={[]}
+        isLive={true}
+        liveToolCalls={["readAgentDescriptors", "readGroups"]}
+        liveToolsSettled
+      />,
+    );
+
+    // The header stops claiming a tool is in use.
+    expect(screen.queryByText(/Using readGroups/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Thinking/)).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("chat-activity-live-status"));
+    const list = screen.getByTestId("chat-activity-live-list");
+    // Every row is complete — no spinner survives under a finished answer.
+    expect(list.querySelectorAll(".animate-spin")).toHaveLength(0);
+  });
+
+  it("still spins the newest call while the tools are actually running", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ChatActivity events={[]} isLive={true} liveToolCalls={["readGroups"]} liveToolsSettled={false} />,
+    );
+
+    expect(screen.getByText(/readGroups/)).toBeInTheDocument();
+    await user.click(screen.getByTestId("chat-activity-live-status"));
+    expect(screen.getByTestId("chat-activity-live-list").querySelectorAll(".animate-spin")).toHaveLength(1);
+  });
 });

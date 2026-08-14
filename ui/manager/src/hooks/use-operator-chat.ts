@@ -40,6 +40,8 @@ export interface OperatorChatState {
    * task_complete's toolTrace, and merging both would double-count.
    */
   liveToolCalls: string[];
+  /** True once tokens resumed after the last tool_call — the tool phase is over. */
+  liveToolsSettled: boolean;
   /**
    * Completed turns' traces, keyed by the agent message they belong to.
    *
@@ -281,6 +283,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
   messages: [],
   events: [],
   liveToolCalls: [],
+  liveToolsSettled: false,
   tracesByMessageId: {},
   isStreaming: false,
   error: null,
@@ -315,6 +318,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       messages: [],
       events: [],
       liveToolCalls: [],
+      liveToolsSettled: false,
       tracesByMessageId: {},
       isStreaming: false,
       error: null,
@@ -431,6 +435,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       messages: [...s.messages, userMessage, agentPlaceholder],
       events: [],
       liveToolCalls: [],
+      liveToolsSettled: false,
       isStreaming: true,
       error: null,
     }));
@@ -468,6 +473,10 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
         if (event.type === "token") {
           set((s) => ({
             ...s,
+            // Output resuming IS the tool-finished signal — there is no live
+            // per-call completion event, so without this the newest tool spun
+            // forever under an answer that had already arrived.
+            liveToolsSettled: s.liveToolCalls.length > 0 ? true : s.liveToolsSettled,
             messages: s.messages.map((m) =>
               m.id === agentId ? { ...m, content: m.content + event.data } : m,
             ),
@@ -585,7 +594,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
             const parsed: { tool?: unknown } = JSON.parse(event.data);
             if (typeof parsed.tool === "string" && parsed.tool) {
               const tool = parsed.tool;
-              set((s) => ({ ...s, liveToolCalls: [...s.liveToolCalls, tool] }));
+              set((s) => ({ ...s, liveToolCalls: [...s.liveToolCalls, tool], liveToolsSettled: false }));
             }
           } catch {
             // Malformed payload — the status line just keeps its last state.
@@ -732,6 +741,50 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
         timestamp: Date.now(),
       }));
 
+      // A decision must ALWAYS leave a visible trace. Approving used to be
+      // indistinguishable from nothing happening when the resumed turn produced
+      // no text — it had paused again on the same tool, and the transcript said
+      // nothing at all. The record goes in regardless of what came back.
+      //
+      // A top-level APPROVED can still carry per-call REJECTEDs — that is how the
+      // banner submits "approve these, not that one" (a top-level REJECTED is
+      // all-or-nothing and carries no map). Recording it as a flat "approved"
+      // would put a claim in the permanent transcript the approver never made,
+      // so the rejected calls are counted and named.
+      const rejectedCalls = toolDecisions
+        ? Object.values(toolDecisions).filter((d) => d.verdict === "REJECTED").length
+        : 0;
+      const decisionCode =
+        verdict !== "APPROVED" ? "rejected" : rejectedCalls > 0 ? "partial" : "approved";
+      const decisionEntry: ChatMessage = {
+        id: nextId("agent"),
+        role: "system",
+        kind: "decision",
+        code: decisionCode,
+        ...(decisionCode === "partial" ? { count: rejectedCalls } : {}),
+        content:
+          decisionCode === "approved"
+            ? "You approved this request."
+            : decisionCode === "partial"
+              ? `You approved this request — ${rejectedCalls} call(s) rejected.`
+              : "You rejected this request.",
+        timestamp: Date.now(),
+      };
+      // ...and when there is no answer to show, say WHY rather than leaving the
+      // approver staring at an unchanged screen.
+      const silentOutcome: ChatMessage | null = parts.length > 0
+        ? null
+        : {
+            id: nextId("agent"),
+            role: "system",
+            kind: "notice",
+            code: rePaused ? "rePaused" : "noReply",
+            content: rePaused
+              ? "The turn paused again and needs another decision."
+              : "The turn finished without a reply.",
+            timestamp: Date.now(),
+          };
+
       set((s) => {
         const settled = {
           isPaused: rePaused,
@@ -739,8 +792,16 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           isResolvingPause: false,
           decidedPausedAt: rePaused ? (snapshot.hitlPausedAt ?? null) : null,
         };
+        const trail = silentOutcome ? [decisionEntry, silentOutcome] : [decisionEntry];
         if (newBubbles.length === 0) {
-          return { ...s, ...settled, pausedPlaceholderId: null };
+          // The formerly silent path: the decision and its outcome are still
+          // recorded, so the approver always sees that something happened.
+          return {
+            ...s,
+            ...settled,
+            messages: [...s.messages, ...trail],
+            pausedPlaceholderId: null,
+          };
         }
         // Read from `s`, never from an outer closure: `messages` here must be
         // this exact update's starting point, not whatever render happened to
@@ -758,6 +819,8 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           // paused) stays attached to the answer it belongs to.
           messages = [
             ...s.messages.slice(0, placeholderIdx),
+            // The decision reads before the answer it produced.
+            decisionEntry,
             { ...s.messages[placeholderIdx]!, content: first!.content, isStreaming: false },
             ...rest,
             ...s.messages.slice(placeholderIdx + 1),
@@ -768,7 +831,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           // rather than overwriting its opening and stranding the remainder.
           renderedId = rest.length > 0 ? rest[rest.length - 1]!.id : placeholderId!;
         } else {
-          messages = [...s.messages, ...newBubbles];
+          messages = [...s.messages, decisionEntry, ...newBubbles];
           renderedId = newBubbles[newBubbles.length - 1]!.id;
         }
         return {
@@ -799,6 +862,7 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
   const messages = useOperatorChatStore((s) => s.messages);
   const events = useOperatorChatStore((s) => s.events);
   const liveToolCalls = useOperatorChatStore((s) => s.liveToolCalls);
+  const liveToolsSettled = useOperatorChatStore((s) => s.liveToolsSettled);
   const tracesByMessageId = useOperatorChatStore((s) => s.tracesByMessageId);
   const isStreaming = useOperatorChatStore((s) => s.isStreaming);
   const error = useOperatorChatStore((s) => s.error);
@@ -832,6 +896,7 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
     messages,
     events,
     liveToolCalls,
+    liveToolsSettled,
     tracesByMessageId,
     isStreaming,
     error,

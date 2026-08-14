@@ -124,7 +124,10 @@ export function DashboardPage() {
   const visibleStatCards = statCards.filter((s) => s.to !== "/manage/resources" || s.value > 0);
 
   return (
-    <div className="space-y-8">
+    // pb-8: the last section (Recent agents) otherwise ends flush against the
+    // scroll edge, so the final row of cards reads as cut off rather than
+    // finished — `main`'s own padding sits outside the scrolling area.
+    <div className="space-y-8 pb-8">
       {/* Page header */}
       <div>
         <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">

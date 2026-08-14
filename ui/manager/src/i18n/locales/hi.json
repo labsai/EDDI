@@ -3152,7 +3152,8 @@
     "confirmRejectToolDescription": "कुछ भी नहीं चलेगा। बातचीत जारी रहेगी और एजेंट {{toolNames}} के बिना उत्तर देगा।",
     "humanTurn": "सदस्य की बारी",
     "humanTurnReason": "{{member}} के बोलने की प्रतीक्षा",
-    "humanTurnMemberFallback": "एक सदस्य"
+    "humanTurnMemberFallback": "एक सदस्य",
+    "decidedProgress": "{{total}} में से {{decided}} तय"
   },
   "chatDrawer": {
     "deploying": "एजेंट Deploy हो रहा है…",
@@ -4048,7 +4049,15 @@
       "action": "फिर से चालू करें"
     },
     "managedAgentBadge": "ऑपरेटर",
-    "managedAgentHint": "प्लेटफ़ॉर्म ऑपरेटर स्क्रीन द्वारा बनाया और प्रबंधित। यहाँ इसे संपादित या हटाने पर वह स्क्रीन टूट जाएगी।"
+    "managedAgentHint": "प्लेटफ़ॉर्म ऑपरेटर स्क्रीन द्वारा बनाया और प्रबंधित। यहाँ इसे संपादित या हटाने पर वह स्क्रीन टूट जाएगी।",
+    "decisionLog": {
+      "approved": "आपने यह अनुरोध स्वीकृत किया",
+      "rejected": "आपने यह अनुरोध अस्वीकार किया",
+      "rePaused": "फिर से रुका — एक और निर्णय आवश्यक है",
+      "noReply": "यह चरण बिना उत्तर के समाप्त हुआ",
+      "partial_one": "स्वीकृत — {{count}} कॉल अस्वीकार",
+      "partial_other": "स्वीकृत — {{count}} कॉल अस्वीकार"
+    }
   },
   "groupWorkspace": {
     "addCadence": "कैडेंस जोड़ें",

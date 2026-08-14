@@ -3152,7 +3152,8 @@
     "confirmRejectToolDescription": "何も実行されません。会話は続行され、エージェントは {{toolNames}} を使わずに回答します。",
     "humanTurn": "メンバーの番",
     "humanTurnReason": "{{member}} の発言を待っています",
-    "humanTurnMemberFallback": "あるメンバー"
+    "humanTurnMemberFallback": "あるメンバー",
+    "decidedProgress": "{{total}} 件中 {{decided}} 件を判断済み"
   },
   "chatDrawer": {
     "deploying": "エージェントをデプロイ中…",
@@ -4048,7 +4049,15 @@
       "action": "再開する"
     },
     "managedAgentBadge": "オペレーター",
-    "managedAgentHint": "プラットフォームオペレーター画面が作成・管理しています。ここで編集または削除すると、その画面が壊れます。"
+    "managedAgentHint": "プラットフォームオペレーター画面が作成・管理しています。ここで編集または削除すると、その画面が壊れます。",
+    "decisionLog": {
+      "approved": "このリクエストを承認しました",
+      "rejected": "このリクエストを拒否しました",
+      "rePaused": "再び一時停止しました — さらに判断が必要です",
+      "noReply": "応答がないままターンが終了しました",
+      "partial_one": "承認しました — {{count}} 件の呼び出しを拒否",
+      "partial_other": "承認しました — {{count}} 件の呼び出しを拒否"
+    }
   },
   "groupWorkspace": {
     "addCadence": "ケイデンスを追加",

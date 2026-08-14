@@ -447,6 +447,31 @@ describe("ApprovalBanner", () => {
       });
     });
 
+    // Approve being withheld is only fair if the approver can see WHY. Without
+    // these two markers the per-call buttons read as decoration and a disabled
+    // Approve reads as a broken button.
+    it("counts down what is left to decide, and marks the calls that are", () => {
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} requireExplicitPerCall />,
+      );
+      expect(screen.getByTestId("per-call-progress")).toHaveTextContent("0 of 2 decided");
+      expect(screen.getByTestId("tool-call-c1")).toHaveAttribute("data-awaiting", "true");
+
+      fireEvent.click(screen.getByTestId("tool-reject-c1"));
+      expect(screen.getByTestId("per-call-progress")).toHaveTextContent("1 of 2 decided");
+      // A rejection is a decision: the row stops asking for one.
+      expect(screen.getByTestId("tool-call-c1")).not.toHaveAttribute("data-awaiting");
+      expect(screen.getByTestId("tool-call-c2")).toHaveAttribute("data-awaiting", "true");
+    });
+
+    it("shows no progress badge when per-call review is not required", () => {
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} />,
+      );
+      expect(screen.queryByTestId("per-call-progress")).not.toBeInTheDocument();
+      expect(screen.getByTestId("tool-call-c1")).not.toHaveAttribute("data-awaiting");
+    });
+
     it("un-reviewing a call (toggling it back off) re-disables Approve", () => {
       renderWithProviders(
         <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} requireExplicitPerCall />,

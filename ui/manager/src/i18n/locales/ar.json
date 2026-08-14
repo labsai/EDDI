@@ -3264,7 +3264,8 @@
     "confirmRejectToolDescription": "لن يُنفَّذ أي شيء. تستمر المحادثة ويجيب الوكيل دون {{toolNames}}.",
     "humanTurn": "دور العضو",
     "humanTurnReason": "في انتظار أن يتحدث {{member}}",
-    "humanTurnMemberFallback": "أحد الأعضاء"
+    "humanTurnMemberFallback": "أحد الأعضاء",
+    "decidedProgress": "تم البت في {{decided}} من {{total}}"
   },
   "chatDrawer": {
     "deploying": "جارٍ نشر الوكيل…",
@@ -4168,7 +4169,19 @@
       "action": "إعادة التشغيل"
     },
     "managedAgentBadge": "المُشغّل",
-    "managedAgentHint": "يُنشأ ويُدار من شاشة مُشغّل المنصة. تعديله أو حذفه من هنا سيُعطّل تلك الشاشة."
+    "managedAgentHint": "يُنشأ ويُدار من شاشة مُشغّل المنصة. تعديله أو حذفه من هنا سيُعطّل تلك الشاشة.",
+    "decisionLog": {
+      "approved": "لقد وافقت على هذا الطلب",
+      "rejected": "لقد رفضت هذا الطلب",
+      "rePaused": "تم الإيقاف مؤقتًا مرة أخرى — يلزم قرار آخر",
+      "noReply": "انتهت الجولة دون رد",
+      "partial_one": "تمت الموافقة — تم رفض استدعاء واحد",
+      "partial_other": "تمت الموافقة — تم رفض {{count}} استدعاءات",
+      "partial_zero": "تمت الموافقة — تم رفض {{count}} استدعاءات",
+      "partial_two": "تمت الموافقة — تم رفض {{count}} استدعاءات",
+      "partial_few": "تمت الموافقة — تم رفض {{count}} استدعاءات",
+      "partial_many": "تمت الموافقة — تم رفض {{count}} استدعاءات"
+    }
   },
   "groupWorkspace": {
     "addCadence": "إضافة وتيرة",

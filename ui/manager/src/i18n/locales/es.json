@@ -3180,7 +3180,8 @@
     "confirmRejectToolDescription": "No se ejecutará nada. La conversación continúa y el agente responde sin {{toolNames}}.",
     "humanTurn": "Turno del miembro",
     "humanTurnReason": "Esperando a que {{member}} hable",
-    "humanTurnMemberFallback": "un miembro"
+    "humanTurnMemberFallback": "un miembro",
+    "decidedProgress": "{{decided}} de {{total}} decididas"
   },
   "chatDrawer": {
     "deploying": "Desplegando agente…",
@@ -4078,7 +4079,16 @@
       "action": "Volver a activar"
     },
     "managedAgentBadge": "Operador",
-    "managedAgentHint": "Aprovisionado y gestionado por la pantalla del operador de plataforma. Editarlo o eliminarlo aquí romperá esa pantalla."
+    "managedAgentHint": "Aprovisionado y gestionado por la pantalla del operador de plataforma. Editarlo o eliminarlo aquí romperá esa pantalla.",
+    "decisionLog": {
+      "approved": "Has aprobado esta solicitud",
+      "rejected": "Has rechazado esta solicitud",
+      "rePaused": "En pausa de nuevo: se necesita otra decisión",
+      "noReply": "El turno terminó sin respuesta",
+      "partial_one": "Aprobada — {{count}} llamada rechazada",
+      "partial_other": "Aprobada — {{count}} llamadas rechazadas",
+      "partial_many": "Aprobada — {{count}} llamadas rechazadas"
+    }
   },
   "groupWorkspace": {
     "addCadence": "Añadir cadencia",

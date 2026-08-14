@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatMarkdownText } from "@/components/groups/group-utils";
-import { Send, Square, RotateCcw, AlertTriangle, ArrowDown, Bot, User, PauseCircle, Loader2, Paperclip } from "lucide-react";
+import { Send, Square, RotateCcw, AlertTriangle, ArrowDown, Bot, User, PauseCircle, Loader2, Paperclip, CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatActivity } from "@/components/chat/chat-activity";
 import { InputHint } from "@/components/chat/input-hint";
@@ -30,6 +30,8 @@ export interface OperatorChatProps {
   events: PipelineEvent[];
   /** Live tool_call names for the turn in flight — drives "Using {tool}…". */
   liveToolCalls?: string[];
+  /** True once the model resumed writing after its last tool call. */
+  liveToolsSettled?: boolean;
   /** Completed turns' traces, keyed by the agent message they belong to. */
   tracesByMessageId: Record<string, PipelineEvent[]>;
   isStreaming: boolean;
@@ -108,6 +110,7 @@ export function OperatorChat({
   messages,
   events,
   liveToolCalls,
+  liveToolsSettled,
   tracesByMessageId,
   isStreaming,
   error,
@@ -231,6 +234,46 @@ export function OperatorChat({
         )}
 
         {messages.map((message) => (
+          message.kind ? (
+            // A recorded decision or an outcome notice — a transcript fact, not
+            // an agent reply, so it renders as a centred rule rather than a
+            // bubble. Its presence is the point: every decision leaves a trace,
+            // even when the resumed turn came back with nothing to show.
+            <div
+              key={message.id}
+              className="flex items-center gap-2 px-4 py-1 text-[11px] text-muted-foreground"
+              data-testid={`operator-decision-${message.code}`}
+            >
+              <span className="h-px flex-1 bg-border/60" />
+              {message.kind === "decision" ? (
+                message.code === "rejected" ? (
+                  <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />
+                ) : (
+                  // "partial" is still an approval — amber because part of the
+                  // batch deliberately did not go through.
+                  <CheckCircle2
+                    className={cn(
+                      "h-3.5 w-3.5 shrink-0",
+                      message.code === "partial" ? "text-amber-500" : "text-emerald-500",
+                    )}
+                    aria-hidden="true"
+                  />
+                )
+              ) : (
+                <PauseCircle className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden="true" />
+              )}
+              <span className="shrink-0">
+                {/* `count` goes ONLY to "partial", the one pluralized key. Handing
+                    i18next a count on the others sends it looking for
+                    `approved_other` and it lands on the base key by fallback
+                    rather than by design. */}
+                {message.code === "partial"
+                  ? t("operator.decisionLog.partial", message.content, { count: message.count ?? 0 })
+                  : t(`operator.decisionLog.${message.code}`, message.content)}
+              </span>
+              <span className="h-px flex-1 bg-border/60" />
+            </div>
+          ) : (
           <div key={message.id} className="space-y-2">
           <div
             className={cn(
@@ -286,9 +329,11 @@ export function OperatorChat({
               isLive={Boolean(message.isStreaming) && isStreaming}
               showInternalSteps={false}
               liveToolCalls={message.isStreaming ? liveToolCalls : undefined}
+              liveToolsSettled={liveToolsSettled}
             />
           ) : null}
           </div>
+          )
         ))}
 
         {error && (
