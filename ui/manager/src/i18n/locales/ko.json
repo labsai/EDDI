@@ -695,6 +695,7 @@
       "toolResult": "결과",
       "error": "오류가 발생했습니다",
       "toolCallsCount_one": "도구 호출 {{count}}건",
+      "stepsCount": "{{count}}단계", "stepsCount_one": "{{count}}단계", "stepsCount_other": "{{count}}단계",
       "toolCallsCount_other": "도구 호출 {{count}}건",
       "toolCallsCount": "도구 호출 {{count}}건",
       "usingTool": "{{tool}} 사용 중…"
@@ -3937,7 +3938,10 @@
       "verifying-gate": "승인 게이트를 확인하는 중…",
       "done": "완료",
       "canary": "오퍼레이터가 플랫폼에 접근할 수 있는지 확인하는 중…",
-      "write-canary": "실제 테스트 쓰기를 실행 중입니다. 승인을 기다려야 합니다…"
+      "write-canary": "실제 테스트 쓰기를 실행 중입니다. 승인을 기다려야 합니다…",
+      "longWait1": "두 연결 검사가 병렬로 실행 중입니다 — 가장 오래 걸리는 단계입니다…",
+      "longWait2": "새 오퍼레이터와 실제 대화를 실행 중 — 모델이 생각하고 있습니다…",
+      "longWait3": "계속 진행 중 — 느린 제공업체에서는 최대 1분이 걸릴 수 있습니다…"
     },
     "status": {
       "title": "오퍼레이터",

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Loader2, Sparkles, ShieldCheck, ShieldAlert, Lock, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -64,6 +64,29 @@ export function OperatorActivation({
   const vaultDown = vaultHealth != null && vaultHealth.available === false;
   const oidcEnabled = method === "keycloak";
   const busy = stage !== "idle" && stage !== "done";
+
+  // The canary stages are the LONG wait (each drives a real LLM conversation;
+  // they run in parallel but still dominate activation time). A static phrase
+  // there reads as frozen — rotate through wait phrases every few seconds so
+  // the indicator keeps visibly moving.
+  const isLongStage = stage === "canary" || stage === "write-canary";
+  const [waitTick, setWaitTick] = useState(0);
+  useEffect(() => {
+    setWaitTick(0);
+    if (!isLongStage) return;
+    const id = setInterval(() => setWaitTick((n) => n + 1), 5000);
+    return () => clearInterval(id);
+  }, [stage, isLongStage]);
+  const stageLabel = useMemo(() => {
+    const base = t(`operator.stage.${stage}`);
+    if (!isLongStage || waitTick === 0) return base;
+    const extras = [
+      t("operator.stage.longWait1", "Both connection checks run in parallel — this is the longest step…"),
+      t("operator.stage.longWait2", "A real conversation is being run against the new operator — the model is thinking…"),
+      t("operator.stage.longWait3", "Still working — this can take up to a minute on slower providers…"),
+    ];
+    return extras[(waitTick - 1) % extras.length]!;
+  }, [stage, isLongStage, waitTick, t]);
 
   /**
    * Whether `read_write` can be offered at all — false only while the write
@@ -360,7 +383,7 @@ export function OperatorActivation({
                 aria-live="polite"
               >
                 <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                {t(`operator.stage.${stage}`)}
+                {stageLabel}
               </div>
             )}
 

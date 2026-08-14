@@ -703,6 +703,7 @@
       "toolResult": "Résultat",
       "error": "Une erreur s'est produite",
       "toolCallsCount_one": "{{count}} appel d'outil",
+      "stepsCount": "{{count}} étapes", "stepsCount_one": "{{count}} étape", "stepsCount_many": "{{count}} étapes", "stepsCount_other": "{{count}} étapes",
       "toolCallsCount_many": "{{count}} appels d'outils",
       "toolCallsCount_other": "{{count}} appels d'outils",
       "toolCallsCount": "{{count}} appels d'outils",
@@ -3966,7 +3967,10 @@
       "verifying-gate": "Vérification de la barrière d'approbation…",
       "done": "Terminé",
       "canary": "Vérification que l'opérateur atteint votre plateforme…",
-      "write-canary": "Exécution d'une écriture de test réelle, qui doit attendre votre approbation…"
+      "write-canary": "Exécution d'une écriture de test réelle, qui doit attendre votre approbation…",
+      "longWait1": "Les deux vérifications de connexion s'exécutent en parallèle — c'est l'étape la plus longue…",
+      "longWait2": "Une vraie conversation est en cours avec le nouvel opérateur — le modèle réfléchit…",
+      "longWait3": "Toujours en cours — cela peut prendre jusqu'à une minute selon le fournisseur…"
     },
     "status": {
       "title": "Opérateur",

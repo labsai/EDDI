@@ -695,6 +695,7 @@
       "toolResult": "Ergebnis",
       "error": "Fehler aufgetreten",
       "toolCallsCount_one": "{{count}} Tool-Aufruf",
+      "stepsCount": "{{count}} Schritte", "stepsCount_one": "{{count}} Schritt", "stepsCount_other": "{{count}} Schritte",
       "toolCallsCount_other": "{{count}} Tool-Aufrufe",
       "toolCallsCount": "{{count}} Tool-Aufrufe",
       "usingTool": "Verwendet {{tool}} …"
@@ -3937,7 +3938,10 @@
       "verifying-gate": "Die Freigabesperre wird überprüft…",
       "done": "Fertig",
       "canary": "Es wird geprüft, ob der Operator Ihre Plattform erreicht …",
-      "write-canary": "Ein echter Testschreibvorgang wird ausgeführt, der auf Ihre Genehmigung wartet…"
+      "write-canary": "Ein echter Testschreibvorgang wird ausgeführt, der auf Ihre Genehmigung wartet…",
+      "longWait1": "Beide Verbindungsprüfungen laufen parallel — dies ist der längste Schritt…",
+      "longWait2": "Gegen den neuen Operator läuft eine echte Konversation — das Modell denkt nach…",
+      "longWait3": "Läuft noch — bei langsameren Anbietern kann das bis zu einer Minute dauern…"
     },
     "status": {
       "title": "Operator",

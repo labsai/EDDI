@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import {
   buildCascadeSteps,
+  isInternalTask,
   type PipelineEvent,
   type ToolTraceEntry,
 } from "@/hooks/use-debug-events";
@@ -118,38 +119,6 @@ function buildTaskSummaries(events: PipelineEvent[]): TaskSummary[] {
   return tasks;
 }
 
-/**
- * Workflow steps that are plumbing, not activity. Filtered out of end-user chat
- * unless the step made a tool call or failed (see `tasks` below).
- *
- * `httpcalls` belongs here and was missing — which is why the Platform Operator
- * rendered "45 steps" for a plain greeting. An OpenAPI-provisioned agent gets
- * one httpcalls workflow step per endpoint group, so its pipeline is dozens of
- * identical unnamed rows deep before the model does anything; ordinary agents
- * have one or two, which is how the gap went unnoticed. Nothing is lost by
- * filtering them: the model's actual calls surface via the langchain task's
- * toolTrace, and an httpcalls step that errors is still shown by the hasError
- * branch.
- */
-const INTERNAL_INFRA_TASKS = new Set([
-  "expressions",
-  "behavior_rules",
-  "langchain",
-  "dictionary",
-  "propertysetter",
-  "parser",
-  "output",
-  "httpcalls",
-  "ai.labs.expressions",
-  "ai.labs.behavior_rules",
-  "ai.labs.langchain",
-  "ai.labs.dictionary",
-  "ai.labs.propertysetter",
-  "ai.labs.parser",
-  "ai.labs.output",
-  "ai.labs.httpcalls",
-]);
-
 interface ChatActivityProps {
   events: PipelineEvent[];
   isLive: boolean;
@@ -185,7 +154,10 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
     return rawTasks.filter((task) => {
       const hasTools = task.toolTrace?.some((e) => e.type === "tool_call");
       const hasError = task.status === "error";
-      const isInternal = INTERNAL_INFRA_TASKS.has(task.taskType);
+      // Case-INSENSITIVE: the runtime emits camelCase ids ("httpCalls") while
+      // this set is lowercase — an exact has() silently filtered nothing in
+      // production while lowercase-mocked tests stayed green.
+      const isInternal = isInternalTask(task.taskType);
       return !isInternal || hasTools || hasError;
     });
   }, [rawTasks, showInternalSteps]);
@@ -239,7 +211,9 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
   if (!showInternalSteps && isLive && !hasErrorTask && cascadeSteps.length === 0) {
     return (
       <div className="flex justify-center px-4 py-1" data-testid="chat-activity">
-        <div className="w-full max-w-[85%] rounded-xl border border-primary/30 bg-primary/5">
+        {/* w-fit: a one-word status stretched to 85% of the chat reads as a
+            banner, not a status line. */}
+        <div className="w-fit max-w-[85%] rounded-full border border-primary/30 bg-primary/5">
           <div className="flex items-center gap-2 px-3 py-2 text-xs" data-testid="chat-activity-live-status">
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
             <span className="font-medium text-primary">
@@ -300,7 +274,7 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
             ) : (
               <span>
                 <span className="font-medium text-foreground">
-                  {tasks.length} {t("chat.activity.steps", "steps")}
+                  {t("chat.activity.stepsCount", "{{count}} steps", { count: tasks.length })}
                 </span>
                 <span className="mx-1.5 text-border">·</span>
                 <span className="font-mono">{formatDuration(totalDuration)}</span>
@@ -308,7 +282,7 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
                   <>
                     <span className="mx-1.5 text-border">·</span>
                     <span>
-                      {toolCallCount} {t("chat.activity.toolCalls", "tool calls")}
+                      {t("chat.activity.toolCallsCount", "{{count}} tool calls", { count: toolCallCount })}
                     </span>
                   </>
                 )}

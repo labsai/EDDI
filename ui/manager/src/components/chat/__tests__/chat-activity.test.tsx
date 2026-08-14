@@ -105,7 +105,7 @@ describe("ChatActivity", () => {
 
     expect(screen.getByText(/\b2 steps/)).toBeInTheDocument();
     expect(screen.getByText("1.0s")).toBeInTheDocument(); // 150ms + 850ms = 1000ms = 1.0s
-    expect(screen.getByText(/1 tool calls/)).toBeInTheDocument();
+    expect(screen.getByText(/1 tool call\b/)).toBeInTheDocument();
   });
 
   it("toggles expanded state on click", async () => {
@@ -307,7 +307,7 @@ describe("ChatActivity — summary metrics follow the filtered list", () => {
 
     renderWithProviders(<ChatActivity events={events} isLive={false} showInternalSteps={false} />);
 
-    expect(screen.getByText(/\b1 steps/)).toBeInTheDocument();
+    expect(screen.getByText(/\b1 step\b/)).toBeInTheDocument();
     expect(screen.queryByText(/\b46 steps/)).not.toBeInTheDocument();
     // The duration is the turn's, not the visible row's: 45×2ms + 900ms.
     expect(screen.getByText("990ms")).toBeInTheDocument();
@@ -391,5 +391,45 @@ describe("ChatActivity — end-user live status line", () => {
 
     expect(screen.queryByTestId("chat-activity-live-status")).not.toBeInTheDocument();
     expect(screen.getByTestId("chat-activity-toggle")).toBeInTheDocument();
+  });
+});
+
+/**
+ * The runtime emits camelCase ids ("httpCalls"); the filter set is lowercase.
+ * An exact has() filtered NOTHING in production — the "41 steps" wall of
+ * spinner rows — while these tests' lowercase fixtures kept passing.
+ */
+describe("ChatActivity — camelCase runtime task ids", () => {
+  it.each(["httpCalls", "mcpCalls", "properties"])(
+    "filters the real '%s' casing at rest — nothing meaningful, nothing shown",
+    (taskType) => {
+      const events: PipelineEvent[] = [
+        { type: "task_start", taskType, taskId: "1", index: 0, timestamp: Date.now() },
+        { type: "task_complete", taskType, taskId: "1", index: 0, durationMs: 1, timestamp: Date.now() },
+        // Unpaired start — the forever-spinner shape from the screenshot.
+        { type: "task_start", taskType, taskId: "2", index: 1, timestamp: Date.now() },
+      ];
+
+      renderWithProviders(<ChatActivity events={events} isLive={false} />);
+
+      expect(screen.queryByTestId("chat-activity")).not.toBeInTheDocument();
+    },
+  );
+
+  it("keeps a camelCase row that actually made tool calls, and counts only visible steps", () => {
+    const events: PipelineEvent[] = [
+      { type: "task_start", taskType: "httpCalls", taskId: "1", index: 0, timestamp: Date.now() },
+      {
+        type: "task_complete", taskType: "httpCalls", taskId: "1", index: 0, durationMs: 5, timestamp: Date.now(),
+        toolTrace: [{ type: "tool_call", tool: "readAgent", arguments: "{}" }],
+      },
+      { type: "task_start", taskType: "httpCalls", taskId: "2", index: 1, timestamp: Date.now() },
+      { type: "task_complete", taskType: "httpCalls", taskId: "2", index: 1, durationMs: 1, timestamp: Date.now() },
+    ];
+
+    renderWithProviders(<ChatActivity events={events} isLive={false} />);
+
+    expect(screen.getByText(/\b1 step\b/)).toBeInTheDocument();
+    expect(screen.queryByText(/\b2 steps/)).not.toBeInTheDocument();
   });
 });

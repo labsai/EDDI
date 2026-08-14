@@ -695,6 +695,7 @@
       "toolResult": "結果",
       "error": "エラーが発生しました",
       "toolCallsCount_one": "{{count}} 件のツール呼び出し",
+      "stepsCount": "{{count}} ステップ", "stepsCount_one": "{{count}} ステップ", "stepsCount_other": "{{count}} ステップ",
       "toolCallsCount_other": "{{count}} 件のツール呼び出し",
       "toolCallsCount": "{{count}} 件のツール呼び出し",
       "usingTool": "{{tool}} を使用中…"
@@ -3937,7 +3938,10 @@
       "verifying-gate": "承認ゲートを確認しています…",
       "done": "完了",
       "canary": "オペレーターが環境に到達できるか確認しています…",
-      "write-canary": "実際のテスト書き込みを実行中です。承認をお待ちください…"
+      "write-canary": "実際のテスト書き込みを実行中です。承認をお待ちください…",
+      "longWait1": "2つの接続チェックが並行して実行されています — これが最も時間のかかるステップです…",
+      "longWait2": "新しいオペレーターに対して実際の会話を実行中 — モデルが考えています…",
+      "longWait3": "処理中です — プロバイダーによっては最大1分かかることがあります…"
     },
     "status": {
       "title": "オペレーター",

@@ -224,14 +224,14 @@ export function useActivateOperator() {
       // A READY badge only proves the config loaded. Run one real read so a
       // deployed-but-unreachable operator is reported as such, not as success.
       onStage?.("canary");
-      const canary = await runOperatorCanary(next);
 
-      // The empirical proof, not just configuration: does a real gated write
-      // actually pause? A non-pass result rolls the whole activation back
-      // (undeploy, delete, clear the config variable) rather than merely
-      // reporting the failure — see enforceWriteCanaryGate's own doc comment
-      // for why a failed write canary can't be treated like a failed read
-      // canary or gate check.
+      // The write canary is the empirical proof, not just configuration: does
+      // a real gated write actually pause? A `fail` — or an `unknown` the
+      // deterministic dry-run could not vouch for — rolls the whole activation
+      // back (undeploy, delete, clear the config variable) rather than merely
+      // reporting the failure; an `unknown` whose gate WAS verified
+      // deterministically proceeds with a warning. See enforceWriteCanaryGate's
+      // own doc comment for the full taxonomy.
       //
       // The scope check stays here (enforceWriteCanaryGate also no-ops for
       // read_only on its own) so the "write-canary" stage is never announced
@@ -242,9 +242,24 @@ export function useActivateOperator() {
       // probing it returned "unknown", rolled back an already-deleted agent, and
       // left the new write-capable operator deployed with its config pointer
       // cleared: the exact outcome this rollback exists to prevent. The read
-      // canary above already uses `next`; these must agree.
+      // canary uses `next` too; these must agree.
       if (next.scope === "read_write") onStage?.("write-canary");
-      const writeCanary = await enforceWriteCanaryGate(next, spec);
+      // In PARALLEL: each canary drives a real conversation (an LLM turn
+      // apiece) in its own conversation, and neither depends on the other's
+      // outcome — running them back to back was the bulk of the activation
+      // wait after provisioning. When the write canary rejects (rollback), the
+      // read canary's stream is ABORTED rather than left dangling against a
+      // deleted agent: Promise.all rejects without cancelling its siblings, so
+      // without the explicit abort the read SSE fetch could sit pending until
+      // its own timeout long after activation error handling finished.
+      const readCanaryAbort = new AbortController();
+      const [canary, writeCanary] = await Promise.all([
+        runOperatorCanary(next, readCanaryAbort.signal),
+        enforceWriteCanaryGate(next, spec).catch((error: unknown) => {
+          readCanaryAbort.abort();
+          throw error;
+        }),
+      ]);
 
       onStage?.("done");
       return { config: next, canary, gate, writeCanary };

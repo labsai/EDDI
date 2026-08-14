@@ -185,7 +185,11 @@ function toPipelineEvent(event: SSEEvent): PipelineEvent | null {
     toolTrace = parsed.toolTrace;
     actions = parsed.actions;
     errorType = parsed.errorType;
-    errorSummary = parsed.errorSummary;
+    // EDDI serializes the failure detail as "error" (RestAgentEngineStreaming
+    // task_failed payload); "errorSummary" kept as a fallback for any newer
+    // shape. Reading only errorSummary lost the detail on every operator
+    // failure — the exact field the failure-UX banner wants to show.
+    errorSummary = parsed.error ?? parsed.errorSummary;
   } catch {
     taskType = event.data || "unknown";
   }
