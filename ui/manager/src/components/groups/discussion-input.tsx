@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { cn } from "@/lib/utils";
+import { filesFromClipboard, useFileDrop } from "@/hooks/use-attachment-staging";
+import { FileDropOverlay } from "@/components/chat/attachment-chip";
 import { MAX_ATTACHMENT_BYTES } from "@/lib/api/attachments";
 import {
   MAX_GROUP_ATTACHMENTS,
@@ -239,6 +241,24 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
     [stageFiles],
   );
 
+  // Paste (screenshots via Ctrl/Cmd+V) and drag-drop feed the SAME serialized
+  // staging queue as the picker — the caps, dedupe and encoding all apply.
+  const handlePasteFiles = useCallback(
+    (e: React.ClipboardEvent) => {
+      const files = filesFromClipboard(e);
+      if (!files.length || !canAttach || disabled || isLoading) return;
+      e.preventDefault();
+      void addFiles(files);
+    },
+    [canAttach, disabled, isLoading, addFiles],
+  );
+  const { isDragOver, dropHandlers } = useFileDrop(
+    canAttach && !disabled && !isLoading,
+    (files) => {
+      void addFiles(files);
+    },
+  );
+
   const charCount = question.length;
   // The backend caps the question at MAX_QUESTION_CHARS and fans it out to every
   // member in every phase, so this is a real ceiling rather than a tuning knob.
@@ -275,7 +295,12 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
 
   return (
     <>
-      <form onSubmit={handleSubmit} className="relative flex flex-wrap items-end gap-2 p-3 pb-5 border-t border-border bg-card/80 backdrop-blur-sm shrink-0">
+      <form
+        onSubmit={handleSubmit}
+        className="relative flex flex-wrap items-end gap-2 p-3 pb-5 border-t border-border bg-card/80 backdrop-blur-sm shrink-0"
+        {...dropHandlers}
+      >
+        {isDragOver && <FileDropOverlay />}
         {attachments.length > 0 && (
           <ul className="flex w-full flex-wrap gap-1.5" data-testid="discussion-attachments">
             {attachments.map((a) => (
@@ -364,6 +389,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
                 handleSubmit();
               }
             }}
+            onPaste={handlePasteFiles}
             data-testid="discussion-input"
           />
           {/* Expand button */}
@@ -432,6 +458,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
                 handleSubmit();
               }
             }}
+            onPaste={handlePasteFiles}
             data-testid="discussion-input-expanded"
           />
           <div className="flex items-center justify-between">

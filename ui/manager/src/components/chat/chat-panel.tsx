@@ -24,6 +24,7 @@ import {
 } from "@/hooks/use-attachment-staging";
 import { FileDropOverlay, PendingAttachmentChip } from "./attachment-chip";
 import { ChatMessage } from "./chat-message";
+import { ChatActivity } from "./chat-activity";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer } from "@/components/debugger/debug-drawer";
@@ -470,10 +471,14 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
           </button>
         )}
 
-        {/* Messages */}
+        {/* Messages — the FAB must be a SIBLING of the scroller, anchored to
+            this wrapper: absolutely positioned inside an overflow container it
+            would scroll away with the content, vanishing exactly when the
+            user has scrolled up and needs it. */}
+        <div className="relative flex-1 min-h-0">
         <div
           ref={scrollContainerRef}
-          className="relative flex-1 overflow-y-auto min-h-0"
+          className="h-full overflow-y-auto"
           onScroll={handleScroll}
         >
           {!selectedAgentId ? (
@@ -499,10 +504,16 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                 <ChatMessage key={msg.id} message={msg} />
               ))}
 
-              {/* Inline thinking / tool-use indicator — replaces old activity card */}
-              {(isProcessing || isThinking) && (
-                <InlineThinkingIndicator events={currentTurnEvents} />
-              )}
+              {/* Live status — the SAME line the operator chat shows:
+                  "Thinking…" / "Using {tool}…" + tool-call count, from the
+                  turn's live events. The dots indicator covers only the gap
+                  before the first event arrives. */}
+              {(isProcessing || isThinking) &&
+                (currentTurnEvents.length > 0 ? (
+                  <ChatActivity events={currentTurnEvents} isLive showInternalSteps={false} />
+                ) : (
+                  <InlineThinkingIndicator events={currentTurnEvents} />
+                ))}
 
               {/* Rerun button — shown when last message is an error */}
               {showRerun && !isProcessing && (
@@ -522,12 +533,13 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
               <div ref={messagesEndRef} />
             </div>
           )}
+          </div>
 
           {/* Scroll-to-bottom FAB with new content pulse */}
           {showScrollFab && (
             <button
               onClick={() => scrollToBottom("smooth")}
-              className="absolute bottom-4 end-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all animate-in fade-in slide-in-from-bottom-2"
+              className="absolute bottom-4 inset-x-0 mx-auto z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all animate-in fade-in slide-in-from-bottom-2"
               title={t("chat.scrollToBottom", "Scroll to bottom")}
               data-testid="scroll-to-bottom"
             >
@@ -1061,7 +1073,7 @@ function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
           ? t("chat.activity.error", "Error occurred")
           : activeToolNames.length > 0
             ? t("chat.usingTools", "Using tools")
-            : t("chat.thinking", "Thinking…")}
+            : t("chat.thinking", "Thinking...")}
       </span>
 
       {/* Tool names — inline, comma-separated */}

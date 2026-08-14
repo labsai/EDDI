@@ -694,7 +694,10 @@
       "toolCall": "도구 호출",
       "toolResult": "결과",
       "error": "오류가 발생했습니다",
-      "toolCallsCount": "도구 호출 {{count}}건"
+      "toolCallsCount_one": "도구 호출 {{count}}건",
+      "toolCallsCount_other": "도구 호출 {{count}}건",
+      "toolCallsCount": "도구 호출 {{count}}건",
+      "usingTool": "{{tool}} 사용 중…"
     },
     "context": {
       "conversationId": "대화 ID",

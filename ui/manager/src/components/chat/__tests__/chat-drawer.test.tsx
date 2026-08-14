@@ -328,3 +328,48 @@ describe("ChatDrawer — attachments", () => {
     await waitFor(() => expect(sendBtn).toBeEnabled());
   });
 });
+
+describe("ChatDrawer — opens scrolled to the bottom", () => {
+  it("an existing transcript mounts at the bottom, not the top", async () => {
+    // jsdom has no scrollTo, so the hook falls back to scrollTop = scrollHeight
+    // — give every element a height so that assignment is observable.
+    const proto = window.HTMLElement.prototype;
+    const original = Object.getOwnPropertyDescriptor(proto, "scrollHeight");
+    Object.defineProperty(proto, "scrollHeight", { configurable: true, get: () => 500 });
+    try {
+      useChatStore.getState().setSelectedAgent("agent-1", "Agent One");
+      useChatStore.getState().setConversationId("conv-s1");
+      for (let i = 0; i < 5; i++) {
+        useChatStore.getState().addMessage({
+          id: `m-${i}`,
+          role: i % 2 ? "agent" : "user",
+          content: `message ${i}`,
+          timestamp: Date.now(),
+        });
+      }
+      // Mount CLOSED first: the real drawer stays mounted in the layout and
+      // only the isOpen dep makes the effect fire on open — rendering with
+      // isOpen pre-set would pass even with that dep deleted, because a fresh
+      // mount runs its effect unconditionally.
+      useChatDrawerStore.setState({
+        isOpen: false,
+        agentId: "agent-1",
+        agentName: "Agent One",
+        step: "ready",
+        errorMessage: null,
+      });
+
+      const { container } = renderWithProviders(<ChatDrawer />);
+      const { act } = await import("@testing-library/react");
+      act(() => {
+        useChatDrawerStore.setState({ isOpen: true });
+      });
+      const scroller = container.querySelector('[aria-live="polite"]') as HTMLElement;
+      expect(scroller).toBeTruthy();
+      await waitFor(() => expect(scroller.scrollTop).toBe(500));
+    } finally {
+      if (original) Object.defineProperty(proto, "scrollHeight", original);
+      else delete (proto as unknown as Record<string, unknown>).scrollHeight;
+    }
+  });
+});

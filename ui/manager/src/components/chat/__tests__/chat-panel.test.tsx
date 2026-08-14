@@ -697,3 +697,22 @@ describe("ChatPanel", () => {
     });
   });
 });
+
+describe("ChatPanel — shared live status line", () => {
+  it("shows the operator-style status line once turn events arrive", () => {
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+    useChatStore.getState().addMessage({ id: "u1", role: "user", content: "hi", timestamp: Date.now() });
+    useChatStore.getState().setProcessing(true);
+    useDebugStore.setState({
+      currentTurnEvents: [
+        { type: "task_start", taskType: "ai.labs.httpcalls", taskId: "1", index: 0, timestamp: Date.now() },
+      ],
+    });
+
+    renderWithProviders(<ChatPanel />);
+
+    expect(screen.getByTestId("chat-activity-live-status")).toBeInTheDocument();
+    expect(screen.getByText(/Thinking/)).toBeInTheDocument();
+  });
+});

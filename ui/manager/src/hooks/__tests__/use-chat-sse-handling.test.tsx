@@ -70,7 +70,12 @@ describe("use-chat handleSSEEvent — task_failed / error-JSON handling", () => 
       await result.current.mutateAsync({ message: "hi" });
     });
 
-    const events = useDebugStore.getState().currentTurnEvents;
+    // The stream ended without a done frame, so the safety net finalizes the
+    // debug turn (turn-boundary fix) — the events live in the turn history
+    // now, not the live set.
+    const finalized = useDebugStore.getState().turns;
+    expect(finalized).toHaveLength(1);
+    const events = finalized[0]!.events;
     const failed = events.find((e) => e.type === "task_failed");
     expect(failed).toBeDefined();
     expect(failed?.taskId).toBe("task-42");
@@ -156,5 +161,55 @@ describe("use-chat handleSSEEvent — canonical snapshot text on done", () => {
     const messages = useChatStore.getState().messages;
     const agentMessage = [...messages].reverse().find((m) => m.role === "agent");
     expect(agentMessage?.content).toBe("Structured answer");
+  });
+});
+
+describe("use-chat — turn boundary on abnormal stream endings", () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    useDebugStore.getState().reset();
+    h.frames = [];
+    useChatStore.setState({
+      selectedAgentId: "agent1",
+      conversationId: "conv1",
+      streamingEnabled: true,
+    });
+  });
+
+  it("a turn that ends without a done frame does not leak its events into the next turn", async () => {
+    // Turn 1: a task event arrives, then the stream just closes — no done, no
+    // error frame (connection drop). Without the boundary fix the events stay
+    // in currentTurnEvents and the NEXT turn's live status line opens showing
+    // this turn's tools.
+    h.frames = [
+      {
+        type: "task_complete",
+        data: JSON.stringify({
+          taskId: "t1",
+          taskType: "ai.labs.httpcalls",
+          index: 0,
+          durationMs: 3,
+          toolTrace: [{ type: "tool_call", tool: "leakedTool", arguments: "{}" }],
+        }),
+      },
+    ];
+
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ message: "first" });
+    });
+
+    expect(useDebugStore.getState().currentTurnEvents).toHaveLength(0);
+
+    // Turn 2 starts: the live set must be empty before its own events arrive.
+    h.frames = [{ type: "done", data: JSON.stringify({ conversationState: "READY" }) }];
+    await act(async () => {
+      await result.current.mutateAsync({ message: "second" });
+    });
+    expect(
+      useDebugStore.getState().currentTurnEvents.some(
+        (e) => e.toolTrace?.some((tr) => tr.tool === "leakedTool"),
+      ),
+    ).toBe(false);
   });
 });

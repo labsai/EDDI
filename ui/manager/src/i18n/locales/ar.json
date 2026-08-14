@@ -726,7 +726,14 @@
       "toolCall": "استدعاء أداة",
       "toolResult": "النتيجة",
       "error": "حدث خطأ",
-      "toolCallsCount": "{{count}} من استدعاءات الأدوات"
+      "toolCallsCount_one": "استدعاء أداة واحد",
+      "toolCallsCount_zero": "لا استدعاءات أدوات",
+      "toolCallsCount_two": "استدعاءا أداة",
+      "toolCallsCount_few": "{{count}} استدعاءات أدوات",
+      "toolCallsCount_many": "{{count}} استدعاءً للأدوات",
+      "toolCallsCount_other": "عدد استدعاءات الأدوات: {{count}}",
+      "toolCallsCount": "عدد استدعاءات الأدوات: {{count}}",
+      "usingTool": "جارٍ استخدام {{tool}}…"
     },
     "context": {
       "conversationId": "معرف المحادثة",

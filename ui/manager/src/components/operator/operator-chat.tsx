@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useState, useRef, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatMarkdownText } from "@/components/groups/group-utils";
-import { Send, Square, RotateCcw, AlertTriangle, Bot, User, PauseCircle, Loader2, Paperclip } from "lucide-react";
+import { Send, Square, RotateCcw, AlertTriangle, ArrowDown, Bot, User, PauseCircle, Loader2, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatActivity } from "@/components/chat/chat-activity";
 import { InputHint } from "@/components/chat/input-hint";
@@ -17,6 +17,7 @@ import {
   useFileDrop,
   type ReadyAttachment,
 } from "@/hooks/use-attachment-staging";
+import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { OPERATOR_STARTER_PROMPTS } from "@/lib/operator/system-prompt";
 import type { ChatMessage } from "@/lib/api/chat";
 import type { SentAttachment } from "@/hooks/use-chat";
@@ -130,9 +131,22 @@ export function OperatorChat({
 }: OperatorChatProps) {
   const { t } = useTranslation();
   const [input, setInput] = useState("");
-  const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Smart auto-scroll: follows new content only while the user is AT the
+  // bottom. Scrolled up (reading something mid-stream), the view stays put and
+  // a centered arrow offers the way back down.
+  const {
+    scrollRef,
+    showScrollFab,
+    hasNewContent,
+    scrollToBottom,
+    handleScroll,
+  } = useSmartAutoScroll<HTMLDivElement>({
+    deps: [messages, events.length, isStreaming],
+    bottomThreshold: 80,
+  });
 
   // Same staging as the main chat panel — picker, paste, chips, per-turn cap.
   const {
@@ -148,10 +162,6 @@ export function OperatorChat({
   const { isDragOver, dropHandlers } = useFileDrop(attachEnabled && !isPaused, (files) => {
     void stageFiles(files);
   });
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, events]);
 
   /** Grow with content up to the same 120px ceiling as chat-drawer. */
   function autoResizeInput() {
@@ -183,8 +193,11 @@ export function OperatorChat({
   return (
     <div className="relative flex h-full min-h-0 flex-col rounded-xl border border-border" {...dropHandlers}>
       {isDragOver && <FileDropOverlay />}
+      <div className="relative flex-1 min-h-0">
       <div
-        className="flex-1 space-y-4 overflow-y-auto p-4"
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="h-full space-y-4 overflow-y-auto p-4"
         data-testid="operator-messages"
         role="log"
         aria-live="polite"
@@ -347,7 +360,27 @@ export function OperatorChat({
           </div>
         )}
 
-        <div ref={endRef} />
+      </div>
+
+      {/* Centered scroll-to-bottom arrow — shown only while scrolled up */}
+      {showScrollFab && (
+        <button
+          type="button"
+          onClick={() => scrollToBottom("smooth")}
+          className="absolute bottom-3 inset-x-0 mx-auto z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all animate-in fade-in slide-in-from-bottom-2"
+          title={t("chat.scrollToBottom", "Scroll to bottom")}
+          aria-label={t("chat.scrollToBottom", "Scroll to bottom")}
+          data-testid="operator-scroll-to-bottom"
+        >
+          <ArrowDown className="h-4 w-4" />
+          {hasNewContent && (
+            <span className="absolute -top-1 -end-1 flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
+            </span>
+          )}
+        </button>
+      )}
       </div>
 
       {/* Pending attachment chips (staged, uploading, errored) */}

@@ -52,10 +52,25 @@ export function useSmartAutoScroll<T extends HTMLElement = HTMLDivElement>({
     }
   }, [bottomThreshold]);
 
+  // The element the tracking state belongs to. The hook can outlive its
+  // scroll container (the drawer unmounts its children while closed but stays
+  // mounted itself); without this, closing while scrolled up leaves
+  // isNearBottomRef=false, and REOPENING lands the fresh container at the TOP
+  // because the stale ref routes the effect to the new-content branch.
+  const trackedElRef = useRef<T | null>(null);
+
   // Trigger auto-scroll on dependency updates if user is near bottom
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    if (trackedElRef.current !== el) {
+      // A freshly mounted container starts at scrollTop 0 with no user scroll
+      // history — treat it as at-bottom so the initial jump happens.
+      trackedElRef.current = el;
+      isNearBottomRef.current = true;
+      setShowScrollFab(false);
+      setHasNewContent(false);
+    }
     if (isNearBottomRef.current) {
       const behavior = isInitialMountRef.current ? "auto" : "smooth";
       if (typeof el.scrollTo === "function") {

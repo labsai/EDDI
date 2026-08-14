@@ -694,7 +694,10 @@
       "toolCall": "การเรียกใช้เครื่องมือ",
       "toolResult": "ผลลัพธ์",
       "error": "เกิดข้อผิดพลาด",
-      "toolCallsCount": "เรียกใช้เครื่องมือ {{count}} ครั้ง"
+      "toolCallsCount_one": "เรียกใช้เครื่องมือ {{count}} ครั้ง",
+      "toolCallsCount_other": "เรียกใช้เครื่องมือ {{count}} ครั้ง",
+      "toolCallsCount": "เรียกใช้เครื่องมือ {{count}} ครั้ง",
+      "usingTool": "กำลังใช้ {{tool}}…"
     },
     "context": {
       "conversationId": "รหัสบทสนทนา",

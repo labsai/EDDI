@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useChatDrawerStore, type ChatDrawerStep } from "@/hooks/use-chat-drawer";
 import { useChatStore, useStartConversation, useSendMessage } from "@/hooks/use-chat";
@@ -11,12 +11,16 @@ import {
   type ReadyAttachment,
 } from "@/hooks/use-attachment-staging";
 import { ChatMessage } from "./chat-message";
+import { ChatActivity } from "./chat-activity";
 import { FileDropOverlay, PendingAttachmentChip } from "./attachment-chip";
 import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer as DebugPanel } from "@/components/debugger/debug-drawer";
+import { useDebugStore } from "@/hooks/use-debug-events";
 import { InputHint } from "@/components/chat/input-hint";
+import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { cn } from "@/lib/utils";
 import {
+  ArrowDown,
   Bot,
   X,
   MessageSquarePlus,
@@ -77,9 +81,9 @@ export function ChatDrawer() {
   const conversationId = useChatStore((s) => s.conversationId);
   const isProcessing = useChatStore((s) => s.isProcessing);
   const isThinking = useChatStore((s) => s.isThinking);
+  const currentTurnEvents = useDebugStore((s) => s.currentTurnEvents);
 
   const startConversation = useStartConversation();
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Attachment staging shared between the drop zone (drawer body) and the
   // input's picker/paste — one staging area, same as the main panel.
@@ -89,10 +93,23 @@ export function ChatDrawer() {
     (files) => void staging.stageFiles(files),
   );
 
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  // Smart auto-scroll: follows new content only while the user is AT the
+  // bottom; scrolled up, the view stays put and a centered arrow offers the
+  // way back down.
+  const {
+    scrollRef,
+    showScrollFab,
+    hasNewContent,
+    scrollToBottom,
+    handleScroll,
+  } = useSmartAutoScroll<HTMLDivElement>({
+    // isOpen: the scroll container mounts only when the drawer opens, so
+    // without it an existing transcript opens scrolled to the TOP with no
+    // way down but manual scrolling. currentTurnEvents.length: the live
+    // status line grows the content without any message change.
+    deps: [messages, isThinking, isProcessing, isOpen, currentTurnEvents.length],
+    bottomThreshold: 80,
+  });
 
   const handleNewConversation = useCallback(() => {
     if (!agentId) return;
@@ -206,7 +223,8 @@ export function ChatDrawer() {
             {/* Chat messages */}
             {(showChat || (step === "idle" && conversationId)) && (
               <>
-                <div className="flex-1 overflow-y-auto" aria-live="polite" aria-relevant="additions">
+                <div className="relative flex-1 min-h-0">
+                <div ref={scrollRef} onScroll={handleScroll} className="h-full overflow-y-auto" aria-live="polite" aria-relevant="additions">
                   {messages.length === 0 ? (
                     <div className="flex h-full items-center justify-center">
                       <div className="text-center">
@@ -221,15 +239,40 @@ export function ChatDrawer() {
                       {messages.map((msg) => (
                         <ChatMessage key={msg.id} message={msg} />
                       ))}
-                      {isThinking && (
+                      {/* Live status — the same "Thinking…" / "Using {tool}…"
+                          line the operator and main chat show; the plain
+                          indicator covers the gap before the first event. */}
+                      {(isProcessing || isThinking) && currentTurnEvents.length > 0 ? (
+                        <ChatActivity events={currentTurnEvents} isLive showInternalSteps={false} />
+                      ) : isThinking ? (
                         <div className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground animate-pulse">
                           <Loader2 className="h-4 w-4 animate-spin" />
                           <span className="italic">{t("chat.thinking")}</span>
                         </div>
-                      )}
-                      <div ref={messagesEndRef} />
+                      ) : null}
                     </div>
                   )}
+                </div>
+
+                {/* Centered scroll-to-bottom arrow — only while scrolled up */}
+                {showScrollFab && (
+                  <button
+                    type="button"
+                    onClick={() => scrollToBottom("smooth")}
+                    className="absolute bottom-3 inset-x-0 mx-auto z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all animate-in fade-in slide-in-from-bottom-2"
+                    title={t("chat.scrollToBottom", "Scroll to bottom")}
+                    aria-label={t("chat.scrollToBottom", "Scroll to bottom")}
+                    data-testid="drawer-scroll-to-bottom"
+                  >
+                    <ArrowDown className="h-4 w-4" />
+                    {hasNewContent && (
+                      <span className="absolute -top-1 -end-1 flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
+                      </span>
+                    )}
+                  </button>
+                )}
                 </div>
 
                 {/* Quick replies */}
