@@ -46,9 +46,15 @@ export interface ChatMessage {
    * happening.
    */
   kind?: "decision" | "notice";
-  /** Stable code for translation; `content` carries the English fallback. */
-  code?: "approved" | "rejected" | "rePaused" | "noReply";
-  /** How many gated calls the decision covered, for the pluralized label. */
+  /**
+   * Stable code for translation; `content` carries the English fallback.
+   *
+   * "partial" is a top-level APPROVED that rejected some of its calls — the
+   * approval banner allows exactly that, and calling it "approved" would put a
+   * claim in the permanent transcript the approver did not make.
+   */
+  code?: "approved" | "partial" | "rejected" | "rePaused" | "noReply";
+  /** "partial" only: how many calls were rejected inside the approved batch. */
   count?: number;
 }
 

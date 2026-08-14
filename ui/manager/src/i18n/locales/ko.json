@@ -4053,7 +4053,9 @@
       "approved": "이 요청을 승인했습니다",
       "rejected": "이 요청을 거부했습니다",
       "rePaused": "다시 일시 중지됨 — 추가 결정이 필요합니다",
-      "noReply": "응답 없이 턴이 종료되었습니다"
+      "noReply": "응답 없이 턴이 종료되었습니다",
+      "partial_one": "승인됨 — 호출 {{count}}건 거부",
+      "partial_other": "승인됨 — 호출 {{count}}건 거부"
     }
   },
   "groupWorkspace": {

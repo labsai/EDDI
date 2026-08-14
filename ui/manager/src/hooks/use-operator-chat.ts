@@ -745,14 +745,29 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       // indistinguishable from nothing happening when the resumed turn produced
       // no text — it had paused again on the same tool, and the transcript said
       // nothing at all. The record goes in regardless of what came back.
-      const decidedCalls = toolDecisions ? Object.keys(toolDecisions).length : 0;
+      //
+      // A top-level APPROVED can still carry per-call REJECTEDs — that is how the
+      // banner submits "approve these, not that one" (a top-level REJECTED is
+      // all-or-nothing and carries no map). Recording it as a flat "approved"
+      // would put a claim in the permanent transcript the approver never made,
+      // so the rejected calls are counted and named.
+      const rejectedCalls = toolDecisions
+        ? Object.values(toolDecisions).filter((d) => d.verdict === "REJECTED").length
+        : 0;
+      const decisionCode =
+        verdict !== "APPROVED" ? "rejected" : rejectedCalls > 0 ? "partial" : "approved";
       const decisionEntry: ChatMessage = {
         id: nextId("agent"),
         role: "system",
         kind: "decision",
-        code: verdict === "APPROVED" ? "approved" : "rejected",
-        count: decidedCalls,
-        content: verdict === "APPROVED" ? "You approved this request." : "You rejected this request.",
+        code: decisionCode,
+        ...(decisionCode === "partial" ? { count: rejectedCalls } : {}),
+        content:
+          decisionCode === "approved"
+            ? "You approved this request."
+            : decisionCode === "partial"
+              ? `You approved this request — ${rejectedCalls} call(s) rejected.`
+              : "You rejected this request.",
         timestamp: Date.now(),
       };
       // ...and when there is no answer to show, say WHY rather than leaving the

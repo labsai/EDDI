@@ -4083,7 +4083,10 @@
       "approved": "Vous avez approuvé cette requête",
       "rejected": "Vous avez rejeté cette requête",
       "rePaused": "De nouveau en pause — une autre décision est nécessaire",
-      "noReply": "Le tour s'est terminé sans réponse"
+      "noReply": "Le tour s'est terminé sans réponse",
+      "partial_one": "Approuvée — {{count}} appel rejeté",
+      "partial_other": "Approuvée — {{count}} appels rejetés",
+      "partial_many": "Approuvée — {{count}} appels rejetés"
     }
   },
   "groupWorkspace": {

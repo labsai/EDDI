@@ -4053,7 +4053,9 @@
       "approved": "Sie haben diese Anfrage genehmigt",
       "rejected": "Sie haben diese Anfrage abgelehnt",
       "rePaused": "Erneut pausiert — eine weitere Entscheidung ist nötig",
-      "noReply": "Der Durchlauf endete ohne Antwort"
+      "noReply": "Der Durchlauf endete ohne Antwort",
+      "partial_one": "Genehmigt — {{count}} Aufruf abgelehnt",
+      "partial_other": "Genehmigt — {{count}} Aufrufe abgelehnt"
     }
   },
   "groupWorkspace": {

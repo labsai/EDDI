@@ -246,16 +246,30 @@ export function OperatorChat({
             >
               <span className="h-px flex-1 bg-border/60" />
               {message.kind === "decision" ? (
-                message.code === "approved" ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" aria-hidden="true" />
-                ) : (
+                message.code === "rejected" ? (
                   <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />
+                ) : (
+                  // "partial" is still an approval — amber because part of the
+                  // batch deliberately did not go through.
+                  <CheckCircle2
+                    className={cn(
+                      "h-3.5 w-3.5 shrink-0",
+                      message.code === "partial" ? "text-amber-500" : "text-emerald-500",
+                    )}
+                    aria-hidden="true"
+                  />
                 )
               ) : (
                 <PauseCircle className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden="true" />
               )}
               <span className="shrink-0">
-                {t(`operator.decisionLog.${message.code}`, message.content, { count: message.count ?? 0 })}
+                {/* `count` goes ONLY to "partial", the one pluralized key. Handing
+                    i18next a count on the others sends it looking for
+                    `approved_other` and it lands on the base key by fallback
+                    rather than by design. */}
+                {message.code === "partial"
+                  ? t("operator.decisionLog.partial", message.content, { count: message.count ?? 0 })
+                  : t(`operator.decisionLog.${message.code}`, message.content)}
               </span>
               <span className="h-px flex-1 bg-border/60" />
             </div>

@@ -4053,7 +4053,9 @@
       "approved": "このリクエストを承認しました",
       "rejected": "このリクエストを拒否しました",
       "rePaused": "再び一時停止しました — さらに判断が必要です",
-      "noReply": "応答がないままターンが終了しました"
+      "noReply": "応答がないままターンが終了しました",
+      "partial_one": "承認しました — {{count}} 件の呼び出しを拒否",
+      "partial_other": "承認しました — {{count}} 件の呼び出しを拒否"
     }
   },
   "groupWorkspace": {

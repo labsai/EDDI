@@ -1061,6 +1061,43 @@ describe("resolveApproval — every decision leaves a trace", () => {
     expect(system[0]!.code).toBe("rejected");
   });
 
+  // The banner submits "approve these, not that one" as a top-level APPROVED
+  // carrying per-call REJECTEDs. Recording that as a flat "approved" would put a
+  // claim in the permanent transcript the approver never made.
+  it("calls a partly-rejected batch partial, not approved", async () => {
+    const { result } = await pausedHook();
+    h.conversationLogs = [{ conversationState: "READY", conversationOutputs: [textOutput("Did the rest.")] }];
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED", undefined, {
+        "call-1": { verdict: "APPROVED" },
+        "call-2": { verdict: "REJECTED" },
+        "call-3": { verdict: "REJECTED" },
+      });
+    });
+
+    const system = result.current.messages.filter((m) => m.role === "system");
+    expect(system).toHaveLength(1);
+    expect(system[0]!.code).toBe("partial");
+    expect(system[0]!.count).toBe(2);
+  });
+
+  it("stays 'approved' when the per-call map only amends, rejecting nothing", async () => {
+    const { result } = await pausedHook();
+    h.conversationLogs = [{ conversationState: "READY", conversationOutputs: [textOutput("Done.")] }];
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED", undefined, {
+        "call-1": { verdict: "APPROVED", amendedArguments: '{"n":1}' },
+      });
+    });
+
+    const system = result.current.messages.filter((m) => m.role === "system");
+    expect(system[0]!.code).toBe("approved");
+    // No count on a non-partial entry: it is the plural argument for exactly one key.
+    expect(system[0]!.count).toBeUndefined();
+  });
+
   it("adds no outcome notice when there IS an answer — the answer is the continuation", async () => {
     const { result } = await pausedHook();
     h.conversationLogs = [{ conversationState: "READY", conversationOutputs: [textOutput("Created it.")] }];
