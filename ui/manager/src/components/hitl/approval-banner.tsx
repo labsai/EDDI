@@ -379,7 +379,10 @@ export function ApprovalBanner({
     <div
       data-testid="approval-banner"
       data-pause-type={isToolCall ? "TOOL_CALL" : "RULE"}
-      className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 backdrop-blur-sm"
+      // min-w-0/max-w-full: a gated call's arguments are one long unbreakable
+      // JSON line; without the width clamp the card's intrinsic width blew the
+      // whole page out horizontally instead of scrolling inside its own <pre>.
+      className="min-w-0 max-w-full rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 backdrop-blur-sm"
     >
       {/* Header */}
       <div className="mb-3 flex items-start gap-3">
@@ -826,7 +829,7 @@ function ToolCallRow({
       {extra}
       {call.arguments && (
         <pre
-          className="max-h-40 overflow-auto rounded bg-muted/60 p-2 text-[11px] leading-relaxed text-foreground"
+          className="max-h-40 max-w-full overflow-auto rounded bg-muted/60 p-2 text-[11px] leading-relaxed text-foreground"
           data-testid={`tool-args-${call.callId}`}
         >
           {call.arguments}

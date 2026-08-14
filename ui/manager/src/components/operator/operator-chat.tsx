@@ -194,8 +194,11 @@ export function OperatorChat({
     requestAnimationFrame(autoResizeInput);
   }
 
+  // min-w-0 on the root: as a grid item this would otherwise grow to the
+  // widest unbreakable line inside it (an approval card's one-line JSON args)
+  // and push the whole page into horizontal scroll.
   return (
-    <div className="relative flex h-full min-h-0 flex-col rounded-xl border border-border" {...dropHandlers}>
+    <div className="relative flex h-full min-h-0 min-w-0 flex-col rounded-xl border border-border" {...dropHandlers}>
       {isDragOver && <FileDropOverlay />}
       <div className="relative flex-1 min-h-0">
       <div

@@ -298,7 +298,13 @@ const BODY_MAKING_CHANGES = `When you change something:
 - Say what you expect the change to do, so the approver can tell afterwards
   whether the result matched.
 - Ask before proposing a change you are unsure the user wants. An approval
-  prompt is a bad place for them to discover you misunderstood.`;
+  prompt is a bad place for them to discover you misunderstood.
+- NEVER fabricate a value you do not actually have — an API key, token,
+  password, id, or URL. An invented credential looks real, breaks the resource
+  it is written into, and contaminates approval records. Secrets are always
+  written as a \${vault:key-name} reference (the platform resolves it at
+  execution time — you never need, and never get, the actual value). If a
+  value is genuinely unknown, say so and ask; a guess is never acceptable.`;
 
 /** Default editable body for a granted endpoint set — the role and style. */
 export function buildOperatorPromptBody(endpoints: readonly string[]): string {

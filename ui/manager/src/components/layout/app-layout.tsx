@@ -87,11 +87,24 @@ export function AppLayout() {
         <main
           id="main-content"
           className={cn(
-            "flex-1 overflow-auto bg-background p-6",
+            // overflow-x-clip: the page never scrolls horizontally. Wide
+            // content must wrap, truncate, or scroll inside its own container
+            // — a page-level horizontal scrollbar is always a layout bug, and
+            // clip turns the failure mode from "whole page pans" into "one
+            // element is visibly clipped", which is both less harmful and
+            // easier to spot and fix.
+            "flex-1 overflow-y-auto overflow-x-clip bg-background p-6",
             "transition-all duration-300"
           )}
         >
-          <div className="@container/main mx-auto max-w-screen-2xl">
+          {/* h-full: gives pages a real height reference. Chat-style pages
+              size themselves with h-full and scroll INTERNALLY — the old
+              h-[calc(100vh-…)] guesses broke whenever a banner or wrapped
+              header changed the arithmetic, leaving BOTH the page and <main>
+              scrolling, with the scroll-to-bottom arrow tracking the wrong
+              one. Pages taller than the viewport still overflow this wrapper
+              and scroll <main>, exactly as before. */}
+          <div className="@container/main mx-auto h-full max-w-screen-2xl">
             <SuspendedOutlet />
           </div>
         </main>

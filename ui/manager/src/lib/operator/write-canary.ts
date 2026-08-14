@@ -268,9 +268,13 @@ async function runProbe(
     return {
       outcome: "unknown",
       toolCalls,
+      // "No agents to test against" was the OLD probe's hypothesis — it picked
+      // a victim from a listing. This probe is self-targeting (the operator
+      // patches its own descriptor), so the target always exists; a silent
+      // model simply declined the instruction.
       error:
         toolCalls === 0
-          ? "The operator never called a tool — there may be no agents on this platform to test against."
+          ? "The operator never called a tool during the probe — the model declined to attempt the test write."
           : "The operator did not attempt the descriptor-patch write this probe looks for.",
       durationMs: Date.now() - startedAt,
     };

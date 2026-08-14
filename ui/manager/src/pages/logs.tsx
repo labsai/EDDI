@@ -329,7 +329,7 @@ function LiveTab() {
 
       {/* Level stats bar */}
       {entries.length > 0 && (
-        <div className="mb-3 flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2" data-testid="level-stats">
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-border bg-card px-3 py-2" data-testid="level-stats">
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-400">
             <span className="h-2 w-2 rounded-full bg-red-500" />
             {levelStats.error} {t("logs.errors", "errors")}
@@ -355,7 +355,7 @@ function LiveTab() {
               value={textSearch}
               onChange={(e) => setTextSearch(e.target.value)}
               placeholder={t("logs.searchLogs", "Search logs…")}
-              className="h-7 w-48 rounded-md border border-input bg-background ps-7 pe-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              className="h-7 w-48 max-w-full rounded-md border border-input bg-background ps-7 pe-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               data-testid="text-search"
             />
           </div>
@@ -569,7 +569,7 @@ function HistoryTab() {
 
       {/* Level stats + text search */}
       {logs && logs.length > 0 && (
-        <div className="mb-3 flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2" data-testid="history-level-stats">
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-border bg-card px-3 py-2" data-testid="history-level-stats">
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-400">
             <span className="h-2 w-2 rounded-full bg-red-500" />
             {levelStats.error} {t("logs.errors", "errors")}
@@ -594,7 +594,7 @@ function HistoryTab() {
               value={textSearch}
               onChange={(e) => setTextSearch(e.target.value)}
               placeholder={t("logs.searchLogs", "Search logs…")}
-              className="h-7 w-48 rounded-md border border-input bg-background ps-7 pe-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              className="h-7 w-48 max-w-full rounded-md border border-input bg-background ps-7 pe-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               data-testid="history-text-search"
             />
           </div>
@@ -699,7 +699,10 @@ function LogRow({ entry }: { entry: LogEntry | DatabaseLogEntry }) {
 
   return (
     <div className="group px-3 py-2 hover:bg-muted/30 transition-colors">
-      <div className="flex items-start gap-3">
+      {/* flex-wrap: the meta chips (timestamp, level, ids) alone are wider
+          than a phone screen; wrapping drops the message to its own line
+          instead of pushing the page into horizontal overflow. */}
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
         <span className="shrink-0 text-muted-foreground">
           {formatTimestamp(entry.timestamp)}
         </span>
@@ -714,7 +717,7 @@ function LogRow({ entry }: { entry: LogEntry | DatabaseLogEntry }) {
             {entry.conversationId}
           </span>
         )}
-        <span className="min-w-0 flex-1 break-all text-foreground">
+        <span className="min-w-[12rem] flex-1 break-all text-foreground">
           {main}
         </span>
         {/* Copy button — visible on hover */}

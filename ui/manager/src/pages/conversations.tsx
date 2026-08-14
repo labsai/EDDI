@@ -194,9 +194,10 @@ export function ConversationsPage() {
           />
         </div>
 
-        {/* State filter + view toggle */}
-        <div className="flex items-center gap-3" data-tour="conversations-filters">
-          <div className="flex items-center gap-1.5">
+        {/* State filter + view toggle — wraps on narrow screens instead of
+            forcing the page wide. */}
+        <div className="flex flex-wrap items-center gap-3" data-tour="conversations-filters">
+          <div className="flex flex-wrap items-center gap-1.5">
             <Filter className="h-4 w-4 text-muted-foreground" />
             {STATE_FILTER_VALUES.map((sf) => (
               <Button
