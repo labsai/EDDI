@@ -212,39 +212,48 @@ export function formatMarkdownText(text: string): string {
   formatted = formatted.replace(/(^|\n)([ \t]*)-\*\*/g, "$1$2- **");
 
   // 5. NORMALIZE WHITESPACE INSIDE DOUBLE ASTERISKS (**word ** -> **word**, ** word** -> **word**)
-  // CommonMark explicitly disallows leading whitespace after opening ** or trailing whitespace before closing **.
-  // Use [\s\u00a0] to also match non-breaking spaces and other Unicode whitespace.
-  // The inner whitespace is dropped, but a separator is re-inserted OUTSIDE the
-  // delimiter whenever dropping it would glue the bold to an adjacent word:
-  // "**cases **(recruitment" must become "**cases** (recruitment", while
-  // "mit ** Fett ** hier" keeps its single spaces rather than gaining doubles.
-  const needsSepAfter = (ch: string | undefined) => !!ch && !/[\s\u00a0.,;:!?)\]}|]/.test(ch);
-  const needsSepBefore = (ch: string | undefined) => !!ch && !/[\s\u00a0([{|]/.test(ch);
-  // Pass A: both sides have whitespace (** word **)
-  formatted = formatted.replace(
-    /\*\*[\s\u00a0]+([^*]+?)[\s\u00a0]+\*\*/g,
-    (m, inner: string, offset: number, str: string) => {
-      const before = needsSepBefore(str[offset - 1]) ? " " : "";
-      const after = needsSepAfter(str[offset + m.length]) ? " " : "";
-      return `${before}**${inner.trim()}**${after}`;
-    },
-  );
-  // Pass B: leading whitespace only (** word**)
-  formatted = formatted.replace(
-    /\*\*[\s\u00a0]+([^*]+?)\*\*/g,
-    (_m, inner: string, offset: number, str: string) => {
-      const before = needsSepBefore(str[offset - 1]) ? " " : "";
-      return `${before}**${inner.trim()}**`;
-    },
-  );
-  // Pass C: trailing whitespace only (**word **)
-  formatted = formatted.replace(
-    /\*\*([^*]+?)[\s\u00a0]+\*\*/g,
-    (m, inner: string, offset: number, str: string) => {
-      const after = needsSepAfter(str[offset + m.length]) ? " " : "";
-      return `**${inner.trim()}**${after}`;
-    },
-  );
+  //
+  // CommonMark disallows whitespace directly inside `**`, so `**bold **` renders
+  // as literal asterisks. The whitespace is moved OUT of the delimiters rather
+  // than deleted: "**cases **(recruitment" must become "**cases** (recruitment",
+  // not "**cases**(recruitment".
+  //
+  // Done by SPLITTING on `**` rather than by regex, because a regex cannot tell
+  // an opener from a closer. Three passes of `\*\*...\*\*` used to do this, and
+  // on a line with two bold spans they matched from the CLOSER of the first to
+  // the OPENER of the second — "a.**B**: c **d** e" became "a. **B**: c** d** e",
+  // corrupting emphasis that was already correct. Splitting makes the pairing
+  // explicit: segment 0 is outside, 1 inside, 2 outside, … so a closer can never
+  // be mistaken for an opener.
+  const segments = formatted.split("**");
+  if (segments.length >= 3) {
+    // An odd delimiter count leaves the final `**` unpaired; everything from it
+    // onward is outside text and must not be trimmed as if it were emphasized.
+    const lastPaired = segments.length % 2 === 0 ? segments.length - 2 : segments.length - 1;
+    for (let i = 1; i < lastPaired; i += 2) {
+      const inner = segments[i]!;
+      const trimmed = inner.trim();
+      // An empty or whitespace-only span is not emphasis at all — leave it
+      // exactly as it is rather than inventing a pair around nothing.
+      if (trimmed === "") continue;
+      const hadLeading = /^[\s\u00a0]/.test(inner);
+      const hadTrailing = /[\s\u00a0]$/.test(inner);
+      segments[i] = trimmed;
+      // Push the removed whitespace outward, but only where its absence would
+      // glue the bold to a neighbouring word. Punctuation and existing
+      // whitespace need no separator, so "**Panel ** |" does not gain a double
+      // space and "**label**:" stays tight.
+      if (hadLeading) {
+        const before = segments[i - 1]!;
+        if (before !== "" && !/[\s\u00a0([{|]$/.test(before)) segments[i - 1] = before + " ";
+      }
+      if (hadTrailing) {
+        const after = segments[i + 1]!;
+        if (after !== "" && !/^[\s\u00a0.,;:!?)\]}|]/.test(after)) segments[i + 1] = " " + after;
+      }
+    }
+    formatted = segments.join("**");
+  }
 
   // 6. Fix missing space BEFORE opening ** when glued to preceding word (e.g. "word**bold**" -> "word **bold**").
   // The char AFTER the ** must be a letter/digit — evidence of an OPENER. The
