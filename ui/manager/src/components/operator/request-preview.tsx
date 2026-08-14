@@ -54,7 +54,15 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
   // showing nothing would read as "nothing to worry about". A group config can
   // exceed the preview cap (up to 100 members), which would put a capability
   // grant past the cut and silently unflagged. Say so instead.
-  const escalationCheckIncomplete = preview.bodyTruncated && escalations.length === 0;
+  //
+  // Truncation alone decides it: this used to also require an EMPTY flag list,
+  // on the reading that a warning already shown means the approver has been
+  // warned. That is wrong once any check can fire early — an embedded
+  // credential in the first line makes the list non-empty and silently
+  // withdrew the "the rest was never scanned" notice, which is exactly when a
+  // capability grant past the cut is most likely to be missed. The two say
+  // different things and both are true.
+  const escalationCheckIncomplete = preview.bodyTruncated;
 
   /**
    * Whole-document `PUT`s get a diff against what is currently stored.

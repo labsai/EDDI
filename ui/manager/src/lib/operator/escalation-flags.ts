@@ -236,17 +236,23 @@ function isAgentCreationBody(body: unknown): boolean {
  * by arriving in a form post.
  */
 function findInlineCredential(body: string): string | null {
-  const nonVaultRedaction = /(?<!\$\{vault:)<REDACTED>/.exec(body);
-  if (nonVaultRedaction) {
-    // Include a short prefix (e.g. "sk-ant-") so the approver can see WHAT
-    // kind of secret was masked, without ever widening past the marker itself.
-    const start = Math.max(0, nonVaultRedaction.index - 8);
-    return body.slice(start, nonVaultRedaction.index + "<REDACTED>".length).trimStart();
+  if (/(?<!\$\{vault:)<REDACTED>/.test(body)) {
+    // The marker itself, verbatim and nothing around it. An earlier version
+    // prefixed it with the 8 preceding characters "so the approver can see what
+    // kind of secret it was" — those characters come from the body, so on a
+    // near-miss redaction they are credential material, and this string is
+    // rendered in the warning. A label that cannot leak beats a label that is
+    // usually safe.
+    return "<REDACTED>";
   }
-  const rawShape = /sk-[A-Za-z0-9_-]{20,}|Bearer\s+[A-Za-z0-9\-_.+/=]{20,}/.exec(body);
-  if (rawShape) {
-    // Never echo the credential itself — the first characters identify it.
-    return `${rawShape[0].slice(0, 10)}…`;
+  // Fixed labels, never a slice of the match: these branches see the credential
+  // UNREDACTED (that is the point — an older backend missed it), so copying any
+  // of it into a string the UI renders would defeat the check's own purpose.
+  if (/sk-[A-Za-z0-9_-]{20,}/.test(body)) {
+    return "sk-…";
+  }
+  if (/Bearer\s+[A-Za-z0-9\-_.+/=]{20,}/.test(body)) {
+    return "Bearer …";
   }
   return null;
 }

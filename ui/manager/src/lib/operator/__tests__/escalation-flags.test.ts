@@ -342,7 +342,8 @@ describe("inlineCredential", () => {
     const flags = detectEscalationFlags(body);
     expect(flags.map((f) => f.id)).toContain("inlineCredential");
     // The path slot carries the marker so the approver sees WHAT was masked.
-    expect(flags.find((f) => f.id === "inlineCredential")?.path).toContain("<REDACTED>");
+    // The marker verbatim — no surrounding body characters ride along.
+    expect(flags.find((f) => f.id === "inlineCredential")?.path).toBe("<REDACTED>");
   });
 
   it("does NOT flag a redacted vault reference — that is the correct way to pass a secret", () => {
@@ -356,9 +357,19 @@ describe("inlineCredential", () => {
     const flags = detectEscalationFlags(body);
     const flag = flags.find((f) => f.id === "inlineCredential");
     expect(flag).toBeTruthy();
-    // The full credential must never round-trip into the warning itself.
-    expect(flag!.path.length).toBeLessThan(15);
-    expect(flag!.path).not.toContain("CeIJ4onq59Mf_oN4");
+    // A FIXED label — not a slice of the match. This branch sees the credential
+    // unredacted, so copying any of it into a rendered string defeats the check.
+    expect(flag!.path).toBe("sk-…");
+    // Nothing past the generic prefix survives: the key's own distinguishing
+    // characters must appear nowhere in anything the warning renders.
+    expect(flag!.path).not.toContain("ant");
+    expect(flag!.path).not.toContain("CeIJ");
+    expect(key).toContain("CeIJ");
+  });
+
+  it("labels a Bearer literal without echoing the token", () => {
+    const flags = detectEscalationFlags('{"h": {"Authorization": "Bearer abcdefghij1234567890abcdef"}}');
+    expect(flags.find((f) => f.id === "inlineCredential")?.path).toBe("Bearer …");
   });
 
   it("flags a Bearer token literal", () => {
