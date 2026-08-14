@@ -31,8 +31,8 @@ class SecretRedactionFilterTest {
     /**
      * Regression: real Anthropic keys carry underscores, and a character class
      * without {@code _} stopped matching at the first one — a full key inside a
-     * gated tool call's arguments sailed through "redacted" and rendered
-     * clear-text on the approval card.
+     * gated tool call's arguments sailed through "redacted" and rendered clear-text
+     * on the approval card.
      */
     @Test
     void redact_anthropicKeyWithUnderscores() {
@@ -53,10 +53,10 @@ class SecretRedactionFilterTest {
 
     /**
      * Regression: the exact shape of the approval-card leak — a tool call whose
-     * {@code requestBody} argument is itself a JSON document, so every quote
-     * around {@code apiKey} arrives backslash-escaped. The generic rule's
-     * separator never matched through the escaping, and the key survived into
-     * the "redacted" arguments the approver reads.
+     * {@code requestBody} argument is itself a JSON document, so every quote around
+     * {@code apiKey} arrives backslash-escaped. The generic rule's separator never
+     * matched through the escaping, and the key survived into the "redacted"
+     * arguments the approver reads.
      */
     @Test
     void redact_apiKeyInsideEscapedJsonRequestBody() {

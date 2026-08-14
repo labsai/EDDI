@@ -7,6 +7,36 @@
 
 
 
+## 🔒 feat(secrets): defense-in-depth for HITL surfaces — serve-time re-redaction + raw-carrier strip (2026-08-14)
+
+**Repo:** EDDI (`fix/hitl-secret-hardening`, follow-up to the filter fix in 943cd119c)
+
+The filter fix closed the pattern gaps; this closes the ARCHITECTURE gaps that let a stale or
+missed redaction reach a human:
+
+- **Serve-time re-redaction everywhere pending-call arguments leave the server.** `argumentsRedacted`
+  is computed once, at pause time, with whatever filter version existed then — a pause stored before
+  a filter improvement kept serving its old, leaky redaction forever. The approval-status summary,
+  the `detail=full` snapshot, the MCP mirror and the Slack approval card now re-run
+  `SecretRedactionFilter` over every served string (arguments, preview uri/body/query/headers).
+- **The raw carriers never leave the server on the approver surface.** `detail=full` returned the
+  whole snapshot with only fingerprints stripped — `argumentsRaw`, the frozen LLM transcript
+  (`chatTranscriptJson`) and the running trace (`traceSoFar`) rode along, each carrying the raw
+  arguments the redaction beside them had masked. `sanitizePendingToolCallsForApprover` strips all
+  three (persisted document untouched; resume unaffected).
+- **The tool trace records redacted arguments and results from the start.** `ToolLoopRunner` stored
+  the model's raw arguments (and raw tool results) in the trace — the same trace that feeds task
+  summaries, SSE, memory and the chat activity list. Both now pass through the filter at record
+  time; execution and the model's own view keep the raw values.
+
+Six new tests: five on the approver sanitizer (raw-carrier strip, stale-redaction re-redaction,
+preview surfaces, fingerprint marker contract, null-safety) and one end-to-end orchestrator test
+pinning that a credential embedded in tool arguments never survives into the trace.
+
+---
+
+
+
 ## 🔒 fix(secrets): redaction filter missed underscored keys and escaped-JSON fields (2026-08-14)
 
 **Repo:** EDDI (`chore/remove-agent-father`)
