@@ -190,9 +190,13 @@ describe("RequestPreview", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("prefers the concrete finding over the incomplete-scan note when both could apply", () => {
-      // A truncated body that still yielded a flag: naming the actual grant is
-      // strictly more useful than saying the scan may have missed something.
+    it("shows BOTH the concrete finding and the incomplete-scan note on a truncated body", () => {
+      // These say different things and both are true: "here is a grant we
+      // found" does not imply "and there is nothing past the cut". Suppressing
+      // the note whenever any flag fired was defensible only while every check
+      // needed the whole document — an inline credential in the first line now
+      // raises a flag immediately, which silently withdrew the notice exactly
+      // when a grant past the cut is most likely to be missed.
       renderWithProviders(
         <RequestPreview
           preview={preview({
@@ -204,9 +208,7 @@ describe("RequestPreview", () => {
         />,
       );
       expect(screen.getByTestId("request-preview-escalations-call-1")).toBeInTheDocument();
-      expect(
-        screen.queryByTestId("request-preview-escalation-unchecked-call-1"),
-      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("request-preview-escalation-unchecked-call-1")).toBeInTheDocument();
     });
 
     it("announces itself to assistive tech rather than being a silent colour change", () => {

@@ -4011,7 +4011,8 @@
         "agentCreatedWithoutGate": "Dieser Agent wird ohne Genehmigungs-Gate erstellt. Jeder spätere Schreibvorgang wird unbeaufsichtigt ausgeführt.",
         "agentCreatedWithBroadEndpoints": "Dieser Agent wird mit Schreibzugriff auf seine eigene API erstellt — nicht auf Lesevorgänge beschränkt.",
         "agentCreatedWithExternalTools": "Dieser Agent wird mit sämtlichen Tools erstellt, die ein externer MCP-Server anbietet. Welche das sind, entscheidet dieser Server, und er kann sie später ändern.",
-        "unchecked": "Der Body war zu lang, um ihn auf Berechtigungserweiterungen zu prüfen — lesen Sie ihn vor der Freigabe vollständig."
+        "unchecked": "Der Body war zu lang, um ihn auf Berechtigungserweiterungen zu prüfen — lesen Sie ihn vor der Freigabe vollständig.",
+        "inlineCredential": "Diese Anfrage enthält offenbar fest eingetragene Zugangsdaten statt einer ${vault:…}-Referenz. Ein eingebettetes Secret liegt im Klartext vor und kann nicht über den Vault rotiert werden — ablehnen und die Vault-Referenz verlangen."
       },
       "blockedSelfTarget": "Ein Agent darf seine eigene Definition nicht ändern, und diese Anfrage betrifft den eigenen Agenten des Operators ({{agentId}}). Solange sie enthalten ist, kann der gesamte Stapel nicht genehmigt werden — lehnen Sie ab und nehmen Sie diese Änderung auf der Seite dieses Agenten vor.",
       "blockedGateCarrying": "Diese Anfrage schreibt eine LLM-Konfiguration, die ihr eigenes Freigabe-Gate (toolApprovals) setzt und damit das prüfende Gate ersetzen würde. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und ändern Sie das Gate auf der Seite des Agenten.",

@@ -371,8 +371,15 @@ function WorkforceWizard() {
 
   // ─── Render ─────────────────────────────────────────────────────────────
 
+  // The outer element is the SCROLLER. `workforce-main` is deliberately
+  // `overflow-hidden` — every Workforce page brings its own scroll container
+  // (see workforce-analytics / workforce-history) — and this page had none, so
+  // once the step content grew past the viewport the rest was simply
+  // unreachable: no page scrollbar, no wheel response, and the wizard's own
+  // Back/Next controls sat below the cut.
   return (
-    <div className="ms-auto me-auto max-w-3xl p-5 sm:p-8">
+    <div className="h-full min-h-0 overflow-y-auto">
+      <div className="ms-auto me-auto max-w-3xl p-5 sm:p-8">
       {/* Close / cancel wizard — back to dashboard */}
       <div className="flex items-center justify-end mb-4">
         <Link
@@ -475,6 +482,7 @@ function WorkforceWizard() {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

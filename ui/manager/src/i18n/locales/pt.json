@@ -4041,7 +4041,8 @@
         "agentCreatedWithoutGate": "Este agente está a ser criado sem porta de aprovação. Cada escrita que fizer posteriormente será executada sem supervisão.",
         "agentCreatedWithBroadEndpoints": "Este agente está a ser criado com acesso de escrita à sua API — não limitado a leituras.",
         "agentCreatedWithExternalTools": "Este agente está a ser criado com todas as ferramentas que um servidor MCP externo disponibiliza. É esse servidor que decide quais são, e pode alterá-las mais tarde.",
-        "unchecked": "O corpo era demasiado longo para analisar concessões de capacidade — leia-o na íntegra antes de aprovar."
+        "unchecked": "O corpo era demasiado longo para analisar concessões de capacidade — leia-o na íntegra antes de aprovar.",
+        "inlineCredential": "Esta solicitação incorpora o que parece ser uma credencial literal em vez de uma referência ${vault:…}. Um segredo escrito diretamente fica em texto simples e não pode ser rotacionado pelo cofre — rejeite e peça a referência do cofre."
       },
       "blockedSelfTarget": "Um agente não pode alterar a sua própria definição, e este pedido visa o próprio agente do operador ({{agentId}}). Enquanto estiver presente, todo o lote não pode ser aprovado — rejeite-o e faça esta alteração a partir da página desse agente.",
       "blockedGateCarrying": "Esta solicitação grava uma configuração de LLM que define o seu próprio portão de aprovação (toolApprovals), o que substituiria o portão que a está a rever. A aprovação fica indisponível para todo o lote enquanto estiver presente — rejeite e altere o portão a partir da página do próprio agente.",
