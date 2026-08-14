@@ -4078,7 +4078,13 @@
       "action": "Voltar a ligar"
     },
     "managedAgentBadge": "Operador",
-    "managedAgentHint": "Aprovisionado e gerido pelo ecrã do operador da plataforma. Editá-lo ou eliminá-lo aqui irá quebrar esse ecrã."
+    "managedAgentHint": "Aprovisionado e gerido pelo ecrã do operador da plataforma. Editá-lo ou eliminá-lo aqui irá quebrar esse ecrã.",
+    "decisionLog": {
+      "approved": "Você aprovou esta solicitação",
+      "rejected": "Você rejeitou esta solicitação",
+      "rePaused": "Pausado novamente — é necessária outra decisão",
+      "noReply": "O turno terminou sem resposta"
+    }
   },
   "groupWorkspace": {
     "addCadence": "Adicionar cadência",

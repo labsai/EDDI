@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatMarkdownText } from "@/components/groups/group-utils";
-import { Send, Square, RotateCcw, AlertTriangle, ArrowDown, Bot, User, PauseCircle, Loader2, Paperclip } from "lucide-react";
+import { Send, Square, RotateCcw, AlertTriangle, ArrowDown, Bot, User, PauseCircle, Loader2, Paperclip, CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatActivity } from "@/components/chat/chat-activity";
 import { InputHint } from "@/components/chat/input-hint";
@@ -234,6 +234,32 @@ export function OperatorChat({
         )}
 
         {messages.map((message) => (
+          message.kind ? (
+            // A recorded decision or an outcome notice — a transcript fact, not
+            // an agent reply, so it renders as a centred rule rather than a
+            // bubble. Its presence is the point: every decision leaves a trace,
+            // even when the resumed turn came back with nothing to show.
+            <div
+              key={message.id}
+              className="flex items-center gap-2 px-4 py-1 text-[11px] text-muted-foreground"
+              data-testid={`operator-decision-${message.code}`}
+            >
+              <span className="h-px flex-1 bg-border/60" />
+              {message.kind === "decision" ? (
+                message.code === "approved" ? (
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" aria-hidden="true" />
+                ) : (
+                  <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />
+                )
+              ) : (
+                <PauseCircle className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden="true" />
+              )}
+              <span className="shrink-0">
+                {t(`operator.decisionLog.${message.code}`, message.content, { count: message.count ?? 0 })}
+              </span>
+              <span className="h-px flex-1 bg-border/60" />
+            </div>
+          ) : (
           <div key={message.id} className="space-y-2">
           <div
             className={cn(
@@ -293,6 +319,7 @@ export function OperatorChat({
             />
           ) : null}
           </div>
+          )
         ))}
 
         {error && (

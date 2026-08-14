@@ -741,6 +741,35 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
         timestamp: Date.now(),
       }));
 
+      // A decision must ALWAYS leave a visible trace. Approving used to be
+      // indistinguishable from nothing happening when the resumed turn produced
+      // no text — it had paused again on the same tool, and the transcript said
+      // nothing at all. The record goes in regardless of what came back.
+      const decidedCalls = toolDecisions ? Object.keys(toolDecisions).length : 0;
+      const decisionEntry: ChatMessage = {
+        id: nextId("agent"),
+        role: "system",
+        kind: "decision",
+        code: verdict === "APPROVED" ? "approved" : "rejected",
+        count: decidedCalls,
+        content: verdict === "APPROVED" ? "You approved this request." : "You rejected this request.",
+        timestamp: Date.now(),
+      };
+      // ...and when there is no answer to show, say WHY rather than leaving the
+      // approver staring at an unchanged screen.
+      const silentOutcome: ChatMessage | null = parts.length > 0
+        ? null
+        : {
+            id: nextId("agent"),
+            role: "system",
+            kind: "notice",
+            code: rePaused ? "rePaused" : "noReply",
+            content: rePaused
+              ? "The turn paused again and needs another decision."
+              : "The turn finished without a reply.",
+            timestamp: Date.now(),
+          };
+
       set((s) => {
         const settled = {
           isPaused: rePaused,
@@ -748,8 +777,16 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           isResolvingPause: false,
           decidedPausedAt: rePaused ? (snapshot.hitlPausedAt ?? null) : null,
         };
+        const trail = silentOutcome ? [decisionEntry, silentOutcome] : [decisionEntry];
         if (newBubbles.length === 0) {
-          return { ...s, ...settled, pausedPlaceholderId: null };
+          // The formerly silent path: the decision and its outcome are still
+          // recorded, so the approver always sees that something happened.
+          return {
+            ...s,
+            ...settled,
+            messages: [...s.messages, ...trail],
+            pausedPlaceholderId: null,
+          };
         }
         // Read from `s`, never from an outer closure: `messages` here must be
         // this exact update's starting point, not whatever render happened to
@@ -767,6 +804,8 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           // paused) stays attached to the answer it belongs to.
           messages = [
             ...s.messages.slice(0, placeholderIdx),
+            // The decision reads before the answer it produced.
+            decisionEntry,
             { ...s.messages[placeholderIdx]!, content: first!.content, isStreaming: false },
             ...rest,
             ...s.messages.slice(placeholderIdx + 1),
@@ -777,7 +816,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           // rather than overwriting its opening and stranding the remainder.
           renderedId = rest.length > 0 ? rest[rest.length - 1]!.id : placeholderId!;
         } else {
-          messages = [...s.messages, ...newBubbles];
+          messages = [...s.messages, decisionEntry, ...newBubbles];
           renderedId = newBubbles[newBubbles.length - 1]!.id;
         }
         return {

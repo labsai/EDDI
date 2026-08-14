@@ -4048,7 +4048,13 @@
       "action": "重新开启"
     },
     "managedAgentBadge": "操作员",
-    "managedAgentHint": "由平台操作员页面创建并管理。在此编辑或删除会导致该页面失效。"
+    "managedAgentHint": "由平台操作员页面创建并管理。在此编辑或删除会导致该页面失效。",
+    "decisionLog": {
+      "approved": "您已批准此请求",
+      "rejected": "您已拒绝此请求",
+      "rePaused": "再次暂停 — 需要另一个决定",
+      "noReply": "本轮结束但没有回复"
+    }
   },
   "groupWorkspace": {
     "addCadence": "添加节奏",

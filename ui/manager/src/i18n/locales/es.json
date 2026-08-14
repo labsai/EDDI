@@ -4078,7 +4078,13 @@
       "action": "Volver a activar"
     },
     "managedAgentBadge": "Operador",
-    "managedAgentHint": "Aprovisionado y gestionado por la pantalla del operador de plataforma. Editarlo o eliminarlo aquí romperá esa pantalla."
+    "managedAgentHint": "Aprovisionado y gestionado por la pantalla del operador de plataforma. Editarlo o eliminarlo aquí romperá esa pantalla.",
+    "decisionLog": {
+      "approved": "Has aprobado esta solicitud",
+      "rejected": "Has rechazado esta solicitud",
+      "rePaused": "En pausa de nuevo: se necesita otra decisión",
+      "noReply": "El turno terminó sin respuesta"
+    }
   },
   "groupWorkspace": {
     "addCadence": "Añadir cadencia",

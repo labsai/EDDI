@@ -4048,7 +4048,13 @@
       "action": "Wieder einschalten"
     },
     "managedAgentBadge": "Operator",
-    "managedAgentHint": "Wird vom Plattform-Operator-Bildschirm bereitgestellt und verwaltet. Bearbeiten oder Löschen an dieser Stelle macht diesen Bildschirm unbrauchbar."
+    "managedAgentHint": "Wird vom Plattform-Operator-Bildschirm bereitgestellt und verwaltet. Bearbeiten oder Löschen an dieser Stelle macht diesen Bildschirm unbrauchbar.",
+    "decisionLog": {
+      "approved": "Sie haben diese Anfrage genehmigt",
+      "rejected": "Sie haben diese Anfrage abgelehnt",
+      "rePaused": "Erneut pausiert — eine weitere Entscheidung ist nötig",
+      "noReply": "Der Durchlauf endete ohne Antwort"
+    }
   },
   "groupWorkspace": {
     "addCadence": "Rhythmus hinzufügen",

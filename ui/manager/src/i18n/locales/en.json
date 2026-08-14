@@ -4048,7 +4048,13 @@
       "action": "Turn back on"
     },
     "managedAgentBadge": "Operator",
-    "managedAgentHint": "Provisioned and managed by the Platform Operator screen. Editing or deleting it here will break that screen."
+    "managedAgentHint": "Provisioned and managed by the Platform Operator screen. Editing or deleting it here will break that screen.",
+    "decisionLog": {
+      "approved": "You approved this request",
+      "rejected": "You rejected this request",
+      "rePaused": "Paused again — another decision is needed",
+      "noReply": "The turn finished without a reply"
+    }
   },
   "groupWorkspace": {
     "taskAdded": "Task added to the backlog",

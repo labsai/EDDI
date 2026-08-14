@@ -4078,7 +4078,13 @@
       "action": "Réactiver"
     },
     "managedAgentBadge": "Opérateur",
-    "managedAgentHint": "Provisionné et géré par l'écran Opérateur de plateforme. Le modifier ou le supprimer ici cassera cet écran."
+    "managedAgentHint": "Provisionné et géré par l'écran Opérateur de plateforme. Le modifier ou le supprimer ici cassera cet écran.",
+    "decisionLog": {
+      "approved": "Vous avez approuvé cette requête",
+      "rejected": "Vous avez rejeté cette requête",
+      "rePaused": "De nouveau en pause — une autre décision est nécessaire",
+      "noReply": "Le tour s'est terminé sans réponse"
+    }
   },
   "groupWorkspace": {
     "addCadence": "Ajouter une cadence",

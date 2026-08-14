@@ -4048,7 +4048,13 @@
       "action": "再開する"
     },
     "managedAgentBadge": "オペレーター",
-    "managedAgentHint": "プラットフォームオペレーター画面が作成・管理しています。ここで編集または削除すると、その画面が壊れます。"
+    "managedAgentHint": "プラットフォームオペレーター画面が作成・管理しています。ここで編集または削除すると、その画面が壊れます。",
+    "decisionLog": {
+      "approved": "このリクエストを承認しました",
+      "rejected": "このリクエストを拒否しました",
+      "rePaused": "再び一時停止しました — さらに判断が必要です",
+      "noReply": "応答がないままターンが終了しました"
+    }
   },
   "groupWorkspace": {
     "addCadence": "ケイデンスを追加",

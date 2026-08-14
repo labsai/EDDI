@@ -22,12 +22,34 @@ export interface MessageAttachment {
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "agent";
+  /**
+   * "system" marks a transcript FACT rather than a turn: a recorded approval
+   * decision or an outcome notice. Kept out of "agent" deliberately — it is not
+   * something the model said, and every "is this an agent reply?" query (bubble
+   * rendering, placeholder reconciliation, trace attachment) must keep ignoring
+   * it.
+   */
+  role: "user" | "agent" | "system";
   content: string;
   timestamp: number;
   isStreaming?: boolean;
   /** Attachments the user sent alongside this message. */
   attachments?: MessageAttachment[];
+  /**
+   * Marks a transcript entry that is NOT an agent reply: a recorded human
+   * decision on a gated pause, or a notice explaining an outcome that produced
+   * no text.
+   *
+   * Exists so a decision ALWAYS leaves a trace. A resumed turn that answers with
+   * nothing — because it paused again, or returned no output — used to add
+   * nothing to the transcript, so approving was indistinguishable from nothing
+   * happening.
+   */
+  kind?: "decision" | "notice";
+  /** Stable code for translation; `content` carries the English fallback. */
+  code?: "approved" | "rejected" | "rePaused" | "noReply";
+  /** How many gated calls the decision covered, for the pluralized label. */
+  count?: number;
 }
 
 export type SSEEventType =
