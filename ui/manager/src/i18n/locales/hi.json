@@ -695,6 +695,7 @@
       "toolResult": "परिणाम",
       "error": "त्रुटि हुई",
       "toolCallsCount_one": "{{count}} टूल कॉल",
+      "stepsCount": "{{count}} चरण", "stepsCount_one": "{{count}} चरण", "stepsCount_other": "{{count}} चरण",
       "toolCallsCount_other": "{{count}} टूल कॉल",
       "toolCallsCount": "{{count}} टूल कॉल",
       "usingTool": "{{tool}} का उपयोग हो रहा है…"

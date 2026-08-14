@@ -703,6 +703,7 @@
       "toolResult": "Résultat",
       "error": "Une erreur s'est produite",
       "toolCallsCount_one": "{{count}} appel d'outil",
+      "stepsCount": "{{count}} étapes", "stepsCount_one": "{{count}} étape", "stepsCount_many": "{{count}} étapes", "stepsCount_other": "{{count}} étapes",
       "toolCallsCount_many": "{{count}} appels d'outils",
       "toolCallsCount_other": "{{count}} appels d'outils",
       "toolCallsCount": "{{count}} appels d'outils",

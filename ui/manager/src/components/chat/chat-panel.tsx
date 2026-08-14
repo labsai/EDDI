@@ -796,6 +796,7 @@ function ChatInputWithSecretToggle({
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    el.style.overflowY = el.scrollHeight > 160 ? "auto" : "hidden";
   }, []);
 
   const canSend =
@@ -1018,10 +1019,13 @@ function EmptyState() {
 
 // ==================== Inline Thinking Indicator ====================
 
-/** Internal pipeline tasks that should never surface in the UI. */
+/** Internal pipeline tasks that should never surface in the UI. Matched
+ *  LOWERCASED against ev.taskType — the runtime ids are camelCase (httpCalls,
+ *  mcpCalls); see INTERNAL_INFRA_TASKS in chat-activity.tsx. */
 const INTERNAL_TASKS = new Set([
   "expressions", "behavior_rules", "langchain", "dictionary",
-  "propertysetter", "parser", "output",
+  "properties", "propertysetter", "parser", "output",
+  "httpcalls", "mcpcalls",
   "ai.labs.expressions", "ai.labs.behavior_rules", "ai.labs.langchain",
   "ai.labs.dictionary", "ai.labs.propertysetter", "ai.labs.parser",
   "ai.labs.output",
@@ -1038,7 +1042,7 @@ function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
   const activeToolNames = useMemo(() => {
     const names: string[] = [];
     for (const ev of events) {
-      if (INTERNAL_TASKS.has(ev.taskType)) continue;
+      if (INTERNAL_TASKS.has(ev.taskType.toLowerCase())) continue;
       if (ev.toolTrace) {
         for (const trace of ev.toolTrace) {
           if (trace.type === "tool_call" && trace.tool && !names.includes(trace.tool)) {
@@ -1052,7 +1056,7 @@ function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
 
   // Check for errors in visible events
   const hasError = events.some(
-    (e) => e.type === "task_failed" && !INTERNAL_TASKS.has(e.taskType),
+    (e) => e.type === "task_failed" && !INTERNAL_TASKS.has(e.taskType.toLowerCase()),
   );
 
   return (

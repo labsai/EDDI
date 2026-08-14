@@ -695,6 +695,7 @@
       "toolResult": "결과",
       "error": "오류가 발생했습니다",
       "toolCallsCount_one": "도구 호출 {{count}}건",
+      "stepsCount": "{{count}}단계", "stepsCount_one": "{{count}}단계", "stepsCount_other": "{{count}}단계",
       "toolCallsCount_other": "도구 호출 {{count}}건",
       "toolCallsCount": "도구 호출 {{count}}건",
       "usingTool": "{{tool}} 사용 중…"

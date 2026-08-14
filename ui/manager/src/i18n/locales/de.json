@@ -695,6 +695,7 @@
       "toolResult": "Ergebnis",
       "error": "Fehler aufgetreten",
       "toolCallsCount_one": "{{count}} Tool-Aufruf",
+      "stepsCount": "{{count}} Schritte", "stepsCount_one": "{{count}} Schritt", "stepsCount_other": "{{count}} Schritte",
       "toolCallsCount_other": "{{count}} Tool-Aufrufe",
       "toolCallsCount": "{{count}} Tool-Aufrufe",
       "usingTool": "Verwendet {{tool}} …"

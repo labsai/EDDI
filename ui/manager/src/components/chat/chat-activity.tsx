@@ -131,15 +131,24 @@ function buildTaskSummaries(events: PipelineEvent[]): TaskSummary[] {
  * toolTrace, and an httpcalls step that errors is still shown by the hasError
  * branch.
  */
+/*
+ * Matched LOWERCASED against task.taskType. The authoritative list is each
+ * ILifecycleTask.getType() in the EDDI backend: httpCalls, mcpCalls,
+ * langchain, expressions, output, properties, behavior_rules — note the
+ * camelCase ids, which an exact match silently missed. The extra entries keep
+ * older/renamed variants covered.
+ */
 const INTERNAL_INFRA_TASKS = new Set([
   "expressions",
   "behavior_rules",
   "langchain",
   "dictionary",
+  "properties",
   "propertysetter",
   "parser",
   "output",
   "httpcalls",
+  "mcpcalls",
   "ai.labs.expressions",
   "ai.labs.behavior_rules",
   "ai.labs.langchain",
@@ -185,7 +194,10 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
     return rawTasks.filter((task) => {
       const hasTools = task.toolTrace?.some((e) => e.type === "tool_call");
       const hasError = task.status === "error";
-      const isInternal = INTERNAL_INFRA_TASKS.has(task.taskType);
+      // Case-INSENSITIVE: the runtime emits camelCase ids ("httpCalls") while
+      // this set is lowercase — an exact has() silently filtered nothing in
+      // production while lowercase-mocked tests stayed green.
+      const isInternal = INTERNAL_INFRA_TASKS.has(task.taskType.toLowerCase());
       return !isInternal || hasTools || hasError;
     });
   }, [rawTasks, showInternalSteps]);
@@ -239,7 +251,9 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
   if (!showInternalSteps && isLive && !hasErrorTask && cascadeSteps.length === 0) {
     return (
       <div className="flex justify-center px-4 py-1" data-testid="chat-activity">
-        <div className="w-full max-w-[85%] rounded-xl border border-primary/30 bg-primary/5">
+        {/* w-fit: a one-word status stretched to 85% of the chat reads as a
+            banner, not a status line. */}
+        <div className="w-fit max-w-[85%] rounded-full border border-primary/30 bg-primary/5">
           <div className="flex items-center gap-2 px-3 py-2 text-xs" data-testid="chat-activity-live-status">
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
             <span className="font-medium text-primary">
@@ -300,7 +314,7 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
             ) : (
               <span>
                 <span className="font-medium text-foreground">
-                  {tasks.length} {t("chat.activity.steps", "steps")}
+                  {t("chat.activity.stepsCount", "{{count}} steps", { count: tasks.length })}
                 </span>
                 <span className="mx-1.5 text-border">·</span>
                 <span className="font-mono">{formatDuration(totalDuration)}</span>
@@ -308,7 +322,7 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
                   <>
                     <span className="mx-1.5 text-border">·</span>
                     <span>
-                      {toolCallCount} {t("chat.activity.toolCalls", "tool calls")}
+                      {t("chat.activity.toolCallsCount", "{{count}} tool calls", { count: toolCallCount })}
                     </span>
                   </>
                 )}

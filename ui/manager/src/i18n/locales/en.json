@@ -724,6 +724,7 @@
       "toolResult": "Result",
       "error": "Error occurred",
       "toolCallsCount_one": "{{count}} tool call",
+      "stepsCount": "{{count}} steps", "stepsCount_one": "{{count}} step", "stepsCount_other": "{{count}} steps",
       "toolCallsCount_other": "{{count}} tool calls",
       "toolCallsCount": "{{count}} tool calls",
       "usingTool": "Using {{tool}}…"

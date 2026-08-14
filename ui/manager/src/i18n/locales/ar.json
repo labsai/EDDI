@@ -727,6 +727,7 @@
       "toolResult": "النتيجة",
       "error": "حدث خطأ",
       "toolCallsCount_one": "استدعاء أداة واحد",
+      "stepsCount": "{{count}} خطوة", "stepsCount_zero": "لا خطوات", "stepsCount_one": "خطوة واحدة", "stepsCount_two": "خطوتان", "stepsCount_few": "{{count}} خطوات", "stepsCount_many": "{{count}} خطوة", "stepsCount_other": "{{count}} خطوة",
       "toolCallsCount_zero": "لا استدعاءات أدوات",
       "toolCallsCount_two": "استدعاءا أداة",
       "toolCallsCount_few": "{{count}} استدعاءات أدوات",
