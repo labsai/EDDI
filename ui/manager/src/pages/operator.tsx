@@ -211,12 +211,16 @@ export function OperatorPage() {
                   // Proven breach (or a breach whose teardown failed): this is
                   // a failure state, not a warning — surface it where a failed
                   // activation would land and re-read what the server now has.
-                  setActivationError(
-                    report.message ?? t("operator.toast.writeProbeFailed", "The approval gate did not hold — the operator was removed."),
-                  );
-                  toast.error(
-                    t("operator.toast.writeProbeFailed", "The approval gate did not hold — the operator was removed."),
-                  );
+                  // The toast carries the report's OWN disposition: a failed
+                  // teardown says "still deployed — remove it manually", and a
+                  // fixed "was removed" here would falsely reassure the admin
+                  // (this toast can be the only visible result after
+                  // navigation, since the activation form is already closed).
+                  const message =
+                    report.message ??
+                    t("operator.toast.writeProbeFailed", "The approval gate did not hold — the operator was removed.");
+                  setActivationError(message);
+                  toast.error(message);
                   void queryClient.invalidateQueries({ queryKey: operatorKeys.all });
                   return;
                 }

@@ -472,6 +472,15 @@ describe("enforceGateDryRun — the blocking, deterministic half", () => {
 describe("runBackgroundWriteProbe — the empirical half, after activation", () => {
   const VAR_URL = "*/variablestore/variables/default/platform.operator";
 
+  /** The stored config still names the probe's agent — the teardown's happy precondition. */
+  const storedConfigPointsAt = (agentId: string) =>
+    http.get(VAR_URL, () =>
+      HttpResponse.json({
+        key: "platform.operator",
+        value: JSON.stringify(config({ agentId })),
+      }),
+    );
+
   beforeEach(() => {
     server.use(
       http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
@@ -542,6 +551,7 @@ describe("runBackgroundWriteProbe — the empirical half, after activation", () 
     let deleted = false;
     let configCleared = false;
     server.use(
+      storedConfigPointsAt("op-1"),
       http.post("*/administration/:env/undeploy/:agentId", () => {
         undeployed = true;
         return new HttpResponse(null, { status: 200 });
@@ -572,6 +582,81 @@ describe("runBackgroundWriteProbe — the empirical half, after activation", () 
     expect(configCleared).toBe(true);
   });
 
+  /**
+   * The probe runs detached from activation, so a breach verdict can land
+   * AFTER the operator was reconfigured (this page, another tab, another
+   * admin). A stale probe must remove its own agent — the breach is real —
+   * but clearing the shared config variable would erase the REPLACEMENT
+   * operator's config.
+   */
+  it("a stale probe removes its own agent but leaves a successor's config untouched", async () => {
+    serveTurn([
+      taskComplete([
+        { type: "tool_call", tool: "patchDescriptor" },
+        { type: "tool_result", tool: "patchDescriptor", result: '{"status":"ok"}' },
+      ]),
+      doneWith("READY"),
+    ]);
+    let deleted = false;
+    let configCleared = false;
+    server.use(
+      // The stored config now names a DIFFERENT agent — this probe is stale.
+      storedConfigPointsAt("op-2-replacement"),
+      http.post("*/administration/:env/undeploy/:agentId", () => new HttpResponse(null, { status: 200 })),
+      http.delete("*/agentstore/agents/:id", ({ request }) => {
+        deleted = true;
+        expect(request.url).toContain("/agents/op-1?");
+        expect(request.url).toContain("cascade=true");
+        expect(request.url).toContain("permanent=true");
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.delete(VAR_URL, () => {
+        configCleared = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const report = await runBackgroundWriteProbe(config(), spec(), true);
+
+    expect(report?.tornDown).toBe(true);
+    expect(deleted).toBe(true);
+    expect(configCleared).toBe(false);
+    expect(report?.message).toMatch(/no longer points at it/i);
+    expect(report?.message).toMatch(/left untouched/i);
+  });
+
+  it("never clears the shared config on a guess — an unreadable store still only removes the probe's agent", async () => {
+    serveTurn([
+      taskComplete([
+        { type: "tool_call", tool: "patchDescriptor" },
+        { type: "tool_result", tool: "patchDescriptor", result: '{"status":"ok"}' },
+      ]),
+      doneWith("READY"),
+    ]);
+    let deleted = false;
+    let configCleared = false;
+    server.use(
+      http.get(VAR_URL, () => HttpResponse.json({ message: "store down" }, { status: 500 })),
+      http.post("*/administration/:env/undeploy/:agentId", () => new HttpResponse(null, { status: 200 })),
+      http.delete("*/agentstore/agents/:id", () => {
+        deleted = true;
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.delete(VAR_URL, () => {
+        configCleared = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const report = await runBackgroundWriteProbe(config(), spec(), true);
+
+    expect(report?.tornDown).toBe(true);
+    expect(deleted).toBe(true);
+    expect(configCleared).toBe(false);
+    expect(report?.message).toMatch(/could not be read/i);
+    expect(report?.message).toMatch(/check the operator screen/i);
+  });
+
   it("says the operator is STILL DEPLOYED when the teardown itself fails", async () => {
     serveTurn([
       taskComplete([
@@ -581,6 +666,7 @@ describe("runBackgroundWriteProbe — the empirical half, after activation", () 
       doneWith("READY"),
     ]);
     server.use(
+      storedConfigPointsAt("op-1"),
       http.post("*/administration/:env/undeploy/:agentId", () => new HttpResponse(null, { status: 200 })),
       http.delete("*/agentstore/agents/:id", () =>
         HttpResponse.json({ message: "backend down" }, { status: 500 }),

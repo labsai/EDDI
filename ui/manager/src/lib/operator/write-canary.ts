@@ -3,11 +3,13 @@ import { resumeConversation, getApprovalStatus } from "@/lib/api/hitl";
 import {
   gateDryRun,
   isNotFound,
+  readOperatorConfig,
   reportOperatorCanaryResult,
   resetOperator,
   type OperatorConfig,
   type FetchedSpec,
 } from "@/lib/api/operator";
+import { undeployAgent, deleteAgent } from "@/lib/api/agents";
 import { buildOperationIdIndex, resolveToolNameForEndpoint } from "./reconstruct-endpoint";
 
 /**
@@ -440,8 +442,9 @@ export interface WriteProbeReport {
  * was the original defect the dry-run fixed; now that activation no longer
  * waits on this probe, unknown is reported as a warning instead. A "fail" is
  * still PROOF the gate is broken with write tools reachable right now, so it
- * still tears the operator down (`resetOperator`: undeploy, delete, clear the
- * config variable).
+ * still tears the operator down — see {@link tearDownBreachedOperator} for
+ * why the shared config variable is only cleared when it still names this
+ * probe's agent.
  */
 export async function runBackgroundWriteProbe(
   config: OperatorConfig,
@@ -473,23 +476,8 @@ export async function runBackgroundWriteProbe(
     // The probe's write EXECUTED without pausing. The gate is broken at
     // runtime, whatever the stored policy says — remove the operator.
     const reason = `The approval gate did NOT hold: ${result.error ?? "no further detail"} Do not re-activate with write access until the gate is fixed.`;
-    try {
-      await resetOperator(config);
-      return {
-        result,
-        tornDown: true,
-        message: `${reason} The operator was removed rather than left deployed with a broken write gate.`,
-      };
-    } catch (rollbackError) {
-      const detail = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
-      return {
-        result,
-        tornDown: false,
-        message:
-          `${reason} Removing it ALSO failed (${detail}). The operator is still deployed with ` +
-          "write tools and a broken gate — remove it manually from the operator screen now.",
-      };
-    }
+    const teardown = await tearDownBreachedOperator(config, reason);
+    return { result, ...teardown };
   }
 
   return {
@@ -502,6 +490,69 @@ export async function runBackgroundWriteProbe(
       : "Could not verify the approval gate empirically, and this backend does not support the " +
         `deterministic check — this is not evidence that it is broken. ${result.error ?? ""}`.trim(),
   };
+}
+
+/**
+ * Removes a probe-proven-unsafe operator WITHOUT clobbering a successor.
+ *
+ * This probe runs detached from activation, so by the time a breach is proven
+ * the operator may already have been reconfigured — by this page, another tab,
+ * or another admin — and the stored `platform.operator` variable can point at
+ * a REPLACEMENT agent. `resetOperator` deletes the agent and then
+ * unconditionally clears that shared variable; run stale, it would erase the
+ * replacement's config. So the shared variable is cleared only when the stored
+ * config still names this probe's agent. A stale probe (or one that cannot
+ * READ the stored config — never clear shared state on a guess) removes its
+ * own agent and leaves the shared state alone.
+ */
+async function tearDownBreachedOperator(
+  config: OperatorConfig,
+  reason: string,
+): Promise<{ tornDown: boolean; message: string }> {
+  let stillCurrent = false;
+  let storeUnreadable = false;
+  try {
+    stillCurrent = (await readOperatorConfig())?.agentId === config.agentId;
+  } catch {
+    storeUnreadable = true;
+  }
+
+  try {
+    if (stillCurrent) {
+      await resetOperator(config);
+      return {
+        tornDown: true,
+        message: `${reason} The operator was removed rather than left deployed with a broken write gate.`,
+      };
+    }
+    // Stale (or unverifiable): remove only THIS probe's agent.
+    if (config.agentId && config.version != null) {
+      try {
+        await undeployAgent(config.environment, config.agentId, config.version, {
+          endAllActiveConversations: true,
+        });
+      } catch {
+        // Already undeployed, or the environment is gone — deletion is what matters.
+      }
+      await deleteAgent(config.agentId, config.version, { cascade: true, permanent: true });
+    }
+    return {
+      tornDown: true,
+      message: storeUnreadable
+        ? `${reason} The probed agent was removed, but the stored operator config could not be read to ` +
+          "confirm it still points at this agent, so it was left untouched — check the operator screen."
+        : `${reason} The probed agent was removed. The stored operator config no longer points at it ` +
+          "(the operator was reconfigured or removed since this probe started), so it was left untouched.",
+    };
+  } catch (rollbackError) {
+    const detail = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+    return {
+      tornDown: false,
+      message:
+        `${reason} Removing it ALSO failed (${detail}). The operator is still deployed with ` +
+        "write tools and a broken gate — remove it manually from the operator screen now.",
+    };
+  }
 }
 
 /** Marker so the dry-run catch can re-throw a rollback's error untouched. */
