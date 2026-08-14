@@ -3180,7 +3180,8 @@
     "confirmRejectToolDescription": "No se ejecutará nada. La conversación continúa y el agente responde sin {{toolNames}}.",
     "humanTurn": "Turno del miembro",
     "humanTurnReason": "Esperando a que {{member}} hable",
-    "humanTurnMemberFallback": "un miembro"
+    "humanTurnMemberFallback": "un miembro",
+    "decidedProgress": "{{decided}} de {{total}} decididas"
   },
   "chatDrawer": {
     "deploying": "Desplegando agente…",

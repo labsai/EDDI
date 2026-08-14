@@ -3264,7 +3264,8 @@
     "confirmRejectToolDescription": "لن يُنفَّذ أي شيء. تستمر المحادثة ويجيب الوكيل دون {{toolNames}}.",
     "humanTurn": "دور العضو",
     "humanTurnReason": "في انتظار أن يتحدث {{member}}",
-    "humanTurnMemberFallback": "أحد الأعضاء"
+    "humanTurnMemberFallback": "أحد الأعضاء",
+    "decidedProgress": "تم البت في {{decided}} من {{total}}"
   },
   "chatDrawer": {
     "deploying": "جارٍ نشر الوكيل…",

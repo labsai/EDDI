@@ -3152,7 +3152,8 @@
     "confirmRejectToolDescription": "จะไม่มีการเรียกใช้ใด ๆ การสนทนาจะดำเนินต่อและเอเจนต์จะตอบโดยไม่ใช้ {{toolNames}}",
     "humanTurn": "ตาของสมาชิก",
     "humanTurnReason": "กำลังรอให้ {{member}} พูด",
-    "humanTurnMemberFallback": "สมาชิกคนหนึ่ง"
+    "humanTurnMemberFallback": "สมาชิกคนหนึ่ง",
+    "decidedProgress": "ตัดสินใจแล้ว {{decided}} จาก {{total}}"
   },
   "chatDrawer": {
     "deploying": "กำลังปรับใช้เอเจนต์…",

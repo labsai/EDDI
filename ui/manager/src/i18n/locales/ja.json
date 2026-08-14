@@ -3152,7 +3152,8 @@
     "confirmRejectToolDescription": "何も実行されません。会話は続行され、エージェントは {{toolNames}} を使わずに回答します。",
     "humanTurn": "メンバーの番",
     "humanTurnReason": "{{member}} の発言を待っています",
-    "humanTurnMemberFallback": "あるメンバー"
+    "humanTurnMemberFallback": "あるメンバー",
+    "decidedProgress": "{{total}} 件中 {{decided}} 件を判断済み"
   },
   "chatDrawer": {
     "deploying": "エージェントをデプロイ中…",

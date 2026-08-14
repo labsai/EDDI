@@ -205,10 +205,11 @@ export function ApprovalBanner({
   // Every gated call must carry an explicit verdict before Approve is offered.
   // Checked against callStates directly (not toolDecisions, which is built only
   // at submit time) so the button reflects the CURRENT review state live.
+  const decidedCount = isToolCall
+    ? toolPause!.calls.filter((call) => callStates[call.callId]?.verdict !== undefined).length
+    : 0;
   const explicitReviewMissing =
-    requireExplicitPerCall &&
-    isToolCall &&
-    toolPause!.calls.some((call) => callStates[call.callId]?.verdict === undefined);
+    requireExplicitPerCall && isToolCall && decidedCount < toolPause!.calls.length;
 
   // A refusal, not a nudge. Any blocked call disables Approve for the whole
   // batch rather than only for itself: the per-call verdicts are submitted
@@ -454,9 +455,31 @@ export function ApprovalBanner({
       {/* Tool-call approvals (TOOL_CALL pause) */}
       {toolPause && (
         <div className="mb-3 space-y-2" data-testid="tool-call-approvals">
-          <p className="text-xs font-medium text-muted-foreground">
-            {t("hitl.toolCallsAwaiting", "Tool calls awaiting approval")}
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-medium text-muted-foreground">
+              {t("hitl.toolCallsAwaiting", "Tool calls awaiting approval")}
+            </p>
+            {/* Under requireExplicitPerCall, Approve is withheld until every call
+                carries a verdict — and the per-call buttons are small enough that
+                an approver reads a disabled Approve as a broken button rather than
+                as unfinished work. This says how much is left. */}
+            {requireExplicitPerCall && (
+              <span
+                className={cn(
+                  "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                  explicitReviewMissing
+                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                    : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+                )}
+                data-testid="per-call-progress"
+              >
+                {t("hitl.decidedProgress", "{{decided}} of {{total}} decided", {
+                  decided: decidedCount,
+                  total: toolPause.calls.length,
+                })}
+              </span>
+            )}
+          </div>
           {/* The backend never sends raw arguments to a client — only the
               redacted, size-capped form. A secret inside the payload reads as
               the literal text "<REDACTED>" here — the marker must match
@@ -475,6 +498,7 @@ export function ApprovalBanner({
               key={call.callId}
               call={call}
               state={callStates[call.callId] ?? {}}
+              awaitingDecision={requireExplicitPerCall && callStates[call.callId]?.verdict === undefined}
               outcomeUnknown={outcomeUnknown.has(call.callId)}
               extra={renderCallExtra?.(call)}
               onToggle={(verdict) =>
@@ -743,6 +767,7 @@ export function ApprovalBanner({
 function ToolCallRow({
   call,
   state,
+  awaitingDecision,
   outcomeUnknown,
   extra,
   onToggle,
@@ -751,6 +776,8 @@ function ToolCallRow({
 }: {
   call: PendingToolCallView;
   state: CallState;
+  /** Explicit per-call review is on and this call has no verdict yet. */
+  awaitingDecision?: boolean;
   outcomeUnknown: boolean;
   /** Optional caller-supplied content rendered above the arguments block —
    *  see `ApprovalBannerProps.renderCallExtra`. */
@@ -762,8 +789,17 @@ function ToolCallRow({
   const { t } = useTranslation();
   return (
     <div
-      className="rounded-lg border border-border bg-background/50 p-3"
+      className={cn(
+        "rounded-lg border p-3",
+        // An undecided call is the thing standing between the approver and the
+        // Approve button, so it is the thing that should catch the eye. Decided
+        // rows fall back to the neutral card.
+        awaitingDecision
+          ? "border-amber-500/40 bg-amber-500/[0.04]"
+          : "border-border bg-background/50",
+      )}
       data-testid={`tool-call-${call.callId}`}
+      data-awaiting={awaitingDecision ? "true" : undefined}
     >
       <div className="mb-1.5 flex items-start justify-between gap-2">
         <div className="min-w-0">
@@ -799,11 +835,15 @@ function ToolCallRow({
             aria-pressed={state.verdict === "APPROVED"}
             aria-label={`${t("hitl.approve", "Approve")} — ${call.toolName}`}
             onClick={() => onToggle("APPROVED")}
+            // Undecided reads as an OUTLINED control, not flat muted-on-muted:
+            // these were being mistaken for disabled labels, which made a
+            // withheld batch-Approve look like a broken button rather than an
+            // unfinished review.
             className={cn(
-              "rounded-md px-2 py-0.5 text-xs transition-colors",
+              "rounded-md border px-2.5 py-1 text-xs transition-colors",
               state.verdict === "APPROVED"
-                ? "bg-emerald-500/20 text-emerald-600 font-medium"
-                : "bg-muted text-muted-foreground hover:bg-emerald-500/10",
+                ? "border-emerald-500/40 bg-emerald-500/20 font-medium text-emerald-600"
+                : "border-border bg-background text-foreground hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:text-emerald-600",
             )}
             data-testid={`tool-approve-${call.callId}`}
           >
@@ -815,10 +855,10 @@ function ToolCallRow({
             aria-label={`${t("hitl.reject", "Reject")} — ${call.toolName}`}
             onClick={() => onToggle("REJECTED")}
             className={cn(
-              "rounded-md px-2 py-0.5 text-xs transition-colors",
+              "rounded-md border px-2.5 py-1 text-xs transition-colors",
               state.verdict === "REJECTED"
-                ? "bg-destructive/20 text-destructive font-medium"
-                : "bg-muted text-muted-foreground hover:bg-destructive/10",
+                ? "border-destructive/40 bg-destructive/20 font-medium text-destructive"
+                : "border-border bg-background text-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive",
             )}
             data-testid={`tool-reject-${call.callId}`}
           >

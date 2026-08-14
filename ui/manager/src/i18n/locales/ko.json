@@ -3152,7 +3152,8 @@
     "confirmRejectToolDescription": "아무것도 실행되지 않습니다. 대화는 계속되며 에이전트는 {{toolNames}} 없이 답변합니다.",
     "humanTurn": "구성원 차례",
     "humanTurnReason": "{{member}}님의 발언을 기다리는 중",
-    "humanTurnMemberFallback": "한 구성원"
+    "humanTurnMemberFallback": "한 구성원",
+    "decidedProgress": "{{total}}건 중 {{decided}}건 결정됨"
   },
   "chatDrawer": {
     "deploying": "에이전트 배포 중…",

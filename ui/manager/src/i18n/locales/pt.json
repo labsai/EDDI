@@ -3180,7 +3180,8 @@
     "confirmRejectToolDescription": "Nada será executado. A conversa continua e o agente responde sem {{toolNames}}.",
     "humanTurn": "Vez do membro",
     "humanTurnReason": "A aguardar que {{member}} fale",
-    "humanTurnMemberFallback": "um membro"
+    "humanTurnMemberFallback": "um membro",
+    "decidedProgress": "{{decided}} de {{total}} decididas"
   },
   "chatDrawer": {
     "deploying": "Implantando agente…",

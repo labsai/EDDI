@@ -3152,7 +3152,8 @@
     "confirmRejectToolDescription": "不会运行任何内容。对话将继续，智能体会在不使用 {{toolNames}} 的情况下作答。",
     "humanTurn": "成员发言",
     "humanTurnReason": "正在等待 {{member}} 发言",
-    "humanTurnMemberFallback": "某位成员"
+    "humanTurnMemberFallback": "某位成员",
+    "decidedProgress": "已决定 {{decided}}/{{total}}"
   },
   "chatDrawer": {
     "deploying": "正在部署智能体…",

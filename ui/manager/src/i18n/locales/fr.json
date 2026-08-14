@@ -3180,7 +3180,8 @@
     "confirmRejectToolDescription": "Rien ne sera exécuté. La conversation se poursuit et l'agent répond sans {{toolNames}}.",
     "humanTurn": "Tour du membre",
     "humanTurnReason": "En attente de la prise de parole de {{member}}",
-    "humanTurnMemberFallback": "un membre"
+    "humanTurnMemberFallback": "un membre",
+    "decidedProgress": "{{decided}} sur {{total}} décidés"
   },
   "chatDrawer": {
     "deploying": "Déploiement de l'agent…",

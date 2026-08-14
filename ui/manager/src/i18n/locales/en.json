@@ -3192,7 +3192,8 @@
     "confirmRejectToolDescription": "Nothing will run. The conversation continues and the agent answers without {{toolNames}}.",
     "humanTurn": "Member's turn",
     "humanTurnReason": "Waiting on {{member}} to speak",
-    "humanTurnMemberFallback": "a member"
+    "humanTurnMemberFallback": "a member",
+    "decidedProgress": "{{decided}} of {{total}} decided"
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",
