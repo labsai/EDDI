@@ -131,9 +131,15 @@ interface ChatActivityProps {
    * the status line said "Thinking…" through an entire tool-using turn.
    */
   liveToolCalls?: string[];
+  /**
+   * True once the model resumed writing after its last tool call. Without it the
+   * newest call renders as running forever — there is no live per-call
+   * completion event, so a finished answer still sat under a spinner.
+   */
+  liveToolsSettled?: boolean;
 }
 
-export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = false, liveToolCalls }: ChatActivityProps) {
+export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = false, liveToolCalls, liveToolsSettled = false }: ChatActivityProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   /** The live status pill's own expansion — the running list of tool calls. */
@@ -275,7 +281,7 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
           >
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
             <span className="font-medium text-primary">
-              {currentTool
+              {currentTool && !liveToolsSettled
                 ? t("chat.activity.usingTool", "Using {{tool}}…", { tool: currentTool })
                 : t("chat.thinking", "Thinking...")}
             </span>
@@ -298,7 +304,7 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
             >
               {liveNames.map((name, i) => (
                 <div key={`${name}-${i}`} className="flex items-center gap-1.5 text-[11px]">
-                  {i === liveNames.length - 1 ? (
+                  {i === liveNames.length - 1 && !liveToolsSettled ? (
                     <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
                   ) : (
                     <Check className="h-3 w-3 shrink-0 text-emerald-500" />

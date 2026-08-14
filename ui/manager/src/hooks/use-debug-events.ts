@@ -111,6 +111,16 @@ interface DebugState {
    * so the status line can say "Using {tool}…" while the turn is running.
    */
   liveToolCalls: string[];
+  /**
+   * True once TOKENS have arrived since the last `tool_call`, i.e. the model is
+   * writing again and the tool phase is over.
+   *
+   * There is no live "tool finished" event — the per-call result only reaches
+   * the client in the turn-end toolTrace — so the newest call was rendered as
+   * running forever, still spinning under a finished answer. Resumed output IS
+   * the completion signal.
+   */
+  liveToolsSettled: boolean;
 
   // UI state
   isDebugOpen: boolean;
@@ -121,6 +131,7 @@ interface DebugState {
   // Actions
   addEvent: (event: PipelineEvent) => void;
   addToolCall: (tool: string) => void;
+  markToolsSettled: () => void;
   finalizeTurn: () => void;
   setDebugOpen: (open: boolean) => void;
   toggleDebug: () => void;
@@ -171,6 +182,7 @@ export const useDebugStore = create<DebugState>((set) => ({
   currentTurnEvents: [],
   currentTurnStart: 0,
   liveToolCalls: [],
+  liveToolsSettled: false,
   isDebugOpen: loadDebugPref(),
   activeTab: "pipeline",
   selectedTurnIndex: null,
@@ -183,14 +195,19 @@ export const useDebugStore = create<DebugState>((set) => ({
     })),
 
   addToolCall: (tool) =>
-    set((s) => ({ liveToolCalls: [...s.liveToolCalls, tool] })),
+    set((s) => ({ liveToolCalls: [...s.liveToolCalls, tool], liveToolsSettled: false })),
+
+  // Idempotent on purpose: this runs on EVERY token, so returning the same
+  // object once the flag is set keeps it from re-rendering the tree per token.
+  markToolsSettled: () =>
+    set((s) => (s.liveToolsSettled ? s : { ...s, liveToolsSettled: true })),
 
   finalizeTurn: () =>
     set((s) => {
       if (s.currentTurnEvents.length === 0) {
         // No pipeline events, but a stale live-tool list must still not leak
         // into the next turn's status line.
-        return s.liveToolCalls.length ? { ...s, liveToolCalls: [] } : s;
+        return s.liveToolCalls.length ? { ...s, liveToolCalls: [], liveToolsSettled: false } : s;
       }
 
       const events = s.currentTurnEvents;
@@ -211,6 +228,7 @@ export const useDebugStore = create<DebugState>((set) => ({
         currentTurnEvents: [],
         currentTurnStart: 0,
         liveToolCalls: [],
+        liveToolsSettled: false,
         selectedTurnIndex: null,
       };
     }),
@@ -244,6 +262,7 @@ export const useDebugStore = create<DebugState>((set) => ({
       currentTurnEvents: [],
       currentTurnStart: 0,
       liveToolCalls: [],
+      liveToolsSettled: false,
       selectedTurnIndex: null,
     }),
 }));

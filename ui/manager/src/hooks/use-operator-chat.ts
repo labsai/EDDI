@@ -40,6 +40,8 @@ export interface OperatorChatState {
    * task_complete's toolTrace, and merging both would double-count.
    */
   liveToolCalls: string[];
+  /** True once tokens resumed after the last tool_call — the tool phase is over. */
+  liveToolsSettled: boolean;
   /**
    * Completed turns' traces, keyed by the agent message they belong to.
    *
@@ -281,6 +283,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
   messages: [],
   events: [],
   liveToolCalls: [],
+  liveToolsSettled: false,
   tracesByMessageId: {},
   isStreaming: false,
   error: null,
@@ -315,6 +318,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       messages: [],
       events: [],
       liveToolCalls: [],
+      liveToolsSettled: false,
       tracesByMessageId: {},
       isStreaming: false,
       error: null,
@@ -431,6 +435,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       messages: [...s.messages, userMessage, agentPlaceholder],
       events: [],
       liveToolCalls: [],
+      liveToolsSettled: false,
       isStreaming: true,
       error: null,
     }));
@@ -468,6 +473,10 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
         if (event.type === "token") {
           set((s) => ({
             ...s,
+            // Output resuming IS the tool-finished signal — there is no live
+            // per-call completion event, so without this the newest tool spun
+            // forever under an answer that had already arrived.
+            liveToolsSettled: s.liveToolCalls.length > 0 ? true : s.liveToolsSettled,
             messages: s.messages.map((m) =>
               m.id === agentId ? { ...m, content: m.content + event.data } : m,
             ),
@@ -585,7 +594,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
             const parsed: { tool?: unknown } = JSON.parse(event.data);
             if (typeof parsed.tool === "string" && parsed.tool) {
               const tool = parsed.tool;
-              set((s) => ({ ...s, liveToolCalls: [...s.liveToolCalls, tool] }));
+              set((s) => ({ ...s, liveToolCalls: [...s.liveToolCalls, tool], liveToolsSettled: false }));
             }
           } catch {
             // Malformed payload — the status line just keeps its last state.
@@ -799,6 +808,7 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
   const messages = useOperatorChatStore((s) => s.messages);
   const events = useOperatorChatStore((s) => s.events);
   const liveToolCalls = useOperatorChatStore((s) => s.liveToolCalls);
+  const liveToolsSettled = useOperatorChatStore((s) => s.liveToolsSettled);
   const tracesByMessageId = useOperatorChatStore((s) => s.tracesByMessageId);
   const isStreaming = useOperatorChatStore((s) => s.isStreaming);
   const error = useOperatorChatStore((s) => s.error);
@@ -832,6 +842,7 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
     messages,
     events,
     liveToolCalls,
+    liveToolsSettled,
     tracesByMessageId,
     isStreaming,
     error,

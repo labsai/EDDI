@@ -93,6 +93,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const toggleShowActivity = useDebugStore((s) => s.toggleShowActivity);
   const currentTurnEvents = useDebugStore((s) => s.currentTurnEvents);
   const liveToolCalls = useDebugStore((s) => s.liveToolCalls);
+  const liveToolsSettled = useDebugStore((s) => s.liveToolsSettled);
 
   // Queries & mutations
   const { data: deployedAgents, isLoading: agentsLoading } = useDeployedAgents();
@@ -516,6 +517,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                     isLive
                     showInternalSteps={false}
                     liveToolCalls={liveToolCalls}
+                    liveToolsSettled={liveToolsSettled}
                   />
                 ) : (
                   <InlineThinkingIndicator events={currentTurnEvents} />

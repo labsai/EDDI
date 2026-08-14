@@ -448,6 +448,7 @@ export function OperatorPage() {
           messages={chat.messages}
           events={chat.events}
           liveToolCalls={chat.liveToolCalls}
+          liveToolsSettled={chat.liveToolsSettled}
           tracesByMessageId={chat.tracesByMessageId}
           isStreaming={chat.isStreaming}
           error={chat.error}

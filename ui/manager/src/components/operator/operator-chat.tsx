@@ -30,6 +30,8 @@ export interface OperatorChatProps {
   events: PipelineEvent[];
   /** Live tool_call names for the turn in flight — drives "Using {tool}…". */
   liveToolCalls?: string[];
+  /** True once the model resumed writing after its last tool call. */
+  liveToolsSettled?: boolean;
   /** Completed turns' traces, keyed by the agent message they belong to. */
   tracesByMessageId: Record<string, PipelineEvent[]>;
   isStreaming: boolean;
@@ -108,6 +110,7 @@ export function OperatorChat({
   messages,
   events,
   liveToolCalls,
+  liveToolsSettled,
   tracesByMessageId,
   isStreaming,
   error,
@@ -286,6 +289,7 @@ export function OperatorChat({
               isLive={Boolean(message.isStreaming) && isStreaming}
               showInternalSteps={false}
               liveToolCalls={message.isStreaming ? liveToolCalls : undefined}
+              liveToolsSettled={liveToolsSettled}
             />
           ) : null}
           </div>
