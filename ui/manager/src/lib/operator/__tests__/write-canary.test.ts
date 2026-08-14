@@ -3,7 +3,8 @@ import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import {
   runOperatorWriteCanary,
-  enforceWriteCanaryGate,
+  enforceGateDryRun,
+  runBackgroundWriteProbe,
   buildWriteCanaryPrompt,
   WRITE_CANARY_TARGET_ENDPOINT,
 } from "../write-canary";
@@ -323,40 +324,177 @@ describe("buildWriteCanaryPrompt", () => {
   });
 });
 
-describe("enforceWriteCanaryGate", () => {
+describe("enforceGateDryRun — the blocking, deterministic half", () => {
   const VAR_URL = "*/variablestore/variables/default/platform.operator";
-
-  /** Default: the deterministic check verifies the stored policy. Individual
-   *  tests override this to drive the not-gated / old-backend / error paths. */
-  const dryRunGated = () =>
-    http.post("*/administration/operator/gate-dry-run", () =>
-      HttpResponse.json({ policyPresent: true, gated: true, matchedPattern: "http.patch:*" }),
-    );
 
   beforeEach(() => {
     server.use(
-      dryRunGated(),
+      http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
+      http.post("*/agents/:conversationId/endConversation", () => new HttpResponse(null, { status: 200 })),
+    );
+  });
+
+  it("is a no-op for read_only — nothing is called, nothing is deleted", async () => {
+    let dryRunCalled = false;
+    server.use(
+      http.post("*/administration/operator/gate-dry-run", () => {
+        dryRunCalled = true;
+        return HttpResponse.json({ policyPresent: true, gated: true, matchedPattern: "http.patch:*" });
+      }),
+    );
+
+    const result = await enforceGateDryRun(config({ scope: "read_only" }), spec());
+
+    expect(result).toBeNull();
+    expect(dryRunCalled).toBe(false);
+  });
+
+  it("returns true — verified — when the dry-run classifies the target write as gated", async () => {
+    let deleted = false;
+    server.use(
+      http.post("*/administration/operator/gate-dry-run", () =>
+        HttpResponse.json({ policyPresent: true, gated: true, matchedPattern: "http.patch:*" }),
+      ),
+      http.delete("*/agentstore/agents/:id", () => {
+        deleted = true;
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+
+    await expect(enforceGateDryRun(config(), spec())).resolves.toBe(true);
+    expect(deleted).toBe(false);
+  });
+
+  /**
+   * Deterministically broken configuration: the one write-verification outcome
+   * that still blocks activation, because it is PROOF, not absence of proof.
+   */
+  it("rolls back and throws when the dry-run says the write is not gated", async () => {
+    let undeployed = false;
+    let deleted = false;
+    let configCleared = false;
+    server.use(
+      http.post("*/administration/operator/gate-dry-run", () =>
+        HttpResponse.json({ policyPresent: true, gated: false, matchedPattern: null }),
+      ),
+      http.post("*/administration/:env/undeploy/:agentId", () => {
+        undeployed = true;
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.delete("*/agentstore/agents/:id", ({ request }) => {
+        deleted = true;
+        // resetOperator's full-wipe semantics: cascade + permanent.
+        expect(request.url).toContain("cascade=true");
+        expect(request.url).toContain("permanent=true");
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.delete(VAR_URL, () => {
+        configCleared = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const error = String(await enforceGateDryRun(config(), spec()).catch((e: unknown) => e));
+
+    expect(error).toMatch(/did NOT hold/);
+    expect(error).toMatch(/no probe was run and nothing was written/i);
+    expect(undeployed).toBe(true);
+    expect(deleted).toBe(true);
+    expect(configCleared).toBe(true);
+    // Pins the RollbackFailure re-throw guard: without it the rollback's own
+    // throw is caught again and re-wrapped, so the admin reads a generic
+    // "could not verify / deterministic check failed" headline instead of the
+    // proven-broken-gate one (and the operator is rolled back twice).
+    expect(error).not.toMatch(/deterministic check failed/i);
+    expect(error).not.toMatch(/could not verify/i);
+  });
+
+  it("fails closed when the dry-run itself errors (not 404) — verification failure, not breach", async () => {
+    server.use(
+      http.post("*/administration/operator/gate-dry-run", () => HttpResponse.json({ message: "boom" }, { status: 500 })),
+      http.delete("*/agentstore/agents/:id", () => new HttpResponse(null, { status: 200 })),
+      http.delete(VAR_URL, () => new HttpResponse(null, { status: 204 })),
+      http.post("*/administration/:env/undeploy/:agentId", () => new HttpResponse(null, { status: 200 })),
+    );
+
+    const error = String(await enforceGateDryRun(config(), spec()).catch((e: unknown) => e));
+
+    expect(error).toMatch(/could not verify the approval gate/i);
+    expect(error).toMatch(/deterministic check failed/i);
+    expect(error).not.toMatch(/did NOT hold/);
+    // An admin left with no operator needs a way forward, not just a verdict.
+    expect(error).toMatch(/try activating again/i);
+    expect(error).toMatch(/read-only/i);
+  });
+
+  /**
+   * A backend that predates gate-dry-run (404) can no longer be verified
+   * deterministically — activation proceeds UNVERIFIED (false) rather than
+   * failing, and the background probe becomes the deployment's only evidence.
+   */
+  it("returns false — unverified, not broken — on a 404 old backend, and deletes nothing", async () => {
+    let deleted = false;
+    server.use(
+      http.post("*/administration/operator/gate-dry-run", () => new HttpResponse(null, { status: 404 })),
+      http.delete("*/agentstore/agents/:id", () => {
+        deleted = true;
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+
+    await expect(enforceGateDryRun(config(), spec())).resolves.toBe(false);
+    expect(deleted).toBe(false);
+  });
+
+  it("says the operator is STILL DEPLOYED when the rollback itself fails", async () => {
+    server.use(
+      http.post("*/administration/operator/gate-dry-run", () =>
+        HttpResponse.json({ policyPresent: false, gated: false, matchedPattern: null }),
+      ),
+      http.post("*/administration/:env/undeploy/:agentId", () => new HttpResponse(null, { status: 200 })),
+      // The DELETE, not the undeploy: resetOperator deliberately tolerates a
+      // failed undeploy (already undeployed is fine — deletion is the point),
+      // so only a failed delete actually leaves the agent standing.
+      http.delete("*/agentstore/agents/:id", () =>
+        HttpResponse.json({ message: "backend down" }, { status: 500 }),
+      ),
+    );
+
+    const error = String(await enforceGateDryRun(config(), spec()).catch((e: unknown) => e));
+
+    expect(error).toMatch(/still deployed/i);
+    expect(error).toMatch(/remove it manually/i);
+    // The original reason must survive too — the admin needs both facts.
+    expect(error).toMatch(/did NOT hold/);
+  });
+});
+
+describe("runBackgroundWriteProbe — the empirical half, after activation", () => {
+  const VAR_URL = "*/variablestore/variables/default/platform.operator";
+
+  beforeEach(() => {
+    server.use(
       http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
       http.post("*/agents/:conversationId/endConversation", () => new HttpResponse(null, { status: 200 })),
     );
   });
 
   it("is a no-op for read_only — no probe runs, nothing is deleted", async () => {
-    let anyWriteCanaryRequestMade = false;
+    let anyProbeRequestMade = false;
     server.use(
       http.post("*/agents/:agentId/start", () => {
-        anyWriteCanaryRequestMade = true;
+        anyProbeRequestMade = true;
         return HttpResponse.json({ location: "/agents/conv-1" }, { status: 201 });
       }),
     );
 
-    const result = await enforceWriteCanaryGate(config({ scope: "read_only" }), spec());
+    const report = await runBackgroundWriteProbe(config({ scope: "read_only" }), spec(), true);
 
-    expect(result).toBeNull();
-    expect(anyWriteCanaryRequestMade).toBe(false);
+    expect(report).toBeNull();
+    expect(anyProbeRequestMade).toBe(false);
   });
 
-  it("returns the passing result and deletes nothing when the canary passes", async () => {
+  it("reports a clean pass and deletes nothing when the probe's write pauses", async () => {
     serveTurn([
       taskComplete([{ type: "tool_call", tool: "patchDescriptor" }]),
       doneWith("AWAITING_HUMAN"),
@@ -381,16 +519,18 @@ describe("enforceWriteCanaryGate", () => {
       }),
     );
 
-    const result = await enforceWriteCanaryGate(config(), spec());
+    const report = await runBackgroundWriteProbe(config(), spec(), true);
 
-    expect(result?.outcome).toBe("pass");
+    expect(report?.result.outcome).toBe("pass");
+    expect(report?.tornDown).toBe(false);
     expect(deleteCalled).toBe(false);
   });
 
-  it("rolls the agent back and throws when the canary does not pass — the actual safety property", async () => {
+  it("tears the operator down — without throwing — when the write executes without pausing", async () => {
     // The write executes without pausing — the gate is broken. This is the
-    // scenario the whole rollback exists for: an agent that is ALREADY
-    // deployed, right now, with a write tool that just proved unsafe.
+    // scenario the teardown exists for: an agent that is ALREADY deployed,
+    // right now, with a write tool that just proved unsafe. The probe runs in
+    // the background, so the verdict arrives as a report, not a throw.
     serveTurn([
       taskComplete([
         { type: "tool_call", tool: "patchDescriptor" },
@@ -408,7 +548,6 @@ describe("enforceWriteCanaryGate", () => {
       }),
       http.delete("*/agentstore/agents/:id", ({ request }) => {
         deleted = true;
-        // resetOperator's full-wipe semantics: cascade + permanent.
         expect(request.url).toContain("cascade=true");
         expect(request.url).toContain("permanent=true");
         return new HttpResponse(null, { status: 200 });
@@ -419,135 +558,21 @@ describe("enforceWriteCanaryGate", () => {
       }),
     );
 
-    await expect(enforceWriteCanaryGate(config(), spec())).rejects.toThrow(/did NOT hold/);
+    const report = await runBackgroundWriteProbe(config(), spec(), true);
 
+    expect(report?.result.outcome).toBe("fail");
+    expect(report?.tornDown).toBe(true);
+    expect(report?.message).toMatch(/did NOT hold/);
+    expect(report?.message).toMatch(/was removed/i);
+    // Nudging a retry at a broken gate is the one thing this must never do.
+    expect(report?.message).not.toMatch(/try activating again/i);
+    expect(report?.message).toMatch(/do not re-activate with write access/i);
     expect(undeployed).toBe(true);
     expect(deleted).toBe(true);
     expect(configCleared).toBe(true);
   });
 
-  /**
-   * THE core semantic change of the dry-run integration: an operator whose
-   * stored policy verified deterministically is not deleted just because the
-   * model declined to attempt the probe's write. That deletion was the original
-   * defect — activation as a coin flip on an LLM's tool choice.
-   */
-  it("proceeds — does NOT roll back — when the policy verified and the probe was merely inconclusive", async () => {
-    serveTurn(["event: token\ndata: nothing useful\n\n", doneWith("READY")]);
-    let deleted = false;
-    server.use(http.delete("*/agentstore/agents/:id", () => { deleted = true; return new HttpResponse(null, { status: 200 }); }));
-
-    const result = await enforceWriteCanaryGate(config(), spec());
-
-    expect(deleted).toBe(false);
-    expect(result?.outcome).toBe("unknown");
-    // Honest, not upgraded: the caller sees exactly what was and wasn't proven.
-    expect(result?.error).toMatch(/verified deterministically/i);
-    expect(result?.error).toMatch(/probe was inconclusive/i);
-  });
-
-  /**
-   * Deterministically broken configuration: the probe is NOT run — provoking a
-   * write against a policy known not to gate it would execute it for real.
-   */
-  it("rolls back without running the probe when the dry-run says the write is not gated", async () => {
-    server.use(
-      http.post("*/administration/operator/gate-dry-run", () =>
-        HttpResponse.json({ policyPresent: true, gated: false, matchedPattern: null }),
-      ),
-      http.delete("*/agentstore/agents/:id", () => new HttpResponse(null, { status: 200 })),
-    );
-    let probeStarted = false;
-    server.use(
-      http.post("*/agents/:agentId/start", () => {
-        probeStarted = true;
-        return HttpResponse.json({ location: "/agents/conv-1" }, { status: 201 });
-      }),
-    );
-
-    const error = String(await enforceWriteCanaryGate(config(), spec()).catch((e: unknown) => e));
-
-    expect(probeStarted).toBe(false);
-    expect(error).toMatch(/did NOT hold/);
-    expect(error).toMatch(/no probe was run and nothing was written/i);
-    // Pins the RollbackFailure re-throw guard: without it the rollback's own
-    // throw is caught again and re-wrapped, so the admin reads a generic
-    // "could not verify / deterministic check failed" headline instead of the
-    // proven-broken-gate one (and the operator is rolled back twice).
-    expect(error).not.toMatch(/deterministic check failed/i);
-    expect(error).not.toMatch(/could not verify/i);
-  });
-
-  /**
-   * A backend that predates gate-dry-run (404) restores the old semantics
-   * wholesale: with nothing verified, "unknown" must keep rolling back — "not
-   * proven safe" stays the bar when there is no other evidence.
-   */
-  it("still rolls back an inconclusive probe against an old backend without gate-dry-run", async () => {
-    server.use(http.post("*/administration/operator/gate-dry-run", () => new HttpResponse(null, { status: 404 })));
-    serveTurn(["event: token\ndata: nothing useful\n\n", doneWith("READY")]);
-    let deleted = false;
-    server.use(http.delete("*/agentstore/agents/:id", () => { deleted = true; return new HttpResponse(null, { status: 200 }); }));
-
-    const error = String(await enforceWriteCanaryGate(config(), spec()).catch((e: unknown) => e));
-
-    expect(deleted).toBe(true);
-    expect(error).toMatch(/not evidence that it is broken/i);
-    expect(error).not.toMatch(/did NOT hold/);
-    // An admin left with no operator needs a way forward, not just a verdict.
-    expect(error).toMatch(/try activating again/i);
-    expect(error).toMatch(/read-only/i);
-  });
-
-  it("fails closed when the dry-run itself errors (not 404) — verification failure, not breach", async () => {
-    server.use(
-      http.post("*/administration/operator/gate-dry-run", () => HttpResponse.json({ message: "boom" }, { status: 500 })),
-      http.delete("*/agentstore/agents/:id", () => new HttpResponse(null, { status: 200 })),
-    );
-
-    const error = String(await enforceWriteCanaryGate(config(), spec()).catch((e: unknown) => e));
-
-    expect(error).toMatch(/could not verify the approval gate/i);
-    expect(error).toMatch(/deterministic check failed/i);
-    expect(error).not.toMatch(/did NOT hold/);
-  });
-
-  it("says the gate did NOT hold — and does not offer a retry — on a confirmed fail", async () => {
-    serveTurn([
-      taskComplete([
-        { type: "tool_call", tool: "patchDescriptor" },
-        { type: "tool_result", tool: "patchDescriptor", result: '{"status":"ok"}' },
-      ]),
-      doneWith("READY"),
-    ]);
-    server.use(http.delete("*/agentstore/agents/:id", () => new HttpResponse(null, { status: 200 })));
-
-    const error = String(await enforceWriteCanaryGate(config(), spec()).catch((e: unknown) => e));
-
-    expect(error).toMatch(/did NOT hold/);
-    // Nudging a retry at a broken gate is the one thing this must never do.
-    expect(error).not.toMatch(/try activating again/i);
-    expect(error).toMatch(/do not re-activate with write access/i);
-  });
-
-  it("the thrown error names the outcome and carries the canary's own error detail", async () => {
-    serveTurn([
-      taskComplete([
-        { type: "tool_call", tool: "patchDescriptor" },
-        { type: "tool_result", tool: "patchDescriptor", result: '{"status":"ok"}' },
-      ]),
-      doneWith("READY"),
-    ]);
-    server.use(http.delete("*/agentstore/agents/:id", () => new HttpResponse(null, { status: 200 })));
-
-    await expect(enforceWriteCanaryGate(config(), spec())).rejects.toThrow(/executed without pausing/i);
-  });
-
-  it("says the operator is STILL DEPLOYED when the rollback itself fails", async () => {
-    // The one path the admin has to act on. Letting the rollback's own error
-    // propagate would surface a bare transport message for what is actually
-    // "a write-capable operator that failed its gate check is still live" —
-    // read as a retryable blip, and the agent is never removed.
+  it("says the operator is STILL DEPLOYED when the teardown itself fails", async () => {
     serveTurn([
       taskComplete([
         { type: "tool_call", tool: "patchDescriptor" },
@@ -556,20 +581,59 @@ describe("enforceWriteCanaryGate", () => {
       doneWith("READY"),
     ]);
     server.use(
-      // The DELETE, not the undeploy: resetOperator deliberately tolerates a
-      // failed undeploy (already undeployed is fine — deletion is the point),
-      // so only a failed delete actually leaves the agent standing.
+      http.post("*/administration/:env/undeploy/:agentId", () => new HttpResponse(null, { status: 200 })),
       http.delete("*/agentstore/agents/:id", () =>
         HttpResponse.json({ message: "backend down" }, { status: 500 }),
       ),
     );
 
-    const error = await enforceWriteCanaryGate(config(), spec()).catch((e: unknown) => e);
+    const report = await runBackgroundWriteProbe(config(), spec(), true);
 
-    expect(String(error)).toMatch(/still deployed/i);
-    expect(String(error)).toMatch(/remove it manually/i);
-    // The original reason must survive too — the admin needs both facts.
-    expect(String(error)).toMatch(/did NOT hold/);
+    expect(report?.tornDown).toBe(false);
+    expect(report?.message).toMatch(/still deployed/i);
+    expect(report?.message).toMatch(/remove it manually/i);
+    expect(report?.message).toMatch(/did NOT hold/);
+  });
+
+  /**
+   * THE core semantic property carried over from the dry-run integration: an
+   * operator whose stored policy verified deterministically is not deleted
+   * just because the model declined to attempt the probe's write.
+   */
+  it("reports — does NOT tear down — when the policy verified and the probe was merely inconclusive", async () => {
+    serveTurn(["event: token\ndata: nothing useful\n\n", doneWith("READY")]);
+    let deleted = false;
+    server.use(http.delete("*/agentstore/agents/:id", () => { deleted = true; return new HttpResponse(null, { status: 200 }); }));
+
+    const report = await runBackgroundWriteProbe(config(), spec(), true);
+
+    expect(deleted).toBe(false);
+    expect(report?.result.outcome).toBe("unknown");
+    expect(report?.tornDown).toBe(false);
+    // Honest, not upgraded: the caller sees exactly what was and wasn't proven.
+    expect(report?.message).toMatch(/verified deterministically/i);
+    expect(report?.message).toMatch(/probe was inconclusive/i);
+  });
+
+  /**
+   * The deliberate semantic CHANGE from the blocking era: on an old backend
+   * (no gate-dry-run, nothing verified) an inconclusive probe used to roll the
+   * activation back. Now that the probe runs after activation, absence of
+   * proof is reported as an honest warning — only PROOF of a broken gate
+   * (outcome "fail") tears down a deployed operator.
+   */
+  it("warns — does NOT tear down — when nothing verified and the probe was inconclusive", async () => {
+    serveTurn(["event: token\ndata: nothing useful\n\n", doneWith("READY")]);
+    let deleted = false;
+    server.use(http.delete("*/agentstore/agents/:id", () => { deleted = true; return new HttpResponse(null, { status: 200 }); }));
+
+    const report = await runBackgroundWriteProbe(config(), spec(), false);
+
+    expect(deleted).toBe(false);
+    expect(report?.result.outcome).toBe("unknown");
+    expect(report?.tornDown).toBe(false);
+    expect(report?.message).toMatch(/not evidence that it is broken/i);
+    expect(report?.message).toMatch(/does not support the deterministic check/i);
   });
 });
 

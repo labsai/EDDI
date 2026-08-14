@@ -125,9 +125,15 @@ interface ChatActivityProps {
   totalSteps?: number;
   /** If true, shows internal pipeline steps (expressions, behavior_rules, etc.) even when no tool calls or errors occurred. Defaults to false. */
   showInternalSteps?: boolean;
+  /**
+   * Tool names from live `tool_call` SSE events, in call order, current turn
+   * only. The per-task toolTrace only arrives at task_complete — without this
+   * the status line said "Thinking…" through an entire tool-using turn.
+   */
+  liveToolCalls?: string[];
 }
 
-export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = false }: ChatActivityProps) {
+export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = false, liveToolCalls }: ChatActivityProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
@@ -176,27 +182,55 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
 
   const shouldPulse = isLive && hasRunning;
 
-  // The tool the agent is on right now — best live evidence is the last
-  // tool_call in the most recent event carrying a toolTrace. Null until the
+  // The tool the agent is on right now. Live `tool_call` events are the
+  // primary signal — they arrive the moment each tool starts. The toolTrace
+  // scan stays as a fallback for backends without the event (trace only
+  // arrives at task_complete, so it lags a full task behind). Null until the
   // first tool call: the turn is purely "thinking" until then.
   const currentTool = useMemo(() => {
+    if (liveToolCalls?.length) return liveToolCalls[liveToolCalls.length - 1]!;
     for (let i = events.length - 1; i >= 0; i--) {
       const calls = events[i]?.toolTrace?.filter((e) => e.type === "tool_call");
       if (calls?.length) return calls[calls.length - 1]!.tool;
     }
     return null;
-  }, [events]);
+  }, [liveToolCalls, events]);
 
-  // Auto-expand if tool calls, cascade steps, or errors are present
+  // Mid-turn the live event list runs ahead of the completed-task traces;
+  // at rest the traces are authoritative. Never both — that double-counts.
+  const liveToolCallCount = Math.max(toolCallCount, liveToolCalls?.length ?? 0);
+
+  // A flat call→result list across all tasks, for the end-user resting view:
+  // what the agent DID, without the pipeline-task shell around it.
+  const toolPairs = useMemo(() => {
+    const pairs: { call: ToolTraceEntry; result?: ToolTraceEntry }[] = [];
+    for (const task of rawTasks) {
+      const calls = task.toolTrace?.filter((e) => e.type === "tool_call") ?? [];
+      const results = task.toolTrace?.filter((e) => e.type === "tool_result") ?? [];
+      calls.forEach((call, i) => pairs.push({ call, result: results[i] }));
+    }
+    return pairs;
+  }, [rawTasks]);
+
+  // Auto-expand only what is actionable: errors and cascade traces. In the
+  // debug surface tool calls still auto-expand (inspecting them is the point);
+  // in end-user chat they stay behind the collapsed "N tool calls · Xs" pill —
+  // auto-opening a 8-row list under every answer was noise, not information.
   useEffect(() => {
-    if (toolCallCount > 0 || cascadeSteps.length > 0 || rawTasks.some((t) => t.status === "error")) {
+    if (
+      cascadeSteps.length > 0 ||
+      rawTasks.some((t) => t.status === "error") ||
+      (showInternalSteps && toolCallCount > 0)
+    ) {
       setExpanded(true);
     }
-  }, [toolCallCount, cascadeSteps.length, rawTasks]);
+  }, [toolCallCount, cascadeSteps.length, rawTasks, showInternalSteps]);
 
   // In end-user chat mode, if there are no tool calls, cascade steps, or errors, and processing is done, stay hidden
-  if (!showInternalSteps && !isLive && tasks.length === 0 && cascadeSteps.length === 0) return null;
-  if (rawTasks.length === 0 && cascadeSteps.length === 0) return null;
+  const hasLiveTools = isLive && (liveToolCalls?.length ?? 0) > 0;
+  if (!showInternalSteps && !isLive && tasks.length === 0 && cascadeSteps.length === 0 && toolPairs.length === 0) return null;
+  // A live tool_call can arrive before the first task event — it is activity.
+  if (rawTasks.length === 0 && cascadeSteps.length === 0 && !hasLiveTools) return null;
 
   // End-user LIVE mode: a scrolling wall of internal step rows (an
   // OpenAPI-provisioned agent's pipeline is dozens of identical httpcalls
@@ -221,9 +255,9 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
                 ? t("chat.activity.usingTool", "Using {{tool}}…", { tool: currentTool })
                 : t("chat.thinking", "Thinking...")}
             </span>
-            {toolCallCount > 0 && (
+            {liveToolCallCount > 0 && (
               <span className="text-muted-foreground">
-                {t("chat.activity.toolCallsCount", "{{count}} tool calls", { count: toolCallCount })}
+                {t("chat.activity.toolCallsCount", "{{count}} tool calls", { count: liveToolCallCount })}
               </span>
             )}
           </div>
@@ -266,10 +300,21 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
               <span className="text-primary font-medium">
                 {t("chat.activity.processing", "Processing…")}
                 <span className="ms-1.5 text-muted-foreground font-normal">
-                  {toolCallCount > 0
-                    ? t("chat.activity.toolCallsCount", "{{count}} tool calls", { count: toolCallCount })
+                  {liveToolCallCount > 0
+                    ? t("chat.activity.toolCallsCount", "{{count}} tool calls", { count: liveToolCallCount })
                     : `${completedCount}/${totalSteps ?? rawTasks.length}`}
                 </span>
+              </span>
+            ) : !showInternalSteps && toolCallCount > 0 ? (
+              // End-user resting header: lead with what the agent DID.
+              // "1 step" was the pipeline's plumbing count leaking through —
+              // meaningless next to "8 tool calls".
+              <span>
+                <span className="font-medium text-foreground">
+                  {t("chat.activity.toolCallsCount", "{{count}} tool calls", { count: toolCallCount })}
+                </span>
+                <span className="mx-1.5 text-border">·</span>
+                <span className="font-mono">{formatDuration(totalDuration)}</span>
               </span>
             ) : (
               <span>
@@ -313,9 +358,25 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
                 className="mb-1 rounded-lg border border-purple-500/20 bg-purple-500/5 p-2"
               />
             )}
-            {tasks.map((task, i) => (
-              <TaskRow key={`${task.taskType}-${task.index}-${i}`} task={task} />
-            ))}
+            {!showInternalSteps && toolPairs.length > 0 ? (
+              // End-user detail: the flat list of tool calls, plus any failed
+              // step (its error is actionable). The "1 step → langchain →
+              // expand again" task shell said nothing a user could act on.
+              <>
+                {tasks
+                  .filter((task) => task.status === "error")
+                  .map((task, i) => (
+                    <TaskRow key={`err-${task.taskType}-${task.index}-${i}`} task={task} />
+                  ))}
+                {toolPairs.map((pair, i) => (
+                  <ToolCallRow key={i} call={pair.call} result={pair.result} />
+                ))}
+              </>
+            ) : (
+              tasks.map((task, i) => (
+                <TaskRow key={`${task.taskType}-${task.index}-${i}`} task={task} />
+              ))
+            )}
           </div>
         </div>
       </div>

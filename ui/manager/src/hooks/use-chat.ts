@@ -715,6 +715,20 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
       });
       return false;
     }
+    case "tool_call": {
+      // Live "Using {tool}…" signal — the backend emits the NAME right before
+      // each tool executes (arguments arrive later, redacted, in the
+      // task_complete toolTrace). Feeds the status line only, not the turns.
+      try {
+        const parsed = JSON.parse(event.data);
+        if (typeof parsed.tool === "string" && parsed.tool) {
+          debug.addToolCall(parsed.tool);
+        }
+      } catch {
+        // Malformed payload — the status line just keeps saying "Thinking…".
+      }
+      return false;
+    }
     case "task_start": {
       store.getState().setThinking(true);
       // Parse event data for structured pipeline info

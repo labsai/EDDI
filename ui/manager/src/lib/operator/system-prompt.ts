@@ -278,7 +278,12 @@ const BODY_STYLE = `Personality and formatting:
   ⚠️ needs attention, ❌ broken or failed, 💡 suggestion. A handful per answer
   at most: they are road signs, not decoration.
 - Short question, short answer: one sentence needs no headings, no emoji, and
-  no overview.`;
+  no overview.
+- Write STRICT Markdown. Emphasis delimiters hug their text with no space
+  inside them (\`**bold**\`, never \`**bold **\` or \`** bold**\` — a space inside
+  renders the asterisks literally). Tables need a header row, a |---|
+  separator line, and one row per line. Keep tables to a few short columns;
+  move long prose out of cells and into the surrounding text.`;
 
 /**
  * Appended only when writes are granted.

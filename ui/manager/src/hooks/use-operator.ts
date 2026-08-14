@@ -18,10 +18,15 @@ import {
   reportOperatorGateStatus,
   type GateVerificationResult,
   type OperatorConfig,
+  type FetchedSpec,
 } from "@/lib/api/operator";
 import { undeployAgent, deleteAgent } from "@/lib/api/agents";
 import { endpointsForScope } from "@/lib/operator/tool-scopes";
-import { enforceWriteCanaryGate, type WriteCanaryResult } from "@/lib/operator/write-canary";
+import {
+  enforceGateDryRun,
+  runBackgroundWriteProbe,
+  type WriteProbeReport,
+} from "@/lib/operator/write-canary";
 
 /* ─── Query Keys ─── */
 
@@ -86,17 +91,26 @@ export type ActivationStage =
   | "resolving-version"
   | "saving"
   | "verifying-gate"
-  | "canary"
-  | "write-canary"
   | "done";
 
-/** What activation returns: the saved config plus the probe outcomes. */
+/**
+ * What activation returns: the saved config plus the DETERMINISTIC check
+ * outcomes. The LLM probes (read canary, live write probe) no longer block
+ * activation — run them afterwards via {@link runPostActivationProbes}, which
+ * needs the `spec` carried here.
+ */
 export interface ActivationOutcome {
   config: OperatorConfig;
-  canary: CanaryResult;
   gate: GateVerificationResult;
-  /** Only run for scope "read_write" — null for a read_only activation. */
-  writeCanary: WriteCanaryResult | null;
+  /**
+   * Whether gate-dry-run deterministically verified the stored policy gates
+   * the probe's target write. `null` for read_only (nothing to verify);
+   * `false` means the backend predates gate-dry-run — NOT that the gate is
+   * broken (a proven-broken policy throws and rolls back instead).
+   */
+  policyVerified: boolean | null;
+  /** The spec activation provisioned against, for the background probes. */
+  spec: FetchedSpec;
 }
 
 export interface ActivateParams {
@@ -149,7 +163,7 @@ export function useActivateOperator() {
       // "off", because the config variable it reads was never written. It was
       // invisible, unmanaged, and a retry made a second one:
       // removeSupersededAgent only ever cleans up the agent recorded in the
-      // config. The write-canary path below already rolls back for exactly this
+      // config. The gate checks below already roll back for exactly this
       // reason; these three steps simply never got the same treatment.
       let version: number;
       let next: OperatorConfig;
@@ -203,14 +217,14 @@ export function useActivateOperator() {
       // proceeding would leave exactly the hole the old two-step bootstrap
       // existed to close.
       //
-      // The write canary below is NOT a substitute for this check. It provokes
-      // one endpoint (`PATCH /descriptorstore/descriptors/{id}`), so it proves
-      // the patch pattern pauses and says nothing about `http.post:*`,
-      // `http.put:*` or `http.delete:*`. A document whose gate covers only some
-      // write methods passes the canary while leaving the rest ungated;
-      // `gateLooksInstalled` is what inspects the whole pattern set. The two are
-      // complementary: this one checks the configuration is sound, the canary
-      // checks it is actually enforced at runtime.
+      // The gate dry-run below is NOT a substitute for this check. It
+      // classifies one endpoint (`PATCH /descriptorstore/descriptors/{id}`),
+      // so it proves the patch pattern is gated and says nothing about
+      // `http.post:*`, `http.put:*` or `http.delete:*`. A document whose gate
+      // covers only some write methods passes the dry-run while leaving the
+      // rest ungated; `gateLooksInstalled` is what inspects the whole pattern
+      // set. The two are complementary: this one checks the pattern set is
+      // complete, the dry-run checks the classifier actually gates the target.
       onStage?.("verifying-gate");
       const gate = await verifyGateInstalled(result.agentId);
       await reportOperatorGateStatus(gate.verified);
@@ -221,54 +235,33 @@ export function useActivateOperator() {
         );
       }
 
-      // A READY badge only proves the config loaded. Run one real read so a
-      // deployed-but-unreachable operator is reported as such, not as success.
-      onStage?.("canary");
-
-      // The write canary is the empirical proof, not just configuration: does
-      // a real gated write actually pause? A `fail` — or an `unknown` the
-      // deterministic dry-run could not vouch for — rolls the whole activation
-      // back (undeploy, delete, clear the config variable) rather than merely
-      // reporting the failure; an `unknown` whose gate WAS verified
-      // deterministically proceeds with a warning. See enforceWriteCanaryGate's
-      // own doc comment for the full taxonomy.
+      // The deterministic half of write verification (backend gate-dry-run):
+      // classifies the probe's target write against the STORED policy — pure
+      // function of policy + call address, cannot flake, writes nothing. A
+      // proven-ungated policy (or a failed verification) rolls back fail-closed
+      // inside. This is the ONLY write check activation still waits on.
       //
-      // The scope check stays here (enforceWriteCanaryGate also no-ops for
-      // read_only on its own) so the "write-canary" stage is never announced
-      // for an activation that has no write tool to probe.
-      // `next`, NOT `config`: the probe has to run against the agent that was
+      // The LLM probes — read canary and live write probe — deliberately do
+      // NOT run here anymore. Each drives a real model conversation and was
+      // the bulk of the activation wait (a minute of "connection check" after
+      // the operator was already deployed and usable), and an inconclusive
+      // outcome proved nothing anyway. They run in the background via
+      // runPostActivationProbes once the admin is already in the chat; the
+      // write probe still tears the operator down on a PROVEN gate breach.
+      //
+      // `next`, NOT `config`: the check has to run against the agent that was
       // just provisioned. `config` still carries the PREVIOUS agentId, which on
-      // a reconfigure `removeSupersededAgent` deleted a few lines above — so
-      // probing it returned "unknown", rolled back an already-deleted agent, and
-      // left the new write-capable operator deployed with its config pointer
-      // cleared: the exact outcome this rollback exists to prevent. The read
-      // canary uses `next` too; these must agree.
-      if (next.scope === "read_write") onStage?.("write-canary");
-      // In PARALLEL: each canary drives a real conversation (an LLM turn
-      // apiece) in its own conversation, and neither depends on the other's
-      // outcome — running them back to back was the bulk of the activation
-      // wait after provisioning. When the write canary rejects (rollback), the
-      // read canary's stream is ABORTED rather than left dangling against a
-      // deleted agent: Promise.all rejects without cancelling its siblings, so
-      // without the explicit abort the read SSE fetch could sit pending until
-      // its own timeout long after activation error handling finished.
-      const readCanaryAbort = new AbortController();
-      const [canary, writeCanary] = await Promise.all([
-        runOperatorCanary(next, readCanaryAbort.signal),
-        enforceWriteCanaryGate(next, spec).catch((error: unknown) => {
-          readCanaryAbort.abort();
-          throw error;
-        }),
-      ]);
+      // a reconfigure `removeSupersededAgent` deleted a few lines above.
+      const policyVerified = await enforceGateDryRun(next, spec);
 
       onStage?.("done");
-      return { config: next, canary, gate, writeCanary };
+      return { config: next, gate, policyVerified, spec };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: operatorKeys.all });
     },
     // A failed activation mutates server state as surely as a successful one:
-    // the provisioning rollback above and `enforceWriteCanaryGate`'s
+    // the provisioning rollback above and `enforceGateDryRun`'s
     // `resetOperator` both DELETE agents and clear the config variable before
     // throwing. Without this the cache still holds the pre-activation config,
     // so cancelling out of the form lands on a page reporting an active
@@ -280,6 +273,52 @@ export function useActivateOperator() {
       qc.invalidateQueries({ queryKey: operatorKeys.all });
     },
   });
+}
+
+/** Callbacks through which the background probes report — see runPostActivationProbes. */
+export interface PostActivationProbeCallbacks {
+  /** The read canary's outcome (one real read through a real conversation). */
+  onReadResult: (result: CanaryResult) => void;
+  /**
+   * The live write probe's outcome (read_write only). `report.tornDown` means
+   * the probe PROVED the gate broken and the operator was already removed —
+   * the UI must re-read the config, not just show a warning.
+   */
+  onWriteResult?: (report: WriteProbeReport) => void;
+}
+
+/**
+ * The LLM probes that used to block activation, now run AFTER it: one real
+ * read (the canary) and — for read_write — one real gated write that must
+ * pause. Fire-and-forget from the activation success handler; each result is
+ * delivered through the callbacks as it arrives, in parallel.
+ *
+ * Deliberately NOT a mutation hook: nothing here belongs to a component's
+ * lifecycle. The probes must keep running (and the write probe must keep its
+ * power to tear down a provably-ungated operator) even if the admin navigates
+ * away from the operator page mid-probe.
+ */
+export async function runPostActivationProbes(
+  outcome: ActivationOutcome,
+  callbacks: PostActivationProbeCallbacks,
+): Promise<void> {
+  const { config, spec, policyVerified } = outcome;
+  await Promise.all([
+    runOperatorCanary(config)
+      .catch(
+        (error: unknown): CanaryResult => ({
+          ok: false,
+          toolCalls: 0,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      )
+      .then((result) => callbacks.onReadResult(result)),
+    config.scope === "read_write"
+      ? runBackgroundWriteProbe(config, spec, policyVerified === true).then((report) => {
+          if (report) callbacks.onWriteResult?.(report);
+        })
+      : Promise.resolve(),
+  ]);
 }
 
 /**

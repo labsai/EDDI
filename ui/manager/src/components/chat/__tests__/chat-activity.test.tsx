@@ -103,9 +103,11 @@ describe("ChatActivity", () => {
 
     renderWithProviders(<ChatActivity events={events} isLive={false} />);
 
-    expect(screen.getByText(/\b2 steps/)).toBeInTheDocument();
-    expect(screen.getByText("1.0s")).toBeInTheDocument(); // 150ms + 850ms = 1000ms = 1.0s
+    // End-user resting header leads with what the agent DID: tool calls, not
+    // the pipeline's internal step count.
     expect(screen.getByText(/1 tool call\b/)).toBeInTheDocument();
+    expect(screen.getByText("1.0s")).toBeInTheDocument(); // 150ms + 850ms = 1000ms = 1.0s
+    expect(screen.queryByText(/\b2 steps/)).not.toBeInTheDocument();
   });
 
   it("toggles expanded state on click", async () => {
@@ -135,8 +137,9 @@ describe("ChatActivity", () => {
   });
 
   it("renders details and supports tool tracing, expansion, and copying details", async () => {
-    // Details are a resting-state affordance in end-user mode now — live shows
-    // only the status line.
+    // The task-row shell (type icon, label, per-task badge) is a DEBUG
+    // affordance now — end-user resting mode gets the flat tool list instead
+    // (tested below).
     const user = userEvent.setup();
     const events: PipelineEvent[] = [
       {
@@ -161,7 +164,7 @@ describe("ChatActivity", () => {
       },
     ];
 
-    renderWithProviders(<ChatActivity events={events} isLive={false} />);
+    renderWithProviders(<ChatActivity events={events} isLive={false} showInternalSteps />);
 
     // Auto-expands because the toolTrace makes toolCallCount > 0 — the
     // expansion effect, not liveness, drives it
@@ -307,8 +310,11 @@ describe("ChatActivity — summary metrics follow the filtered list", () => {
 
     renderWithProviders(<ChatActivity events={events} isLive={false} showInternalSteps={false} />);
 
-    expect(screen.getByText(/\b1 step\b/)).toBeInTheDocument();
+    // With a tool call in the turn, the header leads with it — the plumbing
+    // step count ("46 steps", or even "1 step") never surfaces.
+    expect(screen.getByText(/\b1 tool call\b/)).toBeInTheDocument();
     expect(screen.queryByText(/\b46 steps/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\b1 step\b/)).not.toBeInTheDocument();
     // The duration is the turn's, not the visible row's: 45×2ms + 900ms.
     expect(screen.getByText("990ms")).toBeInTheDocument();
   });
@@ -416,7 +422,7 @@ describe("ChatActivity — camelCase runtime task ids", () => {
     },
   );
 
-  it("keeps a camelCase row that actually made tool calls, and counts only visible steps", () => {
+  it("keeps a camelCase turn that actually made tool calls, led by the tool-call count", () => {
     const events: PipelineEvent[] = [
       { type: "task_start", taskType: "httpCalls", taskId: "1", index: 0, timestamp: Date.now() },
       {
@@ -429,7 +435,129 @@ describe("ChatActivity — camelCase runtime task ids", () => {
 
     renderWithProviders(<ChatActivity events={events} isLive={false} />);
 
-    expect(screen.getByText(/\b1 step\b/)).toBeInTheDocument();
-    expect(screen.queryByText(/\b2 steps/)).not.toBeInTheDocument();
+    expect(screen.getByText(/\b1 tool call\b/)).toBeInTheDocument();
+    expect(screen.queryByText(/steps?\b/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The end-user resting view is a flat record of what the agent DID. The old
+ * shape — "1 step · 59.2s · 8 tool calls" over a `langchain` task row that had
+ * to be expanded AGAIN to reach the calls — was three layers of pipeline
+ * plumbing around the only content that mattered.
+ */
+describe("ChatActivity — end-user resting flat tool list", () => {
+  const turn = (): PipelineEvent[] => [
+    { type: "task_start", taskType: "langchain", taskId: "l1", index: 0, timestamp: Date.now() },
+    {
+      type: "task_complete", taskType: "langchain", taskId: "l1", index: 0, durationMs: 59_200, timestamp: Date.now(),
+      toolTrace: [
+        { type: "tool_call", tool: "readAgentDescriptors", arguments: "{}" },
+        { type: "tool_result", tool: "readAgentDescriptors", result: "[]" },
+        { type: "tool_call", tool: "readGroups", arguments: "{}" },
+        { type: "tool_result", tool: "readGroups", result: "[]" },
+      ],
+    },
+  ];
+
+  it("stays collapsed by default — the pill itself is the summary", () => {
+    renderWithProviders(<ChatActivity events={turn()} isLive={false} />);
+    expect(screen.getByTestId("chat-activity-toggle")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText(/\b2 tool calls\b/)).toBeInTheDocument();
+    expect(screen.getByText("59.2s")).toBeInTheDocument();
+  });
+
+  it("expands to the flat tool-call list with no task-row shell around it", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ChatActivity events={turn()} isLive={false} />);
+
+    await user.click(screen.getByTestId("chat-activity-toggle"));
+
+    // The calls themselves, directly — no "langchain" row to expand again.
+    expect(screen.getAllByTestId("tool-call-row")).toHaveLength(2);
+    expect(screen.getByText("readAgentDescriptors")).toBeInTheDocument();
+    expect(screen.getByText("readGroups")).toBeInTheDocument();
+    expect(screen.queryByText("langchain")).not.toBeInTheDocument();
+  });
+
+  it("a failed step still surfaces inside the expanded flat view", async () => {
+    const user = userEvent.setup();
+    const events: PipelineEvent[] = [
+      ...turn(),
+      { type: "task_start", taskType: "output", taskId: "o1", index: 1, timestamp: Date.now() },
+      {
+        type: "task_failed", taskType: "output", taskId: "o1", index: 1, timestamp: Date.now(),
+        errorType: "timeout", errorSummary: "provider timed out",
+      },
+    ];
+    renderWithProviders(<ChatActivity events={events} isLive={false} />);
+
+    // Errors auto-expand — they are actionable.
+    expect(screen.getByTestId("chat-activity-toggle")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/provider timed out/)).toBeInTheDocument();
+    expect(screen.getAllByTestId("tool-call-row")).toHaveLength(2);
+    // Collapse/expand still works with both present (the detail panel is
+    // hidden via CSS animation, so assert the toggle state, not unmounting).
+    await user.click(screen.getByTestId("chat-activity-toggle"));
+    expect(screen.getByTestId("chat-activity-toggle")).toHaveAttribute("aria-expanded", "false");
+  });
+});
+
+/**
+ * Live `tool_call` SSE events are the immediate signal — the per-task
+ * toolTrace only arrives at task_complete, which for a single long tool loop
+ * is the end of the turn. Without the live list the status line said
+ * "Thinking…" through an entire tool-using conversation.
+ */
+describe("ChatActivity — live tool_call events", () => {
+  const start = (taskType: string, index: number): PipelineEvent => ({
+    type: "task_start",
+    taskType,
+    taskId: String(index),
+    index,
+    timestamp: Date.now(),
+  });
+
+  it("names the tool from liveToolCalls before any toolTrace exists", () => {
+    renderWithProviders(
+      <ChatActivity
+        events={[start("langchain", 0)]}
+        isLive={true}
+        liveToolCalls={["readAgentDescriptors"]}
+      />,
+    );
+
+    expect(screen.getByText(/readAgentDescriptors/)).toBeInTheDocument();
+    expect(screen.getByText(/1 tool call\b/)).toBeInTheDocument();
+  });
+
+  it("prefers the newest live call over a stale completed-task trace", () => {
+    const events: PipelineEvent[] = [
+      start("httpCalls", 0),
+      {
+        ...start("httpCalls", 0),
+        type: "task_complete",
+        durationMs: 2,
+        toolTrace: [{ type: "tool_call", tool: "oldTool", arguments: "{}" }],
+      },
+    ];
+
+    renderWithProviders(
+      <ChatActivity events={events} isLive={true} liveToolCalls={["oldTool", "newTool"]} />,
+    );
+
+    expect(screen.getByText(/newTool/)).toBeInTheDocument();
+    expect(screen.queryByText(/Using oldTool/)).not.toBeInTheDocument();
+    // Count comes from the live list (2), not the lagging trace (1).
+    expect(screen.getByText(/2 tool calls\b/)).toBeInTheDocument();
+  });
+
+  it("renders the status line from live calls alone — before any task event arrives", () => {
+    renderWithProviders(<ChatActivity events={[]} isLive={true} liveToolCalls={["readGroups"]} />);
+
+    // events=[] used to be an early-return null; the live list must count as
+    // activity or the panel falls back to the bare dots indicator.
+    expect(screen.getByTestId("chat-activity-live-status")).toBeInTheDocument();
+    expect(screen.getByText(/readGroups/)).toBeInTheDocument();
   });
 });

@@ -65,11 +65,11 @@ export function OperatorActivation({
   const oidcEnabled = method === "keycloak";
   const busy = stage !== "idle" && stage !== "done";
 
-  // The canary stages are the LONG wait (each drives a real LLM conversation;
-  // they run in parallel but still dominate activation time). A static phrase
-  // there reads as frozen — rotate through wait phrases every few seconds so
-  // the indicator keeps visibly moving.
-  const isLongStage = stage === "canary" || stage === "write-canary";
+  // Provisioning is the LONG wait now that the LLM connection checks run in
+  // the background after activation (setup-api builds and deploys the whole
+  // agent). A static phrase there reads as frozen — rotate through wait
+  // phrases every few seconds so the indicator keeps visibly moving.
+  const isLongStage = stage === "provisioning";
   const [waitTick, setWaitTick] = useState(0);
   useEffect(() => {
     setWaitTick(0);
@@ -81,9 +81,9 @@ export function OperatorActivation({
     const base = t(`operator.stage.${stage}`);
     if (!isLongStage || waitTick === 0) return base;
     const extras = [
-      t("operator.stage.longWait1", "Both connection checks run in parallel — this is the longest step…"),
-      t("operator.stage.longWait2", "A real conversation is being run against the new operator — the model is thinking…"),
-      t("operator.stage.longWait3", "Still working — this can take up to a minute on slower providers…"),
+      t("operator.stage.longWait1", "The operator agent is being built and deployed — this is the longest step…"),
+      t("operator.stage.longWait2", "Wiring up tools and the approval gate on the new agent…"),
+      t("operator.stage.longWait3", "Still working — deployment can take a while on a busy platform…"),
     ];
     return extras[(waitTick - 1) % extras.length]!;
   }, [stage, isLongStage, waitTick, t]);
@@ -419,9 +419,10 @@ interface ScopeFieldProps {
  * Selects between read & write (the default) and read-only.
  *
  * Write-first, freely selectable on first activation: the protections that
- * actually matter are not this radio but the per-write approval gate and the
- * write canary activation runs before leaving a write-capable operator
- * deployed. Read-only is the deliberate opt-down for an admin who wants a
+ * actually matter are not this radio but the per-write approval gate,
+ * verified deterministically before activation finishes, plus the background
+ * write probe that removes the operator if a real write ever executes without
+ * pausing. Read-only is the deliberate opt-down for an admin who wants a
  * purely inspecting operator — not a hurdle to be cleared first.
  */
 function ScopeField({ scope, writeScopeAvailable, onChange }: ScopeFieldProps) {
@@ -499,7 +500,7 @@ function ScopeField({ scope, writeScopeAvailable, onChange }: ScopeFieldProps) {
         <Notice tone="info" icon={ShieldAlert} testId="operator-scope-write-warning">
           {t(
             "operator.activation.scope.writeWarning",
-            "Activating will run a write canary: a real, harmless test write that must pause for approval before this deployment finishes. If it does not pause, activation is refused and the operator is removed rather than left deployed with an unverified write gate.",
+            "Activation verifies the approval gate against the stored policy before it finishes. A real, harmless test write then runs in the background — if it ever executes without pausing for approval, the operator is removed immediately.",
           )}
         </Notice>
       )}

@@ -221,6 +221,7 @@ export function OperatorDrawer() {
               <OperatorChat
                 messages={chat.messages}
                 events={chat.events}
+                liveToolCalls={chat.liveToolCalls}
                 tracesByMessageId={chat.tracesByMessageId}
                 isStreaming={chat.isStreaming}
                 error={chat.error}

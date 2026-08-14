@@ -695,7 +695,9 @@
       "toolResult": "Ergebnis",
       "error": "Fehler aufgetreten",
       "toolCallsCount_one": "{{count}} Tool-Aufruf",
-      "stepsCount": "{{count}} Schritte", "stepsCount_one": "{{count}} Schritt", "stepsCount_other": "{{count}} Schritte",
+      "stepsCount": "{{count}} Schritte",
+      "stepsCount_one": "{{count}} Schritt",
+      "stepsCount_other": "{{count}} Schritte",
       "toolCallsCount_other": "{{count}} Tool-Aufrufe",
       "toolCallsCount": "{{count}} Tool-Aufrufe",
       "usingTool": "Verwendet {{tool}} …"
@@ -3907,7 +3909,7 @@
           "label": "Lese- und Schreibzugriff",
           "description": "Kann außerdem Agenten und Agentengruppen erstellen und ändern, bereitstellen, die Bereitstellung aufheben, einen außer Kontrolle geratenen Zeitplan deaktivieren und die Beschreibung eines Agenten bearbeiten — jeweils erst nach Ihrer Genehmigung."
         },
-        "writeWarning": "Beim Aktivieren wird ein Schreib-Kanarientest ausgeführt: ein echter, harmloser Testschreibvorgang, der vor Abschluss dieses Deployments auf Ihre Genehmigung warten muss. Pausiert er nicht, wird die Aktivierung verweigert und der Operator entfernt, statt mit einem ungeprüften Schreib-Gate bereitgestellt zu bleiben."
+        "writeWarning": "Die Aktivierung prüft das Freigabe-Gate vor dem Abschluss gegen die gespeicherte Richtlinie. Ein echter, harmloser Testschreibvorgang läuft anschließend im Hintergrund — wird er jemals ohne Freigabepause ausgeführt, wird der Operator sofort entfernt."
       },
       "safetyPreamble": "Sicherheitsregeln (nicht bearbeitbar)",
       "safetyPreambleHint": "Wird immer vorangestellt. Sie weist den Operator an, alles von seinen Tools Zurückgelieferte als nicht vertrauenswürdige Daten zu behandeln.",
@@ -3937,11 +3939,9 @@
       "saving": "Konfiguration wird gespeichert …",
       "verifying-gate": "Die Freigabesperre wird überprüft…",
       "done": "Fertig",
-      "canary": "Es wird geprüft, ob der Operator Ihre Plattform erreicht …",
-      "write-canary": "Ein echter Testschreibvorgang wird ausgeführt, der auf Ihre Genehmigung wartet…",
-      "longWait1": "Beide Verbindungsprüfungen laufen parallel — dies ist der längste Schritt…",
-      "longWait2": "Gegen den neuen Operator läuft eine echte Konversation — das Modell denkt nach…",
-      "longWait3": "Läuft noch — bei langsameren Anbietern kann das bis zu einer Minute dauern…"
+      "longWait1": "Der Operator-Agent wird erstellt und bereitgestellt — dies ist der längste Schritt…",
+      "longWait2": "Werkzeuge und Freigabe-Gate werden am neuen Agenten eingerichtet…",
+      "longWait3": "Läuft noch — die Bereitstellung kann auf einer ausgelasteten Plattform etwas dauern…"
     },
     "status": {
       "title": "Operator",
@@ -4026,11 +4026,14 @@
     },
     "toast": {
       "activated": "Plattform-Operator aktiviert",
-      "activatedReadWrite": "Plattform-Operator aktiviert — Schreibzugriff verifiziert",
-      "activatedReadWriteUnverified": "Platform Operator aktiviert — Freigabe-Gate verifiziert; die Live-Schreibprobe war ergebnislos",
       "deactivated": "Plattform-Operator deaktiviert",
       "reset": "Plattform-Operator gelöscht",
-      "activatedButUnreachable": "Operator deployt, konnte Ihre Plattform aber nicht lesen"
+      "activatedButUnreachable": "Operator deployt, konnte Ihre Plattform aber nicht lesen",
+      "activatedGateVerified": "Platform Operator aktiviert — Freigabe-Gate verifiziert. Verbindungsprüfungen laufen im Hintergrund.",
+      "activatedChecking": "Platform Operator aktiviert. Verbindungsprüfungen laufen im Hintergrund.",
+      "writeProbeVerified": "Schreibzugriff verifiziert — ein echter, geschützter Schreibvorgang wurde zur Freigabe angehalten.",
+      "writeProbeFailed": "Das Freigabe-Gate hat nicht gehalten — der Operator wurde entfernt.",
+      "writeProbeInconclusive": "Der Live-Schreibtest war ergebnislos."
     },
     "canary": {
       "genericFailure": "Die Verbindungsprüfung war nicht erfolgreich.",

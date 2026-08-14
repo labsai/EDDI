@@ -34,6 +34,13 @@ export interface OperatorChatState {
   /** Pipeline events for the turn in flight, fed straight to `ChatActivity`. */
   events: PipelineEvent[];
   /**
+   * Tool names from live `tool_call` SSE events for the turn in flight, in
+   * call order — drives "Using {tool}…" in the status line. Kept separate from
+   * `events`: the authoritative record (arguments, results) still arrives in
+   * task_complete's toolTrace, and merging both would double-count.
+   */
+  liveToolCalls: string[];
+  /**
    * Completed turns' traces, keyed by the agent message they belong to.
    *
    * An operator answer is only as trustworthy as the reads behind it, so the
@@ -273,6 +280,7 @@ async function pollUntilSettled(
 export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
   messages: [],
   events: [],
+  liveToolCalls: [],
   tracesByMessageId: {},
   isStreaming: false,
   error: null,
@@ -306,6 +314,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
     set({
       messages: [],
       events: [],
+      liveToolCalls: [],
       tracesByMessageId: {},
       isStreaming: false,
       error: null,
@@ -421,6 +430,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       ...s,
       messages: [...s.messages, userMessage, agentPlaceholder],
       events: [],
+      liveToolCalls: [],
       isStreaming: true,
       error: null,
     }));
@@ -566,6 +576,21 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
             };
           });
           break;
+        }
+
+        if (event.type === "tool_call") {
+          // Live "Using {tool}…" signal — name only; arguments arrive later,
+          // redacted, in the task_complete toolTrace.
+          try {
+            const parsed: { tool?: unknown } = JSON.parse(event.data);
+            if (typeof parsed.tool === "string" && parsed.tool) {
+              const tool = parsed.tool;
+              set((s) => ({ ...s, liveToolCalls: [...s.liveToolCalls, tool] }));
+            }
+          } catch {
+            // Malformed payload — the status line just keeps its last state.
+          }
+          continue;
         }
 
         const pipelineEvent = toPipelineEvent(event);
@@ -773,6 +798,7 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
   // abortController swap, a token streamed into someone else's turn).
   const messages = useOperatorChatStore((s) => s.messages);
   const events = useOperatorChatStore((s) => s.events);
+  const liveToolCalls = useOperatorChatStore((s) => s.liveToolCalls);
   const tracesByMessageId = useOperatorChatStore((s) => s.tracesByMessageId);
   const isStreaming = useOperatorChatStore((s) => s.isStreaming);
   const error = useOperatorChatStore((s) => s.error);
@@ -805,6 +831,7 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
   return {
     messages,
     events,
+    liveToolCalls,
     tracesByMessageId,
     isStreaming,
     error,

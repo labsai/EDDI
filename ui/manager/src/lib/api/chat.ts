@@ -35,6 +35,7 @@ export type SSEEventType =
   | "task_start"
   | "task_complete"
   | "task_failed"
+  | "tool_call"
   | "cascade_step_start"
   | "cascade_escalation"
   | "done"

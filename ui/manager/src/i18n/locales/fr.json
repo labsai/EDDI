@@ -703,7 +703,10 @@
       "toolResult": "Résultat",
       "error": "Une erreur s'est produite",
       "toolCallsCount_one": "{{count}} appel d'outil",
-      "stepsCount": "{{count}} étapes", "stepsCount_one": "{{count}} étape", "stepsCount_many": "{{count}} étapes", "stepsCount_other": "{{count}} étapes",
+      "stepsCount": "{{count}} étapes",
+      "stepsCount_one": "{{count}} étape",
+      "stepsCount_many": "{{count}} étapes",
+      "stepsCount_other": "{{count}} étapes",
       "toolCallsCount_many": "{{count}} appels d'outils",
       "toolCallsCount_other": "{{count}} appels d'outils",
       "toolCallsCount": "{{count}} appels d'outils",
@@ -3936,7 +3939,7 @@
           "label": "Lecture et écriture",
           "description": "Peut aussi créer et modifier des agents et des groupes d'agents, déployer, annuler le déploiement, désactiver une planification incontrôlée et modifier le descripteur d'un agent — chacune de ces actions étant d'abord soumise à votre approbation."
         },
-        "writeWarning": "L'activation exécutera un test canari d'écriture : une écriture de test réelle et inoffensive qui doit rester en attente d'approbation avant la fin de ce déploiement. Si elle ne se met pas en pause, l'activation est refusée et l'opérateur est supprimé plutôt que laissé déployé avec une passerelle d'écriture non vérifiée."
+        "writeWarning": "L'activation vérifie la barrière d'approbation par rapport à la politique enregistrée avant de se terminer. Une écriture de test réelle et inoffensive s'exécute ensuite en arrière-plan — si elle s'exécute un jour sans pause d'approbation, l'opérateur est immédiatement supprimé."
       },
       "safetyPreamble": "Règles de sécurité (non modifiables)",
       "safetyPreambleHint": "Toujours ajoutées en tête. Elles indiquent à l'opérateur de traiter tout ce que renvoient ses outils comme des données non fiables.",
@@ -3966,11 +3969,9 @@
       "saving": "Enregistrement de la configuration…",
       "verifying-gate": "Vérification de la barrière d'approbation…",
       "done": "Terminé",
-      "canary": "Vérification que l'opérateur atteint votre plateforme…",
-      "write-canary": "Exécution d'une écriture de test réelle, qui doit attendre votre approbation…",
-      "longWait1": "Les deux vérifications de connexion s'exécutent en parallèle — c'est l'étape la plus longue…",
-      "longWait2": "Une vraie conversation est en cours avec le nouvel opérateur — le modèle réfléchit…",
-      "longWait3": "Toujours en cours — cela peut prendre jusqu'à une minute selon le fournisseur…"
+      "longWait1": "L'agent opérateur est en cours de création et de déploiement — c'est l'étape la plus longue…",
+      "longWait2": "Configuration des outils et de la barrière d'approbation sur le nouvel agent…",
+      "longWait3": "Toujours en cours — le déploiement peut prendre du temps sur une plateforme chargée…"
     },
     "status": {
       "title": "Opérateur",
@@ -4055,11 +4056,14 @@
     },
     "toast": {
       "activated": "Opérateur de plateforme activé",
-      "activatedReadWrite": "Opérateur de plateforme activé — accès en écriture vérifié",
-      "activatedReadWriteUnverified": "Opérateur de plateforme activé — barrière d'approbation vérifiée ; la sonde d'écriture en direct n'a pas été concluante",
       "deactivated": "Opérateur de plateforme désactivé",
       "reset": "Opérateur de plateforme supprimé",
-      "activatedButUnreachable": "Opérateur déployé, mais il n'a pas pu lire votre plateforme"
+      "activatedButUnreachable": "Opérateur déployé, mais il n'a pas pu lire votre plateforme",
+      "activatedGateVerified": "Opérateur de plateforme activé — barrière d'approbation vérifiée. Les vérifications de connexion s'exécutent en arrière-plan.",
+      "activatedChecking": "Opérateur de plateforme activé. Les vérifications de connexion s'exécutent en arrière-plan.",
+      "writeProbeVerified": "Accès en écriture vérifié — une écriture réelle protégée a été mise en pause pour approbation.",
+      "writeProbeFailed": "La barrière d'approbation n'a pas tenu — l'opérateur a été supprimé.",
+      "writeProbeInconclusive": "Le test d'écriture en direct n'a pas été concluant."
     },
     "canary": {
       "genericFailure": "La vérification de connexion a échoué.",

@@ -347,123 +347,161 @@ async function handlePause(
 }
 
 /**
- * Runs the write canary against a just-activated `read_write` operator and
- * enforces its result — the actual grant decision, not just the probe.
+ * The BLOCKING half of write verification: deterministic classification of the
+ * probe's target call against the operator's STORED policy, via the backend's
+ * gate-dry-run endpoint (the same ToolApprovalGate.classify the tool loop runs
+ * at execution time). Pure function of policy + call address: cannot flake,
+ * writes nothing — which is why it is the only write check activation still
+ * waits on. The empirical LLM probe moved to {@link runBackgroundWriteProbe}:
+ * it costs a full model conversation per run and its "unknown" outcomes say
+ * nothing about the gate, so blocking (or worse, rolling back) on it made
+ * activation slow and flaky without adding proof.
  *
- * A failed read canary or failed gate verification (see `useActivateOperator`)
- * is reported but non-fatal: an inert or unreachable operator is merely
- * useless. A failed write canary is different in kind. `config` is already
- * DEPLOYED at the point this runs — provisioning happens before any probe —
- * so a non-"pass" outcome means live write tools that just proved they do not
- * pause are reachable RIGHT NOW. Reporting that and moving on would leave them
- * reachable; this rolls the whole activation back instead.
+ * No-op — returns `null` — for any scope other than `read_write`.
  *
- * `resetOperator` (undeploy, delete, clear the config variable) rather than
- * merely discarding the caller's local config object: `config` was already
- * persisted by the caller before this runs, so anything short of clearing the
- * stored variable would leave it pointing at an agent this function just
- * deleted.
- *
- * No-op — returns `null` — for any scope other than `read_write`: a read_only
- * agent has no write tool this probe could provoke, and running it anyway
- * would report "unknown" uselessly on every activation.
- *
- * @throws if the canary did not pass — after rollback, or, if rollback ALSO
- *         failed, with a message saying so explicitly.
+ * @returns whether the policy was deterministically verified: `false` means
+ *          the backend predates gate-dry-run (404) or the target tool could
+ *          not be resolved from the spec — NOT that the gate is broken.
+ * @throws after rolling the activation back when the dry-run proves the policy
+ *         does not gate the target write, or when verification itself fails
+ *         (fail closed — not proven safe, not deployed).
  */
-export async function enforceWriteCanaryGate(
+export async function enforceGateDryRun(
   config: OperatorConfig,
   spec: FetchedSpec,
-  signal?: AbortSignal,
-): Promise<WriteCanaryResult | null> {
+): Promise<boolean | null> {
   if (config.scope !== "read_write") return null;
 
-  // ── Check 1: deterministic classification (backend gate-dry-run) ──
-  //
-  // The backend classifies the canary's exact target call against the operator's
-  // STORED policy, using the same ToolApprovalGate.classify the tool loop runs
-  // at execution time. Pure function of policy + call address: cannot flake,
-  // writes nothing. This is what breaks the old coin flip — with the policy
-  // deterministically verified, an inconclusive empirical probe no longer has to
-  // be treated as a possible security failure.
-  let policyVerified = false;
   const expectedToolName = resolveToolNameForEndpoint(WRITE_CANARY_TARGET_ENDPOINT, buildOperationIdIndex(spec));
-  if (expectedToolName) {
-    try {
-      const dryRun = await gateDryRun(config, expectedToolName, WRITE_CANARY_TARGET_ENDPOINT);
-      if (!dryRun.gated) {
-        // Deterministically broken configuration. The empirical probe is NOT run:
-        // provoking the write against a policy known not to gate it would execute
-        // the write for real — the destructive path, entered knowingly.
-        const why = dryRun.policyPresent
-          ? "the stored approval policy does not gate the canary's own target write"
-          : "the agent document carries no approval policy at all";
-        await rollBack(
-          config,
-          `The approval gate did NOT hold: ${why} (verified deterministically against the stored ` +
-            "agent document — no probe was run and nothing was written). Do not re-activate with " +
-            "write access until the gate is fixed.",
-        );
-      }
-      policyVerified = true;
-    } catch (error) {
-      if (error instanceof RollbackFailure) {
-        throw error;
-      }
-      if (!isNotFound(error)) {
-        // Not "old backend", an actual failure to verify. Fail closed — same
-        // principle as everywhere else in this flow: not proven safe, not
-        // deployed. The message says it is a verification failure, not a breach.
-        const detail = error instanceof Error ? error.message : String(error);
-        await rollBack(
-          config,
-          `Could not verify the approval gate (the deterministic check failed: ${detail}) — this is ` +
-            "not evidence that it is broken. Try activating again, or choose read-only access, " +
-            "which needs no write verification.",
-        );
-      }
-      // 404 → the backend predates gate-dry-run. policyVerified stays false and
-      // the empirical probe below carries the full burden, exactly as before.
+  if (!expectedToolName) return false;
+
+  try {
+    const dryRun = await gateDryRun(config, expectedToolName, WRITE_CANARY_TARGET_ENDPOINT);
+    if (!dryRun.gated) {
+      // Deterministically broken configuration — the one write-verification
+      // outcome that must still block activation, because it is PROOF, not
+      // absence of proof.
+      const why = dryRun.policyPresent
+        ? "the stored approval policy does not gate the canary's own target write"
+        : "the agent document carries no approval policy at all";
+      await rollBack(
+        config,
+        `The approval gate did NOT hold: ${why} (verified deterministically against the stored ` +
+          "agent document — no probe was run and nothing was written). Do not re-activate with " +
+          "write access until the gate is fixed.",
+      );
     }
+    return true;
+  } catch (error) {
+    if (error instanceof RollbackFailure) {
+      throw error;
+    }
+    if (!isNotFound(error)) {
+      // Not "old backend", an actual failure to verify. Fail closed — same
+      // principle as everywhere else in this flow: not proven safe, not
+      // deployed. The message says it is a verification failure, not a breach.
+      const detail = error instanceof Error ? error.message : String(error);
+      await rollBack(
+        config,
+        `Could not verify the approval gate (the deterministic check failed: ${detail}) — this is ` +
+          "not evidence that it is broken. Try activating again, or choose read-only access, " +
+          "which needs no write verification.",
+      );
+    }
+    // 404 → the backend predates gate-dry-run. Report unverified; the
+    // background probe is the only evidence this deployment will get.
+    return false;
   }
+}
 
-  // ── Check 2: empirical probe (the gate actually pausing a real call) ──
-  const result = await runOperatorWriteCanary(config, spec, signal);
-  if (result.outcome === "pass") {
-    return result;
-  }
+/** What the background write probe concluded, shaped for direct UI surfacing. */
+export interface WriteProbeReport {
+  result: WriteCanaryResult;
+  /**
+   * True when the probe PROVED the gate broken (its write executed without
+   * pausing) and the operator was therefore removed. The one outcome that
+   * still ends the deployment — it is proof, arriving late.
+   */
+  tornDown: boolean;
+  /** Human-readable summary for the admin; always set for non-pass outcomes. */
+  message?: string;
+}
 
-  if (result.outcome === "unknown" && policyVerified) {
-    // The policy is deterministically sound; the model merely never attempted
-    // the write, which proves nothing about the gate. Deleting a verified
-    // operator over that was the original defect. Proceed, but return the
-    // outcome honestly — the caller surfaces it — rather than upgrading it to
-    // a pass the probe never earned.
-    return {
-      ...result,
-      error:
-        "The stored approval policy was verified deterministically (gate-dry-run: the canary's target " +
-        "write classifies as gated), but the live probe was inconclusive — the operator did not attempt " +
-        `the write. ${result.error ?? ""}`.trim(),
+/**
+ * The BACKGROUND half of write verification: the empirical probe that provokes
+ * one real gated write and checks it pauses. Runs AFTER activation has
+ * completed — the admin is already chatting with the operator while this
+ * verifies. Never throws.
+ *
+ * Outcome handling differs from the old blocking gate on exactly one point:
+ * an "unknown" no longer rolls anything back. Unknown means the model never
+ * attempted the write (or the outcome could not be observed) — absence of
+ * proof. Deleting a deployed, deterministically-verified operator over that
+ * was the original defect the dry-run fixed; now that activation no longer
+ * waits on this probe, unknown is reported as a warning instead. A "fail" is
+ * still PROOF the gate is broken with write tools reachable right now, so it
+ * still tears the operator down (`resetOperator`: undeploy, delete, clear the
+ * config variable).
+ */
+export async function runBackgroundWriteProbe(
+  config: OperatorConfig,
+  spec: FetchedSpec,
+  policyVerified: boolean,
+  signal?: AbortSignal,
+): Promise<WriteProbeReport | null> {
+  if (config.scope !== "read_write") return null;
+
+  let result: WriteCanaryResult;
+  try {
+    result = await runOperatorWriteCanary(config, spec, signal);
+  } catch (error) {
+    // runOperatorWriteCanary reports failures as outcomes rather than throwing;
+    // this catch is a guard against its internals changing, not a real path.
+    result = {
+      outcome: "unknown",
+      toolCalls: 0,
+      error: error instanceof Error ? error.message : String(error),
+      durationMs: 0,
     };
   }
 
-  //   fail    → the probe's write EXECUTED without pausing. The gate is broken
-  //             at runtime, whatever the stored policy says.
-  //   unknown → nothing was learned AND the policy could not be verified
-  //             (old backend without gate-dry-run) — the pre-dry-run semantics.
-  const failure =
-    result.outcome === "fail"
-      ? `The approval gate did NOT hold: ${result.error ?? "no further detail"}`
-      : `Could not verify the approval gate — this is not evidence that it is broken. ` +
-        `${result.error ?? "No further detail."}`;
-  const nextStep =
-    result.outcome === "fail"
-      ? "Do not re-activate with write access until the gate is fixed."
-      : "Try activating again, or choose read-only access, which needs no write probe.";
-  await rollBack(config, `${failure} ${nextStep}`);
-  // rollBack always throws; this is unreachable but satisfies the compiler.
-  return result;
+  if (result.outcome === "pass") {
+    return { result, tornDown: false };
+  }
+
+  if (result.outcome === "fail") {
+    // The probe's write EXECUTED without pausing. The gate is broken at
+    // runtime, whatever the stored policy says — remove the operator.
+    const reason = `The approval gate did NOT hold: ${result.error ?? "no further detail"} Do not re-activate with write access until the gate is fixed.`;
+    try {
+      await resetOperator(config);
+      return {
+        result,
+        tornDown: true,
+        message: `${reason} The operator was removed rather than left deployed with a broken write gate.`,
+      };
+    } catch (rollbackError) {
+      const detail = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+      return {
+        result,
+        tornDown: false,
+        message:
+          `${reason} Removing it ALSO failed (${detail}). The operator is still deployed with ` +
+          "write tools and a broken gate — remove it manually from the operator screen now.",
+      };
+    }
+  }
+
+  return {
+    result,
+    tornDown: false,
+    message: policyVerified
+      ? "The stored approval policy was verified deterministically (gate-dry-run: the probe's target " +
+        "write classifies as gated), but the live probe was inconclusive — the operator did not attempt " +
+        `the write. ${result.error ?? ""}`.trim()
+      : "Could not verify the approval gate empirically, and this backend does not support the " +
+        `deterministic check — this is not evidence that it is broken. ${result.error ?? ""}`.trim(),
+  };
 }
 
 /** Marker so the dry-run catch can re-throw a rollback's error untouched. */

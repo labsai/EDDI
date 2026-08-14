@@ -1,4 +1,9 @@
 @import 'tailwindcss';
+/* Real typography for the `prose` classes every markdown surface already
+   wears. Without this plugin they were inert: preflight strips heading sizes,
+   list bullets and margins, and nothing put them back — chat replies rendered
+   as a crowded wall with unstyled tables. */
+@plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -192,6 +197,32 @@
   .prose a {
     color: var(--color-primary);
     text-decoration: underline;
+  }
+
+  /* Markdown tables inside chat bubbles: readable and self-contained. The
+     typography plugin provides the base table styling; these add the chat
+     specifics — hairline row borders, breathing room in cells, and horizontal
+     scrolling INSIDE the table so a wide model-written table can never force
+     the whole bubble (or page) to scroll sideways. */
+  .prose table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+  }
+
+  .prose th {
+    text-align: start;
+    font-weight: 600;
+    padding: 0.375rem 0.75rem;
+    border-bottom: 1px solid var(--color-border);
+    background-color: var(--color-muted);
+  }
+
+  .prose td {
+    padding: 0.375rem 0.75rem;
+    border-bottom: 1px solid color-mix(in oklab, var(--color-border) 60%, transparent);
+    vertical-align: top;
   }
 
   /* ── Onboarding ─────────────────────────────── */

@@ -103,6 +103,14 @@ interface DebugState {
   turns: PipelineTurn[];
   currentTurnEvents: PipelineEvent[];
   currentTurnStart: number;
+  /**
+   * Tool names from live `tool_call` SSE events, in call order, current turn
+   * only. Kept OUT of currentTurnEvents: the authoritative per-task record
+   * (with arguments and results) still arrives in task_complete's toolTrace,
+   * and storing both in one list would double-count. This list exists solely
+   * so the status line can say "Using {tool}…" while the turn is running.
+   */
+  liveToolCalls: string[];
 
   // UI state
   isDebugOpen: boolean;
@@ -112,6 +120,7 @@ interface DebugState {
 
   // Actions
   addEvent: (event: PipelineEvent) => void;
+  addToolCall: (tool: string) => void;
   finalizeTurn: () => void;
   setDebugOpen: (open: boolean) => void;
   toggleDebug: () => void;
@@ -161,6 +170,7 @@ export const useDebugStore = create<DebugState>((set) => ({
   turns: [],
   currentTurnEvents: [],
   currentTurnStart: 0,
+  liveToolCalls: [],
   isDebugOpen: loadDebugPref(),
   activeTab: "pipeline",
   selectedTurnIndex: null,
@@ -172,9 +182,16 @@ export const useDebugStore = create<DebugState>((set) => ({
       currentTurnStart: s.currentTurnStart || event.timestamp,
     })),
 
+  addToolCall: (tool) =>
+    set((s) => ({ liveToolCalls: [...s.liveToolCalls, tool] })),
+
   finalizeTurn: () =>
     set((s) => {
-      if (s.currentTurnEvents.length === 0) return s;
+      if (s.currentTurnEvents.length === 0) {
+        // No pipeline events, but a stale live-tool list must still not leak
+        // into the next turn's status line.
+        return s.liveToolCalls.length ? { ...s, liveToolCalls: [] } : s;
+      }
 
       const events = s.currentTurnEvents;
       const totalDurationMs = events.reduce(
@@ -193,6 +210,7 @@ export const useDebugStore = create<DebugState>((set) => ({
         turns: [...s.turns, newTurn],
         currentTurnEvents: [],
         currentTurnStart: 0,
+        liveToolCalls: [],
         selectedTurnIndex: null,
       };
     }),
@@ -225,6 +243,7 @@ export const useDebugStore = create<DebugState>((set) => ({
       turns: [],
       currentTurnEvents: [],
       currentTurnStart: 0,
+      liveToolCalls: [],
       selectedTurnIndex: null,
     }),
 }));
