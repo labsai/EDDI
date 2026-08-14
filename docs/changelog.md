@@ -7,6 +7,47 @@
 
 
 
+## ⬆️ chore(deps): langchain4j 1.18.1 → 1.19.0 (2026-08-14)
+
+**Repo:** EDDI (`chore/langchain4j-1.19.0`)
+
+`langchain4j` / `langchain4j-libs` → 1.19.0, `langchain4j-beta` → 1.19.0-beta29.
+
+`langchain4j-community` **stays at 1.18.0-beta28**: that project releases on its own cadence and
+1.19.0-beta29 does not exist there — verified against Maven Central, and the build fails to resolve
+`langchain4j-community-oci-genai:1.19.0-beta29`. The skew is safe in this direction: community
+modules depend on core, not the reverse.
+
+**The one behavioural change in 1.19.0 does not reach us.** "Disable Apache HttpClient's automatic
+retries by default" would matter to a deployment relying on transport-level retries — but every
+provider builder here pins `JdkHttpClient` explicitly (Anthropic, OpenAI, Gemini, Mistral, Ollama;
+Azure uses the Azure SDK pipeline), so no Apache client sits in the request path. EDDI's own
+`RetryConfiguration` remains the only retry layer, unchanged.
+
+**Fixes we simply gain**, all in paths this codebase exercises:
+
+- Anthropic: parallel tool use with no `toolChoice` — the tool loop's normal shape
+- Anthropic: `cache_control` applied to image/PDF content blocks — the attachment forwarder's
+  `ImageContent` / `PdfFileContent` path
+- Gemini / Google GenAI: missing finish reasons that previously broke deserialization
+- OpenAI: `reasoning` parsed as an alias for `reasoning_content`
+
+**Nothing from 1.18.0 or 1.19.0 is left unadopted.** The remaining headline items are for shapes
+this deployment does not run: batch models (`AnthropicBatchChatModel`, `MistralAiBatchChatModel`)
+serve bulk jobs rather than an interactive turn; the agentic BDI/HIL primitives duplicate EDDI's own
+gate and pause machinery; watsonx, Milvus V2 and Docling belong to integrations not wired here. Two
+are worth revisiting if the feature ever lands: Anthropic prompt caching with its new cache
+diagnostics (EDDI sets no `cache_control` today), and MCP tool-result `_meta`, now surfaced through
+`ToolExecutionResult.attributes()`.
+
+791 tests green locally. The 10 errors in `LanguageModelBuildersTest` are this machine's
+loopback-socket restriction hitting `JdkHttpClient` construction, NOT the upgrade — verified by
+running the same class on 1.18.1, which produces the identical 10 errors. CI covers that class.
+
+---
+
+
+
 ## 🔒 feat(secrets): defense-in-depth for HITL surfaces — serve-time re-redaction + raw-carrier strip (2026-08-14)
 
 **Repo:** EDDI (`fix/hitl-secret-hardening`, follow-up to the filter fix in 943cd119c)
