@@ -7,6 +7,28 @@
 
 
 
+## 🔒 fix(secrets): redaction filter missed underscored keys and escaped-JSON fields (2026-08-14)
+
+**Repo:** EDDI (`chore/remove-agent-father`)
+
+Dev-testing the operator's create-agent flow: the approval card — which promises "a secret value
+appears as `<REDACTED>`, not omitted" — displayed a full `sk-ant-…` API key in clear text inside
+the gated call's arguments. (The key was model-fabricated, not a real credential, and the
+capability guard blocked the approval anyway — but a user-pasted real key would have leaked the
+same way.) Two `SecretRedactionFilter` gaps, both fixed:
+
+- **Underscores.** Real Anthropic keys carry `_`; the `sk-ant-[a-zA-Z0-9\-]{20,}` class stopped at
+  the first one. Both `sk-` patterns now include `_` (OpenAI `sk-proj-…` keys need it too).
+- **Escaped JSON.** A tool call whose `requestBody` argument is itself a JSON document arrives with
+  every quote backslash-escaped (`\"apiKey\": \"…`), and the generic
+  `apikey/token/secret/password` rule's separator never matched through the escaping. The rule now
+  tolerates backslash-escaped quotes around the separator. Quantifiers stay possessive (ReDoS).
+
+Verified against the exact leaked payload shape (standalone harness + five regression tests,
+including the full underscored key and the escaped-`requestBody` form).
+
+---
+
 ## 🎯 feat(streaming): live `tool_call` SSE event for "Using {tool}…" status (2026-08-14)
 
 **Repo:** EDDI (`chore/remove-agent-father`)

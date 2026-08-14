@@ -28,6 +28,54 @@ class SecretRedactionFilterTest {
         assertTrue(result.contains("sk-ant-<REDACTED>"));
     }
 
+    /**
+     * Regression: real Anthropic keys carry underscores, and a character class
+     * without {@code _} stopped matching at the first one — a full key inside a
+     * gated tool call's arguments sailed through "redacted" and rendered
+     * clear-text on the approval card.
+     */
+    @Test
+    void redact_anthropicKeyWithUnderscores() {
+        String input = "sk-ant-api03-CeIJ4onq59Mf_oN4mICgfgScyJO5bfxFSS3Sdvo1Zgo2F7zUfEvx_ljLzk8GHUWqILDGl8og-C3SuewAA";
+        String result = SecretRedactionFilter.redact(input);
+
+        assertFalse(result.contains("CeIJ4onq59Mf"));
+        assertFalse(result.contains("ljLzk8GHUWq"));
+    }
+
+    @Test
+    void redact_openaiProjectKeyWithUnderscoresAndHyphens() {
+        String input = "sk-proj-Ab_cd-EFGH1234567890abcdefghij";
+        String result = SecretRedactionFilter.redact(input);
+
+        assertFalse(result.contains("EFGH1234567890"));
+    }
+
+    /**
+     * Regression: the exact shape of the approval-card leak — a tool call whose
+     * {@code requestBody} argument is itself a JSON document, so every quote
+     * around {@code apiKey} arrives backslash-escaped. The generic rule's
+     * separator never matched through the escaping, and the key survived into
+     * the "redacted" arguments the approver reads.
+     */
+    @Test
+    void redact_apiKeyInsideEscapedJsonRequestBody() {
+        String input = "{\"requestBody\": \"{\\n  \\\"llm\\\": {\\n    \\\"apiKey\\\": "
+                + "\\\"sk-ant-api03-CeIJ4onq59Mf_oN4mICgfgScyJO5bfxFSS3Sdvo1Zgo2F7zUfEvx\\\"\\n  }\\n}\"}";
+        String result = SecretRedactionFilter.redact(input);
+
+        assertFalse(result.contains("CeIJ4onq59Mf"));
+        assertTrue(result.contains("<REDACTED>"));
+    }
+
+    @Test
+    void redact_secretFieldInsideEscapedJson_evenWithoutKnownPrefix() {
+        String input = "\\\"password\\\": \\\"hunter2butlonger\\\"";
+        String result = SecretRedactionFilter.redact(input);
+
+        assertFalse(result.contains("hunter2butlonger"));
+    }
+
     @Test
     void redact_bearerToken() {
         String input = "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature";
