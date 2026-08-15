@@ -145,6 +145,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 Map<String, Object> result = new HashMap<>();
 
                 do {
+                    // Final attempt wins, entirely: a retried failure populated
+                    // "body"/"httpCode" on its pass through the loop, and a
+                    // succeeding retry that does NOT save its response would
+                    // otherwise inherit the failed attempt's error body next to
+                    // its own 2xx code — a self-contradictory tool result.
+                    result.clear();
                     request = buildRequest(targetServerUrl, call, templateDataObjects);
                     var objectName = call.getName() + "Request";
                     var requestMap = request.toMap();

@@ -299,6 +299,42 @@ class ApiCallExecutorTest {
     }
 
     @Test
+    void execute_retriedFailureThenQuietSuccess_doesNotLeakTheErrorBody() throws Exception {
+        // A 503 populates "body" with its error on the first pass through the
+        // retry loop; the succeeding retry has saveResponse=false, so it writes
+        // only "httpCode". Without clearing between attempts the model would be
+        // handed {"httpCode": 200, "body": "<the 503's error>"} — a
+        // self-contradictory tool result.
+        ApiCall call = createSimpleApiCall("flaky-call", false);
+        HttpPostResponse postResponse = new HttpPostResponse();
+        RetryApiCallInstruction retryInstruction = new RetryApiCallInstruction();
+        retryInstruction.setMaxRetries(1);
+        retryInstruction.setRetryOnHttpCodes(List.of(503));
+        retryInstruction.setExponentialBackoffDelayInMillis(0);
+        postResponse.setRetryApiCallInstruction(retryInstruction);
+        call.setPostResponse(postResponse);
+
+        // Two distinct response mocks, switched per ATTEMPT via send(): the code
+        // under test reads getHttpCode() several times within one iteration, so
+        // sequential stubbing on a single mock would flip mid-attempt.
+        IResponse failing = mock(IResponse.class);
+        when(failing.getHttpCode()).thenReturn(503);
+        when(failing.getContentAsString()).thenReturn("upstream flaked");
+        when(failing.getHttpCodeMessage()).thenReturn("Service Unavailable");
+        when(failing.getHttpHeader()).thenReturn(new HashMap<>());
+        IResponse succeeding = mock(IResponse.class);
+        when(succeeding.getHttpCode()).thenReturn(200);
+        when(succeeding.getContentAsString()).thenReturn("ok");
+        when(succeeding.getHttpHeader()).thenReturn(new HashMap<>());
+        when(mockRequest.send()).thenReturn(failing).thenReturn(succeeding);
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals(200, result.get("httpCode"));
+        assertFalse(result.containsKey("body"), "the failed attempt's error body must not survive the retry");
+    }
+
+    @Test
     void execute_successWithoutSaveResponse_resultStillCarriesHttpCode() throws Exception {
         // The body stays out (that is what saveResponse=false means), but a model
         // whose tool returned "{}" cannot tell a 204 from a crash.
