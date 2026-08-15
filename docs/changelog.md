@@ -7,6 +7,87 @@
 
 
 
+## 🐛 fix(llm): an approved tool call died at the API because its body was not JSON (2026-08-15)
+
+**Repo:** EDDI (`fix/tool-body-json-guard`)
+
+From an operator session: a human approved `setupAgent`, the call went out, and the API rejected it
+at bind time — `400 {"objectName":"Class","attributeName":"systemPrompt","line":1,"column":593}`.
+Column 593 is deep inside a long `systemPrompt` string value.
+
+**EDDI had not mangled anything.** `McpApiToolBuilder.buildBodyTemplate` generates the request body
+as ONE variable, `{requestBody}`, and that is deliberate — per-property templates were rejected
+because the templating engine runs in TEXT mode and escapes nothing, so a substituted value carrying
+a quote could break the body or add fields the schema never declared. With the whole body in one
+variable there is no substitution boundary to cross, and nothing sits between the model's string and
+the wire. So a body that fails to bind failed because the model emitted invalid JSON: it escaped one
+level too few, writing `\n` where the inner document needed `\\n`, which decodes to a raw newline
+inside a JSON string value. Do not "fix" this by escaping in the template or decomposing the body —
+both are rejected designs with their reasons recorded in that method.
+
+`HttpCallToolsProvider`'s executor now parses that body before calling `ApiCallExecutor`, and on
+failure returns `{"error": "requestBody is not valid JSON at line L, column C. The request was NOT
+sent. …"}` in place of making the call — the same result shape as the executor's existing catch, so
+a model that handles one handles the other. The message carries the parse POSITION and never the
+body: the body is model-supplied and routinely carries resolved secrets (the reason
+`RequestRedactor` exists), and Jackson's own message would have appended a snippet of the offending
+source to both the log line and the tool result. Same reason the warn log names only the tool and
+the position.
+
+**Parsed strictly, with its own mapper.** Jackson's default stops at the first complete value and
+ignores the rest, so a body with a trailing sentence ("…} Sure, I created the agent!") or a closing
+markdown fence — the second-most-common shape of this bug — validated clean and then failed to bind
+at the API, leaving the model with EDDI's positive assurance that its body was fine and making the
+next attempt *less* likely to fix it. `FAIL_ON_TRAILING_TOKENS` is enabled on a private mapper; the
+shared one is also the persistence mapper, and `SerializationCustomizer` documents why strictness
+there is not available. Six other classes take the same posture with LLM output — see
+`ConvergenceDetector`, "FAIL_ON_TRAILING_TOKENS is load-bearing, not hygiene".
+
+**A structured object is refused by name.** The parameter description says "a single JSON object",
+and a model that answers it with an actual object rather than a string is at least as common as the
+escaping bug. Qute renders in TEXT mode, so that Map would reach the wire as `{name=Bot}` — not JSON
+under any parser. It now gets "requestBody must be a JSON document encoded as a STRING" instead of
+an unexplainable bind error.
+
+Scoped so it cannot refuse a call it merely fails to understand: only a JSON content type — matched
+on the media type with parameters stripped, so `application/problem+json` is covered and
+`multipart/related; type="application/json"` is not — only a body template that is nothing but a
+single variable (a hand-authored apicallstore template interpolating values into surrounding JSON is
+left alone; there the braces are EDDI's, not the model's), and only when that variable resolved to a
+non-blank string. The variable is read out of the template rather than assumed to be named
+`requestBody`, because the builder renames it on a name collision. A blank value is deliberately not
+refused — that is the separate "the model never filled the body" failure, not a malformed document.
+
+The message is assembled from an ALLOW-LIST — a fixed sentence chosen by exception type plus the
+numeric line and column — and never from the parser's own words. `getOriginalMessage()` looks safe
+because it omits the `[Source: …]` suffix `getMessage()` appends, but the message itself quotes
+model-controlled input: a stray token yields ``Unrecognized token 'SUPERSECRET'``. Since this string
+is logged AND returned as a tool result that lands in conversation memory, echoing the parser would
+leak exactly what the guard promises to withhold. Two regressions cover a secret in an unrecognised
+token and in trailing garbage.
+
+The refusal names the parameter the tool actually exposes, read from the template rather than
+hardcoded: the builder renames the whole-body variable on a collision, and telling the model to fix
+a `requestBody` argument that does not exist is worse than saying nothing.
+
+Twenty-six tests drive the real executor lambda through a real workflow traversal: the raw-newline
+case as reported, an unescaped quote, a truncated document, trailing prose, a trailing fence, a
+structured object, a renamed body variable, a `+json` suffix type, two no-leak regressions, and the
+refusal's wording —
+against those proving the guard stays out of the way (valid body, no body, `text/plain`, multipart,
+a per-property template, a JSON array body). The load-bearing assertion is
+`verify(apiCallExecutor, never()).execute(...)`. Mutation-checked twice: disabling the guard fails
+six, and dropping strictness plus the object carve-out fails the three that pin them.
+
+**Known limit, not addressed here.** The approval gate pauses BEFORE execution, so the human still
+spends one approval on the doomed call; what changes is that the retry now has the information to
+succeed instead of looping. Refusing at gate time would mean validating inside
+`IApiCallExecutor#resolve`, which is a larger change to the pause path.
+
+---
+
+
+
 ## 🐛 fix(hitl): a second pause on the SAME tool rendered byte-identical text (2026-08-15)
 
 **Repo:** EDDI (`fix/pause-ordinal`)
