@@ -518,9 +518,9 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
                   pauseReason: snapshot.hitlPauseReason ?? null,
                   resolveError: null,
                   decidedPausedAt: snapshot.hitlPausedAt ?? null,
-                  // This turn's own bubble is the placeholder resolveApproval
-                  // will replace — recorded by id, whether or not it ever got
-                  // any text.
+                  // This turn's own bubble is the ask resolveApproval anchors
+                  // on (decision + answer are inserted after it) — recorded by
+                  // id, whether or not it ever got any text.
                   pausedPlaceholderId: agentId,
                   // The backend writes its pending message into this same
                   // step's output, exactly like an ordinary answer — snap the
@@ -697,8 +697,9 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
    * looks computed but is a constant.
    *
    * When we own a placeholder bubble (the pause arrived on a turn we streamed)
-   * it is replaced in place; when we do not (a 409 pause, whose optimistic
-   * bubbles were dropped) the answer is appended.
+   * it STAYS as the ask, with the decision entry and the answer inserted after
+   * it; when we do not (a 409 pause, whose optimistic bubbles were dropped)
+   * decision and answer are appended.
    */
   resolveApproval: async (verdict, note, toolDecisions) => {
     const conversationId = get().conversationId;
