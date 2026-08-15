@@ -7,6 +7,32 @@
 
 
 
+## 🧹 fix(style): hoist inline fully-qualified names out of the operator-audit changes (2026-08-15)
+
+**Repo:** EDDI (`fix/import-style-violations`)
+
+`ImportStyleTest.noInlineFullyQualifiedNames` (AGENTS.md §4.7) went red on `chore/remove-agent-father`
+right after #690 merged. Three files from that PR used inline fully-qualified names:
+
+- `Conversation.java` — `java.util.regex.Pattern` spelled out twice inside `pendingPlaceholderCandidates()`.
+  The compiled pattern is now an `ORDINAL_SUFFIX` constant beside the other pending-message constants,
+  so it is also compiled once at class-init instead of on every resume, rather than merely renamed.
+- `ApiCallsTaskTest.java` — six `java.util.Map.of(...)` calls in `isFailureResult_classifiesByHttpCode`,
+  now plain `Map.of(...)` (the import was already present).
+- `ConversationMemoryUtilitiesTest.java` — `java.util.Arrays.asList(...)` in
+  `blankBesideRealEntryStillFilters`, now `List.of(...)`.
+
+No behaviour change: the regex text and the `DOTALL` flag are byte-identical to what they replaced.
+
+**Why it escaped local verification:** the affected suites were run by name (`-Dtest=...`) and
+`ImportStyleTest` was not among them, so the enforcement test only ever ran in CI. Style-rule tests are
+repo-wide rather than change-local — they belong in the pre-push check unconditionally, not in a list
+inferred from which files were touched.
+
+---
+
+
+
 ## 🛡️ fix(review): four-agent audit of the operator stack — cross-version placeholders, contract widenings, live-path guard (2026-08-15)
 
 **Repo:** EDDI (`fix/operator-review-findings`)
