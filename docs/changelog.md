@@ -7,6 +7,43 @@
 
 
 
+## 🧭 fix(operator): approvals finally read as a flow — settle window, resync, receipt, per-pause banner (2026-08-16)
+
+**Repo:** EDDI-Manager (`fix/operator-resume-settle`, commit `dfb97078`) — documented here because the
+ecosystem changelog lives in this repo; the EDDI half is the entry below.
+
+Live repro (operator "create a test agent … and chat with it"): approving setupAgent re-rendered the
+byte-identical ask, the approval controls vanished, the next pause never appeared, and typing into the
+still-paused conversation printed a raw `{"message":"Internal server error"}` blob. Four defects:
+
+1. **The settle poll read the resume CAS window as "settled".** Accepting a resume persists
+   `AWAITING_HUMAN→IN_PROGRESS` immediately (`ConversationHitlService`'s claim CAS); the outcome
+   persists only in `onComplete`. So 1.5s after approving, `pollUntilSettled` saw "not AWAITING_HUMAN"
+   with PRE-decision outputs — old ask duplicated as "the answer", `isPaused` cleared, pause 2
+   invisible. `IN_PROGRESS` now keeps polling; only terminal states or a NEW `hitlPausedAt` settle.
+2. **A paused-conversation send rejected over the open stream rendered raw JSON.** On the backend's
+   new `awaiting_approval` code the chat re-syncs the pause (drops the unsent bubbles, restores the
+   banner, back-fills the ask); other error events render their `message`, never the envelope.
+3. **Approved work was invisible.** The model often goes from an approved call straight into its next
+   tool call with no text between, so "You approved" → next ask showed the created agent nowhere. A
+   receipt ("Ran setupAgent ✓") now lands after the decision, diffed against a pre-decision baseline
+   of the step's executed `httpCalls` (`<name>Request` marks execution, `<name>_response` merges only
+   on success). New `operator.decisionLog.executed` key in all 11 locales.
+4. **The banner showed the PREVIOUS pause's calls.** `useApprovalStatus` was keyed on conversation id
+   alone, and — verified live — `removeQueries` after deciding produces no refetch on an
+   actively-observed query. The key now includes the pause's `hitlPausedAt`; operator page, drawer and
+   conversation-detail pass it.
+
+**Verified end-to-end against the running deployment:** approve startConversation → 4 polls ride the
+IN_PROGRESS window → "You approved this request" → "Ran startConversation ✓" → the `say` ask
+("approval 3 this turn") with a fresh 0-of-1 banner → approve → final answer "✅ Agent created,
+deployed, and verified working" with the test agent's actual in-character reply. 8 new tests, each
+mutation-verified; full suite 5365 green.
+
+---
+
+
+
 ## 🛡️ fix(streaming): known client conditions are typed error events, not opaque 500s (2026-08-16)
 
 **Repo:** EDDI (`fix/streaming-known-conditions`)
