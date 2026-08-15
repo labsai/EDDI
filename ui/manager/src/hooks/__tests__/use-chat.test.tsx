@@ -813,3 +813,65 @@ describe("useSendMessage", () => {
     });
   });
 });
+
+/**
+ * A conversation belongs to the deployment it was created against, and an
+ * agent's descriptors span every environment. Without an environment filter,
+ * choosing "chat in test" resumed the newest PRODUCTION conversation — the
+ * environment choice silently did not apply, which defeats the whole feature.
+ */
+describe("pickResumableConversation — environment scoping", () => {
+  const desc = (over: Partial<ConversationDescriptor>): ConversationDescriptor =>
+    ({
+      resource: "eddi://ai.labs.conversation/conversationstore/conversations/c1",
+      conversationState: "READY",
+      lastModifiedOn: 1,
+      ...over,
+    }) as ConversationDescriptor;
+
+  it("never resumes another environment's conversation", () => {
+    const picked = pickResumableConversation(
+      [
+        desc({ resource: "…/prod-newest", environment: "production", lastModifiedOn: 900 }),
+        desc({ resource: "…/test-older", environment: "test", lastModifiedOn: 100 }),
+      ],
+      "test",
+    );
+    expect(picked?.resource).toContain("test-older");
+  });
+
+  it("still prefers the newest WITHIN the environment", () => {
+    const picked = pickResumableConversation(
+      [
+        desc({ resource: "…/test-older", environment: "test", lastModifiedOn: 100 }),
+        desc({ resource: "…/test-newest", environment: "test", lastModifiedOn: 500 }),
+      ],
+      "test",
+    );
+    expect(picked?.resource).toContain("test-newest");
+  });
+
+  it("treats a descriptor with no environment as production", () => {
+    // Predates the field. A legacy conversation is not evidence of a test one,
+    // and guessing the other way would resume production history into a test
+    // chat — the exact bug the filter prevents.
+    const legacy = [desc({ resource: "…/legacy", lastModifiedOn: 10 })];
+    expect(pickResumableConversation(legacy, "production")?.resource).toContain("legacy");
+    expect(pickResumableConversation(legacy, "test")).toBeNull();
+  });
+
+  it("returns null rather than crossing environments when nothing matches", () => {
+    const picked = pickResumableConversation(
+      [desc({ environment: "production", lastModifiedOn: 900 })],
+      "test",
+    );
+    expect(picked).toBeNull();
+  });
+
+  it("keeps the unfiltered behaviour when no environment is given", () => {
+    const picked = pickResumableConversation([
+      desc({ resource: "…/any", environment: "production", lastModifiedOn: 900 }),
+    ]);
+    expect(picked?.resource).toContain("any");
+  });
+});

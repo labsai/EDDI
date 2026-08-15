@@ -992,11 +992,24 @@ const RESUMABLE_STATES: ReadonlySet<string> = new Set(["READY", "AWAITING_HUMAN"
  */
 export function pickResumableConversation(
   descriptors: ConversationDescriptor[] | undefined,
+  environment?: Environment,
 ): ConversationDescriptor | null {
   if (!descriptors?.length) return null;
   return (
     [...descriptors]
       .filter((c) => RESUMABLE_STATES.has(c.conversationState))
+      // Resume only within the environment being opened. A conversation belongs
+      // to the deployment it was created against, and the descriptors for an
+      // agent span every environment — so without this, choosing "chat in test"
+      // would silently resume the newest PRODUCTION conversation and the
+      // environment choice would quietly not apply.
+      //
+      // A descriptor with no `environment` predates the field. Treated as
+      // production, matching the backend's own default for the parameter that
+      // would have created it — a legacy conversation is not evidence of a test
+      // one, and guessing the other way would resume production history into a
+      // test chat, which is the bug this filter exists to prevent.
+      .filter((c) => environment === undefined || (c.environment ?? "production") === environment)
       // The backend does not promise an order — sort rather than trust index 0.
       .sort((a, b) => (b.lastModifiedOn ?? 0) - (a.lastModifiedOn ?? 0))[0] ?? null
   );
@@ -1025,7 +1038,7 @@ export function useResumeOrStartConversation() {
           queryFn: () => getConversationDescriptors(50, 0, "", agentId),
           staleTime: 30_000,
         });
-        resumable = pickResumableConversation(descriptors);
+        resumable = pickResumableConversation(descriptors, environment);
       } catch {
         // History is a convenience, not a precondition — fall through to a new
         // conversation rather than leaving the user with a dead chat panel.
