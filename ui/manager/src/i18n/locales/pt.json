@@ -245,7 +245,12 @@
     "chat": "Chat",
     "deployAndChat": "Implantar e conversar",
     "openExternalChat": "Abrir em nova aba",
-    "count_many": "{{count}} agentes"
+    "count_many": "{{count}} agentes",
+    "liveIn": "Ativo em {{environment}}",
+    "chatIn": "Conversar em {{environment}}",
+    "openExternalChatIn": "Abrir o chat de {{environment}} numa nova aba",
+    "deployToProduction": "Implantar em produção",
+    "undeployFromProduction": "Remover da produção"
   },
   "agentDetail": {
     "a2aDescHint": "Apresentado no Agent Card — ajuda outros agentes a entender o que este agente faz",
@@ -3337,7 +3342,8 @@
     "deployed": "Implantado",
     "deploying": "Implantando...",
     "error": "Erro",
-    "notDeployed": "Não implantado"
+    "notDeployed": "Não implantado",
+    "checking": "Verificando…"
   },
   "userData": {
     "subtitle": "Gerir memórias, propriedades e vínculos de conversa por utilizador",
@@ -4282,5 +4288,9 @@
     "ready": "Pronto",
     "title": "Sua equipa digital",
     "unnamed": "Agente sem nome"
+  },
+  "environments": {
+    "production": "Produção",
+    "test": "Teste"
   }
 }

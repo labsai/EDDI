@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useSearchParams, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import type { Environment } from "@/lib/constants";
+import { preferredChatEnvironment } from "@/lib/deployment-environments";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import {
@@ -107,6 +109,25 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const redoConversation = useRedoConversation();
 
   // Open the chat for the ?agentId= query param
+  /**
+   * The environment to open a conversation in for a given agent: production
+   * when it is live there, otherwise wherever it actually is.
+   *
+   * Every chat entry point used to assume production — and the value was then
+   * dropped on the wire entirely — so an agent deployed only to `test` could be
+   * neither listed nor talked to.
+   */
+  const environmentFor = useCallback(
+    (agentId: string): Environment => {
+      return preferredChatEnvironment(
+        deployedAgents?.find((a) => a.id === agentId)?.environments ?? [],
+      );
+    },
+    [deployedAgents],
+  );
+
+  const chatEnvironment = environmentFor(selectedAgentId ?? "");
+
   useEffect(() => {
     const agentIdParam = searchParams.get("agentId");
     if (!agentIdParam) return;
@@ -128,13 +149,13 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
     // Auto-select and reopen the agent's last conversation (or start one)
     setSelectedAgent(agentIdParam, agentName);
     openConversation.mutate(
-      { agentId: agentIdParam },
+      { agentId: agentIdParam, environment: environmentFor(agentIdParam) },
       { onError: (err) => toast.error(getErrorMessage(err)) },
     );
 
     // Remove query params so refresh doesn't re-open
     setSearchParams({}, { replace: true });
-  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, openConversation, setSearchParams]);
+  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, openConversation, setSearchParams, environmentFor]);
 
   // Smart auto-scroll: auto scrolls when at bottom, pauses when user scrolls up
   const {
@@ -162,12 +183,13 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+
   const handleSelectAgent = useCallback(
     (agentId: string, agentName: string) => {
       setSelectedAgent(agentId, agentName);
       setAgentSelectorOpen(false);
       openConversation.mutate(
-        { agentId },
+        { agentId, environment: environmentFor(agentId) },
         { onError: (err) => toast.error(getErrorMessage(err)) },
       );
       // Focus the chat input after the dropdown closes and UI settles
@@ -176,7 +198,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
         input?.focus();
       }, 150);
     },
-    [setSelectedAgent, openConversation]
+    [setSelectedAgent, openConversation, environmentFor]
   );
 
   /** Explicit fresh start — the one path that always creates a conversation. */
@@ -184,10 +206,10 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
     if (!selectedAgentId) return;
     useChatStore.getState().clearMessages();
     startConversation.mutate(
-      { agentId: selectedAgentId },
+      { agentId: selectedAgentId, environment: chatEnvironment },
       { onError: (err) => toast.error(getErrorMessage(err)) },
     );
-  }, [selectedAgentId, startConversation]);
+  }, [selectedAgentId, startConversation, chatEnvironment]);
 
   // ── Attachment upload (shared staging hook — also used by the operator) ──
   const fileInputRef = useRef<HTMLInputElement>(null);

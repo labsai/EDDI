@@ -244,7 +244,12 @@
     "emptyDescription": "ใช้วิซาร์ดสร้าง Agent ที่กำหนดค่าสมบูรณ์ได้ในไม่กี่นาที",
     "chat": "แชท",
     "deployAndChat": "ปรับใช้และแชท",
-    "openExternalChat": "เปิดในแท็บใหม่"
+    "openExternalChat": "เปิดในแท็บใหม่",
+    "liveIn": "ใช้งานอยู่ใน {{environment}}",
+    "chatIn": "แชทใน {{environment}}",
+    "openExternalChatIn": "เปิดแชท {{environment}} ในแท็บใหม่",
+    "deployToProduction": "ดีพลอยไปยังโปรดักชัน",
+    "undeployFromProduction": "นำออกจากโปรดักชัน"
   },
   "agentDetail": {
     "a2aDescHint": "แสดงใน Agent Card — ช่วยให้เอเจนต์อื่นเข้าใจว่าเอเจนต์นี้ทำอะไร",
@@ -3308,7 +3313,8 @@
     "deployed": "ปรับใช้แล้ว",
     "deploying": "กำลังปรับใช้...",
     "error": "ข้อผิดพลาด",
-    "notDeployed": "ยังไม่ปรับใช้"
+    "notDeployed": "ยังไม่ปรับใช้",
+    "checking": "กำลังตรวจสอบ…"
   },
   "userData": {
     "subtitle": "จัดการหน่วยความจำ คุณสมบัติ และการเชื่อมโยงการสนทนาต่อผู้ใช้",
@@ -4250,5 +4256,9 @@
     "ready": "พร้อม",
     "title": "ทีมงานดิจิทัลของคุณ",
     "unnamed": "เอเจนต์ไม่มีชื่อ"
+  },
+  "environments": {
+    "production": "โปรดักชัน",
+    "test": "ทดสอบ"
   }
 }

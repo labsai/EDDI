@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { toEnvironment } from "@/lib/constants";
 import { createApiAgent, type SetupResult } from "./agent-setup";
 import {
   getVariable,
@@ -574,7 +575,7 @@ export async function runOperatorCanary(
 
   let conversationId = null;
   try {
-    conversationId = await startConversation(config.environment, config.agentId);
+    conversationId = await startConversation(toEnvironment(config.environment), config.agentId);
     let toolCalls = 0;
     let toolError: string | undefined;
     let streamError: string | undefined;

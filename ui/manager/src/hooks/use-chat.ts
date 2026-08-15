@@ -1,6 +1,8 @@
 import { useRef } from "react";
 import { create } from "zustand";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { Environment } from "@/lib/constants";
+import { deployedEnvironments } from "@/lib/deployment-environments";
 import {
   startConversation,
   readConversation,
@@ -33,9 +35,8 @@ import {
 } from "@/lib/api/conversations";
 import {
   getAgentDescriptors,
-  getDeploymentStatus,
+  getDeploymentStatuses,
   type AgentDescriptor,
-  type DeploymentStatus,
   parseResourceUri,
 } from "@/lib/api/agents";
 import { useDebugStore } from "@/hooks/use-debug-events";
@@ -285,36 +286,52 @@ export function useDeployedAgents() {
       }
       const agents = Array.from(grouped.values());
 
-      // Check deployment status in parallel (avoids N+1 sequential requests)
+      // Status across EVERY environment, not just production. Filtering on
+      // production alone kept a test-only agent out of the chat picker
+      // entirely — it could not be selected, so "I can't see it in the UI" was
+      // literally true. Each agent now carries the environments it is live in,
+      // so the picker can both list it and start the conversation in the right
+      // place.
       const results = await Promise.allSettled(
         agents.map(async (agent) => {
-          const status = await getDeploymentStatus("production", agent.id, agent.version);
-          return { agent, status };
+          const statuses = await getDeploymentStatuses(agent.id, agent.version);
+          return { agent, environments: deployedEnvironments(statuses) };
         })
       );
 
       return results
         .filter(
-          (r): r is PromiseFulfilledResult<{ agent: typeof agents[number]; status: DeploymentStatus }> =>
-            r.status === "fulfilled" && r.value.status.status === "READY"
+          (r): r is PromiseFulfilledResult<{
+            agent: (typeof agents)[number];
+            environments: Environment[];
+          }> => r.status === "fulfilled" && r.value.environments.length > 0
         )
-        .map((r) => r.value.agent);
+        .map((r) => ({ ...r.value.agent, environments: r.value.environments }));
     },
     staleTime: 60_000,
   });
 }
 
 /** Start a new conversation with a agent, then GET to pick up welcome messages. */
+/**
+ * Starts a conversation in a SPECIFIC environment.
+ *
+ * `environment` is required rather than defaulted: it used to be hardcoded
+ * "production" here (and then discarded by `startConversation`, which never sent
+ * it), so an agent deployed only to `test` could not be chatted with at all and
+ * the failure looked like a broken agent. Making callers name the environment
+ * means a new call site has to think about which one it means.
+ */
 export function useStartConversation() {
   const store = useChatStore;
   return useMutation({
-    mutationFn: async ({ agentId }: { agentId: string }) => {
-      const conversationId = await startConversation("production", agentId);
+    mutationFn: async ({ agentId, environment }: { agentId: string; environment: Environment }) => {
+      const conversationId = await startConversation(environment, agentId);
       store.getState().setConversationId(conversationId);
 
       // GET immediately to pick up any welcome message
       const snapshot = await readConversation(
-        "production",
+        environment,
         agentId,
         conversationId,
         false
@@ -997,7 +1014,7 @@ export function useResumeOrStartConversation() {
   const startConversationMutation = useStartConversation();
 
   return useMutation({
-    mutationFn: async ({ agentId }: { agentId: string }) => {
+    mutationFn: async ({ agentId, environment }: { agentId: string; environment: Environment }) => {
       let resumable: ConversationDescriptor | null = null;
       try {
         const descriptors = await queryClient.fetchQuery({
@@ -1022,7 +1039,10 @@ export function useResumeOrStartConversation() {
         }
       }
 
-      return startConversationMutation.mutateAsync({ agentId });
+      // Environment-explicit: this used to inherit a hardcoded "production"
+      // that was then discarded on the wire, so an agent live only in `test` had
+      // no reachable conversation at all.
+      return startConversationMutation.mutateAsync({ agentId, environment });
     },
   });
 }

@@ -245,7 +245,12 @@
     "deployAndChat": "Déployer & Discuter",
     "openExternalChat": "Ouvrir dans un nouvel onglet",
     "emptyDescription": "Utilisez l'assistant pour créer un agent entièrement configuré en quelques minutes.",
-    "count_many": "{{count}} agents"
+    "count_many": "{{count}} agents",
+    "liveIn": "Actif en {{environment}}",
+    "chatIn": "Discuter en {{environment}}",
+    "openExternalChatIn": "Ouvrir le chat {{environment}} dans un nouvel onglet",
+    "deployToProduction": "Déployer en production",
+    "undeployFromProduction": "Retirer de la production"
   },
   "agentDetail": {
     "a2aDescHint": "Affiché dans l'Agent Card — aide les autres agents à comprendre ce que fait cet agent",
@@ -3337,7 +3342,8 @@
     "deployed": "Déployé",
     "deploying": "Déploiement...",
     "error": "Erreur",
-    "notDeployed": "Non déployé"
+    "notDeployed": "Non déployé",
+    "checking": "Vérification…"
   },
   "userData": {
     "subtitle": "Gérer les souvenirs, propriétés et liaisons de conversation par utilisateur",
@@ -4282,5 +4288,9 @@
     "ready": "Prêt",
     "title": "Votre effectif numérique",
     "unnamed": "Agent sans nom"
+  },
+  "environments": {
+    "production": "Production",
+    "test": "Test"
   }
 }

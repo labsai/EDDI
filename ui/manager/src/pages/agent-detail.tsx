@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { deployedEnvironments, preferredChatEnvironment } from "@/lib/deployment-environments";
+import type { Environment } from "@/lib/constants";
 import { useQueryClient } from "@tanstack/react-query";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
@@ -105,6 +107,11 @@ export function AgentDetailPage() {
   const { data: agent, isLoading, isError, refetch } = useAgent(id!, resolvedVersion);
   const { data: deployment } = useDeploymentStatus(id!, resolvedVersion);
   const { data: envStatuses } = useDeploymentStatuses(id!, resolvedVersion);
+  // Chat where the agent is ACTUALLY live. Production wins when it is live (the
+  // environment a reader assumes), otherwise the first live one — which is what
+  // makes a test-only agent reachable at all.
+  const liveEnvironments = deployedEnvironments(envStatuses);
+  const chatEnvironment: Environment = preferredChatEnvironment(liveEnvironments);
 
   const deployMutation = useDeployAgent();
   const undeployMutation = useUndeployAgent();
@@ -383,7 +390,7 @@ export function AgentDetailPage() {
                     drawerStore.setStep("starting");
                     chatStore.clearMessages();
                     chatStore.setSelectedAgent(id!, agentDisplayName);
-                    await startConversationMutation.mutateAsync({ agentId: id! });
+                    await startConversationMutation.mutateAsync({ agentId: id!, environment: chatEnvironment });
                     drawerStore.setStep("ready");
                   } catch (err) {
                     drawerStore.setStep("error", getErrorMessage(err));
@@ -410,7 +417,7 @@ export function AgentDetailPage() {
                     chatStore.clearMessages();
                     chatStore.setSelectedAgent(id!, agentDisplayName);
                     try {
-                      await startConversationMutation.mutateAsync({ agentId: id! });
+                      await startConversationMutation.mutateAsync({ agentId: id!, environment: chatEnvironment });
                       drawerStore.setStep("ready");
                     } catch (err) {
                       drawerStore.setStep("error", getErrorMessage(err));

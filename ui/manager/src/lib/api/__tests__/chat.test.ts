@@ -394,3 +394,44 @@ describe("parseConversationIdFromLocation edge cases", () => {
   });
 });
 
+
+/**
+ * The wire-level half of the environment bug: `startConversation` accepted the
+ * environment as `_environment` and never sent it, so the backend's
+ * `@DefaultValue("production")` applied to every conversation the Manager
+ * started. An agent deployed only to `test` was unreachable, and the failure
+ * read as a broken agent rather than as the wrong environment.
+ */
+describe("startConversation — environment reaches the wire", () => {
+  it("sends the requested environment as a query parameter", async () => {
+    let seen = "";
+    server.use(
+      http.post("*/agents/:agentId/start", ({ request }) => {
+        seen = new URL(request.url).search;
+        return HttpResponse.json({ location: "/agents/conv-1" });
+      }),
+    );
+
+    await startConversation("test", "agent-1");
+
+    expect(seen).toContain("environment=test");
+  });
+
+  it("sends production when production is asked for — never silently omitted", () => {
+    // Asserting the positive too: an implementation that drops the parameter
+    // "because production is the default anyway" is the bug, not a shortcut.
+    return (async () => {
+      let seen = "";
+      server.use(
+        http.post("*/agents/:agentId/start", ({ request }) => {
+          seen = new URL(request.url).search;
+          return HttpResponse.json({ location: "/agents/conv-2" });
+        }),
+      );
+
+      await startConversation("production", "agent-1");
+
+      expect(seen).toContain("environment=production");
+    })();
+  });
+});

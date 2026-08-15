@@ -244,7 +244,12 @@
     "emptyDescription": "ウィザードで数分で完全に構成された Agent を作成できます。",
     "chat": "チャット",
     "deployAndChat": "デプロイしてチャット",
-    "openExternalChat": "新しいタブで開く"
+    "openExternalChat": "新しいタブで開く",
+    "liveIn": "{{environment}} で稼働中",
+    "chatIn": "{{environment}} でチャット",
+    "openExternalChatIn": "{{environment}} のチャットを新しいタブで開く",
+    "deployToProduction": "本番にデプロイ",
+    "undeployFromProduction": "本番から削除"
   },
   "agentDetail": {
     "a2aDescHint": "エージェントカードに表示され、他のエージェントがこのエージェントの機能を理解するのに役立ちます",
@@ -3308,7 +3313,8 @@
     "deployed": "デプロイ済み",
     "deploying": "デプロイ中...",
     "error": "エラー",
-    "notDeployed": "未デプロイ"
+    "notDeployed": "未デプロイ",
+    "checking": "確認中…"
   },
   "userData": {
     "subtitle": "ユーザーごとのメモリ、プロパティ、会話バインディングを管理",
@@ -4250,5 +4256,9 @@
     "ready": "準備完了",
     "title": "あなたのデジタルワークフォース",
     "unnamed": "名称未設定のエージェント"
+  },
+  "environments": {
+    "production": "本番",
+    "test": "テスト"
   }
 }

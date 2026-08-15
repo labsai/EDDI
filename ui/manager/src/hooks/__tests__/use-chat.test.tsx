@@ -292,7 +292,7 @@ describe("useStartConversation", () => {
       wrapper: createWrapper(),
     });
 
-    result.current.mutate({ agentId: "agent-1" });
+    result.current.mutate({ agentId: "agent-1", environment: "production" });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(useChatStore.getState().conversationId).not.toBeNull();
@@ -305,7 +305,7 @@ describe("useStartConversation", () => {
       wrapper: createWrapper(),
     });
 
-    result.current.mutate({ agentId: "agent-1" });
+    result.current.mutate({ agentId: "agent-1", environment: "production" });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     // The MSW handler returns conversationOutputs with welcome text
@@ -776,7 +776,7 @@ describe("useSendMessage", () => {
       const { result } = renderHook(() => useResumeOrStartConversation(), {
         wrapper: createWrapper(),
       });
-      result.current.mutate({ agentId: "agent1" });
+      result.current.mutate({ agentId: "agent1", environment: "production" });
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
       expect(useChatStore.getState().conversationId).toBe("conv1");
@@ -806,7 +806,7 @@ describe("useSendMessage", () => {
       const { result } = renderHook(() => useResumeOrStartConversation(), {
         wrapper: createWrapper(),
       });
-      result.current.mutate({ agentId: "agent1" });
+      result.current.mutate({ agentId: "agent1", environment: "production" });
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
       expect(useChatStore.getState().conversationId).toBe("fresh-1");

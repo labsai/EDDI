@@ -244,7 +244,12 @@
     "emptyDescription": "कुछ ही मिनटों में पूरी तरह से कॉन्फ़िगर किया गया Agent बनाने के लिए विज़ार्ड का उपयोग करें।",
     "chat": "चैट",
     "deployAndChat": "डिप्लॉय करें और चैट करें",
-    "openExternalChat": "नए टैब में खोलें"
+    "openExternalChat": "नए टैब में खोलें",
+    "liveIn": "{{environment}} में सक्रिय",
+    "chatIn": "{{environment}} में चैट करें",
+    "openExternalChatIn": "{{environment}} चैट नए टैब में खोलें",
+    "deployToProduction": "प्रोडक्शन में तैनात करें",
+    "undeployFromProduction": "प्रोडक्शन से हटाएँ"
   },
   "agentDetail": {
     "a2aDescHint": "Agent Card में दिखाया जाता है — अन्य एजेंट को यह समझने में मदद करता है कि यह एजेंट क्या करता है",
@@ -3308,7 +3313,8 @@
     "deployed": "Deploy किया गया",
     "deploying": "Deploy हो रहा है...",
     "error": "त्रुटि",
-    "notDeployed": "Deploy नहीं किया गया"
+    "notDeployed": "Deploy नहीं किया गया",
+    "checking": "जाँच हो रही है…"
   },
   "userData": {
     "subtitle": "प्रति-उपयोगकर्ता स्मृतियां, गुण और बातचीत बाइंडिंग प्रबंधित करें",
@@ -4250,5 +4256,9 @@
     "ready": "तैयार",
     "title": "आपका डिजिटल कार्यबल",
     "unnamed": "अनाम एजेंट"
+  },
+  "environments": {
+    "production": "प्रोडक्शन",
+    "test": "टेस्ट"
   }
 }

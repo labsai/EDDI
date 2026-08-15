@@ -244,7 +244,12 @@
     "emptyDescription": "위자드를 사용하여 몇 분 만에 완전히 구성된 Agent를 만드세요.",
     "chat": "채팅",
     "deployAndChat": "배포 후 채팅",
-    "openExternalChat": "새 탭에서 열기"
+    "openExternalChat": "새 탭에서 열기",
+    "liveIn": "{{environment}}에서 실행 중",
+    "chatIn": "{{environment}}에서 채팅",
+    "openExternalChatIn": "{{environment}} 채팅을 새 탭에서 열기",
+    "deployToProduction": "프로덕션에 배포",
+    "undeployFromProduction": "프로덕션에서 제거"
   },
   "agentDetail": {
     "a2aDescHint": "에이전트 카드에 표시됩니다 — 다른 에이전트가 이 에이전트의 기능을 이해하는 데 도움이 됩니다",
@@ -3308,7 +3313,8 @@
     "deployed": "배포됨",
     "deploying": "배포 중...",
     "error": "오류",
-    "notDeployed": "배포되지 않음"
+    "notDeployed": "배포되지 않음",
+    "checking": "확인 중…"
   },
   "userData": {
     "subtitle": "사용자별 메모리, 속성, 대화 바인딩 관리",
@@ -4250,5 +4256,9 @@
     "ready": "준비됨",
     "title": "나의 디지털 워크포스",
     "unnamed": "이름 없는 에이전트"
+  },
+  "environments": {
+    "production": "프로덕션",
+    "test": "테스트"
   }
 }

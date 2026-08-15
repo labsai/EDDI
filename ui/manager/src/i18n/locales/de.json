@@ -244,7 +244,12 @@
     "chat": "Chat",
     "deployAndChat": "Bereitstellen & Chatten",
     "openExternalChat": "In neuem Tab öffnen",
-    "emptyDescription": "Erstellen Sie mit dem Wizard in wenigen Minuten einen fertig konfigurierten Agent."
+    "emptyDescription": "Erstellen Sie mit dem Wizard in wenigen Minuten einen fertig konfigurierten Agent.",
+    "liveIn": "Aktiv in {{environment}}",
+    "chatIn": "In {{environment}} chatten",
+    "openExternalChatIn": "{{environment}}-Chat in neuem Tab öffnen",
+    "deployToProduction": "In Produktion bereitstellen",
+    "undeployFromProduction": "Aus Produktion entfernen"
   },
   "agentDetail": {
     "a2aDescHint": "Wird in der Agent Card angezeigt — hilft anderen Agenten zu verstehen, was dieser Agent tut",
@@ -3308,7 +3313,8 @@
     "deployed": "Bereitgestellt",
     "deploying": "Wird bereitgestellt…",
     "error": "Fehler",
-    "notDeployed": "Nicht bereitgestellt"
+    "notDeployed": "Nicht bereitgestellt",
+    "checking": "Wird geprüft…"
   },
   "userData": {
     "subtitle": "Verwalten Sie Erinnerungen, Eigenschaften und Gesprächszuordnungen pro Nutzer",
@@ -4250,5 +4256,9 @@
     "ready": "Bereit",
     "title": "Ihre digitale Belegschaft",
     "unnamed": "Unbenannter Agent"
+  },
+  "environments": {
+    "production": "Produktion",
+    "test": "Test"
   }
 }

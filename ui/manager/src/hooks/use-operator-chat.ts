@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { toEnvironment } from "@/lib/constants";
 import { create } from "zustand";
 import {
   startConversation,
@@ -356,7 +357,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
     let creating: Promise<string> | null = null;
     creating = (async () => {
       try {
-        const conversationId = await startConversation(config.environment, agentId);
+        const conversationId = await startConversation(toEnvironment(config.environment), agentId);
         // A reset() while the create was in flight cleared the slot — the user
         // asked for a clean slate, so do not resurrect this conversation into
         // the store (callers still get the id; their uploads just target a

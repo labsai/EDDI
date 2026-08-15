@@ -75,7 +75,9 @@ describe("AgentCard", () => {
     );
     renderWithProviders(<AgentCard {...defaultProps} />);
     await waitFor(() => {
-      expect(screen.getByText("Deploy")).toBeInTheDocument();
+      // The toggle names its environment now: a bare "Deploy" beside a "Test"
+      // chip was exactly the ambiguity this card change removes.
+      expect(screen.getByText("Deploy to production")).toBeInTheDocument();
     });
   });
 
@@ -87,7 +89,7 @@ describe("AgentCard", () => {
     );
     renderWithProviders(<AgentCard {...defaultProps} />);
     await waitFor(() => {
-      expect(screen.getByText("Undeploy")).toBeInTheDocument();
+      expect(screen.getByText("Undeploy from production")).toBeInTheDocument();
     });
   });
 
@@ -100,7 +102,7 @@ describe("AgentCard", () => {
     renderWithProviders(<AgentCard {...defaultProps} />);
     await waitFor(() => {
       expect(
-        screen.getByTestId("agent-chat-agent-test-1")
+        screen.getByTestId("agent-chat-production-agent-test-1")
       ).toBeInTheDocument();
     });
   });
@@ -157,12 +159,58 @@ describe("AgentCard", () => {
     renderWithProviders(<AgentCard {...defaultProps} />);
     await waitFor(() => {
       const extLink = screen.getByTestId(
-        "agent-external-chat-agent-test-1"
+        "agent-external-chat-production-agent-test-1"
       );
       expect(extLink).toHaveAttribute(
         "href",
         "/chat/production/agent-test-1"
       );
     });
+  });
+
+  /**
+   * The bug the whole change exists for. This card used to read deployment
+   * status for production ONLY, so a test-deployed agent was labelled "Not
+   * deployed" and offered no chat button at all — it was invisible and
+   * unreachable, and the user's conclusion was that the agent was broken.
+   */
+  it("shows a test-only agent as live in Test, and offers a Test chat", async () => {
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", ({ params }) =>
+        HttpResponse.json({ status: params.env === "test" ? "READY" : "NOT_FOUND" }),
+      ),
+    );
+    renderWithProviders(<AgentCard {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("env-chip-test")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("env-chip-production")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not deployed")).not.toBeInTheDocument();
+
+    // Reachable, and pointed at the environment it actually runs in.
+    expect(screen.getByTestId("agent-chat-test-agent-test-1")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("agent-external-chat-test-agent-test-1"),
+    ).toHaveAttribute("href", "/chat/test/agent-test-1");
+    // ...and the production toggle still offers to deploy there.
+    expect(screen.getByText("Deploy to production")).toBeInTheDocument();
+  });
+
+  it("names both environments when the agent is live in both", async () => {
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", () =>
+        HttpResponse.json({ status: "READY" }),
+      ),
+    );
+    renderWithProviders(<AgentCard {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("env-chip-production")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("env-chip-test")).toBeInTheDocument();
+    // One chat entry each — with two environments the label must disambiguate.
+    expect(screen.getByTestId("agent-chat-production-agent-test-1")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-chat-test-agent-test-1")).toBeInTheDocument();
   });
 });

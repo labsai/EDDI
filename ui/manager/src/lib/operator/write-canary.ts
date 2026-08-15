@@ -1,4 +1,5 @@
 import { startConversation, sendMessageStreaming, endConversation } from "@/lib/api/chat";
+import { toEnvironment } from "@/lib/constants";
 import { resumeConversation, getApprovalStatus } from "@/lib/api/hitl";
 import {
   gateDryRun,
@@ -170,7 +171,7 @@ async function runProbe(
 
   let conversationId: string | null = null;
   try {
-    conversationId = await startConversation(config.environment, config.agentId);
+    conversationId = await startConversation(toEnvironment(config.environment), config.agentId);
 
     let toolCalls = 0;
     let sawExpectedToolCall = false;

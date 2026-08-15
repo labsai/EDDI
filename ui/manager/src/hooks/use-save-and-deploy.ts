@@ -100,7 +100,9 @@ export function useSaveAndDeploy() {
         drawerStore.setStep("starting");
         chatStore.clearMessages();
         chatStore.setSelectedAgent(opts.agentId, opts.agentName ?? "Agent");
-        await startConvRef.current.mutateAsync({ agentId: opts.agentId });
+        // Same environment this flow just deployed to (step 3 above), not a
+        // default: "save & deploy then chat" must open the thing it deployed.
+        await startConvRef.current.mutateAsync({ agentId: opts.agentId, environment: "production" });
 
         // Step 5: Ready
         drawerStore.setStep("ready");
