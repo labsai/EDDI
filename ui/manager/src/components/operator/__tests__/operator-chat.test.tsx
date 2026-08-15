@@ -32,6 +32,29 @@ function renderChat(overrides: Partial<OperatorChatProps> = {}) {
   );
 }
 
+describe("OperatorChat — the approved step is visibly running", () => {
+  // The resumed turn is polled, not streamed, and routinely takes 30-60s when it
+  // creates an agent. Without this row the transcript sits unchanged and
+  // approving reads as "nothing happened" — reported that way twice from live
+  // use.
+  it("shows a running indicator while the decision is being resolved", () => {
+    renderChat({ isResolvingPause: true });
+    const status = screen.getByTestId("operator-chat-resolving");
+    expect(status).toHaveTextContent(/running the approved step/i);
+    expect(status).toHaveAttribute("role", "status");
+  });
+
+  it("shows nothing once the turn has settled", () => {
+    renderChat({ isResolvingPause: false });
+    expect(screen.queryByTestId("operator-chat-resolving")).not.toBeInTheDocument();
+  });
+
+  it("shows it on the compact surface too — the drawer waits just as long", () => {
+    renderChat({ isResolvingPause: true, pauseSurface: "compact" });
+    expect(screen.getByTestId("operator-chat-resolving")).toBeInTheDocument();
+  });
+});
+
 describe("OperatorChat — pauseSurface", () => {
   it("renders the full ApprovalBanner by default", () => {
     renderChat();

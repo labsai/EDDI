@@ -3979,7 +3979,8 @@
       "newConversation": "Neue Konversation beginnen",
       "transcript": "Operator-Konversation",
       "pauseCompactFallback": "Der Operator benötigt Ihre Zustimmung, bevor er fortfahren kann.",
-      "pauseCompactReview": "Zur Genehmigung prüfen →"
+      "pauseCompactReview": "Zur Genehmigung prüfen →",
+      "resolving": "Der genehmigte Schritt läuft — das kann einen Moment dauern…"
     },
     "drawer": {
       "title": "Plattform-Operator",

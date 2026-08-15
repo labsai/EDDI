@@ -4009,7 +4009,8 @@
       "newConversation": "Démarrer une nouvelle conversation",
       "transcript": "Conversation avec l'opérateur",
       "pauseCompactFallback": "L'opérateur a besoin de votre approbation pour continuer.",
-      "pauseCompactReview": "Examiner pour approuver →"
+      "pauseCompactReview": "Examiner pour approuver →",
+      "resolving": "Exécution de l'étape approuvée — cela peut prendre un instant…"
     },
     "drawer": {
       "title": "Opérateur de plateforme",

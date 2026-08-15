@@ -4009,7 +4009,8 @@
       "newConversation": "Iniciar una conversación nueva",
       "transcript": "Conversación con el operador",
       "pauseCompactFallback": "El operador necesita tu aprobación para continuar.",
-      "pauseCompactReview": "Revisar para aprobar →"
+      "pauseCompactReview": "Revisar para aprobar →",
+      "resolving": "Ejecutando el paso aprobado: puede tardar un momento…"
     },
     "drawer": {
       "title": "Operador de plataforma",

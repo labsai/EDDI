@@ -336,6 +336,25 @@ export function OperatorChat({
           )
         ))}
 
+        {/* The approved step is running, and it is NOT streamed — resolveApproval
+            polls until the resumed turn settles, which is routinely 30-60s for a
+            turn that creates an agent. Until this row existed the only feedback
+            was a spinner inside the Approve button, so the transcript sat
+            unchanged and approving read as "nothing happened". Reported exactly
+            that way, twice. */}
+        {isResolvingPause && (
+          <div
+            className="flex items-center gap-2 px-4 py-1 text-[11px] text-muted-foreground"
+            data-testid="operator-chat-resolving"
+            role="status"
+          >
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+            <span>
+              {t("operator.chat.resolving", "Running the approved step — this can take a moment…")}
+            </span>
+          </div>
+        )}
+
         {error && (
           <div
             className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
