@@ -7,6 +7,36 @@
 
 
 
+## 🐛 fix(apicalls): a failed httpcall tool returned "{}" — the model could not know it failed (2026-08-15)
+
+**Repo:** EDDI (`fix/tool-result-contract`)
+
+From the same operator session log as the vault-mention fix: the human approved `setupAgent`, the
+call went out and got a 400 — and the model was handed `{}` as the tool result.
+`HttpCallToolsProvider` serializes `ApiCallExecutor.execute()`'s returned map verbatim, and that map
+was only ever populated inside `if (isResponseSuccessful && call.getSaveResponse())`. On a non-2xx
+it stayed EMPTY; on a 2xx with `saveResponse=false` it stayed empty too. So the model could neither
+report a failure nor confirm a success — a human-approved call that 400'd looked exactly like one
+that worked, which is precisely the "I approved it and nothing happened" experience.
+
+Now:
+
+- **non-2xx** → `{"httpCode": 400, "body": "<error body, truncated to 2000 chars>"}` (status
+  message when the body is blank). Same keys as the success path, not a new `error` namespace —
+  `ApiCallsTask` merges this map into template data, where that vocabulary is already established.
+- **2xx with `saveResponse=false`** → `{"httpCode": 204}`. The body stays out (that is what the
+  flag means), but a model whose tool returned `{}` cannot tell a 204 from a crash.
+- The response OBJECT semantics are untouched: an error body still never lands under
+  `responseObjectName`, and memory still sees it only under the `*Error` key.
+
+Four new tests pin the contract (error body + code, blank-body fallback, truncation in the result,
+code-only on quiet success); four existing tests that pinned the empty-map behaviour were updated —
+they were pinning the bug.
+
+---
+
+
+
 ## 🐛 fix(llm): a prompt MENTIONING `${vault:key-name}` crashed templating every turn (2026-08-15)
 
 **Repo:** EDDI (`fix/vault-ref-template-crash`)
