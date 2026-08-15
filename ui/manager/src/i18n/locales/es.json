@@ -245,7 +245,13 @@
     "chat": "Chat",
     "deployAndChat": "Desplegar y chatear",
     "openExternalChat": "Abrir en nueva pestaña",
-    "count_many": "{{count}} agentes"
+    "count_many": "{{count}} agentes",
+    "liveIn": "Activo en {{environment}}",
+    "chatIn": "Chatear en {{environment}}",
+    "openExternalChatIn": "Abrir el chat de {{environment}} en una pestaña nueva",
+    "deployToProduction": "Desplegar en producción",
+    "undeployFromProduction": "Retirar de producción",
+    "deployFailedIn": "El despliegue falló en {{environment}}"
   },
   "agentDetail": {
     "a2aDescHint": "Se muestra en la Agent Card — ayuda a otros agentes a entender qué hace este agente",
@@ -3337,7 +3343,8 @@
     "deployed": "Desplegado",
     "deploying": "Desplegando...",
     "error": "Error",
-    "notDeployed": "No desplegado"
+    "notDeployed": "No desplegado",
+    "checking": "Comprobando…"
   },
   "userData": {
     "subtitle": "Gestione los recuerdos, las propiedades y los vínculos de conversación por usuario",
@@ -4283,5 +4290,9 @@
     "ready": "Listo",
     "title": "Tu plantilla digital",
     "unnamed": "Agente sin nombre"
+  },
+  "environments": {
+    "production": "Producción",
+    "test": "Prueba"
   }
 }

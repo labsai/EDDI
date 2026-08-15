@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { operatorEnvironment } from "@/lib/operator/operator-environment";
 import { createApiAgent, type SetupResult } from "./agent-setup";
 import {
   getVariable,
@@ -574,13 +575,13 @@ export async function runOperatorCanary(
 
   let conversationId = null;
   try {
-    conversationId = await startConversation(config.environment, config.agentId);
+    conversationId = await startConversation(operatorEnvironment(config), config.agentId);
     let toolCalls = 0;
     let toolError: string | undefined;
     let streamError: string | undefined;
 
     const stream = sendMessageStreaming(
-      config.environment,
+      operatorEnvironment(config),
       config.agentId,
       conversationId,
       { input: CANARY_PROMPT },

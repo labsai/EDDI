@@ -113,15 +113,20 @@ export function ChatDrawer() {
     bottomThreshold: 80,
   });
 
+  const drawerEnvironment = useChatDrawerStore((s) => s.environment);
+
   const handleNewConversation = useCallback(() => {
     if (!agentId) return;
     useChatStore.getState().clearMessages();
     useChatDrawerStore.getState().setStep("starting");
     startConversation.mutate(
-      { agentId },
+      // The environment the drawer was OPENED with — a "new conversation" must
+      // land in the same place as the one it replaces, not silently in
+      // production because that used to be the only option.
+      { agentId, environment: drawerEnvironment },
       { onSuccess: () => useChatDrawerStore.getState().setStep("ready") }
     );
-  }, [agentId, startConversation]);
+  }, [agentId, startConversation, drawerEnvironment]);
 
   const handleRetry = useCallback(() => {
     // Reset to idle — the user's "Save & Test" hook will need to be re-triggered

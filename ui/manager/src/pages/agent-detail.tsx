@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { deployedEnvironments, preferredChatEnvironment } from "@/lib/deployment-environments";
+import type { Environment } from "@/lib/constants";
 import { useQueryClient } from "@tanstack/react-query";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
@@ -105,6 +107,19 @@ export function AgentDetailPage() {
   const { data: agent, isLoading, isError, refetch } = useAgent(id!, resolvedVersion);
   const { data: deployment } = useDeploymentStatus(id!, resolvedVersion);
   const { data: envStatuses } = useDeploymentStatuses(id!, resolvedVersion);
+  // Chat where the agent is ACTUALLY live. Production wins when it is live (the
+  // environment a reader assumes), otherwise the first live one — which is what
+  // makes a test-only agent reachable at all.
+  const liveEnvironments = deployedEnvironments(envStatuses);
+  const chatEnvironment: Environment = preferredChatEnvironment(liveEnvironments);
+  /**
+   * Whether a chat is reachable AT ALL, and therefore whether the chat controls
+   * appear. Derived from every environment, not from production: `isDeployed`
+   * below is production-only (it drives the production deploy/undeploy toggle),
+   * and reusing it here hid the Chat button from a test-only agent — the exact
+   * bug this page's sibling card had.
+   */
+  const isChatReachable = liveEnvironments.length > 0;
 
   const deployMutation = useDeployAgent();
   const undeployMutation = useUndeployAgent();
@@ -361,7 +376,7 @@ export function AgentDetailPage() {
             </button>
 
             {/* Deploy & Chat */}
-            {!isDeployed && !isBusy && (
+            {!isChatReachable && !isBusy && (
               <button
                 onClick={async () => {
                   const drawerStore = useChatDrawerStore.getState();
@@ -383,7 +398,10 @@ export function AgentDetailPage() {
                     drawerStore.setStep("starting");
                     chatStore.clearMessages();
                     chatStore.setSelectedAgent(id!, agentDisplayName);
-                    await startConversationMutation.mutateAsync({ agentId: id! });
+                    // Same environment this branch just deployed to. It only
+                    // runs when nothing is live, so the two cannot disagree —
+                    // but naming it keeps them from drifting apart later.
+                    await startConversationMutation.mutateAsync({ agentId: id!, environment: "production" });
                     drawerStore.setStep("ready");
                   } catch (err) {
                     drawerStore.setStep("error", getErrorMessage(err));
@@ -405,12 +423,12 @@ export function AgentDetailPage() {
                   const drawerStore = useChatDrawerStore.getState();
                   const chatStore = useChatStore.getState();
                   drawerStore.open(id!, agentDisplayName);
-                  if (isDeployed) {
+                  if (isChatReachable) {
                     drawerStore.setStep("starting");
                     chatStore.clearMessages();
                     chatStore.setSelectedAgent(id!, agentDisplayName);
                     try {
-                      await startConversationMutation.mutateAsync({ agentId: id! });
+                      await startConversationMutation.mutateAsync({ agentId: id!, environment: chatEnvironment });
                       drawerStore.setStep("ready");
                     } catch (err) {
                       drawerStore.setStep("error", getErrorMessage(err));
@@ -420,7 +438,7 @@ export function AgentDetailPage() {
                 disabled={startConversationMutation.isPending}
                 className={cn(
                   "inline-flex items-center gap-1.5 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed",
-                  isDeployed ? "rounded-s-lg" : "rounded-lg"
+                  isChatReachable ? "rounded-s-lg" : "rounded-lg"
                 )}
                 data-testid="chat-btn"
                 aria-label={t("agents.chat", "Chat")}
@@ -428,9 +446,9 @@ export function AgentDetailPage() {
                 <MessageSquare className="h-4 w-4" aria-hidden="true" />
                 {t("agents.chat", "Chat")}
               </button>
-              {isDeployed && (
+              {isChatReachable && (
                 <a
-                  href={`/chat/production/${id}`}
+                  href={`/chat/${chatEnvironment}/${id}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center rounded-e-lg border-s border-emerald-500/20 bg-emerald-500/10 px-2.5 py-2 text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"

@@ -801,5 +801,30 @@ describe("AgentDetailPage", () => {
       expect(updateCalled).toBe(true);
     });
   });
-});
 
+  /**
+   * The detail page had the same production-only assumption the agent card did,
+   * one level deeper: `isDeployed` came from the production status and gated the
+   * Chat controls, and the external link was hardcoded to /chat/production/. A
+   * test-only agent therefore had no way to be chatted with from its own page.
+   */
+  describe("a test-only agent is chattable from its own page", () => {
+    it("offers chat and links to the environment it actually runs in", async () => {
+      server.use(
+        http.get("*/administration/:env/deploymentstatus/:agentId", ({ params }) =>
+          HttpResponse.json({ status: params.env === "test" ? "READY" : "NOT_FOUND" }),
+        ),
+      );
+
+      renderAgentDetail();
+
+      await waitFor(() => {
+        const link = screen.getByRole("link", { name: /open in new tab/i });
+        expect(link).toHaveAttribute("href", expect.stringContaining("/chat/test/"));
+      });
+      // ...and never offers "Deploy & Chat", which would deploy production for
+      // an agent that is already live somewhere.
+      expect(screen.queryByText(/deploy & chat/i)).not.toBeInTheDocument();
+    });
+  });
+});

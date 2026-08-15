@@ -8,6 +8,20 @@
 export const ENVIRONMENTS = ["production", "test"] as const;
 export type Environment = (typeof ENVIRONMENTS)[number];
 
+/**
+ * Narrows a free-form string to an {@link Environment}.
+ *
+ * Some environments arrive as plain strings — the operator's own config is read
+ * back from a backend global variable, so it is data, not a literal. Falling
+ * back to production matches the backend's own `@DefaultValue("production")`
+ * rather than inventing a third behaviour.
+ */
+export function toEnvironment(value: string | undefined | null): Environment {
+  return (ENVIRONMENTS as readonly string[]).includes(value ?? "")
+    ? (value as Environment)
+    : "production";
+}
+
 /** Tailwind classes for capability confidence badges */
 export const CONFIDENCE_COLORS: Record<string, string> = {
   high: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",

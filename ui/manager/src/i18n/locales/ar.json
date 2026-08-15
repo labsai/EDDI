@@ -248,7 +248,13 @@
     "count_zero": "{{count}} وكيل",
     "count_two": "وكيلان",
     "count_few": "{{count}} وكلاء",
-    "count_many": "{{count}} وكيل"
+    "count_many": "{{count}} وكيل",
+    "liveIn": "نشط في {{environment}}",
+    "chatIn": "الدردشة في {{environment}}",
+    "openExternalChatIn": "فتح دردشة {{environment}} في علامة تبويب جديدة",
+    "deployToProduction": "النشر في الإنتاج",
+    "undeployFromProduction": "الإزالة من الإنتاج",
+    "deployFailedIn": "فشل النشر في {{environment}}"
   },
   "agentDetail": {
     "a2aDescHint": "يظهر في بطاقة الوكيل — يساعد الوكلاء الآخرين على فهم ما يفعله هذا الوكيل",
@@ -3424,7 +3430,8 @@
     "deployed": "منشور",
     "deploying": "جارٍ النشر...",
     "error": "خطأ",
-    "notDeployed": "غير منشور"
+    "notDeployed": "غير منشور",
+    "checking": "جارٍ التحقق…"
   },
   "userData": {
     "subtitle": "إدارة ذكريات المستخدم وخصائصه وروابط محادثاته",
@@ -4379,5 +4386,9 @@
     "ready": "جاهز",
     "title": "فريق عملك الرقمي",
     "unnamed": "وكيل بدون اسم"
+  },
+  "environments": {
+    "production": "الإنتاج",
+    "test": "الاختبار"
   }
 }

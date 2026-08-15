@@ -271,7 +271,13 @@
     "importError": "Failed to import agent",
     "chat": "Chat",
     "deployAndChat": "Deploy & Chat",
-    "openExternalChat": "Open in new tab"
+    "openExternalChat": "Open in new tab",
+    "liveIn": "Live in {{environment}}",
+    "chatIn": "Chat in {{environment}}",
+    "openExternalChatIn": "Open {{environment}} chat in a new tab",
+    "deployToProduction": "Deploy to production",
+    "undeployFromProduction": "Undeploy from production",
+    "deployFailedIn": "Deployment failed in {{environment}}"
   },
   "agentDetail": {
     "a2aDescHint": "Shown in the Agent Card — helps other agents understand what this agent does",
@@ -3348,7 +3354,8 @@
     "deployed": "Deployed",
     "deploying": "Deploying...",
     "error": "Error",
-    "notDeployed": "Not deployed"
+    "notDeployed": "Not deployed",
+    "checking": "Checking…"
   },
   "userData": {
     "subtitle": "Manage per-user memories, properties, and conversation bindings",
@@ -4251,5 +4258,9 @@
     "ready": "Ready",
     "title": "Your Digital Workforce",
     "unnamed": "Unnamed Agent"
+  },
+  "environments": {
+    "production": "Production",
+    "test": "Test"
   }
 }

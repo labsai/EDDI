@@ -1,6 +1,9 @@
 import { useRef } from "react";
 import { create } from "zustand";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { Environment } from "@/lib/constants";
+import { deployedEnvironments } from "@/lib/deployment-environments";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import {
   startConversation,
   readConversation,
@@ -33,9 +36,8 @@ import {
 } from "@/lib/api/conversations";
 import {
   getAgentDescriptors,
-  getDeploymentStatus,
+  getDeploymentStatuses,
   type AgentDescriptor,
-  type DeploymentStatus,
   parseResourceUri,
 } from "@/lib/api/agents";
 import { useDebugStore } from "@/hooks/use-debug-events";
@@ -285,36 +287,54 @@ export function useDeployedAgents() {
       }
       const agents = Array.from(grouped.values());
 
-      // Check deployment status in parallel (avoids N+1 sequential requests)
-      const results = await Promise.allSettled(
-        agents.map(async (agent) => {
-          const status = await getDeploymentStatus("production", agent.id, agent.version);
-          return { agent, status };
-        })
-      );
+      // Status across EVERY environment, not just production. Filtering on
+      // production alone kept a test-only agent out of the chat picker
+      // entirely — it could not be selected, so "I can't see it in the UI" was
+      // literally true. Each agent now carries the environments it is live in,
+      // so the picker can both list it and start the conversation in the right
+      // place.
+      // BOUNDED. `getAgentDescriptors` pages at 500 and each agent costs one
+      // request per environment, so an unbounded fan-out here could open ~1000
+      // sockets on a single picker refresh. Per-agent failures resolve to "no
+      // environments" and drop out below, exactly as the previous allSettled
+      // did — one unreachable agent must not empty the picker.
+      const results = await mapWithConcurrency(agents, 8, async (agent) => {
+        try {
+          const statuses = await getDeploymentStatuses(agent.id, agent.version);
+          return { agent, environments: deployedEnvironments(statuses) };
+        } catch {
+          return { agent, environments: [] as Environment[] };
+        }
+      });
 
       return results
-        .filter(
-          (r): r is PromiseFulfilledResult<{ agent: typeof agents[number]; status: DeploymentStatus }> =>
-            r.status === "fulfilled" && r.value.status.status === "READY"
-        )
-        .map((r) => r.value.agent);
+        .filter((r) => r.environments.length > 0)
+        .map((r) => ({ ...r.agent, environments: r.environments }));
     },
     staleTime: 60_000,
   });
 }
 
 /** Start a new conversation with a agent, then GET to pick up welcome messages. */
+/**
+ * Starts a conversation in a SPECIFIC environment.
+ *
+ * `environment` is required rather than defaulted: it used to be hardcoded
+ * "production" here (and then discarded by `startConversation`, which never sent
+ * it), so an agent deployed only to `test` could not be chatted with at all and
+ * the failure looked like a broken agent. Making callers name the environment
+ * means a new call site has to think about which one it means.
+ */
 export function useStartConversation() {
   const store = useChatStore;
   return useMutation({
-    mutationFn: async ({ agentId }: { agentId: string }) => {
-      const conversationId = await startConversation("production", agentId);
+    mutationFn: async ({ agentId, environment }: { agentId: string; environment: Environment }) => {
+      const conversationId = await startConversation(environment, agentId);
       store.getState().setConversationId(conversationId);
 
       // GET immediately to pick up any welcome message
       const snapshot = await readConversation(
-        "production",
+        environment,
         agentId,
         conversationId,
         false
@@ -972,11 +992,24 @@ const RESUMABLE_STATES: ReadonlySet<string> = new Set(["READY", "AWAITING_HUMAN"
  */
 export function pickResumableConversation(
   descriptors: ConversationDescriptor[] | undefined,
+  environment?: Environment,
 ): ConversationDescriptor | null {
   if (!descriptors?.length) return null;
   return (
     [...descriptors]
       .filter((c) => RESUMABLE_STATES.has(c.conversationState))
+      // Resume only within the environment being opened. A conversation belongs
+      // to the deployment it was created against, and the descriptors for an
+      // agent span every environment — so without this, choosing "chat in test"
+      // would silently resume the newest PRODUCTION conversation and the
+      // environment choice would quietly not apply.
+      //
+      // A descriptor with no `environment` predates the field. Treated as
+      // production, matching the backend's own default for the parameter that
+      // would have created it — a legacy conversation is not evidence of a test
+      // one, and guessing the other way would resume production history into a
+      // test chat, which is the bug this filter exists to prevent.
+      .filter((c) => environment === undefined || (c.environment ?? "production") === environment)
       // The backend does not promise an order — sort rather than trust index 0.
       .sort((a, b) => (b.lastModifiedOn ?? 0) - (a.lastModifiedOn ?? 0))[0] ?? null
   );
@@ -997,7 +1030,7 @@ export function useResumeOrStartConversation() {
   const startConversationMutation = useStartConversation();
 
   return useMutation({
-    mutationFn: async ({ agentId }: { agentId: string }) => {
+    mutationFn: async ({ agentId, environment }: { agentId: string; environment: Environment }) => {
       let resumable: ConversationDescriptor | null = null;
       try {
         const descriptors = await queryClient.fetchQuery({
@@ -1005,7 +1038,7 @@ export function useResumeOrStartConversation() {
           queryFn: () => getConversationDescriptors(50, 0, "", agentId),
           staleTime: 30_000,
         });
-        resumable = pickResumableConversation(descriptors);
+        resumable = pickResumableConversation(descriptors, environment);
       } catch {
         // History is a convenience, not a precondition — fall through to a new
         // conversation rather than leaving the user with a dead chat panel.
@@ -1022,7 +1055,10 @@ export function useResumeOrStartConversation() {
         }
       }
 
-      return startConversationMutation.mutateAsync({ agentId });
+      // Environment-explicit: this used to inherit a hardcoded "production"
+      // that was then discarded on the wire, so an agent live only in `test` had
+      // no reachable conversation at all.
+      return startConversationMutation.mutateAsync({ agentId, environment });
     },
   });
 }

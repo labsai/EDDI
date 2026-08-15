@@ -13,7 +13,10 @@ import {
   Sparkles,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { useDeploymentStatus, useDeployAgent, useUndeployAgent } from "@/hooks/use-agents";
+import { useDeploymentStatuses, useDeployAgent, useUndeployAgent } from "@/hooks/use-agents";
+import { DeploymentEnvironmentBadge } from "./deployment-environments";
+import { useEnvironmentLabel } from "@/hooks/use-environment-label";
+import { deployedEnvironments, isAnyEnvironmentBusy } from "@/lib/deployment-environments";
 
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
 import { useChatStore, useStartConversation } from "@/hooks/use-chat";
@@ -45,7 +48,8 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardP
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
-  const { data: deployment } = useDeploymentStatus(agent.id, agent.version);
+  const { data: envStatuses, isLoading: statusLoading } = useDeploymentStatuses(agent.id, agent.version);
+  const envLabel = useEnvironmentLabel();
   const deployMutation = useDeployAgent();
   const undeployMutation = useUndeployAgent();
   const startConversation = useStartConversation();
@@ -55,22 +59,21 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardP
     requestAnimationFrame(() => menuTriggerRef.current?.focus());
   }, []);
 
-  const status = deployment?.status ?? "NOT_FOUND";
-  const config = statusIcons[status];
-  const StatusIcon = config.icon;
-  const statusLabels: Record<string, string> = {
-    READY: t("status.deployed", "Deployed"),
-    IN_PROGRESS: t("status.deploying", "Deploying..."),
-    ERROR: t("status.error", "Error"),
-    NOT_FOUND: t("status.notDeployed", "Not deployed"),
-  };
-  const statusLabel = statusLabels[status] ?? status;
-
-  const isDeployed = status === "READY";
+  // Every environment, not just production. Reading production alone labelled a
+  // test-only agent "Not deployed" on the card most people navigate from.
+  const liveEnvironments = deployedEnvironments(envStatuses);
+  // The deploy/undeploy toggle still acts on PRODUCTION — the card is a list
+  // affordance, and per-environment control lives on the agent's own page. Its
+  // label names the environment so it cannot be misread next to a badge that
+  // says "Test".
+  const productionStatus =
+    envStatuses?.find((s) => s.environment === "production")?.status ?? "NOT_FOUND";
+  const isProductionDeployed = productionStatus === "READY";
+  const config = statusIcons[isProductionDeployed ? "READY" : productionStatus];
   const isBusy =
     deployMutation.isPending ||
     undeployMutation.isPending ||
-    status === "IN_PROGRESS";
+    isAnyEnvironmentBusy(envStatuses);
 
   function handleDeploy() {
     deployMutation.mutate(
@@ -105,17 +108,11 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardP
     >
       {/* Status badge + menu */}
       <div className="flex items-start justify-between">
-        <div
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1",
-            config.bg,
-            config.color,
-            config.ring
-          )}
-        >
-          <StatusIcon className="h-3.5 w-3.5" />
-          {statusLabel}
-        </div>
+        <DeploymentEnvironmentBadge
+          statuses={envStatuses}
+          isLoading={statusLoading}
+          data-testid={`agent-deployment-${agent.id}`}
+        />
 
         {/* The Platform Operator agent is provisioned and owned by the operator
             screen. Editing or deleting it here leaves that screen pointing at
@@ -195,62 +192,82 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardP
         </span>
 
         <div className="flex items-center gap-2">
-          {/* Chat button group — inline + external, only when deployed */}
-          {isDeployed && (
-            <div className="inline-flex">
+          {/* One chat entry PER LIVE ENVIRONMENT. There are at most two, so a
+              menu would be heavier than the choice deserves — and the previous
+              single button silently targeted production, which is why a
+              test-only agent could not be chatted with at all. When exactly one
+              environment is live the button reads simply "Chat"; with both, each
+              names its environment so the click is never a guess. */}
+          {liveEnvironments.map((env) => (
+            <div className="inline-flex" key={env}>
               <button
                 onClick={async () => {
                   const drawerStore = useChatDrawerStore.getState();
                   const chatStore = useChatStore.getState();
                   const agentName = agent.name || t("agents.unnamed", "Unnamed Agent");
-                  drawerStore.open(agent.id, agentName);
+                  drawerStore.open(agent.id, agentName, env);
                   drawerStore.setStep("starting");
                   chatStore.clearMessages();
                   chatStore.setSelectedAgent(agent.id, agentName);
                   try {
-                    await startConversation.mutateAsync({ agentId: agent.id });
+                    await startConversation.mutateAsync({ agentId: agent.id, environment: env });
                     drawerStore.setStep("ready");
                   } catch (err) {
                     drawerStore.setStep("error", getErrorMessage(err));
                   }
                 }}
-                className="inline-flex items-center gap-1.5 rounded-s-lg bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
-                data-testid={`agent-chat-${agent.id}`}
-                aria-label={t("agents.chat", "Chat")}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-s-lg px-3 py-1.5 text-xs font-medium transition-colors",
+                  env === "production"
+                    ? "bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400"
+                    : "bg-sky-500/10 text-sky-600 hover:bg-sky-500/20 dark:text-sky-400",
+                )}
+                data-testid={`agent-chat-${env}-${agent.id}`}
+                aria-label={t("agents.chatIn", "Chat in {{environment}}", { environment: envLabel(env) })}
               >
                 <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
-                {t("agents.chat", "Chat")}
+                {liveEnvironments.length > 1 ? envLabel(env) : t("agents.chat", "Chat")}
               </button>
               <a
-                href={`/chat/production/${agent.id}`}
+                href={`/chat/${env}/${agent.id}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center rounded-e-lg border-s border-emerald-500/20 bg-emerald-500/10 px-1.5 py-1.5 text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
-                title={t("agents.openExternalChat", "Open in new tab")}
-                aria-label={t("agents.openExternalChat", "Open in new tab")}
-                data-testid={`agent-external-chat-${agent.id}`}
+                className={cn(
+                  "inline-flex items-center rounded-e-lg border-s px-1.5 py-1.5 transition-colors",
+                  env === "production"
+                    ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400"
+                    : "border-sky-500/20 bg-sky-500/10 text-sky-600 hover:bg-sky-500/20 dark:text-sky-400",
+                )}
+                title={t("agents.openExternalChatIn", "Open {{environment}} chat in a new tab", { environment: envLabel(env) })}
+                aria-label={t("agents.openExternalChatIn", "Open {{environment}} chat in a new tab", { environment: envLabel(env) })}
+                data-testid={`agent-external-chat-${env}-${agent.id}`}
               >
                 <ExternalLink className="h-3 w-3" aria-hidden="true" />
               </a>
             </div>
-          )}
+          ))}
 
           <button
-            onClick={isDeployed ? handleUndeploy : handleDeploy}
+            onClick={isProductionDeployed ? handleUndeploy : handleDeploy}
             disabled={isBusy}
+            data-testid={`agent-deploy-toggle-${agent.id}`}
             className={cn(
               "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
-              isDeployed
+              isProductionDeployed
                 ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
                 : "bg-primary/10 text-primary hover:bg-primary/20",
               isBusy && "cursor-not-allowed opacity-50"
             )}
           >
+            {/* Names the environment: this toggle acts on production, and the
+                badge beside it may well say "Test". A bare "Deploy" next to a
+                Test chip reads as "not deployed", which is the confusion this
+                whole card change exists to remove. */}
             {isBusy
-              ? t("common.loading")
-              : isDeployed
-                ? t("agents.undeploy", "Undeploy")
-                : t("agents.deploy", "Deploy")}
+              ? t("common.loading", "Loading...")
+              : isProductionDeployed
+                ? t("agents.undeployFromProduction", "Undeploy from production")
+                : t("agents.deployToProduction", "Deploy to production")}
           </button>
         </div>
       </div>

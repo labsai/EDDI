@@ -244,7 +244,13 @@
     "emptyDescription": "使用向导在几分钟内创建一个完整配置的 Agent。",
     "chat": "聊天",
     "deployAndChat": "部署并聊天",
-    "openExternalChat": "在新标签页中打开"
+    "openExternalChat": "在新标签页中打开",
+    "liveIn": "在 {{environment}} 中运行",
+    "chatIn": "在 {{environment}} 中聊天",
+    "openExternalChatIn": "在新标签页中打开 {{environment}} 聊天",
+    "deployToProduction": "部署到生产环境",
+    "undeployFromProduction": "从生产环境移除",
+    "deployFailedIn": "在 {{environment}} 中部署失败"
   },
   "agentDetail": {
     "a2aDescHint": "显示在智能体名片中——帮助其他智能体了解此智能体的功能",
@@ -3308,7 +3314,8 @@
     "deployed": "已部署",
     "deploying": "部署中…",
     "error": "错误",
-    "notDeployed": "未部署"
+    "notDeployed": "未部署",
+    "checking": "检查中…"
   },
   "userData": {
     "subtitle": "管理按用户的记忆、属性和对话绑定",
@@ -4251,5 +4258,9 @@
     "ready": "就绪",
     "title": "您的数字团队",
     "unnamed": "未命名代理"
+  },
+  "environments": {
+    "production": "生产环境",
+    "test": "测试环境"
   }
 }
