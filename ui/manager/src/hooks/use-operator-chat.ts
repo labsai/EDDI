@@ -1095,9 +1095,10 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           pausedPlaceholderId: null,
           messages: s.messages.filter((m) => m.id !== userMessage.id && m.id !== agentId),
         }));
-        // The pause happened on a turn we never saw, so its reason is not in
-        // any snapshot we hold — read it, or the banner shows a bare
-        // "awaiting approval" with no explanation of what for.
+        // The pause happened on a turn we never saw. The read below recovers
+        // hitlPausedAt (the re-pause discriminator pollUntilSettled compares
+        // against) — NOT a reason: the simple snapshot never carries one, and
+        // the banner's reason overlays from approval-status on both surfaces.
         if (conversationId) {
           try {
             const snapshot = await getSimpleConversationLog(conversationId, false, true);

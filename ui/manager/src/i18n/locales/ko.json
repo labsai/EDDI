@@ -721,7 +721,8 @@
     "emptyConversation": "이 대화에는 아직 메시지가 없습니다.",
     "loadConversationFailed": "이 대화를 불러올 수 없습니다: {{error}}",
     "multilineHint": "Enter로 보내기 · Shift+Enter로 줄바꿈",
-    "multilineHintCtrlEnter": "Ctrl+Enter로 보내기 · Enter로 줄바꿈"
+    "multilineHintCtrlEnter": "Ctrl+Enter로 보내기 · Enter로 줄바꿈",
+    "toolRefused": "거부됨"
   },
   "resources": {
     "backToWorkflow": "워크플로로 돌아가기",

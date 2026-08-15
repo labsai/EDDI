@@ -721,7 +721,8 @@
     "emptyConversation": "इस वार्तालाप में अभी कोई संदेश नहीं है।",
     "loadConversationFailed": "यह वार्तालाप लोड नहीं हो सका: {{error}}",
     "multilineHint": "भेजने के लिए Enter · नई पंक्ति के लिए Shift+Enter",
-    "multilineHintCtrlEnter": "भेजने के लिए Ctrl+Enter · नई पंक्ति के लिए Enter"
+    "multilineHintCtrlEnter": "भेजने के लिए Ctrl+Enter · नई पंक्ति के लिए Enter",
+    "toolRefused": "अस्वीकृत"
   },
   "resources": {
     "backToWorkflow": "Workflow पर वापस जाएं",

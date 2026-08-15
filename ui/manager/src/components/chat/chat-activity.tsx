@@ -430,7 +430,7 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
                     <TaskRow key={`err-${task.taskType}-${task.index}-${i}`} task={task} />
                   ))}
                 {toolPairs.map((pair, i) => (
-                  <ToolCallRow key={i} call={pair.call} result={pair.result} />
+                  <ToolCallRow key={i} call={pair.call} result={pair.result} error={pair.error} />
                 ))}
               </>
             ) : (
@@ -454,8 +454,11 @@ function TaskRow({ task }: { task: TaskSummary }) {
   const color = getExtensionColor(task.taskType);
   const label = getTaskLabel(task.taskType);
 
-  const toolCalls = task.toolTrace?.filter((e) => e.type === "tool_call") ?? [];
-  const hasTools = toolCalls.length > 0;
+  // Paired rows, not raw tool_calls: a pause-cap refusal emits a tool_error
+  // with NO tool_call, and gating on calls alone hid exactly the refusal this
+  // view must show.
+  const toolRows = pairToolTrace(task.toolTrace);
+  const hasTools = toolRows.length > 0;
 
   return (
     <div>
@@ -488,7 +491,7 @@ function TaskRow({ task }: { task: TaskSummary }) {
             className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
           >
             <Wrench className="h-2.5 w-2.5" />
-            {toolCalls.length}
+            {toolRows.length}
           </button>
         )}
 
@@ -530,7 +533,7 @@ function TaskRow({ task }: { task: TaskSummary }) {
       {/* Tool calls detail (nested) */}
       {hasTools && toolsExpanded && (
         <div className="ms-8 mb-1 space-y-0.5">
-          {pairToolTrace(task.toolTrace).map((pair, ci) => (
+          {toolRows.map((pair, ci) => (
             <ToolCallRow key={ci} call={pair.call} result={pair.result} error={pair.error} />
           ))}
         </div>
@@ -551,6 +554,7 @@ function ToolCallRow({
   result?: ToolTraceEntry;
   error?: ToolTraceEntry;
 }) {
+  const { t } = useTranslation();
   const [showDetail, setShowDetail] = useState(false);
   const hasResult = !!result?.result;
   // A refusal (tool_error), or a result whose contractual httpCode says the
@@ -620,7 +624,9 @@ function ToolCallRow({
           )}
           {error && (
             <div>
-              <span className="font-semibold text-destructive uppercase tracking-wider">Refused</span>
+              <span className="font-semibold text-destructive uppercase tracking-wider">
+                {t("chat.toolRefused", "Refused")}
+              </span>
               <pre className="mt-0.5 whitespace-pre-wrap break-all text-foreground/80 font-mono max-h-32 overflow-y-auto">
                 {formatJsonSafe(error.error ?? error.result ?? "")}
               </pre>

@@ -748,7 +748,8 @@
     "agentTyping": "Agent is typing",
     "copy": "Copy",
     "emptyConversation": "This conversation has no messages yet.",
-    "loadConversationFailed": "Couldn't load this conversation: {{error}}"
+    "loadConversationFailed": "Couldn't load this conversation: {{error}}",
+    "toolRefused": "Refused"
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",

@@ -761,7 +761,8 @@
     "emptyConversation": "لا تحتوي هذه المحادثة على رسائل بعد.",
     "loadConversationFailed": "تعذّر تحميل هذه المحادثة: {{error}}",
     "multilineHint": "Enter للإرسال · Shift+Enter لسطر جديد",
-    "multilineHintCtrlEnter": "Ctrl+Enter للإرسال · Enter لسطر جديد"
+    "multilineHintCtrlEnter": "Ctrl+Enter للإرسال · Enter لسطر جديد",
+    "toolRefused": "مرفوض"
   },
   "resources": {
     "backToWorkflow": "العودة إلى مسار العمل",

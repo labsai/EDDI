@@ -721,7 +721,8 @@
     "emptyConversation": "การสนทนานี้ยังไม่มีข้อความ",
     "loadConversationFailed": "ไม่สามารถโหลดการสนทนานี้ได้: {{error}}",
     "multilineHint": "Enter เพื่อส่ง · Shift+Enter เพื่อขึ้นบรรทัดใหม่",
-    "multilineHintCtrlEnter": "Ctrl+Enter เพื่อส่ง · Enter เพื่อขึ้นบรรทัดใหม่"
+    "multilineHintCtrlEnter": "Ctrl+Enter เพื่อส่ง · Enter เพื่อขึ้นบรรทัดใหม่",
+    "toolRefused": "ถูกปฏิเสธ"
   },
   "resources": {
     "backToWorkflow": "กลับไปยังเวิร์กโฟลว์",

@@ -43,6 +43,10 @@ function call(overrides: Partial<PendingToolCallView> = {}): PendingToolCallView
 }
 
 /** A call whose preview points at the operator's own agent document. */
+function preview(method: string, uri: string) {
+  return { method, uri, queryParams: {}, headers: {}, body: null, bodyTruncated: false };
+}
+
 function selfTargeted(overrides: Partial<PendingToolCallView> = {}): PendingToolCallView {
   return call({
     requestPreview: {
@@ -199,5 +203,41 @@ describe("findSelfTargetedCalls", () => {
     expect(findSelfTargetedCalls(null, OPERATOR_ID)).toEqual([]);
     expect(findSelfTargetedCalls(undefined, OPERATOR_ID)).toEqual([]);
     expect(findSelfTargetedCalls([], OPERATOR_ID)).toEqual([]);
+  });
+});
+
+/**
+ * The self-start LABEL decides which refusal message the human reads; the
+ * blocking itself is decided by the substring hit either way. Raw-URI testing
+ * mislabeled a percent-encoded self-start as a definition rewrite, and a
+ * substring test called a DIFFERENT agent's start "self-start" when the acting
+ * id merely appeared in its query string.
+ */
+describe("self-start labeling", () => {
+  it("labels a start-conversation on the operator's OWN agent as self-start", () => {
+    const hits = findSelfTargetedCalls(
+      [call({ requestPreview: preview("POST", `https://eddi.example/agents/${OPERATOR_ID}/start?environment=test`) })],
+      OPERATOR_ID,
+    );
+    expect(hits).toEqual([{ callId: "c1", agentId: OPERATOR_ID, target: "self-start" }]);
+  });
+
+  it("labels a PERCENT-ENCODED self-start as self-start, not as a definition rewrite", () => {
+    const encoded = encodeURIComponent(OPERATOR_ID);
+    const hits = findSelfTargetedCalls(
+      [call({ requestPreview: preview("POST", `https://eddi.example/agents/${encoded}/start`) })],
+      OPERATOR_ID,
+    );
+    expect(hits[0]?.target).toBe("self-start");
+  });
+
+  it("does NOT call another agent's start self-start when the acting id is only in the query", () => {
+    const hits = findSelfTargetedCalls(
+      [call({ requestPreview: preview("POST", `https://eddi.example/agents/aaaabbbbccccddddeeeeffff/start?context=${OPERATOR_ID}`) })],
+      OPERATOR_ID,
+    );
+    // Still blocked (the id appears in the request — the module's asymmetry
+    // errs that way), but as the generic agent target, not "self-start".
+    expect(hits[0]?.target).toBe("agent");
   });
 });

@@ -721,7 +721,8 @@
     "emptyConversation": "この会話にはまだメッセージがありません。",
     "loadConversationFailed": "この会話を読み込めませんでした: {{error}}",
     "multilineHint": "Enterで送信 · Shift+Enterで改行",
-    "multilineHintCtrlEnter": "Ctrl+Enterで送信 · Enterで改行"
+    "multilineHintCtrlEnter": "Ctrl+Enterで送信 · Enterで改行",
+    "toolRefused": "拒否されました"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",

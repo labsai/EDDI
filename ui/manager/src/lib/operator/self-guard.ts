@@ -138,7 +138,21 @@ export function findSelfTargetedCalls(
       // but the reason must describe what was actually attempted: telling an
       // approver "may not modify its own definition" for a test-drive click
       // reads as a bug, not a boundary.
-      const selfStart = /\/agents\/[^/?#]+\/start(?:[?#]|$)/i.test(preview.uri ?? "");
+      // Decoded with the same malformed-escape fallback as uriTargetsAgent, and
+      // the agent SEGMENT compared — not substring-matched. Testing the raw URI
+      // mislabeled a percent-encoded self-start as a definition rewrite, and a
+      // substring test would call a DIFFERENT agent's start "self-start" when
+      // the acting id merely appeared in its query string. Both mislabelings
+      // block correctly either way (the outer uriTargetsAgent hit already
+      // decided that); this only decides WHICH refusal message the human reads.
+      let decodedUri = preview.uri ?? "";
+      try {
+        decodedUri = decodeURIComponent(decodedUri);
+      } catch {
+        // Malformed escape — keep the raw form, same policy as uriTargetsAgent.
+      }
+      const startMatch = /\/agents\/([^/?#]+)\/start(?:[?#]|$)/i.exec(decodedUri);
+      const selfStart = startMatch?.[1]?.toLowerCase() === actingAgentId.trim().toLowerCase();
       found.push({
         callId: call.callId,
         agentId: actingAgentId,

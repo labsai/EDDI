@@ -645,9 +645,13 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
         try {
           const snapshot = JSON.parse(event.data);
           // A streamed turn that ends AWAITING_HUMAN paused for approval — the
-          // pendingMessage/pauseReason is in the snapshot output; flag the pause.
+          // pendingMessage is in the snapshot output; flag the pause. The
+          // reason is null on purpose: this is the seventh site that read a
+          // hitlPauseReason the wire never carries — invisible to the compiler
+          // because JSON.parse is untyped, caught by review. approval-status
+          // supplies the rendered reason.
           if (snapshot.conversationState === "AWAITING_HUMAN") {
-            store.getState().setPaused(true, snapshot.hitlPauseReason ?? null);
+            store.getState().setPaused(true, null);
           }
           if (snapshot.conversationOutputs?.length) {
             const lastOutput = snapshot.conversationOutputs[

@@ -731,7 +731,8 @@
     "emptyConversation": "Esta conversa ainda não tem mensagens.",
     "loadConversationFailed": "Não foi possível carregar esta conversa: {{error}}",
     "multilineHint": "Enter para enviar · Shift+Enter para nova linha",
-    "multilineHintCtrlEnter": "Ctrl+Enter para enviar · Enter para nova linha"
+    "multilineHintCtrlEnter": "Ctrl+Enter para enviar · Enter para nova linha",
+    "toolRefused": "Recusado"
   },
   "resources": {
     "backToWorkflow": "Voltar ao workflow",
