@@ -364,4 +364,36 @@ describe("prompt corrections from dev testing", () => {
   it("keeps the announcement requirement — the approver still needs to know what is coming", () => {
     expect(safetyPreambleForScope("read_write")).toMatch(/say plainly what you are about\s+to change/);
   });
+
+  it("carries a config cheatsheet with a docs map, for BOTH scopes", () => {
+    // Observed: several documentation round-trips before every routine action.
+    // The cheatsheet answers the routine cases inline; the docs map makes the
+    // remaining lookups targeted instead of exploratory.
+    for (const scope of ["read_only", "read_write"] as const) {
+      const body = defaultOperatorPromptBody(scope);
+      expect(body).toContain("Quick reference");
+      expect(body).toMatch(/read the docs only when this and\s+your tool schemas do not cover it/);
+      expect(body).toContain("Docs map");
+      // Spot-check the map points at real docs/ page names.
+      expect(body).toContain('"behavior-rules"');
+      expect(body).toContain('"secrets-vault"');
+    }
+  });
+
+  it("tells an agent-creating operator that cloud providers REQUIRE a vault apiKey", () => {
+    // Observed: setupAgent 400 "API key is required for cloud LLM providers" —
+    // the operator proposed the call with no apiKey at all, burning a human
+    // approval on a request the backend was always going to reject.
+    const body = defaultOperatorPromptBody("read_write");
+    // Anchored to the cloud-provider sentence itself — a bare /apiKey.*REQUIRED/
+    // could be satisfied by an unrelated later "REQUIRED".
+    expect(body).toMatch(/For a CLOUD\s+provider \(anthropic, openai, gemini\) `apiKey` is REQUIRED/);
+    expect(body).toContain("${vault:key-name}");
+    // ...and the local exception, so the operator does not demand a key ollama
+    // does not need.
+    expect(body).toMatch(/Local\s+providers \(ollama\) need no key/);
+    expect(body).toMatch(/ask which one to use BEFORE proposing the\s+call/);
+    // And the read-only scope, which cannot create agents, does not carry it.
+    expect(defaultOperatorPromptBody("read_only")).not.toContain("setupAgent essentials");
+  });
 });
