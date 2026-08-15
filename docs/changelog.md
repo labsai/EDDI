@@ -7,6 +7,77 @@
 
 
 
+## 🧭 fix(operator): approvals finally read as a flow — settle window, resync, receipt, per-pause banner (2026-08-16)
+
+**Repo:** EDDI-Manager (`fix/operator-resume-settle`, commit `dfb97078`) — documented here because the
+ecosystem changelog lives in this repo; the EDDI half is the entry below.
+
+Live repro (operator "create a test agent … and chat with it"): approving setupAgent re-rendered the
+byte-identical ask, the approval controls vanished, the next pause never appeared, and typing into the
+still-paused conversation printed a raw `{"message":"Internal server error"}` blob. Four defects:
+
+1. **The settle poll read the resume CAS window as "settled".** Accepting a resume persists
+   `AWAITING_HUMAN→IN_PROGRESS` immediately (`ConversationHitlService`'s claim CAS); the outcome
+   persists only in `onComplete`. So 1.5s after approving, `pollUntilSettled` saw "not AWAITING_HUMAN"
+   with PRE-decision outputs — old ask duplicated as "the answer", `isPaused` cleared, pause 2
+   invisible. `IN_PROGRESS` now keeps polling; only terminal states or a NEW `hitlPausedAt` settle.
+2. **A paused-conversation send rejected over the open stream rendered raw JSON.** On the backend's
+   new `awaiting_approval` code the chat re-syncs the pause (drops the unsent bubbles, restores the
+   banner, back-fills the ask); other error events render their `message`, never the envelope.
+3. **Approved work was invisible.** The model often goes from an approved call straight into its next
+   tool call with no text between, so "You approved" → next ask showed the created agent nowhere. A
+   receipt ("Ran setupAgent ✓") now lands after the decision, diffed against a pre-decision baseline
+   of the step's executed `httpCalls` (`<name>Request` marks execution, `<name>_response` merges only
+   on success). New `operator.decisionLog.executed` key in all 11 locales.
+4. **The banner showed the PREVIOUS pause's calls.** `useApprovalStatus` was keyed on conversation id
+   alone, and — verified live — `removeQueries` after deciding produces no refetch on an
+   actively-observed query. The key now includes the pause's `hitlPausedAt`; operator page, drawer and
+   conversation-detail pass it.
+
+**Verified end-to-end against the running deployment:** approve startConversation → 4 polls ride the
+IN_PROGRESS window → "You approved this request" → "Ran startConversation ✓" → the `say` ask
+("approval 3 this turn") with a fresh 0-of-1 banner → approve → final answer "✅ Agent created,
+deployed, and verified working" with the test agent's actual in-character reply. 8 new tests, each
+mutation-verified; full suite 5365 green.
+
+---
+
+
+
+## 🛡️ fix(streaming): known client conditions are typed error events, not opaque 500s (2026-08-16)
+
+**Repo:** EDDI (`fix/streaming-known-conditions`)
+
+Observed live in the operator flow: sending a message into an `AWAITING_HUMAN` conversation is
+correctly refused by `ConversationService.sayStreaming` (`ConversationAwaitingApprovalException`),
+but `RestAgentEngineStreaming`'s catch-all wrapped it in `logAndBuildOpaqueErrorEvent` — the client
+saw `{"message":"Internal server error","correlationId":…}` and the Manager rendered a dead error
+blob with no way to react. The non-streaming twin (`RestAgentEngine`) has always given this a 409
+with a client-safe body; the streaming path threw that distinction away.
+
+**Change:** `buildKnownConditionOrOpaqueErrorEvent` maps the six conditions `sayStreaming` rejects
+synchronously to `{"message":…,"code":…}` error events — `awaiting_approval`, `conversation_ended`,
+`agent_not_ready`, `agent_mismatch`, `quota_exceeded`, `processing_restricted`. Per exception, the
+message mirrors exactly what the twin already discloses: echoed where the twin echoes (fixed safe
+templates), replaced by the twin's fixed text where the exception message names deployment internals
+(agent-not-ready carries environment+agentId; mismatch carries ids). Everything else stays opaque —
+that path exists because store-layer messages can name collections, hosts and replica-set members.
+Known rejections log at WARN without a stack trace; only genuine internal errors keep the
+ERROR + correlationId treatment.
+
+The `code` field is what the Manager keys on: `awaiting_approval` lets it re-render the approval
+banner instead of an error blob when input races an undecided pause (the Manager-side half is a
+separate fix — its settle-poll treated the resume CAS's persisted `IN_PROGRESS` window as "settled",
+which is what enabled input during a pause in the first place).
+
+**Tests:** 5 new (`KnownConditionErrorEvents`) — typed code+message per condition, the
+non-disclosure property (agent-not-ready must not leak `environment=…`), and the opaque fallback.
+Mutation-verified: reverting the main change fails all 4 typed tests.
+
+---
+
+
+
 ## 🧹 fix(style): hoist inline fully-qualified names out of the operator-audit changes (2026-08-15)
 
 **Repo:** EDDI (`fix/import-style-violations`)

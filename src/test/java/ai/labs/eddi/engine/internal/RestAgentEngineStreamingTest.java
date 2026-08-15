@@ -591,4 +591,106 @@ class RestAgentEngineStreamingTest {
             return out.toString();
         }
     }
+
+    /**
+     * The known client conditions {@code ConversationService.sayStreaming} rejects
+     * synchronously must surface as TYPED error events —
+     * {@code {"message":…,"code":…}} — not the opaque internal-error shape.
+     * Observed live: input sent into an AWAITING_HUMAN conversation was refused
+     * correctly by the backend but reached the client as
+     * {@code {"message":"Internal server error"}}, which the Manager rendered as a
+     * dead error blob instead of re-showing the approval banner.
+     */
+    @Nested
+    @DisplayName("sayStreaming known client conditions (typed error events)")
+    class KnownConditionErrorEvents {
+
+        private SseEventSink eventSink;
+        private Sse sse;
+        private OutboundSseEvent.Builder eventBuilder;
+        private ArgumentCaptor<String> payloads;
+
+        @BeforeEach
+        void wireSse() {
+            eventSink = mock(SseEventSink.class);
+            sse = mock(Sse.class);
+            eventBuilder = mock(OutboundSseEvent.Builder.class);
+            var sseEvent = mock(OutboundSseEvent.class);
+            payloads = ArgumentCaptor.forClass(String.class);
+            when(eventSink.isClosed()).thenReturn(false);
+            when(sse.newEventBuilder()).thenReturn(eventBuilder);
+            when(eventBuilder.name(anyString())).thenReturn(eventBuilder);
+            when(eventBuilder.data(any(Class.class), payloads.capture())).thenReturn(eventBuilder);
+            when(eventBuilder.build()).thenReturn(sseEvent);
+        }
+
+        private String errorPayloadFor(Exception thrown) throws Exception {
+            doThrow(thrown).when(conversationService)
+                    .sayStreaming(anyString(), any(), any(), any(), any(), any());
+            var inputData = new InputData();
+            inputData.setInput("Hello");
+            streaming.sayStreaming("conv-1", false, false, List.of(), inputData, eventSink, sse);
+            verify(eventBuilder, atLeastOnce()).name("error");
+            return payloads.getValue();
+        }
+
+        @Test
+        @DisplayName("awaiting approval → code=awaiting_approval with the twin's 409 message")
+        void awaitingApprovalIsTyped() throws Exception {
+            String message = "Conversation is awaiting human approval — a reviewer must resolve it via"
+                    + " POST /agents/conv-1/resume (or cancel) before new input is accepted";
+            String payload = errorPayloadFor(
+                    new IConversationService.ConversationAwaitingApprovalException(message));
+
+            assertTrue(payload.contains("\"code\":\"awaiting_approval\""), payload);
+            assertTrue(payload.contains("awaiting human approval"), payload);
+            assertFalse(payload.contains("Internal server error"), payload);
+        }
+
+        @Test
+        @DisplayName("conversation ended → code=conversation_ended")
+        void conversationEndedIsTyped() throws Exception {
+            String payload = errorPayloadFor(
+                    new IConversationService.ConversationEndedException("Conversation has ended!"));
+
+            assertTrue(payload.contains("\"code\":\"conversation_ended\""), payload);
+            assertFalse(payload.contains("Internal server error"), payload);
+        }
+
+        @Test
+        @DisplayName("agent not ready → fixed text, NOT the message naming environment and agentId")
+        void agentNotReadyDisclosesNothing() throws Exception {
+            String payload = errorPayloadFor(new IConversationService.AgentNotReadyException(
+                    "Agent not deployed (environment=restricted, conversationId=conv-1, version=7)"));
+
+            assertTrue(payload.contains("\"code\":\"agent_not_ready\""), payload);
+            assertTrue(payload.contains("Agent is not deployed or not ready"), payload);
+            // The exception's own message mirrors what the non-streaming twin
+            // withholds behind a bare 404 — it must not leak here either.
+            assertFalse(payload.contains("environment=restricted"), payload);
+        }
+
+        @Test
+        @DisplayName("agent mismatch → the twin's fixed 409 text, not the id-bearing message")
+        void agentMismatchUsesFixedText() throws Exception {
+            String payload = errorPayloadFor(new IConversationService.AgentMismatchException(
+                    "Supplied agentId (agent-7) is incompatible with conversationId (conv-1)"));
+
+            assertTrue(payload.contains("\"code\":\"agent_mismatch\""), payload);
+            assertTrue(payload.contains("Agent version mismatch"), payload);
+            assertFalse(payload.contains("agent-7"), payload);
+        }
+
+        @Test
+        @DisplayName("anything else stays opaque: fixed message + correlationId, no code")
+        void unknownExceptionsStayOpaque() throws Exception {
+            String payload = errorPayloadFor(
+                    new RuntimeException("mongodb://replica-set-member:27017 unreachable"));
+
+            assertTrue(payload.contains("Internal server error"), payload);
+            assertTrue(payload.contains("correlationId"), payload);
+            assertFalse(payload.contains("\"code\""), payload);
+            assertFalse(payload.contains("mongodb://"), payload);
+        }
+    }
 }
