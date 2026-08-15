@@ -6,7 +6,9 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IRestAgentEngineStreaming;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -220,9 +222,65 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                     });
         } catch (Exception e) {
             stream.markTerminal();
-            stream.send("error", logAndBuildOpaqueErrorEvent("Failed to start streaming for conversation " + safeConversationId, e));
+            stream.send("error", buildKnownConditionOrOpaqueErrorEvent(
+                    "Failed to start streaming for conversation " + safeConversationId, e));
             stream.close();
         }
+    }
+
+    /**
+     * Maps the known client conditions {@code sayStreaming} rejects synchronously
+     * to a typed {@code error} event — {@code {"message":…,"code":…}} — instead of
+     * the opaque internal-error shape.
+     * <p>
+     * These are not internal errors: the non-streaming twin
+     * ({@code RestAgentEngine}) gives each a proper status (409/410/404/429/403)
+     * with a client-safe body, and before this method the SAME condition on the
+     * streaming path surfaced as {@code {"message":"Internal server error"}} —
+     * observed live when a message was sent into an AWAITING_HUMAN conversation:
+     * the backend refused correctly and the client rendered an opaque 500-style
+     * blob with no way to react.
+     * <p>
+     * Per exception, the message mirrors exactly what the twin already discloses —
+     * echoed for the conditions whose message is a fixed safe template
+     * (awaiting-approval, quota, GDPR restriction), replaced by the twin's fixed
+     * text for those whose message names deployment internals (agent-not-ready
+     * carries environment and agentId; mismatch carries ids). No new disclosure
+     * either way. Everything else stays opaque via
+     * {@link #logAndBuildOpaqueErrorEvent}: those paths' messages can name
+     * collections, hosts and replica-set members.
+     * <p>
+     * The {@code code} field is the machine-readable part clients key on —
+     * {@code awaiting_approval} is what lets the Manager re-render the approval
+     * banner instead of an error blob when input races an undecided pause.
+     */
+    private String buildKnownConditionOrOpaqueErrorEvent(String context, Exception e) {
+        String code;
+        String message;
+        if (e instanceof IConversationService.ConversationAwaitingApprovalException) {
+            code = "awaiting_approval";
+            message = e.getMessage();
+        } else if (e instanceof IConversationService.ConversationEndedException) {
+            code = "conversation_ended";
+            message = "Conversation has ended";
+        } else if (e instanceof IConversationService.AgentNotReadyException) {
+            code = "agent_not_ready";
+            message = "Agent is not deployed or not ready";
+        } else if (e instanceof IConversationService.AgentMismatchException) {
+            code = "agent_mismatch";
+            message = "Agent version mismatch";
+        } else if (e instanceof QuotaExceededException) {
+            code = "quota_exceeded";
+            message = e.getMessage();
+        } else if (e instanceof ProcessingRestrictedException) {
+            code = "processing_restricted";
+            message = e.getMessage();
+        } else {
+            return logAndBuildOpaqueErrorEvent(context, e);
+        }
+        // WARN, not ERROR with stack trace: the request was rejected by design.
+        LOGGER.warnf("%s: %s", context, e.getMessage());
+        return String.format("{\"message\":\"%s\",\"code\":\"%s\"}", escapeJson(message), code);
     }
 
     /**

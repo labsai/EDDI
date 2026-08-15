@@ -7,6 +7,40 @@
 
 
 
+## 🛡️ fix(streaming): known client conditions are typed error events, not opaque 500s (2026-08-16)
+
+**Repo:** EDDI (`fix/streaming-known-conditions`)
+
+Observed live in the operator flow: sending a message into an `AWAITING_HUMAN` conversation is
+correctly refused by `ConversationService.sayStreaming` (`ConversationAwaitingApprovalException`),
+but `RestAgentEngineStreaming`'s catch-all wrapped it in `logAndBuildOpaqueErrorEvent` — the client
+saw `{"message":"Internal server error","correlationId":…}` and the Manager rendered a dead error
+blob with no way to react. The non-streaming twin (`RestAgentEngine`) has always given this a 409
+with a client-safe body; the streaming path threw that distinction away.
+
+**Change:** `buildKnownConditionOrOpaqueErrorEvent` maps the six conditions `sayStreaming` rejects
+synchronously to `{"message":…,"code":…}` error events — `awaiting_approval`, `conversation_ended`,
+`agent_not_ready`, `agent_mismatch`, `quota_exceeded`, `processing_restricted`. Per exception, the
+message mirrors exactly what the twin already discloses: echoed where the twin echoes (fixed safe
+templates), replaced by the twin's fixed text where the exception message names deployment internals
+(agent-not-ready carries environment+agentId; mismatch carries ids). Everything else stays opaque —
+that path exists because store-layer messages can name collections, hosts and replica-set members.
+Known rejections log at WARN without a stack trace; only genuine internal errors keep the
+ERROR + correlationId treatment.
+
+The `code` field is what the Manager keys on: `awaiting_approval` lets it re-render the approval
+banner instead of an error blob when input races an undecided pause (the Manager-side half is a
+separate fix — its settle-poll treated the resume CAS's persisted `IN_PROGRESS` window as "settled",
+which is what enabled input during a pause in the first place).
+
+**Tests:** 5 new (`KnownConditionErrorEvents`) — typed code+message per condition, the
+non-disclosure property (agent-not-ready must not leak `environment=…`), and the opaque fallback.
+Mutation-verified: reverting the main change fails all 4 typed tests.
+
+---
+
+
+
 ## 🧹 fix(style): hoist inline fully-qualified names out of the operator-audit changes (2026-08-15)
 
 **Repo:** EDDI (`fix/import-style-violations`)
