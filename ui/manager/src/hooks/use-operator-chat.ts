@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { toEnvironment } from "@/lib/constants";
+import { operatorEnvironment } from "@/lib/operator/operator-environment";
 import { create } from "zustand";
 import {
   startConversation,
@@ -357,7 +357,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
     let creating: Promise<string> | null = null;
     creating = (async () => {
       try {
-        const conversationId = await startConversation(toEnvironment(config.environment), agentId);
+        const conversationId = await startConversation(operatorEnvironment(config), agentId);
         // A reset() while the create was in flight cleared the slot — the user
         // asked for a clean slate, so do not resurrect this conversation into
         // the store (callers still get the id; their uploads just target a
@@ -463,7 +463,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       }
 
       const stream = sendMessageStreaming(
-        config.environment,
+        operatorEnvironment(config),
         config.agentId,
         conversationId,
         Object.keys(turnContext).length ? { input, context: turnContext } : { input },
