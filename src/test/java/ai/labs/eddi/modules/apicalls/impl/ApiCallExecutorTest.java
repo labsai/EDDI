@@ -246,6 +246,107 @@ class ApiCallExecutorTest {
         verify(mockRequest, times(1)).send();
     }
 
+    // ==================== Tool-result contract (what the LLM sees)
+    // ====================
+    //
+    // HttpCallToolsProvider serializes execute()'s returned map VERBATIM as the
+    // tool result. It used to stay empty on a non-2xx — the model was handed "{}"
+    // for a failed call, so a human-approved setupAgent that 400'd looked exactly
+    // like one that worked, and the model could neither report the failure nor
+    // tell the approver anything happened at all.
+
+    @Test
+    void execute_non2xx_resultCarriesHttpCodeAndErrorBody() throws Exception {
+        ApiCall call = createSimpleApiCall("failing-call", true);
+        when(mockResponse.getHttpCode()).thenReturn(400);
+        when(mockResponse.getContentAsString()).thenReturn("{\"attributeName\":\"systemPrompt\",\"column\":593}");
+        when(mockResponse.getHttpCodeMessage()).thenReturn("Bad Request");
+        when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals(400, result.get("httpCode"));
+        assertEquals("{\"attributeName\":\"systemPrompt\",\"column\":593}", result.get("body"));
+    }
+
+    @Test
+    void execute_non2xxWithEmptyBody_resultFallsBackToStatusMessage() throws Exception {
+        // saveResponse=false as well: the tool-result contract must not depend on
+        // the memory-persistence flag.
+        ApiCall call = createSimpleApiCall("failing-call", false);
+        when(mockResponse.getHttpCode()).thenReturn(503);
+        when(mockResponse.getContentAsString()).thenReturn("");
+        when(mockResponse.getHttpCodeMessage()).thenReturn("Service Unavailable");
+        when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals(503, result.get("httpCode"));
+        assertEquals("Service Unavailable", result.get("body"));
+    }
+
+    @Test
+    void execute_non2xx_errorBodyIsTruncatedInTheResultToo() throws Exception {
+        ApiCall call = createSimpleApiCall("failing-call", false);
+        when(mockResponse.getHttpCode()).thenReturn(500);
+        when(mockResponse.getContentAsString()).thenReturn("x".repeat(5000));
+        when(mockResponse.getHttpCodeMessage()).thenReturn("Internal Server Error");
+        when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals(2000, ((String) result.get("body")).length());
+    }
+
+    @Test
+    void execute_retriedFailureThenQuietSuccess_doesNotLeakTheErrorBody() throws Exception {
+        // A 503 populates "body" with its error on the first pass through the
+        // retry loop; the succeeding retry has saveResponse=false, so it writes
+        // only "httpCode". Without clearing between attempts the model would be
+        // handed {"httpCode": 200, "body": "<the 503's error>"} — a
+        // self-contradictory tool result.
+        ApiCall call = createSimpleApiCall("flaky-call", false);
+        HttpPostResponse postResponse = new HttpPostResponse();
+        RetryApiCallInstruction retryInstruction = new RetryApiCallInstruction();
+        retryInstruction.setMaxRetries(1);
+        retryInstruction.setRetryOnHttpCodes(List.of(503));
+        retryInstruction.setExponentialBackoffDelayInMillis(0);
+        postResponse.setRetryApiCallInstruction(retryInstruction);
+        call.setPostResponse(postResponse);
+
+        // Two distinct response mocks, switched per ATTEMPT via send(): the code
+        // under test reads getHttpCode() several times within one iteration, so
+        // sequential stubbing on a single mock would flip mid-attempt.
+        IResponse failing = mock(IResponse.class);
+        when(failing.getHttpCode()).thenReturn(503);
+        when(failing.getContentAsString()).thenReturn("upstream flaked");
+        when(failing.getHttpCodeMessage()).thenReturn("Service Unavailable");
+        when(failing.getHttpHeader()).thenReturn(new HashMap<>());
+        IResponse succeeding = mock(IResponse.class);
+        when(succeeding.getHttpCode()).thenReturn(200);
+        when(succeeding.getContentAsString()).thenReturn("ok");
+        when(succeeding.getHttpHeader()).thenReturn(new HashMap<>());
+        when(mockRequest.send()).thenReturn(failing).thenReturn(succeeding);
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals(200, result.get("httpCode"));
+        assertFalse(result.containsKey("body"), "the failed attempt's error body must not survive the retry");
+    }
+
+    @Test
+    void execute_successWithoutSaveResponse_resultStillCarriesHttpCode() throws Exception {
+        // The body stays out (that is what saveResponse=false means), but a model
+        // whose tool returned "{}" cannot tell a 204 from a crash.
+        ApiCall call = createSimpleApiCall("quiet-call", false);
+        setupSuccessResponse(204, "", "text/plain");
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals(204, result.get("httpCode"));
+        assertNull(result.get("body"));
+    }
+
     // ==================== Validation Tests ====================
 
     @Test
@@ -727,7 +828,7 @@ class ApiCallExecutorTest {
     // ==================== Non-2xx Response Tests ====================
 
     @Test
-    void execute_non2xxResponse_doesNotSaveBody() throws Exception {
+    void execute_non2xxResponse_doesNotPromoteBodyToTheResponseObject() throws Exception {
         ApiCall call = createSimpleApiCall("err-call", true);
         when(mockResponse.getHttpCode()).thenReturn(500);
         when(mockResponse.getHttpCodeMessage()).thenReturn("Internal Server Error");
@@ -736,8 +837,13 @@ class ApiCallExecutorTest {
 
         Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
-        assertFalse(result.containsKey("body"));
+        // The error body IS the tool result now (an LLM whose tool returned "{}"
+        // could not report the failure) — but it is never parsed as the response
+        // object, and memory only ever sees it under the *Error key.
+        assertEquals("error body", result.get("body"));
+        assertEquals(500, result.get("httpCode"));
         verify(jsonSerialization, never()).deserialize(any(), any());
+        verify(prePostUtils, never()).createMemoryEntry(eq(currentStep), any(), eq("response"), any());
     }
 
     @Test

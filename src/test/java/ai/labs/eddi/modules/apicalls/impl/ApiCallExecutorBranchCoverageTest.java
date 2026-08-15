@@ -207,7 +207,7 @@ class ApiCallExecutorBranchCoverageTest {
         }
 
         @Test
-        @DisplayName("non-2xx response with saveResponse=true → doesn't save body")
+        @DisplayName("non-2xx response → error body and code reach the tool result, response object untouched")
         void non2xxResponse() throws Exception {
             ApiCall call = createCall("fail-call", true);
             when(mockResponse.getHttpCode()).thenReturn(500);
@@ -216,7 +216,10 @@ class ApiCallExecutorBranchCoverageTest {
             when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
 
             Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
-            assertFalse(result.containsKey("body"));
+            // The result map is the LLM's tool result; "{}" on failure made a
+            // 400'd call indistinguishable from one that worked.
+            assertEquals("error", result.get("body"));
+            assertEquals(500, result.get("httpCode"));
         }
     }
 
@@ -554,7 +557,7 @@ class ApiCallExecutorBranchCoverageTest {
     class SaveResponseFalse {
 
         @Test
-        @DisplayName("should not include body in result when saveResponse is false")
+        @DisplayName("should not include body in result when saveResponse is false — but the code still travels")
         void noBodyInResult() throws Exception {
             ApiCall call = createCall("no-save", false);
             setupSuccessResponse(200, "response-body", "application/json");
@@ -562,7 +565,8 @@ class ApiCallExecutorBranchCoverageTest {
             Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
             assertFalse(result.containsKey("body"));
-            assertFalse(result.containsKey("httpCode"));
+            // A model whose tool returned "{}" cannot tell a success from a crash.
+            assertEquals(200, result.get("httpCode"));
         }
     }
 

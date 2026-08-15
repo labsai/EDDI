@@ -145,6 +145,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 Map<String, Object> result = new HashMap<>();
 
                 do {
+                    // Final attempt wins, entirely: a retried failure populated
+                    // "body"/"httpCode" on its pass through the loop, and a
+                    // succeeding retry that does NOT save its response would
+                    // otherwise inherit the failed attempt's error body next to
+                    // its own 2xx code — a self-contradictory tool result.
+                    result.clear();
                     request = buildRequest(targetServerUrl, call, templateDataObjects);
                     var objectName = call.getName() + "Request";
                     var requestMap = request.toMap();
@@ -164,14 +170,29 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
                         LOGGER.warn("Error Msg:" + response.getHttpCodeMessage());
 
+                        String errorBody = response.getContentAsString();
+                        String truncatedError = errorBody != null && errorBody.length() > 2000
+                                ? errorBody.substring(0, 2000)
+                                : errorBody;
+
+                        // The returned map is what an LLM tool call receives as its result
+                        // (HttpCallToolsProvider serializes it verbatim). It used to stay
+                        // EMPTY on a non-2xx, so the model was handed "{}" for a failed
+                        // call — with no httpCode and no error it could neither report the
+                        // failure nor tell it apart from success, and a human-approved
+                        // setupAgent that 400'd looked exactly like one that worked. Same
+                        // keys as the success path ("body"/"httpCode"), not a new "error"
+                        // namespace: ApiCallsTask merges this map into template data,
+                        // where that vocabulary is already established.
+                        result.put("httpCode", response.getHttpCode());
+                        result.put("body", truncatedError != null && !truncatedError.isBlank()
+                                ? truncatedError
+                                : response.getHttpCodeMessage());
+
                         // Store error body in memory so downstream templates / rules can inspect it
                         if (call.getSaveResponse()) {
-                            String errorBody = response.getContentAsString();
                             String errorObjectName = call.getResponseObjectName() + "Error";
-                            if (errorBody != null && !errorBody.isBlank()) {
-                                String truncatedError = errorBody.length() > 2000
-                                        ? errorBody.substring(0, 2000)
-                                        : errorBody;
+                            if (truncatedError != null && !truncatedError.isBlank()) {
                                 prePostUtils.createMemoryEntry(currentStep, truncatedError, errorObjectName, KEY_HTTP_CALLS);
                                 templateDataObjects.put(errorObjectName, truncatedError);
                             }
@@ -223,6 +244,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         templateDataObjects.put(responseObjectName, responseObject);
                         prePostUtils.createMemoryEntry(currentStep, responseObject, responseObjectName, KEY_HTTP_CALLS);
                         result.put("body", responseObject);
+                        result.put("httpCode", response.getHttpCode());
+                    } else if (isResponseSuccessful) {
+                        // saveResponse=false keeps the BODY out of memory and out of the
+                        // tool result on purpose, but the status code still travels: a
+                        // model whose tool returned "{}" cannot tell a 204 from a crash,
+                        // and honestly reporting "it worked" requires knowing that it did.
                         result.put("httpCode", response.getHttpCode());
                     }
 
