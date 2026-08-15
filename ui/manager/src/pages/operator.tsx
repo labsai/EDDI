@@ -224,7 +224,17 @@ export function OperatorPage() {
                   void queryClient.invalidateQueries({ queryKey: operatorKeys.all });
                   return;
                 }
-                // Inconclusive: absence of proof, reported honestly but quietly.
+                // Inconclusive with the gate already verified deterministically:
+                // the model declining an unexplained write is its hardening
+                // working, and a warning toast on every activation trains admins
+                // to dismiss operator warnings. Log it for the curious; say
+                // nothing on screen.
+                if (report.quiet) {
+                  console.info("[operator] write probe inconclusive:", report.message);
+                  return;
+                }
+                // Inconclusive AND no deterministic verdict to fall back on —
+                // the probe was the only signal there was, so it stays a warning.
                 toast.warning(
                   report.message ??
                     t("operator.toast.writeProbeInconclusive", "The live write probe was inconclusive."),

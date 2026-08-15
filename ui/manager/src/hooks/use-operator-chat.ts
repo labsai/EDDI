@@ -518,9 +518,9 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
                   pauseReason: snapshot.hitlPauseReason ?? null,
                   resolveError: null,
                   decidedPausedAt: snapshot.hitlPausedAt ?? null,
-                  // This turn's own bubble is the placeholder resolveApproval
-                  // will replace — recorded by id, whether or not it ever got
-                  // any text.
+                  // This turn's own bubble is the ask resolveApproval anchors
+                  // on (decision + answer are inserted after it) — recorded by
+                  // id, whether or not it ever got any text.
                   pausedPlaceholderId: agentId,
                   // The backend writes its pending message into this same
                   // step's output, exactly like an ordinary answer — snap the
@@ -697,8 +697,9 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
    * looks computed but is a constant.
    *
    * When we own a placeholder bubble (the pause arrived on a turn we streamed)
-   * it is replaced in place; when we do not (a 409 pause, whose optimistic
-   * bubbles were dropped) the answer is appended.
+   * it STAYS as the ask, with the decision entry and the answer inserted after
+   * it; when we do not (a 409 pause, whose optimistic bubbles were dropped)
+   * decision and answer are appended.
    */
   resolveApproval: async (verdict, note, toolDecisions) => {
     const conversationId = get().conversationId;
@@ -810,30 +811,34 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
         const placeholderIdx = placeholderId
           ? s.messages.findIndex((m) => m.id === placeholderId)
           : -1;
-        const [first, ...rest] = newBubbles;
         let messages: ChatMessage[];
-        let renderedId: string;
         if (placeholderIdx >= 0) {
-          // Reuse the placeholder's own id for the first part so any state
-          // keyed by it (tracesByMessageId — the trace of the very turn that
-          // paused) stays attached to the answer it belongs to.
+          // The ask bubble ("I need your approval to run X") STAYS, the decision
+          // reads after it, and the answer follows as its own bubble — the flow
+          // an approver expects: request → decision → result. The ask used to be
+          // overwritten by the answer, which put the decision rule ABOVE the very
+          // message it was answering — reading as approval of a request that had
+          // not been made yet. The server drops its copy of the ask from the
+          // resolved step, so a reload shows only the answer — like the decision
+          // rules themselves, the fuller sequence is this tab's record of what
+          // happened, not a claim about the stored transcript.
+          //
+          // The placeholder keeps its id, so the paused turn's pipeline trace
+          // (keyed by it in tracesByMessageId) stays attached to the ask.
           messages = [
             ...s.messages.slice(0, placeholderIdx),
-            // The decision reads before the answer it produced.
+            { ...s.messages[placeholderIdx]!, isStreaming: false },
             decisionEntry,
-            { ...s.messages[placeholderIdx]!, content: first!.content, isStreaming: false },
-            ...rest,
+            ...newBubbles,
             ...s.messages.slice(placeholderIdx + 1),
           ];
-          // The LAST bubble rendered, matching the append branch below: on a
-          // re-pause this becomes the next placeholder, and a multi-part
-          // pending message must leave the next decision replacing its tail
-          // rather than overwriting its opening and stranding the remainder.
-          renderedId = rest.length > 0 ? rest[rest.length - 1]!.id : placeholderId!;
         } else {
           messages = [...s.messages, decisionEntry, ...newBubbles];
-          renderedId = newBubbles[newBubbles.length - 1]!.id;
         }
+        // The LAST bubble rendered: on a re-pause it holds the NEW pending
+        // message and becomes the ask the next decision reads after; a
+        // multi-part output must anchor there, not on its opening part.
+        const renderedId = newBubbles[newBubbles.length - 1]!.id;
         return {
           ...s,
           ...settled,

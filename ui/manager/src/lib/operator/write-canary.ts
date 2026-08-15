@@ -431,6 +431,17 @@ export interface WriteProbeReport {
   tornDown: boolean;
   /** Human-readable summary for the admin; always set for non-pass outcomes. */
   message?: string;
+  /**
+   * True when an inconclusive live probe changes nothing the admin should act
+   * on: the gate was already verified deterministically (gate-dry-run), and
+   * "the model declined to attempt an unexplained write" is its hardening
+   * working, not a defect. A careful model CAN always decline — so with the
+   * deterministic verdict in hand this outcome is EXPECTED, and toasting it on
+   * every activation trained admins to dismiss operator warnings. Without the
+   * deterministic verdict the probe is the only signal there is, so the same
+   * outcome stays a warning.
+   */
+  quiet?: boolean;
 }
 
 /**
@@ -487,6 +498,7 @@ export async function runBackgroundWriteProbe(
   return {
     result,
     tornDown: false,
+    quiet: policyVerified,
     message: policyVerified
       ? "The stored approval policy was verified deterministically (gate-dry-run: the probe's target " +
         "write classifies as gated), but the live probe was inconclusive — the operator did not attempt " +
