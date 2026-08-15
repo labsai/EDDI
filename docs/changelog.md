@@ -25,7 +25,8 @@ and fell back to the RAW string — skipping every legitimate `{memory...}` expr
 mention.
 
 The fix threads the needle without touching the security decision: `LlmTask.escapeVaultMentions`
-wraps `{vault:...}` / `{eddivault:...}` mentions in Qute raw sections **for LLM parameters only**.
+wraps `{vault:...}` mentions in Qute raw sections **for LLM parameters only** (`eddivault` is a
+retired alias and deliberately not covered).
 Prompts go to the model, never through vault resolution, so the literal is inert documentation
 there. Httpcall templating does not pass through this path and keeps failing loudly, exactly as
 `CallerNamespaceResolver` requires. Four tests, including one that REPRODUCES the crash on the

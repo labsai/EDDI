@@ -64,13 +64,13 @@ class LlmTaskVaultMentionTest {
     }
 
     @Test
-    @DisplayName("eddivault and bare {vault:...} mentions are escaped too")
-    void otherMentionFormsEscape() throws Exception {
-        String value = "Use {vault:a-key} or {eddivault:b_key} here.";
+    @DisplayName("a bare {vault:...} mention (no leading $) is escaped too")
+    void bareMentionFormEscapes() throws Exception {
+        String value = "Use {vault:a-key} or {vault:b_key} here.";
 
         String rendered = templatingEngine.processTemplate(LlmTask.escapeVaultMentions(value), Map.of());
 
-        assertEquals("Use {vault:a-key} or {eddivault:b_key} here.", rendered);
+        assertEquals("Use {vault:a-key} or {vault:b_key} here.", rendered);
     }
 
     @Test

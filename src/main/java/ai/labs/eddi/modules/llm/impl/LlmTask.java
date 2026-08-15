@@ -1151,14 +1151,14 @@ public class LlmTask implements ILifecycleTask {
     private static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
 
     /**
-     * A vault reference MENTIONED in an LLM parameter — {@code {vault:key-name}} or
-     * {@code {eddivault:key-name}}, with or without the leading {@code $} (which is
-     * plain text to Qute either way).
+     * A vault reference MENTIONED in an LLM parameter — {@code {vault:key-name}},
+     * with or without the leading {@code $} (which is plain text to Qute either
+     * way).
      */
-    private static final Pattern VAULT_REF_MENTION = Pattern.compile("\\{(?:eddi)?vault:[^}]*\\}");
+    private static final Pattern VAULT_REF_MENTION = Pattern.compile("\\{vault:[^}]*\\}");
 
     /**
-     * Wraps vault-reference mentions in Qute raw sections so a PROMPT may talk
+     * Wraps {@code {vault:...}} mentions in Qute raw sections so a PROMPT may talk
      * about the syntax without crashing templating.
      * <p>
      * The Platform Operator's system prompt instructs the model to write secrets as
