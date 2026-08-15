@@ -21,21 +21,46 @@ The cause is one unset field. `ApiCallExecutor` populates the result map's `head
 the call declares a `responseHeaderObjectName`, and `McpApiToolBuilder.buildApiCall` never set one —
 it defaults to null, so *no* tool generated from an OpenAPI spec has ever seen a response header.
 That breaks a whole convention, not just this endpoint: 201 + empty body + `Location` is how a large
-share of REST APIs report a create. `buildApiCall` now sets `<name>_responseHeaders`,
-unconditionally rather than only for operations that document a 201 — a spec that describes its
-responses badly still yields a usable tool.
+share of REST APIs report a create. `buildApiCall` now sets `<name>_responseHeaders` — but only for
+operations that plausibly ANSWER in a header: a declared `201`/`202`/`3xx`, or a `2xx` that declares
+no content. An operation whose success response declares a body is answering in the body and gets
+nothing, and a spec that documents no responses at all gets nothing either.
 
-**The exposure this adds, stated plainly:** every response header of the target API now reaches the
-tool result and conversation memory, including a `Set-Cookie` nobody asked for. Accepted because the
-response BODY already travels that same path for these tools (`saveResponse` is on) and is the
-larger surface of the two. A header-name filter was considered and not applied: it would have to
-live in `ApiCallExecutor`'s shared response-header path, where it would also strip values that
-hand-authored apicallstore configs legitimately template against today.
+**Why scoped and not universal.** The first version of this granted headers to every generated call,
+and that is not worth the exposure. Response headers reach the tool result, the LLM context and
+conversation memory (persisted, and rendered in the Manager's tool trace), and nothing on that path
+redacts them — `RequestRedactor` is request-only by construction and `SecretRedactionFilter` runs on
+the display copy. `Set-Cookie` is the case that matters: `HttpClientModule` builds a cookie-aware,
+application-scoped `WebClientSession`, so that value is a live session credential EDDI is actively
+replaying, and copying it into prompt-injectable context is what `HttpOnly` exists to prevent. In
+the Petstore fixture the scoping withholds headers from all five calls; EDDI's own spec documents
+`201` on `/agents/{agentId}/start`, which is the case this exists for.
 
-Two tests on the builder — `createPet` gets the name, and every generated call in the fixture gets
-one. The executor half of the chain was already covered (`ApiCallExecutorBranchCoverageTest` asserts
-`result.get("headers")` is populated once the name is set), so the two together prove the id is
-reachable end to end.
+**Two ordering bugs fixed alongside, both pre-existing and both load-bearing here.**
+
+`ApiCallExecutor`'s result map is now a `LinkedHashMap` with `headers` inserted last. It is
+serialized verbatim as the tool result and truncated from the FRONT, and with a plain `HashMap`
+`headers` hashed ahead of `body` on both the success and the error path *regardless of insertion
+order* — so a per-tool limit, or the always-on tool-context budget, spent the allowance on a header
+block and cut away the response body the model asked for.
+
+`HttpClientWrapper.convertHeaderToMap` now returns a `TreeMap` with `CASE_INSENSITIVE_ORDER`. HTTP
+field names are case-insensitive and HTTP/2 mandates lowercase, so the same endpoint answers
+`Location` over h1 and `location` over h2. This was already costing us: `ApiCallExecutor` looks the
+content type up as the literal `"Content-Type"`, so against a lowercase-header response it found
+nothing, took the `<not-present>` branch, and stored every JSON body as a raw String instead of
+parsed JSON. The casing the server sent is preserved; only lookup is relaxed.
+
+**Limitation, stated because it will otherwise read as a bug.** `AgentSetupService` PERSISTS the
+generated `ApiCallsConfiguration` at creation, and the runtime loads the stored document. So this
+reaches agents created after the deploy; an operator provisioned earlier keeps
+`responseHeaderObjectName: null` until it is re-provisioned. There is no migration.
+
+Nine tests: five on the builder pinning each response shape it decides on (201, 204, 3xx, a
+body-returning 200, and an undocumented operation) plus a fixture-size assertion so the sweeping
+ones cannot pass on an empty stream; two on the executor pinning `headers` after `body` on both
+paths; one on the case-insensitive lookup; and the pre-existing executor coverage that `headers` is
+populated once the name is set.
 
 ---
 

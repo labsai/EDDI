@@ -18,6 +18,63 @@ import static org.junit.jupiter.api.Assertions.*;
 class McpApiToolBuilderTest {
 
     /**
+     * Covers every response shape {@code returnsDataInHeaders} decides on: a 201
+     * with no body, a 204, a 3xx, a 200 that declares content, and an operation
+     * that documents no responses at all.
+     */
+    private static final String HEADER_ANSWER_SPEC = """
+            {
+              "openapi": "3.0.3",
+              "info": { "title": "Things", "version": "1.0.0" },
+              "servers": [{ "url": "https://things.example.com" }],
+              "paths": {
+                "/things": {
+                  "post": {
+                    "operationId": "createThing",
+                    "summary": "Create a thing",
+                    "tags": ["things"],
+                    "responses": { "201": { "description": "Created. See Location header." } }
+                  },
+                  "get": {
+                    "operationId": "listThings",
+                    "summary": "List things",
+                    "tags": ["things"],
+                    "responses": {
+                      "200": {
+                        "description": "OK",
+                        "content": { "application/json": { "schema": { "type": "array", "items": { "type": "string" } } } }
+                      }
+                    }
+                  }
+                },
+                "/things/{id}/touch": {
+                  "post": {
+                    "operationId": "touchThing",
+                    "summary": "Touch a thing",
+                    "tags": ["things"],
+                    "responses": { "204": { "description": "No Content" } }
+                  }
+                },
+                "/things/{id}/follow": {
+                  "get": {
+                    "operationId": "followThing",
+                    "summary": "Follow a thing",
+                    "tags": ["things"],
+                    "responses": { "302": { "description": "Found" } }
+                  }
+                },
+                "/things/guess": {
+                  "get": {
+                    "operationId": "guessThing",
+                    "summary": "Undocumented responses",
+                    "tags": ["things"]
+                  }
+                }
+              }
+            }
+            """;
+
+    /**
      * Minimal Petstore-style OpenAPI 3.0 spec with two tags (pets, store), path
      * params, query params, and a request body.
      */
@@ -402,39 +459,94 @@ class McpApiToolBuilderTest {
     }
 
     /**
-     * Without a response-header object name, {@code ApiCallExecutor} skips its
-     * {@code result.put("headers", …)} branch entirely — the name is null by
-     * default, so no generated tool ever saw a response header.
+     * The spec shape this whole capability exists for: 201 + empty body + the new
+     * resource's id in {@code Location}.
      * <p>
-     * That made every "create" endpoint following the 201 + empty body + Location
-     * convention unusable: the model gets {@code {"httpCode": 201}} and the id it
-     * needs for every following call is in the header it cannot see. EDDI's own
-     * {@code POST /agents/{agentId}/start} is exactly that shape, which is what
-     * makes an operator test-drive of another agent possible or not.
+     * {@code ApiCallExecutor} populates the {@code "headers"} key only when the
+     * call declares a response-header object name, and that field is null by
+     * default — so before this, no generated tool had ever seen a response header,
+     * and every "create" endpoint following this convention answered the model with
+     * {@code {"httpCode": 201}} and nothing it could act on. EDDI's own {@code POST
+     * /agents/{agentId}/start} is exactly this shape.
      */
     @Test
-    void parseAndBuild_httpCallCapturesResponseHeaders() {
-        var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
-        var petsConfig = result.configsByGroup().get("pets");
+    void parseAndBuild_bindsResponseHeaders_forA201WithNoBody() {
+        var result = McpApiToolBuilder.parseAndBuild(HEADER_ANSWER_SPEC, null, null, null);
+        var calls = result.configsByGroup().get("things").getHttpCalls();
 
-        ApiCall createPet = petsConfig.getHttpCalls().stream().filter(c -> "createPet".equals(c.getName())).findFirst().orElseThrow();
+        ApiCall created = calls.stream().filter(c -> "createThing".equals(c.getName())).findFirst().orElseThrow();
 
-        assertEquals("createPet_responseHeaders", createPet.getResponseHeaderObjectName(),
-                "a generated tool must be able to read Location off a 201");
+        assertEquals("createThing_responseHeaders", created.getResponseHeaderObjectName(),
+                "a 201 answers in Location; the tool must be able to read it");
     }
 
     /**
-     * Every generated call, not just the ones whose spec happens to declare a 201:
-     * the response-header name is set unconditionally, so a spec that documents its
-     * responses badly (or not at all) still yields a usable tool.
+     * A 204 and a 3xx are the same convention: nothing in the body, so a header is
+     * the only place an answer can be.
      */
     @Test
-    void parseAndBuild_everyGeneratedCallCapturesResponseHeaders() {
-        var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
+    void parseAndBuild_bindsResponseHeaders_forNoContentAndRedirects() {
+        var result = McpApiToolBuilder.parseAndBuild(HEADER_ANSWER_SPEC, null, null, null);
+        var calls = result.configsByGroup().get("things").getHttpCalls();
 
-        result.configsByGroup().values().stream().flatMap(config -> config.getHttpCalls().stream())
-                .forEach(call -> assertEquals(call.getName() + "_responseHeaders", call.getResponseHeaderObjectName(),
-                        "call '" + call.getName() + "' cannot read its response headers"));
+        for (String name : List.of("touchThing", "followThing")) {
+            ApiCall call = calls.stream().filter(c -> name.equals(c.getName())).findFirst().orElseThrow();
+            assertEquals(name + "_responseHeaders", call.getResponseHeaderObjectName(),
+                    "call '" + name + "' answers in a header");
+        }
+    }
+
+    /**
+     * The exposure control, and the assertion that matters most here.
+     * <p>
+     * Response headers reach the tool result, the LLM context and conversation
+     * memory unredacted, and {@code Set-Cookie} on EDDI's shared cookie-aware
+     * client is a live session credential. An operation that declares a 200 WITH
+     * content is answering in the body and has nothing to gain, so it must not be
+     * granted them. Granting every operation was the first version of this change.
+     */
+    @Test
+    void parseAndBuild_withholdsResponseHeaders_fromPlainBodyReturningCalls() {
+        var result = McpApiToolBuilder.parseAndBuild(HEADER_ANSWER_SPEC, null, null, null);
+        var calls = result.configsByGroup().get("things").getHttpCalls();
+
+        ApiCall listing = calls.stream().filter(c -> "listThings".equals(c.getName())).findFirst().orElseThrow();
+
+        assertNull(listing.getResponseHeaderObjectName(),
+                "a 200 that declares content answers in the body — no header exposure is warranted");
+    }
+
+    /**
+     * A spec documenting no responses at all is missing information, and the safe
+     * reading of missing information here is "no headers": the cost is a capability
+     * an undocumented endpoint silently lacks, against copying every future
+     * Set-Cookie of an unknown API into conversation memory.
+     */
+    @Test
+    void parseAndBuild_withholdsResponseHeaders_whenTheSpecDocumentsNoResponses() {
+        var result = McpApiToolBuilder.parseAndBuild(HEADER_ANSWER_SPEC, null, null, null);
+        var calls = result.configsByGroup().get("things").getHttpCalls();
+
+        ApiCall undocumented = calls.stream().filter(c -> "guessThing".equals(c.getName())).findFirst().orElseThrow();
+
+        assertNull(undocumented.getResponseHeaderObjectName());
+    }
+
+    /**
+     * Pins the fixture size, so the sweeping assertions above cannot pass by
+     * iterating an empty stream. Five, not six: {@code deletePet} is deprecated and
+     * skipped during generation.
+     */
+    @Test
+    void parseAndBuild_petstoreYieldsFiveCalls_noneOfWhichNeedResponseHeaders() {
+        var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
+        var all = result.configsByGroup().values().stream().flatMap(config -> config.getHttpCalls().stream()).toList();
+
+        assertEquals(5, all.size(), "deprecated operations are skipped, so the fixture yields five");
+        // Every Petstore operation documents a body-returning success or nothing
+        // at all, so none of them qualifies — the scoping is doing real work.
+        all.forEach(call -> assertNull(call.getResponseHeaderObjectName(),
+                "call '" + call.getName() + "' should not have been granted response headers"));
     }
 
     @Test

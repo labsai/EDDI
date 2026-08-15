@@ -488,6 +488,59 @@ class ApiCallExecutorBranchCoverageTest {
             // Verify memory entry was created for headers
             verify(prePostUtils).createMemoryEntry(eq(currentStep), any(), eq("respHeaders"), eq("httpCalls"));
         }
+
+        /**
+         * The result map is serialized verbatim as the LLM tool result and truncated
+         * from the FRONT ({@code ToolResponseTruncator} cuts
+         * {@code result.substring(0, maxChars)}), so whatever serializes first is what
+         * survives a cap.
+         * <p>
+         * With a plain {@code HashMap}, {@code "headers"} hashed ahead of
+         * {@code "body"} on BOTH the success and the error path regardless of insertion
+         * order — so a per-tool limit, or the always-on tool-context budget, spent the
+         * allowance on a header block and cut away the response body the model actually
+         * asked for. Headers are the disposable half of this map; the body is not.
+         */
+        @Test
+        @DisplayName("should order body before headers so truncation drops headers first")
+        void ordersBodyBeforeHeaders() throws Exception {
+            ApiCall call = createCall("header-call", true);
+            call.setResponseHeaderObjectName("respHeaders");
+            Map<String, String> responseHeaders = new HashMap<>();
+            responseHeaders.put("Set-Cookie", "session=secret");
+            when(mockResponse.getHttpCode()).thenReturn(200);
+            when(mockResponse.getContentAsString()).thenReturn("\"ok\"");
+            when(mockResponse.getHttpHeader()).thenReturn(responseHeaders);
+
+            Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+            var keys = new ArrayList<>(result.keySet());
+            assertTrue(keys.indexOf("headers") > keys.indexOf("body"),
+                    "headers must serialize after body, or truncation eats the body first: " + keys);
+        }
+
+        /**
+         * The error path puts its own body/httpCode, so it needs the same guarantee — a
+         * failed call's error body is exactly what the model needs in order to decide
+         * whether to retry.
+         */
+        @Test
+        @DisplayName("should order the error body before headers too")
+        void ordersErrorBodyBeforeHeaders() throws Exception {
+            ApiCall call = createCall("header-call", true);
+            call.setResponseHeaderObjectName("respHeaders");
+            Map<String, String> responseHeaders = new HashMap<>();
+            responseHeaders.put("Set-Cookie", "session=secret");
+            when(mockResponse.getHttpCode()).thenReturn(400);
+            when(mockResponse.getContentAsString()).thenReturn("bad request");
+            when(mockResponse.getHttpHeader()).thenReturn(responseHeaders);
+
+            Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+            var keys = new ArrayList<>(result.keySet());
+            assertTrue(keys.indexOf("headers") > keys.indexOf("body"),
+                    "headers must serialize after the error body: " + keys);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════

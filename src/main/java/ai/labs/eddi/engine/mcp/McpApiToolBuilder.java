@@ -236,27 +236,30 @@ public final class McpApiToolBuilder {
         // Save response for post-processing
         httpCall.setSaveResponse(true);
         httpCall.setResponseObjectName(name + "_response");
-        // Response headers travel too, and without them a whole class of REST API
-        // is unusable as a generated tool: the "create" convention is 201 with an
-        // EMPTY body and the new resource's id only in Location. EDDI's own
-        // POST /agents/{agentId}/start is exactly that — it answers
-        // Response.created(conversationUri).build() — so a model that started a
-        // conversation received {"httpCode": 201} and had no way to learn the id it
-        // needs for every following call. ApiCallExecutor only populates the
-        // "headers" key when this name is set (it is null by default, which is why
-        // nothing generated here ever saw one), so setting it is what makes the id
-        // reachable at all.
+        // Response headers, but only where the operation plausibly answers IN one.
         //
-        // The exposure this adds, stated plainly: every response header of the
-        // target API now reaches the tool result and conversation memory, including
-        // a Set-Cookie the caller never asked for. Accepted because the response
-        // BODY already travels that same path for these tools (saveResponse is on,
-        // above) and is the larger surface of the two; a header-name filter is not
-        // applied here because the filtering would have to live in
-        // ApiCallExecutor's shared header path, where it would also silently strip
-        // values that hand-authored apicallstore configs legitimately template
-        // against today.
-        httpCall.setResponseHeaderObjectName(name + "_responseHeaders");
+        // Without any, a whole class of REST API is unusable as a generated tool:
+        // the "create" convention is 201 with an EMPTY body and the new resource's
+        // id only in Location. EDDI's own POST /agents/{agentId}/start is exactly
+        // that — Response.created(conversationUri).build() — so a model that
+        // started a conversation received {"httpCode": 201} and had no way to learn
+        // the id every following call needs. ApiCallExecutor populates the
+        // "headers" key only when this name is set, and it is null by default,
+        // which is why nothing generated here has ever seen a response header.
+        //
+        // Granting it to EVERY operation was the first version of this and it is
+        // not worth the exposure. Response headers reach the tool result, the LLM
+        // context and conversation memory (persisted), and nothing on that path
+        // redacts them — RequestRedactor is request-only by construction and
+        // SecretRedactionFilter runs on the display copy. Set-Cookie is the case
+        // that matters: HttpClientModule builds a cookie-aware, application-scoped
+        // WebClientSession, so that value is a live session credential EDDI is
+        // actively replaying, and copying it into prompt-injectable context is
+        // exactly what HttpOnly exists to prevent. A plain GET that answers with a
+        // body has nothing to gain from it, so it does not get it.
+        if (returnsDataInHeaders(operation)) {
+            httpCall.setResponseHeaderObjectName(name + "_responseHeaders");
+        }
 
         // Build request
         var request = new Request();
@@ -337,6 +340,56 @@ public final class McpApiToolBuilder {
         }
 
         return httpCall;
+    }
+
+    /**
+     * Whether this operation's useful answer can be in a response HEADER rather
+     * than the body — the only case where binding them is worth the exposure
+     * described at the call site.
+     * <p>
+     * Two shapes qualify, and both are the same underlying convention:
+     * <ul>
+     * <li>a declared {@code 201}/{@code 202} or any {@code 3xx} — "created" and
+     * "redirected" both answer with a {@code Location} and routinely no body;</li>
+     * <li>a {@code 2xx} that declares NO content — a {@code 204}, or a spec that
+     * documents success with nothing in it. There is no body to read, so a header
+     * is the only place an answer could be.</li>
+     * </ul>
+     * An operation whose success response declares content is answering in the body
+     * and gets nothing.
+     * <p>
+     * A spec that documents no responses at all gets nothing either. That is the
+     * deliberately safe reading of missing information: the cost is a capability an
+     * undocumented endpoint silently lacks, against copying every future
+     * {@code Set-Cookie} of an unknown API into conversation memory. EDDI's own
+     * spec documents {@code 201} on {@code /agents/{agentId}/start}, which is the
+     * case this exists for.
+     */
+    static boolean returnsDataInHeaders(Operation operation) {
+        var responses = operation.getResponses();
+        if (responses == null || responses.isEmpty()) {
+            return false;
+        }
+        for (var entry : responses.entrySet()) {
+            String status = entry.getKey();
+            if (status == null) {
+                continue;
+            }
+            if ("201".equals(status) || "202".equals(status) || status.startsWith("3")) {
+                return true;
+            }
+            // A success that declares no content cannot be answering in the body.
+            // "default" is deliberately not treated as a success here — it covers
+            // errors just as often, and guessing wrong grants headers to every
+            // operation that documents one.
+            if (status.startsWith("2")) {
+                var content = entry.getValue() == null ? null : entry.getValue().getContent();
+                if (content == null || content.isEmpty()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

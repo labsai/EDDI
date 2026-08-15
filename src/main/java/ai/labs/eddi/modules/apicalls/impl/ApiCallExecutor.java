@@ -142,7 +142,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 IResponse response = null;
                 boolean retryCall = false;
                 int amountOfExecutions = 0;
-                Map<String, Object> result = new HashMap<>();
+                // LinkedHashMap, not HashMap: this map is serialized verbatim as the
+                // LLM tool result and truncated from the front, so key order decides
+                // what survives a cap. See the ordered "headers" insert below.
+                Map<String, Object> result = new LinkedHashMap<>();
 
                 do {
                     // Final attempt wins, entirely: a retried failure populated
@@ -203,11 +206,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     }
 
                     var responseHeaderObjectName = call.getResponseHeaderObjectName();
+                    Object responseObjectHeader = null;
                     if (!isNullOrEmpty(responseHeaderObjectName)) {
-                        var responseObjectHeader = requireNonNullElse(response.getHttpHeader(), new HashMap<>());
+                        responseObjectHeader = requireNonNullElse(response.getHttpHeader(), new HashMap<>());
                         templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
                         prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName, KEY_HTTP_CALLS);
-                        result.put("headers", responseObjectHeader);
+                        // NOT put into `result` here — see the ordered insert below.
                     }
 
                     if (isResponseSuccessful && call.getSaveResponse()) {
@@ -251,6 +255,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         // model whose tool returned "{}" cannot tell a 204 from a crash,
                         // and honestly reporting "it worked" requires knowing that it did.
                         result.put("httpCode", response.getHttpCode());
+                    }
+
+                    // Headers go in LAST, on purpose, and `result` is a LinkedHashMap
+                    // so that ordering survives serialization.
+                    //
+                    // The tool result is truncated from the FRONT
+                    // (ToolResponseTruncator cuts `result.substring(0, maxChars)`),
+                    // so whatever serializes first is what survives. With a plain
+                    // HashMap "headers" hashed ahead of "body" on both the success and
+                    // the error path regardless of insertion order — so a per-tool
+                    // limit, or the always-on tool-context budget, would spend the
+                    // allowance on a header block and cut away the response body the
+                    // model actually asked for. Headers are the disposable half of
+                    // this map; the body is not.
+                    if (responseObjectHeader != null) {
+                        result.put("headers", responseObjectHeader);
                     }
 
                     amountOfExecutions++;
