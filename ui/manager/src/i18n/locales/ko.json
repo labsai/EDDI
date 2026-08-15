@@ -3979,7 +3979,8 @@
       "newConversation": "새 대화 시작",
       "transcript": "오퍼레이터 대화",
       "pauseCompactFallback": "계속하려면 운영자에게 승인이 필요합니다.",
-      "pauseCompactReview": "검토 후 승인 →"
+      "pauseCompactReview": "검토 후 승인 →",
+      "resolving": "승인된 단계를 실행 중입니다 — 잠시 걸릴 수 있습니다…"
     },
     "drawer": {
       "title": "플랫폼 오퍼레이터",

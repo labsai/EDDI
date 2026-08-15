@@ -3979,7 +3979,8 @@
       "newConversation": "开始新会话",
       "transcript": "操作员对话",
       "pauseCompactFallback": "操作员需要你的批准才能继续。",
-      "pauseCompactReview": "查看并批准 →"
+      "pauseCompactReview": "查看并批准 →",
+      "resolving": "正在执行已批准的步骤 — 可能需要一点时间…"
     },
     "drawer": {
       "title": "平台操作员",

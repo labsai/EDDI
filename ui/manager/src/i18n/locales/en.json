@@ -3979,7 +3979,8 @@
       "newConversation": "Start a new conversation",
       "transcript": "Operator conversation",
       "pauseCompactFallback": "The operator needs your approval before continuing.",
-      "pauseCompactReview": "Review to approve →"
+      "pauseCompactReview": "Review to approve →",
+      "resolving": "Running the approved step — this can take a moment…"
     },
     "drawer": {
       "title": "Platform Operator",

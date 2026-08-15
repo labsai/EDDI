@@ -3979,7 +3979,8 @@
       "newConversation": "新しい会話を開始",
       "transcript": "オペレーターとの会話",
       "pauseCompactFallback": "続行する前にオペレーターの承認が必要です。",
-      "pauseCompactReview": "確認して承認 →"
+      "pauseCompactReview": "確認して承認 →",
+      "resolving": "承認されたステップを実行中です — 少し時間がかかる場合があります…"
     },
     "drawer": {
       "title": "プラットフォームオペレーター",

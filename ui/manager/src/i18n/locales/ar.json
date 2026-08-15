@@ -4099,7 +4099,8 @@
       "newConversation": "بدء محادثة جديدة",
       "transcript": "محادثة المُشغّل",
       "pauseCompactFallback": "يحتاج المشغّل إلى موافقتك قبل المتابعة.",
-      "pauseCompactReview": "مراجعة للموافقة →"
+      "pauseCompactReview": "مراجعة للموافقة →",
+      "resolving": "جارٍ تنفيذ الخطوة المعتمدة — قد يستغرق ذلك لحظة…"
     },
     "drawer": {
       "title": "مُشغّل المنصة",
