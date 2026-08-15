@@ -276,7 +276,8 @@
     "chatIn": "Chat in {{environment}}",
     "openExternalChatIn": "Open {{environment}} chat in a new tab",
     "deployToProduction": "Deploy to production",
-    "undeployFromProduction": "Undeploy from production"
+    "undeployFromProduction": "Undeploy from production",
+    "deployFailedIn": "Deployment failed in {{environment}}"
   },
   "agentDetail": {
     "a2aDescHint": "Shown in the Agent Card — helps other agents understand what this agent does",

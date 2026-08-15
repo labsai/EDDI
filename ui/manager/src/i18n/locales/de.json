@@ -249,7 +249,8 @@
     "chatIn": "In {{environment}} chatten",
     "openExternalChatIn": "{{environment}}-Chat in neuem Tab öffnen",
     "deployToProduction": "In Produktion bereitstellen",
-    "undeployFromProduction": "Aus Produktion entfernen"
+    "undeployFromProduction": "Aus Produktion entfernen",
+    "deployFailedIn": "Bereitstellung in {{environment}} fehlgeschlagen"
   },
   "agentDetail": {
     "a2aDescHint": "Wird in der Agent Card angezeigt — hilft anderen Agenten zu verstehen, was dieser Agent tut",

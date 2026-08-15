@@ -249,7 +249,8 @@
     "chatIn": "{{environment}} में चैट करें",
     "openExternalChatIn": "{{environment}} चैट नए टैब में खोलें",
     "deployToProduction": "प्रोडक्शन में तैनात करें",
-    "undeployFromProduction": "प्रोडक्शन से हटाएँ"
+    "undeployFromProduction": "प्रोडक्शन से हटाएँ",
+    "deployFailedIn": "{{environment}} में तैनाती विफल"
   },
   "agentDetail": {
     "a2aDescHint": "Agent Card में दिखाया जाता है — अन्य एजेंट को यह समझने में मदद करता है कि यह एजेंट क्या करता है",

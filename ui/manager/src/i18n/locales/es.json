@@ -250,7 +250,8 @@
     "chatIn": "Chatear en {{environment}}",
     "openExternalChatIn": "Abrir el chat de {{environment}} en una pestaña nueva",
     "deployToProduction": "Desplegar en producción",
-    "undeployFromProduction": "Retirar de producción"
+    "undeployFromProduction": "Retirar de producción",
+    "deployFailedIn": "El despliegue falló en {{environment}}"
   },
   "agentDetail": {
     "a2aDescHint": "Se muestra en la Agent Card — ayuda a otros agentes a entender qué hace este agente",

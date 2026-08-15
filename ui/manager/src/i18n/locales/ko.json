@@ -249,7 +249,8 @@
     "chatIn": "{{environment}}에서 채팅",
     "openExternalChatIn": "{{environment}} 채팅을 새 탭에서 열기",
     "deployToProduction": "프로덕션에 배포",
-    "undeployFromProduction": "프로덕션에서 제거"
+    "undeployFromProduction": "프로덕션에서 제거",
+    "deployFailedIn": "{{environment}}에 배포하지 못했습니다"
   },
   "agentDetail": {
     "a2aDescHint": "에이전트 카드에 표시됩니다 — 다른 에이전트가 이 에이전트의 기능을 이해하는 데 도움이 됩니다",

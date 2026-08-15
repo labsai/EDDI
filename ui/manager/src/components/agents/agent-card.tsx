@@ -250,6 +250,7 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardP
           <button
             onClick={isProductionDeployed ? handleUndeploy : handleDeploy}
             disabled={isBusy}
+            data-testid={`agent-deploy-toggle-${agent.id}`}
             className={cn(
               "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
               isProductionDeployed
@@ -263,7 +264,7 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardP
                 Test chip reads as "not deployed", which is the confusion this
                 whole card change exists to remove. */}
             {isBusy
-              ? t("common.loading")
+              ? t("common.loading", "Loading...")
               : isProductionDeployed
                 ? t("agents.undeployFromProduction", "Undeploy from production")
                 : t("agents.deployToProduction", "Deploy to production")}

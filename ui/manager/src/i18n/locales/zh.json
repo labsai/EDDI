@@ -249,7 +249,8 @@
     "chatIn": "在 {{environment}} 中聊天",
     "openExternalChatIn": "在新标签页中打开 {{environment}} 聊天",
     "deployToProduction": "部署到生产环境",
-    "undeployFromProduction": "从生产环境移除"
+    "undeployFromProduction": "从生产环境移除",
+    "deployFailedIn": "在 {{environment}} 中部署失败"
   },
   "agentDetail": {
     "a2aDescHint": "显示在智能体名片中——帮助其他智能体了解此智能体的功能",

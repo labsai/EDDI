@@ -97,6 +97,23 @@ export function DeploymentEnvironmentBadge({
           {label(env)}
         </span>
       ))}
+      {/* An environment that FAILED must still be visible when another one is
+          live — showing only the healthy chip would hide a broken production
+          deploy behind a green test one, which is the same class of omission
+          this component exists to fix. */}
+      {errored.map(({ environment }) => (
+        <span
+          key={environment}
+          className={cn(pill, "bg-destructive/15 text-destructive ring-destructive/30")}
+          data-testid={`env-chip-error-${environment}`}
+          title={t("agents.deployFailedIn", "Deployment failed in {{environment}}", {
+            environment: label(environment),
+          })}
+        >
+          <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
+          {label(environment)}
+        </span>
+      ))}
       {busy && (
         <Loader2
           className="h-3.5 w-3.5 animate-spin text-muted-foreground"

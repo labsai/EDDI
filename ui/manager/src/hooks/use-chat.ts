@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Environment } from "@/lib/constants";
 import { deployedEnvironments } from "@/lib/deployment-environments";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import {
   startConversation,
   readConversation,
@@ -292,21 +293,23 @@ export function useDeployedAgents() {
       // literally true. Each agent now carries the environments it is live in,
       // so the picker can both list it and start the conversation in the right
       // place.
-      const results = await Promise.allSettled(
-        agents.map(async (agent) => {
+      // BOUNDED. `getAgentDescriptors` pages at 500 and each agent costs one
+      // request per environment, so an unbounded fan-out here could open ~1000
+      // sockets on a single picker refresh. Per-agent failures resolve to "no
+      // environments" and drop out below, exactly as the previous allSettled
+      // did — one unreachable agent must not empty the picker.
+      const results = await mapWithConcurrency(agents, 8, async (agent) => {
+        try {
           const statuses = await getDeploymentStatuses(agent.id, agent.version);
           return { agent, environments: deployedEnvironments(statuses) };
-        })
-      );
+        } catch {
+          return { agent, environments: [] as Environment[] };
+        }
+      });
 
       return results
-        .filter(
-          (r): r is PromiseFulfilledResult<{
-            agent: (typeof agents)[number];
-            environments: Environment[];
-          }> => r.status === "fulfilled" && r.value.environments.length > 0
-        )
-        .map((r) => ({ ...r.value.agent, environments: r.value.environments }));
+        .filter((r) => r.environments.length > 0)
+        .map((r) => ({ ...r.agent, environments: r.environments }));
     },
     staleTime: 60_000,
   });

@@ -249,7 +249,8 @@
     "chatIn": "{{environment}} でチャット",
     "openExternalChatIn": "{{environment}} のチャットを新しいタブで開く",
     "deployToProduction": "本番にデプロイ",
-    "undeployFromProduction": "本番から削除"
+    "undeployFromProduction": "本番から削除",
+    "deployFailedIn": "{{environment}} へのデプロイに失敗しました"
   },
   "agentDetail": {
     "a2aDescHint": "エージェントカードに表示され、他のエージェントがこのエージェントの機能を理解するのに役立ちます",

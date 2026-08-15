@@ -77,7 +77,9 @@ describe("AgentCard", () => {
     await waitFor(() => {
       // The toggle names its environment now: a bare "Deploy" beside a "Test"
       // chip was exactly the ambiguity this card change removes.
-      expect(screen.getByText("Deploy to production")).toBeInTheDocument();
+      expect(screen.getByTestId("agent-deploy-toggle-agent-test-1")).toHaveTextContent(
+        "Deploy to production",
+      );
     });
   });
 
@@ -89,7 +91,9 @@ describe("AgentCard", () => {
     );
     renderWithProviders(<AgentCard {...defaultProps} />);
     await waitFor(() => {
-      expect(screen.getByText("Undeploy from production")).toBeInTheDocument();
+      expect(screen.getByTestId("agent-deploy-toggle-agent-test-1")).toHaveTextContent(
+        "Undeploy from production",
+      );
     });
   });
 
@@ -212,5 +216,25 @@ describe("AgentCard", () => {
     // One chat entry each — with two environments the label must disambiguate.
     expect(screen.getByTestId("agent-chat-production-agent-test-1")).toBeInTheDocument();
     expect(screen.getByTestId("agent-chat-test-agent-test-1")).toBeInTheDocument();
+  });
+
+  /**
+   * A failed deployment must stay visible when another environment is healthy.
+   * Rendering only the green chip would hide a broken production deploy behind
+   * a working test one — the same omission, one level down, that this whole
+   * component exists to fix.
+   */
+  it("surfaces an errored environment alongside a live one", async () => {
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", ({ params }) =>
+        HttpResponse.json({ status: params.env === "test" ? "READY" : "ERROR" }),
+      ),
+    );
+    renderWithProviders(<AgentCard {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("env-chip-test")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("env-chip-error-production")).toBeInTheDocument();
   });
 });

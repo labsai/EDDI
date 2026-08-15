@@ -253,7 +253,8 @@
     "chatIn": "الدردشة في {{environment}}",
     "openExternalChatIn": "فتح دردشة {{environment}} في علامة تبويب جديدة",
     "deployToProduction": "النشر في الإنتاج",
-    "undeployFromProduction": "الإزالة من الإنتاج"
+    "undeployFromProduction": "الإزالة من الإنتاج",
+    "deployFailedIn": "فشل النشر في {{environment}}"
   },
   "agentDetail": {
     "a2aDescHint": "يظهر في بطاقة الوكيل — يساعد الوكلاء الآخرين على فهم ما يفعله هذا الوكيل",

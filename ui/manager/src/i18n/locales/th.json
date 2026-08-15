@@ -249,7 +249,8 @@
     "chatIn": "แชทใน {{environment}}",
     "openExternalChatIn": "เปิดแชท {{environment}} ในแท็บใหม่",
     "deployToProduction": "ดีพลอยไปยังโปรดักชัน",
-    "undeployFromProduction": "นำออกจากโปรดักชัน"
+    "undeployFromProduction": "นำออกจากโปรดักชัน",
+    "deployFailedIn": "การดีพลอยใน {{environment}} ล้มเหลว"
   },
   "agentDetail": {
     "a2aDescHint": "แสดงใน Agent Card — ช่วยให้เอเจนต์อื่นเข้าใจว่าเอเจนต์นี้ทำอะไร",
