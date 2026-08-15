@@ -215,7 +215,46 @@ class HttpCallToolsProviderBodyGuardTest {
                 "memory-1");
 
         verify(apiCallExecutor, never()).execute(any(), any(), any(), anyString());
-        assertTrue(errorOf(result).startsWith("requestBody is not valid JSON"));
+        // Named for the parameter the tool ACTUALLY exposes. On this path there
+        // is no "requestBody" argument at all, so telling the model to fix one
+        // would send it looking for something that does not exist.
+        assertTrue(errorOf(result).startsWith("requestBodyBody is not valid JSON"), errorOf(result));
+    }
+
+    /**
+     * The refusal is assembled from an allow-list, never from the parser's own
+     * message.
+     * <p>
+     * {@code getOriginalMessage()} looks safe — it omits the {@code [Source: …]}
+     * suffix that {@code getMessage()} appends — but the message ITSELF quotes
+     * model-controlled input: an unrecognised token yields
+     * {@code Unrecognized token 'SUPERSECRET'}. That string is logged AND returned
+     * as a tool result which lands in conversation memory, so echoing the parser
+     * would leak exactly what this guard promises to withhold.
+     */
+    @Test
+    void theRefusalNeverEchoesAnUnrecognisedTokenFromTheBody() throws Exception {
+        ToolExecutor executor = executorForJsonBodyTool();
+
+        // A bare token is what makes Jackson quote it back in its message.
+        String result = executor.execute(argumentsCarryingBody("sk-live-SUPERSECRET"), "memory-1");
+
+        verify(apiCallExecutor, never()).execute(any(), any(), any(), anyString());
+        assertFalse(result.contains("SUPERSECRET"), "the parser's message leaked the body: " + result);
+        assertFalse(result.contains("Unrecognized token"), "the parser's own words must not be echoed: " + result);
+    }
+
+    /**
+     * Same again, for a secret sitting in trailing garbage after a valid document.
+     */
+    @Test
+    void theRefusalNeverEchoesATrailingTokenFromTheBody() throws Exception {
+        ToolExecutor executor = executorForJsonBodyTool();
+
+        String result = executor.execute(argumentsCarryingBody("{\"a\":1} sk-live-SUPERSECRET"), "memory-1");
+
+        verify(apiCallExecutor, never()).execute(any(), any(), any(), anyString());
+        assertFalse(result.contains("SUPERSECRET"), "the parser's message leaked the body: " + result);
     }
 
     // =================================================================

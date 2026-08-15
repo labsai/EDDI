@@ -58,16 +58,22 @@ non-blank string. The variable is read out of the template rather than assumed t
 `requestBody`, because the builder renames it on a name collision. A blank value is deliberately not
 refused — that is the separate "the model never filled the body" failure, not a malformed document.
 
-The message carries Jackson's own `getOriginalMessage()`, snippet-free by construction because it
-never appends the location — so the model gets "Illegal unquoted character (CTRL-CHAR, code 10): has
-to be escaped using backslash", which says far more than a column number. (Checking the older
-comment: `INCLUDE_SOURCE_IN_LOCATION` has been off by default since Jackson 2.16, so `getMessage()`
-would render `[Source: REDACTED …]` anyway. Avoiding it is defence in depth against that
-one-property default being flipped, not a live leak.)
+The message is assembled from an ALLOW-LIST — a fixed sentence chosen by exception type plus the
+numeric line and column — and never from the parser's own words. `getOriginalMessage()` looks safe
+because it omits the `[Source: …]` suffix `getMessage()` appends, but the message itself quotes
+model-controlled input: a stray token yields ``Unrecognized token 'SUPERSECRET'``. Since this string
+is logged AND returned as a tool result that lands in conversation memory, echoing the parser would
+leak exactly what the guard promises to withhold. Two regressions cover a secret in an unrecognised
+token and in trailing garbage.
 
-Twenty-four tests drive the real executor lambda through a real workflow traversal: the raw-newline
+The refusal names the parameter the tool actually exposes, read from the template rather than
+hardcoded: the builder renames the whole-body variable on a collision, and telling the model to fix
+a `requestBody` argument that does not exist is worse than saying nothing.
+
+Twenty-six tests drive the real executor lambda through a real workflow traversal: the raw-newline
 case as reported, an unescaped quote, a truncated document, trailing prose, a trailing fence, a
-structured object, a renamed body variable, a `+json` suffix type, and the refusal's wording —
+structured object, a renamed body variable, a `+json` suffix type, two no-leak regressions, and the
+refusal's wording —
 against those proving the guard stays out of the way (valid body, no body, `text/plain`, multipart,
 a per-property template, a JSON array body). The load-bearing assertion is
 `verify(apiCallExecutor, never()).execute(...)`. Mutation-checked twice: disabling the guard fails

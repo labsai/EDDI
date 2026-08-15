@@ -107,12 +107,6 @@ class HttpCallToolsProvider implements ToolSourceProvider {
     private static final Pattern WHOLE_BODY_TEMPLATE = Pattern.compile("^\\{([A-Za-z_][A-Za-z0-9_]*)}$");
 
     /**
-     * Cap for the parser's own explanation echoed into a tool result and a log
-     * line. Jackson's messages are short; this bounds a pathological one.
-     */
-    private static final int PARSE_DETAIL_MAX_BYTES = 200;
-
-    /**
      * Strict parser for the model-written request body.
      * <p>
      * Its own mapper, not the injected {@link IJsonSerialization}, for one reason:
@@ -343,7 +337,12 @@ class HttpCallToolsProvider implements ToolSourceProvider {
         if (!matcher.matches()) {
             return null;
         }
-        Object value = templateData.get(matcher.group(1));
+        // The real parameter name, not the literal "requestBody": the builder
+        // renames the whole-body variable on a collision with a path or query
+        // parameter, and telling the model to fix an argument its tool does not
+        // expose is worse than saying nothing.
+        String bodyParameter = matcher.group(1);
+        Object value = templateData.get(bodyParameter);
 
         // A model that answered the "a single JSON object" parameter description
         // with an actual object rather than a string lands here as a Map. Qute runs
@@ -355,7 +354,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
         if (value instanceof Map || value instanceof Iterable) {
             LOGGER.warnf("Refusing httpcall tool '%s' before sending: requestBody arrived as %s, not a string",
                     sanitize(apiCall.getName()), value.getClass().getSimpleName());
-            return errorResult("requestBody must be a JSON document encoded as a STRING, but arrived as a "
+            return errorResult(bodyParameter + " must be a JSON document encoded as a STRING, but arrived as a "
                     + (value instanceof Map ? "JSON object" : "JSON array")
                     + ". The request was NOT sent. Send the whole body as one string value —"
                     + " \"{\\\"name\\\": \\\"…\\\"}\" — not as structured arguments.");
@@ -379,7 +378,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             // templateDataFor's own catch goes to such lengths.
             LOGGER.warnf("Refusing httpcall tool '%s' before sending: the model's request body is not valid JSON (%s)",
                     sanitize(apiCall.getName()), detail);
-            return errorResult("requestBody is not valid JSON: " + detail
+            return errorResult(bodyParameter + " is not valid JSON: " + detail
                     + ". The request was NOT sent. Re-send this call with the body as one correctly escaped JSON"
                     + " document, and nothing after it: inside a string value a newline must be written \\n and a"
                     + " double quote \\\", never as a raw character.");
@@ -407,44 +406,42 @@ class HttpCallToolsProvider implements ToolSourceProvider {
     }
 
     /**
-     * What went wrong and where, with no part of the body in it.
-     * <p>
-     * {@code getOriginalMessage()} rather than {@code getMessage()}, and the
-     * distinction is the whole point: the latter appends a source description, and
-     * the former is snippet-free <em>by construction</em> because it never appends
-     * the location at all. It carries the diagnosis the model needs — "Illegal
-     * unquoted character (CTRL-CHAR, code 10): has to be escaped using backslash"
-     * says far more than a bare column number about what to fix.
-     * <p>
-     * Note for anyone verifying the claim above: on Jackson 2.16+
-     * {@code StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION} is disabled by default,
-     * so {@code getMessage()} would render {@code [Source: REDACTED …]} rather than
-     * the body — the leak this avoids is not reachable on the pinned version. This
-     * is defence in depth against that default being re-enabled, which is a
-     * one-property change, and it costs nothing.
-     * <p>
-     * The location is appended separately from its integer accessors, never from
-     * {@code JsonLocation.toString()}.
+     * What went wrong and where, carrying no part of the body.
      *
-     * @return a one-line, body-free description of the parse failure
+     * <p>
+     * <b>Built from an allow-list, not from the parser's message.</b> An earlier
+     * version returned {@code getOriginalMessage()} on the reasoning that it is
+     * snippet-free — which is true only of the {@code [Source: …]} suffix
+     * {@code getMessage()} appends. The message ITSELF quotes model-controlled
+     * input: a stray token produces {@code Unrecognized token 'SUPERSECRET'}, and
+     * this string is both logged AND returned as a tool result that is persisted
+     * into conversation memory. That is precisely the leak the whole method is
+     * written to avoid, so the parser's own words never reach either.
+     * <p>
+     * What is returned instead is a fixed sentence chosen by exception type, plus
+     * the numeric line and column. Those cover the failures a model actually
+     * produces and are the part that makes the message actionable; an unrecognised
+     * type degrades to a generic reason rather than to the parser's text.
+     *
+     * @return a body-free description of the parse failure
      */
     private static String parseFailureDetail(IOException e) {
-        String reason = "unparseable";
+        String reason = switch (e) {
+            case com.fasterxml.jackson.core.JsonParseException ignored ->
+                "the document is malformed — an unescaped character, an unquoted token, or a missing delimiter";
+            case com.fasterxml.jackson.databind.exc.MismatchedInputException ignored ->
+                "the document is empty or ends before it is complete";
+            default -> "the document could not be parsed";
+        };
         String position = "";
         if (e instanceof JsonProcessingException jsonError) {
-            String original = jsonError.getOriginalMessage();
-            if (original != null && !original.isBlank()) {
-                reason = capUtf8(original, PARSE_DETAIL_MAX_BYTES);
-            }
             JsonLocation location = jsonError.getLocation();
             // JsonLocation.NA reports -1 for both.
             if (location != null && location.getLineNr() > 0) {
                 position = " at line " + location.getLineNr() + ", column " + location.getColumnNr();
             }
         }
-        // Sanitized for the same reason the tool arguments are: this string reaches
-        // a log line, and a model-influenced \r or \n could forge whole records.
-        return sanitize(reason + position);
+        return reason + position;
     }
 
     /**
