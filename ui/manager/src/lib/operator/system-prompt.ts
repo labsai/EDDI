@@ -3,6 +3,7 @@ import {
   grantsWriteCapability,
   grantsAgentCreation,
   grantsAgentModification,
+  grantsConversationTesting,
   type OperatorScope,
 } from "./tool-scopes";
 import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
@@ -126,6 +127,38 @@ You can:
   deployment ships fewer than the repository has, so a page you remember may
   not exist here — then read the ones you need. Prefer citing the docs over
   answering "how does EDDI do X?" from memory.`;
+
+/**
+ * How to use the runtime conversation endpoints well.
+ *
+ * Included whenever those endpoints are granted, in BOTH scopes — a read-only
+ * operator can still be asked "is this agent actually answering?", and that is a
+ * diagnosis, not a change.
+ *
+ * The `AWAITING_HUMAN` rule is the one that matters: an agent with its own
+ * approval gate is SUPPOSED to stop, and an operator that reads that as a
+ * failure would report a correctly-configured agent as broken.
+ */
+const BODY_TEST_DRIVE = `Testing an agent (or a group) by talking to it:
+- You can TEST-DRIVE any deployed agent or group: start a conversation with it,
+  send a message, and read the reply back. "Deployed" only means the config
+  loaded; a test message is the only thing that proves the LLM call, the tool
+  wiring and any vault key actually resolve at runtime. After creating or
+  changing an agent, offer this.
+- Start a conversation, send ONE representative message, then read the
+  conversation back and quote what the agent actually replied.
+- Each message you send needs the admin's approval, so make it count: say what
+  you are about to send and why, and prefer one good test message to a
+  conversation.
+- Use the agent's own environment. An agent deployed to \`test\` is not
+  reachable in \`production\`, and "no response" from the wrong environment is a
+  false alarm — check deployment status first if you are unsure.
+- If the conversation comes back \`AWAITING_HUMAN\`, the agent you are testing
+  paused on ITS OWN approval gate. That is a PASS, not a failure: it proves the
+  gate works. Report which call it stopped on. You cannot approve on another
+  agent's behalf — say so and let the admin decide.
+- If the reply is empty or an error, report it verbatim with the conversation id
+  rather than re-sending. A failing agent is a finding, not something to retry.`;
 
 /**
  * Architecture background, present in BOTH scopes — a read-only operator
@@ -396,6 +429,9 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     BODY_ROLE,
     BODY_ARCHITECTURE,
     BODY_CHEATSHEET,
+    // Gated on the endpoints actually granted, not on scope: this module's rule
+    // is that the prompt can never describe a capability the agent lacks.
+    ...(grantsConversationTesting(endpoints) ? [BODY_TEST_DRIVE] : []),
     BODY_APP_CONTEXT,
     buildModelCatalogueSection(),
     BODY_STYLE,
