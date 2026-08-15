@@ -29,8 +29,10 @@ Now:
 - The response OBJECT semantics are untouched: an error body still never lands under
   `responseObjectName`, and memory still sees it only under the `*Error` key.
 
-Four new tests pin the contract (error body + code, blank-body fallback, truncation in the result,
-code-only on quiet success); four existing tests that pinned the empty-map behaviour were updated —
+Five new tests pin the contract (error body + code, blank-body fallback, truncation in the result,
+code-only on quiet success, and a mutation-verified regression for the retried-failure leak: a 503's
+error body must not survive into a succeeding retry's quiet-success result — the map is cleared per
+attempt, final attempt wins); four existing tests that pinned the empty-map behaviour were updated —
 they were pinning the bug.
 
 ---
