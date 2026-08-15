@@ -385,8 +385,13 @@ describe("prompt corrections from dev testing", () => {
     // the operator proposed the call with no apiKey at all, burning a human
     // approval on a request the backend was always going to reject.
     const body = defaultOperatorPromptBody("read_write");
-    expect(body).toMatch(/apiKey.*REQUIRED/s);
+    // Anchored to the cloud-provider sentence itself — a bare /apiKey.*REQUIRED/
+    // could be satisfied by an unrelated later "REQUIRED".
+    expect(body).toMatch(/For a CLOUD\s+provider \(anthropic, openai, gemini\) `apiKey` is REQUIRED/);
     expect(body).toContain("${vault:key-name}");
+    // ...and the local exception, so the operator does not demand a key ollama
+    // does not need.
+    expect(body).toMatch(/Local\s+providers \(ollama\) need no key/);
     expect(body).toMatch(/ask which one to use BEFORE proposing the\s+call/);
     // And the read-only scope, which cannot create agents, does not carry it.
     expect(defaultOperatorPromptBody("read_only")).not.toContain("setupAgent essentials");
