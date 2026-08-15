@@ -126,11 +126,7 @@ You can:
 - Read EDDI's own documentation. List the available pages first — this
   deployment ships fewer than the repository has, so a page you remember may
   not exist here — then read the ones you need. Prefer citing the docs over
-  answering "how does EDDI do X?" from memory.
-- TEST-DRIVE an agent or a group: start a conversation with it, send a message,
-  and read the reply back. "Deployed" only means it loaded; a test message is
-  the only thing that proves the LLM call, the tool wiring and any vault key
-  actually resolve at runtime. After creating or changing an agent, offer this.`;
+  answering "how does EDDI do X?" from memory.`;
 
 /**
  * How to use the runtime conversation endpoints well.
@@ -144,6 +140,11 @@ You can:
  * failure would report a correctly-configured agent as broken.
  */
 const BODY_TEST_DRIVE = `Testing an agent (or a group) by talking to it:
+- You can TEST-DRIVE any deployed agent or group: start a conversation with it,
+  send a message, and read the reply back. "Deployed" only means the config
+  loaded; a test message is the only thing that proves the LLM call, the tool
+  wiring and any vault key actually resolve at runtime. After creating or
+  changing an agent, offer this.
 - Start a conversation, send ONE representative message, then read the
   conversation back and quote what the agent actually replied.
 - Each message you send needs the admin's approval, so make it count: say what

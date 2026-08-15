@@ -430,7 +430,26 @@ describe("test-drive: talking to another agent", () => {
 
   it("leaves read_only genuinely read-only — the regression the tests caught", () => {
     expect(safetyPreambleForScope("read_only")).toContain("You are read-only");
-    expect(defaultOperatorPromptBody("read_only")).not.toContain("Testing an agent");
+  });
+
+  /**
+   * The prompt must never describe a capability the agent lacks — the whole
+   * reason this module derives from the endpoint set. A first attempt put the
+   * test-drive bullet in BODY_ROLE, which is unconditional, so a read_only
+   * operator was told to start conversations it has no endpoint for. Asserting
+   * on the section heading alone would NOT have caught that, so this checks
+   * every phrase that promises the capability.
+   */
+  it("says nothing whatsoever about test-driving in a read_only body", () => {
+    const body = defaultOperatorPromptBody("read_only");
+    for (const promise of [
+      "Testing an agent",
+      "TEST-DRIVE",
+      "Start a conversation",
+      "start a conversation with it",
+    ]) {
+      expect(body).not.toContain(promise);
+    }
   });
 
   /**
