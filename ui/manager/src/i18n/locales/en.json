@@ -3979,8 +3979,10 @@
     },
     "chat": {
       "empty": "Ask about your deployment. The operator looks things up and shows you every call it makes.",
+      "restoring": "Opening that conversation…",
       "placeholder": "Ask about agents, conversations, deployments, logs…",
       "pausedPlaceholder": "Awaiting a decision above before the operator can continue…",
+      "readOnlyPlaceholder": "This conversation is finished — start a new one to continue.",
       "send": "Send",
       "stop": "Stop",
       "newConversation": "Start a new conversation",
@@ -4066,6 +4068,18 @@
       "noReply": "The turn finished without a reply",
       "partial_one": "You approved this request — {{count}} call rejected",
       "partial_other": "You approved this request — {{count}} calls rejected"
+    },
+    "tabs": {
+      "label": "Operator views",
+      "chat": "Chat",
+      "history": "History"
+    },
+    "history": {
+      "emptyTitle": "No past conversations",
+      "emptyDescription": "Conversations you have with the operator show up here, so you can pick one back up later.",
+      "noOpeningMessage": "(no message yet)",
+      "stepCount_one": "{{count}} step",
+      "stepCount_other": "{{count}} steps"
     }
   },
   "groupWorkspace": {

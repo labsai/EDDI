@@ -75,6 +75,20 @@ export function OperatorDrawer() {
   }, [isOpen]);
 
   /**
+   * Restore the tab's conversation when the drawer is opened.
+   *
+   * On OPEN rather than on mount: this drawer is mounted app-wide, and
+   * hydrating on mount would issue a conversation read on every page load for
+   * an admin who never opens it. `hydrate` is idempotent and shares the store
+   * with the full page, so opening the drawer on /manage/operator — where the
+   * page has already hydrated — does nothing.
+   */
+  useEffect(() => {
+    if (isOpen && config?.enabled && config.agentId) void chat.hydrate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, config?.enabled, config?.agentId, chat.hydrate]);
+
+  /**
    * Escape closes, focus moves in on open and back to the launcher on close.
    *
    * The panel now follows the launcher in the DOM, so tab order already reaches

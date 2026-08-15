@@ -4009,8 +4009,10 @@
     },
     "chat": {
       "empty": "Pregunta sobre tu instalación. El operador lo consulta y te muestra cada llamada que hace.",
+      "restoring": "Abriendo esa conversación…",
       "placeholder": "Pregunta por agentes, conversaciones, despliegues, registros…",
       "pausedPlaceholder": "Esperando una decisión arriba antes de que el operador pueda continuar…",
+      "readOnlyPlaceholder": "Esta conversación ha terminado: inicia una nueva para continuar.",
       "send": "Enviar",
       "stop": "Detener",
       "newConversation": "Iniciar una conversación nueva",
@@ -4097,6 +4099,19 @@
       "partial_one": "Aprobada — {{count}} llamada rechazada",
       "partial_other": "Aprobada — {{count}} llamadas rechazadas",
       "partial_many": "Aprobada — {{count}} llamadas rechazadas"
+    },
+    "tabs": {
+      "label": "Vistas del operador",
+      "chat": "Chat",
+      "history": "Historial"
+    },
+    "history": {
+      "emptyTitle": "No hay conversaciones anteriores",
+      "emptyDescription": "Las conversaciones con el operador aparecen aquí para que puedas retomarlas más tarde.",
+      "noOpeningMessage": "(aún sin mensaje)",
+      "stepCount_one": "{{count}} paso",
+      "stepCount_other": "{{count}} pasos",
+      "stepCount_many": "{{count}} pasos"
     }
   },
   "groupWorkspace": {

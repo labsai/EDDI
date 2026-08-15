@@ -2,6 +2,7 @@ import { startConversation, sendMessageStreaming, endConversation } from "@/lib/
 import { operatorEnvironment } from "@/lib/operator/operator-environment";
 import { resumeConversation, getApprovalStatus } from "@/lib/api/hitl";
 import {
+  OPERATOR_PROBE_USER_ID,
   gateDryRun,
   isNotFound,
   readOperatorConfig,
@@ -171,7 +172,7 @@ async function runProbe(
 
   let conversationId: string | null = null;
   try {
-    conversationId = await startConversation(operatorEnvironment(config), config.agentId);
+    conversationId = await startConversation(operatorEnvironment(config), config.agentId, OPERATOR_PROBE_USER_ID);
 
     let toolCalls = 0;
     let sawExpectedToolCall = false;

@@ -182,6 +182,46 @@ describe("OperatorDrawer", () => {
     await waitFor(() => expect(screen.queryByTestId("operator-drawer-panel")).not.toBeInTheDocument());
   });
 
+  /**
+   * The drawer restores the tab's conversation when OPENED, not on mount.
+   *
+   * Both halves need pinning and neither was: deleting the effect entirely left
+   * all 15 drawer tests green, and so did moving it to mount — the exact thing
+   * its own comment forbids, because the drawer is mounted app-wide and would
+   * then issue a conversation read on every page load for an admin who never
+   * opens it.
+   */
+  it("reads the stored conversation only once the drawer is opened", async () => {
+    serveConfig(activeConfig());
+    sessionStorage.setItem("eddi.operator.conversationId", "conv-1");
+    useOperatorChatStore.setState({ conversationId: "conv-1" });
+    const reads: string[] = [];
+    server.use(
+      http.get("*/conversationstore/conversations/simple/:id", ({ params }) => {
+        reads.push(String(params.id));
+        return HttpResponse.json({
+          agentId: "op-1",
+          agentVersion: 2,
+          conversationId: "conv-1",
+          environment: "production",
+          conversationState: "READY",
+          conversationSteps: [{ conversationStep: [{ key: "input:initial", value: "what is deployed?" }] }],
+          conversationOutputs: [{ output: [{ type: "text", text: "Three agents." }] }],
+        });
+      }),
+    );
+
+    renderWithProviders(<OperatorDrawer />, { initialRoute: "/manage/agents" });
+    // Mounted but closed: nothing may be read.
+    await waitFor(() => expect(screen.getByTestId("operator-drawer-fab")).toBeInTheDocument());
+    expect(reads).toEqual([]);
+
+    await userEvent.click(screen.getByTestId("operator-drawer-fab"));
+
+    expect(await screen.findByText("Three agents.")).toBeInTheDocument();
+    expect(reads).toEqual(["conv-1"]);
+  });
+
   it("shows the compact pause notice, not the full approval banner, when paused", async () => {
     serveConfig(activeConfig());
     // Seeded directly on the shared, public chat state — this test is about
@@ -195,6 +235,26 @@ describe("OperatorDrawer", () => {
     server.use(
       http.get("*/agents/conv-1/approval-status", () =>
         HttpResponse.json({ pauseReason: "Creating a new agent — review the whole config" }),
+      ),
+      // Opening the drawer hydrates the stored conversation, and this one is
+      // seeded with an id but no transcript — the shape a 409 pause leaves
+      // after a reload. The read has to agree that it is still paused, or the
+      // restore would (correctly) clear a pause the backend no longer reports.
+      http.get("*/conversationstore/conversations/simple/conv-1", () =>
+        HttpResponse.json({
+          agentId: "op-1",
+          agentVersion: 2,
+          conversationId: "conv-1",
+          environment: "production",
+          conversationState: "AWAITING_HUMAN",
+          hitlPauseReason: "Creating a new agent — review the whole config",
+          conversationSteps: [
+            { conversationStep: [{ key: "input:initial", value: "build me an agent" }] },
+          ],
+          conversationOutputs: [
+            { output: [{ type: "text", text: "I need your approval to run setupAgent." }] },
+          ],
+        }),
       ),
     );
 

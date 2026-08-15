@@ -14,6 +14,7 @@ import {
   rerunLastStep,
   type SSEEvent,
 } from "../chat";
+import { OPERATOR_PROBE_USER_ID } from "../operator";
 
 // ─── Pure function tests ──────────────────────────────────────────
 
@@ -62,6 +63,45 @@ describe("startConversation", () => {
     await expect(
       startConversation("production", "agent-fail")
     ).rejects.toMatchObject({ status: 500 });
+  });
+
+  /**
+   * The `userId` query parameter is the whole mechanism that keeps activation's
+   * probe conversations out of "restore my last conversation" — the probes stamp
+   * `OPERATOR_PROBE_USER_ID` and recovery filters on it. Every other test in
+   * that chain asserts on already-tagged descriptor fixtures, so removing or
+   * misspelling this line would leave all of them green while the filter
+   * silently stopped matching anything. This is the one place the request itself
+   * is checked.
+   */
+  it("passes userId through as a query parameter when given", async () => {
+    let seen: string | null = null;
+    server.use(
+      http.post("*/agents/:agentId/start", ({ request }) => {
+        seen = new URL(request.url).searchParams.get("userId");
+        return HttpResponse.json({ location: "/agents/conv-tagged" });
+      })
+    );
+
+    await startConversation("production", "agent1", OPERATOR_PROBE_USER_ID);
+
+    expect(seen).toBe(OPERATOR_PROBE_USER_ID);
+  });
+
+  it("sends no userId parameter at all when none is given", async () => {
+    // An admin's own conversation must stay untagged, or recovery would filter
+    // out the very conversation it exists to restore.
+    let hadParam = true;
+    server.use(
+      http.post("*/agents/:agentId/start", ({ request }) => {
+        hadParam = new URL(request.url).searchParams.has("userId");
+        return HttpResponse.json({ location: "/agents/conv-plain" });
+      })
+    );
+
+    await startConversation("production", "agent1");
+
+    expect(hadParam).toBe(false);
   });
 });
 

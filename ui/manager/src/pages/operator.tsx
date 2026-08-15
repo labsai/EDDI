@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { OperatorActivation } from "@/components/operator/operator-activation";
 import { OperatorChat } from "@/components/operator/operator-chat";
+import { OperatorHistory } from "@/components/operator/operator-history";
 import { OperatorStatusPanel } from "@/components/operator/operator-status";
 import {
   useOperatorConfig,
@@ -60,6 +61,9 @@ export function OperatorPage() {
   const [canaryWarning, setCanaryWarning] = useState<string | null>(null);
   /** Delete is irreversible, so it is confirmed wherever it is offered. */
   const [confirmPausedReset, setConfirmPausedReset] = useState(false);
+  /** Chat or History. Local, not a route: switching tabs is not a navigation
+   *  anyone wants in their back-button history mid-investigation. */
+  const [tab, setTab] = useState<"chat" | "history">("chat");
 
   const activate = useActivateOperator();
   const reactivate = useReactivateOperator();
@@ -75,6 +79,42 @@ export function OperatorPage() {
   // Structured RULE/TOOL_CALL pause detail — the streamed `done` snapshot only
   // carries the generic bookmark fields, not per-call tool names/arguments.
   const approvalStatus = useApprovalStatus(chat.conversationId ?? undefined, chat.isPaused);
+
+  /**
+   * Bring the tab's conversation back on mount.
+   *
+   * The store is shared with the docked drawer, which hydrates too — `hydrate`
+   * is idempotent and no-ops while one is in flight or a transcript is already
+   * on screen, so both mounting at once loads it once. Firing on every render
+   * where the identity changes is harmless for the same reason.
+   */
+  const isActiveOperator = Boolean(config?.enabled && config?.agentId);
+  const hydrate = chat.hydrate;
+  useEffect(() => {
+    if (!isActiveOperator) return;
+    void hydrate();
+  }, [isActiveOperator, hydrate]);
+
+  /**
+   * True only while an explicit History pick is loading.
+   *
+   * Deliberately NOT `chat.isHydrating`, which is also true during the silent
+   * mount restore — feeding that to the list disabled every row for a load that
+   * had nothing to do with a pick, with no spinner to explain it.
+   */
+  const [isPicking, setIsPicking] = useState(false);
+
+  const handleSelectConversation = useCallback(
+    (conversationId: string) => {
+      // Switch first: the load is what the Chat tab renders, and leaving the
+      // admin on the list while it happens hides the thing they just asked for.
+      setTab("chat");
+      setIsPicking(true);
+      void chat.selectConversation(conversationId).finally(() => setIsPicking(false));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [chat.selectConversation],
+  );
 
   // Fetched once a pause needs it, cached for the tab: reconstructing "METHOD
   // /path" for display is the same lookup on every pause, and the spec does
@@ -453,7 +493,91 @@ export function OperatorPage() {
         </div>
       )}
 
+      {/* A real ARIA tablist: roving tabIndex, arrow-key selection, and each tab
+          bound to its panel — the pattern `config-editor-layout.tsx` already
+          establishes. Declaring role="tab" without them looks correct to a
+          checker and leaves keyboard and screen-reader users with two buttons
+          that announce as tabs and behave as neither. */}
+      <div
+        role="tablist"
+        aria-label={t("operator.tabs.label", "Operator views")}
+        className="flex items-center gap-1 border-b border-border"
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+          e.preventDefault();
+          const next = tab === "chat" ? "history" : "chat";
+          setTab(next);
+          // Focus follows selection, as the APG pattern specifies for
+          // automatically-activated tabs.
+          requestAnimationFrame(() => document.getElementById(`operator-tab-${next}`)?.focus());
+        }}
+      >
+        {(["chat", "history"] as const).map((value) => (
+          <button
+            key={value}
+            id={`operator-tab-${value}`}
+            type="button"
+            role="tab"
+            aria-selected={tab === value}
+            aria-controls={`operator-tabpanel-${value}`}
+            tabIndex={tab === value ? 0 : -1}
+            onClick={() => setTab(value)}
+            className={
+              tab === value
+                ? "-mb-px border-b-2 border-primary px-3 py-2 text-sm font-medium text-foreground"
+                : "-mb-px border-b-2 border-transparent px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+            }
+            data-testid={`operator-tab-${value}`}
+          >
+            {value === "chat"
+              ? t("operator.tabs.chat", "Chat")
+              : t("operator.tabs.history", "History")}
+          </button>
+        ))}
+      </div>
+
+      {/* The status panel stays put across both tabs — deployment state and the
+          gate verdict are exactly the context someone reviewing past
+          conversations wants, and moving it would make the tabs feel like two
+          different screens. Only the left cell swaps. */}
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[1fr_20rem]">
+        {/* Rendered only while showing. `hidden` is display:none, which does NOT
+            unmount — the list and one full-transcript read per row fired on
+            every operator page load for a tab nobody had opened (measured: 17
+            requests). Unlike the chat below there is nothing here worth keeping
+            alive: react-query caches the data, so coming back is free. */}
+        {tab === "history" && (
+          <div
+            id="operator-tabpanel-history"
+            role="tabpanel"
+            aria-labelledby="operator-tab-history"
+            tabIndex={0}
+            className="min-h-0 min-w-0 overflow-y-auto"
+          >
+            <OperatorHistory
+              agentId={config!.agentId!}
+              activeConversationId={chat.conversationId}
+              onSelect={handleSelectConversation}
+              isLoading={isPicking}
+            />
+          </div>
+        )}
+
+        {/* Kept MOUNTED while History is showing, not unmounted and rebuilt.
+            OperatorChat owns scroll position and composer draft state, and a
+            streaming turn keeps running while the admin looks through history —
+            a remount would drop the draft and jump the transcript to the top. */}
+        {/* min-w-0 belongs on the GRID ITEM, which is now this wrapper rather
+            than OperatorChat itself. Without it the track grows to the widest
+            unbreakable line inside (an approval card's one-line JSON args) and
+            pushes the page into horizontal scroll — the child's own min-w-0 is a
+            floor, not a ceiling, so it no longer constrains the track. */}
+        <div
+          id="operator-tabpanel-chat"
+          role="tabpanel"
+          aria-labelledby="operator-tab-chat"
+          className={tab === "chat" ? "flex min-h-0 min-w-0 flex-col" : "hidden"}
+        >
         <OperatorChat
           messages={chat.messages}
           events={chat.events}
@@ -485,7 +609,11 @@ export function OperatorPage() {
           onDecide={handleDecide}
           blockedCalls={blockedCalls}
           renderCallExtra={renderCallExtra}
+          isVisible={tab === "chat"}
+          isRestoring={isPicking}
+          isReadOnly={chat.isReadOnly}
         />
+        </div>
         <OperatorStatusPanel
           config={config!}
           status={status.data}

@@ -4009,8 +4009,10 @@
     },
     "chat": {
       "empty": "Interrogez votre déploiement. L'opérateur fait les recherches et vous montre chaque appel qu'il effectue.",
+      "restoring": "Ouverture de la conversation…",
       "placeholder": "Agents, conversations, déploiements, journaux…",
       "pausedPlaceholder": "En attente d'une décision ci-dessus avant que l'opérateur ne puisse continuer…",
+      "readOnlyPlaceholder": "Cette conversation est terminée — démarrez-en une nouvelle pour continuer.",
       "send": "Envoyer",
       "stop": "Arrêter",
       "newConversation": "Démarrer une nouvelle conversation",
@@ -4097,6 +4099,19 @@
       "partial_one": "Approuvée — {{count}} appel rejeté",
       "partial_other": "Approuvée — {{count}} appels rejetés",
       "partial_many": "Approuvée — {{count}} appels rejetés"
+    },
+    "tabs": {
+      "label": "Vues de l'opérateur",
+      "chat": "Discussion",
+      "history": "Historique"
+    },
+    "history": {
+      "emptyTitle": "Aucune conversation passée",
+      "emptyDescription": "Les conversations avec l'opérateur apparaissent ici pour que vous puissiez les reprendre plus tard.",
+      "noOpeningMessage": "(pas encore de message)",
+      "stepCount_one": "{{count}} étape",
+      "stepCount_other": "{{count}} étapes",
+      "stepCount_many": "{{count}} étapes"
     }
   },
   "groupWorkspace": {

@@ -3979,8 +3979,10 @@
     },
     "chat": {
       "empty": "배포에 대해 물어보세요. 오퍼레이터가 찾아보고, 수행한 모든 호출을 보여줍니다.",
+      "restoring": "대화를 여는 중…",
       "placeholder": "에이전트, 대화, 배포, 로그에 대해 물어보세요…",
       "pausedPlaceholder": "위의 결정을 기다리는 중이라 운영자가 계속할 수 없습니다…",
+      "readOnlyPlaceholder": "이 대화는 종료되었습니다 — 계속하려면 새 대화를 시작하세요.",
       "send": "보내기",
       "stop": "중지",
       "newConversation": "새 대화 시작",
@@ -4066,6 +4068,18 @@
       "noReply": "응답 없이 턴이 종료되었습니다",
       "partial_one": "승인됨 — 호출 {{count}}건 거부",
       "partial_other": "승인됨 — 호출 {{count}}건 거부"
+    },
+    "tabs": {
+      "label": "운영자 보기",
+      "chat": "채팅",
+      "history": "기록"
+    },
+    "history": {
+      "emptyTitle": "이전 대화가 없습니다",
+      "emptyDescription": "운영자와의 대화가 여기에 표시되어 나중에 다시 이어갈 수 있습니다.",
+      "noOpeningMessage": "(아직 메시지 없음)",
+      "stepCount_one": "{{count}}단계",
+      "stepCount_other": "{{count}}단계"
     }
   },
   "groupWorkspace": {

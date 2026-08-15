@@ -3979,8 +3979,10 @@
     },
     "chat": {
       "empty": "Fragen Sie nach Ihrer Installation. Der Operator schlägt nach und zeigt Ihnen jeden Aufruf, den er macht.",
+      "restoring": "Unterhaltung wird geöffnet …",
       "placeholder": "Fragen Sie nach Agenten, Konversationen, Deployments, Logs …",
       "pausedPlaceholder": "Wartet auf eine Entscheidung oben, bevor der Operator fortfahren kann…",
+      "readOnlyPlaceholder": "Diese Unterhaltung ist beendet — starten Sie eine neue, um fortzufahren.",
       "send": "Senden",
       "stop": "Stoppen",
       "newConversation": "Neue Konversation beginnen",
@@ -4066,6 +4068,18 @@
       "noReply": "Der Durchlauf endete ohne Antwort",
       "partial_one": "Genehmigt — {{count}} Aufruf abgelehnt",
       "partial_other": "Genehmigt — {{count}} Aufrufe abgelehnt"
+    },
+    "tabs": {
+      "label": "Operator-Ansichten",
+      "chat": "Chat",
+      "history": "Verlauf"
+    },
+    "history": {
+      "emptyTitle": "Keine früheren Unterhaltungen",
+      "emptyDescription": "Unterhaltungen mit dem Operator erscheinen hier, damit Sie sie später fortsetzen können.",
+      "noOpeningMessage": "(noch keine Nachricht)",
+      "stepCount_one": "{{count}} Schritt",
+      "stepCount_other": "{{count}} Schritte"
     }
   },
   "groupWorkspace": {

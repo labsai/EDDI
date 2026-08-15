@@ -1,4 +1,4 @@
-import { useState, useRef, type ReactNode } from "react";
+import { useState, useRef, useLayoutEffect, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "react-i18next";
@@ -34,6 +34,26 @@ export interface OperatorChatProps {
   liveToolsSettled?: boolean;
   /** Completed turns' traces, keyed by the agent message they belong to. */
   tracesByMessageId: Record<string, PipelineEvent[]>;
+  /**
+   * False while another tab is showing this pane. The pane stays MOUNTED (a
+   * streaming turn and the composer draft must survive the switch), but
+   * `display:none` still destroys the scroll container's position, so becoming
+   * visible again has to restore it.
+   */
+  isVisible?: boolean;
+  /**
+   * True while a conversation picked from History is being read back. Without
+   * it an empty `messages` renders the starter-prompt empty state, which is
+   * indistinguishable from a brand-new chat for the whole duration of the read.
+   */
+  isRestoring?: boolean;
+  /**
+   * True when the shown conversation cannot take another turn (ENDED, ERROR,
+   * EXECUTION_INTERRUPTED, or a turn still IN_PROGRESS). The transcript stays
+   * readable; the composer closes, because sending would fail at the backend
+   * and an enabled composer over a dead conversation is a trap.
+   */
+  isReadOnly?: boolean;
   isStreaming: boolean;
   error: string | null;
   onSend: (input: string, attachments?: SentAttachment[]) => void;
@@ -112,6 +132,9 @@ export function OperatorChat({
   liveToolCalls,
   liveToolsSettled,
   tracesByMessageId,
+  isVisible = true,
+  isRestoring = false,
+  isReadOnly = false,
   isStreaming,
   error,
   onSend,
@@ -154,6 +177,37 @@ export function OperatorChat({
     bottomThreshold: 80,
   });
 
+  // Coming back from another tab. `display:none` resets scrollTop to 0, and the
+  // auto-scroll effect above only fires when its deps change — none of which do
+  // on a tab flip — so without this the admin lands on message 1 of a long
+  // transcript with no new content to bring them back down.
+  //
+  // The OFFSET is restored, not just "jump to the bottom": someone who switched
+  // away while reading an older part of the transcript wants that place back,
+  // and always bottoming out would lose it just as surely as the reset did. The
+  // one case that does bottom out is having been at the bottom already, where
+  // following new content is the point.
+  const wasVisibleRef = useRef(isVisible);
+  const hiddenScrollTopRef = useRef<number | null>(null);
+  const hiddenAtBottomRef = useRef(true);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!isVisible && wasVisibleRef.current && el) {
+      // Going away: remember where they were, before display:none erases it.
+      hiddenScrollTopRef.current = el.scrollTop;
+      hiddenAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 80;
+    } else if (isVisible && !wasVisibleRef.current) {
+      // Coming back. At the bottom before, or nothing recorded (first reveal) —
+      // follow the transcript; otherwise put them back where they were.
+      if (hiddenAtBottomRef.current || hiddenScrollTopRef.current === null) {
+        scrollToBottom("auto");
+      } else if (el) {
+        el.scrollTop = hiddenScrollTopRef.current;
+      }
+    }
+    wasVisibleRef.current = isVisible;
+  }, [isVisible, scrollToBottom, scrollRef]);
+
   // Same staging as the main chat panel — picker, paste, chips, per-turn cap.
   const {
     pendingAttachments,
@@ -165,7 +219,11 @@ export function OperatorChat({
     takeForSend,
   } = useAttachmentStaging(conversationId ?? null, onEnsureConversation);
   const attachEnabled = Boolean(onEnsureConversation || conversationId);
-  const { isDragOver, dropHandlers } = useFileDrop(attachEnabled && !isPaused, (files) => {
+  // One predicate for "the composer is closed", so the textarea, the send
+  // button, the attach button and the drop target cannot drift apart.
+  const composerClosed = isPaused || isReadOnly;
+
+  const { isDragOver, dropHandlers } = useFileDrop(attachEnabled && !composerClosed, (files) => {
     void stageFiles(files);
   });
 
@@ -182,7 +240,7 @@ export function OperatorChat({
     const value = text.trim();
     // Attachment-only turns are allowed once an upload is ready, matching the
     // main chat panel; nothing sends while an upload is still in flight.
-    if ((!value && !hasReadyAttachment) || isStreaming || isPaused || isUploading) return;
+    if ((!value && !hasReadyAttachment) || isStreaming || composerClosed || isUploading) return;
     const sent: SentAttachment[] = takeForSend().map((a: ReadyAttachment) => ({
       storageRef: a.result.storageRef,
       fileName: a.result.fileName || a.file.name,
@@ -214,7 +272,15 @@ export function OperatorChat({
         aria-relevant="additions text"
         aria-label={t("operator.chat.transcript", "Operator conversation")}
       >
-        {messages.length === 0 && (
+        {messages.length === 0 && isRestoring && (
+          <div className="space-y-3 py-8 text-center" role="status" data-testid="operator-restoring">
+            <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground/60" />
+            <p className="text-sm text-muted-foreground">
+              {t("operator.chat.restoring", "Opening that conversation…")}
+            </p>
+          </div>
+        )}
+        {messages.length === 0 && !isRestoring && (
           <div className="space-y-3 py-8 text-center">
             <Bot className="mx-auto h-10 w-10 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">{t("operator.chat.empty", "Ask about your deployment. The operator looks things up and shows you every call it makes.")}</p>
@@ -478,7 +544,7 @@ export function OperatorChat({
               variant="ghost"
               size="icon"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isPaused || isUploading}
+              disabled={composerClosed || isUploading}
               title={t("chat.attach", "Attach file")}
               aria-label={t("chat.attach", "Attach file")}
               data-testid="operator-attach-btn"
@@ -508,16 +574,18 @@ export function OperatorChat({
             // Screenshots / copied files paste as attachments; text pastes
             // (no files on the clipboard) fall through untouched.
             const files = filesFromClipboard(e);
-            if (!files.length || !attachEnabled || isPaused) return;
+            if (!files.length || !attachEnabled || composerClosed) return;
             e.preventDefault();
             void stageFiles(files);
           }}
-          disabled={isPaused}
+          disabled={composerClosed}
           rows={1}
           placeholder={
             isPaused
               ? t("operator.chat.pausedPlaceholder", "Awaiting a decision above before the operator can continue…")
-              : t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")
+              : isReadOnly
+                ? t("operator.chat.readOnlyPlaceholder", "This conversation is finished — start a new one to continue.")
+                : t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")
           }
           aria-label={t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")}
           className="max-h-[120px] min-h-[40px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2.5 text-sm disabled:opacity-50"
@@ -531,7 +599,7 @@ export function OperatorChat({
           <Button
             size="icon"
             onClick={() => submit(input)}
-            disabled={(!input.trim() && !hasReadyAttachment) || isPaused || isUploading}
+            disabled={(!input.trim() && !hasReadyAttachment) || composerClosed || isUploading}
             title={t("operator.chat.send", "Send")}
             aria-label={t("operator.chat.send", "Send")}
             data-testid="operator-send"

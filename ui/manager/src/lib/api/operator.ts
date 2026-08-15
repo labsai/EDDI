@@ -536,6 +536,22 @@ export interface CanaryResult {
   error?: string;
 }
 
+/**
+ * `userId` stamped on every conversation the activation probes start.
+ *
+ * The probes run against the operator's OWN agent, and both are fire-and-forget
+ * after activation returns — so for ~30 seconds there is a conversation newer
+ * than anything the admin has, belonging to the same agent, that is about to be
+ * ended. Without a marker, a second tab opened in that window restored the
+ * canary as the admin's own transcript ("List the agents on this platform. Use
+ * your tools; do not guess.") and was then parked on a dead conversation.
+ *
+ * A `userId` rather than a naming convention on the message: it lands on the
+ * conversation DESCRIPTOR, so a caller can filter probes out of a descriptor
+ * list without reading each transcript to find out what it is.
+ */
+export const OPERATOR_PROBE_USER_ID = "eddi-operator-probe";
+
 /** The probe message. Phrased to force exactly one cheap read. */
 /** How long a probe read may take before it is treated as a failure. */
 export const CANARY_TIMEOUT_MS = 60_000;
@@ -575,7 +591,7 @@ export async function runOperatorCanary(
 
   let conversationId = null;
   try {
-    conversationId = await startConversation(operatorEnvironment(config), config.agentId);
+    conversationId = await startConversation(operatorEnvironment(config), config.agentId, OPERATOR_PROBE_USER_ID);
     let toolCalls = 0;
     let toolError: string | undefined;
     let streamError: string | undefined;

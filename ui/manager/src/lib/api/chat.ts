@@ -98,12 +98,21 @@ export function parseConversationIdFromLocation(location: string): string {
  * production regardless of what the caller asked for. An agent deployed only to
  * `test` was therefore unreachable from the UI, and the failure read as a broken
  * agent rather than as the wrong environment.
+ *
+ * `userId` is optional and is passed straight through to the backend, which
+ * stores it on the conversation descriptor. Its one use today is letting
+ * machine-started conversations be told apart from an admin's own: the operator
+ * activation probes tag theirs (see `OPERATOR_PROBE_USER_ID`) so that restoring
+ * "your last conversation" cannot adopt a canary that is about to be ended
+ * underneath it.
  */
 export async function startConversation(
   environment: Environment,
-  agentId: string
+  agentId: string,
+  userId?: string
 ): Promise<string> {
   const params = new URLSearchParams({ environment });
+  if (userId) params.set("userId", userId);
   const result = await api.post<{ location: string }>(
     `/agents/${agentId}/start?${params.toString()}`
   );

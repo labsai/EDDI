@@ -3979,8 +3979,10 @@
     },
     "chat": {
       "empty": "ご自身の環境について質問してください。オペレーターが調べ、行ったすべての呼び出しを表示します。",
+      "restoring": "会話を開いています…",
       "placeholder": "エージェント、会話、デプロイ、ログについて質問…",
       "pausedPlaceholder": "上の判断待ちのため、オペレーターは続行できません…",
+      "readOnlyPlaceholder": "この会話は終了しています。続けるには新しい会話を開始してください。",
       "send": "送信",
       "stop": "停止",
       "newConversation": "新しい会話を開始",
@@ -4066,6 +4068,18 @@
       "noReply": "応答がないままターンが終了しました",
       "partial_one": "承認しました — {{count}} 件の呼び出しを拒否",
       "partial_other": "承認しました — {{count}} 件の呼び出しを拒否"
+    },
+    "tabs": {
+      "label": "オペレータービュー",
+      "chat": "チャット",
+      "history": "履歴"
+    },
+    "history": {
+      "emptyTitle": "過去の会話はありません",
+      "emptyDescription": "オペレーターとの会話はここに表示され、後から再開できます。",
+      "noOpeningMessage": "(メッセージはまだありません)",
+      "stepCount_one": "{{count}} ステップ",
+      "stepCount_other": "{{count}} ステップ"
     }
   },
   "groupWorkspace": {

@@ -4099,8 +4099,10 @@
     },
     "chat": {
       "empty": "اسأل عن نشرك. يبحث المُشغّل عن الإجابات ويعرض لك كل استدعاء يقوم به.",
+      "restoring": "جارٍ فتح تلك المحادثة…",
       "placeholder": "اسأل عن الوكلاء والمحادثات وعمليات النشر والسجلات…",
       "pausedPlaceholder": "بانتظار قرار أعلاه قبل أن يتمكن المشغّل من المتابعة…",
+      "readOnlyPlaceholder": "انتهت هذه المحادثة — ابدأ محادثة جديدة للمتابعة.",
       "send": "إرسال",
       "stop": "إيقاف",
       "newConversation": "بدء محادثة جديدة",
@@ -4190,6 +4192,22 @@
       "partial_two": "تمت الموافقة — تم رفض {{count}} استدعاءات",
       "partial_few": "تمت الموافقة — تم رفض {{count}} استدعاءات",
       "partial_many": "تمت الموافقة — تم رفض {{count}} استدعاءات"
+    },
+    "tabs": {
+      "label": "عروض المشغّل",
+      "chat": "محادثة",
+      "history": "السجل"
+    },
+    "history": {
+      "emptyTitle": "لا توجد محادثات سابقة",
+      "emptyDescription": "تظهر محادثاتك مع المشغّل هنا لتتمكن من متابعتها لاحقًا.",
+      "noOpeningMessage": "(لا توجد رسالة بعد)",
+      "stepCount_one": "خطوة واحدة",
+      "stepCount_other": "{{count}} خطوة",
+      "stepCount_zero": "{{count}} خطوة",
+      "stepCount_two": "خطوتان",
+      "stepCount_few": "{{count}} خطوات",
+      "stepCount_many": "{{count}} خطوة"
     }
   },
   "groupWorkspace": {

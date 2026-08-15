@@ -3979,8 +3979,10 @@
     },
     "chat": {
       "empty": "来问问你的部署。操作员会去查，并向你展示它发出的每一次调用。",
+      "restoring": "正在打开该对话…",
       "placeholder": "询问智能体、会话、部署、日志……",
       "pausedPlaceholder": "正在等待上方的决定，之后操作员才能继续…",
+      "readOnlyPlaceholder": "该对话已结束——请开始新的对话以继续。",
       "send": "发送",
       "stop": "停止",
       "newConversation": "开始新会话",
@@ -4066,6 +4068,18 @@
       "noReply": "本轮结束但没有回复",
       "partial_one": "已批准 — 拒绝了 {{count}} 个调用",
       "partial_other": "已批准 — 拒绝了 {{count}} 个调用"
+    },
+    "tabs": {
+      "label": "操作员视图",
+      "chat": "对话",
+      "history": "历史记录"
+    },
+    "history": {
+      "emptyTitle": "没有历史对话",
+      "emptyDescription": "你与操作员的对话会显示在这里，方便稍后继续。",
+      "noOpeningMessage": "(尚无消息)",
+      "stepCount_one": "{{count}} 步",
+      "stepCount_other": "{{count}} 步"
     }
   },
   "groupWorkspace": {
