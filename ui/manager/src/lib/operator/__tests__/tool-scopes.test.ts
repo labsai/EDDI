@@ -94,6 +94,15 @@ describe("tool-scopes", () => {
       // addition here is exactly as dangerous as a silent removal from an
       // allow-list — this test catches either direction.
       expect(WRITE_ENDPOINTS).toEqual([
+        // Test-drive. Writes by METHOD only — they create a conversation and a
+        // message, never a configuration change. Here rather than in
+        // READ_ENDPOINTS because grantsWriteCapability keys off the method, and
+        // a POST among the reads flipped read_only into the write branch of the
+        // safety preamble. `/resume`, `/state`, `/cancel` and `/endConversation`
+        // are excluded on purpose — see TEST_DRIVE_WRITES.
+        "POST /agents/{agentId}/start",
+        "POST /agents/{conversationId}",
+        "POST /groups/{groupId}/conversations",
         "PATCH /descriptorstore/descriptors/{id}",
         "POST /administration/{environment}/deploy/{agentId}",
         "POST /administration/{environment}/undeploy/{agentId}",

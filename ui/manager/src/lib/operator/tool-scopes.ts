@@ -116,6 +116,11 @@ export const READ_ENDPOINTS: readonly string[] = [
   // Conversations
   "GET /conversationstore/conversations",
   "GET /conversationstore/conversations/{conversationId}",
+  // Test-drive, read half: inspect a conversation with another agent. The POSTs
+  // that CREATE one live in WRITE_ENDPOINTS — see TEST_DRIVE_WRITES.
+  "GET /agents/{conversationId}",
+  "GET /agents/{conversationId}/status",
+  "GET /groups/{groupId}/conversations/{groupConversationId}",
   // Operations
   "GET /administration/{environment}/deploymentstatus/{agentId}",
   "GET /administration/coordinator/status",
@@ -251,7 +256,38 @@ export const READ_ENDPOINTS: readonly string[] = [
  * unconditionally, anything added here is gated the moment it is added — the
  * failure mode of forgetting to update a pattern list does not exist.
  */
+/**
+ * Starting a conversation with another agent, and saying something into it.
+ *
+ * These are POSTs, so they belong in the write set — not because they change any
+ * configuration (they do not), but because `grantsWriteCapability` and the whole
+ * gate model key off the method. Putting them in `READ_ENDPOINTS` flipped a
+ * read-only operator into the write branch of the safety preamble: it lost the
+ * "you are read-only" rule and gained the six write rules, describing a
+ * capability boundary it was not actually behind. The tests caught it; the
+ * lesson is that `READ_ENDPOINTS` means "GETs", not "harmless".
+ *
+ * The consequence, accepted deliberately: a read-only operator cannot test-drive
+ * an agent. That is coherent — it cannot create the conversation record either.
+ *
+ * Every call here pauses for human approval like any other write. That is the
+ * point: sending a message as the admin is a decision they should see, and the
+ * agent being tested keeps its OWN gate for anything it then does.
+ *
+ * Deliberately ABSENT, and they must stay absent: `POST /agents/{id}/resume`
+ * (the operator approving its own pauses would be a complete escape from the
+ * gate), `PATCH /agents/{conversationId}/state`, `/cancel`, `/endConversation`,
+ * `/undo`, `/redo`, and `DELETE …/conversations/{id}` — see
+ * `planning/operator-write-scope-plan.md` §5 in the EDDI repo.
+ */
+const TEST_DRIVE_WRITES = [
+  "POST /agents/{agentId}/start",
+  "POST /agents/{conversationId}",
+  "POST /groups/{groupId}/conversations",
+] as const;
+
 export const WRITE_ENDPOINTS: readonly string[] = [
+  ...TEST_DRIVE_WRITES,
   "PATCH /descriptorstore/descriptors/{id}",
   "POST /administration/{environment}/deploy/{agentId}",
   "POST /administration/{environment}/undeploy/{agentId}",
@@ -392,6 +428,19 @@ export function grantsWriteCapability(endpoints: readonly string[]): boolean {
 export function grantsAgentCreation(endpoints: readonly string[]): boolean {
   const set = new Set(endpoints);
   return set.has("POST /administration/agents/setup") || set.has("POST /administration/agents/setup-api");
+}
+
+/**
+ * Whether the granted endpoints let the operator hold a conversation with
+ * another agent — start one AND say something into it.
+ *
+ * Both are required: `start` alone creates an empty conversation and proves
+ * nothing, which is exactly the useless half-capability the prompt must not
+ * advertise.
+ */
+export function grantsConversationTesting(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return set.has("POST /agents/{agentId}/start") && set.has("POST /agents/{conversationId}");
 }
 
 /**

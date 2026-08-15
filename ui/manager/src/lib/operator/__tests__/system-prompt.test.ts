@@ -6,7 +6,13 @@ import {
   defaultOperatorPromptBody,
   safetyPreambleForScope,
 } from "../system-prompt";
-import { READ_ENDPOINTS, WRITE_ENDPOINTS, endpointsForScope } from "../tool-scopes";
+import {
+  READ_ENDPOINTS,
+  WRITE_ENDPOINTS,
+  endpointsForScope,
+  buildToolApprovals,
+  grantsConversationTesting,
+} from "../tool-scopes";
 
 /**
  * A granted set that contains a write.
@@ -395,5 +401,89 @@ describe("prompt corrections from dev testing", () => {
     expect(body).toMatch(/ask which one to use BEFORE proposing the\s+call/);
     // And the read-only scope, which cannot create agents, does not carry it.
     expect(defaultOperatorPromptBody("read_only")).not.toContain("setupAgent essentials");
+  });
+});
+
+/**
+ * Test-drive: the operator could build an agent but never exercise one. Asked to
+ * check its own creation it answered "I don't have a start conversation tool" —
+ * accurate, and useless to the admin who had just approved the build.
+ */
+describe("test-drive: talking to another agent", () => {
+  it("grants start + say to read_write, and the read-back to both", () => {
+    const write = new Set(endpointsForScope("read_write"));
+    expect(write.has("POST /agents/{agentId}/start")).toBe(true);
+    expect(write.has("POST /agents/{conversationId}")).toBe(true);
+    expect(write.has("POST /groups/{groupId}/conversations")).toBe(true);
+
+    // The POSTs are writes by method, so they sit in WRITE_ENDPOINTS: putting
+    // them in READ_ENDPOINTS flipped read_only into the write branch of the
+    // safety preamble. Reading a conversation back is a plain GET and is
+    // granted to both scopes.
+    for (const scope of ["read_only", "read_write"] as const) {
+      expect(new Set(endpointsForScope(scope)).has("GET /agents/{conversationId}")).toBe(true);
+    }
+    const read = new Set(endpointsForScope("read_only"));
+    expect(read.has("POST /agents/{agentId}/start")).toBe(false);
+    expect(read.has("POST /agents/{conversationId}")).toBe(false);
+  });
+
+  it("leaves read_only genuinely read-only — the regression the tests caught", () => {
+    expect(safetyPreambleForScope("read_only")).toContain("You are read-only");
+    expect(defaultOperatorPromptBody("read_only")).not.toContain("Testing an agent");
+  });
+
+  /**
+   * THE regression guard. `/resume` would let the operator approve its own
+   * pauses — a complete escape from the gate — and the other three let it
+   * rewrite or discard a conversation's lifecycle. All are excluded by
+   * planning/operator-write-scope-plan.md §5.
+   */
+  it("never grants resume, state, cancel or end — for any scope", () => {
+    for (const scope of ["read_only", "read_write"] as const) {
+      const set = new Set(endpointsForScope(scope));
+      for (const forbidden of [
+        "POST /agents/{conversationId}/resume",
+        "PATCH /agents/{conversationId}/state",
+        "POST /agents/{conversationId}/cancel",
+        "POST /agents/{conversationId}/endConversation",
+        "POST /agents/{conversationId}/undo",
+        "POST /agents/{conversationId}/redo",
+      ]) {
+        expect(set.has(forbidden)).toBe(false);
+      }
+    }
+  });
+
+  it("keeps the gate intact — the new POSTs are approved, never exempt", () => {
+    // Adding a conversation POST to `exempt` would be the first hole ever
+    // punched in http.post:*, and verifyGateInstalled would reject it anyway.
+    expect(buildToolApprovals().exempt).toEqual(["http.get:*"]);
+    expect(buildToolApprovals().requireApproval).toContain("http.post:*");
+  });
+
+  it("tells the operator that an AWAITING_HUMAN reply is a PASS, not a failure", () => {
+    // An agent with its own gate is supposed to stop. Reading that as broken
+    // would report a correctly-configured agent as failing.
+    const body = defaultOperatorPromptBody("read_write");
+    expect(body).toContain("Testing an agent");
+    expect(body).toMatch(/paused on ITS OWN approval gate/);
+    expect(body).toMatch(/That is a PASS/);
+    expect(body).toMatch(/cannot approve on another\s+agent's behalf/);
+  });
+
+  it("says nothing about test-driving when the endpoints are not granted", () => {
+    // The module's rule: the prompt may never describe a capability the agent
+    // lacks. Pass a set with the reads but neither conversation POST.
+    const body = buildOperatorPromptBody(["GET /agentstore/agents/descriptors"]);
+    expect(body).not.toContain("Testing an agent");
+  });
+
+  it("requires BOTH start and say — start alone proves nothing", () => {
+    expect(grantsConversationTesting(["POST /agents/{agentId}/start"])).toBe(false);
+    expect(grantsConversationTesting(["POST /agents/{conversationId}"])).toBe(false);
+    expect(
+      grantsConversationTesting(["POST /agents/{agentId}/start", "POST /agents/{conversationId}"]),
+    ).toBe(true);
   });
 });
