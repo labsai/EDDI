@@ -86,10 +86,31 @@ public class ApiCallsTask implements ILifecycleTask {
             // ApiCallExecutor stores response in conversation memory via prePostUtils.
             // We also merge into templateDataObjects so subsequent calls in this loop can
             // reference previous results.
-            if (httpCallResult != null && !httpCallResult.isEmpty()) {
+            //
+            // SUCCESSFUL results only. The result map doubles as the LLM tool
+            // contract, which now populates "body"/"httpCode" on FAILURES too (the
+            // model must be able to see a call failed) — but this pipeline's
+            // cross-call template contract predates that and never included error
+            // text: a failed call used to merge nothing. Without this guard, a
+            // failed call's error body would overwrite a previous successful
+            // call's {body} and a later call templating it would silently send
+            // error text as its payload. Failure details remain available to
+            // templates under the scoped keys the executor has always written
+            // ({responseObjectName}Error / {responseObjectName}HttpCode).
+            if (httpCallResult != null && !httpCallResult.isEmpty() && !isFailureResult(httpCallResult)) {
                 templateDataObjects.putAll(httpCallResult);
             }
         }
+    }
+
+    /**
+     * Whether the executor's result map describes a FAILED call — a non-2xx
+     * {@code httpCode}. A missing code is not failure: fire-and-forget returns an
+     * empty map, and pre-contract results carried no code at all.
+     */
+    // Package-private for unit testing.
+    static boolean isFailureResult(Map<String, Object> result) {
+        return result.get("httpCode") instanceof Integer code && (code < 200 || code >= 300);
     }
 
     /**

@@ -538,6 +538,16 @@ class RestAgentEngineStreamingTest {
     @org.junit.jupiter.api.DisplayName("SSE data lines are padded so a leading space survives")
     class DataLinePadding {
 
+        @Test
+        @DisplayName("a bare carriage return is normalised so its continuation line stays padded")
+        void carriageReturnContinuationIsPadded() {
+            // RESTEasy's SSE serializer starts a new data: line on \r as well
+            // as \n - an unnormalised \r would produce an UNPADDED continuation
+            // whose first character the consumer then eats.
+            String padded = RestAgentEngineStreaming.padDataLines("a\rb\r\nc");
+            assertEquals(" a\n b\n c", padded);
+        }
+
         @org.junit.jupiter.api.Test
         void aLeadingSpaceSurvivesTheConsumersStrip() {
             String padded = RestAgentEngineStreaming.padDataLines(" alpha");

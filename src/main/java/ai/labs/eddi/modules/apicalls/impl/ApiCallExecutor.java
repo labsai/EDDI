@@ -21,6 +21,7 @@ import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -106,7 +107,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     private static final Set<String> CREDENTIAL_RESPONSE_HEADERS = Set.of(
             "set-cookie", "set-cookie2", "authorization", "proxy-authorization",
-            "www-authenticate", "proxy-authenticate");
+            "www-authenticate", "proxy-authenticate",
+            // RFC 7615: server-authentication material (rspauth, nextnonce) —
+            // challenge-response state, never data.
+            "authentication-info", "proxy-authentication-info");
 
     private final IHttpClient httpClient;
     private final IJsonSerialization jsonSerialization;
@@ -239,9 +243,21 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         // namespace: ApiCallsTask merges this map into template data,
                         // where that vocabulary is already established.
                         result.put("httpCode", response.getHttpCode());
-                        result.put("body", truncatedError != null && !truncatedError.isBlank()
-                                ? truncatedError
-                                : response.getHttpCodeMessage());
+                        // REDACTED before it reaches the model: an error body is
+                        // server-authored text, and a 401/403 routinely echoes the
+                        // credential that failed ("invalid api key sk-…"). The
+                        // success path stays untouched — response bodies are the
+                        // data the call exists to fetch — but an error body's
+                        // value to the model is the failure REASON, which survives
+                        // redaction. The memory-side {name}Error entry keeps the
+                        // raw text, as it always has, for operators debugging via
+                        // the store.
+                        // The status-message fallback is server-authored text of the
+                        // same trust class as the body — redacted for the same reason.
+                        String toolErrorBody = truncatedError != null && !truncatedError.isBlank()
+                                ? SecretRedactionFilter.redact(truncatedError)
+                                : SecretRedactionFilter.redact(response.getHttpCodeMessage());
+                        result.put("body", toolErrorBody);
 
                         // Store error body in memory so downstream templates / rules can inspect it
                         if (call.getSaveResponse()) {

@@ -1548,6 +1548,20 @@ public class LlmTask implements ILifecycleTask {
                         templateDataObjects.put("userInput", userInput);
 
                         Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateDataObjects, targetServerUrl);
+
+                        // A FAILED retrieval contributes nothing. Its result now
+                        // carries the error body (so LLM TOOLS can report
+                        // failures), but this path pastes the serialized result
+                        // into the SYSTEM prompt as "## Search Results" — where
+                        // up to 2KB of proxy/WAF error page, attacker-influenced
+                        // in some architectures, would masquerade as retrieved
+                        // knowledge. Pre-contract, a failed call contributed an
+                        // empty map here; keep that meaning.
+                        if (result.get("httpCode") instanceof Integer code && (code < 200 || code >= 300)) {
+                            LOGGER.warnf("httpCall RAG '%s' returned %d — omitting from context", httpCallName, code);
+                            return null;
+                        }
+
                         String serialized = jsonSerialization.serialize(result);
 
                         LOGGER.infof("httpCall RAG '%s' executed: keys=%s, size=%d", httpCallName, result.keySet(), serialized.length());

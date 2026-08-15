@@ -232,6 +232,36 @@ class ConversationMemoryUtilitiesTest {
             assertNotNull(simple.getConversationOutputs());
             assertNotNull(simple.getConversationProperties());
         }
+
+        /**
+         * A present-but-empty query parameter ({@code ?returningFields=}) binds as
+         * {@code [""]}, and LLM-generated tools make that shape routine: every
+         * generated parameter is required, so a model with no filter to express sends
+         * the empty string. Treating {@code [""]} as a selection nulled steps, outputs
+         * AND properties — the operator's test-drive read-back returned a snapshot with
+         * nothing to quote, so a working agent looked broken. Blank entries mean NO
+         * filter.
+         */
+        @Test
+        @DisplayName("a blank entry means NO filter, not 'select nothing'")
+        void blankEntryMeansNoFilter() {
+            var snapshot = buildMultiStepSnapshot(2);
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(
+                    snapshot, true, true, List.of(""));
+            assertNotNull(simple.getConversationSteps(), "[\"\"] must behave like no filter");
+            assertNotNull(simple.getConversationOutputs());
+            assertNotNull(simple.getConversationProperties());
+        }
+
+        @Test
+        @DisplayName("blank entries are dropped, real entries still filter")
+        void blankBesideRealEntryStillFilters() {
+            var snapshot = buildMultiStepSnapshot(2);
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(
+                    snapshot, true, true, java.util.Arrays.asList("", "conversationOutputs", "  "));
+            assertNull(simple.getConversationSteps(), "the real entry keeps filtering");
+            assertNotNull(simple.getConversationOutputs());
+        }
     }
 
     // ─── Test Helpers ────────────────────────────────────────────

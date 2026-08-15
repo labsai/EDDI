@@ -668,4 +668,72 @@ class McpApiToolBuilderTest {
         assertFalse(McpApiToolBuilder.looksLikeInlineSpec("https://petstore.example.com/openapi.json"));
         assertFalse(McpApiToolBuilder.looksLikeInlineSpec("file:///etc/passwd"));
     }
+
+    /**
+     * The silent-swallow this closes: the say tool's body was a $ref the parser
+     * left unresolved, so its parameter description carried ZERO field names. The
+     * model guessed keys, the guessed body bound to the DTO's defaults (empty
+     * input), the API answered 200 — and a human-approved test message was never
+     * delivered, with nothing anywhere saying so.
+     */
+    @Test
+    @DisplayName("a $ref body resolves one level, so the description names the real fields")
+    void parseAndBuild_refBodyDescriptionNamesFields() {
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/say":{"post":{
+                "operationId":"say","tags":["chat"],
+                "requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/InputData"}}}},
+                "responses":{"200":{"description":"ok"}}}}},
+                "components":{"schemas":{"InputData":{"type":"object","required":["input"],
+                "properties":{"input":{"type":"string"},"context":{"type":"object"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall say = result.configsByGroup().get("chat").getHttpCalls().get(0);
+
+        String description = say.getParameters().get(McpApiToolBuilder.WHOLE_BODY_VARIABLE);
+        assertTrue(description.contains("input"), "the body fields must be named; got: " + description);
+        assertTrue(description.contains("context"), description);
+        assertTrue(description.contains("required"), "requiredness must be conveyed; got: " + description);
+    }
+
+    @Test
+    @DisplayName("an unknown $ref still degrades to the nameless whole-body form, never throws")
+    void parseAndBuild_unknownRefStillDegrades() {
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/x":{"post":{
+                "operationId":"x","tags":["g"],
+                "requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Missing"}}}},
+                "responses":{"200":{"description":"ok"}}}}},
+                "components":{"schemas":{}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall x = result.configsByGroup().get("g").getHttpCalls().get(0);
+        assertEquals("{" + McpApiToolBuilder.WHOLE_BODY_VARIABLE + "}", x.getRequest().getBody());
+    }
+
+    /**
+     * The description is the model's ONLY view of a parameter's value space — the
+     * generated schema types everything as a required string. Observed with
+     * `environment`: a guessed value silently fell back to production on the
+     * lenient server-side enum parse, so a test-drive quietly exercised the wrong
+     * deployment.
+     */
+    @Test
+    @DisplayName("enum values and defaults reach the query-parameter description")
+    void parseAndBuild_enumAndDefaultReachParamDescription() {
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/start":{"post":{
+                "operationId":"start","tags":["chat"],
+                "parameters":[{"name":"environment","in":"query","description":"Deployment environment.",
+                "schema":{"type":"string","enum":["production","test"],"default":"production"}}],
+                "responses":{"201":{"description":"created"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall start = result.configsByGroup().get("chat").getHttpCalls().get(0);
+
+        String description = start.getParameters().get("environment");
+        assertTrue(description.contains("production"), description);
+        assertTrue(description.contains("test"), description);
+        assertTrue(description.contains("Default: production"), description);
+    }
 }

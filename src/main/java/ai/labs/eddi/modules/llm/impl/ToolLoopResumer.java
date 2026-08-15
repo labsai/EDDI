@@ -515,34 +515,77 @@ class ToolLoopResumer {
      */
     String targetsOwnConversation(PendingToolCallBatch.PendingToolCall c, String amendedArguments,
                                   Map<String, ToolRequestResolver> resolvers, String conversationId) {
+        return targetsOwnConversation(c.getToolName(),
+                amendedArguments != null ? amendedArguments : c.getArgumentsRaw(),
+                req -> {
+                    var resolver = resolvers.get(c.getToolName());
+                    return resolver != null ? resolver.resolve(rebuiltRequest(c, req)) : null;
+                },
+                conversationId);
+    }
 
+    /**
+     * The LIVE-path form of the same rule, for a call the gate let through WITHOUT
+     * a pause — an ungated method, or the whole gate inert.
+     * <p>
+     * Exists because the resume-path check alone couples the boundary to the gate
+     * configuration: "an agent may not send a request to its own conversation" was
+     * enforced only for calls that paused, so an agent whose config did not gate
+     * the method — or a deployment with the HITL kill-switch off — could
+     * self-message with no check anywhere in the engine. The rule is absolute; it
+     * runs wherever a request is about to be sent, not only where approvals funnel.
+     * <p>
+     * Cost, accepted with eyes open: resolvers exist only for httpcall tools, so a
+     * resolver-less tool (built-ins, MCP) falls back to raw-argument containment —
+     * and on THIS path a false positive is a silent {@code NOT_EXECUTED} with no
+     * human to override, where on the resume path it cost one refused approval. The
+     * fallback is kept anyway: it is the only check covering the real built-in
+     * route ({@code converse_with_agent} handed the agent's own conversationId),
+     * and the false-positive shape — arguments that merely MENTION the id — is the
+     * same asymmetry the whole guard already accepts: a refusal costs a retry, a
+     * miss costs the boundary.
+     */
+    static String targetsOwnConversationLive(dev.langchain4j.agent.tool.ToolExecutionRequest toolRequest,
+                                             Map<String, ToolRequestResolver> resolvers, String conversationId) {
+        return targetsOwnConversation(toolRequest.name(), toolRequest.arguments(),
+                args -> {
+                    var resolver = resolvers != null ? resolvers.get(toolRequest.name()) : null;
+                    return resolver != null ? resolver.resolve(toolRequest) : null;
+                },
+                conversationId);
+    }
+
+    /**
+     * The shared core: resolve if possible and check the URI; otherwise check the
+     * raw arguments (the coarser test, and the safe direction to err in).
+     */
+    private static String targetsOwnConversation(String toolName, String rawArguments,
+                                                 ResolutionAttempt resolution, String conversationId) {
         if (conversationId == null || conversationId.isBlank()) {
             return null;
         }
-        var resolver = resolvers.get(c.getToolName());
-        if (resolver != null) {
-            try {
-                String args = amendedArguments != null ? amendedArguments : c.getArgumentsRaw();
-                ResolvedRequest current = resolver.resolve(rebuiltRequest(c, args));
-                if (uriTargetsConversation(current.uri(), conversationId)) {
-                    return "the request targets the conversation the agent is running in";
-                }
-                return null;
-            } catch (Exception e) {
-                // Type only, never the throwable: a request-build failure quotes the
-                // material being rendered, which would undo the redaction beside it.
-                LOGGER.warnf("Could not resolve the request for approved tool '%s' (%s); "
-                        + "falling back to its arguments for the self-conversation check.",
-                        sanitize(c.getToolName()), e.getClass().getSimpleName());
+        try {
+            ResolvedRequest current = resolution.resolve(rawArguments);
+            if (current != null) {
+                return uriTargetsConversation(current.uri(), conversationId)
+                        ? "the request targets the conversation the agent is running in"
+                        : null;
             }
+        } catch (Exception e) {
+            // Type only, never the throwable: a request-build failure quotes the
+            // material being rendered, which would undo the redaction beside it.
+            LOGGER.warnf("Could not resolve the request for tool '%s' (%s); "
+                    + "falling back to its arguments for the self-conversation check.",
+                    sanitize(toolName), e.getClass().getSimpleName());
         }
-        // No resolver, or resolution failed. The arguments are what the request is
-        // built FROM, so an id that will end up in the URI is already in them —
-        // a coarser test than the resolved URI, and the safe direction to err in.
-        String args = amendedArguments != null ? amendedArguments : c.getArgumentsRaw();
-        return uriTargetsConversation(args, conversationId)
+        return uriTargetsConversation(rawArguments, conversationId)
                 ? "the request targets the conversation the agent is running in"
                 : null;
+    }
+
+    @FunctionalInterface
+    private interface ResolutionAttempt {
+        ResolvedRequest resolve(String rawArguments) throws Exception;
     }
 
     /** Case-insensitive containment, tolerating percent-encoding. */

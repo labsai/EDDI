@@ -492,6 +492,18 @@ public class ConversationMemoryUtilities {
 
         var memorySnapshot = convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly);
 
+        // Blank entries mean NO filter, not "select nothing". A present-but-empty
+        // query parameter (?returningFields=) binds as [""], and LLM-generated
+        // tools make that shape routine: every generated parameter is required,
+        // so a model with no filter to express sends the empty string — and the
+        // branches below would then null out steps, outputs AND properties,
+        // leaving the operator's test-drive read-back with nothing to quote.
+        // "" selects no field under any reading, so dropping blanks recovers the
+        // caller's intent on every interpretation.
+        if (returningFields != null) {
+            returningFields = returningFields.stream().filter(f -> f != null && !f.isBlank()).toList();
+        }
+
         if (returnCurrentStepOnly) {
             if (isNullOrEmpty(returningFields) || returningFields.contains(KEY_CONVERSATION_STEPS)) {
                 var conversationSteps = memorySnapshot.getConversationSteps();
