@@ -47,15 +47,23 @@ type Translate = (key: string, defaultValue: string, options?: Record<string, un
 export function findBlockedCalls(
   calls: readonly PendingToolCallView[] | null | undefined,
   actingAgentId: string | null | undefined,
+  actingConversationId: string | null | undefined,
   t: Translate,
 ): BlockedCall[] {
-  const selfTargeted = findSelfTargetedCalls(calls, actingAgentId).map((hit) => ({
+  const selfTargeted = findSelfTargetedCalls(calls, actingAgentId, actingConversationId).map((hit) => ({
     callId: hit.callId,
-    reason: t(
-      "operator.approval.blockedSelfTarget",
-      "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page.",
-      { agentId: hit.agentId },
-    ),
+    reason:
+      hit.target === "conversation"
+        ? t(
+            "operator.approval.blockedSelfConversation",
+            "An agent may not send a message into the conversation it is running in, and this request targets this one ({{agentId}}). That would write its own text in as though a human had said it. Approving is unavailable for the whole batch while it is present — reject.",
+            { agentId: hit.agentId },
+          )
+        : t(
+            "operator.approval.blockedSelfTarget",
+            "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page.",
+            { agentId: hit.agentId },
+          ),
   }));
 
   // One reason string per failure mode, not one for "everything that is not a

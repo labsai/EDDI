@@ -4,6 +4,7 @@ import {
   grantsAgentCreation,
   grantsAgentModification,
   grantsConversationTesting,
+  grantsGroupDiscussion,
   type OperatorScope,
 } from "./tool-scopes";
 import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
@@ -131,22 +132,40 @@ You can:
 /**
  * How to use the runtime conversation endpoints well.
  *
- * Included whenever those endpoints are granted, in BOTH scopes — a read-only
- * operator can still be asked "is this agent actually answering?", and that is a
- * diagnosis, not a change.
+ * Included whenever those endpoints are granted — which in practice means
+ * `read_write` only, because the calls that START a conversation and SAY
+ * something are POSTs and therefore live in `WRITE_ENDPOINTS` (see
+ * `TEST_DRIVE_WRITES` there for why moving them into `READ_ENDPOINTS` broke the
+ * read-only safety preamble). The gate is still on the resolved endpoint set
+ * rather than on the scope name, so this section follows what was actually
+ * granted if that ever changes.
  *
  * The `AWAITING_HUMAN` rule is the one that matters: an agent with its own
  * approval gate is SUPPOSED to stop, and an operator that reads that as a
  * failure would report a correctly-configured agent as broken.
  */
-const BODY_TEST_DRIVE = `Testing an agent (or a group) by talking to it:
-- You can TEST-DRIVE any deployed agent or group: start a conversation with it,
-  send a message, and read the reply back. "Deployed" only means the config
-  loaded; a test message is the only thing that proves the LLM call, the tool
-  wiring and any vault key actually resolve at runtime. After creating or
-  changing an agent, offer this.
+const BODY_TEST_DRIVE = `Testing an agent by talking to it:
+- You can TEST-DRIVE any deployed AGENT: start a conversation with it, send a
+  message, and read the reply back. "Deployed" only means the config loaded; a
+  test message is the only thing that proves the LLM call, the tool wiring and
+  any vault key actually resolve at runtime. After creating or changing an
+  agent, offer this.
 - Start a conversation, send ONE representative message, then read the
   conversation back and quote what the agent actually replied.
+- Mechanics you cannot infer from the tool schemas, because they are not in
+  them. Starting an AGENT conversation answers \`201\` with an EMPTY body: the
+  new conversation's id arrives in the \`Location\` RESPONSE HEADER, which the
+  tool result carries under \`headers\`, shaped
+  \`eddi://ai.labs.conversation/conversationstore/conversations/<id>\` — the id is
+  its last path segment, and every following call needs it. Header names are
+  case-insensitive, so do not give up if it reads \`location\`. That same call
+  also requires a request body: send \`{}\` when you have no initial context to
+  pass. Sending a message takes \`{"input": "your message"}\`. If \`headers\` is
+  missing or carries no \`Location\`, say so and stop — a guessed conversation id
+  addresses somebody else's conversation.
+- You cannot message the conversation you are yourself running in, and must not
+  try: that would write your own text in as though the admin had said it, and
+  the approval surface refuses it outright.
 - Each message you send needs the admin's approval, so make it count: say what
   you are about to send and why, and prefer one good test message to a
   conversation.
@@ -159,6 +178,31 @@ const BODY_TEST_DRIVE = `Testing an agent (or a group) by talking to it:
   agent's behalf — say so and let the admin decide.
 - If the reply is empty or an error, report it verbatim with the conversation id
   rather than re-sending. A failing agent is a finding, not something to retry.`;
+
+/**
+ * Groups, gated on their OWN endpoint rather than bundled with the agent
+ * section.
+ *
+ * A group is not "an agent you can also talk to". The granted set can START a
+ * discussion and READ it back; `/followup`, `/continue` and `/human-input` are
+ * all ungranted, so there is no back-and-forth to promise — and the start
+ * answers with the group conversation as a JSON body, not the `Location` header
+ * the agent mechanics above describe. An earlier version of this section said
+ * "any deployed agent or group" and then gave the agent-only mechanics for
+ * both, which sent the operator looking for a `Location` that was never coming
+ * and reporting a healthy group as broken.
+ */
+const BODY_TEST_DRIVE_GROUP = `Starting a group discussion:
+- You can START a discussion in an agent GROUP and read it back — but you cannot
+  talk into it afterwards. There is no follow-up, continue or human-input tool
+  in your set, so never promise a back-and-forth with a group.
+- The call takes \`{"question": "..."}\` and answers with the group conversation
+  as a JSON BODY. No \`Location\` header is involved here; read the id out of the
+  response itself.
+- Read the group's own configuration BEFORE starting one. A discussion can run
+  many agents for many turns — a far larger action than one test message — and
+  the person approving it sees only your question, not what the group will then
+  do. Say what the group is configured to do as part of asking.`;
 
 /**
  * Architecture background, present in BOTH scopes — a read-only operator
@@ -432,6 +476,7 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     // Gated on the endpoints actually granted, not on scope: this module's rule
     // is that the prompt can never describe a capability the agent lacks.
     ...(grantsConversationTesting(endpoints) ? [BODY_TEST_DRIVE] : []),
+    ...(grantsGroupDiscussion(endpoints) ? [BODY_TEST_DRIVE_GROUP] : []),
     BODY_APP_CONTEXT,
     buildModelCatalogueSection(),
     BODY_STYLE,

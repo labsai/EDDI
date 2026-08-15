@@ -444,6 +444,22 @@ export function grantsConversationTesting(endpoints: readonly string[]): boolean
 }
 
 /**
+ * Whether the operator can start a discussion in an agent GROUP.
+ *
+ * Separate from {@link grantsConversationTesting} because the capabilities are
+ * genuinely different and the prompt must describe them differently: an agent
+ * can be talked WITH (start, say, read back), while a group can only be STARTED
+ * and read — no follow-up, continue or human-input endpoint is granted, and the
+ * start answers with a JSON body rather than a `Location` header. Folding the
+ * two into one predicate left the prompt advertising a group back-and-forth
+ * that no granted endpoint can perform, which is exactly the failure the
+ * `grantsAgentCreation`/`grantsAgentModification` split exists to prevent.
+ */
+export function grantsGroupDiscussion(endpoints: readonly string[]): boolean {
+  return new Set(endpoints).has("POST /groups/{groupId}/conversations");
+}
+
+/**
  * Whether the granted endpoints can change an existing agent's behavior,
  * outputs, tool wiring, or pipeline — any workflow or writable
  * workflow-extension store's update verb.

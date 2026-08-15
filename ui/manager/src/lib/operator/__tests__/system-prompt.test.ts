@@ -12,6 +12,7 @@ import {
   endpointsForScope,
   buildToolApprovals,
   grantsConversationTesting,
+  grantsGroupDiscussion,
 } from "../tool-scopes";
 
 /**
@@ -489,6 +490,98 @@ describe("test-drive: talking to another agent", () => {
     expect(body).toMatch(/paused on ITS OWN approval gate/);
     expect(body).toMatch(/That is a PASS/);
     expect(body).toMatch(/cannot approve on another\s+agent's behalf/);
+  });
+
+  /**
+   * The bullet that decides whether the capability works at all.
+   *
+   * `POST /agents/{agentId}/start` answers 201 with an EMPTY body and puts the
+   * new conversation's id only in the `Location` header. No tool schema mentions
+   * a response header — the generated tool's parameters describe the REQUEST —
+   * so an operator that is not told where to look has nothing to send its test
+   * message to, and the most likely failure is that it invents an id and
+   * addresses a stranger's conversation.
+   *
+   * Depends on EDDI `feat/generated-tools-response-headers`: before it,
+   * `McpApiToolBuilder` set no `responseHeaderObjectName`, so `ApiCallExecutor`
+   * never populated `headers` and the id was unreachable for ANY generated tool.
+   */
+  it("says where the conversation id comes from, and to stop rather than guess", () => {
+    const body = defaultOperatorPromptBody("read_write");
+    // Anchored to the actual sentence, not the bare words: "headers" also
+    // appears in the UNCONDITIONAL cheatsheet ("named HTTP tools (method, path,
+    // headers, body template)"), so `toContain("headers")` passed with this
+    // whole section deleted.
+    expect(body).toMatch(/`Location` RESPONSE HEADER/);
+    expect(body).toMatch(/tool\s+result carries under `headers`/);
+    expect(body).toMatch(/last path segment/);
+    // The failure mode worth naming: a fabricated id is a valid-looking id.
+    expect(body).toMatch(/somebody else's conversation/);
+  });
+
+  it("says how to fill the two request bodies the model must write itself", () => {
+    // Both are whole-body `{requestBody}` variables (McpApiToolBuilder), so the
+    // model writes the JSON. `start` REQUIRES a body it has no obvious value
+    // for — an operator that omits it sends an empty one and the call fails.
+    const body = defaultOperatorPromptBody("read_write");
+    expect(body).toContain("{}");
+    expect(body).toContain('{"input": "your message"}');
+  });
+
+  /**
+   * A group is not "an agent you can also talk to", and the prompt must not
+   * imply it is. The granted set can START a discussion and read it back;
+   * /followup, /continue and /human-input are all ungranted, and the start
+   * answers with a JSON body rather than the Location header the agent
+   * mechanics describe.
+   *
+   * These pin the branch itself: without them the section could become
+   * unconditional, lose its JSON-body mechanics, or wrongly reuse the agent
+   * instructions, and the existing "the endpoint is granted" assertions would
+   * all still pass.
+   */
+  it("describes group discussions on their own terms", () => {
+    const body = defaultOperatorPromptBody("read_write");
+    expect(body).toContain("Starting a group discussion");
+    expect(body).toMatch(/cannot\s+talk into it afterwards/);
+    expect(body).toContain('{"question": "..."}');
+    expect(body).toMatch(/as a JSON BODY/);
+    // The agent-only mechanic must NOT be repeated for groups.
+    expect(body).toMatch(/No `Location` header is involved here/);
+  });
+
+  it("tells the operator to read a group's config before starting a discussion", () => {
+    // The approver sees one question, not what the group will then do — which
+    // may be many agents over many turns.
+    expect(defaultOperatorPromptBody("read_write")).toMatch(
+      /Read the group's own configuration BEFORE starting one/,
+    );
+  });
+
+  it("omits the group section entirely when the group endpoint is not granted", () => {
+    const withoutGroups = endpointsForScope("read_write").filter(
+      (e) => e !== "POST /groups/{groupId}/conversations",
+    );
+    const body = buildOperatorPromptBody(withoutGroups);
+
+    expect(body).not.toContain("Starting a group discussion");
+    expect(body).not.toContain('{"question": "..."}');
+    // ...while the agent test-drive it still holds is untouched.
+    expect(body).toContain("Testing an agent by talking to it");
+  });
+
+  it("omits the group section for read_only, which has no group POST", () => {
+    expect(defaultOperatorPromptBody("read_only")).not.toContain("Starting a group discussion");
+  });
+
+  it("grantsGroupDiscussion tracks the group endpoint alone", () => {
+    // Separate from grantsConversationTesting on purpose: removing the group
+    // endpoint must silence the group prose even while agent test-drive stays.
+    expect(grantsGroupDiscussion(endpointsForScope("read_write"))).toBe(true);
+    expect(grantsGroupDiscussion(endpointsForScope("read_only"))).toBe(false);
+    expect(
+      grantsGroupDiscussion(["POST /agents/{agentId}/start", "POST /agents/{conversationId}"]),
+    ).toBe(false);
   });
 
   it("says nothing about test-driving when the endpoints are not granted", () => {

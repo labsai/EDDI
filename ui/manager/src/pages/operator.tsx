@@ -101,8 +101,8 @@ export function OperatorPage() {
     // Narrowed on the discriminator rather than a `"calls" in` probe: a RULE
     // pause has no per-call requests to target anything with.
     const pending = details?.type === "TOOL_CALL" ? details.calls : undefined;
-    return findBlockedCalls(pending, config?.agentId, t);
-  }, [chat.isPaused, approvalStatus.data, config?.agentId, t]);
+    return findBlockedCalls(pending, config?.agentId, chat.conversationId, t);
+  }, [chat.isPaused, approvalStatus.data, config?.agentId, chat.conversationId, t]);
   /**
    * Resolve the pause, then DROP the cached approval-status.
    *

@@ -108,8 +108,8 @@ export function ConversationDetailPage() {
     // The conversation's OWN agent, not the separately-fetched operator id: the
     // operator-config read is admin/editor-only, so keying on it would leave
     // this guard silently inert for an eddi-approver. See `blocked-calls.ts`.
-    return findBlockedCalls(pending, conversation?.agentId, t);
-  }, [approvalStatus, conversation?.agentId, t]);
+    return findBlockedCalls(pending, conversation?.agentId, id, t);
+  }, [approvalStatus, conversation?.agentId, id, t]);
 
   function handleDelete() {
     deleteMutation.mutate(

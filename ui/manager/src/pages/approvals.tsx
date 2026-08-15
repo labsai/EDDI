@@ -117,8 +117,8 @@ function ApprovalQueueRow({
     const details = approvalStatus.data?.pauseDetails;
     // Narrowed on the discriminator: a RULE pause carries no per-call requests.
     const pending = details?.type === "TOOL_CALL" ? details.calls : undefined;
-    return findBlockedCalls(pending, item.agentId, t);
-  }, [approvalStatus.data, item.agentId, t]);
+    return findBlockedCalls(pending, item.agentId, item.conversationId, t);
+  }, [approvalStatus.data, item.agentId, item.conversationId, t]);
 
   return (
     <>
