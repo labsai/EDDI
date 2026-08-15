@@ -157,4 +157,51 @@ class ToolLoopResumerSelfConversationTest {
                 "https://x/a%/agents/" + CONVERSATION_ID, CONVERSATION_ID));
         assertFalse(ToolLoopResumer.uriTargetsConversation("https://x/agents/" + OTHER_CONVERSATION_ID, CONVERSATION_ID));
     }
+
+    /**
+     * The LIVE-path form. The resume-path check alone coupled the rule to the gate
+     * configuration: a call an inert or non-matching gate let straight through
+     * executed with no self-conversation check anywhere in the engine. These pin
+     * the live variant so the boundary survives without a pause.
+     */
+    @Test
+    @DisplayName("live path: refuses an ungated call whose resolved URI is the agent's own conversation")
+    void livePathRefusesSelfTargetedCall() {
+        var request = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+                .name("say").arguments("{}").build();
+
+        String reason = ToolLoopResumer.targetsOwnConversationLive(request,
+                resolverFor("https://eddi.example/agents/" + CONVERSATION_ID), CONVERSATION_ID);
+
+        assertNotNull(reason, "the rule is absolute — it must hold without a pause");
+    }
+
+    @Test
+    @DisplayName("live path: allows an ungated call to a different conversation")
+    void livePathAllowsOtherConversation() {
+        var request = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+                .name("say").arguments("{}").build();
+
+        assertNull(ToolLoopResumer.targetsOwnConversationLive(request,
+                resolverFor("https://eddi.example/agents/" + OTHER_CONVERSATION_ID), CONVERSATION_ID));
+    }
+
+    @Test
+    @DisplayName("live path: falls back to the raw arguments when no resolver exists")
+    void livePathFallsBackToArguments() {
+        var request = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+                .name("say").arguments("{\"conversationId\":\"" + CONVERSATION_ID + "\"}").build();
+
+        assertNotNull(ToolLoopResumer.targetsOwnConversationLive(request, Map.of(), CONVERSATION_ID));
+    }
+
+    @Test
+    @DisplayName("live path: tolerates a null resolver map and a blank conversation id")
+    void livePathToleratesMissingInputs() {
+        var request = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+                .name("say").arguments("{}").build();
+
+        assertNull(ToolLoopResumer.targetsOwnConversationLive(request, null, null));
+        assertNull(ToolLoopResumer.targetsOwnConversationLive(request, null, " "));
+    }
 }

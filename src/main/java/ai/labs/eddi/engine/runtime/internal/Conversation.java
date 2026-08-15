@@ -879,6 +879,57 @@ public class Conversation implements IConversation {
     }
 
     /**
+     * Every string {@link #pauseConversation} may have written as the pending
+     * placeholder for the CURRENT batch — under this build or a previous one. First
+     * entry is what this build writes; the rest are legacy renderings.
+     * <p>
+     * Exists because the determinism argument ("recompute the exact string on
+     * resume") silently assumed pause and resume run the same build. Two releases
+     * changed the DEFAULT wording — the tool-named default, then the repeat-pause
+     * ordinal — so a conversation paused under the previous build recomputes a
+     * string that is not in its output list, the removal no-ops, and the resolved
+     * turn renders [stale placeholder, answer]: the exact artifact those changes
+     * exist to kill, once per in-flight pause on the first post-upgrade resume.
+     * There is no schema migration for conversation output, so the resume path
+     * itself must recognise its predecessors' wording.
+     * <p>
+     * Only DEFAULT renderings accumulate variants — a configured
+     * {@code pendingMessage} has never been rewritten by a release, so it stays a
+     * single candidate. (An operator editing their template between pause and
+     * resume strands the placeholder exactly as before; that is config drift, not a
+     * version boundary, and predates all of this.)
+     */
+    private List<String> pendingPlaceholderCandidates(IConversationMemory memory) {
+        String current = resolvePendingMessage(memory);
+        var candidates = new ArrayList<String>();
+        candidates.add(current);
+
+        var batch = memory.getHitlPendingToolCalls();
+        var cfg = batch != null && batch.getEffectiveToolApprovals() != null
+                ? batch.getEffectiveToolApprovals()
+                : memory.getAgentToolApprovalsConfig();
+        var rule = batch != null ? batch.getEffectiveRule() : null;
+        boolean configured = (rule != null && rule.getPendingMessage() != null && !rule.getPendingMessage().isBlank())
+                || (cfg != null && !isNullOrEmpty(cfg.getPendingMessage()));
+        if (!configured) {
+            // Pre-ordinal build: the tool-named default without the suffix. The
+            // ordinal itself predates the suffix (it was persisted for cap
+            // enforcement), so a repeat pause persisted by that build re-reads
+            // its ordinal today and gains a suffix the stored text never had.
+            var suffix = java.util.regex.Pattern.compile("^(.*) \\(approval \\d+ this turn\\)$",
+                    java.util.regex.Pattern.DOTALL).matcher(current);
+            if (suffix.matches()) {
+                candidates.add(suffix.group(1));
+            }
+            // Pre-tool-named build: the constant, regardless of names.
+            if (!candidates.contains(DEFAULT_PENDING_MESSAGE)) {
+                candidates.add(DEFAULT_PENDING_MESSAGE);
+            }
+        }
+        return candidates;
+    }
+
+    /**
      * Removes the pending-approval placeholder that {@link #pauseConversation}
      * added to the current step on a TOOL_CALL pause, so the resumed step renders
      * ONLY the final answer.
@@ -902,11 +953,18 @@ public class Conversation implements IConversation {
      * writer replaced it we leave it alone.
      */
     private void dropPendingApprovalPlaceholder(IWritableConversationStep currentStep) {
-        String pending = resolvePendingMessage(conversationMemory);
-        currentStep.removeConversationOutputListItem(MemoryKeys.OUTPUT_PREFIX, pending);
+        // ALL renderings this or a previous build may have written for this batch
+        // — see pendingPlaceholderCandidates. At most one of them is actually in
+        // the list (each pause writes exactly one placeholder), so removing every
+        // candidate removes exactly the placeholder and cannot touch legitimate
+        // output: a candidate that was never written simply no-ops.
+        List<String> candidates = pendingPlaceholderCandidates(conversationMemory);
+        for (String pending : candidates) {
+            currentStep.removeConversationOutputListItem(MemoryKeys.OUTPUT_PREFIX, pending);
+        }
 
         IData<?> outputData = currentStep.getData(MemoryKeys.OUTPUT_PREFIX);
-        if (outputData != null && List.of(pending).equals(outputData.getResult())) {
+        if (outputData != null && candidates.stream().anyMatch(p -> List.of(p).equals(outputData.getResult()))) {
             var blanked = new Data<>(MemoryKeys.OUTPUT_PREFIX, new ArrayList<>());
             blanked.setPublic(true);
             currentStep.storeData(blanked);

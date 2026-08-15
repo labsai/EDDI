@@ -7,6 +7,80 @@
 
 
 
+## 🛡️ fix(review): four-agent audit of the operator stack — cross-version placeholders, contract widenings, live-path guard (2026-08-15)
+
+**Repo:** EDDI (`fix/operator-review-findings`)
+
+A four-reviewer audit of everything merged into `chore/remove-agent-father` (#679–#689) plus an
+end-to-end trace of the operator paths. Confirmed findings, all fixed here:
+
+**Cross-version placeholder stranding (the audit's sharpest catch).** `dropPendingApprovalPlaceholder`
+removes the pending-approval bubble by recomputing `resolvePendingMessage` and matching the exact
+string — which silently assumed pause and resume run the same build. Two releases changed the
+default wording (tool-named, then the repeat ordinal), so a conversation paused under the previous
+build recomputes a string that is not in its output, the removal no-ops, and the resolved turn
+renders [stale placeholder, answer] — the artifact those changes exist to kill, once per in-flight
+pause on the first post-upgrade resume. The resume path now recognises its predecessors' wording
+(`pendingPlaceholderCandidates`): the current rendering, the suffix-less variant, and the legacy
+constant. Two upgrade-boundary tests simulate a pre-upgrade pause and resume with current code.
+
+**Self-conversation guard now holds WITHOUT a pause.** #689's rule ("an agent may not send a request
+to its own conversation") was enforced only in `ToolLoopResumer` — the approval-execution path — so
+a call the gate let through live (ungated method, or the HITL kill-switch off) executed with no
+check anywhere. The rule is absolute; `ToolLoopRunner`'s live loop now runs the same check
+(`targetsOwnConversationLive`, shared core extracted) and refuses with the same `NOT_EXECUTED`
+envelope and `hitl_self_conversation` trace. A second review round then caught that the FIRST
+version of this fix missed the mixed-batch pause branch — ungated calls executed before the pause
+is thrown, frozen into the batch, never rechecked — so the guard runs there too. Accepted cost,
+documented in code: resolver-less tools (built-ins, MCP) fall back to raw-argument containment,
+where a mere MENTION of the id refuses the call; kept because that fallback is the only check
+covering `converse_with_agent` handed the agent's own conversationId.
+
+**#684 contract widenings, narrowed.** The tool-result contract (`body`/`httpCode` on failures)
+leaked past its intent in three places: (1) `ApiCallsTask` merged FAILED results into cross-call
+template data, where a failed call's error text could overwrite a previous success's `{body}` for a
+later call in the same step — failures no longer merge (`isFailureResult`); the scoped
+`{name}Error`/`{name}HttpCode` keys are unchanged. (2) The RAG path pasted a failed retrieval's
+error body into the SYSTEM prompt as "## Search Results" — up to 2KB of proxy/WAF error page,
+attacker-influenced in some architectures, masquerading as retrieved knowledge; failed retrievals
+now contribute nothing, as pre-contract. (3) The error body itself is now REDACTED
+(`SecretRedactionFilter`) before entering the tool result — a 401 routinely echoes the credential
+that failed, and the body flows into the transcript, pause batches and traces. The memory-side
+`{name}Error` entry keeps the raw text as before.
+
+**Test-drive read-back returned nothing to quote.** Every generated tool parameter is REQUIRED, so a
+model with no field filter to express sends `returningFields=""` — which bound as `[""]` and nulled
+steps, outputs AND properties from the snapshot: a working agent looked broken to the operator.
+Blank entries now mean NO filter (`ConversationMemoryUtilities`).
+
+**A guessed say-body was silently swallowed.** The say tool's body schema is a `$ref` the parser
+leaves unresolved, so its description carried zero field names; a guessed `{"message": ...}` bound
+to `InputData`'s defaults (empty input), answered 200, and a human-approved test message was never
+delivered. Body `$refs` now resolve one level (`resolveComponentRef`), so the description names
+`input`/`context` and requiredness — for every generated tool, not just say.
+
+**Enum values and defaults now reach parameter descriptions** (`appendSchemaHints`): the generated
+schema types every parameter as a required string, so the description is the model's only view of
+the value space. Observed with `environment`, where a guessed value silently fell back to production
+on the lenient server-side enum parse — a test-drive quietly exercising the wrong deployment.
+
+**Smaller items:** `padDataLines` normalises bare `\r` so its continuation line stays padded
+(RESTEasy starts a new `data:` line on either); `Authentication-Info`/`Proxy-Authentication-Info`
+join the credential response-header deny-list (RFC 7615 challenge material). Disclosure owed from
+#688: the credential-header stripping sits on the SHARED executor path, so a hand-authored config
+that captured `Set-Cookie`/`Authorization` from a response now reads them as absent — deliberate
+(those values are never data), but it is a behaviour change for such configs.
+
+Verified sound by the same audit, no change needed: `maxPausesPerTurn` exhaustion is fail-closed
+(synthetic DENIED, never ungated execution); every resume entry point restores the full persisted
+batch, so the ordinal is deterministic across REST/Slack/MCP/timeout/group resumes; #687's JSON
+guard runs post-approval by design and cannot diverge from the pinned fingerprint; conversation ids
+are globally unique across environments, so test-environment conversations read back fine.
+
+---
+
+
+
 ## 🔒 fix(hitl): an agent may not send a request to its own conversation (2026-08-15)
 
 **Repo:** EDDI (`fix/self-conversation-tool-call`)

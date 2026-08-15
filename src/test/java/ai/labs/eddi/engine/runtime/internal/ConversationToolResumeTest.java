@@ -323,6 +323,91 @@ class ConversationToolResumeTest {
     }
 
     /**
+     * The version boundary the determinism argument silently skipped: a pause
+     * PERSISTED by a previous build holds that build's placeholder wording, and
+     * recomputing with the current code produces a different string — so the
+     * removal no-ops and the resolved turn renders [stale placeholder, answer]. Two
+     * releases changed the default (tool-named, then the repeat ordinal); the
+     * resume path must recognise both predecessors.
+     */
+    @Test
+    @DisplayName("upgrade boundary: a placeholder written by the PRE-tool-named build is still dropped")
+    void preToolNamedPlaceholderStillDropped() throws Exception {
+        var conv = pauseViaToolCallWithDefaultMessage(1);
+        // Swap the freshly written placeholder for the old build's constant — the
+        // step output now looks exactly as a pre-upgrade pause left it.
+        String legacy = "This action requires human approval before it can proceed. "
+                + "You will receive the result once a reviewer decides.";
+        var out = outputList();
+        out.clear();
+        out.add(legacy);
+
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem("Done.", 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        var after = outputList();
+        assertFalse(after.stream().anyMatch(o -> String.valueOf(o).equals(legacy)),
+                "the previous build's placeholder must be recognised and dropped; got: " + after);
+        assertEquals(1, after.size(), "only the answer remains; got: " + after);
+    }
+
+    @Test
+    @DisplayName("upgrade boundary: a repeat-pause placeholder written WITHOUT the ordinal suffix is still dropped")
+    void preOrdinalPlaceholderStillDropped() throws Exception {
+        // pauseCountThisTurn predates the suffix (it was persisted for cap
+        // enforcement), so a repeat pause persisted by the pre-ordinal build
+        // re-reads ordinal 2 today and recomputes a suffixed string the stored
+        // text never had.
+        var conv = pauseViaToolCallWithDefaultMessage(2);
+        String suffixless = "I need your approval before I can run delete_record. "
+                + "You will receive the result once a reviewer decides.";
+        var out = outputList();
+        out.clear();
+        out.add(suffixless);
+
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem("Done.", 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        var after = outputList();
+        assertFalse(after.stream().anyMatch(o -> String.valueOf(o).equals(suffixless)),
+                "the pre-ordinal placeholder must be recognised and dropped; got: " + after);
+        assertEquals(1, after.size(), "only the answer remains; got: " + after);
+    }
+
+    /**
+     * Pauses with NO configured pendingMessage (the default applies) at the given
+     * persisted pause ordinal — the shape both upgrade-boundary tests need.
+     */
+    private Conversation pauseViaToolCallWithDefaultMessage(int pauseCountThisTurn) throws Exception {
+        memory.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("delete_record");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setPauseCountThisTurn(pauseCountThisTurn);
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated tool call",
+                    ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conv = createConversation();
+        conv.say("do it", Map.of());
+        return conv;
+    }
+
+    /**
      * The drop is by exact-string match against a RECOMPUTED
      * {@code resolvePendingMessage}, so the DEFAULT message has to be just as
      * deterministic as a configured one. It now names the gated tool — read off the

@@ -366,6 +366,23 @@ class ToolLoopRunner {
                         } else {
                             // 1) execute the ungated calls of this batch normally
                             for (ToolExecutionRequest allowedReq : gateResult.allowed()) {
+                                // Same absolute rule as the main allowed() loop below.
+                                // This branch runs BEFORE the pause is thrown, and its
+                                // results are frozen into the batch the resume replays
+                                // — a self-conversation call slipping through here is
+                                // never checked again anywhere. A mixed batch (one
+                                // gated call, one ungated self-message) was exactly
+                                // the remaining hole.
+                                String selfTargetedPre = ToolLoopResumer.targetsOwnConversationLive(
+                                        allowedReq, setup.toolRequestResolvers(), conversationId);
+                                if (selfTargetedPre != null) {
+                                    LOGGER.warnf("Refusing ungated tool '%s': %s", sanitize(allowedReq.name()), selfTargetedPre);
+                                    currentMessages.add(ToolExecutionResultMessage.from(allowedReq,
+                                            "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}"));
+                                    trace.add(Map.of("type", "hitl_self_conversation", "tool", allowedReq.name(),
+                                            "detail", selfTargetedPre));
+                                    continue;
+                                }
                                 executeSingleToolCall(allowedReq, memory, currentMessages, trace, toolExecutors,
                                         toolRateLimits, toolCanonicalNames, defaultRateLimit, maxBudget, conversationId,
                                         enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
@@ -418,6 +435,23 @@ class ToolLoopRunner {
                         // Thread.interrupted() clears the flag so it cannot leak to later work.
                         if (Thread.interrupted()) {
                             throw new LifecycleException("Agent execution cancelled (interrupted) before tool: " + toolRequest.name());
+                        }
+
+                        // "An agent may not send a request to its own conversation" is
+                        // an ABSOLUTE rule, and this loop is the one place it was not
+                        // enforced: a call the gate lets through live (ungated method,
+                        // or the whole gate inert) executed with no check anywhere.
+                        // The resume path has its own copy; a rule enforced only where
+                        // approvals funnel is a rule that vanishes with the gate.
+                        String selfTargeted = ToolLoopResumer.targetsOwnConversationLive(
+                                toolRequest, setup.toolRequestResolvers(), conversationId);
+                        if (selfTargeted != null) {
+                            LOGGER.warnf("Refusing ungated tool '%s': %s", sanitize(toolRequest.name()), selfTargeted);
+                            currentMessages.add(ToolExecutionResultMessage.from(toolRequest,
+                                    "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}"));
+                            trace.add(Map.of("type", "hitl_self_conversation", "tool", toolRequest.name(),
+                                    "detail", selfTargeted));
+                            continue;
                         }
 
                         executeSingleToolCall(toolRequest, memory, currentMessages, trace, toolExecutors,

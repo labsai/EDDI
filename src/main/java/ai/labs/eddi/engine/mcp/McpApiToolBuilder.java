@@ -115,7 +115,7 @@ public final class McpApiToolBuilder {
                     // Determine group (first tag, or "General")
                     String group = (operation.getTags() != null && !operation.getTags().isEmpty()) ? operation.getTags().get(0) : DEFAULT_GROUP;
 
-                    ApiCall httpCall = buildApiCall(method, path, operation, apiAuth);
+                    ApiCall httpCall = buildApiCall(method, path, operation, apiAuth, openAPI);
                     callsByGroup.computeIfAbsent(group, k -> new ArrayList<>()).add(httpCall);
                     endpointCount++;
 
@@ -210,7 +210,7 @@ public final class McpApiToolBuilder {
     /**
      * Build a single ApiCall from an OpenAPI operation.
      */
-    private static ApiCall buildApiCall(String method, String path, Operation operation, String apiAuth) {
+    private static ApiCall buildApiCall(String method, String path, Operation operation, String apiAuth, OpenAPI openAPI) {
         var httpCall = new ApiCall();
 
         // Name: operationId or generated slug
@@ -284,6 +284,14 @@ public final class McpApiToolBuilder {
             for (Parameter param : operation.getParameters()) {
                 String paramName = param.getName();
                 String paramDesc = param.getDescription() != null ? param.getDescription() : paramName;
+                // The description is the model's ONLY view of the value space —
+                // the generated tool schema types every parameter as a plain
+                // string, and every one is REQUIRED. Without the allowed values
+                // and the default spelled out, the model guesses: observed with
+                // `environment`, where a guessed value silently falls back to
+                // production on the lenient server-side enum parse — a
+                // test-drive that quietly exercises the wrong deployment.
+                paramDesc = appendSchemaHints(paramDesc, param.getSchema());
 
                 if ("query".equals(param.getIn())) {
                     // Query params use Qute template for LLM-provided values
@@ -303,7 +311,18 @@ public final class McpApiToolBuilder {
             MediaType jsonMedia = content.get("application/json");
             if (jsonMedia != null) {
                 request.setContentType("application/json");
-                var body = buildBodyTemplate(jsonMedia.getSchema());
+                // One level of $ref resolution, HERE and deliberately not resolveFully():
+                // the parser leaves component references unresolved, so a body
+                // declared as $ref: InputData reached describeBodySchema as a
+                // nameless shell and the parameter description degraded to "a
+                // single JSON object" with ZERO field names. The model then
+                // guesses keys — observed with the say tool, where a guessed
+                // {"message": ...} bound to InputData's DEFAULTS, returned 200,
+                // and the approved test message was silently never delivered.
+                // Nested property refs stay unresolved: the top-level field
+                // names and requiredness are what the model needs to write a
+                // correct body.
+                var body = buildBodyTemplate(resolveComponentRef(jsonMedia.getSchema(), openAPI));
                 // The body template's variables must be declared as tool parameters,
                 // or the model has no documented way to fill them: the tool schema is
                 // built from getParameters() alone (AgentOrchestrator), and with
@@ -441,6 +460,29 @@ public final class McpApiToolBuilder {
     /** Name of the whole-body variable used when the schema has no properties. */
     static final String WHOLE_BODY_VARIABLE = "requestBody";
 
+    /**
+     * Resolves a top-level {@code $ref: #/components/schemas/X} to its component
+     * schema, one level deep. Anything else — no ref, unknown name, no components —
+     * returns the input unchanged.
+     */
+    private static Schema<?> resolveComponentRef(Schema<?> schema, OpenAPI openAPI) {
+        if (schema == null || schema.get$ref() == null || openAPI == null
+                || openAPI.getComponents() == null || openAPI.getComponents().getSchemas() == null) {
+            return schema;
+        }
+        String ref = schema.get$ref();
+        // Schemas namespace ONLY: a malformed ref into another components
+        // namespace (requestBodies, parameters) must degrade to the safe
+        // nameless form rather than resolving a same-named SCHEMA and
+        // describing the wrong type's fields.
+        String prefix = "#/components/schemas/";
+        if (!ref.startsWith(prefix)) {
+            return schema;
+        }
+        Schema<?> resolved = openAPI.getComponents().getSchemas().get(ref.substring(prefix.length()));
+        return resolved != null ? resolved : schema;
+    }
+
     private static BodyTemplate buildBodyTemplate(Schema<?> schema) {
         if (schema == null) {
             // A declared body with no schema still needs a variable, or the model has
@@ -478,6 +520,29 @@ public final class McpApiToolBuilder {
      * and marks which are required. Types are included because the model must
      * produce real JSON — an integer field unquoted, a string field quoted.
      */
+    /**
+     * Appends the schema's allowed values and default to a parameter description,
+     * when it declares them. See the call site for why this is the model's only
+     * channel for either.
+     */
+    private static String appendSchemaHints(String description, Schema<?> schema) {
+        if (schema == null) {
+            return description;
+        }
+        var sb = new StringBuilder(description);
+        List<?> allowed = schema.getEnum();
+        if (allowed != null && !allowed.isEmpty()) {
+            sb.append(" Allowed values: ");
+            sb.append(String.join(", ", allowed.stream().map(String::valueOf).toList()));
+            sb.append(".");
+        }
+        Object defaultValue = schema.getDefault();
+        if (defaultValue != null && !String.valueOf(defaultValue).isBlank()) {
+            sb.append(" Default: ").append(defaultValue).append(".");
+        }
+        return sb.toString();
+    }
+
     private static String describeBodySchema(Schema<?> schema) {
         // Name the container the schema actually declares. Saying "a single JSON
         // object" for a top-level array makes the model wrap the payload in braces,
