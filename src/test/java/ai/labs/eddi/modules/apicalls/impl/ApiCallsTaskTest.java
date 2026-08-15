@@ -426,13 +426,13 @@ class ApiCallsTaskTest {
      */
     @Test
     void isFailureResult_classifiesByHttpCode() {
-        assertTrue(ApiCallsTask.isFailureResult(java.util.Map.of("httpCode", 400, "body", "boom")));
-        assertTrue(ApiCallsTask.isFailureResult(java.util.Map.of("httpCode", 503)));
-        assertFalse(ApiCallsTask.isFailureResult(java.util.Map.of("httpCode", 200, "body", "ok")));
-        assertFalse(ApiCallsTask.isFailureResult(java.util.Map.of("httpCode", 204)));
+        assertTrue(ApiCallsTask.isFailureResult(Map.of("httpCode", 400, "body", "boom")));
+        assertTrue(ApiCallsTask.isFailureResult(Map.of("httpCode", 503)));
+        assertFalse(ApiCallsTask.isFailureResult(Map.of("httpCode", 200, "body", "ok")));
+        assertFalse(ApiCallsTask.isFailureResult(Map.of("httpCode", 204)));
         // No code is NOT failure: fire-and-forget returns an empty map, and
         // pre-contract results carried no code at all.
-        assertFalse(ApiCallsTask.isFailureResult(java.util.Map.of("body", "legacy")));
-        assertFalse(ApiCallsTask.isFailureResult(java.util.Map.of()));
+        assertFalse(ApiCallsTask.isFailureResult(Map.of("body", "legacy")));
+        assertFalse(ApiCallsTask.isFailureResult(Map.of()));
     }
 }

@@ -27,6 +27,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.ArrayList;
 
 import static ai.labs.eddi.engine.memory.ContextUtilities.storeContextLanguageInLongTermMemory;
@@ -797,6 +798,10 @@ public class Conversation implements IConversation {
     private static final String DEFAULT_PENDING_MESSAGE = "This action requires human approval before it can proceed. "
             + "You will receive the result once a reviewer decides.";
 
+    /** Matches a rendered default carrying the repeat-pause ordinal suffix. */
+    private static final Pattern ORDINAL_SUFFIX = Pattern.compile(
+            "^(.*) \\(approval \\d+ this turn\\)$", Pattern.DOTALL);
+
     /**
      * Default pending message when the gated call names ARE known — the normal
      * case.
@@ -916,8 +921,7 @@ public class Conversation implements IConversation {
             // ordinal itself predates the suffix (it was persisted for cap
             // enforcement), so a repeat pause persisted by that build re-reads
             // its ordinal today and gains a suffix the stored text never had.
-            var suffix = java.util.regex.Pattern.compile("^(.*) \\(approval \\d+ this turn\\)$",
-                    java.util.regex.Pattern.DOTALL).matcher(current);
+            var suffix = ORDINAL_SUFFIX.matcher(current);
             if (suffix.matches()) {
                 candidates.add(suffix.group(1));
             }

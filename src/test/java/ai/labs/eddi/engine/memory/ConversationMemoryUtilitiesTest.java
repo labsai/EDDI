@@ -258,7 +258,7 @@ class ConversationMemoryUtilitiesTest {
         void blankBesideRealEntryStillFilters() {
             var snapshot = buildMultiStepSnapshot(2);
             var simple = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(
-                    snapshot, true, true, java.util.Arrays.asList("", "conversationOutputs", "  "));
+                    snapshot, true, true, List.of("", "conversationOutputs", "  "));
             assertNull(simple.getConversationSteps(), "the real entry keeps filtering");
             assertNotNull(simple.getConversationOutputs());
         }
