@@ -401,6 +401,42 @@ class McpApiToolBuilderTest {
         assertEquals("listPets_response", listPets.getResponseObjectName());
     }
 
+    /**
+     * Without a response-header object name, {@code ApiCallExecutor} skips its
+     * {@code result.put("headers", …)} branch entirely — the name is null by
+     * default, so no generated tool ever saw a response header.
+     * <p>
+     * That made every "create" endpoint following the 201 + empty body + Location
+     * convention unusable: the model gets {@code {"httpCode": 201}} and the id it
+     * needs for every following call is in the header it cannot see. EDDI's own
+     * {@code POST /agents/{agentId}/start} is exactly that shape, which is what
+     * makes an operator test-drive of another agent possible or not.
+     */
+    @Test
+    void parseAndBuild_httpCallCapturesResponseHeaders() {
+        var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
+        var petsConfig = result.configsByGroup().get("pets");
+
+        ApiCall createPet = petsConfig.getHttpCalls().stream().filter(c -> "createPet".equals(c.getName())).findFirst().orElseThrow();
+
+        assertEquals("createPet_responseHeaders", createPet.getResponseHeaderObjectName(),
+                "a generated tool must be able to read Location off a 201");
+    }
+
+    /**
+     * Every generated call, not just the ones whose spec happens to declare a 201:
+     * the response-header name is set unconditionally, so a spec that documents its
+     * responses badly (or not at all) still yields a usable tool.
+     */
+    @Test
+    void parseAndBuild_everyGeneratedCallCapturesResponseHeaders() {
+        var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
+
+        result.configsByGroup().values().stream().flatMap(config -> config.getHttpCalls().stream())
+                .forEach(call -> assertEquals(call.getName() + "_responseHeaders", call.getResponseHeaderObjectName(),
+                        "call '" + call.getName() + "' cannot read its response headers"));
+    }
+
     @Test
     void parseAndBuild_httpCallHasDescription() {
         var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);

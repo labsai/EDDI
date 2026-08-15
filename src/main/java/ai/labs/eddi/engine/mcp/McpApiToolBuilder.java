@@ -236,6 +236,27 @@ public final class McpApiToolBuilder {
         // Save response for post-processing
         httpCall.setSaveResponse(true);
         httpCall.setResponseObjectName(name + "_response");
+        // Response headers travel too, and without them a whole class of REST API
+        // is unusable as a generated tool: the "create" convention is 201 with an
+        // EMPTY body and the new resource's id only in Location. EDDI's own
+        // POST /agents/{agentId}/start is exactly that — it answers
+        // Response.created(conversationUri).build() — so a model that started a
+        // conversation received {"httpCode": 201} and had no way to learn the id it
+        // needs for every following call. ApiCallExecutor only populates the
+        // "headers" key when this name is set (it is null by default, which is why
+        // nothing generated here ever saw one), so setting it is what makes the id
+        // reachable at all.
+        //
+        // The exposure this adds, stated plainly: every response header of the
+        // target API now reaches the tool result and conversation memory, including
+        // a Set-Cookie the caller never asked for. Accepted because the response
+        // BODY already travels that same path for these tools (saveResponse is on,
+        // above) and is the larger surface of the two; a header-name filter is not
+        // applied here because the filtering would have to live in
+        // ApiCallExecutor's shared header path, where it would also silently strip
+        // values that hand-authored apicallstore configs legitimately template
+        // against today.
+        httpCall.setResponseHeaderObjectName(name + "_responseHeaders");
 
         // Build request
         var request = new Request();

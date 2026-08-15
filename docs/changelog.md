@@ -7,6 +7,40 @@
 
 
 
+## ✨ feat(mcp): OpenAPI-generated tools can read response headers (2026-08-15)
+
+**Repo:** EDDI (`feat/generated-tools-response-headers`)
+
+Found while wiring the Platform Operator to test-drive another agent. The flow starts with
+`POST /agents/{agentId}/start`, which answers `Response.created(conversationUri).build()` — 201, an
+EMPTY body, and the new conversation's id only in the `Location` header. The model received
+`{"httpCode": 201}` and had no way to learn the id that every following call needs, so the
+capability could not work at all.
+
+The cause is one unset field. `ApiCallExecutor` populates the result map's `headers` key only when
+the call declares a `responseHeaderObjectName`, and `McpApiToolBuilder.buildApiCall` never set one —
+it defaults to null, so *no* tool generated from an OpenAPI spec has ever seen a response header.
+That breaks a whole convention, not just this endpoint: 201 + empty body + `Location` is how a large
+share of REST APIs report a create. `buildApiCall` now sets `<name>_responseHeaders`,
+unconditionally rather than only for operations that document a 201 — a spec that describes its
+responses badly still yields a usable tool.
+
+**The exposure this adds, stated plainly:** every response header of the target API now reaches the
+tool result and conversation memory, including a `Set-Cookie` nobody asked for. Accepted because the
+response BODY already travels that same path for these tools (`saveResponse` is on) and is the
+larger surface of the two. A header-name filter was considered and not applied: it would have to
+live in `ApiCallExecutor`'s shared response-header path, where it would also strip values that
+hand-authored apicallstore configs legitimately template against today.
+
+Two tests on the builder — `createPet` gets the name, and every generated call in the fixture gets
+one. The executor half of the chain was already covered (`ApiCallExecutorBranchCoverageTest` asserts
+`result.get("headers")` is populated once the name is set), so the two together prove the id is
+reachable end to end.
+
+---
+
+
+
 ## 🐛 fix(hitl): a second pause on the SAME tool rendered byte-identical text (2026-08-15)
 
 **Repo:** EDDI (`fix/pause-ordinal`)
