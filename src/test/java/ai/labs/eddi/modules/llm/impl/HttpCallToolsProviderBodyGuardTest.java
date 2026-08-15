@@ -236,18 +236,126 @@ class HttpCallToolsProviderBodyGuardTest {
         assertTrue(result.contains("httpCode"), "the executor's own result must be returned verbatim: " + result);
     }
 
-    /** A GET has no body template at all — there is nothing to judge. */
+    /**
+     * A GET has no body template at all — there is nothing to judge.
+     * <p>
+     * The content type is declared deliberately: {@code new Request()} defaults
+     * BOTH {@code body} and {@code contentType} to {@code ""}, so a bare GET
+     * fixture exits at the content-type gate and never reaches the body path this
+     * test is named for. Declaring JSON forces it past that gate, so the empty body
+     * is what actually decides.
+     */
     @Test
     void aCallWithNoBodyIsUnaffected() throws Exception {
         when(apiCallExecutor.execute(any(), any(), any(), anyString())).thenReturn(Map.of("httpCode", 200));
         var request = new Request();
         request.setMethod("get");
         request.setPath("/agentstore/agents/descriptors");
+        request.setContentType("application/json");
         ToolExecutor executor = executorFor(callWith(request));
 
         executor.execute(toolCall("{\"limit\":\"10\"}"), "memory-1");
 
         verify(apiCallExecutor, times(1)).execute(any(), any(), any(), anyString());
+    }
+
+    /**
+     * Jackson stops at the first complete value by default and ignores the rest, so
+     * this shape — a correct document with a sentence or a closing markdown fence
+     * after it — used to validate clean and then fail to bind at the API. Worse
+     * than not catching it: the model came away with EDDI's positive assurance that
+     * its body was fine, making the next attempt less likely to fix it.
+     */
+    @Test
+    void trailingProseAfterTheDocumentIsRefused() throws Exception {
+        ToolExecutor executor = executorForJsonBodyTool();
+
+        String result = executor.execute(
+                argumentsCarryingBody("{\"name\":\"Bot\"}\n\nSure, I created the agent!"), "memory-1");
+
+        verify(apiCallExecutor, never()).execute(any(), any(), any(), anyString());
+        assertTrue(errorOf(result).startsWith("requestBody is not valid JSON"));
+    }
+
+    @Test
+    void aTrailingMarkdownFenceIsRefused() throws Exception {
+        ToolExecutor executor = executorForJsonBodyTool();
+
+        executor.execute(argumentsCarryingBody("{\"name\":\"Bot\"}\n```"), "memory-1");
+
+        verify(apiCallExecutor, never()).execute(any(), any(), any(), anyString());
+    }
+
+    /**
+     * The parameter description says "a single JSON object", and a model that
+     * answers it with an actual object rather than a string is at least as common
+     * as the escaping bug. Qute renders in TEXT mode, so the Map would reach the
+     * wire as {@code {name=Bot}} — not JSON under any parser — and the API would
+     * answer with a bind error nothing in the arguments explains.
+     */
+    @Test
+    void aStructuredObjectInsteadOfAStringIsRefusedByName() throws Exception {
+        ToolExecutor executor = executorForJsonBodyTool();
+
+        String result = executor.execute(
+                toolCall(jsonSerialization.serialize(Map.of("requestBody", Map.of("name", "Bot")))), "memory-1");
+
+        verify(apiCallExecutor, never()).execute(any(), any(), any(), anyString());
+        String error = errorOf(result);
+        assertTrue(error.contains("STRING"), "the model must be told which shape it got wrong: " + error);
+        assertTrue(error.contains("JSON object"), error);
+        assertFalse(error.contains("Bot"), "the refusal must not echo the body: " + error);
+    }
+
+    /**
+     * A structured-suffix JSON type is still JSON. The old
+     * {@code contains("application/json")} test missed every one of these, silently
+     * switching the guard off for them.
+     */
+    @Test
+    void aStructuredSuffixJsonContentTypeIsStillGuarded() throws Exception {
+        var request = new Request();
+        request.setMethod("patch");
+        request.setPath("/things/{id}");
+        request.setContentType("application/merge-patch+json");
+        request.setBody("{requestBody}");
+        ToolExecutor executor = executorFor(callWith(request));
+
+        String result = executor.execute(argumentsCarryingBody("{\"a\":\"x\ny\"}"), "memory-1");
+
+        verify(apiCallExecutor, never()).execute(any(), any(), any(), anyString());
+        assertTrue(errorOf(result).startsWith("requestBody is not valid JSON"));
+    }
+
+    /**
+     * ...and a multipart body that merely NAMES json in a parameter is not a JSON
+     * document. The old substring test classified this as JSON and would have
+     * refused a working call.
+     */
+    @Test
+    void aMultipartContentTypeNamingJsonIsNotGuarded() throws Exception {
+        when(apiCallExecutor.execute(any(), any(), any(), anyString())).thenReturn(Map.of("httpCode", 200));
+        var request = new Request();
+        request.setMethod("post");
+        request.setPath("/upload");
+        request.setContentType("multipart/related; type=\"application/json\"");
+        request.setBody("{requestBody}");
+        ToolExecutor executor = executorFor(callWith(request));
+
+        executor.execute(argumentsCarryingBody("--boundary not json at all"), "memory-1");
+
+        verify(apiCallExecutor, times(1)).execute(any(), any(), any(), anyString());
+    }
+
+    /** The media type alone decides; parameters are not part of it. */
+    @Test
+    void jsonContentTypeClassification() {
+        assertTrue(HttpCallToolsProvider.declaresJsonBody("application/json; charset=utf-8"));
+        assertTrue(HttpCallToolsProvider.declaresJsonBody("APPLICATION/JSON"));
+        assertTrue(HttpCallToolsProvider.declaresJsonBody("application/problem+json"));
+        assertFalse(HttpCallToolsProvider.declaresJsonBody("text/plain"));
+        assertFalse(HttpCallToolsProvider.declaresJsonBody(null));
+        assertFalse(HttpCallToolsProvider.declaresJsonBody("multipart/related; type=\"application/json\""));
     }
 
     /**

@@ -22,6 +22,9 @@ import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import com.fasterxml.jackson.core.JsonLocation;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
@@ -102,6 +105,33 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      * @see #rejectUnparseableBody
      */
     private static final Pattern WHOLE_BODY_TEMPLATE = Pattern.compile("^\\{([A-Za-z_][A-Za-z0-9_]*)}$");
+
+    /**
+     * Cap for the parser's own explanation echoed into a tool result and a log
+     * line. Jackson's messages are short; this bounds a pathological one.
+     */
+    private static final int PARSE_DETAIL_MAX_BYTES = 200;
+
+    /**
+     * Strict parser for the model-written request body.
+     * <p>
+     * Its own mapper, not the injected {@link IJsonSerialization}, for one reason:
+     * {@code FAIL_ON_TRAILING_TOKENS}. Jackson's default is to parse the first
+     * complete value and ignore whatever follows, so a body with a trailing
+     * sentence ("…} Sure, I created the agent!") or a closing markdown fence
+     * validated clean here and then failed to bind at the API — leaving the model
+     * with EDDI's positive assurance that its body was fine, which makes the next
+     * attempt LESS likely to fix it. The shared mapper cannot be tightened: it is
+     * also the persistence mapper, and {@code SerializationCustomizer} documents
+     * why strictness there is not available.
+     * <p>
+     * The same posture six other classes take with LLM output — see
+     * {@code ConvergenceDetector}, whose comment puts it as
+     * "FAIL_ON_TRAILING_TOKENS is load-bearing, not hygiene".
+     */
+    private static final ObjectMapper STRICT_JSON = JsonMapper.builder()
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .build();
 
     private final IRestAgentStore restAgentStore;
     private final IRestWorkflowStore restWorkflowStore;
@@ -306,64 +336,115 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      */
     private String rejectUnparseableBody(ApiCall apiCall, Map<String, Object> templateData) {
         var request = apiCall.getRequest();
-        if (request == null || request.getBody() == null || request.getContentType() == null) {
-            return null;
-        }
-        if (!request.getContentType().toLowerCase(Locale.ROOT).contains("application/json")) {
+        if (request == null || request.getBody() == null || !declaresJsonBody(request.getContentType())) {
             return null;
         }
         var matcher = WHOLE_BODY_TEMPLATE.matcher(request.getBody().trim());
         if (!matcher.matches()) {
             return null;
         }
-        // Only a String is judged. The tool schema declares this parameter as a
-        // string (see the addStringProperty above), so anything else is a model
-        // that ignored the schema, and what Qute renders a non-string as is a
-        // question about the templating engine rather than about the JSON — not a
-        // basis on which to block a call. Those still fail at the API, where the
-        // result map now carries httpCode and the error body.
-        if (!(templateData.get(matcher.group(1)) instanceof String body) || body.isBlank()) {
+        Object value = templateData.get(matcher.group(1));
+
+        // A model that answered the "a single JSON object" parameter description
+        // with an actual object rather than a string lands here as a Map. Qute runs
+        // in TEXT mode, so it renders via toString — "{name=x}", which is not JSON
+        // under any parser. This is at least as common as the escaping bug the
+        // guard was written for, and refusing it by name is far more useful than
+        // letting the API answer with a bind error about a body nobody can explain.
+        // Numbers and booleans are left alone: they render as valid JSON scalars.
+        if (value instanceof Map || value instanceof Iterable) {
+            LOGGER.warnf("Refusing httpcall tool '%s' before sending: requestBody arrived as %s, not a string",
+                    sanitize(apiCall.getName()), value.getClass().getSimpleName());
+            return errorResult("requestBody must be a JSON document encoded as a STRING, but arrived as a "
+                    + (value instanceof Map ? "JSON object" : "JSON array")
+                    + ". The request was NOT sent. Send the whole body as one string value —"
+                    + " \"{\\\"name\\\": \\\"…\\\"}\" — not as structured arguments.");
+        }
+        if (!(value instanceof String body) || body.isBlank()) {
             return null;
         }
         try {
-            jsonSerialization.deserialize(body, Object.class);
+            // STRICT_JSON, not the shared mapper: Jackson's default stops at the
+            // first complete value and ignores the rest, so a body with a trailing
+            // sentence or a closing ``` fence — the second-most-common shape of
+            // this bug — parsed clean here and then failed to bind at the API,
+            // leaving the model with EDDI's assurance that its body was fine.
+            STRICT_JSON.readValue(body, Object.class);
             return null;
         } catch (IOException e) {
-            String position = parsePosition(e);
-            // The name and the position, never the body: it is model-supplied and
-            // routinely carries resolved secrets, which is why the pause record keeps
-            // only a redacted copy (RequestRedactor) and why templateDataFor's own
-            // catch goes to such lengths. The position is enough to triage with.
-            LOGGER.warnf("Refusing httpcall tool '%s' before sending: the model's request body is not valid JSON%s",
-                    sanitize(apiCall.getName()), position);
-            return errorResult("requestBody is not valid JSON" + position
+            String detail = parseFailureDetail(e);
+            // The tool name and the parse detail, never the body: it is
+            // model-supplied and routinely carries resolved secrets, which is why
+            // the pause record keeps only a redacted copy (RequestRedactor) and why
+            // templateDataFor's own catch goes to such lengths.
+            LOGGER.warnf("Refusing httpcall tool '%s' before sending: the model's request body is not valid JSON (%s)",
+                    sanitize(apiCall.getName()), detail);
+            return errorResult("requestBody is not valid JSON: " + detail
                     + ". The request was NOT sent. Re-send this call with the body as one correctly escaped JSON"
-                    + " document: inside a string value a newline must be written \\n and a double quote \\\","
-                    + " never as a raw character.");
+                    + " document, and nothing after it: inside a string value a newline must be written \\n and a"
+                    + " double quote \\\", never as a raw character.");
         }
     }
 
     /**
-     * Where the parse failed, and nothing else.
+     * Whether this call's configured content type means "the body is a JSON
+     * document".
      * <p>
-     * Deliberately not the exception's message. Jackson appends a snippet of the
-     * offending source to it ("at [Source: (String)\"{...\"; line: 1, column:
-     * 593]"), which would put the very body this method is careful not to log — or
-     * to hand back into conversation memory — into both. The line and column alone
-     * are what makes the failure actionable.
-     *
-     * @return {@code " at line L, column C"}, or an empty string when the failure
-     *         carries no usable location
+     * Matched on the media type alone, with parameters stripped, rather than by
+     * substring. {@code contains("application/json")} was both too loose and too
+     * tight: it classified {@code multipart/related; type="application/json"} as
+     * JSON — so a multipart body would have been refused — while missing
+     * {@code application/problem+json}, {@code application/merge-patch+json} and
+     * every other structured-suffix type, silently switching the guard off for
+     * them.
      */
-    private static String parsePosition(IOException e) {
+    static boolean declaresJsonBody(String contentType) {
+        if (contentType == null) {
+            return false;
+        }
+        String mediaType = contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+        return mediaType.equals("application/json") || mediaType.equals("text/json") || mediaType.endsWith("+json");
+    }
+
+    /**
+     * What went wrong and where, with no part of the body in it.
+     * <p>
+     * {@code getOriginalMessage()} rather than {@code getMessage()}, and the
+     * distinction is the whole point: the latter appends a source description, and
+     * the former is snippet-free <em>by construction</em> because it never appends
+     * the location at all. It carries the diagnosis the model needs — "Illegal
+     * unquoted character (CTRL-CHAR, code 10): has to be escaped using backslash"
+     * says far more than a bare column number about what to fix.
+     * <p>
+     * Note for anyone verifying the claim above: on Jackson 2.16+
+     * {@code StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION} is disabled by default,
+     * so {@code getMessage()} would render {@code [Source: REDACTED …]} rather than
+     * the body — the leak this avoids is not reachable on the pinned version. This
+     * is defence in depth against that default being re-enabled, which is a
+     * one-property change, and it costs nothing.
+     * <p>
+     * The location is appended separately from its integer accessors, never from
+     * {@code JsonLocation.toString()}.
+     *
+     * @return a one-line, body-free description of the parse failure
+     */
+    private static String parseFailureDetail(IOException e) {
+        String reason = "unparseable";
+        String position = "";
         if (e instanceof JsonProcessingException jsonError) {
+            String original = jsonError.getOriginalMessage();
+            if (original != null && !original.isBlank()) {
+                reason = capUtf8(original, PARSE_DETAIL_MAX_BYTES);
+            }
             JsonLocation location = jsonError.getLocation();
             // JsonLocation.NA reports -1 for both.
             if (location != null && location.getLineNr() > 0) {
-                return " at line " + location.getLineNr() + ", column " + location.getColumnNr();
+                position = " at line " + location.getLineNr() + ", column " + location.getColumnNr();
             }
         }
-        return "";
+        // Sanitized for the same reason the tool arguments are: this string reaches
+        // a log line, and a model-influenced \r or \n could forge whole records.
+        return sanitize(reason + position);
     }
 
     /**

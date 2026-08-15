@@ -34,21 +34,44 @@ body: the body is model-supplied and routinely carries resolved secrets (the rea
 source to both the log line and the tool result. Same reason the warn log names only the tool and
 the position.
 
-Scoped so it cannot refuse a call it merely fails to understand: only a JSON content type, only a
-body template that is nothing but a single variable (a hand-authored apicallstore template
-interpolating values into surrounding JSON is left alone — there the braces are EDDI's, not the
-model's), and only when that variable resolved to a non-blank string. The variable is read out of
-the template rather than assumed to be named `requestBody`, because the builder renames it when a
-path or query parameter already claims the name. A blank value is deliberately not refused — that is
-the separate "the model never filled the body" failure, not a malformed document.
+**Parsed strictly, with its own mapper.** Jackson's default stops at the first complete value and
+ignores the rest, so a body with a trailing sentence ("…} Sure, I created the agent!") or a closing
+markdown fence — the second-most-common shape of this bug — validated clean and then failed to bind
+at the API, leaving the model with EDDI's positive assurance that its body was fine and making the
+next attempt *less* likely to fix it. `FAIL_ON_TRAILING_TOKENS` is enabled on a private mapper; the
+shared one is also the persistence mapper, and `SerializationCustomizer` documents why strictness
+there is not available. Six other classes take the same posture with LLM output — see
+`ConvergenceDetector`, "FAIL_ON_TRAILING_TOKENS is load-bearing, not hygiene".
 
-Twelve tests drive the real executor lambda through a real workflow traversal with the real
-`JsonSerialization` (a stubbed parser would only prove the stub throws): the raw-newline case as
-reported, an unescaped quote, a truncated document, a renamed body variable, and the refusal's
-wording — against five that prove the guard stays out of the way (valid body, no body, `text/plain`,
+**A structured object is refused by name.** The parameter description says "a single JSON object",
+and a model that answers it with an actual object rather than a string is at least as common as the
+escaping bug. Qute renders in TEXT mode, so that Map would reach the wire as `{name=Bot}` — not JSON
+under any parser. It now gets "requestBody must be a JSON document encoded as a STRING" instead of
+an unexplainable bind error.
+
+Scoped so it cannot refuse a call it merely fails to understand: only a JSON content type — matched
+on the media type with parameters stripped, so `application/problem+json` is covered and
+`multipart/related; type="application/json"` is not — only a body template that is nothing but a
+single variable (a hand-authored apicallstore template interpolating values into surrounding JSON is
+left alone; there the braces are EDDI's, not the model's), and only when that variable resolved to a
+non-blank string. The variable is read out of the template rather than assumed to be named
+`requestBody`, because the builder renames it on a name collision. A blank value is deliberately not
+refused — that is the separate "the model never filled the body" failure, not a malformed document.
+
+The message carries Jackson's own `getOriginalMessage()`, snippet-free by construction because it
+never appends the location — so the model gets "Illegal unquoted character (CTRL-CHAR, code 10): has
+to be escaped using backslash", which says far more than a column number. (Checking the older
+comment: `INCLUDE_SOURCE_IN_LOCATION` has been off by default since Jackson 2.16, so `getMessage()`
+would render `[Source: REDACTED …]` anyway. Avoiding it is defence in depth against that
+one-property default being flipped, not a live leak.)
+
+Twenty-four tests drive the real executor lambda through a real workflow traversal: the raw-newline
+case as reported, an unescaped quote, a truncated document, trailing prose, a trailing fence, a
+structured object, a renamed body variable, a `+json` suffix type, and the refusal's wording —
+against those proving the guard stays out of the way (valid body, no body, `text/plain`, multipart,
 a per-property template, a JSON array body). The load-bearing assertion is
-`verify(apiCallExecutor, never()).execute(...)`. Mutation-checked: disabling the guard fails six of
-them.
+`verify(apiCallExecutor, never()).execute(...)`. Mutation-checked twice: disabling the guard fails
+six, and dropping strictness plus the object carve-out fails the three that pin them.
 
 **Known limit, not addressed here.** The approval gate pauses BEFORE execution, so the human still
 spends one approval on the doomed call; what changes is that the retry now has the information to
