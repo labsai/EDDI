@@ -4068,6 +4068,7 @@
       "rejected": "Sie haben diese Anfrage abgelehnt",
       "rePaused": "Erneut pausiert — eine weitere Entscheidung ist nötig",
       "noReply": "Der Durchlauf endete ohne Antwort",
+      "executed": "Ausgeführt: {{calls}}",
       "partial_one": "Genehmigt — {{count}} Aufruf abgelehnt",
       "partial_other": "Genehmigt — {{count}} Aufrufe abgelehnt"
     },

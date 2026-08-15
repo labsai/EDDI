@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatMarkdownText } from "@/components/groups/group-utils";
-import { Send, Square, RotateCcw, AlertTriangle, ArrowDown, Bot, User, PauseCircle, Loader2, Paperclip, CheckCircle2, XCircle } from "lucide-react";
+import { Send, Square, RotateCcw, AlertTriangle, ArrowDown, Bot, User, PauseCircle, Loader2, Paperclip, CheckCircle2, XCircle, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatActivity } from "@/components/chat/chat-activity";
 import { InputHint } from "@/components/chat/input-hint";
@@ -325,6 +325,10 @@ export function OperatorChat({
                     aria-hidden="true"
                   />
                 )
+              ) : message.code === "executed" ? (
+                // The receipt of what an approval actually ran — a tool fact,
+                // not a pause, so it gets its own icon.
+                <Wrench className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               ) : (
                 <PauseCircle className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden="true" />
               )}
@@ -332,10 +336,14 @@ export function OperatorChat({
                 {/* `count` goes ONLY to "partial", the one pluralized key. Handing
                     i18next a count on the others sends it looking for
                     `approved_other` and it lands on the base key by fallback
-                    rather than by design. */}
+                    rather than by design. `detail` likewise goes only to
+                    "executed": the ran-calls list is dynamic, so its key is a
+                    template ("Ran {{calls}}") rather than a static sentence. */}
                 {message.code === "partial"
                   ? t("operator.decisionLog.partial", message.content, { count: message.count ?? 0 })
-                  : t(`operator.decisionLog.${message.code}`, message.content)}
+                  : message.code === "executed"
+                    ? t("operator.decisionLog.executed", message.content, { calls: message.detail ?? "" })
+                    : t(`operator.decisionLog.${message.code}`, message.content)}
               </span>
               <span className="h-px flex-1 bg-border/60" />
             </div>

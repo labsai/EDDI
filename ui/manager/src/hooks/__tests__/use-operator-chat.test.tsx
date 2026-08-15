@@ -14,6 +14,13 @@ const h = vi.hoisted(() => ({
   /** InputData bodies handed to sendMessageStreaming, in call order. */
   sentInputs: [] as Array<{ input: string; context?: Record<string, unknown> }>,
   conversationLogs: [] as Array<Partial<SimpleConversationMemorySnapshot>>,
+  /**
+   * Reads with `returnDetailed` — the receipt's baseline/post reads. Their own
+   * queue with a benign empty default (they are best-effort in production, and
+   * a strict FIFO here would make every resolveApproval test enumerate reads
+   * it does not care about), so `conversationLogs` keeps policing the polls.
+   */
+  detailedLogs: [] as Array<Partial<SimpleConversationMemorySnapshot>>,
   resumeCalls: [] as Array<{ conversationId: string; decision: unknown }>,
   /** Runs inside a conversation-log read, before it resolves — lets a test act
    *  while the read is genuinely in flight. */
@@ -48,7 +55,13 @@ vi.mock("@/lib/api/conversations", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/conversations")>();
   return {
     ...actual,
-    getSimpleConversationLog: vi.fn(async () => {
+    getSimpleConversationLog: vi.fn(async (_conv: string, returnDetailed?: boolean) => {
+      if (returnDetailed) {
+        // `duringLogRead` deliberately does NOT fire here: it exists so tests
+        // can act during a POLL read, and the best-effort receipt reads would
+        // otherwise steal that trigger.
+        return (h.detailedLogs.shift() ?? {}) as SimpleConversationMemorySnapshot;
+      }
       const next = h.conversationLogs.shift();
       if (!next) throw new Error("test bug: ran out of mocked conversation logs");
       h.duringLogRead?.();
@@ -94,6 +107,7 @@ beforeEach(() => {
   h.sendError = null;
   h.sentInputs = [];
   h.conversationLogs = [];
+  h.detailedLogs = [];
   h.resumeCalls = [];
   h.duringLogRead = null;
   h.duringStream = null;
@@ -219,6 +233,115 @@ describe("a send rejected 409 while already paused", () => {
     });
     expect(result.current.isPaused).toBe(false);
     expect(result.current.error).toContain("boom");
+  });
+
+  it("re-syncs the pause when the stream reports awaiting_approval", async () => {
+    // The same rejection can arrive on the OTHER channel: the SSE stream opens
+    // before ConversationService re-checks the state, so the refusal lands as
+    // an error EVENT on a 200 stream, not a 409 status. Before the backend
+    // typed it, this surfaced as a raw
+    // {"message":"Internal server error","correlationId":…} blob over a live
+    // approval — observed live, input enabled, banner gone.
+    h.frames = [
+      {
+        type: "error",
+        data: JSON.stringify({
+          message:
+            "Conversation is awaiting human approval — a reviewer must resolve it via POST /agents/conv-1/resume (or cancel) before new input is accepted",
+          code: "awaiting_approval",
+        }),
+      },
+    ];
+    const pendingAsk =
+      "I need your approval before I can run startConversation. You will receive the result once a reviewer decides. (approval 2 this turn)";
+    h.conversationLogs = [
+      {
+        conversationState: "AWAITING_HUMAN",
+        hitlPausedAt: "2026-08-01T12:00:00Z",
+        conversationOutputs: [textOutput(pendingAsk)],
+      },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("did it work?");
+    });
+
+    expect(result.current.isPaused).toBe(true);
+    expect(result.current.error).toBeNull();
+    // The unsent optimistic bubbles are dropped; the pending ask is back-filled
+    // so the banner has a request to point at.
+    expect(result.current.messages.map((m) => [m.role, m.content])).toEqual([
+      ["agent", pendingAsk],
+    ]);
+    expect(result.current.pausedPlaceholderId).toBe(result.current.messages[0]?.id);
+  });
+
+  it("does not duplicate the ask when it is already on screen", async () => {
+    // The normal shape once the settle-poll fix lands: the pause rendered when
+    // it happened, and this send merely raced the decision. The back-fill must
+    // recognise its own text.
+    const pendingAsk = "I need your approval before I can run setupAgent.";
+    h.frames = [
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          hitlPausedAt: "2026-08-01T12:00:00Z",
+          conversationOutputs: [textOutput(pendingAsk)],
+        }),
+      },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("create the agent");
+    });
+    expect(result.current.messages.map((m) => m.content)).toEqual([
+      "create the agent",
+      pendingAsk,
+    ]);
+
+    // A raced second send, rejected over the stream.
+    h.frames = [
+      {
+        type: "error",
+        data: JSON.stringify({ message: "Conversation is awaiting human approval", code: "awaiting_approval" }),
+      },
+    ];
+    h.conversationLogs = [
+      {
+        conversationState: "AWAITING_HUMAN",
+        hitlPausedAt: "2026-08-01T12:00:00Z",
+        conversationOutputs: [textOutput(pendingAsk)],
+      },
+    ];
+    await act(async () => {
+      await result.current.send("did it work?");
+    });
+
+    expect(result.current.isPaused).toBe(true);
+    // Unchanged: no duplicate ask, no surviving optimistic bubbles.
+    expect(result.current.messages.map((m) => m.content)).toEqual([
+      "create the agent",
+      pendingAsk,
+    ]);
+  });
+
+  it("renders an error event's message, never its raw JSON envelope", async () => {
+    h.frames = [
+      {
+        type: "error",
+        data: JSON.stringify({ message: "Internal server error", correlationId: "abc-123" }),
+      },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.error).toBe("Internal server error");
+    expect(result.current.error).not.toContain("correlationId");
+    expect(result.current.isPaused).toBe(false);
   });
 });
 
@@ -451,6 +574,121 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     // Null from the snapshot ON PURPOSE: the simple snapshot never carries a
     // reason on the wire; the rendered reason overlays from approval-status.
     expect(result.current.pauseReason).toBeNull();
+  });
+
+  it("does not settle on the resume's persisted IN_PROGRESS window", async () => {
+    // Accepting a resume persists AWAITING_HUMAN→IN_PROGRESS immediately (the
+    // claim CAS), while the outcome persists only when the turn finishes — so
+    // for the whole execution the store answers IN_PROGRESS with the
+    // PRE-decision outputs, the pending ask still in them. Reading that as
+    // settled re-rendered the old ask as "the answer" (a byte-identical
+    // duplicate bubble), cleared isPaused, and left the next pause with no
+    // approval controls — observed live as "I approved it and nothing
+    // happened", with the approved tools running fine server-side.
+    vi.useFakeTimers();
+    try {
+      const { result } = await pausedHook();
+      h.conversationLogs = [
+        // The CAS window: state flipped, outputs still pre-decision.
+        {
+          conversationState: "IN_PROGRESS",
+          conversationOutputs: [textOutput("Waiting on a reviewer…")],
+        },
+        { conversationState: "READY", conversationOutputs: [textOutput("Created the agent.")] },
+      ];
+
+      await act(async () => {
+        const resolvePromise = result.current.resolveApproval("APPROVED");
+        await vi.advanceTimersByTimeAsync(1_500);
+        await resolvePromise;
+      });
+
+      expect(h.conversationLogs).toHaveLength(0); // polled THROUGH the window
+      expect(result.current.isPaused).toBe(false);
+      // The stale ask was not duplicated as an answer — one ask, one answer.
+      const agents = result.current.messages.filter((m) => m.role === "agent");
+      expect(agents.map((m) => m.content)).toEqual([
+        "Waiting on a reviewer…",
+        "Created the agent.",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("adds a receipt of the calls the decision caused to run", async () => {
+    // The model often proceeds from an approved call straight into its next
+    // tool call with no text between, so "You approved" → next ask showed the
+    // created agent nowhere. The receipt is the diff of the step's executed
+    // calls (detailed snapshot's httpCalls) across the decision: <name>Request
+    // marks execution, <name>_response is only merged on success.
+    const { result } = await pausedHook();
+    h.detailedLogs = [
+      // Baseline: the exempt read the turn ran BEFORE pausing.
+      {
+        conversationOutputs: [
+          { httpCalls: { readAgentDescriptorsRequest: {}, readAgentDescriptors_response: {} } },
+        ],
+      },
+      // Post-settle: baseline calls plus what the approval unlocked — one
+      // success, one call that ran but failed (no _response merged).
+      {
+        conversationOutputs: [
+          {
+            httpCalls: {
+              readAgentDescriptorsRequest: {},
+              readAgentDescriptors_response: {},
+              setupAgentRequest: {},
+              setupAgent_response: {},
+              deployAgentRequest: {},
+            },
+          },
+        ],
+      },
+    ];
+    h.conversationLogs = [
+      { conversationState: "READY", conversationOutputs: [textOutput("All set.")] },
+    ];
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    const receipt = result.current.messages.find((m) => m.code === "executed");
+    expect(receipt?.kind).toBe("notice");
+    // Baseline calls are NOT re-listed; the failed call is named honestly.
+    expect(receipt?.detail).toBe("setupAgent ✓, deployAgent ✕");
+    expect(receipt?.content).toBe("Ran setupAgent ✓, deployAgent ✕");
+    // Reads decision → receipt → answer.
+    expect(result.current.messages.map((m) => m.code ?? m.content)).toEqual([
+      "do a thing",
+      "Waiting on a reviewer…",
+      "approved",
+      "executed",
+      "All set.",
+    ]);
+  });
+
+  it("adds no receipt when the decision caused nothing new to run", async () => {
+    // A rejection (or an approval whose calls all failed to start) executes
+    // nothing — an empty "Ran" line would be noise, and a receipt listing the
+    // pre-pause reads would claim the decision did things it did not do.
+    const { result } = await pausedHook();
+    const baseline = {
+      conversationOutputs: [
+        { httpCalls: { readAgentDescriptorsRequest: {}, readAgentDescriptors_response: {} } },
+      ],
+    };
+    h.detailedLogs = [baseline, baseline];
+    h.conversationLogs = [
+      { conversationState: "READY", conversationOutputs: [textOutput("Understood, stopping.")] },
+    ];
+
+    await act(async () => {
+      await result.current.resolveApproval("REJECTED");
+    });
+
+    expect(result.current.messages.some((m) => m.code === "executed")).toBe(false);
   });
 
   it("polls until the conversation leaves AWAITING_HUMAN rather than reading once", async () => {

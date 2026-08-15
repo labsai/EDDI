@@ -78,7 +78,14 @@ export function OperatorPage() {
 
   // Structured RULE/TOOL_CALL pause detail — the streamed `done` snapshot only
   // carries the generic bookmark fields, not per-call tool names/arguments.
-  const approvalStatus = useApprovalStatus(chat.conversationId ?? undefined, chat.isPaused);
+  // Keyed by the pause's identity (decidedPausedAt): a turn may pause several
+  // times, and on the conversation id alone the second pause rendered the first
+  // pause's cached calls — see useApprovalStatus.
+  const approvalStatus = useApprovalStatus(
+    chat.conversationId ?? undefined,
+    chat.isPaused,
+    chat.decidedPausedAt,
+  );
 
   /**
    * Bring the tab's conversation back on mount.

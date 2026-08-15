@@ -4068,6 +4068,7 @@
       "rejected": "您已拒绝此请求",
       "rePaused": "再次暂停 — 需要另一个决定",
       "noReply": "本轮结束但没有回复",
+      "executed": "已执行 {{calls}}",
       "partial_one": "已批准 — 拒绝了 {{count}} 个调用",
       "partial_other": "已批准 — 拒绝了 {{count}} 个调用"
     },

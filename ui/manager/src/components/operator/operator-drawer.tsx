@@ -63,7 +63,13 @@ export function OperatorDrawer() {
   // over the chat hook's derived one: the hook's is null on some pause paths
   // (a 409 arriving with no reason of its own), and approval-status is the
   // endpoint that actually carries it.
-  const approvalStatus = useApprovalStatus(chat.conversationId ?? undefined, chat.isPaused);
+  // Keyed by the pause's identity — same reason as operator.tsx: without it, a
+  // turn's second pause rendered the first pause's cached calls.
+  const approvalStatus = useApprovalStatus(
+    chat.conversationId ?? undefined,
+    chat.isPaused,
+    chat.decidedPausedAt,
+  );
   const screenContext = useCurrentScreenContext();
 
   useEffect(() => {

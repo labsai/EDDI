@@ -60,10 +60,25 @@ export function useAllGroupPendingApprovals(limit = 200) {
  * `pauseDetails` (per-call tool name + redacted arguments for a TOOL_CALL pause,
  * or the rule reason/actions for a RULE pause). Enable only while the
  * conversation is actually AWAITING_HUMAN.
+ *
+ * `pauseKey` identifies WHICH pause the caller is showing — pass the pause's
+ * `hitlPausedAt` when available. A turn may pause up to `maxPausesPerTurn`
+ * times (backend default 3), and with the key on the conversation id alone a
+ * re-pause is the SAME query, so the second pause rendered the first pause's
+ * cached calls — decided buttons and all. (Verified live: the previous remedy,
+ * `removeQueries` after deciding, produces no refetch on an actively-observed
+ * query — the observer keeps rendering its last data. Keying by pause identity
+ * makes the fresh fetch a cache-model guarantee instead of a removal
+ * side-effect.) Callers without a pause timestamp omit it and keep the old
+ * behaviour.
  */
-export function useApprovalStatus(conversationId: string | undefined, enabled = true) {
+export function useApprovalStatus(
+  conversationId: string | undefined,
+  enabled = true,
+  pauseKey?: string | null,
+) {
   return useQuery({
-    queryKey: ["approval-status", conversationId],
+    queryKey: ["approval-status", conversationId, pauseKey ?? null],
     queryFn: () => getApprovalStatus(conversationId!),
     enabled: enabled && !!conversationId,
   });
