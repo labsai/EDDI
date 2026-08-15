@@ -524,6 +524,42 @@ class ApiCallExecutorBranchCoverageTest {
          * failed call's error body is exactly what the model needs in order to decide
          * whether to retry.
          */
+        /**
+         * Choosing which operations may BIND headers is not the same control as
+         * choosing which headers may be STORED, and only the second one closes this. An
+         * operation that qualifies on its documented 201 still answers some calls — the
+         * error path especially — with a {@code Set-Cookie}, and that value is a live
+         * session credential: {@code HttpClientModule} builds a cookie-aware,
+         * application-scoped {@code WebClientSession}, so EDDI actively replays it. It
+         * must reach neither the tool result, the template data, nor conversation
+         * memory.
+         */
+        @Test
+        @DisplayName("should never store or return credential-bearing response headers")
+        void dropsCredentialHeaders() throws Exception {
+            ApiCall call = createCall("header-call", true);
+            call.setResponseHeaderObjectName("respHeaders");
+            Map<String, String> responseHeaders = new HashMap<>();
+            responseHeaders.put("set-cookie", "JSESSIONID=SUPERSECRET; HttpOnly");
+            responseHeaders.put("WWW-Authenticate", "Bearer realm=\"x\"");
+            responseHeaders.put("Location", "/agents/conv-1");
+            when(mockResponse.getHttpCode()).thenReturn(201);
+            when(mockResponse.getContentAsString()).thenReturn("\"\"");
+            when(mockResponse.getHttpHeader()).thenReturn(responseHeaders);
+
+            Map<String, Object> templateData = new HashMap<>();
+            Map<String, Object> result = executor.execute(call, memory, templateData, "http://example.com");
+
+            String returned = String.valueOf(result.get("headers"));
+            assertFalse(returned.contains("SUPERSECRET"), "Set-Cookie reached the tool result: " + returned);
+            assertFalse(returned.contains("Bearer realm"), "an authenticate challenge reached the tool result");
+            // ...while the header the whole capture exists for still arrives.
+            assertTrue(returned.contains("/agents/conv-1"), "Location must survive the filter: " + returned);
+
+            assertFalse(String.valueOf(templateData.get("respHeaders")).contains("SUPERSECRET"),
+                    "Set-Cookie reached the template data");
+        }
+
         @Test
         @DisplayName("should order the error body before headers too")
         void ordersErrorBodyBeforeHeaders() throws Exception {

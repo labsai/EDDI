@@ -36,6 +36,16 @@ replaying, and copying it into prompt-injectable context is what `HttpOnly` exis
 the Petstore fixture the scoping withholds headers from all five calls; EDDI's own spec documents
 `201` on `/agents/{agentId}/start`, which is the case this exists for.
 
+**Credential headers are never stored.** Choosing which operations may BIND headers is not the same
+control as choosing which headers may be STORED, and only the second one closes the exposure: an
+operation qualifying on its documented 201 still answers other calls — the error path especially —
+with a `Set-Cookie`. `ApiCallExecutor` now drops `Set-Cookie`, `Set-Cookie2`, the authorization and
+the authenticate headers before the map reaches the tool result, the template data or conversation
+memory, matched case-insensitively. A deny-list rather than an allow-list, deliberately: which
+header is *useful* is not knowable here (`Location`, `ETag`, a pagination cursor, a rate-limit
+budget, some vendor `X-*`) and an allow-list would silently break hand-authored configs templating
+one of those — what IS knowable is the small closed set that is never data.
+
 **Two ordering bugs fixed alongside, both pre-existing and both load-bearing here.**
 
 `ApiCallExecutor`'s result map is now a `LinkedHashMap` with `headers` inserted last. It is
@@ -56,7 +66,7 @@ generated `ApiCallsConfiguration` at creation, and the runtime loads the stored 
 reaches agents created after the deploy; an operator provisioned earlier keeps
 `responseHeaderObjectName: null` until it is re-provisioned. There is no migration.
 
-Nine tests: five on the builder pinning each response shape it decides on (201, 204, 3xx, a
+Ten tests: five on the builder pinning each response shape it decides on (201, 204, 3xx, a
 body-returning 200, and an undocumented operation) plus a fixture-size assertion so the sweeping
 ones cannot pass on an empty stream; two on the executor pinning `headers` after `body` on both
 paths; one on the case-insensitive lookup; and the pre-existing executor coverage that `headers` is
