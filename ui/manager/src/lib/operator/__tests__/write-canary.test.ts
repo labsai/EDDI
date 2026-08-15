@@ -701,6 +701,10 @@ describe("runBackgroundWriteProbe — the empirical half, after activation", () 
     // Honest, not upgraded: the caller sees exactly what was and wasn't proven.
     expect(report?.message).toMatch(/verified deterministically/i);
     expect(report?.message).toMatch(/probe was inconclusive/i);
+    // ...but marked quiet: with the deterministic verdict in hand, a careful
+    // model declining an unexplained write is EXPECTED, and toasting it on
+    // every activation trained admins to dismiss operator warnings.
+    expect(report?.quiet).toBe(true);
   });
 
   /**
@@ -722,6 +726,9 @@ describe("runBackgroundWriteProbe — the empirical half, after activation", () 
     expect(report?.tornDown).toBe(false);
     expect(report?.message).toMatch(/not evidence that it is broken/i);
     expect(report?.message).toMatch(/does not support the deterministic check/i);
+    // No deterministic verdict to fall back on — the probe was the only signal
+    // there was, so this one is NOT quiet.
+    expect(report?.quiet).toBeFalsy();
   });
 });
 

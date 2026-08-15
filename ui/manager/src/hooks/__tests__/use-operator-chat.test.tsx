@@ -254,7 +254,10 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     return rendered;
   }
 
-  it("replaces the placeholder bubble in place, leaving no duplicate", async () => {
+  it("reads ask → decision → answer, with the ask bubble kept", async () => {
+    // The ask ("I need your approval…") must NOT be overwritten by the answer:
+    // that put the decision rule above the very message it was answering,
+    // reading as approval of a request that had not been made yet.
     const { result } = await pausedHook();
     h.conversationLogs = [
       { conversationState: "READY", conversationOutputs: [textOutput("Done — the agent was created.")] },
@@ -268,14 +271,15 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     expect(h.resumeCalls).toEqual([
       { conversationId: "conv-1", decision: { verdict: "APPROVED", note: undefined, toolDecisions: { "call-1": { verdict: "APPROVED" } } } },
     ]);
-    const agentMessages = result.current.messages.filter((m) => m.role === "agent");
-    // The pending message is GONE and the answer took its place — not appended
-    // beneath it.
-    expect(agentMessages).toHaveLength(1);
-    expect(agentMessages[0]?.content).toBe("Done — the agent was created.");
+    expect(result.current.messages.map((m) => [m.role, m.content])).toEqual([
+      ["user", "do a thing"],
+      ["agent", "Waiting on a reviewer…"],
+      ["system", "You approved this request."],
+      ["agent", "Done — the agent was created."],
+    ]);
   });
 
-  it("keeps the placeholder's message id, so its pipeline trace stays attached", async () => {
+  it("keeps the ask bubble's message id, so its pipeline trace stays attached", async () => {
     const { result } = await pausedHook();
     const placeholderId = result.current.messages.find((m) => m.role === "agent")?.id;
     h.conversationLogs = [
@@ -286,9 +290,11 @@ describe("resolveApproval — reconciling the resumed turn", () => {
       await result.current.resolveApproval("APPROVED");
     });
 
-    const agentMessage = result.current.messages.find((m) => m.role === "agent");
-    expect(agentMessage?.id).toBe(placeholderId);
-    expect(agentMessage?.content).toBe("Done.");
+    // The ask keeps its id — tracesByMessageId is keyed by it, and the trace
+    // belongs to the very turn that paused.
+    const askMessage = result.current.messages.find((m) => m.role === "agent");
+    expect(askMessage?.id).toBe(placeholderId);
+    expect(askMessage?.content).toBe("Waiting on a reviewer…");
   });
 
   it("stays paused when the resumed turn pauses AGAIN on a new batch", async () => {
@@ -316,8 +322,11 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     expect(result.current.resolveError).toBeNull();
     expect(result.current.isResolvingPause).toBe(false);
     const agentMessages = result.current.messages.filter((m) => m.role === "agent");
-    expect(agentMessages).toHaveLength(1);
-    expect(agentMessages[0]?.content).toBe("Now waiting on batch two…");
+    // The first ask stays; the new pending message follows the decision.
+    expect(agentMessages.map((m) => m.content)).toEqual([
+      "Waiting on a reviewer…",
+      "Now waiting on batch two…",
+    ]);
   });
 
   it("discards the resumed turn when the conversation was reset while polling", async () => {
@@ -341,10 +350,10 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     expect(result.current.conversationId).toBeNull();
   });
 
-  it("tracks the LAST bubble of a multi-part re-pause as the next placeholder", async () => {
+  it("tracks the LAST bubble of a multi-part re-pause as the next ask", async () => {
     // A pending message that renders as several bubbles still has exactly one
-    // tail. Tracking its head instead would make the next decision overwrite
-    // the opening line and strand the remainder *after* the final answer.
+    // tail. Anchoring on its head would make the next decision read after the
+    // opening line instead of after the ask it actually answers.
     const { result } = await pausedHook();
     h.conversationLogs = [
       {
@@ -363,7 +372,7 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     // which is a transcript fact rather than something anyone said.
     expect(
       result.current.messages.filter((m) => m.role !== "system").map((m) => m.content),
-    ).toEqual(["do a thing", "Part one.", "Part two."]);
+    ).toEqual(["do a thing", "Waiting on a reviewer…", "Part one.", "Part two."]);
 
     h.conversationLogs = [
       { conversationState: "READY", conversationOutputs: [textOutput("Final answer.")] },
@@ -372,10 +381,17 @@ describe("resolveApproval — reconciling the resumed turn", () => {
       await result.current.resolveApproval("APPROVED");
     });
 
-    // Conversation turns only — each decision also records a "system" entry.
+    // The second decision reads after "Part two." (the tail of the second ask),
+    // and the final answer follows it — every earlier turn kept intact.
     expect(
       result.current.messages.filter((m) => m.role !== "system").map((m) => m.content),
-    ).toEqual(["do a thing", "Part one.", "Final answer."]);
+    ).toEqual(["do a thing", "Waiting on a reviewer…", "Part one.", "Part two.", "Final answer."]);
+    const systemIndexes = result.current.messages
+      .map((m, i) => (m.role === "system" ? i : -1))
+      .filter((i) => i >= 0);
+    const secondDecisionIdx = systemIndexes[systemIndexes.length - 1]!;
+    const partTwoIdx = result.current.messages.findIndex((m) => m.content === "Part two.");
+    expect(secondDecisionIdx).toBe(partTwoIdx + 1);
   });
 
   it("renders every part when the resumed step emits several outputs", async () => {
@@ -392,7 +408,11 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     });
 
     const agentMessages = result.current.messages.filter((m) => m.role === "agent");
-    expect(agentMessages.map((m) => m.content)).toEqual(["First.", "Second."]);
+    expect(agentMessages.map((m) => m.content)).toEqual([
+      "Waiting on a reviewer…",
+      "First.",
+      "Second.",
+    ]);
   });
 
   it("APPENDS rather than replacing when the pause came from a 409 (no placeholder of ours)", async () => {
@@ -455,7 +475,9 @@ describe("resolveApproval — reconciling the resumed turn", () => {
 
       expect(h.conversationLogs).toHaveLength(0); // all three were consumed
       expect(result.current.isPaused).toBe(false);
-      expect(result.current.messages.find((m) => m.role === "agent")?.content).toBe("Finally done.");
+      // The ask stays; the answer lands after it (last agent bubble = the answer).
+      const agents = result.current.messages.filter((m) => m.role === "agent");
+      expect(agents[agents.length - 1]?.content).toBe("Finally done.");
     } finally {
       vi.useRealTimers();
     }
