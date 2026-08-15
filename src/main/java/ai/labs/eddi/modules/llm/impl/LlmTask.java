@@ -48,6 +48,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
+import java.util.regex.Pattern;
 
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType;
@@ -1149,13 +1150,51 @@ public class LlmTask implements ILifecycleTask {
      */
     private static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
 
+    /**
+     * A vault reference MENTIONED in an LLM parameter — {@code {vault:key-name}},
+     * with or without the leading {@code $} (which is plain text to Qute either
+     * way).
+     */
+    private static final Pattern VAULT_REF_MENTION = Pattern.compile("\\{vault:[^}]*\\}");
+
+    /**
+     * Wraps {@code {vault:...}} mentions in Qute raw sections so a PROMPT may talk
+     * about the syntax without crashing templating.
+     * <p>
+     * The Platform Operator's system prompt instructs the model to write secrets as
+     * {@code ${vault:key-name}} references. Qute parses the brace part as a
+     * namespaced expression, and there is deliberately no {@code vault} namespace
+     * resolver (see {@code CallerNamespaceResolver}'s class doc: letting vault
+     * references survive templating in general would let one ride a templated
+     * request BODY into vault resolution, and the resolved body is written to
+     * conversation memory in plaintext) — so every turn of such an agent failed
+     * templating for that parameter and fell back to the RAW string, skipping every
+     * legitimate {@code {memory...}} expression alongside it.
+     * <p>
+     * Escaping HERE, for LLM parameters only, threads that needle: these values go
+     * to the model, never through vault resolution, so a literal
+     * {@code ${vault:key-name}} in a prompt is inert documentation. Httpcall
+     * templating does not pass through this method and keeps failing loudly,
+     * exactly as that security decision requires.
+     * <p>
+     * Known limit: a mention already inside a {@code {|raw|}} section would be
+     * double-wrapped and render its markers. Prompts do not write Qute raw
+     * sections; accepting that beats parsing Qute here.
+     */
+    static String escapeVaultMentions(String value) {
+        if (value == null || !value.contains("vault:")) {
+            return value;
+        }
+        return VAULT_REF_MENTION.matcher(value).replaceAll(match -> "{|" + match.group() + "|}");
+    }
+
     private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters, Map<String, Object> templateDataObjects) {
 
         var processedParams = new HashMap<>(parameters);
         processedParams.forEach((key, value) -> {
             try {
                 if (!isNullOrEmpty(value) && !TEMPLATE_SKIP_PARAMS.contains(key)) {
-                    processedParams.put(key, templatingEngine.processTemplate(value, templateDataObjects));
+                    processedParams.put(key, templatingEngine.processTemplate(escapeVaultMentions(value), templateDataObjects));
                 }
             } catch (ITemplatingEngine.TemplateEngineException e) {
                 LOGGER.errorf(e, "Template processing failed for LLM parameter '%s': %s", key, e.getLocalizedMessage());

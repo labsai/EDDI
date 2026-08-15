@@ -7,6 +7,67 @@
 
 
 
+## 🐛 fix(llm): a prompt MENTIONING `${vault:key-name}` crashed templating every turn (2026-08-15)
+
+**Repo:** EDDI (`fix/vault-ref-template-crash`)
+
+The Platform Operator's system prompt instructs the model to write secrets as `${vault:key-name}`
+references. Qute parses the brace part as a namespaced expression, and there is deliberately no
+`vault` namespace resolver — `CallerNamespaceResolver`'s class doc records why: letting vault
+references survive templating in general would let one ride a templated request BODY into vault
+resolution, and the resolved body is written to conversation memory in plaintext. So every turn of
+such an agent logged
+
+> Template processing failed for LLM parameter 'systemMessage': ... No namespace resolver found for
+> [vault] in expression {vault:key-name}
+
+and fell back to the RAW string — skipping every legitimate `{memory...}` expression beside the
+mention.
+
+The fix threads the needle without touching the security decision: `LlmTask.escapeVaultMentions`
+wraps `{vault:...}` mentions in Qute raw sections **for LLM parameters only** (`eddivault` is a
+retired alias and deliberately not covered).
+Prompts go to the model, never through vault resolution, so the literal is inert documentation
+there. Httpcall templating does not pass through this path and keeps failing loudly, exactly as
+`CallerNamespaceResolver` requires. Four tests, including one that REPRODUCES the crash on the
+unescaped prompt — if that one ever stops throwing, the escape is dead code and the security doc
+no longer holds, and both need revisiting together.
+
+Also diagnosed in the same session log (still open): the resumed turn's `setupAgent` call failed
+with 400 `{"objectName":"Class","attributeName":"systemPrompt","line":1,"column":593}` — the JSON
+body failed to BIND at parse time, column 593 inside the systemPrompt string. The error shape comes
+from the JSON layer, not EDDI code; closing it needs the full memorized request body.
+
+---
+
+
+
+## 🎨 fix(operator-ux): decision reads after the ask; expected-inconclusive probe stops toasting (2026-08-15)
+
+**Repo:** EDDI-Manager (`fix/approval-flow-ordering`)
+
+Two follow-ups on the approval-flow work, both from live use:
+
+**Ask → decision → answer.** The decision rule ("You approved this request") rendered ABOVE the
+pending-approval bubble it was answering, because the resolved turn's answer used to overwrite the
+ask bubble in place. Now the ask stays, the decision reads after it, and the answer (or the next
+pending message) follows — the sequence an approver expects. The ask keeps its message id, so the
+paused turn's pipeline trace stays attached. The server still drops its copy of the ask from the
+resolved step, so a reload shows only the answer — like the decision rules themselves, the fuller
+sequence is the tab's own record.
+
+**The write probe's expected outcome no longer warns.** Activation verifies the gate
+deterministically (gate-dry-run); the background live probe then asks the model to attempt a real
+gated write. A careful model CAN always decline an unexplained write — that is its hardening
+working — so with the deterministic verdict in hand, "inconclusive" is the EXPECTED case, and
+toasting it on every activation trained admins to dismiss operator warnings. The report now carries
+`quiet: true` for exactly that case and the page logs instead of toasting. On a backend without the
+dry-run the probe is the only signal there is, so the same outcome still warns.
+
+---
+
+
+
 ## 🐛 fix(hitl): the pending-approval message was the same sentence on every pause (2026-08-14)
 
 **Repo:** EDDI (`fix/sse-data-line-padding`)
