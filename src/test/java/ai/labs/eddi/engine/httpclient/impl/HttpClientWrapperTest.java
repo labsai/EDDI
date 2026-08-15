@@ -90,6 +90,32 @@ class HttpClientWrapperTest {
             assertEquals("abc123", result.get("X-Request-Id"));
         }
 
+        /**
+         * HTTP field names are case-insensitive by specification, and HTTP/2 mandates
+         * lowercase on the wire — so the same endpoint answers {@code Location} over h1
+         * and {@code location} over h2.
+         * <p>
+         * This was already costing the codebase: {@code ApiCallExecutor} looks the
+         * content type up as the literal {@code "Content-Type"}, so against a
+         * lowercase-header response it found nothing, took the {@code <not-present>}
+         * branch, and stored every JSON body as a raw String instead of parsed JSON.
+         * Generated tools reading {@code Location} off a 201 depend on the same
+         * tolerance.
+         */
+        @Test
+        @DisplayName("lookups are case-insensitive, whatever casing the wire used")
+        void lookupIsCaseInsensitive() {
+            MultiMap headers = HeadersMultiMap.httpHeaders();
+            headers.add("location", "eddi://ai.labs.conversation/conversationstore/conversations/c-1");
+            headers.add("content-type", "application/json");
+
+            Map<String, String> result = HttpClientWrapper.convertHeaderToMap(headers);
+
+            assertEquals("application/json", result.get("Content-Type"), "the pre-existing Content-Type lookup must hit");
+            assertTrue(result.get("Location").endsWith("/c-1"), "a generated tool must find Location whatever its casing");
+            assertTrue(result.containsKey("LOCATION"));
+        }
+
         @Test
         @DisplayName("duplicate header keys are handled (last value wins in HashMap)")
         void duplicateHeaders() {

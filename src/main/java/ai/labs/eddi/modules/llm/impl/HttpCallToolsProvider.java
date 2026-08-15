@@ -19,7 +19,12 @@ import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
+import com.fasterxml.jackson.core.JsonLocation;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
@@ -33,6 +38,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -85,6 +91,41 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             "context", "properties", "memory",
             "snippets", "vars",
             "userInfo", "conversationInfo", "conversationLog");
+
+    /**
+     * A body template that is nothing but one Qute variable — the shape
+     * {@code McpApiToolBuilder.buildBodyTemplate} always generates, where the model
+     * writes the whole JSON document and that variable IS the request body.
+     * <p>
+     * Anchored, so a template that merely CONTAINS a variable does not match: in
+     * {@code {"name":"{name}"}} the JSON around the value is EDDI's own and the
+     * model never wrote it, so judging one substituted value as a JSON document
+     * would refuse every correct call of that shape.
+     *
+     * @see #rejectUnparseableBody
+     */
+    private static final Pattern WHOLE_BODY_TEMPLATE = Pattern.compile("^\\{([A-Za-z_][A-Za-z0-9_]*)}$");
+
+    /**
+     * Strict parser for the model-written request body.
+     * <p>
+     * Its own mapper, not the injected {@link IJsonSerialization}, for one reason:
+     * {@code FAIL_ON_TRAILING_TOKENS}. Jackson's default is to parse the first
+     * complete value and ignore whatever follows, so a body with a trailing
+     * sentence ("…} Sure, I created the agent!") or a closing markdown fence
+     * validated clean here and then failed to bind at the API — leaving the model
+     * with EDDI's positive assurance that its body was fine, which makes the next
+     * attempt LESS likely to fix it. The shared mapper cannot be tightened: it is
+     * also the persistence mapper, and {@code SerializationCustomizer} documents
+     * why strictness there is not available.
+     * <p>
+     * The same posture six other classes take with LLM output — see
+     * {@code ConvergenceDetector}, whose comment puts it as
+     * "FAIL_ON_TRAILING_TOKENS is load-bearing, not hygiene".
+     */
+    private static final ObjectMapper STRICT_JSON = JsonMapper.builder()
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .build();
 
     private final IRestAgentStore restAgentStore;
     private final IRestWorkflowStore restWorkflowStore;
@@ -182,6 +223,15 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                     executors.put(apiCall.getName(), (toolRequest, memoryId) -> {
                         try {
                             Map<String, Object> templateData = templateDataFor(memory, toolRequest);
+
+                            // Checked before the wire, not after. A body the model wrote as
+                            // broken JSON cannot bind at any API, so sending it spends a round
+                            // trip to be told something the string itself already says.
+                            String rejection = rejectUnparseableBody(apiCall, templateData);
+                            if (rejection != null) {
+                                return rejection;
+                            }
+
                             Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl);
 
                             String serialized = jsonSerialization.serialize(result);
@@ -189,9 +239,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                             return serialized;
                         } catch (Exception e) {
                             LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
-                            String errorMsg = e.getMessage() != null ? e.getMessage() : "Unknown error";
-                            String escaped = new String(JsonStringEncoder.getInstance().quoteAsString(errorMsg));
-                            return "{\"error\": \"" + escaped + "\"}";
+                            return errorResult(e.getMessage() != null ? e.getMessage() : "Unknown error");
                         }
                     });
                 }
@@ -244,6 +292,169 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             }
         }
         return templateData;
+    }
+
+    /**
+     * Refuse a call whose model-written request body is not JSON at all, and say
+     * why, instead of sending it.
+     * <p>
+     * <b>Why this is the model's mistake and not a bug to fix elsewhere.</b>
+     * {@code McpApiToolBuilder.buildBodyTemplate} generates the body as ONE
+     * variable, {@code {requestBody}} — the model writes the entire JSON document
+     * itself and EDDI puts nothing between that string and the wire, deliberately
+     * (see that method: per-property templates were rejected because the templating
+     * engine runs in TEXT mode and escapes nothing, so a substituted value carrying
+     * a quote could break the body or add undeclared fields). So a body that fails
+     * to bind failed because the model emitted invalid JSON — overwhelmingly a raw
+     * newline or an unescaped quote inside a long string value, where {@code \n}
+     * and {@code \"} were needed. Nothing here escapes it for them; the fix is for
+     * the model to re-send, and this tells it so in the one place it will read.
+     * <p>
+     * Scoped narrowly, because a guard that refuses a call it merely fails to
+     * understand is worse than the round trip it saves. It fires only when all of:
+     * the call declares a JSON content type; its body template is nothing but a
+     * single variable, so that variable IS the request body and judging the
+     * variable judges the request (a hand-authored apicallstore template that
+     * interpolates values into surrounding JSON is left alone — there the braces
+     * around it are EDDI's, not the model's); and the variable actually resolved to
+     * a non-blank string. The variable is read out of the template rather than
+     * assumed to be named {@code requestBody}, because the builder renames it when
+     * a path or query parameter already claims that name.
+     * <p>
+     * A blank value is deliberately NOT refused. That is the separate "model never
+     * filled the body" failure — Qute renders an unsupplied variable as empty with
+     * strict rendering off — and it is not a malformed document.
+     *
+     * @return {@code null} when there is nothing to refuse, otherwise the tool
+     *         result to hand back in place of making the call
+     */
+    private String rejectUnparseableBody(ApiCall apiCall, Map<String, Object> templateData) {
+        var request = apiCall.getRequest();
+        if (request == null || request.getBody() == null || !declaresJsonBody(request.getContentType())) {
+            return null;
+        }
+        var matcher = WHOLE_BODY_TEMPLATE.matcher(request.getBody().trim());
+        if (!matcher.matches()) {
+            return null;
+        }
+        // The real parameter name, not the literal "requestBody": the builder
+        // renames the whole-body variable on a collision with a path or query
+        // parameter, and telling the model to fix an argument its tool does not
+        // expose is worse than saying nothing.
+        String bodyParameter = matcher.group(1);
+        Object value = templateData.get(bodyParameter);
+
+        // A model that answered the "a single JSON object" parameter description
+        // with an actual object rather than a string lands here as a Map. Qute runs
+        // in TEXT mode, so it renders via toString — "{name=x}", which is not JSON
+        // under any parser. This is at least as common as the escaping bug the
+        // guard was written for, and refusing it by name is far more useful than
+        // letting the API answer with a bind error about a body nobody can explain.
+        // Numbers and booleans are left alone: they render as valid JSON scalars.
+        if (value instanceof Map || value instanceof Iterable) {
+            LOGGER.warnf("Refusing httpcall tool '%s' before sending: requestBody arrived as %s, not a string",
+                    sanitize(apiCall.getName()), value.getClass().getSimpleName());
+            return errorResult(bodyParameter + " must be a JSON document encoded as a STRING, but arrived as a "
+                    + (value instanceof Map ? "JSON object" : "JSON array")
+                    + ". The request was NOT sent. Send the whole body as one string value —"
+                    + " \"{\\\"name\\\": \\\"…\\\"}\" — not as structured arguments.");
+        }
+        if (!(value instanceof String body) || body.isBlank()) {
+            return null;
+        }
+        try {
+            // STRICT_JSON, not the shared mapper: Jackson's default stops at the
+            // first complete value and ignores the rest, so a body with a trailing
+            // sentence or a closing ``` fence — the second-most-common shape of
+            // this bug — parsed clean here and then failed to bind at the API,
+            // leaving the model with EDDI's assurance that its body was fine.
+            STRICT_JSON.readValue(body, Object.class);
+            return null;
+        } catch (IOException e) {
+            String detail = parseFailureDetail(e);
+            // The tool name and the parse detail, never the body: it is
+            // model-supplied and routinely carries resolved secrets, which is why
+            // the pause record keeps only a redacted copy (RequestRedactor) and why
+            // templateDataFor's own catch goes to such lengths.
+            LOGGER.warnf("Refusing httpcall tool '%s' before sending: the model's request body is not valid JSON (%s)",
+                    sanitize(apiCall.getName()), detail);
+            return errorResult(bodyParameter + " is not valid JSON: " + detail
+                    + ". The request was NOT sent. Re-send this call with the body as one correctly escaped JSON"
+                    + " document, and nothing after it: inside a string value a newline must be written \\n and a"
+                    + " double quote \\\", never as a raw character.");
+        }
+    }
+
+    /**
+     * Whether this call's configured content type means "the body is a JSON
+     * document".
+     * <p>
+     * Matched on the media type alone, with parameters stripped, rather than by
+     * substring. {@code contains("application/json")} was both too loose and too
+     * tight: it classified {@code multipart/related; type="application/json"} as
+     * JSON — so a multipart body would have been refused — while missing
+     * {@code application/problem+json}, {@code application/merge-patch+json} and
+     * every other structured-suffix type, silently switching the guard off for
+     * them.
+     */
+    static boolean declaresJsonBody(String contentType) {
+        if (contentType == null) {
+            return false;
+        }
+        String mediaType = contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+        return mediaType.equals("application/json") || mediaType.equals("text/json") || mediaType.endsWith("+json");
+    }
+
+    /**
+     * What went wrong and where, carrying no part of the body.
+     *
+     * <p>
+     * <b>Built from an allow-list, not from the parser's message.</b> An earlier
+     * version returned {@code getOriginalMessage()} on the reasoning that it is
+     * snippet-free — which is true only of the {@code [Source: …]} suffix
+     * {@code getMessage()} appends. The message ITSELF quotes model-controlled
+     * input: a stray token produces {@code Unrecognized token 'SUPERSECRET'}, and
+     * this string is both logged AND returned as a tool result that is persisted
+     * into conversation memory. That is precisely the leak the whole method is
+     * written to avoid, so the parser's own words never reach either.
+     * <p>
+     * What is returned instead is a fixed sentence chosen by exception type, plus
+     * the numeric line and column. Those cover the failures a model actually
+     * produces and are the part that makes the message actionable; an unrecognised
+     * type degrades to a generic reason rather than to the parser's text.
+     *
+     * @return a body-free description of the parse failure
+     */
+    private static String parseFailureDetail(IOException e) {
+        String reason = switch (e) {
+            case com.fasterxml.jackson.core.JsonParseException ignored ->
+                "the document is malformed — an unescaped character, an unquoted token, or a missing delimiter";
+            case com.fasterxml.jackson.databind.exc.MismatchedInputException ignored ->
+                "the document is empty or ends before it is complete";
+            default -> "the document could not be parsed";
+        };
+        String position = "";
+        if (e instanceof JsonProcessingException jsonError) {
+            JsonLocation location = jsonError.getLocation();
+            // JsonLocation.NA reports -1 for both.
+            if (location != null && location.getLineNr() > 0) {
+                position = " at line " + location.getLineNr() + ", column " + location.getColumnNr();
+            }
+        }
+        return reason + position;
+    }
+
+    /**
+     * The single tool-result shape for a call that did not produce a response — one
+     * JSON object with an {@code error} string, escaped so the message cannot break
+     * out of it.
+     * <p>
+     * Shared by the executor's catch-all and by {@link #rejectUnparseableBody} so a
+     * refusal is indistinguishable in shape from a failure: both are "no response,
+     * here is why", and a model that handles one handles the other.
+     */
+    private static String errorResult(String message) {
+        return "{\"error\": \"" + new String(JsonStringEncoder.getInstance().quoteAsString(message)) + "\"}";
     }
 
     /**

@@ -334,6 +334,29 @@ class ApiCallExecutorTest {
         assertFalse(result.containsKey("body"), "the failed attempt's error body must not survive the retry");
     }
 
+    /**
+     * An error body is server-authored text, and a 401 routinely echoes the
+     * credential that failed. The body flows into the LLM transcript (and from
+     * there into pause batches and traces), so it is redacted on the way into the
+     * tool result. The memory-side *Error entry keeps the raw text, as it always
+     * has, for operators debugging via the store.
+     */
+    @Test
+    void execute_non2xx_errorBodyIsRedactedInTheToolResult() throws Exception {
+        ApiCall call = createSimpleApiCall("auth-call", true);
+        when(mockResponse.getHttpCode()).thenReturn(401);
+        when(mockResponse.getContentAsString())
+                .thenReturn("invalid api key sk-ant-api03-verySecretValue1234567890abcdefghij provided");
+        when(mockResponse.getHttpCodeMessage()).thenReturn("Unauthorized");
+        when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        String body = (String) result.get("body");
+        assertFalse(body.contains("verySecretValue"), "the echoed credential must not reach the model: " + body);
+        assertTrue(body.contains("invalid api key"), "the failure REASON must survive redaction: " + body);
+    }
+
     @Test
     void execute_successWithoutSaveResponse_resultStillCarriesHttpCode() throws Exception {
         // The body stays out (that is what saveResponse=false means), but a model

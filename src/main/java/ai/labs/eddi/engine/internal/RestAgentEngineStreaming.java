@@ -300,7 +300,13 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         if (data == null || data.isEmpty()) {
             return data;
         }
-        return " " + data.replace("\n", "\n ");
+        // \r is a line break to RESTEasy's SSE serializer too (SseUtil starts a
+        // new data: line on either), so a payload with a bare \r would get an
+        // UNPADDED continuation line. Normalise \r\n and \r to \n first; the
+        // consumer reassembles data lines with \n regardless, so the
+        // normalisation is invisible to it.
+        String normalised = data.replace("\r\n", "\n").replace('\r', '\n');
+        return " " + normalised.replace("\n", "\n ");
     }
 
     private final class SseStream {
