@@ -1,1 +1,0 @@
-import{am as t,aW as n,cH as u,cI as s}from"./index-DAoV152r.js";function i(){const e=t();return n({mutationFn:s,onSuccess:()=>{e.invalidateQueries({queryKey:["agents"]})}})}function r(){const e=t();return n({mutationFn:u,onSuccess:()=>{e.invalidateQueries({queryKey:["agents"]})}})}export{r as a,i as u};
