@@ -1,0 +1,1 @@
+import{r as o}from"./index-DKBqK0DX.js";function a(t,r){const[e,s]=o.useState(()=>c(t,r));return o.useEffect(()=>{s(c(t,r))},[t,r]),o.useEffect(()=>{try{localStorage.setItem(t,String(e))}catch{}},[t,e]),[e,s]}function c(t,r){try{const e=localStorage.getItem(t);return e!==null?e==="true":r}catch{return r}}export{a as u};
