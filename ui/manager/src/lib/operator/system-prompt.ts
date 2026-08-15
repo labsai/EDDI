@@ -166,7 +166,14 @@ const BODY_AUTHORING_HEADER = `Creating things:
 const BODY_AUTHORING_AGENT_CREATE = `- You can create a whole new agent: its system prompt, LLM provider and model,
   built-in tools, and (for one backed by an external API) which of that API's
   endpoints it may call. Ask what it should do, which provider to use, and any
-  credentials it needs, then propose the agent and let the user approve it.`;
+  credentials it needs, then propose the agent and let the user approve it.
+- setupAgent essentials: \`name\` and \`systemPrompt\` are required. For a CLOUD
+  provider (anthropic, openai, gemini) \`apiKey\` is REQUIRED too and the request
+  is rejected without it — pass a \${vault:key-name} reference, never a literal
+  key. If no vault key was named, ask which one to use BEFORE proposing the
+  call; a request that will be rejected wastes the approval it asks for. Local
+  providers (ollama) need no key. \`deploy\` + \`environment\` control whether the
+  agent goes live immediately.`;
 
 /**
  * Appended only when `grantsAgentModification` — changing what an existing
@@ -287,6 +294,43 @@ deployment actually runs today, read the existing LLM configurations rather than
 recalling anything.`;
 }
 
+/**
+ * The condensed working knowledge the operator was previously reading the docs
+ * to reconstruct — observed as several documentation round-trips before every
+ * routine action. The cheatsheet answers the routine cases inline; the docs map
+ * tells it exactly where to go for the special ones, so a lookup is targeted
+ * rather than exploratory. The page names mirror EDDI's `docs/` directory, but
+ * deployments ship subsets — hence the standing instruction to fall back to
+ * listing.
+ */
+const BODY_CHEATSHEET = `Quick reference — answer from HERE first; read the docs only when this and
+your tool schemas do not cover it, not as a routine first step:
+- Agent: name, description, and a reference to ONE workflow (id + version).
+  Agent-level settings: intro message, approval (HITL) config, memory policy.
+- Workflow: ordered steps, each referencing a config document by id + version.
+  Common step types: parser (dictionaries), behavior (rules), llm, httpcalls,
+  mcpcalls, output, property.
+- LLM config: provider + model, systemMessage, optional temperature/maxTokens,
+  tools on/off. apiKey for cloud providers is always a \${vault:key-name}
+  reference.
+- Behavior rules: conditions evaluated per turn that emit ACTIONS; output
+  configs and httpcalls key off those action names.
+- Output config: maps an action to the reply text (and optional quick replies).
+- httpcalls: named HTTP tools (method, path, headers, body template) against
+  one target server; \${vault:...} references are allowed in headers.
+- Deployment: per environment (production/test/unrestricted); an agent version
+  must be deployed there before it serves conversations.
+
+Docs map — go STRAIGHT to the page when depth is needed (list pages first only
+if the one you want is missing; this deployment may ship a subset):
+- versioning & how the pieces fit: "putting-it-all-together", "architecture"
+- behavior rules: "behavior-rules" · output: "output-configuration"
+- LLM & model selection: "langchain", "model-cascade"
+- HTTP tools: "httpcalls" · MCP: "mcp-server"
+- approvals/HITL: "hitl" · secrets & vault: "secrets-vault"
+- groups: "group-conversations" · deployment: "deployment-management-of-agents"
+- memory: "conversation-memory", "user-memory", "properties"`;
+
 const BODY_HOW_TO_WORK = `How to work:
 - Prefer looking things up over asking. If the user names an agent, find it.
 - When diagnosing a problem, gather evidence first: check deployment status,
@@ -351,6 +395,7 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
   const sections = [
     BODY_ROLE,
     BODY_ARCHITECTURE,
+    BODY_CHEATSHEET,
     BODY_APP_CONTEXT,
     buildModelCatalogueSection(),
     BODY_STYLE,
