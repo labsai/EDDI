@@ -7,6 +7,28 @@
 
 
 
+## 🐛 fix(hitl): a second pause on the SAME tool rendered byte-identical text (2026-08-15)
+
+**Repo:** EDDI (`fix/pause-ordinal`)
+
+The tool-named default made pauses on *different* tools distinguishable; a turn that pauses twice
+on the SAME tool — approve → the call fails → the model retries with fixed arguments — still
+rendered byte-identical asks. On screen: ask, "You approved this request", ask again with exactly
+the same sentence, reported as "approval need text now shows up double". It is not a duplicate; it
+is a second, real request — it just looked like a rendering bug.
+
+Repeat pauses now carry their ordinal: "I need your approval before I can run setupAgent. … (approval
+2 this turn)". The ordinal comes off the batch's own `pauseCountThisTurn` — persisted WITH the batch,
+so `dropPendingApprovalPlaceholder`'s resume-time recomputation reads the identical value, keeping the
+determinism placeholder-dropping requires. Only the built-in default gains the suffix (a configured
+`pendingMessage` is the operator's wording, kept verbatim), first pauses stay clean, and legacy
+batches (ordinal 0) are unaffected. Three tests: same-tool pauses differ, the configured template
+never gains the suffix, and an APPROVED resume still drops the suffixed default.
+
+---
+
+
+
 ## 🐛 fix(apicalls): a failed httpcall tool returned "{}" — the model could not know it failed (2026-08-15)
 
 **Repo:** EDDI (`fix/tool-result-contract`)

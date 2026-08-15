@@ -342,6 +342,10 @@ class ConversationToolResumeTest {
             b.setLlmTaskId("ai.labs.llm");
             b.setLlmTaskIndex(0);
             b.setCalls(List.of(call));
+            // A REPEAT pause: the default gains its "(approval 2 this turn)" suffix,
+            // and the drop must still match — the ordinal comes off the batch, which
+            // is identical at pause time and at resume time.
+            b.setPauseCountThisTurn(2);
             // No effectiveToolApprovals and no agent-level config: the default applies.
             memory.setHitlPendingToolCalls(b);
             throw new ConversationPauseException("wf1", 0, "gated tool call",
