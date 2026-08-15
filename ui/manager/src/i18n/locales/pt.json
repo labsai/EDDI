@@ -4098,6 +4098,7 @@
       "rejected": "Você rejeitou esta solicitação",
       "rePaused": "Pausado novamente — é necessária outra decisão",
       "noReply": "O turno terminou sem resposta",
+      "executed": "Executou {{calls}}",
       "partial_one": "Aprovada — {{count}} chamada rejeitada",
       "partial_other": "Aprovada — {{count}} chamadas rejeitadas",
       "partial_many": "Aprovada — {{count}} chamadas rejeitadas"

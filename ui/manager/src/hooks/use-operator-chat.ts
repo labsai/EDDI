@@ -75,6 +75,15 @@ export interface OperatorChatState {
    *  pause itself is NOT cleared — the admin can still decide again. */
   resolveError: string | null;
   /**
+   * `hitlPausedAt` of the pause currently on screen, null when not paused.
+   *
+   * Doubles as the pause's IDENTITY for consumers: `useApprovalStatus` keys its
+   * cache on it, so the second pause of a turn fetches ITS calls instead of
+   * re-rendering the first pause's decided ones. Internally it is also what
+   * `pollUntilSettled` compares against to recognise a NEW pause.
+   */
+  decidedPausedAt: string | null;
+  /**
    * Id of the agent bubble showing the pending-approval message, or null when
    * there is none (a 409 pause, whose optimistic bubbles were dropped).
    *
@@ -119,8 +128,6 @@ export interface OperatorChatState {
 interface OperatorChatInternal {
   abortController: AbortController | null;
   resolveAbortController: AbortController | null;
-  /** `hitlPausedAt` of the pause currently on screen — see pollUntilSettled. */
-  decidedPausedAt: string | null;
   /** In-flight hydrate, if any. Doubles as the "already hydrating" latch. */
   hydrateAbortController: AbortController | null;
 }
@@ -325,12 +332,27 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  * resumed turn's continuation (the model's final answer, or the next gated
  * batch) actually completes — a single re-read immediately after would race it.
  *
- * "Acted on" is NOT simply "no longer AWAITING_HUMAN". A resumed turn may pause
- * AGAIN on a fresh tool batch — the backend permits `maxPausesPerTurn` (default
- * 3), and a multi-step job is expected to use them. Waiting for the state to
- * clear would spin until the timeout on a conversation behaving exactly as
- * intended. So a pause carrying a different `hitlPausedAt` than the one we
- * decided also counts as settled, and the caller renders it as the next pause.
+ * "Acted on" is NOT simply "no longer AWAITING_HUMAN". Two non-settled shapes
+ * exist, and both were live bugs when read as settled:
+ *
+ * - A resumed turn may pause AGAIN on a fresh tool batch — the backend permits
+ *   `maxPausesPerTurn` (default 3), and a multi-step job is expected to use
+ *   them. Waiting for the state to clear would spin until the timeout on a
+ *   conversation behaving exactly as intended. So a pause carrying a different
+ *   `hitlPausedAt` than the one we decided counts as settled, and the caller
+ *   renders it as the next pause.
+ *
+ * - Accepting the resume PERSISTS `IN_PROGRESS` immediately (the
+ *   AWAITING_HUMAN→IN_PROGRESS CAS in ConversationHitlService that claims the
+ *   decision), while the turn's OUTCOME persists only when it finishes. For the
+ *   whole execution the store therefore answers `IN_PROGRESS` with the
+ *   PRE-DECISION outputs — the pending-ask text still in place. Reading that as
+ *   settled re-rendered the old ask as "the answer" (a byte-identical duplicate
+ *   bubble), cleared `isPaused`, and left the NEXT pause with no approval
+ *   controls at all: the approved tools ran server-side, the agent was created,
+ *   and the screen said nothing happened. `IN_PROGRESS` means the decision is
+ *   being acted on RIGHT NOW — the one state that is unambiguously "keep
+ *   waiting".
  */
 async function pollUntilSettled(
   conversationId: string,
@@ -354,7 +376,8 @@ async function pollUntilSettled(
       // trade a bounded wait-then-timeout for silently clearing an approval the
       // human has not actually given.
       (decidedPausedAt === null || snapshot.hitlPausedAt === decidedPausedAt);
-    if (!stillTheSamePause) return snapshot;
+    const stillExecuting = snapshot.conversationState === "IN_PROGRESS";
+    if (!stillTheSamePause && !stillExecuting) return snapshot;
     if (Date.now() >= deadline) {
       throw new Error(
         "Timed out waiting for the resumed turn to finish. It may still complete — refresh in a moment.",
@@ -362,6 +385,40 @@ async function pollUntilSettled(
     }
     await sleep(RESOLVE_POLL_INTERVAL_MS, signal);
   }
+}
+
+/**
+ * Tool calls the current step has executed, from a DETAILED current-step-only
+ * snapshot — name → whether it succeeded.
+ *
+ * Sourced from the step's `httpCalls` output map, whose shape the backend
+ * guarantees: executing a call writes `<name>Request`, and the parsed response
+ * object is stored as `<name>_response` (McpApiToolBuilder's
+ * `responseObjectName`) ONLY when the call succeeded — failed results are
+ * deliberately not merged (ApiCallsTask.isFailureResult). So Request-without-
+ * response reads as "ran and failed", which is exactly what the receipt needs
+ * to say.
+ *
+ * Detailed only: the default simple view strips `httpCalls` from outputs, which
+ * is why `pollUntilSettled`'s cheap 1.5s polls cannot provide this.
+ */
+function executedCallsFromDetailed(
+  snapshot: SimpleConversationMemorySnapshot,
+): Map<string, boolean> {
+  const outputs = snapshot.conversationOutputs ?? [];
+  const last = outputs[outputs.length - 1] as Record<string, unknown> | undefined;
+  const calls = new Map<string, boolean>();
+  const httpCalls = last?.["httpCalls"];
+  if (httpCalls && typeof httpCalls === "object" && !Array.isArray(httpCalls)) {
+    const keys = Object.keys(httpCalls as Record<string, unknown>);
+    for (const key of keys) {
+      if (key.endsWith("Request")) {
+        const name = key.slice(0, -"Request".length);
+        if (name) calls.set(name, keys.includes(`${name}_response`));
+      }
+    }
+  }
+  return calls;
 }
 
 /**
@@ -947,7 +1004,86 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           continue;
         }
         if (event.type === "error") {
-          set((s) => ({ ...s, error: event.data || "Stream error" }));
+          // The payload is JSON — `{"message":…,"code":…}` for the conditions
+          // the backend rejects by design, `{"message":"Internal server
+          // error","correlationId":…}` for genuine failures. Render the
+          // message; the raw JSON blob is never a thing to show an admin.
+          let errorText = event.data || "Stream error";
+          let errorCode: string | null = null;
+          try {
+            const parsed: { message?: unknown; code?: unknown } = JSON.parse(event.data);
+            if (typeof parsed.message === "string" && parsed.message) {
+              errorText = parsed.message;
+            }
+            if (typeof parsed.code === "string") {
+              errorCode = parsed.code;
+            }
+          } catch {
+            // Not JSON — keep the raw text.
+          }
+          if (errorCode === "awaiting_approval") {
+            // The send raced an undecided pause: the backend refused it WITHOUT
+            // consuming it, over the already-open stream. Same recovery as the
+            // 409 catch below — this is the same condition arriving on the
+            // other channel (the stream opens before ConversationService
+            // re-checks the state, so the rejection arrives as an event, not a
+            // status). Show the pause, not an error: the input "failing" is
+            // the approval gate working.
+            revokeMessagePreviews([userMessage]);
+            set((s) => ({
+              ...s,
+              isPaused: true,
+              error: null,
+              resolveError: null,
+              messages: s.messages.filter((m) => m.id !== userMessage.id && m.id !== agentId),
+            }));
+            if (conversationId) {
+              try {
+                const snapshot = await getSimpleConversationLog(conversationId, false, true);
+                const parts = extractOutputParts(
+                  (snapshot.conversationOutputs ?? [])[
+                    (snapshot.conversationOutputs?.length ?? 0) - 1
+                  ],
+                );
+                const pendingText = parts.join("\n\n");
+                const askId = nextId("agent");
+                set((s) => {
+                  const last = s.messages[s.messages.length - 1];
+                  // Back-fill the ask so the banner has a request to point at
+                  // — unless it is already on screen (the normal case: the
+                  // pause rendered when it happened and this send raced it).
+                  const askMissing =
+                    pendingText.length > 0 &&
+                    !(last?.role === "agent" && last.content === pendingText);
+                  return {
+                    ...s,
+                    decidedPausedAt: snapshot.hitlPausedAt ?? null,
+                    pauseReason: null,
+                    ...(askMissing
+                      ? {
+                          messages: [
+                            ...s.messages,
+                            {
+                              id: askId,
+                              role: "agent" as const,
+                              content: pendingText,
+                              timestamp: Date.now(),
+                            },
+                          ],
+                          pausedPlaceholderId: askId,
+                        }
+                      : {}),
+                  };
+                });
+              } catch {
+                // Best effort — the pause itself is already surfaced, and an
+                // ask we could not read back is strictly less bad than a raw
+                // error over a live approval.
+              }
+            }
+            continue;
+          }
+          set((s) => ({ ...s, error: errorText }));
           continue;
         }
         if (event.type === "done") {
@@ -1172,6 +1308,21 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
     set({ isResolvingPause: true, resolveError: null, resolveAbortController: controller });
 
     try {
+      // Receipt baseline: which calls the turn had ALREADY executed before this
+      // decision. Read BEFORE the resume — the conversation is still paused, so
+      // the store is stable; read after it, the executing turn could race fresh
+      // calls into the baseline and the receipt would under-report. Best-effort
+      // by design: no baseline means no receipt, never a wrong one.
+      let preDecisionCalls: ReadonlySet<string> | null = null;
+      try {
+        preDecisionCalls = new Set(
+          executedCallsFromDetailed(
+            await getSimpleConversationLog(conversationId, true, true),
+          ).keys(),
+        );
+      } catch {
+        preDecisionCalls = null;
+      }
       await resumeConversation(conversationId, { verdict, note, toolDecisions });
       const snapshot = await pollUntilSettled(conversationId, controller.signal, get().decidedPausedAt);
       // `pollUntilSettled` can only observe an abort between polls — the reads
@@ -1234,6 +1385,40 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
               : "You rejected this request.",
         timestamp: Date.now(),
       };
+      // The receipt: what this decision actually caused to run. The model often
+      // proceeds straight from an approved call into its next tool call with no
+      // text in between, so without this the transcript read "You approved" →
+      // next ask, and the created agent appeared nowhere — the approver's most
+      // common question ("did it work?") had no answer on screen. Derived as a
+      // diff against the pre-decision baseline so repeat pauses in the same
+      // turn do not re-list earlier calls.
+      let receipt: ChatMessage | null = null;
+      if (preDecisionCalls) {
+        try {
+          const ran = [
+            ...executedCallsFromDetailed(
+              await getSimpleConversationLog(conversationId, true, true),
+            ),
+          ].filter(([name]) => !preDecisionCalls.has(name));
+          if (ran.length > 0) {
+            const callsText = ran
+              .map(([name, ok]) => `${name} ${ok ? "✓" : "✕"}`)
+              .join(", ");
+            receipt = {
+              id: nextId("agent"),
+              role: "system",
+              kind: "notice",
+              code: "executed",
+              detail: callsText,
+              content: `Ran ${callsText}`,
+              timestamp: Date.now(),
+            };
+          }
+        } catch {
+          // Best effort — the decision entry and the answer still land.
+        }
+      }
+
       // ...and when there is no answer to show, say WHY rather than leaving the
       // approver staring at an unchanged screen.
       const silentOutcome: ChatMessage | null = parts.length > 0
@@ -1256,7 +1441,11 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           isResolvingPause: false,
           decidedPausedAt: rePaused ? (snapshot.hitlPausedAt ?? null) : null,
         };
-        const trail = silentOutcome ? [decisionEntry, silentOutcome] : [decisionEntry];
+        const trail = [
+          decisionEntry,
+          ...(receipt ? [receipt] : []),
+          ...(silentOutcome ? [silentOutcome] : []),
+        ];
         if (newBubbles.length === 0) {
           // The formerly silent path: the decision and its outcome are still
           // recorded, so the approver always sees that something happened.
@@ -1291,12 +1480,14 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           messages = [
             ...s.messages.slice(0, placeholderIdx),
             { ...s.messages[placeholderIdx]!, isStreaming: false },
-            decisionEntry,
+            // `trail` here is [decision, receipt?] — silentOutcome is only
+            // built when there are no answer bubbles, and this branch has them.
+            ...trail,
             ...newBubbles,
             ...s.messages.slice(placeholderIdx + 1),
           ];
         } else {
-          messages = [...s.messages, decisionEntry, ...newBubbles];
+          messages = [...s.messages, ...trail, ...newBubbles];
         }
         // The LAST bubble rendered: on a re-pause it holds the NEW pending
         // message and becomes the ask the next decision reads after; a
@@ -1339,6 +1530,7 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
   const pauseReason = useOperatorChatStore((s) => s.pauseReason);
   const isResolvingPause = useOperatorChatStore((s) => s.isResolvingPause);
   const resolveError = useOperatorChatStore((s) => s.resolveError);
+  const decidedPausedAt = useOperatorChatStore((s) => s.decidedPausedAt);
   const pausedPlaceholderId = useOperatorChatStore((s) => s.pausedPlaceholderId);
   const isHydrating = useOperatorChatStore((s) => s.isHydrating);
   const isReadOnly = useOperatorChatStore((s) => s.isReadOnly);
@@ -1379,6 +1571,7 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
     pauseReason,
     isResolvingPause,
     resolveError,
+    decidedPausedAt,
     pausedPlaceholderId,
     isHydrating,
     isReadOnly,

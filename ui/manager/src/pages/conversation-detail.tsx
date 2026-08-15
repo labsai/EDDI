@@ -100,7 +100,13 @@ export function ConversationDetailPage() {
     isLoading: approvalStatusLoading,
     isError: approvalStatusError,
     refetch: refetchApprovalStatus,
-  } = useApprovalStatus(id, conversation?.conversationState === "AWAITING_HUMAN");
+  } = useApprovalStatus(
+    id,
+    conversation?.conversationState === "AWAITING_HUMAN",
+    // Keyed by the pause instance so a later pause of the same conversation
+    // never renders this pause's cached calls — see useApprovalStatus.
+    conversation?.hitlPausedAt,
+  );
 
   const blockedCalls = useMemo(() => {
     const details = approvalStatus?.pauseDetails;

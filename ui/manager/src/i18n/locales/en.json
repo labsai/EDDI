@@ -4068,6 +4068,7 @@
       "rejected": "You rejected this request",
       "rePaused": "Paused again — another decision is needed",
       "noReply": "The turn finished without a reply",
+      "executed": "Ran {{calls}}",
       "partial_one": "You approved this request — {{count}} call rejected",
       "partial_other": "You approved this request — {{count}} calls rejected"
     },

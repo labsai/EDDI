@@ -54,9 +54,16 @@ export interface ChatMessage {
    * approval banner allows exactly that, and calling it "approved" would put a
    * claim in the permanent transcript the approver did not make.
    */
-  code?: "approved" | "partial" | "rejected" | "rePaused" | "noReply";
+  code?: "approved" | "partial" | "rejected" | "rePaused" | "noReply" | "executed";
   /** "partial" only: how many calls were rejected inside the approved batch. */
   count?: number;
+  /**
+   * "executed" only: the comma-joined tool receipt ("setupAgent ✓, readAgent ✓")
+   * interpolated into the localized template. Dynamic, so it cannot live in the
+   * per-code translation the way the static notices do; `content` still carries
+   * the full English fallback.
+   */
+  detail?: string;
 }
 
 export type SSEEventType =
