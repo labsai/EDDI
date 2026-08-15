@@ -427,9 +427,32 @@ public class HttpClientWrapper implements IHttpClient {
         return text;
     }
 
-    // Package-private for testability (HttpClientWrapperTest)
+    /**
+     * Response headers as a map, looked up case-INSENSITIVELY.
+     * <p>
+     * HTTP field names are case-insensitive by specification, and HTTP/2 mandates
+     * lowercase on the wire — so the same endpoint answers {@code Location} over h1
+     * and {@code location} over h2. A plain {@link HashMap} made that difference
+     * load-bearing, and this codebase was already losing on it:
+     * {@code ApiCallExecutor} looks the content type up as the literal
+     * {@code "Content-Type"}, so against a lowercase-header response it found
+     * nothing, took the {@code <not-present>} branch, and stored every JSON body as
+     * a raw String instead of parsed JSON.
+     * <p>
+     * A {@link TreeMap} with {@link String#CASE_INSENSITIVE_ORDER} keeps the casing
+     * the server actually sent — anything serializing this map still shows the real
+     * header names — while making {@code get} agree with the specification. Callers
+     * templating a header by name ({@code {tool_responseHeaders.Location}}) gain
+     * the same tolerance.
+     * <p>
+     * Repeated headers still collapse to the last value, unchanged: this returns
+     * one value per name, and a multi-value accessor would be a different method
+     * with different callers.
+     * <p>
+     * Package-private for testability (HttpClientWrapperTest).
+     */
     static Map<String, String> convertHeaderToMap(MultiMap headers) {
-        Map<String, String> httpHeader = new HashMap<>();
+        Map<String, String> httpHeader = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         for (Map.Entry<String, String> header : headers) {
             httpHeader.put(header.getKey(), header.getValue());
         }

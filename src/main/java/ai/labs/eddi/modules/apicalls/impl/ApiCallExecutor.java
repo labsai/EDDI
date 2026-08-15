@@ -34,6 +34,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -78,6 +80,34 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     static final int MAX_TRANSPORT_RESPONSE_SIZE_BYTES = 8 * 1024 * 1024;
 
+    /**
+     * Response headers that are credentials, and are dropped before the header map
+     * reaches conversation memory, the template data or an LLM tool result.
+     * <p>
+     * Choosing which headers to BIND is not the same control as choosing which to
+     * STORE, and only the second one closes this. An operation can qualify for
+     * header capture on its documented 201 and still answer some other call with a
+     * {@code Set-Cookie} — the error path especially — so gating on the declared
+     * status alone leaves the live session cookie flowing into persisted memory and
+     * the model's context.
+     * <p>
+     * {@code Set-Cookie} is the case that matters: {@code HttpClientModule} builds
+     * a cookie-aware, application-scoped {@code WebClientSession}, so that value is
+     * a session credential EDDI is actively replaying, and {@code HttpOnly} exists
+     * precisely to keep such values out of scriptable — here, prompt-injectable —
+     * context. The authenticate headers carry challenge material with the same
+     * property.
+     * <p>
+     * A deny-list rather than an allow-list, deliberately: the useful header on any
+     * given API is not knowable here ({@code Location}, {@code ETag}, a pagination
+     * cursor, a rate-limit budget, some vendor {@code X-*}), and an allow-list
+     * would silently break every hand-authored config templating one of those. What
+     * IS knowable is the small closed set that is never data.
+     */
+    private static final Set<String> CREDENTIAL_RESPONSE_HEADERS = Set.of(
+            "set-cookie", "set-cookie2", "authorization", "proxy-authorization",
+            "www-authenticate", "proxy-authenticate");
+
     private final IHttpClient httpClient;
     private final IJsonSerialization jsonSerialization;
     private final IRuntime runtime;
@@ -112,6 +142,27 @@ public class ApiCallExecutor implements IApiCallExecutor {
         this.defaultMaxResponseSizeInBytes = defaultMaxResponseSizeInBytes;
     }
 
+    /**
+     * The response headers, minus {@link #CREDENTIAL_RESPONSE_HEADERS}.
+     * <p>
+     * Case-insensitive, because {@code HttpClientWrapper.convertHeaderToMap}
+     * preserves whatever casing the wire used and HTTP/2 mandates lowercase — a
+     * filter keyed on {@code "Set-Cookie"} would miss {@code set-cookie} and defend
+     * nothing over h2.
+     */
+    static Map<String, String> withoutCredentialHeaders(Map<String, String> headers) {
+        var filtered = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+        if (headers == null) {
+            return filtered;
+        }
+        headers.forEach((name, value) -> {
+            if (name != null && !CREDENTIAL_RESPONSE_HEADERS.contains(name.toLowerCase(Locale.ROOT))) {
+                filtered.put(name, value);
+            }
+        });
+        return filtered;
+    }
+
     @Override
     public Map<String, Object> execute(ApiCall call, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl)
             throws LifecycleException {
@@ -142,7 +193,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 IResponse response = null;
                 boolean retryCall = false;
                 int amountOfExecutions = 0;
-                Map<String, Object> result = new HashMap<>();
+                // LinkedHashMap, not HashMap: this map is serialized verbatim as the
+                // LLM tool result and truncated from the front, so key order decides
+                // what survives a cap. See the ordered "headers" insert below.
+                Map<String, Object> result = new LinkedHashMap<>();
 
                 do {
                     // Final attempt wins, entirely: a retried failure populated
@@ -203,11 +257,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     }
 
                     var responseHeaderObjectName = call.getResponseHeaderObjectName();
+                    Object responseObjectHeader = null;
                     if (!isNullOrEmpty(responseHeaderObjectName)) {
-                        var responseObjectHeader = requireNonNullElse(response.getHttpHeader(), new HashMap<>());
+                        responseObjectHeader = withoutCredentialHeaders(response.getHttpHeader());
                         templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
                         prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName, KEY_HTTP_CALLS);
-                        result.put("headers", responseObjectHeader);
+                        // NOT put into `result` here — see the ordered insert below.
                     }
 
                     if (isResponseSuccessful && call.getSaveResponse()) {
@@ -251,6 +306,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         // model whose tool returned "{}" cannot tell a 204 from a crash,
                         // and honestly reporting "it worked" requires knowing that it did.
                         result.put("httpCode", response.getHttpCode());
+                    }
+
+                    // Headers go in LAST, on purpose, and `result` is a LinkedHashMap
+                    // so that ordering survives serialization.
+                    //
+                    // The tool result is truncated from the FRONT
+                    // (ToolResponseTruncator cuts `result.substring(0, maxChars)`),
+                    // so whatever serializes first is what survives. With a plain
+                    // HashMap "headers" hashed ahead of "body" on both the success and
+                    // the error path regardless of insertion order — so a per-tool
+                    // limit, or the always-on tool-context budget, would spend the
+                    // allowance on a header block and cut away the response body the
+                    // model actually asked for. Headers are the disposable half of
+                    // this map; the body is not.
+                    if (responseObjectHeader != null) {
+                        result.put("headers", responseObjectHeader);
                     }
 
                     amountOfExecutions++;
