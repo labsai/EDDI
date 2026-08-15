@@ -298,12 +298,17 @@ class ConversationHitlTest {
          * @return the rendered {@code "output"} conversation-output of the paused step
          */
         private String pauseWithUnconfiguredMessage(String toolName) throws Exception {
+            return pauseWithUnconfiguredMessage(toolName, 1);
+        }
+
+        private String pauseWithUnconfiguredMessage(String toolName, int pauseCountThisTurn) throws Exception {
             memory.setConversationState(ConversationState.READY);
             doAnswer(inv -> {
                 var call = new PendingToolCallBatch.PendingToolCall();
                 call.setToolName(toolName);
                 var batch = new PendingToolCallBatch();
                 batch.setCalls(List.of(call));
+                batch.setPauseCountThisTurn(pauseCountThisTurn);
                 memory.setHitlPendingToolCalls(batch);
                 throw new ConversationPauseException("wf1", 2, "gated tool call",
                         ConversationPauseException.PauseOrigin.TOOL_CALL);
@@ -345,6 +350,54 @@ class ConversationHitlTest {
                     "consecutive pauses on different tools must not render identical text; got: " + first);
             assertTrue(second.contains("deployAgent") && !second.contains("createAgent"),
                     "the second pause must name only its own gated tool; got: " + second);
+        }
+
+        /**
+         * The user-visible failure this pins: approve → the call fails → the model
+         * retries the SAME tool → the second pause rendered byte-identical text, which
+         * reads as a duplicated bubble (or a dead Approve button). The batch's own
+         * ordinal — persisted with it, so resume-time recomputation matches — makes the
+         * second ask visibly a second ask.
+         */
+        @Test
+        @DisplayName("a second pause on the SAME tool renders differently from the first")
+        void secondPauseOnSameToolDiffers() throws Exception {
+            String first = pauseWithUnconfiguredMessage("setupAgent", 1);
+            String second = pauseWithUnconfiguredMessage("setupAgent", 2);
+
+            assertNotEquals(first, second,
+                    "consecutive pauses on the same tool must not render identical text; got: " + first);
+            assertTrue(second.contains("(approval 2 this turn)"),
+                    "the repeat ask must carry its ordinal; got: " + second);
+            assertFalse(first.contains("(approval"),
+                    "the FIRST ask stays clean — no ordinal suffix; got: " + first);
+        }
+
+        @Test
+        @DisplayName("a configured pendingMessage never gains the ordinal suffix")
+        void configuredMessageKeepsOperatorWordingVerbatim() throws Exception {
+            memory.setConversationState(ConversationState.READY);
+            var agentLevel = new ToolApprovalsConfig();
+            agentLevel.setPendingMessage("Own wording for {toolNames}");
+            memory.setAgentToolApprovalsConfig(agentLevel);
+            doAnswer(inv -> {
+                var call = new PendingToolCallBatch.PendingToolCall();
+                call.setToolName("setupAgent");
+                var batch = new PendingToolCallBatch();
+                batch.setCalls(List.of(call));
+                batch.setPauseCountThisTurn(2);
+                memory.setHitlPendingToolCalls(batch);
+                throw new ConversationPauseException("wf1", 2, "gated tool call",
+                        ConversationPauseException.PauseOrigin.TOOL_CALL);
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            createConversation().say("do it", Map.of());
+
+            String rendered = memory.getCurrentStep().getConversationOutput().get(MemoryKeys.OUTPUT_PREFIX).toString();
+            assertTrue(rendered.contains("Own wording for setupAgent"),
+                    "the configured wording must render; got: " + rendered);
+            assertFalse(rendered.contains("approval 2"),
+                    "an operator's own wording is kept verbatim; got: " + rendered);
         }
 
         @Test

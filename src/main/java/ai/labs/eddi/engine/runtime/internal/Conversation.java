@@ -856,10 +856,26 @@ public class Conversation implements IConversation {
         // Resolved AFTER the names, because which default applies depends on whether
         // there are any. A configured template is used as-is either way — an operator
         // who wrote their own wording keeps it, with or without {toolNames} in it.
-        if (template == null) {
+        boolean usedDefault = template == null;
+        if (usedDefault) {
             template = names.isBlank() ? DEFAULT_PENDING_MESSAGE : DEFAULT_PENDING_MESSAGE_WITH_TOOLS;
         }
-        return template.replace("{toolNames}", names);
+        String rendered = template.replace("{toolNames}", names);
+        // Naming the tool made pauses on DIFFERENT tools distinguishable; a turn
+        // that pauses twice on the SAME tool (approve → the call fails → the model
+        // retries with fixed arguments) still rendered byte-identical text, which
+        // reads as a duplicated bubble — or a dead Approve button. The batch's own
+        // pause ordinal disambiguates. It is persisted WITH the batch, so the
+        // resume-time recomputation in dropPendingApprovalPlaceholder reads the
+        // identical value — the determinism that placeholder-dropping requires.
+        // Only the built-in default gains the suffix: a configured template is the
+        // operator's wording, kept verbatim. First pauses (and legacy batches,
+        // whose ordinal is 0) stay clean.
+        int pauseOrdinal = batch != null ? batch.getPauseCountThisTurn() : 0;
+        if (usedDefault && pauseOrdinal >= 2) {
+            rendered += " (approval " + pauseOrdinal + " this turn)";
+        }
+        return rendered;
     }
 
     /**
