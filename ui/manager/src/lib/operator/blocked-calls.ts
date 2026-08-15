@@ -17,10 +17,14 @@ import { findGateCarryingCalls, type GateCarryingReason } from "./gate-guard";
  * present — a batch is approved or rejected together, so one refused call in it
  * refuses all of them. The reason strings therefore say so.
  *
- * See `self-guard.ts` and `gate-guard.ts` for why each is a control rather than
- * a warning, and for the honest scope limits both share (Manager-side only —
- * Slack buttons and the MCP `resume_conversation` tool decide the same pause
- * through different code).
+ * See `self-guard.ts` and `gate-guard.ts` for why each is a control rather
+ * than a warning. Scope note: these checks are Manager-side, but the
+ * self-conversation case is ALSO enforced in the engine at
+ * approval-execution time and on the live path (ToolLoopResumer /
+ * ToolLoopRunner refuse with NOT_EXECUTED), so Slack buttons and the MCP
+ * `resume_conversation` tool — which do not consult this file — still cannot
+ * execute that call. This surface exists to refuse it BEFORE a human spends
+ * a decision on it.
  */
 
 /** A call the approval surfaces must refuse, with the reason to show. */
@@ -53,7 +57,13 @@ export function findBlockedCalls(
   const selfTargeted = findSelfTargetedCalls(calls, actingAgentId, actingConversationId).map((hit) => ({
     callId: hit.callId,
     reason:
-      hit.target === "conversation"
+      hit.target === "self-start"
+        ? t(
+            "operator.approval.blockedSelfStart",
+            "The operator may not test-drive itself — starting a conversation with its own agent ({{agentId}}) would loop its output back in as input. Approving is unavailable for the whole batch while it is present — reject, and test-drive a different agent.",
+            { agentId: hit.agentId },
+          )
+        : hit.target === "conversation"
         ? t(
             "operator.approval.blockedSelfConversation",
             "An agent may not send a message into the conversation it is running in, and this request targets this one ({{agentId}}). That would write its own text in as though a human had said it. Approving is unavailable for the whole batch while it is present — reject.",

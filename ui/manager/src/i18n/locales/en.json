@@ -748,7 +748,8 @@
     "agentTyping": "Agent is typing",
     "copy": "Copy",
     "emptyConversation": "This conversation has no messages yet.",
-    "loadConversationFailed": "Couldn't load this conversation: {{error}}"
+    "loadConversationFailed": "Couldn't load this conversation: {{error}}",
+    "toolRefused": "Refused"
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -4029,7 +4030,8 @@
       "blockedSelfConversation": "An agent may not send a message into the conversation it is running in, and this request targets this one ({{agentId}}). That would write its own text in as though a human had said it. Approving is unavailable for the whole batch while it is present — reject.",
       "blockedGateCarrying": "This request writes an LLM configuration that sets its own approval gate (toolApprovals), which would replace the gate reviewing it. Approving is unavailable for the whole batch while it is present — reject, and change the gate from the agent's own page.",
       "blockedGateUnverifiable": "This request writes an LLM configuration whose body cannot be read in full — it is either too large to display or not valid JSON — so it cannot be confirmed free of an approval-gate override. Approving is unavailable for the whole batch while it is present — reject, and make this change from the agent's own page.",
-      "blockedGateUnpinned": "This request writes an LLM configuration but is not pinned, so what actually runs can differ from what is shown here and cannot be confirmed free of an approval-gate override. Approving is unavailable for the whole batch while it is present — reject, and make this change from the agent's own page."
+      "blockedGateUnpinned": "This request writes an LLM configuration but is not pinned, so what actually runs can differ from what is shown here and cannot be confirmed free of an approval-gate override. Approving is unavailable for the whole batch while it is present — reject, and make this change from the agent's own page.",
+      "blockedSelfStart": "The operator may not test-drive itself — starting a conversation with its own agent ({{agentId}}) would loop its output back in as input. Approving is unavailable for the whole batch while it is present — reject, and test-drive a different agent."
     },
     "starters": {
       "whatsDeployed": "What's deployed right now?",

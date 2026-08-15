@@ -110,7 +110,12 @@ export interface SimpleConversationMemorySnapshot {
   hitlPausedWorkflowId?: string;
   hitlPausedAbsoluteTaskIndex?: number;
   hitlPausedAt?: string;
-  hitlPauseReason?: string;
+  // NOTE deliberately ABSENT: hitlPauseReason. The simple snapshot never
+  // carries it — SimpleConversationMemorySnapshot has only hitlPausedAt and
+  // hitlPauseType, and the converter sets no reason. The field used to be
+  // declared here, which let four call sites read it and silently get
+  // undefined on every path; the reason genuinely lives on
+  // GET /agents/{conversationId}/approval-status (useApprovalStatus).
   hitlTimeoutPolicy?: string;
   hitlApprovalTimeout?: string;
 }

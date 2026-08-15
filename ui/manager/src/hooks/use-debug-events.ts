@@ -3,10 +3,17 @@ import { create } from "zustand";
 // ==================== Types ====================
 
 export interface ToolTraceEntry {
-  type: "tool_call" | "tool_result";
+  // "tool_error" is real on the wire: the backend interleaves it for budget,
+  // quota and pause-cap refusals (with no matching tool_result — and for the
+  // pause cap, no preceding tool_call either). The type omitting it is what
+  // let the trace UI zip calls to results by INDEX and mis-attribute every
+  // outcome after the first refusal.
+  type: "tool_call" | "tool_result" | "tool_error";
   tool: string;
   arguments?: string;
   result?: string;
+  /** tool_error entries: the refusal reason. */
+  error?: string;
 }
 
 export interface PipelineEvent {

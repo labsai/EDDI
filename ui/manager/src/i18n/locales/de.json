@@ -721,7 +721,8 @@
     "emptyConversation": "Diese Konversation enthält noch keine Nachrichten.",
     "loadConversationFailed": "Konversation konnte nicht geladen werden: {{error}}",
     "multilineHint": "Enter zum Senden · Shift+Enter für eine neue Zeile",
-    "multilineHintCtrlEnter": "Strg+Enter zum Senden · Enter für eine neue Zeile"
+    "multilineHintCtrlEnter": "Strg+Enter zum Senden · Enter für eine neue Zeile",
+    "toolRefused": "Abgelehnt"
   },
   "resources": {
     "backToWorkflow": "Zurück zum Workflow",
@@ -4029,7 +4030,8 @@
       "blockedSelfConversation": "Ein Agent darf keine Nachricht in die Unterhaltung senden, in der er selbst läuft, und diese Anfrage zielt genau darauf ({{agentId}}). Damit würde er seinen eigenen Text einfügen, als hätte ein Mensch ihn gesagt. Solange sie enthalten ist, kann der gesamte Stapel nicht genehmigt werden — bitte ablehnen.",
       "blockedGateCarrying": "Diese Anfrage schreibt eine LLM-Konfiguration, die ihr eigenes Freigabe-Gate (toolApprovals) setzt und damit das prüfende Gate ersetzen würde. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und ändern Sie das Gate auf der Seite des Agenten.",
       "blockedGateUnverifiable": "Diese Anfrage schreibt eine LLM-Konfiguration, deren Inhalt nicht vollständig lesbar ist — zu groß für die Anzeige oder kein gültiges JSON —, daher lässt sich nicht bestätigen, dass sie kein Freigabe-Gate überschreibt. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und nehmen Sie die Änderung auf der Seite des Agenten vor.",
-      "blockedGateUnpinned": "Diese Anfrage schreibt eine LLM-Konfiguration, ist aber nicht fixiert; was tatsächlich ausgeführt wird, kann daher vom hier Gezeigten abweichen und es lässt sich nicht bestätigen, dass kein Freigabe-Gate überschrieben wird. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und nehmen Sie die Änderung auf der Seite des Agenten vor."
+      "blockedGateUnpinned": "Diese Anfrage schreibt eine LLM-Konfiguration, ist aber nicht fixiert; was tatsächlich ausgeführt wird, kann daher vom hier Gezeigten abweichen und es lässt sich nicht bestätigen, dass kein Freigabe-Gate überschrieben wird. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und nehmen Sie die Änderung auf der Seite des Agenten vor.",
+      "blockedSelfStart": "Der Operator darf sich nicht selbst testen — eine Konversation mit dem eigenen Agenten ({{agentId}}) würde seine Ausgabe als Eingabe zurückführen. Genehmigen ist für den gesamten Stapel gesperrt, solange dieser Aufruf enthalten ist — ablehnen und einen anderen Agenten testen."
     },
     "starters": {
       "whatsDeployed": "Was ist derzeit deployt?",

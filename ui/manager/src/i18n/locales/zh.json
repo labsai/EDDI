@@ -721,7 +721,8 @@
     "emptyConversation": "此对话还没有消息。",
     "loadConversationFailed": "无法加载此对话：{{error}}",
     "multilineHint": "Enter 发送 · Shift+Enter 换行",
-    "multilineHintCtrlEnter": "Ctrl+Enter 发送 · Enter 换行"
+    "multilineHintCtrlEnter": "Ctrl+Enter 发送 · Enter 换行",
+    "toolRefused": "已拒绝"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -4029,7 +4030,8 @@
       "blockedSelfConversation": "智能体不能向自己正在运行的对话发送消息，而此请求正是针对该对话（{{agentId}}）。这会把它自己的文本写入，就像是人类说的一样。只要该项存在，整批都无法批准——请拒绝。",
       "blockedGateCarrying": "此请求写入的 LLM 配置会设置它自己的审批门（toolApprovals），从而取代正在审核它的审批门。只要它存在，整批请求都无法批准——请拒绝，并在该代理自己的页面上修改审批门。",
       "blockedGateUnverifiable": "此请求写入的 LLM 配置内容无法完整读取——过大而无法显示，或不是有效的 JSON——因此无法确认其中不含审批门覆盖设置。只要它存在，整批请求都无法批准——请拒绝，并在该代理自己的页面上进行此更改。",
-      "blockedGateUnpinned": "此请求写入 LLM 配置，但未被固定，因此实际执行的内容可能与此处显示的不同，无法确认其中不含审批门覆盖设置。只要它存在，整批请求都无法批准——请拒绝，并在该代理自己的页面上进行此更改。"
+      "blockedGateUnpinned": "此请求写入 LLM 配置，但未被固定，因此实际执行的内容可能与此处显示的不同，无法确认其中不含审批门覆盖设置。只要它存在，整批请求都无法批准——请拒绝，并在该代理自己的页面上进行此更改。",
+      "blockedSelfStart": "操作员不能测试自己 — 与自己的智能体（{{agentId}}）开始对话会将其输出作为输入循环回来。存在此调用时整批无法批准 — 请拒绝并测试其他智能体。"
     },
     "starters": {
       "whatsDeployed": "现在部署了哪些内容？",

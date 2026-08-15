@@ -59,7 +59,6 @@ describe("useLoadConversation — pause re-establishment", () => {
           agentId: "a1",
           agentVersion: 1,
           conversationState: "AWAITING_HUMAN",
-          hitlPauseReason: "Approve wire transfer of $5000",
           environment: "production",
           conversationSteps: [],
           conversationOutputs: [],
@@ -72,6 +71,8 @@ describe("useLoadConversation — pause re-establishment", () => {
       await result.current.mutateAsync({ agentId: "a1", conversationId: "conv-x" });
     });
     expect(useChatStore.getState().isPaused).toBe(true);
-    expect(useChatStore.getState().pauseReason).toBe("Approve wire transfer of $5000");
+    // Null from the snapshot ON PURPOSE: the simple snapshot never carries a
+    // reason on the wire; the rendered reason overlays from approval-status.
+    expect(useChatStore.getState().pauseReason).toBeNull();
   });
 });

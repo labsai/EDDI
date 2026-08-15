@@ -113,7 +113,6 @@ describe("pause detection from the streamed done event", () => {
         type: "done",
         data: JSON.stringify({
           conversationState: "AWAITING_HUMAN",
-          hitlPauseReason: "Creating a new agent — review the whole config",
           conversationOutputs: [textOutput("Waiting on a reviewer…")],
         }),
       },
@@ -125,7 +124,9 @@ describe("pause detection from the streamed done event", () => {
     });
 
     expect(result.current.isPaused).toBe(true);
-    expect(result.current.pauseReason).toBe("Creating a new agent — review the whole config");
+    // Null from the snapshot ON PURPOSE: the simple snapshot never carries a
+    // reason on the wire; the rendered reason overlays from approval-status.
+    expect(result.current.pauseReason).toBeNull();
     const agentMessage = result.current.messages.find((m) => m.role === "agent");
     expect(agentMessage?.content).toBe("Waiting on a reviewer…");
   });
@@ -183,7 +184,6 @@ describe("a send rejected 409 while already paused", () => {
         type: "done",
         data: JSON.stringify({
           conversationState: "AWAITING_HUMAN",
-          hitlPauseReason: "First",
           hitlPausedAt: "2026-08-01T10:00:00Z",
           conversationOutputs: [textOutput("Pending…")],
         }),
@@ -202,7 +202,7 @@ describe("a send rejected 409 while already paused", () => {
     expect(result.current.resolveError).toBeTruthy();
 
     h.sendError = { status: 409, message: "Conflict" };
-    h.conversationLogs = [{ conversationState: "AWAITING_HUMAN", hitlPauseReason: "Second" }];
+    h.conversationLogs = [{ conversationState: "AWAITING_HUMAN" }];
     await act(async () => {
       await result.current.send("try again");
     });
@@ -240,7 +240,6 @@ describe("resolveApproval — reconciling the resumed turn", () => {
         type: "done",
         data: JSON.stringify({
           conversationState: "AWAITING_HUMAN",
-          hitlPauseReason: "Approval required",
           hitlPausedAt: "2026-08-01T10:00:00Z",
           conversationOutputs: [textOutput("Waiting on a reviewer…")],
         }),
@@ -308,7 +307,6 @@ describe("resolveApproval — reconciling the resumed turn", () => {
       {
         conversationState: "AWAITING_HUMAN",
         hitlPausedAt: "2026-08-01T10:05:00Z",
-        hitlPauseReason: "Second batch needs approval",
         conversationOutputs: [textOutput("Now waiting on batch two…")],
       },
     ];
@@ -318,7 +316,9 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     });
 
     expect(result.current.isPaused).toBe(true);
-    expect(result.current.pauseReason).toBe("Second batch needs approval");
+    // Null from the snapshot ON PURPOSE: the simple snapshot never carries a
+    // reason on the wire; the rendered reason overlays from approval-status.
+    expect(result.current.pauseReason).toBeNull();
     expect(result.current.resolveError).toBeNull();
     expect(result.current.isResolvingPause).toBe(false);
     const agentMessages = result.current.messages.filter((m) => m.role === "agent");
@@ -359,7 +359,6 @@ describe("resolveApproval — reconciling the resumed turn", () => {
       {
         conversationState: "AWAITING_HUMAN",
         hitlPausedAt: "2026-08-01T10:05:00Z",
-        hitlPauseReason: "Batch two",
         conversationOutputs: [
           { output: [{ type: "text", text: "Part one." }, { type: "text", text: "Part two." }] },
         ],
@@ -420,7 +419,7 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     // bubbles were dropped — there is nothing to replace, so replacing "the
     // last agent message" would clobber an unrelated earlier answer.
     h.sendError = { status: 409, message: "Conflict" };
-    h.conversationLogs = [{ conversationState: "AWAITING_HUMAN", hitlPauseReason: "Approval required" }];
+    h.conversationLogs = [{ conversationState: "AWAITING_HUMAN" }];
     const { result } = renderHook(() => useOperatorChat(config()));
     await act(async () => {
       await result.current.send("are you still there?");
@@ -443,13 +442,15 @@ describe("resolveApproval — reconciling the resumed turn", () => {
   it("reads the pause reason on a 409, so the banner is not blank", async () => {
     h.sendError = { status: 409, message: "Conflict" };
     h.conversationLogs = [
-      { conversationState: "AWAITING_HUMAN", hitlPauseReason: "Creating a new agent — review the whole config" },
+      { conversationState: "AWAITING_HUMAN" },
     ];
     const { result } = renderHook(() => useOperatorChat(config()));
     await act(async () => {
       await result.current.send("hi");
     });
-    expect(result.current.pauseReason).toBe("Creating a new agent — review the whole config");
+    // Null from the snapshot ON PURPOSE: the simple snapshot never carries a
+    // reason on the wire; the rendered reason overlays from approval-status.
+    expect(result.current.pauseReason).toBeNull();
   });
 
   it("polls until the conversation leaves AWAITING_HUMAN rather than reading once", async () => {
@@ -521,7 +522,7 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     try {
       h.sendError = { status: 409, message: "Conflict" };
       // No hitlPausedAt — this is the shape that makes the branch reachable.
-      h.conversationLogs = [{ conversationState: "AWAITING_HUMAN", hitlPauseReason: "Approval required" }];
+      h.conversationLogs = [{ conversationState: "AWAITING_HUMAN" }];
       const { result } = renderHook(() => useOperatorChat(config()));
       await act(async () => {
         await result.current.send("still there?");
@@ -532,7 +533,6 @@ describe("resolveApproval — reconciling the resumed turn", () => {
       h.conversationLogs = Array.from({ length: 100 }, () => ({
         conversationState: "AWAITING_HUMAN" as const,
         hitlPausedAt: "2026-08-01T11:00:00Z",
-        hitlPauseReason: "A second batch",
         conversationOutputs: [textOutput("Batch two pending…")],
       }));
 
@@ -545,7 +545,9 @@ describe("resolveApproval — reconciling the resumed turn", () => {
       expect(result.current.resolveError).toMatch(/timed out/i);
       expect(result.current.isPaused).toBe(true);
       // The second batch's pending message never became a card.
-      expect(result.current.pauseReason).toBe("Approval required");
+      // Was pinned to the FIXTURE-served reason — a field the real wire
+      // never carries. Null is the honest value on every snapshot path.
+      expect(result.current.pauseReason).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -688,7 +690,6 @@ describe("a failed turn that streams nothing", () => {
         type: "done",
         data: JSON.stringify({
           conversationState: "AWAITING_HUMAN",
-          hitlPauseReason: "review",
           conversationOutputs: [textOutput("Waiting…")],
         }),
       },
@@ -880,7 +881,6 @@ describe("streamed interim text vs the canonical answer", () => {
         type: "done",
         data: JSON.stringify({
           conversationState: "AWAITING_HUMAN",
-          hitlPauseReason: "Gated write",
           conversationOutputs: [textOutput("Waiting for your approval to rename the agent.")],
         }),
       },
@@ -1024,7 +1024,6 @@ describe("resolveApproval — every decision leaves a trace", () => {
         type: "done",
         data: JSON.stringify({
           conversationState: "AWAITING_HUMAN",
-          hitlPauseReason: "Approval required",
           hitlPausedAt: "2026-08-01T10:00:00Z",
           conversationOutputs: [textOutput("Waiting on a reviewer…")],
         }),
@@ -1056,7 +1055,6 @@ describe("resolveApproval — every decision leaves a trace", () => {
       {
         conversationState: "AWAITING_HUMAN",
         hitlPausedAt: "2026-08-01T10:05:00Z",
-        hitlPauseReason: "Another batch needs approval",
         conversationOutputs: [],
       },
     ];

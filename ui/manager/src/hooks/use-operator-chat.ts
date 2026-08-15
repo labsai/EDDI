@@ -552,7 +552,10 @@ function hydratedState(conversationId: string, snapshot: SimpleConversationMemor
     conversationId,
     messages,
     isPaused: paused,
-    pauseReason: paused ? (snapshot.hitlPauseReason ?? null) : null,
+    // Always null from a simple snapshot — the wire never carries a reason
+    // (see the note in conversations.ts). The rendered reason comes from
+    // useApprovalStatus, which both surfaces already overlay.
+    pauseReason: null,
     decidedPausedAt: paused ? (snapshot.hitlPausedAt ?? null) : null,
     pausedPlaceholderId: paused && last?.role === "agent" ? last.id : null,
     // Whatever the state of the conversation is, its transcript is worth
@@ -962,7 +965,6 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
             try {
               const snapshot: {
                 conversationState?: string;
-                hitlPauseReason?: string;
                 hitlPausedAt?: string;
                 conversationOutputs?: Record<string, unknown>[];
               } = JSON.parse(event.data);
@@ -975,7 +977,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
                 set((s) => ({
                   ...s,
                   isPaused: true,
-                  pauseReason: snapshot.hitlPauseReason ?? null,
+                  pauseReason: null,
                   resolveError: null,
                   decidedPausedAt: snapshot.hitlPausedAt ?? null,
                   // This turn's own bubble is the ask resolveApproval anchors
@@ -1093,15 +1095,16 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           pausedPlaceholderId: null,
           messages: s.messages.filter((m) => m.id !== userMessage.id && m.id !== agentId),
         }));
-        // The pause happened on a turn we never saw, so its reason is not in
-        // any snapshot we hold — read it, or the banner shows a bare
-        // "awaiting approval" with no explanation of what for.
+        // The pause happened on a turn we never saw. The read below recovers
+        // hitlPausedAt (the re-pause discriminator pollUntilSettled compares
+        // against) — NOT a reason: the simple snapshot never carries one, and
+        // the banner's reason overlays from approval-status on both surfaces.
         if (conversationId) {
           try {
             const snapshot = await getSimpleConversationLog(conversationId, false, true);
             set((s) => ({
               ...s,
-              pauseReason: snapshot.hitlPauseReason ?? null,
+              pauseReason: null,
               decidedPausedAt: snapshot.hitlPausedAt ?? null,
             }));
           } catch {
@@ -1249,7 +1252,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       set((s) => {
         const settled = {
           isPaused: rePaused,
-          pauseReason: rePaused ? (snapshot.hitlPauseReason ?? null) : null,
+          pauseReason: null,
           isResolvingPause: false,
           decidedPausedAt: rePaused ? (snapshot.hitlPausedAt ?? null) : null,
         };

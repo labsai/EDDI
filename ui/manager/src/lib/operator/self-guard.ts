@@ -74,7 +74,7 @@ export interface SelfTargetedCall {
    * remedies, and an approver told the wrong one is worse served than one told
    * nothing.
    */
-  target: "agent" | "conversation";
+  target: "agent" | "conversation" | "self-start";
 }
 
 /**
@@ -132,7 +132,32 @@ export function findSelfTargetedCalls(
     const method = (preview.method ?? "").toUpperCase();
     if (method === "GET" || method === "HEAD" || method === "") continue;
     if (actingAgentId && uriTargetsAgent(preview.uri, actingAgentId)) {
-      found.push({ callId: call.callId, agentId: actingAgentId, target: "agent" });
+      // Starting a conversation WITH itself is its own failure mode, not a
+      // definition rewrite. It is still refused — a self-conversation is the
+      // laundering loop in miniature, and the backend refuses the send half —
+      // but the reason must describe what was actually attempted: telling an
+      // approver "may not modify its own definition" for a test-drive click
+      // reads as a bug, not a boundary.
+      // Decoded with the same malformed-escape fallback as uriTargetsAgent, and
+      // the agent SEGMENT compared — not substring-matched. Testing the raw URI
+      // mislabeled a percent-encoded self-start as a definition rewrite, and a
+      // substring test would call a DIFFERENT agent's start "self-start" when
+      // the acting id merely appeared in its query string. Both mislabelings
+      // block correctly either way (the outer uriTargetsAgent hit already
+      // decided that); this only decides WHICH refusal message the human reads.
+      let decodedUri = preview.uri ?? "";
+      try {
+        decodedUri = decodeURIComponent(decodedUri);
+      } catch {
+        // Malformed escape — keep the raw form, same policy as uriTargetsAgent.
+      }
+      const startMatch = /\/agents\/([^/?#]+)\/start(?:[?#]|$)/i.exec(decodedUri);
+      const selfStart = startMatch?.[1]?.toLowerCase() === actingAgentId.trim().toLowerCase();
+      found.push({
+        callId: call.callId,
+        agentId: actingAgentId,
+        target: selfStart ? "self-start" : "agent",
+      });
       continue;
     }
     // ...and the conversation it is running in. `POST /agents/{conversationId}`
@@ -146,17 +171,14 @@ export function findSelfTargetedCalls(
     // TOLD. Blocked for the same reason as a self-write to its own document —
     // the target is the thing doing the reviewing.
     //
-    // DEFENSE IN DEPTH, NOT A BOUNDARY — and more obviously so for this case
-    // than for the agent one above. Everything in this module is Manager-side:
-    // the same pause can still be approved through the backend `/resume` API,
-    // the Slack buttons, or the MCP `resume_conversation` tool, none of which
-    // consult this file, and the POST then executes. The agent case at least has
-    // a second, backend-side control behind it (a self-targeted gate rewrite
-    // still has to get past `gate-guard`'s refusal of a `toolApprovals`-carrying
-    // body); this one has none. Closing it properly means rejecting a tool call
-    // whose resolved URI targets its own acting conversation in the ENGINE, at
-    // approval-execution time. Until that exists, treat this as reducing the
-    // likelihood of the route being taken, not as preventing it.
+    // DEFENSE IN DEPTH — the ENGINE control this comment once asked for now
+    // exists. The backend refuses a self-conversation call at
+    // approval-execution time (ToolLoopResumer.targetsOwnConversation, all
+    // approval surfaces funnel through it) AND on the live ungated path
+    // (ToolLoopRunner), returning NOT_EXECUTED either way. This Manager-side
+    // check remains so the approver is told BEFORE spending a decision on a
+    // call the engine would refuse anyway — same layering as the agent case
+    // above, whose backend control is gate-guard's body refusal.
     if (actingConversationId && uriTargetsAgent(preview.uri, actingConversationId)) {
       found.push({ callId: call.callId, agentId: actingConversationId, target: "conversation" });
     }

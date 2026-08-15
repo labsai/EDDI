@@ -731,7 +731,8 @@
     "emptyConversation": "Cette conversation ne contient encore aucun message.",
     "loadConversationFailed": "Impossible de charger cette conversation : {{error}}",
     "multilineHint": "Entrée pour envoyer · Maj+Entrée pour une nouvelle ligne",
-    "multilineHintCtrlEnter": "Ctrl+Entrée pour envoyer · Entrée pour une nouvelle ligne"
+    "multilineHintCtrlEnter": "Ctrl+Entrée pour envoyer · Entrée pour une nouvelle ligne",
+    "toolRefused": "Refusé"
   },
   "resources": {
     "backToWorkflow": "Retour au workflow",
@@ -4059,7 +4060,8 @@
       "blockedSelfConversation": "Un agent ne peut pas envoyer de message dans la conversation où il s'exécute, et cette requête vise celle-ci ({{agentId}}). Il inscrirait son propre texte comme si un humain l'avait dit. Tant qu'elle est présente, tout le lot ne peut pas être approuvé : rejetez-la.",
       "blockedGateCarrying": "Cette requête écrit une configuration LLM qui définit sa propre barrière d'approbation (toolApprovals), ce qui remplacerait la barrière qui l'examine. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et modifiez la barrière depuis la page de l'agent.",
       "blockedGateUnverifiable": "Cette requête écrit une configuration LLM dont le corps ne peut être lu intégralement — trop volumineux ou JSON invalide — ; on ne peut donc pas confirmer l'absence de remplacement de la barrière d'approbation. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et effectuez cette modification depuis la page de l'agent.",
-      "blockedGateUnpinned": "Cette requête écrit une configuration LLM mais n'est pas épinglée : ce qui s'exécute réellement peut différer de ce qui est affiché ici, et l'absence de remplacement de la barrière d'approbation ne peut être confirmée. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et effectuez cette modification depuis la page de l'agent."
+      "blockedGateUnpinned": "Cette requête écrit une configuration LLM mais n'est pas épinglée : ce qui s'exécute réellement peut différer de ce qui est affiché ici, et l'absence de remplacement de la barrière d'approbation ne peut être confirmée. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et effectuez cette modification depuis la page de l'agent.",
+      "blockedSelfStart": "L'opérateur ne peut pas se tester lui-même — démarrer une conversation avec son propre agent ({{agentId}}) réinjecterait sa sortie en entrée. L'approbation est indisponible pour tout le lot tant que cet appel est présent — rejetez et testez un autre agent."
     },
     "starters": {
       "whatsDeployed": "Qu'est-ce qui est déployé actuellement ?",

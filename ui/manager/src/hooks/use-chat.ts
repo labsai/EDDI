@@ -559,11 +559,14 @@ export function useSendMessage() {
         state.setQuickReplies(qr);
         state.setProcessing(false);
 
-        // A pause commits as AWAITING_HUMAN. Its pendingMessage / pauseReason is
-        // already rendered as the agent output above; flag the pause so the
-        // input is disabled and a review affordance is shown.
+        // A pause commits as AWAITING_HUMAN. Its pendingMessage is already
+        // rendered as the agent output above; flag the pause so the input is
+        // disabled and a review affordance is shown. The reason is null here on
+        // purpose: the simple snapshot never carries one (the field it used to
+        // read did not exist on the wire), and the banner overlays the real
+        // reason from approval-status.
         if (snapshot.conversationState === "AWAITING_HUMAN") {
-          state.setPaused(true, snapshot.hitlPauseReason ?? null);
+          state.setPaused(true, null);
         }
       }
     },
@@ -642,9 +645,13 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
         try {
           const snapshot = JSON.parse(event.data);
           // A streamed turn that ends AWAITING_HUMAN paused for approval — the
-          // pendingMessage/pauseReason is in the snapshot output; flag the pause.
+          // pendingMessage is in the snapshot output; flag the pause. The
+          // reason is null on purpose: this is the seventh site that read a
+          // hitlPauseReason the wire never carries — invisible to the compiler
+          // because JSON.parse is untyped, caught by review. approval-status
+          // supplies the rendered reason.
           if (snapshot.conversationState === "AWAITING_HUMAN") {
-            store.getState().setPaused(true, snapshot.hitlPauseReason ?? null);
+            store.getState().setPaused(true, null);
           }
           if (snapshot.conversationOutputs?.length) {
             const lastOutput = snapshot.conversationOutputs[
@@ -955,11 +962,13 @@ async function loadConversationIntoStore(agentId: string, conversationId: string
   // Re-establish the pause state when loading a conversation that is still
   // AWAITING_HUMAN — otherwise a paused conversation opened from history
   // would show an enabled input with no banner until a send is rejected 409.
-  // The snapshot carries the backend hitlPauseReason, so surface it rather
-  // than falling back to the generic default banner text.
+  // The reason is null on purpose: the comment here used to claim "the
+  // snapshot carries the backend hitlPauseReason" — it never did; the field
+  // was a phantom on the TS type and this read was undefined on every path.
+  // The rendered reason comes from approval-status, which the banner overlays.
   store.getState().setPaused(
     snapshot.conversationState === "AWAITING_HUMAN",
-    snapshot.hitlPauseReason ?? null,
+    null,
   );
 
   return snapshot;
