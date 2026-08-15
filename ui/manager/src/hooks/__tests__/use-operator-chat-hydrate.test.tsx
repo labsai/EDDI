@@ -177,7 +177,6 @@ describe("hydrate: restoring the stored conversation", () => {
     h.logs = [
       {
         conversationState: "AWAITING_HUMAN",
-        hitlPauseReason: "Creating a new agent — review the whole config",
         hitlPausedAt: "2026-08-15T10:00:00Z",
         conversationSteps: [step("build me an agent")],
         conversationOutputs: [textOutput("I need your approval to run setupAgent.")],
@@ -190,7 +189,9 @@ describe("hydrate: restoring the stored conversation", () => {
     });
 
     expect(result.current.isPaused).toBe(true);
-    expect(result.current.pauseReason).toBe("Creating a new agent — review the whole config");
+    // Null from the snapshot ON PURPOSE: the simple snapshot never carries a
+    // reason on the wire; the rendered reason overlays from approval-status.
+    expect(result.current.pauseReason).toBeNull();
     // The ask bubble is what resolveApproval inserts the decision AFTER, so it
     // has to be the agent message, never the user's request above it.
     const ask = result.current.messages.find((m) => m.role === "agent");
@@ -322,7 +323,6 @@ describe("hydrate: a conversation that cannot take another turn", () => {
     h.logs = [
       {
         conversationState: "AWAITING_HUMAN",
-        hitlPauseReason: "Deploying agent-9",
         conversationSteps: [step("deploy it")],
         conversationOutputs: [textOutput("I need approval to deploy.")],
       },
@@ -656,7 +656,6 @@ describe("selectConversation: the History tab's row click", () => {
     h.logs = [
       {
         conversationState: "AWAITING_HUMAN",
-        hitlPauseReason: "Deploying agent-9",
         conversationSteps: [step("deploy it")],
         conversationOutputs: [textOutput("I need approval to deploy.")],
       },
@@ -668,7 +667,9 @@ describe("selectConversation: the History tab's row click", () => {
     });
 
     expect(result.current.isPaused).toBe(true);
-    expect(result.current.pauseReason).toBe("Deploying agent-9");
+    // Null from the snapshot ON PURPOSE: the simple snapshot never carries a
+    // reason on the wire; the rendered reason overlays from approval-status.
+    expect(result.current.pauseReason).toBeNull();
   });
 
   /**

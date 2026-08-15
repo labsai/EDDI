@@ -271,7 +271,9 @@ export function ConversationDetailPage() {
            which it genuinely does carry. */
         <ApprovalBanner
           surface="regular"
-          pauseReason={approvalStatus?.pauseReason ?? conversation.hitlPauseReason}
+          // approval-status only: the conversation snapshot never carried a
+          // reason (the fallback read a phantom TS field, undefined always).
+          pauseReason={approvalStatus?.pauseReason}
           pausedAt={approvalStatus?.pausedAt ?? conversation.hitlPausedAt}
           timeoutPolicy={approvalStatus?.timeoutPolicy}
           approvalTimeout={approvalStatus?.approvalTimeout}

@@ -153,7 +153,6 @@ describe("DiscussionTranscript", () => {
       ...mockConversation,
       id: "gc-1",
       state: "AWAITING_APPROVAL",
-      hitlPauseReason: "Needs manager sign-off",
     };
     renderWithProviders(
       <DiscussionTranscript

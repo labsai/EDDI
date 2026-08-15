@@ -7,6 +7,7 @@ import {
   type PipelineEvent,
   type ToolTraceEntry,
 } from "@/hooks/use-debug-events";
+import { pairToolTrace } from "@/lib/tool-trace";
 import {
   Zap,
   ChevronDown,
@@ -17,6 +18,7 @@ import {
   AlertTriangle,
   Wrench,
   Copy,
+  X,
 } from "lucide-react";
 import { getExtensionIcon, getExtensionColor } from "@/lib/api/extensions";
 import { CascadeStepTrace } from "@/components/cascade-step-trace";
@@ -211,11 +213,11 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
   // A flat call→result list across all tasks, for the end-user resting view:
   // what the agent DID, without the pipeline-task shell around it.
   const toolPairs = useMemo(() => {
-    const pairs: { call: ToolTraceEntry; result?: ToolTraceEntry }[] = [];
+    // Sequence-walked, not index-zipped — see pairToolTrace for the
+    // tool_error interleaving this survives.
+    const pairs: { call?: ToolTraceEntry; result?: ToolTraceEntry; error?: ToolTraceEntry }[] = [];
     for (const task of rawTasks) {
-      const calls = task.toolTrace?.filter((e) => e.type === "tool_call") ?? [];
-      const results = task.toolTrace?.filter((e) => e.type === "tool_result") ?? [];
-      calls.forEach((call, i) => pairs.push({ call, result: results[i] }));
+      pairs.push(...pairToolTrace(task.toolTrace));
     }
     return pairs;
   }, [rawTasks]);
@@ -253,7 +255,9 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
   if (!showInternalSteps && isLive && !hasErrorTask && cascadeSteps.length === 0) {
     // Everything the turn has called so far, newest last. Live events are the
     // primary record; the trace scan covers backends without them.
-    const liveNames = liveToolCalls?.length ? liveToolCalls : toolPairs.map((p) => p.call.tool);
+    const liveNames = liveToolCalls?.length
+      ? liveToolCalls
+      : toolPairs.flatMap((p) => (p.call?.tool ? [p.call.tool] : []));
     const expandable = liveNames.length > 0;
     return (
       <div className="flex justify-center px-4 py-1" data-testid="chat-activity">
@@ -451,7 +455,6 @@ function TaskRow({ task }: { task: TaskSummary }) {
   const label = getTaskLabel(task.taskType);
 
   const toolCalls = task.toolTrace?.filter((e) => e.type === "tool_call") ?? [];
-  const toolResults = task.toolTrace?.filter((e) => e.type === "tool_result") ?? [];
   const hasTools = toolCalls.length > 0;
 
   return (
@@ -527,29 +530,38 @@ function TaskRow({ task }: { task: TaskSummary }) {
       {/* Tool calls detail (nested) */}
       {hasTools && toolsExpanded && (
         <div className="ms-8 mb-1 space-y-0.5">
-          {toolCalls.map((call, ci) => {
-            const result = toolResults[ci];
-            return (
-              <ToolCallRow key={ci} call={call} result={result} />
-            );
-          })}
+          {pairToolTrace(task.toolTrace).map((pair, ci) => (
+            <ToolCallRow key={ci} call={pair.call} result={pair.result} error={pair.error} />
+          ))}
         </div>
       )}
     </div>
   );
 }
 
+
 // ==================== Tool Call Row ====================
 
 function ToolCallRow({
   call,
   result,
+  error,
 }: {
-  call: ToolTraceEntry;
+  call?: ToolTraceEntry;
   result?: ToolTraceEntry;
+  error?: ToolTraceEntry;
 }) {
   const [showDetail, setShowDetail] = useState(false);
   const hasResult = !!result?.result;
+  // A refusal (tool_error), or a result whose contractual httpCode says the
+  // call FAILED — both used to render the same green check as a success, so an
+  // approved-then-400'd write was indistinguishable from one that worked.
+  const failedHttpCode = (() => {
+    if (!result?.result) return false;
+    const match = /"httpCode"\s*:\s*(\d{3})/.exec(result.result);
+    return match ? Number(match[1]) >= 300 : false;
+  })();
+  const failed = !!error || failedHttpCode;
 
   return (
     <div>
@@ -561,18 +573,22 @@ function ToolCallRow({
       >
         <Wrench className="h-2.5 w-2.5 shrink-0 text-amber-500" />
         <span className="font-medium text-foreground">
-          {call.tool}
+          {call?.tool ?? error?.tool ?? "—"}
         </span>
-        {call.arguments && (
+        {call?.arguments && (
           <span className="text-muted-foreground truncate">
             ({truncate(call.arguments, 40)})
           </span>
         )}
         <span className="ms-auto shrink-0">
-          {hasResult ? (
+          {failed ? (
+            <X className="h-2.5 w-2.5 text-destructive" data-testid="tool-row-failed" />
+          ) : hasResult ? (
             <Check className="h-2.5 w-2.5 text-emerald-500" />
-          ) : (
+          ) : call ? (
             <Loader2 className="h-2.5 w-2.5 animate-spin text-primary" />
+          ) : (
+            <X className="h-2.5 w-2.5 text-destructive" data-testid="tool-row-failed" />
           )}
         </span>
       </button>
@@ -580,7 +596,7 @@ function ToolCallRow({
       {/* Detail panel */}
       {showDetail && (
         <div className="ms-4 mb-1 rounded-md border border-border/50 bg-muted/30 p-2 text-[9px] space-y-1 overflow-x-auto">
-          {call.arguments && (
+          {call?.arguments && (
             <div>
               <div className="flex items-center justify-between">
                 <span className="font-semibold text-muted-foreground uppercase tracking-wider">Args</span>
@@ -599,6 +615,14 @@ function ToolCallRow({
               </div>
               <pre className="mt-0.5 whitespace-pre-wrap break-all text-foreground/80 font-mono max-h-32 overflow-y-auto">
                 {formatJsonSafe(result.result)}
+              </pre>
+            </div>
+          )}
+          {error && (
+            <div>
+              <span className="font-semibold text-destructive uppercase tracking-wider">Refused</span>
+              <pre className="mt-0.5 whitespace-pre-wrap break-all text-foreground/80 font-mono max-h-32 overflow-y-auto">
+                {formatJsonSafe(error.error ?? error.result ?? "")}
               </pre>
             </div>
           )}

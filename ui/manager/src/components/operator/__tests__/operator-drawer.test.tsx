@@ -247,7 +247,6 @@ describe("OperatorDrawer", () => {
           conversationId: "conv-1",
           environment: "production",
           conversationState: "AWAITING_HUMAN",
-          hitlPauseReason: "Creating a new agent — review the whole config",
           conversationSteps: [
             { conversationStep: [{ key: "input:initial", value: "build me an agent" }] },
           ],

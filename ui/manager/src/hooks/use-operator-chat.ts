@@ -552,7 +552,10 @@ function hydratedState(conversationId: string, snapshot: SimpleConversationMemor
     conversationId,
     messages,
     isPaused: paused,
-    pauseReason: paused ? (snapshot.hitlPauseReason ?? null) : null,
+    // Always null from a simple snapshot — the wire never carries a reason
+    // (see the note in conversations.ts). The rendered reason comes from
+    // useApprovalStatus, which both surfaces already overlay.
+    pauseReason: null,
     decidedPausedAt: paused ? (snapshot.hitlPausedAt ?? null) : null,
     pausedPlaceholderId: paused && last?.role === "agent" ? last.id : null,
     // Whatever the state of the conversation is, its transcript is worth
@@ -962,7 +965,6 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
             try {
               const snapshot: {
                 conversationState?: string;
-                hitlPauseReason?: string;
                 hitlPausedAt?: string;
                 conversationOutputs?: Record<string, unknown>[];
               } = JSON.parse(event.data);
@@ -975,7 +977,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
                 set((s) => ({
                   ...s,
                   isPaused: true,
-                  pauseReason: snapshot.hitlPauseReason ?? null,
+                  pauseReason: null,
                   resolveError: null,
                   decidedPausedAt: snapshot.hitlPausedAt ?? null,
                   // This turn's own bubble is the ask resolveApproval anchors
@@ -1101,7 +1103,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
             const snapshot = await getSimpleConversationLog(conversationId, false, true);
             set((s) => ({
               ...s,
-              pauseReason: snapshot.hitlPauseReason ?? null,
+              pauseReason: null,
               decidedPausedAt: snapshot.hitlPausedAt ?? null,
             }));
           } catch {
@@ -1249,7 +1251,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       set((s) => {
         const settled = {
           isPaused: rePaused,
-          pauseReason: rePaused ? (snapshot.hitlPauseReason ?? null) : null,
+          pauseReason: null,
           isResolvingPause: false,
           decidedPausedAt: rePaused ? (snapshot.hitlPausedAt ?? null) : null,
         };
