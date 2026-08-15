@@ -19,6 +19,8 @@ import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
+import com.fasterxml.jackson.core.JsonLocation;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -33,6 +35,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -85,6 +88,20 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             "context", "properties", "memory",
             "snippets", "vars",
             "userInfo", "conversationInfo", "conversationLog");
+
+    /**
+     * A body template that is nothing but one Qute variable — the shape
+     * {@code McpApiToolBuilder.buildBodyTemplate} always generates, where the model
+     * writes the whole JSON document and that variable IS the request body.
+     * <p>
+     * Anchored, so a template that merely CONTAINS a variable does not match: in
+     * {@code {"name":"{name}"}} the JSON around the value is EDDI's own and the
+     * model never wrote it, so judging one substituted value as a JSON document
+     * would refuse every correct call of that shape.
+     *
+     * @see #rejectUnparseableBody
+     */
+    private static final Pattern WHOLE_BODY_TEMPLATE = Pattern.compile("^\\{([A-Za-z_][A-Za-z0-9_]*)}$");
 
     private final IRestAgentStore restAgentStore;
     private final IRestWorkflowStore restWorkflowStore;
@@ -182,6 +199,15 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                     executors.put(apiCall.getName(), (toolRequest, memoryId) -> {
                         try {
                             Map<String, Object> templateData = templateDataFor(memory, toolRequest);
+
+                            // Checked before the wire, not after. A body the model wrote as
+                            // broken JSON cannot bind at any API, so sending it spends a round
+                            // trip to be told something the string itself already says.
+                            String rejection = rejectUnparseableBody(apiCall, templateData);
+                            if (rejection != null) {
+                                return rejection;
+                            }
+
                             Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl);
 
                             String serialized = jsonSerialization.serialize(result);
@@ -189,9 +215,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                             return serialized;
                         } catch (Exception e) {
                             LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
-                            String errorMsg = e.getMessage() != null ? e.getMessage() : "Unknown error";
-                            String escaped = new String(JsonStringEncoder.getInstance().quoteAsString(errorMsg));
-                            return "{\"error\": \"" + escaped + "\"}";
+                            return errorResult(e.getMessage() != null ? e.getMessage() : "Unknown error");
                         }
                     });
                 }
@@ -244,6 +268,115 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             }
         }
         return templateData;
+    }
+
+    /**
+     * Refuse a call whose model-written request body is not JSON at all, and say
+     * why, instead of sending it.
+     * <p>
+     * <b>Why this is the model's mistake and not a bug to fix elsewhere.</b>
+     * {@code McpApiToolBuilder.buildBodyTemplate} generates the body as ONE
+     * variable, {@code {requestBody}} — the model writes the entire JSON document
+     * itself and EDDI puts nothing between that string and the wire, deliberately
+     * (see that method: per-property templates were rejected because the templating
+     * engine runs in TEXT mode and escapes nothing, so a substituted value carrying
+     * a quote could break the body or add undeclared fields). So a body that fails
+     * to bind failed because the model emitted invalid JSON — overwhelmingly a raw
+     * newline or an unescaped quote inside a long string value, where {@code \n}
+     * and {@code \"} were needed. Nothing here escapes it for them; the fix is for
+     * the model to re-send, and this tells it so in the one place it will read.
+     * <p>
+     * Scoped narrowly, because a guard that refuses a call it merely fails to
+     * understand is worse than the round trip it saves. It fires only when all of:
+     * the call declares a JSON content type; its body template is nothing but a
+     * single variable, so that variable IS the request body and judging the
+     * variable judges the request (a hand-authored apicallstore template that
+     * interpolates values into surrounding JSON is left alone — there the braces
+     * around it are EDDI's, not the model's); and the variable actually resolved to
+     * a non-blank string. The variable is read out of the template rather than
+     * assumed to be named {@code requestBody}, because the builder renames it when
+     * a path or query parameter already claims that name.
+     * <p>
+     * A blank value is deliberately NOT refused. That is the separate "model never
+     * filled the body" failure — Qute renders an unsupplied variable as empty with
+     * strict rendering off — and it is not a malformed document.
+     *
+     * @return {@code null} when there is nothing to refuse, otherwise the tool
+     *         result to hand back in place of making the call
+     */
+    private String rejectUnparseableBody(ApiCall apiCall, Map<String, Object> templateData) {
+        var request = apiCall.getRequest();
+        if (request == null || request.getBody() == null || request.getContentType() == null) {
+            return null;
+        }
+        if (!request.getContentType().toLowerCase(Locale.ROOT).contains("application/json")) {
+            return null;
+        }
+        var matcher = WHOLE_BODY_TEMPLATE.matcher(request.getBody().trim());
+        if (!matcher.matches()) {
+            return null;
+        }
+        // Only a String is judged. The tool schema declares this parameter as a
+        // string (see the addStringProperty above), so anything else is a model
+        // that ignored the schema, and what Qute renders a non-string as is a
+        // question about the templating engine rather than about the JSON — not a
+        // basis on which to block a call. Those still fail at the API, where the
+        // result map now carries httpCode and the error body.
+        if (!(templateData.get(matcher.group(1)) instanceof String body) || body.isBlank()) {
+            return null;
+        }
+        try {
+            jsonSerialization.deserialize(body, Object.class);
+            return null;
+        } catch (IOException e) {
+            String position = parsePosition(e);
+            // The name and the position, never the body: it is model-supplied and
+            // routinely carries resolved secrets, which is why the pause record keeps
+            // only a redacted copy (RequestRedactor) and why templateDataFor's own
+            // catch goes to such lengths. The position is enough to triage with.
+            LOGGER.warnf("Refusing httpcall tool '%s' before sending: the model's request body is not valid JSON%s",
+                    sanitize(apiCall.getName()), position);
+            return errorResult("requestBody is not valid JSON" + position
+                    + ". The request was NOT sent. Re-send this call with the body as one correctly escaped JSON"
+                    + " document: inside a string value a newline must be written \\n and a double quote \\\","
+                    + " never as a raw character.");
+        }
+    }
+
+    /**
+     * Where the parse failed, and nothing else.
+     * <p>
+     * Deliberately not the exception's message. Jackson appends a snippet of the
+     * offending source to it ("at [Source: (String)\"{...\"; line: 1, column:
+     * 593]"), which would put the very body this method is careful not to log — or
+     * to hand back into conversation memory — into both. The line and column alone
+     * are what makes the failure actionable.
+     *
+     * @return {@code " at line L, column C"}, or an empty string when the failure
+     *         carries no usable location
+     */
+    private static String parsePosition(IOException e) {
+        if (e instanceof JsonProcessingException jsonError) {
+            JsonLocation location = jsonError.getLocation();
+            // JsonLocation.NA reports -1 for both.
+            if (location != null && location.getLineNr() > 0) {
+                return " at line " + location.getLineNr() + ", column " + location.getColumnNr();
+            }
+        }
+        return "";
+    }
+
+    /**
+     * The single tool-result shape for a call that did not produce a response — one
+     * JSON object with an {@code error} string, escaped so the message cannot break
+     * out of it.
+     * <p>
+     * Shared by the executor's catch-all and by {@link #rejectUnparseableBody} so a
+     * refusal is indistinguishable in shape from a failure: both are "no response,
+     * here is why", and a model that handles one handles the other.
+     */
+    private static String errorResult(String message) {
+        return "{\"error\": \"" + new String(JsonStringEncoder.getInstance().quoteAsString(message)) + "\"}";
     }
 
     /**

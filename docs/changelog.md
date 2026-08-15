@@ -7,6 +7,58 @@
 
 
 
+## 🐛 fix(llm): an approved tool call died at the API because its body was not JSON (2026-08-15)
+
+**Repo:** EDDI (`fix/tool-body-json-guard`)
+
+From an operator session: a human approved `setupAgent`, the call went out, and the API rejected it
+at bind time — `400 {"objectName":"Class","attributeName":"systemPrompt","line":1,"column":593}`.
+Column 593 is deep inside a long `systemPrompt` string value.
+
+**EDDI had not mangled anything.** `McpApiToolBuilder.buildBodyTemplate` generates the request body
+as ONE variable, `{requestBody}`, and that is deliberate — per-property templates were rejected
+because the templating engine runs in TEXT mode and escapes nothing, so a substituted value carrying
+a quote could break the body or add fields the schema never declared. With the whole body in one
+variable there is no substitution boundary to cross, and nothing sits between the model's string and
+the wire. So a body that fails to bind failed because the model emitted invalid JSON: it escaped one
+level too few, writing `\n` where the inner document needed `\\n`, which decodes to a raw newline
+inside a JSON string value. Do not "fix" this by escaping in the template or decomposing the body —
+both are rejected designs with their reasons recorded in that method.
+
+`HttpCallToolsProvider`'s executor now parses that body before calling `ApiCallExecutor`, and on
+failure returns `{"error": "requestBody is not valid JSON at line L, column C. The request was NOT
+sent. …"}` in place of making the call — the same result shape as the executor's existing catch, so
+a model that handles one handles the other. The message carries the parse POSITION and never the
+body: the body is model-supplied and routinely carries resolved secrets (the reason
+`RequestRedactor` exists), and Jackson's own message would have appended a snippet of the offending
+source to both the log line and the tool result. Same reason the warn log names only the tool and
+the position.
+
+Scoped so it cannot refuse a call it merely fails to understand: only a JSON content type, only a
+body template that is nothing but a single variable (a hand-authored apicallstore template
+interpolating values into surrounding JSON is left alone — there the braces are EDDI's, not the
+model's), and only when that variable resolved to a non-blank string. The variable is read out of
+the template rather than assumed to be named `requestBody`, because the builder renames it when a
+path or query parameter already claims the name. A blank value is deliberately not refused — that is
+the separate "the model never filled the body" failure, not a malformed document.
+
+Twelve tests drive the real executor lambda through a real workflow traversal with the real
+`JsonSerialization` (a stubbed parser would only prove the stub throws): the raw-newline case as
+reported, an unescaped quote, a truncated document, a renamed body variable, and the refusal's
+wording — against five that prove the guard stays out of the way (valid body, no body, `text/plain`,
+a per-property template, a JSON array body). The load-bearing assertion is
+`verify(apiCallExecutor, never()).execute(...)`. Mutation-checked: disabling the guard fails six of
+them.
+
+**Known limit, not addressed here.** The approval gate pauses BEFORE execution, so the human still
+spends one approval on the doomed call; what changes is that the retry now has the information to
+succeed instead of looping. Refusing at gate time would mean validating inside
+`IApiCallExecutor#resolve`, which is a larger change to the pause path.
+
+---
+
+
+
 ## 🐛 fix(hitl): a second pause on the SAME tool rendered byte-identical text (2026-08-15)
 
 **Repo:** EDDI (`fix/pause-ordinal`)
