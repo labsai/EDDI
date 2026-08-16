@@ -1386,6 +1386,22 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
         }
       } catch {
         preDecisionCalls = null;
+        // The receipt is best-effort, but the pause IDENTITY is not: with
+        // decidedPausedAt still null (a streamed pause on a backend whose done
+        // events carry no hitlPausedAt), proceeding after a transient failure
+        // here re-opens the very stall this read exists to close — the poll
+        // reads the next pause as "the one we decided" until its timeout. One
+        // lightweight retry recovers it; a persistent outage is left to the
+        // resume/poll below, whose error handling already reports it with the
+        // pause intact.
+        if (decidedPausedAt === null) {
+          try {
+            const light = await getSimpleConversationLog(conversationId, false, true);
+            decidedPausedAt = light.hitlPausedAt ?? null;
+          } catch {
+            // Both reads down: the resume below will surface the outage.
+          }
+        }
       }
       // The baseline read is a suspension point that did not exist when the
       // resume was the first await: a reset() or selectConversation() during
@@ -1393,6 +1409,18 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       // approve (or reject) a conversation the user has already discarded —
       // a real backend side effect, not just a stale render.
       if (controller.signal.aborted) return;
+      // A history pick in flight wins over the submit. selectConversation
+      // deliberately aborts this controller only AFTER its read succeeds (a
+      // failed pick must not cost the conversation on screen), so during that
+      // read the abort guard above passes — and the decision would land on the
+      // conversation the admin is switching away from. hydrate() declines
+      // outright while isResolvingPause is true, so a non-null controller here
+      // can only be an explicit pick. isResolvingPause is cleared because the
+      // pick's own reset() may never run if its read fails.
+      if (get().hydrateAbortController !== null || get().conversationId !== conversationId) {
+        set({ isResolvingPause: false });
+        return;
+      }
       await resumeConversation(conversationId, { verdict, note, toolDecisions });
       const snapshot = await pollUntilSettled(conversationId, controller.signal, decidedPausedAt);
       // `pollUntilSettled` can only observe an abort between polls — the reads

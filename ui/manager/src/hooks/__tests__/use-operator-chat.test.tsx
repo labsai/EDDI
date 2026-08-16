@@ -58,6 +58,9 @@ vi.mock("@/lib/api/conversations", async (importOriginal) => {
   return {
     ...actual,
     getSimpleConversationLog: vi.fn(async (_conv: string, returnDetailed?: boolean) => {
+      // A read that never resolves — models a history pick whose hydration is
+      // still in flight while other work completes (the slow-selection race).
+      if (_conv === "conv-slow") await new Promise(() => {});
       if (returnDetailed) {
         // `duringLogRead` deliberately does NOT fire here: it exists so tests
         // can act during a POLL read, and the best-effort receipt reads would
@@ -596,6 +599,82 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     expect(h.resumeCalls).toHaveLength(0);
     expect(result.current.messages).toHaveLength(0);
     expect(result.current.isPaused).toBe(false);
+  });
+
+  it("yields to a history pick still reading when the baseline completes", async () => {
+    // selectConversation aborts the resolve controller only AFTER its read
+    // succeeds (a failed pick must not cost the conversation on screen). With
+    // a SLOW pick, that abort has not happened yet when the baseline read
+    // finishes — the abort guard alone passed and the decision landed on the
+    // conversation the admin was switching away from. (Copilot catch.)
+    const { result } = await pausedHook();
+    h.duringDetailedRead = () => {
+      // Fires while the baseline read is in flight; sets hydrateAbortController
+      // synchronously, then suspends forever on its own read.
+      void result.current.selectConversation("conv-slow");
+    };
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    expect(h.resumeCalls).toHaveLength(0);
+    expect(result.current.isResolvingPause).toBe(false);
+    // The pick never completed — the original conversation is still on screen,
+    // its pause intact and decidable again.
+    expect(result.current.conversationId).toBe("conv-1");
+    expect(result.current.isPaused).toBe(true);
+  });
+
+  it("recovers the pause identity with a lightweight retry when the baseline read fails", async () => {
+    // The receipt is best-effort but the pause identity is not: a transient
+    // baseline failure while decidedPausedAt is null re-opened the
+    // poll-to-timeout stall. (Copilot catch.)
+    h.frames = [
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          // no hitlPausedAt — the old backend's streamed pause
+          conversationOutputs: [textOutput("Pending batch one…")],
+        }),
+      },
+    ];
+    const rendered = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await rendered.result.current.send("do a thing");
+    });
+    expect(rendered.result.current.isPaused).toBe(true);
+
+    // The baseline (detailed) read fails once; the lightweight retry and the
+    // poll then see the real snapshots.
+    h.duringDetailedRead = () => {
+      h.duringDetailedRead = null;
+      throw new Error("transient blip");
+    };
+    h.conversationLogs = [
+      // Lightweight identity retry.
+      {
+        conversationState: "AWAITING_HUMAN",
+        hitlPausedAt: "2026-08-16T02:00:00Z",
+        conversationOutputs: [textOutput("Pending batch one…")],
+      },
+      // The resumed turn pauses AGAIN — new identity, must settle promptly.
+      {
+        conversationState: "AWAITING_HUMAN",
+        hitlPausedAt: "2026-08-16T02:02:00Z",
+        conversationOutputs: [textOutput("Pending batch two…")],
+      },
+    ];
+
+    await act(async () => {
+      await rendered.result.current.resolveApproval("APPROVED");
+    });
+
+    expect(rendered.result.current.resolveError).toBeNull();
+    expect(rendered.result.current.isPaused).toBe(true);
+    const agents = rendered.result.current.messages.filter((m) => m.role === "agent");
+    expect(agents[agents.length - 1]?.content).toBe("Pending batch two…");
   });
 
   it("recovers the pause identity when the streamed pause carried none", async () => {
