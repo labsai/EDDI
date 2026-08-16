@@ -768,10 +768,21 @@ public class Conversation implements IConversation {
             // templating tasks run, so without this the chat client renders NOTHING
             // for the paused turn. Mirror the REJECTED path's Data/output pattern.
             String pending = resolvePendingMessage(conversationMemory);
-            var pendingData = new Data<>(MemoryKeys.OUTPUT_PREFIX, List.of(pending));
+            // The model's own narration of what it is about to do goes AHEAD of the
+            // placeholder — see PendingToolCallBatch#interimText. Without it a resumed
+            // (non-streamed) turn's second approval arrived with no explanation at all,
+            // and even a streamed one lost the explanation on reload.
+            var outputs = new ArrayList<String>(2);
+            var batch = conversationMemory.getHitlPendingToolCalls();
+            String interim = batch != null ? batch.getInterimText() : null;
+            if (interim != null && !interim.isBlank() && !interim.equals(pending)) {
+                outputs.add(interim);
+            }
+            outputs.add(pending);
+            var pendingData = new Data<>(MemoryKeys.OUTPUT_PREFIX, List.copyOf(outputs));
             pendingData.setPublic(true);
             conversationMemory.getCurrentStep().storeData(pendingData);
-            conversationMemory.getCurrentStep().addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.of(pending));
+            conversationMemory.getCurrentStep().addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.copyOf(outputs));
         } else {
             // A RULE pause must never carry a stale tool batch (e.g. the gate tripped
             // earlier in the same turn on a path that recovered) — belt and braces.
@@ -967,11 +978,22 @@ public class Conversation implements IConversation {
             currentStep.removeConversationOutputListItem(MemoryKeys.OUTPUT_PREFIX, pending);
         }
 
+        // The Data twin of the output entry: strip the placeholder from it too, and
+        // ONLY the placeholder — the interim narration written ahead of it (see
+        // pauseConversation) is legitimate output that must survive the resume,
+        // exactly as it does in the conversationOutput list above.
         IData<?> outputData = currentStep.getData(MemoryKeys.OUTPUT_PREFIX);
-        if (outputData != null && candidates.stream().anyMatch(p -> List.of(p).equals(outputData.getResult()))) {
-            var blanked = new Data<>(MemoryKeys.OUTPUT_PREFIX, new ArrayList<>());
-            blanked.setPublic(true);
-            currentStep.storeData(blanked);
+        if (outputData != null && outputData.getResult() instanceof List<?> stored
+                && stored.stream().anyMatch(candidates::contains)) {
+            var kept = new ArrayList<Object>();
+            for (Object item : stored) {
+                if (!candidates.contains(item)) {
+                    kept.add(item);
+                }
+            }
+            var stripped = new Data<>(MemoryKeys.OUTPUT_PREFIX, kept);
+            stripped.setPublic(true);
+            currentStep.storeData(stripped);
         }
     }
 

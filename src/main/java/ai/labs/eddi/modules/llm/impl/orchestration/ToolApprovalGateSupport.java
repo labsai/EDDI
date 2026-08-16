@@ -76,6 +76,13 @@ public class ToolApprovalGateSupport {
 
     private static final int PAUSE_REASON_MAX_CHARS = 500;
 
+    /**
+     * Cap on the model's interim narration carried with a pause. A sentence or two
+     * by nature; the cap only guards against a runaway preamble bloating the
+     * persisted batch and the paused step's public output.
+     */
+    static final int INTERIM_TEXT_MAX_CHARS = 2_000;
+
     private final ChatTranscriptCodec chatTranscriptCodec;
 
     public ToolApprovalGateSupport(ChatTranscriptCodec chatTranscriptCodec) {
@@ -114,6 +121,28 @@ public class ToolApprovalGateSupport {
     }
 
     // ─── Approver-facing strings ───
+
+    /**
+     * The redacted, capped text of the trailing {@link AiMessage} — the narration
+     * the model emitted in the same message as its gated tool calls — or null when
+     * the transcript does not end in an AiMessage or that message carries no text.
+     */
+    static String interimTextOf(List<ChatMessage> currentMessages) {
+        if (currentMessages == null || currentMessages.isEmpty()) {
+            return null;
+        }
+        if (!(currentMessages.getLast() instanceof AiMessage ai)) {
+            return null;
+        }
+        String text = ai.text();
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        String redacted = SecretRedactionFilter.redact(text.strip());
+        return redacted.length() > INTERIM_TEXT_MAX_CHARS
+                ? redacted.substring(0, INTERIM_TEXT_MAX_CHARS) + "…"
+                : redacted;
+    }
 
     /** First non-blank of the two, or null. */
     public static String firstNonBlank(String preferred, String fallback) {
@@ -249,6 +278,10 @@ public class ToolApprovalGateSupport {
         ChatTranscriptCodec.CodecResult codecResult = chatTranscriptCodec.serialize(currentMessages, transcriptMaxBytes);
         batch.setChatTranscriptJson(codecResult.json());
         batch.setTranscriptOmitted(codecResult.omitted());
+        // What the model said alongside the gated calls — see
+        // PendingToolCallBatch#interimText. The gating AiMessage is the last
+        // message the runner appended before classifying its tool requests.
+        batch.setInterimText(interimTextOf(currentMessages));
 
         // Per gated call: cap raw args, redact + cap redacted args, carry gate reason.
         List<PendingToolCallBatch.PendingToolCall> calls = new ArrayList<>();

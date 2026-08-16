@@ -290,6 +290,30 @@ public class PendingToolCallBatch {
      * persisted before this field existed does.
      */
     private ToolApprovalsConfig.ApprovalRule effectiveRule;
+    /**
+     * What the model SAID in the assistant message that carried the gated tool
+     * calls — its narration of what it is about to do — redacted and capped.
+     * <p>
+     * A tool pause aborts the turn before the output tasks run, so the only text
+     * the paused step used to carry was the pending-approval placeholder; the
+     * model's own "the config checks out, I'll now start a test conversation, which
+     * needs your approval" was dropped on the floor. On a streamed turn the client
+     * had already shown it live; on a RESUMED turn (which is not streamed) it never
+     * existed anywhere the user could see — the second approval of a turn arrived
+     * with no explanation at all, which is how it was reported.
+     * {@code Conversation.pauseConversation} writes this ahead of the placeholder,
+     * so both channels — and a reload — show what the approval is about.
+     * <p>
+     * Redacted with the same filter as the call arguments: it is model output over
+     * tool results, so a secret that reached the model can be echoed here. Capped
+     * ({@code Conversation.MAX_INTERIM_TEXT_CHARS}) — it is a sentence or two by
+     * nature, and the whole batch is persisted with the pause. Null when the
+     * assistant message had no text, and on every batch persisted before this field
+     * existed — readers treat null as "nothing to show", the old behaviour.
+     * Excluded from the names-only projection like {@link #effectiveToolApprovals}
+     * — it is already in the step's public output where it belongs.
+     */
+    private String interimText;
 
     public String getPauseEpoch() {
         return pauseEpoch;
@@ -401,6 +425,14 @@ public class PendingToolCallBatch {
 
     public void setPauseCountThisTurn(int pauseCountThisTurn) {
         this.pauseCountThisTurn = pauseCountThisTurn;
+    }
+
+    public String getInterimText() {
+        return interimText;
+    }
+
+    public void setInterimText(String interimText) {
+        this.interimText = interimText;
     }
 
     public ToolApprovalsConfig getEffectiveToolApprovals() {

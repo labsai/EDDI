@@ -7,6 +7,67 @@
 
 
 
+## 💬 fix(hitl): a tool pause keeps the model's own explanation of what it is about to do (2026-08-16)
+
+**Repo:** EDDI (`fix/pause-keeps-interim-text`) + EDDI-Manager (`fix/operator-resume-settle`, follow-up
+commit).
+
+Third live round on the operator flow: "the confirmation message got removed — this time when the
+second approval came in, it was visible on the first though." Root cause is structural, not a UI
+slip: a tool pause aborts the turn BEFORE the output tasks run, so the only text the paused step
+carried was the pending-approval placeholder. The model's own narration in the very message that
+carried the gated calls ("config checks out — I'll now start a test conversation, which needs your
+approval") was dropped on the floor. On a STREAMED turn the client had already shown it live (and
+the previous Manager fix kept it on screen — hence "visible on the first"); on a RESUMED turn — which
+is not streamed — it never existed anywhere the user could see, so the second approval arrived with
+no explanation at all. And a reload lost it on both.
+
+**EDDI:** `PendingToolCallBatch` gains `interimText` — the trailing `AiMessage`'s text at gate time,
+redacted with the same filter as the call arguments (it is model output over tool results, so an
+echoed secret is possible) and capped at 2000 chars. `ToolApprovalGateSupport.buildPendingBatch`
+derives it from `currentMessages` (no signature change); `Conversation.pauseConversation` writes it
+AHEAD of the placeholder, so the paused step's output is `[narration, ask]`. The resume-side
+placeholder drop was made surgical: it removes only the placeholder from both the output list and
+its `Data` twin (the old twin logic blanked the whole entry when it equalled `[placeholder]`, which
+would now have thrown away the narration). Null on legacy batches and on bare tool calls → old
+behaviour. Excluded from the names-only REST projection like the other batch internals — it is
+already in the step's public output where it belongs.
+
+**Manager:** the streamed pause path treats the done snapshot as `[narration?, ask]` — the ask is
+always the last part. It keeps the streamed bubble (which IS the narration, so it is never rendered
+twice from the snapshot), back-fills the bubble from the snapshot when nothing was streamed, and
+appends the ask as its own bubble. Resume/hydrate already render one bubble per part, so
+`[narration, ask]` reads correctly there with no change; the error-event resync back-fills the ask
+only.
+
+**Also in the same Manager follow-up (round-3 findings):**
+- The second pause's banner stuck on "Loading approval details…": the operator page's post-decision
+  `removeQueries(["approval-status", id])` — the pre-per-pause-key remedy — matches by prefix, so it
+  `destroy()`ed the NEXT pause's freshly-launched query out from under its mounted observer, which
+  then rendered `isLoading` forever with no data. The per-pause key already guarantees the fresh
+  fetch; the removal is gone.
+- The "Running the approved step…" row moved BELOW the approval block: it narrates the consequence
+  of the decision just made, so it belongs where the eye lands after clicking Approve.
+- Reload-safety: a reload while an approved step was executing hydrated as read-only "This
+  conversation is finished" and stayed there until the admin reloaded again. `hydrate` and
+  `selectConversation` now follow an `IN_PROGRESS` conversation through — poll with the shared settle
+  predicate (a new `NO_DECIDED_PAUSE` sentinel: for a reload ANY pause is a settle, unlike the
+  decision path's conservative `null`), then re-hydrate — so the answer or the next card appears as
+  it would have without the reload. Supersession (a reset, a newer pick, a re-pick of the same id)
+  is checked with the same "is this still my controller?" rule the other loaders use.
+
+**Tests (EDDI):** pause writes `[narration, ask]`; APPROVED resume keeps the narration and strips
+only the placeholder from list AND Data twin; `interimTextOf` unit suite (trailing-AI text, bare
+call → null, non-AI tail → null, redaction, cap). Both Conversation behaviours mutation-verified.
+**Tests (Manager):** narration dedup vs streamed text, snapshot back-fill when nothing streamed,
+IN_PROGRESS follow-through, follow-through yields to a newer pick AND to a same-id re-pick (the
+latter is what makes the controller clause load-bearing — verified by mutation), each mutation-
+verified where the mechanism allowed. Full suite 5375 green.
+
+---
+
+
+
 ## 🆔 fix(streaming): done events carry the pause identity — hitlPausedAt (2026-08-16)
 
 **Repo:** EDDI (`fix/done-event-pause-identity`) + EDDI-Manager (`fix/operator-resume-settle`,

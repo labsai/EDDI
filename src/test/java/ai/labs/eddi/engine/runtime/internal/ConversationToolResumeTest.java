@@ -322,6 +322,56 @@ class ConversationToolResumeTest {
                 "the resumed step must render ONLY the final answer, not [placeholder, answer]; got: " + out);
     }
 
+    @Test
+    @DisplayName("APPROVED tool resume drops ONLY the placeholder — the model's interim narration written ahead of it survives")
+    void approvedResumeKeepsInterimText() throws Exception {
+        // The narration ("the config checks out, I'll now start a test conversation")
+        // is legitimate output written by pauseConversation ahead of the placeholder;
+        // the drop must be surgical. Also exercises the Data-twin strip: the stored
+        // Data is [interim, placeholder], not [placeholder] alone, and the old
+        // "blank when equal to [placeholder]" branch would have left the twin
+        // untouched — inconsistent with the list.
+        memory.setConversationState(ConversationState.READY);
+        var effective = new ToolApprovalsConfig();
+        effective.setPendingMessage("Approval required for {toolNames}");
+        String interim = "Config checks out — deleting the record next, which needs your approval.";
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("delete_record");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setEffectiveToolApprovals(effective);
+            b.setInterimText(interim);
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated tool call",
+                    ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conv = createConversation();
+        conv.say("delete it", Map.of());
+        assertEquals(List.of(interim, PENDING), outputList().stream().map(String::valueOf).toList(),
+                "paused: narration then placeholder");
+
+        String finalAnswer = "Record deleted successfully.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(finalAnswer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        var out = outputList().stream().map(String::valueOf).toList();
+        assertEquals(List.of(interim, finalAnswer), out,
+                "resumed: narration kept, placeholder gone, answer appended; got: " + out);
+        // The Data twin agrees with the list.
+        var data = memory.getCurrentStep().getData(MemoryKeys.OUTPUT_PREFIX);
+        assertNotNull(data);
+        assertEquals(List.of(interim), data.getResult(),
+                "the Data twin must have had ONLY the placeholder stripped; got: " + data.getResult());
+    }
+
     /**
      * The version boundary the determinism argument silently skipped: a pause
      * PERSISTED by a previous build holds that build's placeholder wording, and
