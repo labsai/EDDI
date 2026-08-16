@@ -309,8 +309,19 @@ function toPipelineEvent(event: SSEEvent): PipelineEvent | null {
   };
 }
 
-/** How long a decision may take to resolve before pollUntilSettled gives up. */
+/** How long a decision may sit unacted-on before pollUntilSettled gives up. */
 const RESOLVE_TIMEOUT_MS = 90_000;
+/**
+ * Ceiling while the resumed turn is OBSERVABLY EXECUTING (`IN_PROGRESS`).
+ *
+ * A separate, longer limit than {@link RESOLVE_TIMEOUT_MS} on purpose: a turn
+ * that chains model calls and tools legitimately runs for minutes (the
+ * backend's own streaming backstop alone is 120s per model call), and timing
+ * out at 90s while the backend was demonstrably working reported a scary
+ * failure over a healthy turn — whose outcome then arrived with nobody
+ * polling. 90s stays the cap for "the decision was never acted on".
+ */
+const RESOLVE_EXECUTING_TIMEOUT_MS = 300_000;
 /** How often to poll while waiting for a resumed turn to settle. */
 const RESOLVE_POLL_INTERVAL_MS = 1_500;
 
@@ -359,7 +370,7 @@ async function pollUntilSettled(
   signal: AbortSignal,
   decidedPausedAt: string | null,
 ) {
-  const deadline = Date.now() + RESOLVE_TIMEOUT_MS;
+  const start = Date.now();
   for (;;) {
     const snapshot = await getSimpleConversationLog(conversationId, false, true);
     const stillTheSamePause =
@@ -368,16 +379,22 @@ async function pollUntilSettled(
       // decided — the conservative reading, since claiming a new pause we
       // cannot prove would clear the banner for a decision still outstanding.
       //
-      // Reachable only in theory: the backend sets hitlPausedAt unconditionally
-      // in the same block that sets AWAITING_HUMAN (Conversation#pauseConversation),
-      // so a paused snapshot without one would have to predate that or come from
-      // somewhere else entirely. Kept as a fallback rather than an assertion,
-      // and deliberately NOT inverted to "any pause is a new pause": that would
-      // trade a bounded wait-then-timeout for silently clearing an approval the
-      // human has not actually given.
+      // A theoretical fallback only since resolveApproval started recovering
+      // the timestamp from its pre-resume baseline read: a streamed pause used
+      // to arrive with null here (the SSE done payload carried no
+      // hitlPausedAt), which made every re-pause read as "the same pause" and
+      // spun this loop to its full timeout while the next batch sat undecided.
+      // Kept, and deliberately NOT inverted to "any pause is a new pause":
+      // that would trade a bounded wait-then-timeout for silently clearing an
+      // approval the human has not actually given.
       (decidedPausedAt === null || snapshot.hitlPausedAt === decidedPausedAt);
     const stillExecuting = snapshot.conversationState === "IN_PROGRESS";
     if (!stillTheSamePause && !stillExecuting) return snapshot;
+    // Two ceilings: a turn we can SEE executing earns the longer one; a pause
+    // that never even flips to IN_PROGRESS means the decision was not acted
+    // on, and waiting minutes for it would just delay the error.
+    const deadline =
+      start + (stillExecuting ? RESOLVE_EXECUTING_TIMEOUT_MS : RESOLVE_TIMEOUT_MS);
     if (Date.now() >= deadline) {
       throw new Error(
         "Timed out waiting for the resumed turn to finish. It may still complete — refresh in a moment.",
@@ -1110,28 +1127,55 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
               finalText = parts.join("\n\n");
               if (snapshot.conversationState === "AWAITING_HUMAN") {
                 const pendingText = finalText;
-                set((s) => ({
-                  ...s,
-                  isPaused: true,
-                  pauseReason: null,
-                  resolveError: null,
-                  decidedPausedAt: snapshot.hitlPausedAt ?? null,
-                  // This turn's own bubble is the ask resolveApproval anchors
-                  // on (decision + answer are inserted after it) — recorded by
-                  // id, whether or not it ever got any text.
-                  pausedPlaceholderId: agentId,
-                  // The backend writes its pending message into this same
-                  // step's output, exactly like an ordinary answer — snap the
-                  // bubble to it, so a turn that paused after streaming interim
-                  // commentary rests on the pending message (what a reload
-                  // shows), and one that never streamed shows why it paused
-                  // instead of an empty bubble.
-                  messages: pendingText
-                    ? s.messages.map((m) =>
-                        m.id === agentId && m.content !== pendingText ? { ...m, content: pendingText } : m,
-                      )
-                    : s.messages,
-                }));
+                // Minted outside the updater, used only on the branch that
+                // needs it — see the nextId note in resolveApproval.
+                const askId = nextId("agent");
+                set((s) => {
+                  const bubble = s.messages.find((m) => m.id === agentId);
+                  // A turn that streamed interim commentary ("The config
+                  // checks out — I'll now start a test conversation, which
+                  // needs your approval") KEEPS it, with the pending ask
+                  // appended as its own bubble. Snapping the bubble to the
+                  // pending text — as this used to — destroyed the one message
+                  // that explained what the approval was about, the moment the
+                  // approval card appeared. The stored transcript keeps only
+                  // the pending text, so a reload shows just the ask — the
+                  // commentary is this tab's live record, same as the decision
+                  // entries.
+                  const keepCommentary =
+                    !!bubble?.content && !!pendingText && bubble.content !== pendingText;
+                  return {
+                    ...s,
+                    isPaused: true,
+                    pauseReason: null,
+                    resolveError: null,
+                    decidedPausedAt: snapshot.hitlPausedAt ?? null,
+                    // The ask bubble is what resolveApproval anchors on
+                    // (decision + answer are inserted after it): the appended
+                    // ask when the commentary was kept, else this turn's own
+                    // bubble — recorded by id whether or not it got any text.
+                    pausedPlaceholderId: keepCommentary ? askId : agentId,
+                    // A turn that streamed nothing still shows WHY it paused
+                    // instead of an empty bubble.
+                    messages: keepCommentary
+                      ? [
+                          ...s.messages,
+                          {
+                            id: askId,
+                            role: "agent" as const,
+                            content: pendingText,
+                            timestamp: Date.now(),
+                          },
+                        ]
+                      : pendingText
+                        ? s.messages.map((m) =>
+                            m.id === agentId && m.content !== pendingText
+                              ? { ...m, content: pendingText }
+                              : m,
+                          )
+                        : s.messages,
+                  };
+                });
               }
             } catch {
               // Non-JSON done payload — nothing to inspect, same as before.
@@ -1313,18 +1357,38 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       // the store is stable; read after it, the executing turn could race fresh
       // calls into the baseline and the receipt would under-report. Best-effort
       // by design: no baseline means no receipt, never a wrong one.
+      //
+      // The same read doubles as the pause-identity recovery: a pause detected
+      // from a STREAMED turn has `decidedPausedAt: null`, because the SSE done
+      // payload is a hand-built JSON that never carried `hitlPausedAt`. With
+      // null, `pollUntilSettled`'s conservative fallback reads EVERY later
+      // pause as "the one we decided" — so a resumed turn that paused again
+      // spun the poll to its full timeout while the next batch sat undecided,
+      // observed live as "the Approve button only works after a weird
+      // timeout". The REST snapshot here is the same source the poll compares
+      // against, so the identity is sound by construction.
       let preDecisionCalls: ReadonlySet<string> | null = null;
+      let decidedPausedAt = get().decidedPausedAt;
       try {
-        preDecisionCalls = new Set(
-          executedCallsFromDetailed(
-            await getSimpleConversationLog(conversationId, true, true),
-          ).keys(),
-        );
+        const baseline = await getSimpleConversationLog(conversationId, true, true);
+        preDecisionCalls = new Set(executedCallsFromDetailed(baseline).keys());
+        if (baseline.hitlPausedAt) {
+          // Adopt unconditionally, not only when null: the conversation is
+          // still paused at this moment, so this IS the pause being decided —
+          // and taking it from the same REST endpoint the poll reads makes the
+          // identity comparison string-vs-string from one serializer, immune
+          // to any cross-channel format drift in whatever set it earlier.
+          // Local only, NOT set into the store here: the store field keys the
+          // approval-status cache, and rewriting it mid-decide would flip that
+          // key and refetch the banner under the approver for nothing — the
+          // settle path below writes the store value that actually matters.
+          decidedPausedAt = baseline.hitlPausedAt;
+        }
       } catch {
         preDecisionCalls = null;
       }
       await resumeConversation(conversationId, { verdict, note, toolDecisions });
-      const snapshot = await pollUntilSettled(conversationId, controller.signal, get().decidedPausedAt);
+      const snapshot = await pollUntilSettled(conversationId, controller.signal, decidedPausedAt);
       // `pollUntilSettled` can only observe an abort between polls — the reads
       // themselves take no signal. So a `reset()` during the wait (the chat's
       // own clear button, or deactivating the operator) leaves this
