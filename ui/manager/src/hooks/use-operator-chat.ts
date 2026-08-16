@@ -1511,7 +1511,27 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
 
       const outputs = snapshot.conversationOutputs ?? [];
       const lastOutput = outputs[outputs.length - 1];
-      const parts = lastOutput ? extractOutputParts(lastOutput) : [];
+      const allParts = lastOutput ? extractOutputParts(lastOutput) : [];
+      // The step's output ACCUMULATES across a multi-pause turn: after pause 2
+      // it reads [expl1, expl2, ask2] — expl1 has been on screen since pause 1
+      // (and the decision + receipt for it sit under it). Re-rendering every
+      // part would duplicate the earlier explanations below the decision they
+      // preceded. So only the parts NEW since what this tab already shows are
+      // rendered: everything after the last part that is already an agent
+      // bubble on screen. A turn whose earlier parts are not on screen (a 409
+      // pause whose bubbles were dropped, or a hydrated tab) renders them all,
+      // which is the same shape as before.
+      const onScreen = new Set(
+        get().messages.filter((m) => m.role === "agent").map((m) => m.content),
+      );
+      let firstNew = 0;
+      for (let i = allParts.length - 1; i >= 0; i--) {
+        if (onScreen.has(allParts[i]!)) {
+          firstNew = i + 1;
+          break;
+        }
+      }
+      const parts = allParts.slice(firstNew);
       // The resumed turn may have paused again on a fresh tool batch — normal
       // for a multi-step job. Its own pending message is what we just read, so
       // the bubble we render for it becomes the placeholder the NEXT decision

@@ -893,6 +893,52 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     }
   });
 
+  it("a two-pause turn shows each explanation exactly once, in order, with the asks coming and going", async () => {
+    // The step's output ACCUMULATES on the backend: after pause 2 the settle
+    // snapshot is [expl1, expl2, ask2]. expl1 has been on screen since pause 1
+    // with the decision + receipt under it; re-rendering it would duplicate it
+    // BELOW the decision it preceded. Retrospectively the tab must read exactly
+    // like the persisted record: expl1 → (decision) → expl2 → ask2 → (decision)
+    // → answer.
+    const expl1 = "Creating the agent first — that is a write, so it needs your approval.";
+    const ask1 = "I need your approval before I can run setupAgent.";
+    const expl2 = "Agent created and deployed. Now starting a test conversation to verify it — approval needed.";
+    const ask2 = "I need your approval before I can run startConversation. (approval 2 this turn)";
+    const answer = "Done: agent created, deployed and verified.";
+    const two = (a: string, b: string) => ({ output: [{ type: "text", text: a }, { type: "text", text: b }] });
+
+    // Pause 1, streamed: the model narrates expl1, then the done carries [expl1, ask1].
+    h.frames = [
+      { type: "token", data: expl1 },
+      { type: "done", data: JSON.stringify({ conversationState: "AWAITING_HUMAN", hitlPausedAt: "2026-08-16T11:00:00Z", conversationOutputs: [two(expl1, ask1)] }) },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => { await result.current.send("create an agent and test it"); });
+    expect(result.current.messages.filter((m) => m.role === "agent").map((m) => m.content)).toEqual([expl1, ask1]);
+
+    // Approve 1 → re-pause: the accumulated step is [expl1, expl2, ask2].
+    h.conversationLogs = [
+      { conversationState: "AWAITING_HUMAN", hitlPausedAt: "2026-08-16T11:02:00Z", conversationOutputs: [{ output: [{ type: "text", text: expl1 }, { type: "text", text: expl2 }, { type: "text", text: ask2 }] }] },
+    ];
+    await act(async () => { await result.current.resolveApproval("APPROVED"); });
+    const afterRePause = result.current.messages.map((m) => m.code ?? m.content);
+    expect(afterRePause).toEqual(["create an agent and test it", expl1, ask1, "approved", expl2, ask2]);
+    expect(result.current.isPaused).toBe(true);
+    // The NEW ask is the anchor for the next decision.
+    const lastMsg = result.current.messages[result.current.messages.length - 1];
+    expect(result.current.pausedPlaceholderId).toBe(lastMsg?.id);
+
+    // Approve 2 → the answer: the settled step is [expl1, expl2, answer].
+    h.conversationLogs = [
+      { conversationState: "READY", conversationOutputs: [{ output: [{ type: "text", text: expl1 }, { type: "text", text: expl2 }, { type: "text", text: answer }] }] },
+    ];
+    await act(async () => { await result.current.resolveApproval("APPROVED"); });
+    expect(result.current.messages.map((m) => m.code ?? m.content)).toEqual([
+      "create an agent and test it", expl1, ask1, "approved", expl2, ask2, "approved", answer,
+    ]);
+    expect(result.current.isPaused).toBe(false);
+  });
+
   it("adds a receipt of the calls the decision caused to run", async () => {
     // The model often proceeds from an approved call straight into its next
     // tool call with no text between, so "You approved" → next ask showed the
