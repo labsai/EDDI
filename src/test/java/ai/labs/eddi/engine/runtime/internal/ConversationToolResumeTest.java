@@ -322,6 +322,178 @@ class ConversationToolResumeTest {
                 "the resumed step must render ONLY the final answer, not [placeholder, answer]; got: " + out);
     }
 
+    @Test
+    @DisplayName("APPROVED tool resume drops ONLY the placeholder — the model's interim narration written ahead of it survives")
+    void approvedResumeKeepsInterimText() throws Exception {
+        // The narration ("the config checks out, I'll now start a test conversation")
+        // is legitimate output written by pauseConversation ahead of the placeholder;
+        // the drop must be surgical. Also exercises the Data-twin strip: the stored
+        // Data is [interim, placeholder], not [placeholder] alone, and the old
+        // "blank when equal to [placeholder]" branch would have left the twin
+        // untouched — inconsistent with the list.
+        memory.setConversationState(ConversationState.READY);
+        var effective = new ToolApprovalsConfig();
+        effective.setPendingMessage("Approval required for {toolNames}");
+        String interim = "Config checks out — deleting the record next, which needs your approval.";
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("delete_record");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setEffectiveToolApprovals(effective);
+            b.setInterimText(interim);
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated tool call",
+                    ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conv = createConversation();
+        conv.say("delete it", Map.of());
+        assertEquals(List.of(interim, PENDING), outputList().stream().map(String::valueOf).toList(),
+                "paused: narration then placeholder");
+
+        String finalAnswer = "Record deleted successfully.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(finalAnswer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        var out = outputList().stream().map(String::valueOf).toList();
+        assertEquals(List.of(interim, finalAnswer), out,
+                "resumed: narration kept, placeholder gone, answer appended; got: " + out);
+        // The Data twin agrees with the list.
+        var data = memory.getCurrentStep().getData(MemoryKeys.OUTPUT_PREFIX);
+        assertNotNull(data);
+        assertEquals(List.of(interim), data.getResult(),
+                "the Data twin must have had ONLY the placeholder stripped; got: " + data.getResult());
+    }
+
+    @Test
+    @DisplayName("a two-pause turn keeps BOTH explanations retrospectively — only the one-line asks are ever removed, on both channels")
+    void twoPauseTurnKeepsEveryExplanation() throws Exception {
+        // The record the admin reads afterwards must show everything the model
+        // said it was doing: [expl1, expl2, answer]. Only the one-sentence asks
+        // come and go. And the output list and its Data twin must agree at every
+        // step: the twin used to be REPLACED by each pause (keeping only the
+        // latest explanation in the detailed step view) while the list appended.
+        memory.setConversationState(ConversationState.READY);
+        var effective = new ToolApprovalsConfig();
+        effective.setPendingMessage("Approval required for {toolNames}");
+        String expl1 = "Creating the agent first — that is a write, so it needs your approval.";
+        String expl2 = "Agent created and deployed. Now starting a test conversation to verify it — approval needed.";
+        String ask1 = "Approval required for setupAgent";
+        String ask2 = "Approval required for startConversation";
+
+        // Pause 1 (via say).
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("setupAgent");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setEffectiveToolApprovals(effective);
+            b.setInterimText(expl1);
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated", ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conv = createConversation();
+        conv.say("create an agent and test it", Map.of());
+        assertEquals(List.of(expl1, ask1), strings(outputList()));
+        assertEquals(List.of(expl1, ask1), strings(dataList()));
+
+        // Approve 1 → the resumed turn runs setupAgent, then re-pauses on
+        // startConversation.
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("startConversation");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setEffectiveToolApprovals(effective);
+            b.setInterimText(expl2);
+            b.setPauseCountThisTurn(2);
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated", ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+        conv.resume(decision(HitlVerdict.APPROVED));
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        // ask1 gone, expl1 kept, expl2 + ask2 appended — on both channels.
+        assertEquals(List.of(expl1, expl2, ask2), strings(outputList()), "after re-pause: list");
+        assertEquals(List.of(expl1, expl2, ask2), strings(dataList()), "after re-pause: Data twin");
+
+        // Approve 2 → the final answer.
+        String answer = "Done: agent created, deployed and verified.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(answer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        assertEquals(List.of(expl1, expl2, answer), strings(outputList()), "final record: list");
+        assertEquals(List.of(expl1, expl2), strings(dataList()), "final record: Data twin (answer is written via the list by LlmTask)");
+    }
+
+    @Test
+    @DisplayName("the drop removes the LAST placeholder occurrence, never an earlier entry that merely reads the same")
+    void dropRemovesLastOccurrenceOnly() throws Exception {
+        // Adversarial: the model's narration is byte-identical to a placeholder
+        // CANDIDATE (the pre-tool-named build's constant, which the resume path must
+        // still recognise for upgrade safety) while the real trailing placeholder is
+        // the current rendering. A first-match removal deletes the narration and
+        // strands the placeholder; a remove-every-match deletes both. Only the
+        // trailing one may go, on both channels.
+        memory.setConversationState(ConversationState.READY);
+        // No configured pendingMessage → the DEFAULT applies, so BOTH the current
+        // tool-named default and the legacy constant are candidates.
+        String legacyConstant = "This action requires human approval before it can proceed. "
+                + "You will receive the result once a reviewer decides.";
+        String currentPlaceholder = "I need your approval before I can run delete_record. "
+                + "You will receive the result once a reviewer decides.";
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("delete_record");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setInterimText(legacyConstant); // narration that happens to equal a legacy candidate
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated", ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conv = createConversation();
+        conv.say("delete it", Map.of());
+        assertEquals(List.of(legacyConstant, currentPlaceholder), strings(outputList()), "paused shape");
+
+        String answer = "Record deleted successfully.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(answer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        // The narration (legacy-equal) survives; the trailing current placeholder is
+        // gone.
+        assertEquals(List.of(legacyConstant, answer), strings(outputList()), "list");
+        assertEquals(List.of(legacyConstant), strings(dataList()), "Data twin");
+    }
+
+    private static List<String> strings(List<?> items) {
+        return items == null ? List.of() : items.stream().map(String::valueOf).toList();
+    }
+
+    private List<?> dataList() {
+        var data = memory.getCurrentStep().getData(MemoryKeys.OUTPUT_PREFIX);
+        return data == null ? null : (List<?>) data.getResult();
+    }
+
     /**
      * The version boundary the determinism argument silently skipped: a pause
      * PERSISTED by a previous build holds that build's placeholder wording, and
