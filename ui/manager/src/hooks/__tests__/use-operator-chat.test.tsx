@@ -25,6 +25,8 @@ const h = vi.hoisted(() => ({
   /** Runs inside a conversation-log read, before it resolves — lets a test act
    *  while the read is genuinely in flight. */
   duringLogRead: null as null | (() => void),
+  /** Same, for the DETAILED (baseline/receipt) reads. */
+  duringDetailedRead: null as null | (() => void),
   /** Runs after each yielded SSE frame — lets a test act mid-stream, e.g. to
    *  reset() a turn that is still being received. */
   duringStream: null as null | (() => void),
@@ -56,10 +58,14 @@ vi.mock("@/lib/api/conversations", async (importOriginal) => {
   return {
     ...actual,
     getSimpleConversationLog: vi.fn(async (_conv: string, returnDetailed?: boolean) => {
+      // A read that never resolves — models a history pick whose hydration is
+      // still in flight while other work completes (the slow-selection race).
+      if (_conv === "conv-slow") await new Promise(() => {});
       if (returnDetailed) {
         // `duringLogRead` deliberately does NOT fire here: it exists so tests
         // can act during a POLL read, and the best-effort receipt reads would
-        // otherwise steal that trigger.
+        // otherwise steal that trigger. Detailed reads have their own hook.
+        h.duringDetailedRead?.();
         return (h.detailedLogs.shift() ?? {}) as SimpleConversationMemorySnapshot;
       }
       const next = h.conversationLogs.shift();
@@ -109,6 +115,7 @@ beforeEach(() => {
   h.conversationLogs = [];
   h.detailedLogs = [];
   h.resumeCalls = [];
+  h.duringDetailedRead = null;
   h.duringLogRead = null;
   h.duringStream = null;
   sessionStorage.clear();
@@ -574,6 +581,216 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     // Null from the snapshot ON PURPOSE: the simple snapshot never carries a
     // reason on the wire; the rendered reason overlays from approval-status.
     expect(result.current.pauseReason).toBeNull();
+  });
+
+  it("never submits a decision for a conversation reset during the baseline read", async () => {
+    // The baseline read is a suspension point that did not exist when the
+    // resume was the first await. A reset() landing inside it means the user
+    // has discarded the conversation — submitting the decision anyway would
+    // approve it at the backend regardless. (CodeRabbit catch on the first
+    // version of the baseline read.)
+    const { result } = await pausedHook();
+    h.duringDetailedRead = () => result.current.reset();
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    expect(h.resumeCalls).toHaveLength(0);
+    expect(result.current.messages).toHaveLength(0);
+    expect(result.current.isPaused).toBe(false);
+  });
+
+  it("yields to a history pick still reading when the baseline completes", async () => {
+    // selectConversation aborts the resolve controller only AFTER its read
+    // succeeds (a failed pick must not cost the conversation on screen). With
+    // a SLOW pick, that abort has not happened yet when the baseline read
+    // finishes — the abort guard alone passed and the decision landed on the
+    // conversation the admin was switching away from. (Copilot catch.)
+    const { result } = await pausedHook();
+    h.duringDetailedRead = () => {
+      // Fires while the baseline read is in flight; sets hydrateAbortController
+      // synchronously, then suspends forever on its own read.
+      void result.current.selectConversation("conv-slow");
+    };
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    expect(h.resumeCalls).toHaveLength(0);
+    expect(result.current.isResolvingPause).toBe(false);
+    // The pick never completed — the original conversation is still on screen,
+    // its pause intact and decidable again.
+    expect(result.current.conversationId).toBe("conv-1");
+    expect(result.current.isPaused).toBe(true);
+  });
+
+  it("recovers the pause identity with a lightweight retry when the baseline read fails", async () => {
+    // The receipt is best-effort but the pause identity is not: a transient
+    // baseline failure while decidedPausedAt is null re-opened the
+    // poll-to-timeout stall. (Copilot catch.)
+    h.frames = [
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          // no hitlPausedAt — the old backend's streamed pause
+          conversationOutputs: [textOutput("Pending batch one…")],
+        }),
+      },
+    ];
+    const rendered = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await rendered.result.current.send("do a thing");
+    });
+    expect(rendered.result.current.isPaused).toBe(true);
+
+    // The baseline (detailed) read fails once; the lightweight retry and the
+    // poll then see the real snapshots.
+    h.duringDetailedRead = () => {
+      h.duringDetailedRead = null;
+      throw new Error("transient blip");
+    };
+    h.conversationLogs = [
+      // Lightweight identity retry.
+      {
+        conversationState: "AWAITING_HUMAN",
+        hitlPausedAt: "2026-08-16T02:00:00Z",
+        conversationOutputs: [textOutput("Pending batch one…")],
+      },
+      // The resumed turn pauses AGAIN — new identity, must settle promptly.
+      {
+        conversationState: "AWAITING_HUMAN",
+        hitlPausedAt: "2026-08-16T02:02:00Z",
+        conversationOutputs: [textOutput("Pending batch two…")],
+      },
+    ];
+
+    await act(async () => {
+      await rendered.result.current.resolveApproval("APPROVED");
+    });
+
+    expect(rendered.result.current.resolveError).toBeNull();
+    expect(rendered.result.current.isPaused).toBe(true);
+    const agents = rendered.result.current.messages.filter((m) => m.role === "agent");
+    expect(agents[agents.length - 1]?.content).toBe("Pending batch two…");
+  });
+
+  it("recovers the pause identity when the streamed pause carried none", async () => {
+    // The SSE done payload historically had no hitlPausedAt (hand-built JSON),
+    // so a STREAMED pause left decidedPausedAt null — and the poll's
+    // conservative null-fallback then read every re-pause as "the pause we
+    // decided", spinning to the full timeout while the next batch sat
+    // undecided. Observed live as "the Approve button only works after a
+    // weird timeout". The pre-resume baseline read recovers the identity from
+    // the REST snapshot — the same serializer the poll compares against.
+    h.frames = [
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          // no hitlPausedAt — the old backend's done payload
+          conversationOutputs: [textOutput("Pending batch one…")],
+        }),
+      },
+    ];
+    const rendered = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await rendered.result.current.send("do a thing");
+    });
+    expect(rendered.result.current.isPaused).toBe(true);
+
+    h.detailedLogs = [
+      // Baseline read: carries the pause identity the stream dropped.
+      { hitlPausedAt: "2026-08-16T01:00:00Z", conversationOutputs: [] },
+    ];
+    h.conversationLogs = [
+      // The resumed turn pauses AGAIN — recognisable as NEW only via identity.
+      {
+        conversationState: "AWAITING_HUMAN",
+        hitlPausedAt: "2026-08-16T01:02:00Z",
+        conversationOutputs: [textOutput("Pending batch two…")],
+      },
+    ];
+
+    await act(async () => {
+      await rendered.result.current.resolveApproval("APPROVED");
+    });
+
+    // Settled on the first poll — no timeout, the new pause became the card.
+    expect(rendered.result.current.resolveError).toBeNull();
+    expect(rendered.result.current.isPaused).toBe(true);
+    const agents = rendered.result.current.messages.filter((m) => m.role === "agent");
+    expect(agents[agents.length - 1]?.content).toBe("Pending batch two…");
+  });
+
+  it("keeps streamed commentary and appends the ask as its own bubble", async () => {
+    // The turn streams an explanation of what it is about to do, THEN pauses.
+    // Snapping the bubble to the pending text — as this used to — destroyed
+    // the one message that explained what the approval was about, the moment
+    // the approval card appeared.
+    const commentary = "Config checks out — I'll now create the agent, which needs your approval.";
+    const pendingAsk = "I need your approval before I can run setupAgent.";
+    h.frames = [
+      { type: "token", data: commentary },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          hitlPausedAt: "2026-08-16T01:10:00Z",
+          conversationOutputs: [textOutput(pendingAsk)],
+        }),
+      },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("create the agent");
+    });
+
+    expect(result.current.isPaused).toBe(true);
+    expect(result.current.messages.map((m) => [m.role, m.content])).toEqual([
+      ["user", "create the agent"],
+      ["agent", commentary],
+      ["agent", pendingAsk],
+    ]);
+    // The APPENDED ask is the anchor the decision reads after — not the
+    // commentary bubble.
+    const askBubble = result.current.messages[result.current.messages.length - 1];
+    expect(result.current.pausedPlaceholderId).toBe(askBubble?.id);
+  });
+
+  it("waits past the 90s cap while the turn is observably executing", async () => {
+    // A resumed turn chaining model calls and tools legitimately runs for
+    // minutes; timing out at 90s while the store said IN_PROGRESS reported a
+    // scary failure over a healthy turn. The executing state earns the longer
+    // ceiling; the 90s cap still applies to a decision nobody acted on.
+    vi.useFakeTimers();
+    try {
+      const { result } = await pausedHook();
+      h.conversationLogs = [
+        ...Array.from({ length: 65 }, () => ({
+          conversationState: "IN_PROGRESS" as const,
+          conversationOutputs: [textOutput("Waiting on a reviewer…")],
+        })),
+        { conversationState: "READY", conversationOutputs: [textOutput("Done at last.")] },
+      ];
+
+      await act(async () => {
+        const resolvePromise = result.current.resolveApproval("APPROVED");
+        // 65 polls × 1.5s ≈ 97.5s — past the same-pause cap, inside the
+        // executing ceiling.
+        await vi.advanceTimersByTimeAsync(100_000);
+        await resolvePromise;
+      });
+
+      expect(result.current.resolveError).toBeNull();
+      expect(result.current.isPaused).toBe(false);
+      const agents = result.current.messages.filter((m) => m.role === "agent");
+      expect(agents[agents.length - 1]?.content).toBe("Done at last.");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not settle on the resume's persisted IN_PROGRESS window", async () => {
@@ -1112,7 +1329,12 @@ describe("streamed interim text vs the canonical answer", () => {
     expect(agentMessage?.content).toBe("Same answer");
   });
 
-  it("a paused turn's bubble rests on the pending message even after interim streaming", async () => {
+  it("a paused turn keeps its interim commentary, with the ask as its own bubble", async () => {
+    // Used to pin the opposite: the bubble was SNAPPED to the pending text,
+    // which destroyed the one message explaining what the approval was about
+    // the moment the approval card appeared — reported live as a bug. The
+    // commentary is this tab's record (a reload shows only the stored ask),
+    // same as the decision entries.
     h.frames = [
       { type: "token", data: "I will rename the agent now… " },
       {
@@ -1129,9 +1351,13 @@ describe("streamed interim text vs the canonical answer", () => {
       await result.current.send("rename it");
     });
 
-    const agentMessage = result.current.messages.find((m) => m.role === "agent");
-    expect(agentMessage?.content).toBe("Waiting for your approval to rename the agent.");
+    const agents = result.current.messages.filter((m) => m.role === "agent");
+    expect(agents.map((m) => m.content)).toEqual([
+      "I will rename the agent now… ",
+      "Waiting for your approval to rename the agent.",
+    ]);
     expect(result.current.isPaused).toBe(true);
+    expect(result.current.pausedPlaceholderId).toBe(agents[1]?.id);
   });
 });
 
