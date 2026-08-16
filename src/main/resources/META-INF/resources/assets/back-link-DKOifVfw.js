@@ -1,0 +1,1 @@
+import{j as t,h as r,a3 as o}from"./index-DSRnXp_G.js";function n({to:e,label:s}){return t.jsxs(r,{to:e,className:"inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors","data-testid":"back-to-list",children:[t.jsx(o,{className:"h-4 w-4"}),s]})}export{n as B};
