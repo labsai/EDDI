@@ -254,7 +254,7 @@ describe("hydrate: a conversation that cannot take another turn", () => {
    * terminal, IN_PROGRESS has a turn still executing, and the next send fails
    * at the backend. So the transcript is restored and the composer closes.
    */
-  it.each(["ENDED", "ERROR", "EXECUTION_INTERRUPTED", "IN_PROGRESS"] as const)(
+  it.each(["ENDED", "ERROR", "EXECUTION_INTERRUPTED"] as const)(
     "restores a %s conversation read-only",
     async (state) => {
       storeId("conv-1");
@@ -270,6 +270,135 @@ describe("hydrate: a conversation that cannot take another turn", () => {
       expect(result.current.conversationState).toBe(state);
     },
   );
+
+  it("follows an IN_PROGRESS conversation through to its outcome instead of parking it read-only", async () => {
+    // A reload while an approved step is running used to land on "This
+    // conversation is finished — start a new one", permanently, because
+    // nothing watched for the turn to settle: the state the user was in
+    // (waiting on the approved step) was lost to the reload. Now the hydrate
+    // polls to the settle and re-reads — the answer, or the next approval
+    // card, appears exactly as it would have without the reload.
+    storeId("conv-1");
+    h.logs = [
+      // The reload's read: turn still executing.
+      { ...TWO_TURNS, conversationState: "IN_PROGRESS" },
+      // The follow-through poll (current-step-only) sees the turn pause again.
+      { conversationState: "AWAITING_HUMAN", hitlPausedAt: "2026-08-16T10:00:00Z", conversationOutputs: [textOutput("Approve deployAgent?")] },
+      // The re-hydrate (full transcript) — three turns now, ending in the ask.
+      {
+        conversationState: "AWAITING_HUMAN",
+        hitlPausedAt: "2026-08-16T10:00:00Z",
+        conversationSteps: [step("what is deployed?"), step("and the logs?"), step("deploy it")],
+        conversationOutputs: [textOutput("Three agents."), textOutput("All clean."), textOutput("Approve deployAgent?")],
+      },
+    ];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.hydrate();
+    });
+
+    expect(result.current.isReadOnly).toBe(false);
+    expect(result.current.isPaused).toBe(true);
+    expect(result.current.isResolvingPause).toBe(false);
+    expect(result.current.messages).toHaveLength(6);
+    const last = result.current.messages[result.current.messages.length - 1];
+    expect(last?.content).toBe("Approve deployAgent?");
+    expect(result.current.pausedPlaceholderId).toBe(last?.id);
+    expect(h.logs).toHaveLength(0);
+  });
+
+  it("an IN_PROGRESS follow-through yields to a newer pick instead of stomping it", async () => {
+    // A newer selectConversation installs its OWN controller without aborting
+    // the follow-through's; the follow-through must notice it no longer owns
+    // the store and NOT overwrite the picked conversation with the old one's
+    // settled state — nor clear the pick's own resolving flag.
+    //
+    // Reads are dispatched by conversation id here (not FIFO): the
+    // follow-through's poll and the pick's read genuinely race, and a FIFO
+    // queue would make the test hinge on scheduling order rather than on the
+    // guard.
+    storeId("conv-1");
+    const conv1Reads: Array<Partial<SimpleConversationMemorySnapshot>> = [
+      { ...TWO_TURNS, conversationState: "IN_PROGRESS" },
+      { conversationState: "READY", conversationOutputs: [textOutput("conv-1 settled")] },
+      { conversationState: "READY", conversationSteps: [step("stale")], conversationOutputs: [textOutput("conv-1 stale")] },
+    ];
+    const conv2Read: Partial<SimpleConversationMemorySnapshot> = {
+      conversationState: "READY",
+      conversationSteps: [step("other")],
+      conversationOutputs: [textOutput("conv-2 answer")],
+    };
+    const { getSimpleConversationLog } = await import("@/lib/api/conversations");
+    const shared = vi.mocked(getSimpleConversationLog).getMockImplementation();
+    vi.mocked(getSimpleConversationLog).mockImplementation(async (conversationId: string) => {
+      if (conversationId === "conv-2") return conv2Read as SimpleConversationMemorySnapshot;
+      const next = conv1Reads.shift();
+      if (!next) throw new Error("test bug: conv-1 reads exhausted");
+      // The follow-through's first poll is the moment the user picks conv-2.
+      if (conv1Reads.length === 1) void useOperatorChatStore.getState().selectConversation("conv-2");
+      return next as SimpleConversationMemorySnapshot;
+    });
+    try {
+      const { result } = renderHook(() => useOperatorChat(config()));
+      await act(async () => {
+        await result.current.hydrate();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(result.current.conversationId).toBe("conv-2");
+      expect(result.current.messages.map((m) => m.content)).toEqual(["other", "conv-2 answer"]);
+      expect(result.current.isResolvingPause).toBe(false);
+    } finally {
+      // Scoped to this test — the shared FIFO mock serves every other one.
+      vi.mocked(getSimpleConversationLog).mockImplementation(shared!);
+    }
+  });
+
+  it("an IN_PROGRESS follow-through yields to a re-pick of the SAME conversation", async () => {
+    // Same id, newer controller: the conversationId guard alone cannot tell the
+    // two apart, so this is the case that needs the "is this still my
+    // controller?" check. The follow-through's stale re-hydrate must not clear
+    // the re-pick's own resolving flag or overwrite its result.
+    storeId("conv-1");
+    const reads: Array<Partial<SimpleConversationMemorySnapshot>> = [
+      { ...TWO_TURNS, conversationState: "IN_PROGRESS" },              // hydrate
+      { conversationState: "READY", conversationOutputs: [textOutput("settled")] }, // follow-through poll → re-pick fires here
+      { conversationState: "IN_PROGRESS", conversationSteps: [step("q")], conversationOutputs: [textOutput("still running")] }, // re-pick's read: STILL executing
+      { conversationState: "READY", conversationSteps: [step("stale")], conversationOutputs: [textOutput("stale re-hydrate")] }, // old follow-through re-hydrate — must be discarded
+      // The re-pick's own follow-through poll never resolves in this test:
+      // we assert the state while it is still resolving.
+    ];
+    let pickStarted = false;
+    const { getSimpleConversationLog } = await import("@/lib/api/conversations");
+    const shared = vi.mocked(getSimpleConversationLog).getMockImplementation();
+    vi.mocked(getSimpleConversationLog).mockImplementation(async () => {
+      const next = reads.shift();
+      if (!next) await new Promise(() => {}); // the re-pick's poll: hang
+      if (reads.length === 2 && !pickStarted) {
+        pickStarted = true;
+        void useOperatorChatStore.getState().selectConversation("conv-1");
+      }
+      return next as SimpleConversationMemorySnapshot;
+    });
+    try {
+      const { result } = renderHook(() => useOperatorChat(config()));
+      await act(async () => {
+        await result.current.hydrate();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      // The re-pick owns the screen: its "still running" transcript, and its
+      // resolving flag is still up because ITS follow-through is polling. The
+      // old follow-through's stale re-hydrate did not land, and its finally
+      // did not clear the flag out from under the re-pick.
+      expect(result.current.messages.map((m) => m.content)).toEqual(["q", "still running"]);
+      expect(result.current.isResolvingPause).toBe(true);
+    } finally {
+      vi.mocked(getSimpleConversationLog).mockImplementation(shared!);
+      useOperatorChatStore.getState().reset();
+    }
+  });
 
   it.each(["READY", "AWAITING_HUMAN"] as const)("leaves a %s conversation writable", async (state) => {
     storeId("conv-1");

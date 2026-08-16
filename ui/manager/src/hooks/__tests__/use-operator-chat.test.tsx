@@ -725,6 +725,66 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     expect(agents[agents.length - 1]?.content).toBe("Pending batch two…");
   });
 
+  it("does not duplicate streamed commentary when the snapshot also carries it as narration", async () => {
+    // The backend now persists the model's narration AHEAD of the placeholder,
+    // so a streamed pause's done snapshot is [narration, ask] — and the
+    // narration is the very text that was just streamed into the bubble.
+    // Rendering the snapshot's parts blindly would show it twice.
+    const commentary = "Config checks out — I'll now start a test conversation, which needs your approval.";
+    const pendingAsk = "I need your approval before I can run startConversation.";
+    h.frames = [
+      { type: "token", data: commentary },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          hitlPausedAt: "2026-08-16T09:00:00Z",
+          conversationOutputs: [{ output: [{ type: "text", text: commentary }, { type: "text", text: pendingAsk }] }],
+        }),
+      },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("create the agent and test it");
+    });
+
+    expect(result.current.messages.map((m) => [m.role, m.content])).toEqual([
+      ["user", "create the agent and test it"],
+      ["agent", commentary],
+      ["agent", pendingAsk],
+    ]);
+    const askBubble = result.current.messages[result.current.messages.length - 1];
+    expect(result.current.pausedPlaceholderId).toBe(askBubble?.id);
+  });
+
+  it("back-fills narration from the snapshot when nothing was streamed", async () => {
+    // A bare done with no token frames (e.g. the provider answered through the
+    // snapshot only) — the persisted narration is the only copy, so it fills
+    // the empty bubble and the ask follows as its own bubble; live and reload
+    // then agree.
+    const narration = "Deploying is a write, so this needs your approval.";
+    const pendingAsk = "I need your approval before I can run deployAgent.";
+    h.frames = [
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          hitlPausedAt: "2026-08-16T09:01:00Z",
+          conversationOutputs: [{ output: [{ type: "text", text: narration }, { type: "text", text: pendingAsk }] }],
+        }),
+      },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("deploy it");
+    });
+
+    expect(result.current.messages.filter((m) => m.role === "agent").map((m) => m.content)).toEqual([
+      narration,
+      pendingAsk,
+    ]);
+  });
+
   it("keeps streamed commentary and appends the ask as its own bubble", async () => {
     // The turn streams an explanation of what it is about to do, THEN pauses.
     // Snapping the bubble to the pending text — as this used to — destroyed

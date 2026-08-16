@@ -365,15 +365,25 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  *   being acted on RIGHT NOW — the one state that is unambiguously "keep
  *   waiting".
  */
+/**
+ * `decidedPausedAt` sentinel for {@link pollUntilSettled} callers that are NOT
+ * deciding a pause — a reload that found the turn executing. There is no pause
+ * to be "the same as", so ANY pause is a settle. Distinct from `null`, which
+ * keeps its conservative meaning ("a pause we could not identify — assume it
+ * is the one still outstanding") for the decision path.
+ */
+const NO_DECIDED_PAUSE = Symbol("no-decided-pause");
+
 async function pollUntilSettled(
   conversationId: string,
   signal: AbortSignal,
-  decidedPausedAt: string | null,
+  decidedPausedAt: string | null | typeof NO_DECIDED_PAUSE,
 ) {
   const start = Date.now();
   for (;;) {
     const snapshot = await getSimpleConversationLog(conversationId, false, true);
     const stillTheSamePause =
+      decidedPausedAt !== NO_DECIDED_PAUSE &&
       snapshot.conversationState === "AWAITING_HUMAN" &&
       // With no timestamp to compare against, treat any pause as the one we
       // decided — the conservative reading, since claiming a new pause we
@@ -653,6 +663,56 @@ function hydratedState(conversationId: string, snapshot: SimpleConversationMemor
   };
 }
 
+/**
+ * A hydrated conversation whose turn is still EXECUTING is not finished — it is
+ * mid-flight, and will settle into an answer or the next pause on its own.
+ *
+ * `hydratedState` maps `IN_PROGRESS` to `isReadOnly` (a send into it would fail),
+ * which is right for the composer but was the whole story before this: a reload
+ * while an approved step was running rendered "This conversation is finished —
+ * start a new one", and stayed that way until the admin reloaded AGAIN by hand,
+ * because nothing was watching for the turn to settle. The state the user was
+ * in — waiting on the approved step — was lost to the reload.
+ *
+ * So: while the loaded conversation is `IN_PROGRESS`, poll with the same settle
+ * predicate the decision path uses (`pollUntilSettled` returns on a terminal
+ * state or a pause), then re-hydrate — the answer, or the next approval card,
+ * appears exactly as it would have without the reload. `isResolvingPause` is
+ * raised meanwhile so the "Running the approved step…" row shows and `hydrate()`
+ * declines to re-enter. Best-effort: a poll failure leaves the honest read-only
+ * view in place, and an abort (reset / a newer pick) wins as everywhere else.
+ */
+async function followExecutingTurn(
+  conversationId: string,
+  snapshot: SimpleConversationMemorySnapshot,
+  controller: AbortController,
+  get: () => OperatorChatStore,
+  set: (partial: Partial<OperatorChatStore>) => void,
+) {
+  if (snapshot.conversationState !== "IN_PROGRESS") return;
+  // Superseded = aborted (a reset), OR a newer hydrate/pick owns the store now
+  // (a newer pick installs its OWN controller without aborting this one — the
+  // same "is this still mine?" check hydrate and selectConversation make), OR
+  // the conversation on screen is no longer this one.
+  const superseded = () =>
+    controller.signal.aborted
+    || get().hydrateAbortController !== controller
+    || get().conversationId !== conversationId;
+  set({ isResolvingPause: true });
+  try {
+    await pollUntilSettled(conversationId, controller.signal, NO_DECIDED_PAUSE);
+    if (superseded()) return;
+    const settled = await getSimpleConversationLog(conversationId, false, false);
+    if (superseded()) return;
+    set(hydratedState(conversationId, settled));
+  } catch {
+    // Left as the honest read-only view; a later reload or pick retries.
+  } finally {
+    // Only OUR flag: a reset() clears its own; a newer pick owns its own.
+    if (!superseded()) set({ isResolvingPause: false });
+  }
+}
+
 export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
   messages: [],
   events: [],
@@ -810,6 +870,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
 
       storeConversationId(conversationId);
       set((s) => ({ ...s, ...hydratedState(conversationId, snapshot) }));
+      await followExecutingTurn(conversationId, snapshot, controller, get, set);
     } catch (error) {
       // A recovery lookup the admin never asked for must fail as quietly as the
       // 404 above: a speculative read planting a red banner over an empty chat
@@ -859,6 +920,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       storeConversationId(conversationId);
       storeRecoveryDeclined(false);
       set((s) => ({ ...s, ...hydratedState(conversationId, snapshot), hydrateAbortController: controller, isHydrating: true }));
+      await followExecutingTurn(conversationId, snapshot, controller, get, set);
     } catch (error) {
       if (controller.signal.aborted || get().hydrateAbortController !== controller) return;
       // Reported, unlike hydrate's silent 404: the admin clicked a row the list
@@ -1062,7 +1124,10 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
                     (snapshot.conversationOutputs?.length ?? 0) - 1
                   ],
                 );
-                const pendingText = parts.join("\n\n");
+                // [narration?, ask] — the ask is always the last part; the
+                // narration (if any) is what the streamed/resumed pause path
+                // already put on screen, so only the ask is back-filled here.
+                const pendingText = parts[parts.length - 1] ?? "";
                 const askId = nextId("agent");
                 set((s) => {
                   const last = s.messages[s.messages.length - 1];
@@ -1126,7 +1191,12 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
               const parts = lastOutput ? extractOutputParts(lastOutput) : [];
               finalText = parts.join("\n\n");
               if (snapshot.conversationState === "AWAITING_HUMAN") {
-                const pendingText = finalText;
+                // The paused step's output is [narration?, ask]: the backend
+                // writes the model's own interim narration AHEAD of the pending
+                // placeholder (PendingToolCallBatch#interimText). Older backends
+                // send only [ask]. The ask is always the LAST part.
+                const askText = parts[parts.length - 1] ?? "";
+                const narrationText = parts.slice(0, -1).join("\n\n");
                 // Minted outside the updater, used only on the branch that
                 // needs it — see the nextId note in resolveApproval.
                 const askId = nextId("agent");
@@ -1138,12 +1208,18 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
                   // appended as its own bubble. Snapping the bubble to the
                   // pending text — as this used to — destroyed the one message
                   // that explained what the approval was about, the moment the
-                  // approval card appeared. The stored transcript keeps only
-                  // the pending text, so a reload shows just the ask — the
-                  // commentary is this tab's live record, same as the decision
-                  // entries.
-                  const keepCommentary =
-                    !!bubble?.content && !!pendingText && bubble.content !== pendingText;
+                  // approval card appeared.
+                  //
+                  // The streamed bubble and the snapshot's narration part are
+                  // the SAME text (the model streamed it, then the backend
+                  // persisted it with the pause) — so the streamed bubble is
+                  // kept as-is and never duplicated from the snapshot. When
+                  // nothing was streamed but the snapshot carries narration
+                  // (a bare done, no token frames), the bubble is back-filled
+                  // with it so a reload and the live view agree.
+                  const streamed = bubble?.content ?? "";
+                  const commentary = streamed || narrationText;
+                  const keepCommentary = !!commentary && !!askText && commentary !== askText;
                   return {
                     ...s,
                     isPaused: true,
@@ -1159,18 +1235,20 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
                     // instead of an empty bubble.
                     messages: keepCommentary
                       ? [
-                          ...s.messages,
+                          ...s.messages.map((m) =>
+                            m.id === agentId && !streamed ? { ...m, content: commentary } : m,
+                          ),
                           {
                             id: askId,
                             role: "agent" as const,
-                            content: pendingText,
+                            content: askText,
                             timestamp: Date.now(),
                           },
                         ]
-                      : pendingText
+                      : askText
                         ? s.messages.map((m) =>
-                            m.id === agentId && m.content !== pendingText
-                              ? { ...m, content: pendingText }
+                            m.id === agentId && m.content !== askText
+                              ? { ...m, content: askText }
                               : m,
                           )
                         : s.messages,
