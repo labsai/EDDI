@@ -56,8 +56,16 @@ only.
   it would have without the reload. Supersession (a reset, a newer pick, a re-pick of the same id)
   is checked with the same "is this still my controller?" rule the other loaders use.
 
+**Review-round finding (own):** the pause writer REPLACED the output `Data` twin on each pause (a
+bare `storeData`), so a multi-pause turn kept only the latest explanation in the detailed step view
+while the output list kept them all — two channels disagreeing, the exact class of bug the surgical
+drop exists to prevent, and retrospectively "what was going on" would have been missing its first
+half. The twin now accumulates like the list. Pinned by a two-pause end-to-end test asserting
+`[expl1, expl2, answer]` on BOTH channels at each stage; mutation-verified (replace-instead-of-
+accumulate loses `expl1` at exactly that assertion).
+
 **Tests (EDDI):** pause writes `[narration, ask]`; APPROVED resume keeps the narration and strips
-only the placeholder from list AND Data twin; `interimTextOf` unit suite (trailing-AI text, bare
+only the placeholder from list AND Data twin; two-pause turn keeps every explanation on both channels; `interimTextOf` unit suite (trailing-AI text, bare
 call → null, non-AI tail → null, redaction, cap). Both Conversation behaviours mutation-verified.
 **Tests (Manager):** narration dedup vs streamed text, snapshot back-fill when nothing streamed,
 IN_PROGRESS follow-through, follow-through yields to a newer pick AND to a same-id re-pick (the

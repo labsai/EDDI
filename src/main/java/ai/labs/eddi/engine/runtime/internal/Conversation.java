@@ -779,10 +779,25 @@ public class Conversation implements IConversation {
                 outputs.add(interim);
             }
             outputs.add(pending);
-            var pendingData = new Data<>(MemoryKeys.OUTPUT_PREFIX, List.copyOf(outputs));
+            var step = conversationMemory.getCurrentStep();
+            // The Data twin must ACCUMULATE, exactly as the output list does: a turn
+            // may pause several times, and each pause's explanation is a permanent
+            // part of the record — retrospectively, the admin must be able to see
+            // everything the model said it was doing. Replacing the twin (as a bare
+            // storeData would) kept only the latest pause's text in the detailed
+            // step view while the output list kept them all, and two channels that
+            // disagree is exactly the class of bug the surgical placeholder drop
+            // exists to prevent.
+            var accumulated = new ArrayList<Object>();
+            IData<?> previous = step.getData(MemoryKeys.OUTPUT_PREFIX);
+            if (previous != null && previous.getResult() instanceof List<?> prior) {
+                accumulated.addAll(prior);
+            }
+            accumulated.addAll(outputs);
+            var pendingData = new Data<>(MemoryKeys.OUTPUT_PREFIX, accumulated);
             pendingData.setPublic(true);
-            conversationMemory.getCurrentStep().storeData(pendingData);
-            conversationMemory.getCurrentStep().addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.copyOf(outputs));
+            step.storeData(pendingData);
+            step.addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.copyOf(outputs));
         } else {
             // A RULE pause must never carry a stale tool batch (e.g. the gate tripped
             // earlier in the same turn on a path that recovered) — belt and braces.

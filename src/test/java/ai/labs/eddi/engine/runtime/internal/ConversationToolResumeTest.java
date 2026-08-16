@@ -372,6 +372,83 @@ class ConversationToolResumeTest {
                 "the Data twin must have had ONLY the placeholder stripped; got: " + data.getResult());
     }
 
+    @Test
+    @DisplayName("a two-pause turn keeps BOTH explanations retrospectively — only the one-line asks are ever removed, on both channels")
+    void twoPauseTurnKeepsEveryExplanation() throws Exception {
+        // The record the admin reads afterwards must show everything the model
+        // said it was doing: [expl1, expl2, answer]. Only the one-sentence asks
+        // come and go. And the output list and its Data twin must agree at every
+        // step: the twin used to be REPLACED by each pause (keeping only the
+        // latest explanation in the detailed step view) while the list appended.
+        memory.setConversationState(ConversationState.READY);
+        var effective = new ToolApprovalsConfig();
+        effective.setPendingMessage("Approval required for {toolNames}");
+        String expl1 = "Creating the agent first — that is a write, so it needs your approval.";
+        String expl2 = "Agent created and deployed. Now starting a test conversation to verify it — approval needed.";
+        String ask1 = "Approval required for setupAgent";
+        String ask2 = "Approval required for startConversation";
+
+        // Pause 1 (via say).
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("setupAgent");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setEffectiveToolApprovals(effective);
+            b.setInterimText(expl1);
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated", ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conv = createConversation();
+        conv.say("create an agent and test it", Map.of());
+        assertEquals(List.of(expl1, ask1), strings(outputList()));
+        assertEquals(List.of(expl1, ask1), strings(dataList()));
+
+        // Approve 1 → the resumed turn runs setupAgent, then re-pauses on
+        // startConversation.
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("startConversation");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setEffectiveToolApprovals(effective);
+            b.setInterimText(expl2);
+            b.setPauseCountThisTurn(2);
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated", ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+        conv.resume(decision(HitlVerdict.APPROVED));
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        // ask1 gone, expl1 kept, expl2 + ask2 appended — on both channels.
+        assertEquals(List.of(expl1, expl2, ask2), strings(outputList()), "after re-pause: list");
+        assertEquals(List.of(expl1, expl2, ask2), strings(dataList()), "after re-pause: Data twin");
+
+        // Approve 2 → the final answer.
+        String answer = "Done: agent created, deployed and verified.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(answer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        assertEquals(List.of(expl1, expl2, answer), strings(outputList()), "final record: list");
+        assertEquals(List.of(expl1, expl2), strings(dataList()), "final record: Data twin (answer is written via the list by LlmTask)");
+    }
+
+    private static List<String> strings(List<?> items) {
+        return items == null ? List.of() : items.stream().map(String::valueOf).toList();
+    }
+
+    private List<?> dataList() {
+        var data = memory.getCurrentStep().getData(MemoryKeys.OUTPUT_PREFIX);
+        return data == null ? null : (List<?>) data.getResult();
+    }
+
     /**
      * The version boundary the determinism argument silently skipped: a pause
      * PERSISTED by a previous build holds that build's placeholder wording, and
