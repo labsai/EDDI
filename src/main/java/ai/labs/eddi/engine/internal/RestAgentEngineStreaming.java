@@ -515,6 +515,20 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         try {
             var sb = new StringBuilder("{");
             sb.append("\"conversationState\":\"").append(snapshot.getConversationState()).append("\"");
+            // The pause's IDENTITY, not just its existence. A turn may pause up
+            // to maxPausesPerTurn times, and hitlPausedAt is the only field
+            // that distinguishes one pause from the next — clients compare it
+            // to decide whether a decision has been acted on and to key their
+            // approval-detail caches. Omitting it here (while the REST snapshot
+            // carried it) left streamed pauses identityless: the Manager's
+            // settle-poll then read every re-pause as the pause it had already
+            // decided and spun to its timeout with the Approve button dead.
+            // Instant.toString() is ISO_INSTANT — the same formatter Jackson's
+            // JavaTimeModule uses for the REST snapshot, so the two channels
+            // stay byte-identical and string comparison across them is sound.
+            if (snapshot.getHitlPausedAt() != null) {
+                sb.append(",\"hitlPausedAt\":\"").append(snapshot.getHitlPausedAt()).append("\"");
+            }
             if (snapshot.getConversationOutputs() != null) {
                 sb.append(",\"conversationOutputs\":")
                         .append(MAPPER.writeValueAsString(snapshot.getConversationOutputs()));

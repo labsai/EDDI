@@ -26,6 +26,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -139,6 +140,42 @@ class RestAgentEngineStreamingTest {
             String json = (String) method.invoke(streaming, snapshot);
 
             assertTrue(json.contains("conversationOutputs"));
+        }
+
+        @Test
+        @DisplayName("carries the pause identity: hitlPausedAt as the ISO instant, verbatim")
+        void includesPauseIdentity() throws Exception {
+            // hitlPausedAt is the only field distinguishing one pause of a turn
+            // from the next. The done event omitting it left streamed pauses
+            // identityless: the Manager's settle-poll read every re-pause as
+            // the pause it had already decided and spun to its timeout with
+            // the Approve button dead. The value must be the same ISO_INSTANT
+            // string the REST snapshot serializes, so cross-channel string
+            // comparison stays sound.
+            Method method = RestAgentEngineStreaming.class.getDeclaredMethod("toJson", SimpleConversationMemorySnapshot.class);
+            method.setAccessible(true);
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPausedAt(Instant.parse("2026-08-16T00:05:41.984599700Z"));
+
+            String json = (String) method.invoke(streaming, snapshot);
+
+            assertTrue(json.contains("\"hitlPausedAt\":\"2026-08-16T00:05:41.984599700Z\""), json);
+        }
+
+        @Test
+        @DisplayName("omits hitlPausedAt when the conversation is not paused")
+        void omitsPauseIdentityWhenAbsent() throws Exception {
+            Method method = RestAgentEngineStreaming.class.getDeclaredMethod("toJson", SimpleConversationMemorySnapshot.class);
+            method.setAccessible(true);
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+
+            String json = (String) method.invoke(streaming, snapshot);
+
+            assertFalse(json.contains("hitlPausedAt"), json);
         }
     }
 
