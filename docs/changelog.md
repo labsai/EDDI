@@ -7,6 +7,44 @@
 
 
 
+## 🆔 fix(streaming): done events carry the pause identity — hitlPausedAt (2026-08-16)
+
+**Repo:** EDDI (`fix/done-event-pause-identity`) + EDDI-Manager (`fix/operator-resume-settle`,
+commit `33b1ebe8`).
+
+Second live round on the operator flow: approving STILL stalled ("the Approve button only works
+after a weird timeout"), and the streamed message explaining what the approval was about vanished
+when the card appeared. Root cause of the stall: `RestAgentEngineStreaming.toJson` hand-builds the
+`done` payload with only `conversationState` + `conversationOutputs` — **no `hitlPausedAt`** — so a
+STREAMED pause reached the Manager identityless (`decidedPausedAt: null`), and the settle-poll's
+conservative null-fallback read every re-pause as "the pause we decided", spinning the full 90s
+with the next batch's Approve disabled (`isResolvingPause` still true). The earlier E2E validation
+missed it because it hydrated the conversation over REST — which does carry the timestamp.
+
+**EDDI:** the done payload now includes `hitlPausedAt` as `Instant.toString()` — ISO_INSTANT, the
+same formatter Jackson's `InstantSerializer` uses for the REST snapshot (null formatter →
+`value.toString()`), so cross-channel string comparison is sound byte-for-byte. Two tests, one
+mutation-verified.
+
+**Manager (`33b1ebe8`):** three fixes. (1) `resolveApproval`'s pre-resume baseline read now doubles
+as identity recovery — it adopts the REST snapshot's `hitlPausedAt` (locally, not into the store,
+which would flip the banner's query key mid-decide), making the poll comparison
+REST-serializer-vs-REST-serializer and fixing the stall against OLD backends too. (2) Streamed
+interim commentary is kept when the turn pauses, with the pending ask appended as its own bubble —
+snapping the bubble to the pending text destroyed the one message that explained the approval.
+(3) Two poll ceilings: an observably-`IN_PROGRESS` turn earns 300s (chained model calls + tools run
+minutes; the streaming backstop alone is 120s/call); 90s stays the cap for a decision never acted
+on. 3 new tests + 1 rewritten (it pinned the snap-to-pending behaviour), each mutation-verified.
+
+Also triaged from the same session: the `/agentstore/agents/{id}/currentversion` 404s in the console
+are gate-status refetches for a DELETED operator agent from a still-open old tab — noise, not a
+defect in this flow. The "message channel closed" uncaught rejection is a browser-extension
+artifact.
+
+---
+
+
+
 ## 🧭 fix(operator): approvals finally read as a flow — settle window, resync, receipt, per-pause banner (2026-08-16)
 
 **Repo:** EDDI-Manager (`fix/operator-resume-settle`, commit `dfb97078`) — documented here because the
