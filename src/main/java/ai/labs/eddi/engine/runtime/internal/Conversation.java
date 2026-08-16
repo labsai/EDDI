@@ -768,10 +768,36 @@ public class Conversation implements IConversation {
             // templating tasks run, so without this the chat client renders NOTHING
             // for the paused turn. Mirror the REJECTED path's Data/output pattern.
             String pending = resolvePendingMessage(conversationMemory);
-            var pendingData = new Data<>(MemoryKeys.OUTPUT_PREFIX, List.of(pending));
+            // The model's own narration of what it is about to do goes AHEAD of the
+            // placeholder — see PendingToolCallBatch#interimText. Without it a resumed
+            // (non-streamed) turn's second approval arrived with no explanation at all,
+            // and even a streamed one lost the explanation on reload.
+            var outputs = new ArrayList<String>(2);
+            var batch = conversationMemory.getHitlPendingToolCalls();
+            String interim = batch != null ? batch.getInterimText() : null;
+            if (interim != null && !interim.isBlank() && !interim.equals(pending)) {
+                outputs.add(interim);
+            }
+            outputs.add(pending);
+            var step = conversationMemory.getCurrentStep();
+            // The Data twin must ACCUMULATE, exactly as the output list does: a turn
+            // may pause several times, and each pause's explanation is a permanent
+            // part of the record — retrospectively, the admin must be able to see
+            // everything the model said it was doing. Replacing the twin (as a bare
+            // storeData would) kept only the latest pause's text in the detailed
+            // step view while the output list kept them all, and two channels that
+            // disagree is exactly the class of bug the surgical placeholder drop
+            // exists to prevent.
+            var accumulated = new ArrayList<Object>();
+            IData<?> previous = step.getData(MemoryKeys.OUTPUT_PREFIX);
+            if (previous != null && previous.getResult() instanceof List<?> prior) {
+                accumulated.addAll(prior);
+            }
+            accumulated.addAll(outputs);
+            var pendingData = new Data<>(MemoryKeys.OUTPUT_PREFIX, accumulated);
             pendingData.setPublic(true);
-            conversationMemory.getCurrentStep().storeData(pendingData);
-            conversationMemory.getCurrentStep().addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.of(pending));
+            step.storeData(pendingData);
+            step.addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.copyOf(outputs));
         } else {
             // A RULE pause must never carry a stale tool batch (e.g. the gate tripped
             // earlier in the same turn on a path that recovered) — belt and braces.
@@ -935,44 +961,65 @@ public class Conversation implements IConversation {
 
     /**
      * Removes the pending-approval placeholder that {@link #pauseConversation}
-     * added to the current step on a TOOL_CALL pause, so the resumed step renders
-     * ONLY the final answer.
+     * added to the current step on a TOOL_CALL pause — and ONLY the placeholder, so
+     * the resumed step keeps everything the model said it was doing (the interim
+     * narration written ahead of the placeholder, and every earlier pause's
+     * narration in a multi-pause turn) and gains the final answer.
      * <p>
-     * Robust identification without dropping legitimate earlier output: the
-     * placeholder is the exact string produced by {@link #resolvePendingMessage},
-     * which is deterministic from the still-present pending batch (its effective
-     * tool-approvals config and gated call names survive on memory until LlmTask
-     * consumes them). We recompute that string and remove ONLY that value from the
-     * {@code "output"} conversation-output list — an earlier task's output in a
-     * multi-task step (e.g. {@code [earlierOutput, placeholder]}) keeps its entry.
-     * <p>
-     * We also blank the mirror public step-{@code Data<>} that pauseConversation
-     * stored under the bare {@code "output"} key (surfaced in detailed step-data
-     * snapshots via {@code startsWith("output")}) when it still holds exactly the
-     * placeholder — otherwise a client reading the detailed view would see the
-     * stale placeholder a second time. We overwrite that EXACT key with an empty
-     * list (not {@code removeData}, whose {@code startsWith} semantics would also
-     * wipe an earlier task's {@code output:text:*} data in a multi-task step) and
-     * only when it is untouched (equals {@code [placeholder]}); if some other
-     * writer replaced it we leave it alone.
+     * Identification: the placeholder is the exact string produced by
+     * {@link #resolvePendingMessage} (or a previous build's rendering — see
+     * {@link #pendingPlaceholderCandidates}), deterministic from the still-present
+     * pending batch. It is always the TRAILING element the latest pause appended,
+     * so the LAST occurrence of a candidate is the one removed — never the first,
+     * which on a mixed list could be an earlier output or a piece of narration that
+     * happens to equal a candidate string. Applied identically to both channels:
+     * the {@code "output"} conversation-output list and its mirror public
+     * step-{@code Data<>} under the bare {@code "output"} key (surfaced in detailed
+     * step-data snapshots via {@code startsWith("output")}). The Data twin is
+     * overwritten with the stripped list on that EXACT key — not
+     * {@code removeData}, whose {@code startsWith} semantics would also wipe an
+     * earlier task's {@code output:text:*} data in a multi-task step.
      */
     private void dropPendingApprovalPlaceholder(IWritableConversationStep currentStep) {
-        // ALL renderings this or a previous build may have written for this batch
-        // — see pendingPlaceholderCandidates. At most one of them is actually in
-        // the list (each pause writes exactly one placeholder), so removing every
-        // candidate removes exactly the placeholder and cannot touch legitimate
-        // output: a candidate that was never written simply no-ops.
         List<String> candidates = pendingPlaceholderCandidates(conversationMemory);
-        for (String pending : candidates) {
-            currentStep.removeConversationOutputListItem(MemoryKeys.OUTPUT_PREFIX, pending);
+
+        // Output list: drop the LAST candidate occurrence only.
+        Object rawList = currentStep.getConversationOutput().get(MemoryKeys.OUTPUT_PREFIX);
+        if (rawList instanceof List<?> outputList) {
+            int idx = lastCandidateIndex(outputList, candidates);
+            if (idx >= 0) {
+                outputList.remove(idx);
+            }
         }
 
+        // Data twin: same rule, written back on the exact key.
         IData<?> outputData = currentStep.getData(MemoryKeys.OUTPUT_PREFIX);
-        if (outputData != null && candidates.stream().anyMatch(p -> List.of(p).equals(outputData.getResult()))) {
-            var blanked = new Data<>(MemoryKeys.OUTPUT_PREFIX, new ArrayList<>());
-            blanked.setPublic(true);
-            currentStep.storeData(blanked);
+        if (outputData != null && outputData.getResult() instanceof List<?> stored) {
+            int idx = lastCandidateIndex(stored, candidates);
+            if (idx >= 0) {
+                var kept = new ArrayList<Object>(stored);
+                kept.remove(idx);
+                var stripped = new Data<>(MemoryKeys.OUTPUT_PREFIX, kept);
+                stripped.setPublic(true);
+                currentStep.storeData(stripped);
+            }
         }
+    }
+
+    /**
+     * Index of the last element that IS one of the candidate strings, or -1. Object
+     * equality on purpose: the placeholder is stored as a plain String, and a
+     * rendered {@code TextOutputItem} whose text merely reads the same must not be
+     * mistaken for it.
+     */
+    private static int lastCandidateIndex(List<?> items, List<String> candidates) {
+        for (int i = items.size() - 1; i >= 0; i--) {
+            Object item = items.get(i);
+            if (item instanceof String text && candidates.contains(text)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /**
