@@ -725,6 +725,66 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     expect(agents[agents.length - 1]?.content).toBe("Pending batch two…");
   });
 
+  it("does not duplicate streamed commentary when the snapshot also carries it as narration", async () => {
+    // The backend now persists the model's narration AHEAD of the placeholder,
+    // so a streamed pause's done snapshot is [narration, ask] — and the
+    // narration is the very text that was just streamed into the bubble.
+    // Rendering the snapshot's parts blindly would show it twice.
+    const commentary = "Config checks out — I'll now start a test conversation, which needs your approval.";
+    const pendingAsk = "I need your approval before I can run startConversation.";
+    h.frames = [
+      { type: "token", data: commentary },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          hitlPausedAt: "2026-08-16T09:00:00Z",
+          conversationOutputs: [{ output: [{ type: "text", text: commentary }, { type: "text", text: pendingAsk }] }],
+        }),
+      },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("create the agent and test it");
+    });
+
+    expect(result.current.messages.map((m) => [m.role, m.content])).toEqual([
+      ["user", "create the agent and test it"],
+      ["agent", commentary],
+      ["agent", pendingAsk],
+    ]);
+    const askBubble = result.current.messages[result.current.messages.length - 1];
+    expect(result.current.pausedPlaceholderId).toBe(askBubble?.id);
+  });
+
+  it("back-fills narration from the snapshot when nothing was streamed", async () => {
+    // A bare done with no token frames (e.g. the provider answered through the
+    // snapshot only) — the persisted narration is the only copy, so it fills
+    // the empty bubble and the ask follows as its own bubble; live and reload
+    // then agree.
+    const narration = "Deploying is a write, so this needs your approval.";
+    const pendingAsk = "I need your approval before I can run deployAgent.";
+    h.frames = [
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          hitlPausedAt: "2026-08-16T09:01:00Z",
+          conversationOutputs: [{ output: [{ type: "text", text: narration }, { type: "text", text: pendingAsk }] }],
+        }),
+      },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.send("deploy it");
+    });
+
+    expect(result.current.messages.filter((m) => m.role === "agent").map((m) => m.content)).toEqual([
+      narration,
+      pendingAsk,
+    ]);
+  });
+
   it("keeps streamed commentary and appends the ask as its own bubble", async () => {
     // The turn streams an explanation of what it is about to do, THEN pauses.
     // Snapping the bubble to the pending text — as this used to — destroyed
@@ -831,6 +891,52 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("a two-pause turn shows each explanation exactly once, in order, with the asks coming and going", async () => {
+    // The step's output ACCUMULATES on the backend: after pause 2 the settle
+    // snapshot is [expl1, expl2, ask2]. expl1 has been on screen since pause 1
+    // with the decision + receipt under it; re-rendering it would duplicate it
+    // BELOW the decision it preceded. Retrospectively the tab must read exactly
+    // like the persisted record: expl1 → (decision) → expl2 → ask2 → (decision)
+    // → answer.
+    const expl1 = "Creating the agent first — that is a write, so it needs your approval.";
+    const ask1 = "I need your approval before I can run setupAgent.";
+    const expl2 = "Agent created and deployed. Now starting a test conversation to verify it — approval needed.";
+    const ask2 = "I need your approval before I can run startConversation. (approval 2 this turn)";
+    const answer = "Done: agent created, deployed and verified.";
+    const two = (a: string, b: string) => ({ output: [{ type: "text", text: a }, { type: "text", text: b }] });
+
+    // Pause 1, streamed: the model narrates expl1, then the done carries [expl1, ask1].
+    h.frames = [
+      { type: "token", data: expl1 },
+      { type: "done", data: JSON.stringify({ conversationState: "AWAITING_HUMAN", hitlPausedAt: "2026-08-16T11:00:00Z", conversationOutputs: [two(expl1, ask1)] }) },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => { await result.current.send("create an agent and test it"); });
+    expect(result.current.messages.filter((m) => m.role === "agent").map((m) => m.content)).toEqual([expl1, ask1]);
+
+    // Approve 1 → re-pause: the accumulated step is [expl1, expl2, ask2].
+    h.conversationLogs = [
+      { conversationState: "AWAITING_HUMAN", hitlPausedAt: "2026-08-16T11:02:00Z", conversationOutputs: [{ output: [{ type: "text", text: expl1 }, { type: "text", text: expl2 }, { type: "text", text: ask2 }] }] },
+    ];
+    await act(async () => { await result.current.resolveApproval("APPROVED"); });
+    const afterRePause = result.current.messages.map((m) => m.code ?? m.content);
+    expect(afterRePause).toEqual(["create an agent and test it", expl1, ask1, "approved", expl2, ask2]);
+    expect(result.current.isPaused).toBe(true);
+    // The NEW ask is the anchor for the next decision.
+    const lastMsg = result.current.messages[result.current.messages.length - 1];
+    expect(result.current.pausedPlaceholderId).toBe(lastMsg?.id);
+
+    // Approve 2 → the answer: the settled step is [expl1, expl2, answer].
+    h.conversationLogs = [
+      { conversationState: "READY", conversationOutputs: [{ output: [{ type: "text", text: expl1 }, { type: "text", text: expl2 }, { type: "text", text: answer }] }] },
+    ];
+    await act(async () => { await result.current.resolveApproval("APPROVED"); });
+    expect(result.current.messages.map((m) => m.code ?? m.content)).toEqual([
+      "create an agent and test it", expl1, ask1, "approved", expl2, ask2, "approved", answer,
+    ]);
+    expect(result.current.isPaused).toBe(false);
   });
 
   it("adds a receipt of the calls the decision caused to run", async () => {

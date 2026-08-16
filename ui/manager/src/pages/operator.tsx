@@ -151,35 +151,21 @@ export function OperatorPage() {
     return findBlockedCalls(pending, config?.agentId, chat.conversationId, t);
   }, [chat.isPaused, approvalStatus.data, config?.agentId, chat.conversationId, t]);
   /**
-   * Resolve the pause, then DROP the cached approval-status.
+   * Resolve the pause. Nothing else.
    *
-   * `useApprovalStatus` is keyed on the conversation id alone, and a turn may
-   * pause up to `maxPausesPerTurn` times (backend default 3). Without this, the
-   * second pause of a conversation would render the FIRST pause's cached
-   * `pauseDetails` — showing an approver a different set of tool calls than the
-   * one actually awaiting their decision. Removing rather than invalidating so
-   * the next pause starts at `undefined`, which drives `pauseDetailsPending`
-   * and keeps Approve disabled until the real details arrive.
-   *
-   * (`useResumeConversation` does this invalidation itself, but this surface
-   * calls `resumeConversation` directly — it also has to poll for the resumed
-   * turn's outcome, which that mutation does not do.)
+   * This used to `removeQueries(["approval-status", conversationId])` afterwards
+   * — the pre-per-pause-key remedy for the second pause rendering the first
+   * pause's cached calls. Once `useApprovalStatus` became keyed by pause
+   * identity that removal turned actively harmful: by the time
+   * `resolveApproval` returns, the store already points at the NEXT pause and
+   * its query is in flight — and `removeQueries` matches by key PREFIX, so it
+   * `destroy()`ed that live query out from under its still-mounted observer.
+   * The observer then rendered `isLoading` forever with no data: an
+   * "Awaiting Human" card stuck on "Loading approval details…" for the second
+   * pause, observed live. The per-pause key already guarantees the fresh
+   * fetch; there is nothing left for a removal to do.
    */
-  const handleDecide = useCallback<typeof chat.resolveApproval>(
-    async (verdict, note, toolDecisions) => {
-      const conversationId = chat.conversationId;
-      try {
-        await chat.resolveApproval(verdict, note, toolDecisions);
-      } finally {
-        if (conversationId) {
-          queryClient.removeQueries({ queryKey: ["approval-status", conversationId] });
-        }
-      }
-    },
-    // `chat` is recreated each render; only these two members are used.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [chat.resolveApproval, chat.conversationId, queryClient],
-  );
+  const handleDecide = chat.resolveApproval;
 
   const renderCallExtra = useCallback(
     (call: PendingToolCallView) => {
