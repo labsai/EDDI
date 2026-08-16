@@ -1387,6 +1387,12 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       } catch {
         preDecisionCalls = null;
       }
+      // The baseline read is a suspension point that did not exist when the
+      // resume was the first await: a reset() or selectConversation() during
+      // it aborts this controller, and submitting the decision anyway would
+      // approve (or reject) a conversation the user has already discarded —
+      // a real backend side effect, not just a stale render.
+      if (controller.signal.aborted) return;
       await resumeConversation(conversationId, { verdict, note, toolDecisions });
       const snapshot = await pollUntilSettled(conversationId, controller.signal, decidedPausedAt);
       // `pollUntilSettled` can only observe an abort between polls — the reads

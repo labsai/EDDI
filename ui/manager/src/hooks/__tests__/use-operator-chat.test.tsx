@@ -25,6 +25,8 @@ const h = vi.hoisted(() => ({
   /** Runs inside a conversation-log read, before it resolves — lets a test act
    *  while the read is genuinely in flight. */
   duringLogRead: null as null | (() => void),
+  /** Same, for the DETAILED (baseline/receipt) reads. */
+  duringDetailedRead: null as null | (() => void),
   /** Runs after each yielded SSE frame — lets a test act mid-stream, e.g. to
    *  reset() a turn that is still being received. */
   duringStream: null as null | (() => void),
@@ -59,7 +61,8 @@ vi.mock("@/lib/api/conversations", async (importOriginal) => {
       if (returnDetailed) {
         // `duringLogRead` deliberately does NOT fire here: it exists so tests
         // can act during a POLL read, and the best-effort receipt reads would
-        // otherwise steal that trigger.
+        // otherwise steal that trigger. Detailed reads have their own hook.
+        h.duringDetailedRead?.();
         return (h.detailedLogs.shift() ?? {}) as SimpleConversationMemorySnapshot;
       }
       const next = h.conversationLogs.shift();
@@ -109,6 +112,7 @@ beforeEach(() => {
   h.conversationLogs = [];
   h.detailedLogs = [];
   h.resumeCalls = [];
+  h.duringDetailedRead = null;
   h.duringLogRead = null;
   h.duringStream = null;
   sessionStorage.clear();
@@ -574,6 +578,24 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     // Null from the snapshot ON PURPOSE: the simple snapshot never carries a
     // reason on the wire; the rendered reason overlays from approval-status.
     expect(result.current.pauseReason).toBeNull();
+  });
+
+  it("never submits a decision for a conversation reset during the baseline read", async () => {
+    // The baseline read is a suspension point that did not exist when the
+    // resume was the first await. A reset() landing inside it means the user
+    // has discarded the conversation — submitting the decision anyway would
+    // approve it at the backend regardless. (CodeRabbit catch on the first
+    // version of the baseline read.)
+    const { result } = await pausedHook();
+    h.duringDetailedRead = () => result.current.reset();
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    expect(h.resumeCalls).toHaveLength(0);
+    expect(result.current.messages).toHaveLength(0);
+    expect(result.current.isPaused).toBe(false);
   });
 
   it("recovers the pause identity when the streamed pause carried none", async () => {
