@@ -83,7 +83,8 @@ class ToolApprovalGateSupportInterimTextTest {
                 AiMessage.builder().text(huge).toolExecutionRequests(List.of(call())).build());
 
         String text = ToolApprovalGateSupport.interimTextOf(messages);
-        assertTrue(text.length() <= ToolApprovalGateSupport.INTERIM_TEXT_MAX_CHARS + 1, "capped (+ ellipsis); was " + text.length());
+        assertEquals(ToolApprovalGateSupport.INTERIM_TEXT_MAX_CHARS, text.length(),
+                "the ellipsis counts against the cap — the persisted value never exceeds it");
         assertTrue(text.endsWith("…"));
     }
 }

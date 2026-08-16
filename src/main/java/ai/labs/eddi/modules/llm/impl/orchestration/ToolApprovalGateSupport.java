@@ -139,8 +139,9 @@ public class ToolApprovalGateSupport {
             return null;
         }
         String redacted = SecretRedactionFilter.redact(text.strip());
+        // The ellipsis counts against the cap, so the persisted value never exceeds it.
         return redacted.length() > INTERIM_TEXT_MAX_CHARS
-                ? redacted.substring(0, INTERIM_TEXT_MAX_CHARS) + "…"
+                ? redacted.substring(0, INTERIM_TEXT_MAX_CHARS - 1) + "…"
                 : redacted;
     }
 

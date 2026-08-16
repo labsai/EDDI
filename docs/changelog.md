@@ -60,9 +60,23 @@ only.
 bare `storeData`), so a multi-pause turn kept only the latest explanation in the detailed step view
 while the output list kept them all — two channels disagreeing, the exact class of bug the surgical
 drop exists to prevent, and retrospectively "what was going on" would have been missing its first
-half. The twin now accumulates like the list. Pinned by a two-pause end-to-end test asserting
-`[expl1, expl2, answer]` on BOTH channels at each stage; mutation-verified (replace-instead-of-
-accumulate loses `expl1` at exactly that assertion).
+half. The twin now accumulates like the list. Pinned by a two-pause end-to-end test asserting the
+paused shapes (`[expl1, ask1]` then `[expl1, expl2, ask2]`) on BOTH channels, and the final record —
+output list `[expl1, expl2, answer]`, Data twin `[expl1, expl2]` (LlmTask writes the answer to the
+list only); mutation-verified (replace-instead-of-accumulate loses `expl1` at exactly that
+assertion).
+
+**Copilot findings on the PR, all addressed:** (1) the surgical drop removed the FIRST match on the
+list (`List.remove(value)`) and every match on the Data twin — on a mixed list a piece of narration
+that happened to equal a candidate string could be deleted or the real trailing placeholder left
+stranded; both channels now remove the LAST candidate occurrence, matched on `String` identity, and
+an adversarial test (narration byte-equal to the legacy candidate) pins it — mutation-verified,
+first-occurrence fails it. (2) The 2000-char cap was exceeded by the appended ellipsis; the ellipsis
+now counts against it. (3) A javadoc named a constant that does not exist. (4) The stale "resumed
+step renders ONLY the final answer" method-level contract on the drop, rewritten. (5) The new field
+is now asserted in `PendingToolCallBatchSnapshotTest` (round-trips) and, with a canary, in
+`ConversationMemoryUtilitiesHitlTest` (absent from the names-only projection) — the two paths a
+reload depends on.
 
 **Tests (EDDI):** pause writes `[narration, ask]`; APPROVED resume keeps the narration and strips
 only the placeholder from list AND Data twin; two-pause turn keeps every explanation on both channels; `interimTextOf` unit suite (trailing-AI text, bare

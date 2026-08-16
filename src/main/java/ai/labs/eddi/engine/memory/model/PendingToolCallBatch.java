@@ -306,12 +306,13 @@ public class PendingToolCallBatch {
      * <p>
      * Redacted with the same filter as the call arguments: it is model output over
      * tool results, so a secret that reached the model can be echoed here. Capped
-     * ({@code Conversation.MAX_INTERIM_TEXT_CHARS}) — it is a sentence or two by
-     * nature, and the whole batch is persisted with the pause. Null when the
-     * assistant message had no text, and on every batch persisted before this field
-     * existed — readers treat null as "nothing to show", the old behaviour.
-     * Excluded from the names-only projection like {@link #effectiveToolApprovals}
-     * — it is already in the step's public output where it belongs.
+     * at 2000 chars ({@code ToolApprovalGateSupport.INTERIM_TEXT_MAX_CHARS},
+     * ellipsis included) — it is a sentence or two by nature, and the whole batch
+     * is persisted with the pause. Null when the assistant message had no text, and
+     * on every batch persisted before this field existed — readers treat null as
+     * "nothing to show", the old behaviour. Excluded from the names-only projection
+     * like {@link #effectiveToolApprovals} — it is already in the step's public
+     * output where it belongs.
      */
     private String interimText;
 

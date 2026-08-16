@@ -440,6 +440,51 @@ class ConversationToolResumeTest {
         assertEquals(List.of(expl1, expl2), strings(dataList()), "final record: Data twin (answer is written via the list by LlmTask)");
     }
 
+    @Test
+    @DisplayName("the drop removes the LAST placeholder occurrence, never an earlier entry that merely reads the same")
+    void dropRemovesLastOccurrenceOnly() throws Exception {
+        // Adversarial: the model's narration is byte-identical to a placeholder
+        // CANDIDATE (the pre-tool-named build's constant, which the resume path must
+        // still recognise for upgrade safety) while the real trailing placeholder is
+        // the current rendering. A first-match removal deletes the narration and
+        // strands the placeholder; a remove-every-match deletes both. Only the
+        // trailing one may go, on both channels.
+        memory.setConversationState(ConversationState.READY);
+        // No configured pendingMessage → the DEFAULT applies, so BOTH the current
+        // tool-named default and the legacy constant are candidates.
+        String legacyConstant = "This action requires human approval before it can proceed. "
+                + "You will receive the result once a reviewer decides.";
+        String currentPlaceholder = "I need your approval before I can run delete_record. "
+                + "You will receive the result once a reviewer decides.";
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("delete_record");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setInterimText(legacyConstant); // narration that happens to equal a legacy candidate
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated", ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conv = createConversation();
+        conv.say("delete it", Map.of());
+        assertEquals(List.of(legacyConstant, currentPlaceholder), strings(outputList()), "paused shape");
+
+        String answer = "Record deleted successfully.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(answer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        // The narration (legacy-equal) survives; the trailing current placeholder is
+        // gone.
+        assertEquals(List.of(legacyConstant, answer), strings(outputList()), "list");
+        assertEquals(List.of(legacyConstant), strings(dataList()), "Data twin");
+    }
+
     private static List<String> strings(List<?> items) {
         return items == null ? List.of() : items.stream().map(String::valueOf).toList();
     }
