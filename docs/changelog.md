@@ -7,6 +7,38 @@
 
 
 
+## 🔒 fix(docker): bump UBI9 base digest for CVE-2026-11940 (python3 tarfile filter bypass) (2026-08-17)
+
+**Repo:** EDDI (`fix/trivy-cve-2026-11940-base-image`)
+
+`main` was red: the blocking Trivy image scan in `ci.yml` flagged 2 HIGH CVEs against
+`labsai/eddi:6.2.0-b1065` — `python3` and `python3-libs` at `3.9.25-7.el9_8.2`, both fixed in
+`3.9.25-7.el9_8.3` (CVE-2026-11940, CPython tarfile extraction filter bypass allowing escape from
+the destination directory). Both come from the UBI9 base layer, not from anything we build; the jar
+layer scanned clean (0 findings across every `deployments/lib/**` entry).
+
+Followed the "Trivy CVE Remediation Procedure" in AGENTS.md and took the clean fix rather than the
+escape hatch: Red Hat had already republished the same `1.24` tag with the patched package, so
+`src/main/docker/Dockerfile` moves from `@sha256:de073e98…` to `@sha256:6b320cbb…`. No
+`microdnf update` stopgap and no `.trivyignore` entry were needed — `.trivyignore` stays empty of
+CVEs, which is where we want it.
+
+**Verified locally** (the CI gate is `severity: CRITICAL,HIGH`, `ignore-unfixed: true`, `exit-code: 1`):
+
+- `rpm -q python3 python3-libs` in the new digest → `3.9.25-7.el9_8.3` on both, i.e. the fixed build.
+- Trivy `image --severity CRITICAL,HIGH --ignore-unfixed` against the new base → **0** vulnerabilities,
+  so nothing else fixable is waiting behind this one.
+- Smoke-checked the layer contract the Dockerfile depends on: `run-java.sh` present at the ENTRYPOINT
+  path, uid 185 (`default`) resolves, `curl` present for the `HEALTHCHECK`, `java -version` →
+  OpenJDK 25.0.4 LTS.
+
+The digest pin is retained (OpenSSF supply-chain requirement) — only its value changed.
+`base-image-check.yml` continues to watch for future republished digests weekly.
+
+---
+
+
+
 ## 💬 fix(hitl): a tool pause keeps the model's own explanation of what it is about to do (2026-08-16)
 
 **Repo:** EDDI (`fix/pause-keeps-interim-text`) + EDDI-Manager (`fix/operator-resume-settle`, follow-up
