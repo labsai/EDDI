@@ -577,6 +577,99 @@ class ConversationServiceHitlCoverageTest {
 
             assertNotNull(mem.get().getAgentToolApprovalsConfig());
         }
+
+        /**
+         * The distinction the sentinel exists for: a store that THROWS is not an agent
+         * without a policy. Both used to leave the carrier null, and a null carrier
+         * makes the gate wholly inert — so a database blip during resume was a window
+         * in which every tool call, writes included, ran unapproved.
+         */
+        @Test
+        @DisplayName("both reads throw → carrier fails CLOSED, not to null")
+        void bothReadsThrow_failsClosed() throws Exception {
+            doThrow(new ResourceStoreException("pinned gone")).when(agentStore).read(AGENT_ID, AGENT_VERSION);
+            // getCurrentResourceId only declares ResourceNotFoundException, so the
+            // store-is-down case surfaces here as an unchecked one.
+            doThrow(new RuntimeException("store down")).when(agentStore).getCurrentResourceId(AGENT_ID);
+
+            AtomicReference<IConversationMemory> mem = drivePlainResume(null);
+
+            var carrier = mem.get().getAgentToolApprovalsConfig();
+            assertNotNull(carrier, "a failed policy read left the gate inert");
+            assertTrue(ToolApprovalsConfig.isUndetermined(carrier),
+                    "a failed policy read must fail closed, not degrade to 'no policy'");
+        }
+
+        /**
+         * A pinned read that ERRORS must not be satisfied by the latest version. The
+         * conversation is pinned to a specific agent version precisely so its policy
+         * cannot shift underneath it; silently substituting a later version's policy
+         * could apply a gate someone has since relaxed. Absence is different — see
+         * {@link #pinnedVersionGone_fallsBackLegitimately}.
+         */
+        @Test
+        @DisplayName("pinned read errors but latest succeeds → still fails CLOSED")
+        void pinnedReadErrors_doesNotSilentlyUseLatestPolicy() throws Exception {
+            var latest = new AgentConfiguration();
+            var hitl = new AgentConfiguration.HitlConfig();
+            hitl.setToolApprovals(new ToolApprovalsConfig());
+            latest.setHitlConfig(hitl);
+
+            doThrow(new ResourceStoreException("store blip")).when(agentStore).read(AGENT_ID, AGENT_VERSION);
+            var resId = mock(IResourceStore.IResourceId.class);
+            lenient().doReturn(2).when(resId).getVersion();
+            lenient().doReturn(resId).when(agentStore).getCurrentResourceId(AGENT_ID);
+            lenient().doReturn(latest).when(agentStore).read(AGENT_ID, 2);
+
+            AtomicReference<IConversationMemory> mem = drivePlainResume(null);
+
+            assertTrue(ToolApprovalsConfig.isUndetermined(mem.get().getAgentToolApprovalsConfig()),
+                    "a store error on the PINNED version was covered up by the latest version's policy");
+        }
+
+        /**
+         * The pinned version being genuinely GONE is an answer, not a failure, so the
+         * historical fallback to latest stays.
+         */
+        @Test
+        @DisplayName("pinned version absent → falls back to latest, no gating")
+        void pinnedVersionGone_fallsBackLegitimately() throws Exception {
+            var latest = new AgentConfiguration();
+            var hitl = new AgentConfiguration.HitlConfig();
+            var approvals = new ToolApprovalsConfig();
+            hitl.setToolApprovals(approvals);
+            latest.setHitlConfig(hitl);
+
+            doThrow(new IResourceStore.ResourceNotFoundException("v1 deleted"))
+                    .when(agentStore).read(AGENT_ID, AGENT_VERSION);
+            var resId = mock(IResourceStore.IResourceId.class);
+            doReturn(2).when(resId).getVersion();
+            doReturn(resId).when(agentStore).getCurrentResourceId(AGENT_ID);
+            doReturn(latest).when(agentStore).read(AGENT_ID, 2);
+
+            AtomicReference<IConversationMemory> mem = drivePlainResume(null);
+
+            assertSame(approvals, mem.get().getAgentToolApprovalsConfig(),
+                    "an absent pinned version should still fall back to the latest policy");
+        }
+
+        /**
+         * The counterpart, and the reason this is scoped to thrown errors only: an
+         * agent that genuinely has no policy must stay ungated. Failing closed on THAT
+         * would gate every tool call for every agent that never opted into HITL.
+         */
+        @Test
+        @DisplayName("agent genuinely absent (no throw) → still null, gate stays inert")
+        void agentAbsentWithoutError_staysInert() throws Exception {
+            doReturn(null).when(agentStore).read(AGENT_ID, AGENT_VERSION);
+            doReturn(null).when(agentStore).getCurrentResourceId(AGENT_ID);
+
+            AtomicReference<IConversationMemory> mem = drivePlainResume(null);
+
+            assertNull(mem.get().getAgentToolApprovalsConfig(),
+                    "an absent agent is an answer, not a failure to obtain one — gating here would "
+                            + "make every non-HITL agent pause");
+        }
     }
 
     // =========================================================================

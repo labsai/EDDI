@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
@@ -365,6 +366,23 @@ class ToolLoopRunner {
                         } else {
                             // 1) execute the ungated calls of this batch normally
                             for (ToolExecutionRequest allowedReq : gateResult.allowed()) {
+                                // Same absolute rule as the main allowed() loop below.
+                                // This branch runs BEFORE the pause is thrown, and its
+                                // results are frozen into the batch the resume replays
+                                // — a self-conversation call slipping through here is
+                                // never checked again anywhere. A mixed batch (one
+                                // gated call, one ungated self-message) was exactly
+                                // the remaining hole.
+                                String selfTargetedPre = ToolLoopResumer.targetsOwnConversationLive(
+                                        allowedReq, setup.toolRequestResolvers(), conversationId);
+                                if (selfTargetedPre != null) {
+                                    LOGGER.warnf("Refusing ungated tool '%s': %s", sanitize(allowedReq.name()), selfTargetedPre);
+                                    currentMessages.add(ToolExecutionResultMessage.from(allowedReq,
+                                            "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}"));
+                                    trace.add(Map.of("type", "hitl_self_conversation", "tool", allowedReq.name(),
+                                            "detail", selfTargetedPre));
+                                    continue;
+                                }
                                 executeSingleToolCall(allowedReq, memory, currentMessages, trace, toolExecutors,
                                         toolRateLimits, toolCanonicalNames, defaultRateLimit, maxBudget, conversationId,
                                         enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
@@ -419,6 +437,23 @@ class ToolLoopRunner {
                             throw new LifecycleException("Agent execution cancelled (interrupted) before tool: " + toolRequest.name());
                         }
 
+                        // "An agent may not send a request to its own conversation" is
+                        // an ABSOLUTE rule, and this loop is the one place it was not
+                        // enforced: a call the gate lets through live (ungated method,
+                        // or the whole gate inert) executed with no check anywhere.
+                        // The resume path has its own copy; a rule enforced only where
+                        // approvals funnel is a rule that vanishes with the gate.
+                        String selfTargeted = ToolLoopResumer.targetsOwnConversationLive(
+                                toolRequest, setup.toolRequestResolvers(), conversationId);
+                        if (selfTargeted != null) {
+                            LOGGER.warnf("Refusing ungated tool '%s': %s", sanitize(toolRequest.name()), selfTargeted);
+                            currentMessages.add(ToolExecutionResultMessage.from(toolRequest,
+                                    "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}"));
+                            trace.add(Map.of("type", "hitl_self_conversation", "tool", toolRequest.name(),
+                                    "detail", selfTargeted));
+                            continue;
+                        }
+
                         executeSingleToolCall(toolRequest, memory, currentMessages, trace, toolExecutors,
                                 toolRateLimits, toolCanonicalNames, defaultRateLimit, maxBudget, conversationId,
                                 enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
@@ -431,12 +466,35 @@ class ToolLoopRunner {
             // Loop exhausted its iteration budget. The last message is usually the
             // model's final AiMessage; on resume with a spent budget it may instead be
             // a verdict-applied tool result — guard the cast either way.
+            //
+            // The fallback is user-visible: it becomes the turn's whole answer when
+            // the model was still mid-tool-call at the cap. The old bare "Max tool
+            // iterations reached" read like an internal error code and hid the two
+            // facts the user actually needs — the tool calls that already ran HAVE
+            // taken effect (nothing rolls back), and the work can be resumed by
+            // asking to continue. Observed live: the Platform Operator building an
+            // agent died at the cap after 22 calls, with real resources created and a
+            // four-word answer.
             ChatMessage last = currentMessages.get(currentMessages.size() - 1);
-            if (last instanceof AiMessage aiLast) {
-                return aiLast.text() != null ? aiLast.text() : "Max tool iterations reached";
+            if (last instanceof AiMessage aiLast && aiLast.text() != null) {
+                return aiLast.text();
             }
-            return "Max tool iterations reached";
+            return iterationBudgetSpentMessage(maxIterations);
         }, task, "Agent execution");
+    }
+
+    /**
+     * The turn's answer when the tool loop hits its iteration cap mid-work. Kept
+     * honest and actionable rather than apologetic: what stopped, what state the
+     * work is in, and how to go on. The cap itself is configurable per task
+     * ({@code maxToolIterations}) — mentioning it here is deliberate, so an agent
+     * designer seeing this repeatedly knows which knob exists.
+     */
+    static String iterationBudgetSpentMessage(int maxIterations) {
+        return "I stopped after reaching the limit of " + maxIterations + " tool-calling rounds for a single turn, "
+                + "before finishing the task. Everything I already did has taken effect — completed calls are not "
+                + "rolled back. Say \"continue\" and I will pick up where I stopped. If this task regularly needs "
+                + "more rounds, the agent's maxToolIterations setting can be raised.";
     }
 
     /**
@@ -483,6 +541,13 @@ class ToolLoopRunner {
                                        boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                        LlmConfiguration.Task task, boolean isLazy,
                                        List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
+        // Live "Using {tool}…" signal for streaming clients — name only, before
+        // execution, so the status line moves the moment work starts rather than
+        // when the whole loop summarizes at turn end.
+        if (memory != null && memory.getEventSink() != null) {
+            memory.getEventSink().onToolCall(toolRequest.name());
+        }
+
         // Auto-checkpoint before tool execution (Wave 4)
         if (memorySnapshotService != null) {
             try {
@@ -498,7 +563,12 @@ class ToolLoopRunner {
         Map<String, Object> callStep = new HashMap<>();
         callStep.put("type", "tool_call");
         callStep.put("tool", toolRequest.name());
-        callStep.put("arguments", toolRequest.arguments());
+        // The trace is a DISPLAY/audit record (task summaries, SSE, memory,
+        // traceSoFar merge on resume) — never an execution input, so it takes
+        // the redacted form. Execution keeps using toolRequest directly; a
+        // model that embeds a credential in its arguments must not have it
+        // echoed through every surface that renders the trace.
+        callStep.put("arguments", SecretRedactionFilter.redact(toolRequest.arguments()));
         trace.add(callStep);
 
         // Check per-conversation TOOL budget before executing tool.
@@ -578,7 +648,11 @@ class ToolLoopRunner {
         Map<String, Object> resultStep = new HashMap<>();
         resultStep.put("type", "tool_result");
         resultStep.put("tool", toolRequest.name());
-        resultStep.put("result", toolResult);
+        // Redacted for the same reason as the call step's arguments: an API
+        // response can echo a credential (its own, or one the request carried).
+        // The MODEL still receives the raw result — the return value below is
+        // untouched; only the display record is filtered.
+        resultStep.put("result", SecretRedactionFilter.redact(toolResult));
         trace.add(resultStep);
 
         // LAZY mode: after discover_tools returns, activate the matching built-in specs

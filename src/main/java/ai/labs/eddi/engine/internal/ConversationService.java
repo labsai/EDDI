@@ -698,6 +698,11 @@ public class ConversationService implements IConversationService {
                 }
 
                 @Override
+                public void onToolCall(String toolName) {
+                    streamingHandler.onToolCall(toolName);
+                }
+
+                @Override
                 public void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary) {
                     streamingHandler.onTaskComplete(taskId, taskType, durationMs, summary);
                 }

@@ -1039,9 +1039,13 @@ class RestImportServiceUncoveredBranchTest {
     // =========================================================
 
     private static RestImportService createMinimalInstance() throws Exception {
-        var constructor = RestImportService.class.getDeclaredConstructors()[0];
+        var constructors = RestImportService.class.getDeclaredConstructors();
+        assertEquals(1, constructors.length,
+                "RestImportService gained an overload — pick the @Inject one explicitly instead of the only one");
+        var constructor = constructors[0];
         constructor.setAccessible(true);
-        return (RestImportService) constructor.newInstance(
-                null, null, null, null, null, null, null, null, null);
+        // One null per parameter, derived from the constructor rather than
+        // hardcoded, so a signature change cannot break this at runtime again.
+        return (RestImportService) constructor.newInstance(new Object[constructor.getParameterCount()]);
     }
 }

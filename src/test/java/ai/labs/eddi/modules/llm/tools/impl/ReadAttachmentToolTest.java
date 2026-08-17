@@ -105,11 +105,26 @@ class ReadAttachmentToolTest {
         assertTrue(tool.readAttachment("missing.txt", 0).contains("No attachment named"));
     }
 
+    /**
+     * An image gets its own answer, not the generic "no extractable text": that
+     * wording made models tell users OCR was missing instead of pointing at the
+     * path that works (vision models see recent images directly — the forwarder
+     * re-inlines them; older ones need a re-attach).
+     */
     @Test
-    void read_nonExtractableType_note() throws Exception {
+    void read_image_pointsAtVisionInsteadOfDeadEnding() throws Exception {
         when(store.listAccessible(CONV)).thenReturn(List.of(att("r1", "pic.png", "image/png", 100)));
         when(store.load("r1", CONV)).thenReturn(new byte[]{1, 2, 3});
-        assertTrue(tool.readAttachment("pic.png", 0).contains("no extractable text"));
+        String answer = tool.readAttachment("pic.png", 0);
+        assertTrue(answer.contains("no OCR"), answer);
+        assertTrue(answer.contains("re-attach"), answer);
+    }
+
+    @Test
+    void read_nonExtractableType_note() throws Exception {
+        when(store.listAccessible(CONV)).thenReturn(List.of(att("r1", "data.bin", "application/octet-stream", 100)));
+        when(store.load("r1", CONV)).thenReturn(new byte[]{1, 2, 3});
+        assertTrue(tool.readAttachment("data.bin", 0).contains("no extractable text"));
     }
 
     @Test

@@ -182,6 +182,10 @@ public interface IConversationService {
                                   String errorType, String errorSummary) {
         }
 
+        /** One tool call is about to execute — see ConversationEventSink#onToolCall. */
+        default void onToolCall(String toolName) {
+        }
+
         /**
          * The turn was dropped without consuming the input (see
          * {@link ConversationResponseHandler#onSkipped}). Defaults to

@@ -47,7 +47,7 @@ public class McpSetupTools {
     @Tool(name = "setup_agent", description = "Create a fully working, deployed Agent in a single call. "
             + "This creates all necessary resources (behavior rules, LLM connection, "
             + "output set, package, agent), names them, and optionally deploys the agent. "
-            + "This is the fastest way to get a new Agent running — equivalent to the Agent Father workflow.")
+            + "This is the fastest way to get a new Agent running.")
     public String setupAgent(@ToolArg(description = "Agent name (required)") String agentName,
                              @ToolArg(description = "System prompt / role for the LLM (required). "
                                      + "Describes the agent's personality and purpose.") String systemPrompt,
@@ -136,8 +136,10 @@ public class McpSetupTools {
             // the caller choose the approval gate would turn it into a complete escape
             // from whatever allow-list governs the agent doing the calling. Provisioning
             // a gated agent goes through the REST setup-api endpoint.
+            // Trailing null: maxToolIterations is not exposed on this MCP tool either —
+            // a model provisioning an agent must not raise its own iteration budget.
             var request = new CreateApiAgentRequest(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints,
-                    enableQuickReplies, enableSentimentAnalysis, deploy, environment, llmBaseUrl, null, mcpServerUrls);
+                    enableQuickReplies, enableSentimentAnalysis, deploy, environment, llmBaseUrl, null, mcpServerUrls, null);
             var result = agentSetupService.createApiAgent(request);
             return jsonSerialization.serialize(result);
         } catch (AgentSetupException e) {

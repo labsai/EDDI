@@ -119,7 +119,7 @@ class PathNavigatorTest {
 
     @Test
     void shouldHandleEDDIResponseHeaderLocation() {
-        // Agent-father pattern: "EDDIResponseHeader.Location"
+        // httpcalls postResponse pattern: "EDDIResponseHeader.Location"
         var map = Map.of("EDDIResponseHeader", Map.of("Location", "/resource/123"));
         assertEquals("/resource/123", PathNavigator.getValue("EDDIResponseHeader.Location", map));
     }
@@ -160,7 +160,7 @@ class PathNavigatorTest {
 
     @Test
     void shouldHandlePropertiesAgentLocation() {
-        // Agent-father behavior valuePath: "properties.agentLocation"
+        // behavior rule valuePath: "properties.agentLocation"
         var map = Map.of("properties", Map.of("agentLocation", "cloud"));
         assertEquals("cloud", PathNavigator.getValue("properties.agentLocation", map));
     }

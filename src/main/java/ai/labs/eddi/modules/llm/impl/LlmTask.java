@@ -36,6 +36,7 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.model.chat.ChatModel;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -47,6 +48,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
+import java.util.regex.Pattern;
 
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType;
@@ -145,6 +147,18 @@ public class LlmTask implements ILifecycleTask {
     @Inject
     @ConfigProperty(name = "eddi.hitl.tool.transcript-max-bytes", defaultValue = "2000000")
     int toolTranscriptMaxBytes;
+
+    /**
+     * When true (the default) and the conversation has an event sink, tool-enabled
+     * turns run their model rounds over the provider's streaming transport via
+     * {@link ToolLoopStreamingChatModel}, so the final answer (and any interim
+     * commentary) reaches the client token-by-token instead of as one chunk after
+     * the whole loop finishes. Kill-switch, not a feature flag: turning it off
+     * restores the previous single-chunk behaviour exactly.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.llm.tool-loop.streaming.enabled", defaultValue = "true")
+    boolean toolLoopStreamingEnabled;
 
     private static final Logger LOGGER = Logger.getLogger(LlmTask.class);
 
@@ -536,9 +550,12 @@ public class LlmTask implements ILifecycleTask {
             responseMetadata.put("cascadeConfidence", cascadeResult.confidence());
 
             // Emit the final response to the stream unless the executor already streamed
-            // it live token-by-token (legacy final-step streaming). Agent-mode results are
-            // emitted here as a single chunk, matching the standard (non-cascade) agent
-            // path.
+            // it live token-by-token (legacy final-step streaming). Agent-mode results
+            // are emitted here as a single chunk — the cascade is now the deliberate
+            // EXCEPTION to tool-loop streaming: CascadingModelExecutor owns per-step
+            // model construction, timeouts and escalation, so the streaming bridge the
+            // two non-cascade branches hand to the loop stops at this boundary rather
+            // than threading a second transport through the cascade's own machinery.
             if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse && !cascadeResult.streamedLive()) {
                 // F10: this is the same single-chunk downgrade the two non-cascade agent
                 // paths record. Agent mode is the DEFAULT here (enableInAgentMode defaults
@@ -569,27 +586,16 @@ public class LlmTask implements ILifecycleTask {
             }
 
         } else if (skipCascade) {
-            // Agent mode with cascade disabled — use normal agent flow
-            var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
-                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
-            if (agentResult != null) {
-                responseContent = agentResult.response();
-                // Null-guarded to match executeResume. No production path returns a null
-                // trace today (both ExecutionResult sites pass a fresh list), but the
-                // record does not enforce it and toolTrace.isEmpty() below would NPE.
-                toolTrace = agentResult.trace() != null ? agentResult.trace() : new ArrayList<>();
-                // AgentOrchestrator sums TokenUsage across every model call in the tool
-                // loop and returns it here; not reading it dropped all agent-mode token
-                // accounting on the floor while the legacy branches below kept theirs.
-                // Copied, not aliased: ExecutionResult's two-arg constructor yields an
-                // immutable Map.of(), so assigning it directly would make any later
-                // metadata write throw only on the agent path, only in production.
-                responseMetadata = new HashMap<>(agentResult.responseMetadata());
+            // Agent mode with cascade disabled — use normal agent flow. The streaming
+            // bridge is handed ONLY to the tool loop — see runToolLoopIfEnabled.
+            var outcome = runToolLoopIfEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
+                    effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
+                    resolvedType, processedParams);
+            if (outcome != null) {
+                responseContent = outcome.response();
+                toolTrace = outcome.trace();
+                responseMetadata = outcome.responseMetadata();
                 usedToolMode = true;
-                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
-                    recordStreamingDowngrade(responseMetadata, task, responseContent);
-                    eventSink.onToken(responseContent);
-                }
             } else {
                 var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
                 responseContent = chatResult.response();
@@ -603,25 +609,15 @@ public class LlmTask implements ILifecycleTask {
 
         } else {
             // === Standard (non-cascade) execution path ===
-            var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
-                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
+            var outcome = runToolLoopIfEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
+                    effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
+                    resolvedType, processedParams);
 
-            if (agentResult != null) {
-                // Agent mode — tools execute synchronously, stream final response if sink
-                // available
-                responseContent = agentResult.response();
-                // Null-guarded, as in the skipCascade branch above.
-                toolTrace = agentResult.trace() != null ? agentResult.trace() : new ArrayList<>();
-                // See the skipCascade branch above: without this, agent-mode token usage
-                // is computed by AgentOrchestrator and then silently discarded. Copied
-                // for the same mutability reason.
-                responseMetadata = new HashMap<>(agentResult.responseMetadata());
+            if (outcome != null) {
+                responseContent = outcome.response();
+                toolTrace = outcome.trace();
+                responseMetadata = outcome.responseMetadata();
                 usedToolMode = true;
-                // Stream the final agent response if streaming is active
-                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
-                    recordStreamingDowngrade(responseMetadata, task, responseContent);
-                    eventSink.onToken(responseContent);
-                }
             } else if (eventSink != null) {
                 // Legacy mode with streaming — try to get a streaming model
                 var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
@@ -1037,7 +1033,14 @@ public class LlmTask implements ILifecycleTask {
         var jsonPolicy = JsonResponseFormatPolicy.of(Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)), resolvedType,
                 task.getJsonResponseFormat());
 
-        var result = agentOrchestrator.resumeToolLoop(chatModel, task, memory, batch, resumeDecision,
+        // Stream the continuation's model rounds too. Replayed transcript rounds
+        // never call the model, so the bridge only ever forwards NEW tokens — text
+        // streamed before the pause cannot be re-emitted. The resume path has no
+        // single-chunk fallback emit, so no suppression bookkeeping is needed here.
+        var resumeBridge = createToolLoopStreamingBridge(memory.getEventSink(),
+                "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task);
+
+        var result = agentOrchestrator.resumeToolLoop(resumeBridge != null ? resumeBridge : chatModel, task, memory, batch, resumeDecision,
                 toolHitlEnabled, jsonPolicy);
 
         String responseContent = result != null ? result.response() : null;
@@ -1147,13 +1150,51 @@ public class LlmTask implements ILifecycleTask {
      */
     private static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
 
+    /**
+     * A vault reference MENTIONED in an LLM parameter — {@code {vault:key-name}},
+     * with or without the leading {@code $} (which is plain text to Qute either
+     * way).
+     */
+    private static final Pattern VAULT_REF_MENTION = Pattern.compile("\\{vault:[^}]*\\}");
+
+    /**
+     * Wraps {@code {vault:...}} mentions in Qute raw sections so a PROMPT may talk
+     * about the syntax without crashing templating.
+     * <p>
+     * The Platform Operator's system prompt instructs the model to write secrets as
+     * {@code ${vault:key-name}} references. Qute parses the brace part as a
+     * namespaced expression, and there is deliberately no {@code vault} namespace
+     * resolver (see {@code CallerNamespaceResolver}'s class doc: letting vault
+     * references survive templating in general would let one ride a templated
+     * request BODY into vault resolution, and the resolved body is written to
+     * conversation memory in plaintext) — so every turn of such an agent failed
+     * templating for that parameter and fell back to the RAW string, skipping every
+     * legitimate {@code {memory...}} expression alongside it.
+     * <p>
+     * Escaping HERE, for LLM parameters only, threads that needle: these values go
+     * to the model, never through vault resolution, so a literal
+     * {@code ${vault:key-name}} in a prompt is inert documentation. Httpcall
+     * templating does not pass through this method and keeps failing loudly,
+     * exactly as that security decision requires.
+     * <p>
+     * Known limit: a mention already inside a {@code {|raw|}} section would be
+     * double-wrapped and render its markers. Prompts do not write Qute raw
+     * sections; accepting that beats parsing Qute here.
+     */
+    static String escapeVaultMentions(String value) {
+        if (value == null || !value.contains("vault:")) {
+            return value;
+        }
+        return VAULT_REF_MENTION.matcher(value).replaceAll(match -> "{|" + match.group() + "|}");
+    }
+
     private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters, Map<String, Object> templateDataObjects) {
 
         var processedParams = new HashMap<>(parameters);
         processedParams.forEach((key, value) -> {
             try {
                 if (!isNullOrEmpty(value) && !TEMPLATE_SKIP_PARAMS.contains(key)) {
-                    processedParams.put(key, templatingEngine.processTemplate(value, templateDataObjects));
+                    processedParams.put(key, templatingEngine.processTemplate(escapeVaultMentions(value), templateDataObjects));
                 }
             } catch (ITemplatingEngine.TemplateEngineException e) {
                 LOGGER.errorf(e, "Template processing failed for LLM parameter '%s': %s", key, e.getLocalizedMessage());
@@ -1316,10 +1357,14 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
-     * Finding F10: a tool-enabled task can never stream token-by-token — the agent
-     * loop runs synchronously and the whole answer is pushed through a single
-     * {@code onToken}. From the client's point of view that is a long silence
-     * followed by one enormous token event, indistinguishable from a slow stream.
+     * Finding F10: a tool-enabled turn that did NOT stream token-by-token pushes
+     * its whole answer through a single {@code onToken} — a long silence followed
+     * by one enormous token event, indistinguishable from a slow stream. Since the
+     * {@link ToolLoopStreamingChatModel} bridge, the non-cascade agent paths
+     * usually stream live and skip this record; it still fires whenever the
+     * single-chunk fallback runs — kill-switch off, no streaming builder, a
+     * buffered provider, a JSON-formatted final round, a synthetic iteration-budget
+     * message, and the whole cascade agent path.
      * <p>
      * Record the downgrade so it is observable: a {@code streamingDowngraded} flag
      * in {@code responseMetadata} (surfaced through
@@ -1336,6 +1381,98 @@ public class LlmTask implements ILifecycleTask {
         }
         LOGGER.infof("Streaming downgraded to a single chunk for task '%s': the tool-calling loop is synchronous (%d chars emitted at once)",
                 task.getId(), responseContent.length());
+    }
+
+    /**
+     * The agent-mode leg shared verbatim by the skipCascade and standard branches
+     * (extracted so the two cannot drift): build the streaming bridge, run the tool
+     * loop with it, package the outcome and emit the final response unless it
+     * already streamed live. Returns null when the task has no tools — the caller
+     * then runs its own legacy fallback, which must NEVER see the bridge
+     * ({@code executeIfToolsEnabled} returns before any model call in that case, so
+     * no token has been forwarded; handing the bridge to a legacy executor would
+     * double-emit every token).
+     */
+    private AgentModeOutcome runToolLoopIfEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessagesWithoutSystem,
+                                                  LlmConfiguration.Task task, IConversationMemory memory,
+                                                  ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
+                                                  JsonResponseFormatPolicy jsonPolicy, ConversationEventSink eventSink,
+                                                  boolean addToOutputExplicitlyFalse, String resolvedType,
+                                                  Map<String, String> processedParams)
+            throws LifecycleException, ChatModelRegistry.UnsupportedLlmTaskException {
+        var toolLoopBridge = createToolLoopStreamingBridge(eventSink, addToOutputExplicitlyFalse, resolvedType, processedParams, task);
+        var agentResult = agentOrchestrator.executeIfToolsEnabled(toolLoopBridge != null ? toolLoopBridge : chatModel, systemMessage,
+                new ArrayList<>(chatMessagesWithoutSystem), task,
+                memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
+        if (agentResult == null) {
+            return null;
+        }
+        String responseContent = agentResult.response();
+        // Null-guarded to match executeResume. No production path returns a null
+        // trace today (both ExecutionResult sites pass a fresh list), but the
+        // record does not enforce it and toolTrace.isEmpty() would NPE later.
+        List<Map<String, Object>> trace = agentResult.trace() != null ? agentResult.trace() : new ArrayList<>();
+        // AgentOrchestrator sums TokenUsage across every model call in the tool
+        // loop and returns it here; not reading it dropped all agent-mode token
+        // accounting on the floor while the legacy branches kept theirs.
+        // Copied, not aliased: ExecutionResult's two-arg constructor yields an
+        // immutable Map.of(), so assigning it directly would make any later
+        // metadata write throw only on the agent path, only in production.
+        Map<String, Object> responseMetadata = new HashMap<>(agentResult.responseMetadata());
+        if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
+            emitAgentResponseUnlessStreamedLive(eventSink, responseContent, responseMetadata, task, toolLoopBridge);
+        }
+        return new AgentModeOutcome(responseContent, trace, responseMetadata);
+    }
+
+    /** What the tool loop produced, ready for the caller's four locals. */
+    private record AgentModeOutcome(String response, List<Map<String, Object>> trace, Map<String, Object> responseMetadata) {
+    }
+
+    /**
+     * Build the streaming bridge for a tool-enabled turn, or return null when the
+     * turn should keep the synchronous single-chunk path: kill-switch off, no event
+     * sink, output suppressed ({@code addToOutput=false} — the postResponse owns
+     * the output, live tokens would leak the raw response), or the provider has no
+     * streaming builder.
+     */
+    private ToolLoopStreamingChatModel createToolLoopStreamingBridge(ConversationEventSink eventSink, boolean addToOutputExplicitlyFalse,
+                                                                     String resolvedType, Map<String, String> processedParams,
+                                                                     LlmConfiguration.Task task)
+            throws ChatModelRegistry.UnsupportedLlmTaskException {
+        if (!toolLoopStreamingEnabled || eventSink == null || addToOutputExplicitlyFalse) {
+            return null;
+        }
+        var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
+        if (streamingModel == null) {
+            return null;
+        }
+        return new ToolLoopStreamingChatModel(streamingModel, eventSink,
+                StreamingLegacyChatExecutor.resolveTimeoutSeconds(task), resolvedType);
+    }
+
+    /**
+     * Emit an agent-mode final response as a single chunk — unless the streaming
+     * bridge already delivered exactly this text token-by-token, in which case
+     * emitting it again would duplicate the whole answer on the client.
+     * <p>
+     * The comparison is an exact text match against the bridge's last completed
+     * model round, not a "did anything stream" boolean, because the final response
+     * is not always that round's text: an exhausted iteration budget substitutes a
+     * synthetic message, a JSON-formatted round forwards nothing, and a provider
+     * that buffers (never emits partials) completes without streaming a character.
+     * In all those cases the single-chunk fallback below still runs — and still
+     * counts as a downgrade, because that is what the client experienced.
+     */
+    private void emitAgentResponseUnlessStreamedLive(ConversationEventSink eventSink, String responseContent,
+                                                     Map<String, Object> responseMetadata, LlmConfiguration.Task task,
+                                                     ToolLoopStreamingChatModel toolLoopBridge) {
+        if (toolLoopBridge != null && responseContent.equals(toolLoopBridge.lastForwardedText())) {
+            responseMetadata.put("streamedLive", true);
+            return;
+        }
+        recordStreamingDowngrade(responseMetadata, task, responseContent);
+        eventSink.onToken(responseContent);
     }
 
     /**
@@ -1411,6 +1548,20 @@ public class LlmTask implements ILifecycleTask {
                         templateDataObjects.put("userInput", userInput);
 
                         Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateDataObjects, targetServerUrl);
+
+                        // A FAILED retrieval contributes nothing. Its result now
+                        // carries the error body (so LLM TOOLS can report
+                        // failures), but this path pastes the serialized result
+                        // into the SYSTEM prompt as "## Search Results" — where
+                        // up to 2KB of proxy/WAF error page, attacker-influenced
+                        // in some architectures, would masquerade as retrieved
+                        // knowledge. Pre-contract, a failed call contributed an
+                        // empty map here; keep that meaning.
+                        if (result.get("httpCode") instanceof Integer code && (code < 200 || code >= 300)) {
+                            LOGGER.warnf("httpCall RAG '%s' returned %d — omitting from context", httpCallName, code);
+                            return null;
+                        }
+
                         String serialized = jsonSerialization.serialize(result);
 
                         LOGGER.infof("httpCall RAG '%s' executed: keys=%s, size=%d", httpCallName, result.keySet(), serialized.length());

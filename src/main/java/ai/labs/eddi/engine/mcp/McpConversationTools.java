@@ -41,7 +41,6 @@ import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
-import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -180,7 +179,6 @@ public class McpConversationTools {
         }
     }
 
-    @Blocking
     @Tool(name = "talk_to_agent", description = "Send a message to a Agent in an existing conversation and get the agent's response. "
             + "You must first call create_conversation to get a conversationId, " + "or use chat_with_agent for a single-call alternative.")
     public String talkToAgent(@ToolArg(description = "Agent ID (required)") String agentId,
@@ -231,7 +229,6 @@ public class McpConversationTools {
         }
     }
 
-    @Blocking
     @Tool(name = "chat_with_agent", description = "Send a message to an agent, automatically creating a new conversation if needed. "
             + "This is the simplest way to interact with a Agent — combines create_conversation + "
             + "talk_to_agent into a single call. Returns the Agent response and conversationId " + "for follow-up messages.")
@@ -620,7 +617,6 @@ public class McpConversationTools {
         }
     }
 
-    @Blocking
     @Tool(name = "chat_managed", description = "Send a message to a Agent using intent-based managed conversations. "
             + "Unlike chat_with_agent (which requires a agentId and creates multiple conversations), this "
             + "tool uses an 'intent' to find the right Agent and maintains exactly ONE conversation "

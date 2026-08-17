@@ -3,7 +3,7 @@
 #
 #   docker compose -f docker-compose.openwebui.yml up --build
 #
-# Then open http://localhost:3000 and pick "agent-father-…" from the model list.
+# Then open http://localhost:3000 and pick "eddi-demo-agent-…" from the model list.
 #
 # EDDI is BUILT FROM THIS WORKING TREE, not pulled from Docker Hub: the adapter
 # is not in any published image yet, so `labsai/eddi:latest` would start fine
@@ -73,11 +73,9 @@ services:
       start_period: 10s
 
   # One-shot: creates and deploys a small rule-based agent so the model list is
-  # not empty on first start. EDDI seeds nothing automatically.
-  #
-  # It does NOT use POST /backup/import/initialAgents — see the note in
-  # seed-demo-agent.sh for why that path cannot import the bundled Agent Father
-  # on Linux today.
+  # not empty on first start. EDDI seeds nothing automatically — there is no
+  # bundled starter agent and no import-on-startup path; agents are authored
+  # through the Manager's Platform Operator, its wizard, or the setup API.
   eddi-seed:
     image: curlimages/curl:8.11.1
     restart: "no"

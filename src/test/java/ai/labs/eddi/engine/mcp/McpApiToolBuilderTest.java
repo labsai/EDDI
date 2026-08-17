@@ -18,6 +18,63 @@ import static org.junit.jupiter.api.Assertions.*;
 class McpApiToolBuilderTest {
 
     /**
+     * Covers every response shape {@code returnsDataInHeaders} decides on: a 201
+     * with no body, a 204, a 3xx, a 200 that declares content, and an operation
+     * that documents no responses at all.
+     */
+    private static final String HEADER_ANSWER_SPEC = """
+            {
+              "openapi": "3.0.3",
+              "info": { "title": "Things", "version": "1.0.0" },
+              "servers": [{ "url": "https://things.example.com" }],
+              "paths": {
+                "/things": {
+                  "post": {
+                    "operationId": "createThing",
+                    "summary": "Create a thing",
+                    "tags": ["things"],
+                    "responses": { "201": { "description": "Created. See Location header." } }
+                  },
+                  "get": {
+                    "operationId": "listThings",
+                    "summary": "List things",
+                    "tags": ["things"],
+                    "responses": {
+                      "200": {
+                        "description": "OK",
+                        "content": { "application/json": { "schema": { "type": "array", "items": { "type": "string" } } } }
+                      }
+                    }
+                  }
+                },
+                "/things/{id}/touch": {
+                  "post": {
+                    "operationId": "touchThing",
+                    "summary": "Touch a thing",
+                    "tags": ["things"],
+                    "responses": { "204": { "description": "No Content" } }
+                  }
+                },
+                "/things/{id}/follow": {
+                  "get": {
+                    "operationId": "followThing",
+                    "summary": "Follow a thing",
+                    "tags": ["things"],
+                    "responses": { "302": { "description": "Found" } }
+                  }
+                },
+                "/things/guess": {
+                  "get": {
+                    "operationId": "guessThing",
+                    "summary": "Undocumented responses",
+                    "tags": ["things"]
+                  }
+                }
+              }
+            }
+            """;
+
+    /**
      * Minimal Petstore-style OpenAPI 3.0 spec with two tags (pets, store), path
      * params, query params, and a request body.
      */
@@ -401,6 +458,97 @@ class McpApiToolBuilderTest {
         assertEquals("listPets_response", listPets.getResponseObjectName());
     }
 
+    /**
+     * The spec shape this whole capability exists for: 201 + empty body + the new
+     * resource's id in {@code Location}.
+     * <p>
+     * {@code ApiCallExecutor} populates the {@code "headers"} key only when the
+     * call declares a response-header object name, and that field is null by
+     * default — so before this, no generated tool had ever seen a response header,
+     * and every "create" endpoint following this convention answered the model with
+     * {@code {"httpCode": 201}} and nothing it could act on. EDDI's own {@code POST
+     * /agents/{agentId}/start} is exactly this shape.
+     */
+    @Test
+    void parseAndBuild_bindsResponseHeaders_forA201WithNoBody() {
+        var result = McpApiToolBuilder.parseAndBuild(HEADER_ANSWER_SPEC, null, null, null);
+        var calls = result.configsByGroup().get("things").getHttpCalls();
+
+        ApiCall created = calls.stream().filter(c -> "createThing".equals(c.getName())).findFirst().orElseThrow();
+
+        assertEquals("createThing_responseHeaders", created.getResponseHeaderObjectName(),
+                "a 201 answers in Location; the tool must be able to read it");
+    }
+
+    /**
+     * A 204 and a 3xx are the same convention: nothing in the body, so a header is
+     * the only place an answer can be.
+     */
+    @Test
+    void parseAndBuild_bindsResponseHeaders_forNoContentAndRedirects() {
+        var result = McpApiToolBuilder.parseAndBuild(HEADER_ANSWER_SPEC, null, null, null);
+        var calls = result.configsByGroup().get("things").getHttpCalls();
+
+        for (String name : List.of("touchThing", "followThing")) {
+            ApiCall call = calls.stream().filter(c -> name.equals(c.getName())).findFirst().orElseThrow();
+            assertEquals(name + "_responseHeaders", call.getResponseHeaderObjectName(),
+                    "call '" + name + "' answers in a header");
+        }
+    }
+
+    /**
+     * The exposure control, and the assertion that matters most here.
+     * <p>
+     * Response headers reach the tool result, the LLM context and conversation
+     * memory unredacted, and {@code Set-Cookie} on EDDI's shared cookie-aware
+     * client is a live session credential. An operation that declares a 200 WITH
+     * content is answering in the body and has nothing to gain, so it must not be
+     * granted them. Granting every operation was the first version of this change.
+     */
+    @Test
+    void parseAndBuild_withholdsResponseHeaders_fromPlainBodyReturningCalls() {
+        var result = McpApiToolBuilder.parseAndBuild(HEADER_ANSWER_SPEC, null, null, null);
+        var calls = result.configsByGroup().get("things").getHttpCalls();
+
+        ApiCall listing = calls.stream().filter(c -> "listThings".equals(c.getName())).findFirst().orElseThrow();
+
+        assertNull(listing.getResponseHeaderObjectName(),
+                "a 200 that declares content answers in the body — no header exposure is warranted");
+    }
+
+    /**
+     * A spec documenting no responses at all is missing information, and the safe
+     * reading of missing information here is "no headers": the cost is a capability
+     * an undocumented endpoint silently lacks, against copying every future
+     * Set-Cookie of an unknown API into conversation memory.
+     */
+    @Test
+    void parseAndBuild_withholdsResponseHeaders_whenTheSpecDocumentsNoResponses() {
+        var result = McpApiToolBuilder.parseAndBuild(HEADER_ANSWER_SPEC, null, null, null);
+        var calls = result.configsByGroup().get("things").getHttpCalls();
+
+        ApiCall undocumented = calls.stream().filter(c -> "guessThing".equals(c.getName())).findFirst().orElseThrow();
+
+        assertNull(undocumented.getResponseHeaderObjectName());
+    }
+
+    /**
+     * Pins the fixture size, so the sweeping assertions above cannot pass by
+     * iterating an empty stream. Five, not six: {@code deletePet} is deprecated and
+     * skipped during generation.
+     */
+    @Test
+    void parseAndBuild_petstoreYieldsFiveCalls_noneOfWhichNeedResponseHeaders() {
+        var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
+        var all = result.configsByGroup().values().stream().flatMap(config -> config.getHttpCalls().stream()).toList();
+
+        assertEquals(5, all.size(), "deprecated operations are skipped, so the fixture yields five");
+        // Every Petstore operation documents a body-returning success or nothing
+        // at all, so none of them qualifies — the scoping is doing real work.
+        all.forEach(call -> assertNull(call.getResponseHeaderObjectName(),
+                "call '" + call.getName() + "' should not have been granted response headers"));
+    }
+
     @Test
     void parseAndBuild_httpCallHasDescription() {
         var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
@@ -519,5 +667,73 @@ class McpApiToolBuilderTest {
         assertTrue(McpApiToolBuilder.looksLikeInlineSpec("swagger: \"2.0\"\ninfo: {}"));
         assertFalse(McpApiToolBuilder.looksLikeInlineSpec("https://petstore.example.com/openapi.json"));
         assertFalse(McpApiToolBuilder.looksLikeInlineSpec("file:///etc/passwd"));
+    }
+
+    /**
+     * The silent-swallow this closes: the say tool's body was a $ref the parser
+     * left unresolved, so its parameter description carried ZERO field names. The
+     * model guessed keys, the guessed body bound to the DTO's defaults (empty
+     * input), the API answered 200 — and a human-approved test message was never
+     * delivered, with nothing anywhere saying so.
+     */
+    @Test
+    @DisplayName("a $ref body resolves one level, so the description names the real fields")
+    void parseAndBuild_refBodyDescriptionNamesFields() {
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/say":{"post":{
+                "operationId":"say","tags":["chat"],
+                "requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/InputData"}}}},
+                "responses":{"200":{"description":"ok"}}}}},
+                "components":{"schemas":{"InputData":{"type":"object","required":["input"],
+                "properties":{"input":{"type":"string"},"context":{"type":"object"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall say = result.configsByGroup().get("chat").getHttpCalls().get(0);
+
+        String description = say.getParameters().get(McpApiToolBuilder.WHOLE_BODY_VARIABLE);
+        assertTrue(description.contains("input"), "the body fields must be named; got: " + description);
+        assertTrue(description.contains("context"), description);
+        assertTrue(description.contains("required"), "requiredness must be conveyed; got: " + description);
+    }
+
+    @Test
+    @DisplayName("an unknown $ref still degrades to the nameless whole-body form, never throws")
+    void parseAndBuild_unknownRefStillDegrades() {
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/x":{"post":{
+                "operationId":"x","tags":["g"],
+                "requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Missing"}}}},
+                "responses":{"200":{"description":"ok"}}}}},
+                "components":{"schemas":{}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall x = result.configsByGroup().get("g").getHttpCalls().get(0);
+        assertEquals("{" + McpApiToolBuilder.WHOLE_BODY_VARIABLE + "}", x.getRequest().getBody());
+    }
+
+    /**
+     * The description is the model's ONLY view of a parameter's value space — the
+     * generated schema types everything as a required string. Observed with
+     * `environment`: a guessed value silently fell back to production on the
+     * lenient server-side enum parse, so a test-drive quietly exercised the wrong
+     * deployment.
+     */
+    @Test
+    @DisplayName("enum values and defaults reach the query-parameter description")
+    void parseAndBuild_enumAndDefaultReachParamDescription() {
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/start":{"post":{
+                "operationId":"start","tags":["chat"],
+                "parameters":[{"name":"environment","in":"query","description":"Deployment environment.",
+                "schema":{"type":"string","enum":["production","test"],"default":"production"}}],
+                "responses":{"201":{"description":"created"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall start = result.configsByGroup().get("chat").getHttpCalls().get(0);
+
+        String description = start.getParameters().get("environment");
+        assertTrue(description.contains("production"), description);
+        assertTrue(description.contains("test"), description);
+        assertTrue(description.contains("Default: production"), description);
     }
 }

@@ -56,7 +56,7 @@ The Langchain task integrates with multiple LLM providers via the langchain4j li
 - **Hugging Face** (Various models)
 - **Jlama** (Local Java-based inference)
 
-**Note**: Use the "Agent Father" agent to streamline setup and configuration of the Langchain task with guided assistance.
+**Note**: The Manager's agent wizard (`/manage/agents/wizard`) and the Platform Operator (`/manage/operator`) both generate a working LLM task for you, so you rarely need to hand-write this config from scratch.
 
 ---
 
@@ -1418,6 +1418,6 @@ The LLM Lifecycle Task provides a flexible, unified interface for integrating LL
 5. ✅ **Security Hardened** - SSRF protection, sandboxed math evaluation, input validation
 6. ✅ **Fine-Grained Control** - Pre/post processing, context management, templating
 7. ✅ **Orchestration Layer** - Conditional invocation, hybrid workflows, state persistence
-8. ✅ **Easy Configuration** - Use Agent Father for guided setup
+8. ✅ **Easy Configuration** - Generated for you by the Manager's agent wizard or the Platform Operator
 
 Whether you need simple chat or advanced agent capabilities, the Langchain task provides the foundation for intelligent conversational experiences in EDDI.

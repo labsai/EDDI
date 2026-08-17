@@ -1,0 +1,1 @@
+import{aq as t,a_ as n,cL as u,cM as s}from"./index-BY6d8wze.js";function i(){const e=t();return n({mutationFn:s,onSuccess:()=>{e.invalidateQueries({queryKey:["agents"]})}})}function r(){const e=t();return n({mutationFn:u,onSuccess:()=>{e.invalidateQueries({queryKey:["agents"]})}})}export{r as a,i as u};

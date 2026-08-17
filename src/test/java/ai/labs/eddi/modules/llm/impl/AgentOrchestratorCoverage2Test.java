@@ -294,6 +294,42 @@ class AgentOrchestratorCoverage2Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // trace redaction — the trace is a display record, never raw
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * A credential the model embeds in its tool arguments must not survive into the
+     * trace: the trace feeds task summaries, SSE, memory and the approval surfaces,
+     * and rendering it clear-text there was the observed leak (a fabricated
+     * {@code sk-ant-…} key on the approval card). Execution keeps the raw request —
+     * only the recorded copy is filtered.
+     */
+    @Test
+    void trace_redactsCredentialShapedArguments() throws Exception {
+        var task = twoToolTask();
+
+        String embeddedKey = "sk-ant-api03-CeIJ4onq59Mf_oN4mICgfgScyJO5bfxFSS3Sdvo1Zgo2F7zUfEvx";
+        ChatModel chatModel = mock(ChatModel.class);
+        var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate")
+                .arguments("{\"expression\":\"1+1\",\"apiKey\":\"" + embeddedKey + "\"}").build();
+        when(chatModel.chat(any(ChatRequest.class)))
+                .thenReturn(toolBatch(calcReq))
+                .thenReturn(text("done"));
+
+        var result = orchestrator.executeIfToolsEnabled(chatModel, "sys",
+                List.of(UserMessage.from("calc")), task, memory);
+
+        assertNotNull(result);
+        var callStep = result.trace().stream()
+                .filter(e -> "tool_call".equals(e.get("type")) && "calculate".equals(e.get("tool")))
+                .findFirst().orElseThrow();
+        String recordedArgs = String.valueOf(callStep.get("arguments"));
+        assertFalse(recordedArgs.contains("CeIJ4onq59Mf"),
+                "the trace is a display record — a credential in the model's arguments must not ride through it");
+        assertTrue(recordedArgs.contains("<REDACTED>"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // maxPausesPerTurn — clamping arms (private static, reflection)
     // ═══════════════════════════════════════════════════════════════════
 

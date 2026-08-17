@@ -787,7 +787,7 @@ class AgentSetupServiceTest {
         void nullAgentName() {
             var request = new CreateApiAgentRequest(
                     null, "prompt", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("Agent name is required"));
@@ -798,7 +798,7 @@ class AgentSetupServiceTest {
         void blankSystemPrompt() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "   ", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("System prompt is required"));
@@ -809,7 +809,7 @@ class AgentSetupServiceTest {
         void blankOpenApiSpec() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("OpenAPI spec is required"));
@@ -820,10 +820,55 @@ class AgentSetupServiceTest {
         void cloudProviderNoApiKey() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
-                    null, null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("API key is required"));
+        }
+
+        /**
+         * Runs BEFORE the OpenAPI parse and any resource creation — the invalid spec
+         * text here would itself throw later, so reaching the iterations message proves
+         * the up-front ordering. Both bounds, because each fails differently in
+         * production: 0 is a loop that never runs (an agent that can never call a
+         * tool), an absurd value is a cost and latency hazard per turn.
+         */
+        @Test
+        @DisplayName("maxToolIterations outside 1..MAX is refused before any resource is created")
+        void maxToolIterationsOutOfRangeRefusedUpFront() {
+            for (int bad : new int[]{0, -1, AgentSetupService.MAX_TOOL_ITERATIONS + 1}) {
+                var request = new CreateApiAgentRequest(
+                        "My Agent", "You are helpful", "not-even-openapi", "openai", "gpt-4",
+                        "sk-key", null, null, null, null, null, null, null, null, null, null, bad);
+                var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                        () -> service.createApiAgent(request), "value " + bad + " must be rejected");
+                assertTrue(ex.getMessage().contains("maxToolIterations"),
+                        "the message must name the offending field, got: " + ex.getMessage());
+                assertTrue(ex.getMessage().contains(String.valueOf(AgentSetupService.MAX_TOOL_ITERATIONS)),
+                        "the message must state the actual bound, got: " + ex.getMessage());
+            }
+        }
+
+        /**
+         * Both bounds must be ACCEPTED, not just the outside rejected: a {@code >} →
+         * {@code >=} regression would refuse exactly
+         * {@link AgentSetupService#MAX_TOOL_ITERATIONS} — the value the Manager
+         * provisions the operator with — while every rejection test stays green. The
+         * invalid spec text guarantees a later failure whose message must NOT be about
+         * the iterations bound.
+         */
+        @Test
+        @DisplayName("maxToolIterations at 1 and at MAX passes validation")
+        void maxToolIterationsBoundariesAccepted() {
+            for (int ok : new int[]{1, AgentSetupService.MAX_TOOL_ITERATIONS}) {
+                var request = new CreateApiAgentRequest(
+                        "My Agent", "You are helpful", "not-even-openapi", "openai", "gpt-4",
+                        "sk-key", null, null, null, null, null, null, null, null, null, null, ok);
+                var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                        () -> service.createApiAgent(request), "value " + ok + " must reach the spec parse");
+                assertFalse(ex.getMessage().contains("maxToolIterations"),
+                        "boundary value " + ok + " must pass validation; failed with: " + ex.getMessage());
+            }
         }
 
         @Test
@@ -846,7 +891,7 @@ class AgentSetupServiceTest {
 
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, hitl, null);
+                    "sk-key", null, null, null, null, null, null, null, null, hitl, null, null);
 
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> guardedService.createApiAgent(request));
@@ -868,7 +913,7 @@ class AgentSetupServiceTest {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
                     "sk-key", null, null, null, null, null, null, null, null, null,
-                    "https://good.example.com/mcp,ftp://bad.example.com/mcp");
+                    "https://good.example.com/mcp,ftp://bad.example.com/mcp", null);
 
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> guardedService.createApiAgent(request));
@@ -887,7 +932,7 @@ class AgentSetupServiceTest {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
                     "sk-key", null, null, null, null, null, null, null, null, null,
-                    "https://a.example.com/mcp, https://b.example.com/mcp");
+                    "https://a.example.com/mcp, https://b.example.com/mcp", null);
 
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> guardedService.createApiAgent(request));
@@ -913,7 +958,7 @@ class AgentSetupServiceTest {
 
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, hitl, null);
+                    "sk-key", null, null, null, null, null, null, null, null, hitl, null, null);
 
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> guardedService.createApiAgent(request));

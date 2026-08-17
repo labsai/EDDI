@@ -1,0 +1,6 @@
+{
+  "resource" : "eddi://ai.labs.property/propertysetterstore/propertysetters/aaa000000000000000000003?version=1",
+  "name" : "Rule-Based Reference Agent",
+  "description" : "Property extraction — wizard answers held as conversation-scoped properties; secret vaulting is delegated to the receiving setup API",
+  "deleted" : false
+}

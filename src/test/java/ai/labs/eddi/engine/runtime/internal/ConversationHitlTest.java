@@ -186,6 +186,36 @@ class ConversationHitlTest {
         }
 
         @Test
+        @DisplayName("TOOL_CALL pause writes the model's interim narration AHEAD of the placeholder")
+        void toolPauseKeepsInterimText() throws Exception {
+            // A tool pause aborts the turn before the output tasks run, so the only
+            // text the paused step used to carry was the placeholder — the model's
+            // own "the config checks out, I'll now start a test conversation" was
+            // dropped. On a resumed (non-streamed) turn that meant the second
+            // approval arrived with no explanation at all.
+            memory.setConversationState(ConversationState.READY);
+            doAnswer(inv -> {
+                var call = new PendingToolCallBatch.PendingToolCall();
+                call.setToolName("startConversation");
+                var batch = new PendingToolCallBatch();
+                batch.setCalls(List.of(call));
+                batch.setInterimText("Config checks out — starting a test conversation next, which needs your approval.");
+                memory.setHitlPendingToolCalls(batch);
+                throw new ConversationPauseException("wf1", 2, "gated tool call",
+                        ConversationPauseException.PauseOrigin.TOOL_CALL);
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            var conv = createConversation();
+            conv.say("create the agent and test it", Map.of());
+
+            @SuppressWarnings("unchecked")
+            var rendered = (List<String>) memory.getCurrentStep().getConversationOutput().get(MemoryKeys.OUTPUT_PREFIX);
+            assertEquals(2, rendered.size(), "narration + placeholder, in that order; got: " + rendered);
+            assertEquals("Config checks out — starting a test conversation next, which needs your approval.", rendered.get(0));
+            assertTrue(rendered.get(1).contains("startConversation"), "placeholder names the gated tool; got: " + rendered.get(1));
+        }
+
+        @Test
         @DisplayName("TOOL_CALL pause with legacy batch (null effective config) falls back to the agent-level pendingMessage")
         void toolPauseLegacyBatchFallsBackToAgentLevel() throws Exception {
             memory.setConversationState(ConversationState.READY);
@@ -289,6 +319,126 @@ class ConversationHitlTest {
             String rendered = output.get(MemoryKeys.OUTPUT_PREFIX).toString();
             assertTrue(rendered.contains("TASK review pending for deleteAgent"),
                     "a rule silent on pendingMessage must inherit the scalar; got: " + rendered);
+        }
+
+        /**
+         * Arms a gated batch for {@code toolName} (no configured pendingMessage
+         * anywhere, so the DEFAULT applies) and runs one turn to the pause.
+         *
+         * @return the rendered {@code "output"} conversation-output of the paused step
+         */
+        private String pauseWithUnconfiguredMessage(String toolName) throws Exception {
+            return pauseWithUnconfiguredMessage(toolName, 1);
+        }
+
+        private String pauseWithUnconfiguredMessage(String toolName, int pauseCountThisTurn) throws Exception {
+            memory.setConversationState(ConversationState.READY);
+            doAnswer(inv -> {
+                var call = new PendingToolCallBatch.PendingToolCall();
+                call.setToolName(toolName);
+                var batch = new PendingToolCallBatch();
+                batch.setCalls(List.of(call));
+                batch.setPauseCountThisTurn(pauseCountThisTurn);
+                memory.setHitlPendingToolCalls(batch);
+                throw new ConversationPauseException("wf1", 2, "gated tool call",
+                        ConversationPauseException.PauseOrigin.TOOL_CALL);
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            createConversation().say("do it", Map.of());
+            return memory.getCurrentStep().getConversationOutput().get(MemoryKeys.OUTPUT_PREFIX).toString();
+        }
+
+        @Test
+        @DisplayName("with no pendingMessage configured, the default NAMES the gated tool")
+        void unconfiguredPendingMessageNamesTheTool() throws Exception {
+            String rendered = pauseWithUnconfiguredMessage("createAgent");
+
+            assertTrue(rendered.contains("createAgent"),
+                    "the default pending message must name the gated tool; got: " + rendered);
+            assertFalse(rendered.contains("{toolNames}"),
+                    "the placeholder token must be substituted, not rendered; got: " + rendered);
+        }
+
+        /**
+         * The regression this default exists for. A turn may pause up to
+         * maxPausesPerTurn times; each pause rewrites the placeholder into the same
+         * step. When the text was a constant, deciding one batch and landing on the
+         * next produced a byte-identical bubble — which reads as "I approved it and
+         * nothing happened". Two pauses on different tools must not render the same
+         * sentence.
+         */
+        @Test
+        @DisplayName("two pauses on different tools produce DIFFERENT pending messages")
+        void consecutivePausesOnDifferentToolsDiffer() throws Exception {
+            String first = pauseWithUnconfiguredMessage("createAgent");
+            // A fresh conversation stands in for the next pause of a multi-pause turn:
+            // what is under test is resolvePendingMessage's dependence on the batch,
+            // and the batch is the only thing that differs between the two.
+            String second = pauseWithUnconfiguredMessage("deployAgent");
+
+            assertNotEquals(first, second,
+                    "consecutive pauses on different tools must not render identical text; got: " + first);
+            assertTrue(second.contains("deployAgent") && !second.contains("createAgent"),
+                    "the second pause must name only its own gated tool; got: " + second);
+        }
+
+        /**
+         * The user-visible failure this pins: approve → the call fails → the model
+         * retries the SAME tool → the second pause rendered byte-identical text, which
+         * reads as a duplicated bubble (or a dead Approve button). The batch's own
+         * ordinal — persisted with it, so resume-time recomputation matches — makes the
+         * second ask visibly a second ask.
+         */
+        @Test
+        @DisplayName("a second pause on the SAME tool renders differently from the first")
+        void secondPauseOnSameToolDiffers() throws Exception {
+            String first = pauseWithUnconfiguredMessage("setupAgent", 1);
+            String second = pauseWithUnconfiguredMessage("setupAgent", 2);
+
+            assertNotEquals(first, second,
+                    "consecutive pauses on the same tool must not render identical text; got: " + first);
+            assertTrue(second.contains("(approval 2 this turn)"),
+                    "the repeat ask must carry its ordinal; got: " + second);
+            assertFalse(first.contains("(approval"),
+                    "the FIRST ask stays clean — no ordinal suffix; got: " + first);
+        }
+
+        @Test
+        @DisplayName("a configured pendingMessage never gains the ordinal suffix")
+        void configuredMessageKeepsOperatorWordingVerbatim() throws Exception {
+            memory.setConversationState(ConversationState.READY);
+            var agentLevel = new ToolApprovalsConfig();
+            agentLevel.setPendingMessage("Own wording for {toolNames}");
+            memory.setAgentToolApprovalsConfig(agentLevel);
+            doAnswer(inv -> {
+                var call = new PendingToolCallBatch.PendingToolCall();
+                call.setToolName("setupAgent");
+                var batch = new PendingToolCallBatch();
+                batch.setCalls(List.of(call));
+                batch.setPauseCountThisTurn(2);
+                memory.setHitlPendingToolCalls(batch);
+                throw new ConversationPauseException("wf1", 2, "gated tool call",
+                        ConversationPauseException.PauseOrigin.TOOL_CALL);
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            createConversation().say("do it", Map.of());
+
+            String rendered = memory.getCurrentStep().getConversationOutput().get(MemoryKeys.OUTPUT_PREFIX).toString();
+            assertTrue(rendered.contains("Own wording for setupAgent"),
+                    "the configured wording must render; got: " + rendered);
+            assertFalse(rendered.contains("approval 2"),
+                    "an operator's own wording is kept verbatim; got: " + rendered);
+        }
+
+        @Test
+        @DisplayName("a batch with no usable tool name falls back to the generic default")
+        void unnamedCallsFallBackToGenericDefault() throws Exception {
+            // Legacy/degenerate batch: "run ." would be worse than saying nothing
+            // specific, so the name-free sentence is kept for exactly this case.
+            String rendered = pauseWithUnconfiguredMessage(null);
+
+            assertTrue(rendered.contains("This action requires human approval"),
+                    "a nameless batch must fall back to the generic default; got: " + rendered);
         }
 
         @Test

@@ -128,7 +128,12 @@ class SlackToolPauseNotificationTest {
         var call = new PendingToolCall();
         call.setToolName("transfer_funds");
         call.setArgumentsRaw("{\"amount\":250,\"secret\":\"RAW_SECRET_VALUE_NEVER_SHOWN\"}");
-        call.setArgumentsRedacted("{\"amount\":250,\"secret\":\"[REDACTED]\"}");
+        // The project's canonical marker (RequestRedactor.REDACTED /
+        // SecretRedactionFilter), not a look-alike: the card re-runs the filter at
+        // send time so a stored pause cannot outlive a filter improvement, and a
+        // non-canonical "[REDACTED]" fixture was itself rewritten to the real
+        // marker — leaving the assertion below looking for a string no longer there.
+        call.setArgumentsRedacted("{\"amount\":250,\"secret\":\"<REDACTED>\"}");
         var batch = new PendingToolCallBatch();
         batch.setCalls(List.of(call));
 
@@ -139,7 +144,7 @@ class SlackToolPauseNotificationTest {
         String rendered = renderBlocksToText(blocks);
         assertFalse(rendered.contains("RAW_SECRET_VALUE_NEVER_SHOWN"),
                 "raw argument value must never reach the Slack approval card");
-        assertTrue(rendered.contains("[REDACTED]"));
+        assertTrue(rendered.contains("<REDACTED>"), rendered);
     }
 
     @Test

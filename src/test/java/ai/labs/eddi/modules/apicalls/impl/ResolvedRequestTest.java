@@ -268,10 +268,20 @@ class ResolvedRequestTest {
             assertEquals("{\"name\":\"billing-agent\",\"maxTurns\":5}", resolved.body());
         }
 
+        /**
+         * A vault reference stays LEGIBLE. It is a pointer to a secret, not a secret —
+         * and the correct alternative to writing one down. The approver has to see
+         * WHICH credential a request will use ("is this about to touch the production
+         * key?"), and masking it also made every correct, vault-referencing request
+         * display a redaction marker, training approvers to read that marker as normal
+         * when it is precisely the signal that a secret LITERAL was embedded. See
+         * {@code SecretRedactionFilter}.
+         */
         @Test
-        void aVaultReferenceIsRedactedToo() {
+        void aVaultReferenceIsLeftLegible() {
             var resolved = request("POST", "https://x/y", Map.of(), Map.of(), "{\"apiKey\":\"${vault:openai-key}\"}");
-            assertFalse(resolved.body().contains("openai-key"), resolved.body());
+            assertTrue(resolved.body().contains("${vault:openai-key}"), resolved.body());
+            assertFalse(resolved.body().contains("<REDACTED>"), resolved.body());
         }
 
         @Test

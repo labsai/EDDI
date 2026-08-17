@@ -509,7 +509,7 @@ This rendering is local to the adapter. The shared `ConversationOutputExtractor`
 
 A quick reply has two halves: a `value` the user sees (`Anthropic`) and an `expressions` token the behaviour rules match (`select_anthropic`). Rendering the *value* is not merely cosmetic — it is the half that round-trips.
 
-`InputParserTask.prepareTemporaryDictionaries()` looks at the **previous** turn's output and, for every quick reply it finds, registers a temporary dictionary entry mapping the `value` to its `expressions` (`DictionaryUtilities.convertQuickReplies` — `addWord` for single words, `addPhrase` when the value contains a space). So when the user reads `` `Anthropic` `` and types `Anthropic`, the parser resolves it to `select_anthropic` and the matching rule fires, with no dictionary configured on the agent. This is why the Agent Father works over `/v1` despite its parser step declaring `"dictionaries": []`.
+`InputParserTask.prepareTemporaryDictionaries()` looks at the **previous** turn's output and, for every quick reply it finds, registers a temporary dictionary entry mapping the `value` to its `expressions` (`DictionaryUtilities.convertQuickReplies` — `addWord` for single words, `addPhrase` when the value contains a space). So when the user reads `` `Anthropic` `` and types `Anthropic`, the parser resolves it to `select_anthropic` and the matching rule fires, with no dictionary configured on the agent. This is why a quick-reply-driven agent works over `/v1` even when its parser step declares `"dictionaries": []`.
 
 Two consequences worth knowing:
 
