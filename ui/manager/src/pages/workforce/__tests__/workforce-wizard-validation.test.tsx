@@ -285,6 +285,29 @@ describe("Workforce wizard — the team step says what the backend will refuse",
     );
   });
 
+  it("associates the agent-picker label and its error with the input too", async () => {
+    // AgentPicker has the same shape as SecretKeyPicker — it renders its own
+    // input — so the "Select agent *" label had the same orphaned htmlFor.
+    const user = userEvent.setup();
+    renderWizard();
+    await fillNamesOnly(user);
+
+    await user.click(next());
+    await screen.findAllByLabelText(/personality & expertise/i);
+    await user.click(screen.getAllByRole("button", { name: /use existing agent/i })[0]!);
+    await user.click(next());
+
+    const card = screen.getAllByTestId(/^member-card-/)[0]!;
+    const input = within(card).getByPlaceholderText(/select agent/i);
+    expect(within(card).getByLabelText(/select agent/i)).toBe(input);
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    const describedBy = input.getAttribute("aria-describedby");
+    expect(document.getElementById(describedBy!)).toHaveTextContent(
+      /pick the existing agent/i,
+    );
+    expect(document.activeElement).toBe(input);
+  });
+
   it("flags a missing board name rather than silently disabling Next", async () => {
     const user = userEvent.setup();
     renderWizard();

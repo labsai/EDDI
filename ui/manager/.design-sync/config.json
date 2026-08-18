@@ -106,7 +106,7 @@
     "StreamBadge": "/** Whether the SSE stream is currently connected */\n  connected: boolean;\n  className?: string;",
     "UnsavedChangesDialog": "open: boolean;\n  onConfirm: () => void;\n  onCancel: () => void;\n  /** Defaults to \"You have unsaved changes…\" */\n  message?: string;\n  /** Defaults to \"Unsaved Changes\" */\n  title?: string;",
     "ActionBadge": "/** Diff action: CREATE | UPDATE | SKIP | CONFLICT */\n  action: string;",
-    "AgentPicker": "value: string;\n  onChange: (value: string) => void;\n  placeholder?: string;\n  readOnly?: boolean;",
+    "AgentPicker": "value: string;\n  onChange: (value: string) => void;\n  placeholder?: string;\n  readOnly?: boolean;\n  /** Forwarded to the focusable control, so a caller's label htmlFor resolves. */\n  id?: string;\n  \"aria-invalid\"?: boolean;\n  \"aria-describedby\"?: string;",
     "BackLink": "to: string;\n  label: string;",
     "CommandPalette": "/** Takes no props — opens via the global Ctrl+K store. */",
     "CreateOrWizardDialog": "open: boolean;\n  onClose: () => void;\n  type: \"agent\" | \"group\";\n  wizardPath: string;\n  /** Picked \"Quick Create\" — close this dialog and open the create form */\n  onQuickCreate: () => void;",

@@ -9,9 +9,28 @@ interface AgentPickerProps {
   onChange: (value: string) => void;
   placeholder?: string;
   readOnly?: boolean;
+  /**
+   * Forwarded to the control the user actually focuses, so a caller's
+   * `<label htmlFor>` resolves. Same reason as `SecretKeyPicker`: this
+   * component renders its own input, so without this the label pointed at
+   * nothing and a required marker or error was announced to nobody.
+   */
+  id?: string;
+  /** Forwarded alongside `id`, so the field itself carries its error state. */
+  "aria-invalid"?: boolean;
+  /** Id(s) of the element(s) describing this field — typically its error text. */
+  "aria-describedby"?: string;
 }
 
-export function AgentPicker({ value, onChange, placeholder, readOnly }: AgentPickerProps) {
+export function AgentPicker({
+  value,
+  onChange,
+  placeholder,
+  readOnly,
+  id,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
+}: AgentPickerProps) {
   const { t } = useTranslation();
   
   // UI state
@@ -129,6 +148,10 @@ export function AgentPicker({ value, onChange, placeholder, readOnly }: AgentPic
     return (
       <div ref={containerRef} className="relative flex-1">
         <div
+          id={id}
+          role="group"
+          aria-invalid={ariaInvalid}
+          aria-describedby={ariaDescribedBy}
           className={`flex h-9 items-center gap-2 rounded-md border px-3 ${
             readOnly
               ? "border-primary/20 bg-primary/5"
@@ -172,6 +195,9 @@ export function AgentPicker({ value, onChange, placeholder, readOnly }: AgentPic
       <div className="flex w-full items-stretch h-9">
         <input
           ref={inputRef}
+          id={id}
+          aria-invalid={ariaInvalid}
+          aria-describedby={ariaDescribedBy}
           type="text"
           value={filter}
           onChange={(e) => {

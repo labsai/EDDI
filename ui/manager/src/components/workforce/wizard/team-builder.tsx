@@ -394,6 +394,11 @@ function MemberCard({
               <AgentPicker
                 value={member.agentId}
                 onChange={(id) => update({ agentId: id })}
+                id={`agent-${member.id}`}
+                aria-invalid={(showErrors && issue === "agent") || undefined}
+                aria-describedby={
+                  showErrors && issue === "agent" ? `member-error-${member.id}` : undefined
+                }
               />
             </div>
           ) : (
