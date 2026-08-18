@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { renderWithProviders } from "@/test/test-utils";
 import {
   ParserEditor,
 } from "@/components/editors/parser-editor";
@@ -22,7 +23,10 @@ function renderEditor(
 ) {
   return {
     onChange,
-    ...render(
+    // Providers, not a bare render: the dictionary section resolves the linked
+    // dictionaries' names through react-query, and the picker dialog it opens
+    // reads the same descriptor list.
+    ...renderWithProviders(
       <ParserEditor data={data} onChange={onChange} readOnly={readOnly} />,
     ),
   };
@@ -169,32 +173,53 @@ describe("ParserEditor", () => {
     expect(screen.getByTestId("regular-dict-0")).toBeInTheDocument();
   });
 
-  it("adds a regular dictionary via URI picker", async () => {
+  it("adds a regular dictionary by picking an existing one", async () => {
     const data: ParserData = {
       config: {},
       extensions: { dictionaries: [], corrections: [], normalizer: [] },
     };
     const { onChange } = renderEditor(data);
 
-    // Click Add button
     await userEvent.click(screen.getByTestId("add-regular-dict-btn"));
-    expect(screen.getByTestId("dict-uri-picker")).toBeInTheDocument();
+    expect(screen.getByTestId("dictionary-picker-dialog")).toBeInTheDocument();
 
-    // Type URI
-    const input = screen.getByTestId("dict-uri-input");
-    await userEvent.type(input, "eddi://ai.labs.dictionary/dictionarystore/dictionaries/mydict?version=1");
-
-    // Confirm
-    await userEvent.click(screen.getByTestId("confirm-add-dict"));
+    // The list is the point of the change: a dictionary is picked by its name,
+    // never by typing out the resource URI it resolves to.
+    const option = await screen.findByTestId("dict-option-res1");
+    expect(option).toHaveTextContent("Mock res1");
+    await userEvent.click(option);
 
     expect(onChange).toHaveBeenCalled();
     const call = onChange.mock.calls[0]![0] as ParserData;
     const regularDicts = call.extensions?.dictionaries?.filter((d) => d.type === REGULAR_DICT_TYPE);
     expect(regularDicts?.length).toBe(1);
-    expect(regularDicts?.[0]?.config?.uri).toContain("mydict");
+    expect(regularDicts?.[0]?.config?.uri).toContain("res1");
   });
 
-  it("cancels dictionary URI picker", async () => {
+  it("shows an already-linked dictionary as added and blocks a second link", async () => {
+    const data: ParserData = {
+      config: {},
+      extensions: {
+        dictionaries: [
+          {
+            type: REGULAR_DICT_TYPE,
+            config: { uri: "eddi://ai.labs.dictionary/dictionarystore/dictionaries/res1?version=1" },
+          },
+        ],
+        corrections: [],
+        normalizer: [],
+      },
+    };
+    const { onChange } = renderEditor(data);
+
+    await userEvent.click(screen.getByTestId("add-regular-dict-btn"));
+    const option = await screen.findByTestId("dict-option-res1");
+    expect(option).toBeDisabled();
+    await userEvent.click(option);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("still accepts a hand-written URI through the manual field", async () => {
     const data: ParserData = {
       config: {},
       extensions: { dictionaries: [], corrections: [], normalizer: [] },
@@ -202,11 +227,76 @@ describe("ParserEditor", () => {
     const { onChange } = renderEditor(data);
 
     await userEvent.click(screen.getByTestId("add-regular-dict-btn"));
-    expect(screen.getByTestId("dict-uri-picker")).toBeInTheDocument();
+    await userEvent.click(await screen.findByTestId("dict-manual-open"));
 
+    const input = screen.getByTestId("dict-uri-input");
+    expect(screen.getByTestId("confirm-add-dict")).toBeDisabled();
+    await userEvent.type(input, "eddi://ai.labs.dictionary/dictionarystore/dictionaries/mydict?version=2");
+    await userEvent.click(screen.getByTestId("confirm-add-dict"));
+
+    const call = onChange.mock.calls[0]![0] as ParserData;
+    const regularDicts = call.extensions?.dictionaries?.filter((d) => d.type === REGULAR_DICT_TYPE);
+    expect(regularDicts?.[0]?.config?.uri).toContain("mydict");
+  });
+
+  it("creates a dictionary from the picker and links it", async () => {
+    const data: ParserData = {
+      config: {},
+      extensions: { dictionaries: [], corrections: [], normalizer: [] },
+    };
+    const { onChange } = renderEditor(data);
+
+    await userEvent.click(screen.getByTestId("add-regular-dict-btn"));
+    await userEvent.click(await screen.findByTestId("dict-create-open"));
+
+    const nameInput = screen.getByTestId("dict-create-name");
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "Support Terms");
+    await userEvent.click(screen.getByTestId("dict-create-submit"));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const call = onChange.mock.calls[0]![0] as ParserData;
+    const regularDicts = call.extensions?.dictionaries?.filter((d) => d.type === REGULAR_DICT_TYPE);
+    expect(regularDicts?.length).toBe(1);
+    expect(regularDicts?.[0]?.config?.uri).toMatch(
+      /^eddi:\/\/ai\.labs\.dictionary\/dictionarystore\/dictionaries\/.+\?version=\d+$/,
+    );
+  });
+
+  it("backs out of the manual field to the list, without adding anything", async () => {
+    const data: ParserData = {
+      config: {},
+      extensions: { dictionaries: [], corrections: [], normalizer: [] },
+    };
+    const { onChange } = renderEditor(data);
+
+    await userEvent.click(screen.getByTestId("add-regular-dict-btn"));
+    await userEvent.click(await screen.findByTestId("dict-manual-open"));
     await userEvent.click(screen.getByTestId("cancel-add-dict"));
+
+    // Cancel here backs out of the URI field, it does not close the dialog —
+    // the list is still there to pick from.
     expect(screen.queryByTestId("dict-uri-picker")).not.toBeInTheDocument();
+    expect(screen.getByTestId("dictionary-picker-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("dict-search")).toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("closes the picker on Escape without adding anything", async () => {
+    const data: ParserData = {
+      config: {},
+      extensions: { dictionaries: [], corrections: [], normalizer: [] },
+    };
+    const { onChange } = renderEditor(data);
+
+    await userEvent.click(screen.getByTestId("add-regular-dict-btn"));
+    expect(await screen.findByTestId("dict-option-res1")).toBeInTheDocument();
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.queryByTestId("dictionary-picker-dialog")).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId("no-regular-dicts")).toBeInTheDocument();
   });
 
   it("removes a regular dictionary", async () => {
@@ -514,16 +604,56 @@ describe("ParserEditor", () => {
     expect(dictSection.textContent).toContain("5");
   });
 
-  // ── Add dict button disabled when URI empty ──
+  // ── Linked dictionaries resolve to their name ──
 
-  it("disables confirm button when URI is empty", async () => {
+  it("labels a linked dictionary with its resource name, not its id", async () => {
     renderEditor({
       config: {},
-      extensions: { dictionaries: [], corrections: [], normalizer: [] },
+      extensions: {
+        dictionaries: [
+          {
+            type: REGULAR_DICT_TYPE,
+            config: { uri: "eddi://ai.labs.dictionary/dictionarystore/dictionaries/res1?version=3" },
+          },
+        ],
+        corrections: [],
+        normalizer: [],
+      },
     });
 
-    await userEvent.click(screen.getByTestId("add-regular-dict-btn"));
-    const confirmBtn = screen.getByTestId("confirm-add-dict");
-    expect(confirmBtn).toBeDisabled();
+    const row = screen.getByTestId("regular-dict-0");
+    // The descriptor's name can only appear once the per-id descriptor read
+    // resolved; the id alone would render as "res1".
+    await waitFor(() => expect(row).toHaveTextContent("Mock descriptor res1"));
+    // The id and pinned version stay visible underneath — that is what the
+    // URI actually carries.
+    expect(row).toHaveTextContent("res1 · v3");
+    expect(screen.getByTestId("open-regular-dict-0")).toHaveAttribute(
+      "href",
+      "/manage/resources/dictionary/res1",
+    );
+  });
+
+  it("shows a non-dictionary URI as itself, with no link to a resource that isn't there", () => {
+    renderEditor({
+      config: {},
+      extensions: {
+        dictionaries: [
+          // What the manual field accepts but the dictionary store cannot
+          // resolve — linking to /manage/resources/dictionary/beh1 would point
+          // at a page for a ruleset.
+          {
+            type: REGULAR_DICT_TYPE,
+            config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
+          },
+        ],
+        corrections: [],
+        normalizer: [],
+      },
+    });
+
+    const row = screen.getByTestId("regular-dict-0");
+    expect(row).toHaveTextContent("eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1");
+    expect(screen.queryByTestId("open-regular-dict-0")).not.toBeInTheDocument();
   });
 });

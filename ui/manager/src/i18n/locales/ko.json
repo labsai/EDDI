@@ -1378,7 +1378,6 @@
     "addDict": "추가",
     "removeDict": "사전 제거",
     "noRegularDicts": "구성된 일반 사전이 없습니다",
-    "regularDictLabel": "일반 사전",
     "dictUri": "사전 리소스 URI",
     "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "교정",
@@ -1404,7 +1403,25 @@
       "specialCharacter": "특수문자 정규화기",
       "contractedWords": "축약어 정규화기",
       "allowedCharacter": "허용 문자 정규화기"
-    }
+    },
+    "regularDictsHint": "사전 리소스로 저장된 사용자 고유의 단어, 구문, 패턴입니다.",
+    "openDict": "사전을 새 탭에서 열기"
+  },
+  "dictionaryPicker": {
+    "title": "일반 사전 추가",
+    "searchPlaceholder": "사전 검색…",
+    "added": "추가됨",
+    "empty": "아직 사전이 없습니다",
+    "emptyDescription": "사전은 파서에 사용자 고유의 단어, 구문, 패턴을 학습시킵니다.",
+    "create": "사전 만들기",
+    "createTitle": "새 사전",
+    "createHint": "비어 있는 상태로 생성되어 이 파서에 바로 연결됩니다. 단어와 구문, 패턴은 사전 편집기에서 추가하세요.",
+    "createFailed": "사전이 생성되었지만 연결하지 못했습니다.",
+    "created": "사전을 만들고 연결했습니다",
+    "defaultName": "새 사전",
+    "descriptionPlaceholder": "이 사전이 파서에 가르치는 내용…",
+    "manual": "대신 URI로 연결",
+    "createdUnnamed": "사전을 만들고 연결했지만 이름을 저장하지 못했습니다. 사전 편집기에서 이름을 변경하세요."
   },
   "coordinator": {
     "activeConversations": "활성 대화",

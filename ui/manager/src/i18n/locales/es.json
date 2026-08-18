@@ -1392,7 +1392,6 @@
     "addDict": "Añadir",
     "removeDict": "Eliminar diccionario",
     "noRegularDicts": "No hay diccionarios regulares configurados",
-    "regularDictLabel": "Diccionario regular",
     "dictUri": "URI del recurso de diccionario",
     "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "Correcciones",
@@ -1418,7 +1417,25 @@
       "specialCharacter": "Normalizador de caracteres especiales",
       "contractedWords": "Normalizador de palabras contraídas",
       "allowedCharacter": "Normalizador de caracteres permitidos"
-    }
+    },
+    "regularDictsHint": "Tus propias palabras, frases y patrones, guardados como recursos de diccionario.",
+    "openDict": "Abrir el diccionario en una pestaña nueva"
+  },
+  "dictionaryPicker": {
+    "title": "Añadir diccionario regular",
+    "searchPlaceholder": "Buscar diccionarios…",
+    "added": "Añadido",
+    "empty": "Todavía no hay diccionarios",
+    "emptyDescription": "Un diccionario le enseña al analizador tus propias palabras, frases y patrones.",
+    "create": "Crear diccionario",
+    "createTitle": "Nuevo diccionario",
+    "createHint": "Se crea vacío y se vincula a este analizador de inmediato: añade palabras, frases y patrones en el editor de diccionarios.",
+    "createFailed": "El diccionario se creó, pero no se pudo vincular.",
+    "created": "Diccionario creado y vinculado",
+    "defaultName": "Nuevo diccionario",
+    "descriptionPlaceholder": "Qué le enseña este diccionario al analizador…",
+    "manual": "Vincular por URI en su lugar",
+    "createdUnnamed": "Diccionario creado y vinculado, pero no se pudo guardar su nombre: renómbralo en el editor de diccionarios."
   },
   "coordinator": {
     "activeConversations": "Conversaciones activas",

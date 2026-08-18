@@ -1392,7 +1392,6 @@
     "addDict": "Ajouter",
     "removeDict": "Supprimer le dictionnaire",
     "noRegularDicts": "Aucun dictionnaire régulier configuré",
-    "regularDictLabel": "Dictionnaire régulier",
     "dictUri": "URI de la ressource dictionnaire",
     "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "Corrections",
@@ -1418,7 +1417,25 @@
       "specialCharacter": "Normalisateur de caractères spéciaux",
       "contractedWords": "Normalisateur de mots contractés",
       "allowedCharacter": "Normalisateur de caractères autorisés"
-    }
+    },
+    "regularDictsHint": "Vos propres mots, expressions et motifs, stockés comme ressources de dictionnaire.",
+    "openDict": "Ouvrir le dictionnaire dans un nouvel onglet"
+  },
+  "dictionaryPicker": {
+    "title": "Ajouter un dictionnaire régulier",
+    "searchPlaceholder": "Rechercher des dictionnaires…",
+    "added": "Ajouté",
+    "empty": "Aucun dictionnaire pour le moment",
+    "emptyDescription": "Un dictionnaire apprend à l'analyseur vos propres mots, expressions et motifs.",
+    "create": "Créer un dictionnaire",
+    "createTitle": "Nouveau dictionnaire",
+    "createHint": "Il est créé vide et lié immédiatement à cet analyseur — ajoutez mots, expressions et motifs dans l'éditeur de dictionnaire.",
+    "createFailed": "Le dictionnaire a été créé mais n'a pas pu être lié.",
+    "created": "Dictionnaire créé et lié",
+    "defaultName": "Nouveau dictionnaire",
+    "descriptionPlaceholder": "Ce que ce dictionnaire apprend à l'analyseur…",
+    "manual": "Lier par URI à la place",
+    "createdUnnamed": "Dictionnaire créé et lié, mais son nom n'a pas pu être enregistré — renommez-le dans l'éditeur de dictionnaire."
   },
   "coordinator": {
     "activeConversations": "Conversations actives",

@@ -1378,7 +1378,6 @@
     "addDict": "追加",
     "removeDict": "辞書を削除",
     "noRegularDicts": "通常辞書が設定されていません",
-    "regularDictLabel": "通常辞書",
     "dictUri": "辞書リソース URI",
     "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "補正",
@@ -1404,7 +1403,25 @@
       "specialCharacter": "特殊文字正規化器",
       "contractedWords": "省略語正規化器",
       "allowedCharacter": "許可文字正規化器"
-    }
+    },
+    "regularDictsHint": "辞書リソースとして保存された、独自の単語・フレーズ・パターンです。",
+    "openDict": "辞書を新しいタブで開く"
+  },
+  "dictionaryPicker": {
+    "title": "通常辞書を追加",
+    "searchPlaceholder": "辞書を検索…",
+    "added": "追加済み",
+    "empty": "辞書がまだありません",
+    "emptyDescription": "辞書はパーサーに独自の単語・フレーズ・パターンを教えます。",
+    "create": "辞書を作成",
+    "createTitle": "新しい辞書",
+    "createHint": "空の状態で作成され、すぐにこのパーサーにリンクされます。単語・フレーズ・パターンは辞書エディターで追加してください。",
+    "createFailed": "辞書は作成されましたが、リンクできませんでした。",
+    "created": "辞書を作成してリンクしました",
+    "defaultName": "新しい辞書",
+    "descriptionPlaceholder": "この辞書がパーサーに教える内容…",
+    "manual": "代わりに URI でリンク",
+    "createdUnnamed": "辞書を作成してリンクしましたが、名前を保存できませんでした。辞書エディターで名前を変更してください。"
   },
   "coordinator": {
     "activeConversations": "アクティブな会話",

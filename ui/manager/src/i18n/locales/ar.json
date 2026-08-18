@@ -1434,7 +1434,6 @@
     "addDict": "إضافة",
     "removeDict": "إزالة القاموس",
     "noRegularDicts": "لم يتم تهيئة أي قواميس عادية",
-    "regularDictLabel": "قاموس عادي",
     "dictUri": "عنوان URI لمورد القاموس",
     "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "التصحيحات",
@@ -1460,7 +1459,25 @@
       "specialCharacter": "مُعيِّر الأحرف الخاصة",
       "contractedWords": "مُعيِّر الكلمات المختصرة",
       "allowedCharacter": "مُعيِّر الأحرف المسموحة"
-    }
+    },
+    "regularDictsHint": "كلماتك وعباراتك وأنماطك الخاصة، مخزَّنة كموارد قواميس.",
+    "openDict": "فتح القاموس في علامة تبويب جديدة"
+  },
+  "dictionaryPicker": {
+    "title": "إضافة قاموس عادي",
+    "searchPlaceholder": "البحث في القواميس…",
+    "added": "مُضاف",
+    "empty": "لا توجد قواميس بعد",
+    "emptyDescription": "يُعلِّم القاموس المحلِّل كلماتك وعباراتك وأنماطك الخاصة.",
+    "create": "إنشاء قاموس",
+    "createTitle": "قاموس جديد",
+    "createHint": "يُنشأ فارغًا ويُربط بهذا المحلِّل فورًا — أضف الكلمات والعبارات والأنماط في محرِّر القواميس.",
+    "createFailed": "تم إنشاء القاموس ولكن تعذَّر ربطه.",
+    "created": "تم إنشاء القاموس وربطه",
+    "defaultName": "قاموس جديد",
+    "descriptionPlaceholder": "ما الذي يُعلِّمه هذا القاموس للمحلِّل…",
+    "manual": "الربط عبر معرّف URI بدلاً من ذلك",
+    "createdUnnamed": "تم إنشاء القاموس وربطه، لكن تعذَّر حفظ اسمه — أعد تسميته في محرِّر القواميس."
   },
   "coordinator": {
     "activeConversations": "المحادثات النشطة",

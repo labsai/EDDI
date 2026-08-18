@@ -1378,7 +1378,6 @@
     "addDict": "Hinzufügen",
     "removeDict": "Wörterbuch entfernen",
     "noRegularDicts": "Keine regulären Wörterbücher konfiguriert",
-    "regularDictLabel": "Reguläres Wörterbuch",
     "dictUri": "Wörterbuch-Ressourcen-URI",
     "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "Korrekturen",
@@ -1404,7 +1403,25 @@
       "specialCharacter": "Sonderzeichen-Normalisierer",
       "contractedWords": "Kontraktions-Normalisierer",
       "allowedCharacter": "Erlaubte-Zeichen-Normalisierer"
-    }
+    },
+    "regularDictsHint": "Ihre eigenen Wörter, Phrasen und Muster, gespeichert als Wörterbuch-Ressourcen.",
+    "openDict": "Wörterbuch in neuem Tab öffnen"
+  },
+  "dictionaryPicker": {
+    "title": "Reguläres Wörterbuch hinzufügen",
+    "searchPlaceholder": "Wörterbücher suchen…",
+    "added": "Hinzugefügt",
+    "empty": "Noch keine Wörterbücher",
+    "emptyDescription": "Ein Wörterbuch bringt dem Parser Ihre eigenen Wörter, Phrasen und Muster bei.",
+    "create": "Wörterbuch erstellen",
+    "createTitle": "Neues Wörterbuch",
+    "createHint": "Es wird leer erstellt und sofort mit diesem Parser verknüpft — Wörter, Phrasen und Muster fügen Sie im Wörterbuch-Editor hinzu.",
+    "createFailed": "Das Wörterbuch wurde erstellt, konnte aber nicht verknüpft werden.",
+    "created": "Wörterbuch erstellt und verknüpft",
+    "defaultName": "Neues Wörterbuch",
+    "descriptionPlaceholder": "Was dieses Wörterbuch dem Parser beibringt…",
+    "manual": "Stattdessen per URI verknüpfen",
+    "createdUnnamed": "Wörterbuch erstellt und verknüpft, aber sein Name konnte nicht gespeichert werden — benennen Sie es im Wörterbuch-Editor um."
   },
   "coordinator": {
     "activeConversations": "Aktive Gespräche",

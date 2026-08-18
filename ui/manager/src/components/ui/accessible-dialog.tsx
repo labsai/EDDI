@@ -111,18 +111,24 @@ export function AccessibleDialog({
 
       {/* Dialog */}
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        {/* Capped at the viewport and scrolled in the body, not the box: a
+            dialog taller than the window was centred and then clipped at BOTH
+            ends, so its title and close button sat off-screen with nothing to
+            scroll — the picker with a full list hit this at 900×480. The
+            header stays put; only the content moves. `dvh`, so a mobile URL
+            bar sliding in does not re-clip it. */}
         <div
           ref={dialogRef}
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
-          className={`w-full ${maxWidth} rounded-xl border bg-card shadow-2xl`}
+          className={`flex max-h-[calc(100dvh-2rem)] w-full ${maxWidth} flex-col rounded-xl border bg-card shadow-2xl`}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={handleKeyDown}
           data-testid={testId}
         >
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-border p-5">
+          <div className="flex shrink-0 items-center justify-between border-b border-border p-5">
             <h2
               id={titleId}
               className="text-lg font-semibold text-foreground"
@@ -140,8 +146,9 @@ export function AccessibleDialog({
             )}
           </div>
 
-          {/* Content */}
-          {children}
+          {/* Content — `min-h-0` so this is what shrinks and scrolls when the
+              dialog meets the viewport cap, rather than overflowing the box. */}
+          <div className="min-h-0 overflow-y-auto">{children}</div>
         </div>
       </div>
     </>
