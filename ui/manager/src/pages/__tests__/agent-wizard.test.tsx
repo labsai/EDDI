@@ -675,6 +675,42 @@ describe("AgentWizardPage", () => {
     expect(screen.queryByTestId("wizard-apikey-input")).not.toBeInTheDocument();
   });
 
+  it("shows the backend's vault grant warning when the chosen key is narrowly granted", async () => {
+    server.use(
+      http.post("*/administration/agents/setup", () =>
+        HttpResponse.json({
+          agentId: "agent-1",
+          agentName: "Agent",
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          deployed: false,
+          deploymentStatus: "ERROR",
+          resources: { vaultGrantWarning: "Vault key 'scoped' is granted only to [agent-42]." },
+        })
+      )
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
+    });
+
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Prompt");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-model"), "claude-sonnet-4-6");
+    await user.type(screen.getByTestId("wizard-apikey-input"), "sk-key");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-deploy"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("wizard-vault-grant-warning")).toHaveTextContent("granted only to [agent-42]");
+    });
+  });
+
   // ── Create Another resets wizard ──────────────────────────────────
 
   it("Create Another resets to step 1", async () => {

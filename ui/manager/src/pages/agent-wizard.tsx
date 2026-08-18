@@ -259,6 +259,19 @@ export function AgentWizardPage() {
             </div>
           )}
 
+          {/* Backend-authored, so rendered verbatim: the picker above lists every
+              vault key including narrowly granted ones, and this is the one place
+              the user learns why such an agent will not deploy. */}
+          {typeof result.resources?.vaultGrantWarning === "string" && (
+            <p
+              className="mx-auto mt-3 max-w-md text-start text-xs text-amber-700 dark:text-amber-300"
+              data-testid="wizard-vault-grant-warning"
+            >
+              <AlertCircle className="me-1 inline h-3.5 w-3.5 align-text-bottom" />
+              {result.resources.vaultGrantWarning}
+            </p>
+          )}
+
           {result.apiKeyVaultReference && (
             <div className="mt-4 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-start">
               <p className="text-xs text-muted-foreground">

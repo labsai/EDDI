@@ -94,6 +94,13 @@ export interface SetupResult {
   groups?: string[];
   quickRepliesEnabled?: boolean;
   sentimentAnalysisEnabled?: boolean;
+  /**
+   * Created resource locations plus deploy outcome (`deployWarning`,
+   * `deployError`) and, when the chosen vault key is granted only to specific
+   * agents, `vaultGrantWarning` — the new agent cannot be on that list yet, so
+   * under grant enforcement its deployment is blocked until the grant is
+   * widened.
+   */
   resources?: Record<string, unknown>;
   /**
    * The `${vault:...}` reference the created agent's LLM config points at —
