@@ -511,11 +511,15 @@ function TeamBuilder({
   );
 
   const addMember = useCallback(() => {
-    // Seed the LLM choice from the last advisor built here. A team is normally
-    // one provider and one credential across every member, and without this the
-    // vault key had to be picked again for each of them — the repetition this
-    // wizard exists to avoid. Still per-member state, so any slot can differ.
-    const previous = [...members].reverse().find((m) => m.mode === "new");
+    // The LLM fields stay blank on purpose: blank means "inherit the
+    // workforce-wide LlmDefaults" (see MemberSlot), which is how one provider
+    // and one credential already cover the whole team.
+    //
+    // An earlier version of this seeded them from the previous advisor, to save
+    // picking the same vault key once per member. That shipped alongside the
+    // defaults block and is redundant next to it — worse, it defeated it:
+    // concrete per-member copies stop tracking the defaults, so editing the
+    // workforce key afterwards silently left the seeded advisors on the old one.
     onMembersChange([
       ...members,
       {
@@ -526,9 +530,9 @@ function TeamBuilder({
         agentId: "",
         createdAgentId: "",
         systemPrompt: "",
-        provider: previous?.provider ?? "",
-        model: previous?.model ?? "",
-        apiKey: previous?.apiKey ?? "",
+        provider: "",
+        model: "",
+        apiKey: "",
       },
     ]);
   }, [members, onMembersChange]);

@@ -2,12 +2,18 @@ import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { TeamBuilder, type MemberSlot } from "../team-builder";
+import { INITIAL_LLM_DEFAULTS } from "../member-validation";
 
 /**
- * A team is normally one provider and one credential across every member. The
- * wizard has a `SecretKeyPicker` per member, so without seeding, building a
- * five-advisor board meant picking the same vault key five times — and each
- * pasted plaintext copy would have been vaulted separately by the backend.
+ * A board is normally one provider and one credential across every member, and
+ * the workforce-wide `LlmDefaults` is what delivers that: a member's LLM fields
+ * are blank by default and `effectiveLlm` falls back to the defaults, so the
+ * vault key is picked once for the team.
+ *
+ * A new advisor must therefore start blank. Seeding it from the previous
+ * advisor looks like the same convenience but is not: concrete per-member
+ * copies stop tracking the defaults, so editing the workforce key afterwards
+ * leaves the seeded advisors pointing at the old one.
  */
 describe("TeamBuilder — advisor slots", () => {
   function member(overrides: Partial<MemberSlot> = {}): MemberSlot {
@@ -17,6 +23,7 @@ describe("TeamBuilder — advisor slots", () => {
       role: "",
       mode: "new",
       agentId: "",
+      createdAgentId: "",
       systemPrompt: "",
       provider: "",
       model: "",
@@ -34,11 +41,13 @@ describe("TeamBuilder — advisor slots", () => {
         onBoardDescriptionChange={vi.fn()}
         members={members}
         onMembersChange={onMembersChange}
+        llmDefaults={INITIAL_LLM_DEFAULTS}
+        onLlmDefaultsChange={vi.fn()}
       />
     );
   }
 
-  it("seeds a new advisor's LLM choice from the previous one", async () => {
+  it("adds an advisor whose LLM fields are blank, so it inherits the workforce defaults", async () => {
     const onMembersChange = vi.fn();
     const existing = member({
       displayName: "First",
@@ -52,46 +61,41 @@ describe("TeamBuilder — advisor slots", () => {
 
     const added = onMembersChange.mock.calls[0]![0]!.at(-1)!;
     expect(added).toMatchObject({
-      provider: "anthropic",
-      model: "claude-sonnet-5",
-      apiKey: "${vault:openai-prod}",
-      // Identity is per-advisor and must NOT be inherited.
-      displayName: "",
-      role: "",
-      systemPrompt: "",
-    });
-  });
-
-  /** An "existing" slot points at a deployed agent and holds no credential. */
-  it("ignores existing-agent slots when seeding", async () => {
-    const onMembersChange = vi.fn();
-    render(
-      [
-        member({ provider: "openai", model: "gpt-5.4", apiKey: "${vault:shared}" }),
-        member({ mode: "existing", agentId: "agent-1" }),
-      ],
-      onMembersChange
-    );
-
-    await userEvent.setup().click(screen.getByTestId("add-advisor-btn"));
-
-    expect(onMembersChange.mock.calls[0]![0]!.at(-1)!).toMatchObject({
-      provider: "openai",
-      model: "gpt-5.4",
-      apiKey: "${vault:shared}",
-    });
-  });
-
-  it("leaves the LLM fields empty when there is nothing to seed from", async () => {
-    const onMembersChange = vi.fn();
-    render([member({ mode: "existing", agentId: "agent-1" })], onMembersChange);
-
-    await userEvent.setup().click(screen.getByTestId("add-advisor-btn"));
-
-    expect(onMembersChange.mock.calls[0]![0]!.at(-1)!).toMatchObject({
+      // Blank, NOT copied from the advisor above — see the suite comment.
       provider: "",
       model: "",
       apiKey: "",
+      displayName: "",
+      role: "",
+      systemPrompt: "",
+      mode: "new",
     });
+  });
+
+  /**
+   * `createdAgentId` tracks the id a partially failed creation minted, so a
+   * retry reuses it. A fresh slot has never been created, so it must start
+   * empty or the wizard would adopt a stale agent.
+   */
+  it("gives a new advisor an empty createdAgentId", async () => {
+    const onMembersChange = vi.fn();
+    render([member({ createdAgentId: "already-made-agent-1" })], onMembersChange);
+
+    await userEvent.setup().click(screen.getByTestId("add-advisor-btn"));
+
+    expect(onMembersChange.mock.calls[0]![0]!.at(-1)!.createdAgentId).toBe("");
+  });
+
+  it("appends rather than replacing, and gives each advisor its own id", async () => {
+    const onMembersChange = vi.fn();
+    const first = member({ displayName: "First" });
+    render([first], onMembersChange);
+
+    await userEvent.setup().click(screen.getByTestId("add-advisor-btn"));
+
+    const next = onMembersChange.mock.calls[0]![0]!;
+    expect(next).toHaveLength(2);
+    expect(next[0]).toBe(first);
+    expect(next[1]!.id).not.toBe(first.id);
   });
 });
