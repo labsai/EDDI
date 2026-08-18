@@ -60,8 +60,10 @@ public class McpSetupTools {
                                      + "(anthropic, openai, gemini, mistral). Not needed for bedrock (uses IAM), "
                                      + "oracle-genai (uses OCI auth), or local LLMs (ollama, jlama). "
                                      + "Can be a vault reference like '${vault:openai-key}'. To put several agents on ONE key, "
-                                     + "pass the apiKeyVaultReference returned by an earlier setup_agent call here — a plaintext "
-                                     + "key that the vault already holds is also reused rather than stored again.") String apiKey,
+                                     + "pass the apiKeyVaultReference returned by an earlier setup_agent call here — that always "
+                                     + "reuses the named entry. A plaintext key the vault already holds is reused too, but only "
+                                     + "when the deployment leaves eddi.setup.vault-key-reuse at 'checksum' and the existing entry "
+                                     + "is granted to all agents; otherwise it is stored as a new entry.") String apiKey,
                              @ToolArg(description = "Base URL for the LLM provider (optional). "
                                      + "Useful for ollama when running in Docker (e.g. 'http://host.docker.internal:11434')") String baseUrl,
                              @ToolArg(description = "Greeting message shown when a conversation starts (optional)") String introMessage,
@@ -95,7 +97,8 @@ public class McpSetupTools {
                     // vaultKeyName is not exposed here. Not for reuse — apiKey already
                     // accepts a ${vault:...} reference (see its description), so an
                     // MCP caller can put an agent on an existing key today, and a
-                    // plaintext apiKey de-duplicates by checksum. What vaultKeyName adds
+                    // plaintext apiKey de-duplicates by checksum wherever the
+                    // deployment has that enabled. What vaultKeyName adds
                     // is choosing the NAME of a newly created entry and a
                     // value-must-match check on an existing one — and these tools are
                     // reachable by eddi-editor while REST setup is eddi-admin. Neither

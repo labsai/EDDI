@@ -302,13 +302,27 @@ Plaintext reuse is matched on the SHA-256 checksum the vault already stores per 
 
 Set `eddi.setup.vault-key-reuse=never` to switch plaintext reuse off and give every agent its own entry again — appropriate when two agents hold the same-valued key today but must be able to rotate independently. Neither setting affects the first two rows above: those are explicit caller decisions. Any other value fails startup, as `eddi.vault.grant-enforcement` does — a typo must not silently switch de-duplication off.
 
-Every setup response carries **`apiKeyVaultReference`** — the reference the created agent's LLM config actually points at, whether this call vaulted the key or reused an entry that already held it. Pass it straight back as `vaultKeyName` (or as `apiKey`) on the next setup to put another agent on the same credential. It is `null` when the vault is disabled and the key was stored in plaintext: the plaintext is a secret and is never echoed back in a response body.
+Every setup response carries **`apiKeyVaultReference`** — the reference the created agent's LLM config actually points at, whether this call vaulted the key or reused an entry that already held it. Pass it straight back as `vaultKeyName` (or as `apiKey`) on the next setup to put another agent on the same credential.
 
-`vaultKeyName` must match `[a-zA-Z0-9._-]{1,128}` — the same charset the secrets REST API enforces, because the value gets embedded in `${vault:<tenant>/<key>}` where a `/` would re-parse as a tenant separator and a `}` would truncate the reference. Use the `${vault:tenant/key}` form for a non-default tenant. Naming one key in `vaultKeyName` and a *different* one in `apiKey` is rejected rather than silently resolved in favour of either.
+It is `null` in two cases: the provider needs no key at all (`ollama`, `jlama`, `bedrock`, `oracle-genai`, …), and the vault is disabled so the key was stored in plaintext — a plaintext key is a secret and is never echoed back in a response body.
+
+A setup can also return **`resources.vaultWarning`**: the chosen key does not exist, or it is granted only to other agents. Neither fails the setup — see *Reusing one key across agents* above — but both end in an agent that was created and cannot use its credential, so both are reported rather than only logged.
+
+`vaultKeyName` accepts three shapes:
+
+| Shape | Parsed as |
+| --- | --- |
+| `openai-prod` | key `openai-prod` in the `default` tenant |
+| `${vault:openai-prod}` | the same — the wrapper is unwrapped, not stored |
+| `${vault:acme/openai-prod}` | key `openai-prod` in tenant `acme` |
+
+The **tenant and key components** must each match `[a-zA-Z0-9._-]{1,128}` — the same charset the secrets REST API enforces on create. (The `${vault:…}` wrapper itself is of course not expected to match; it is stripped first.) The constraint is not cosmetic: the components are re-embedded into `${vault:<tenant>/<key>}`, where a `/` inside a *bare* name would re-parse as a tenant separator and a `}` would truncate the reference, leaving the agent pointing at a different secret or none.
+
+Naming one key in `vaultKeyName` and a *different* one in `apiKey` is rejected rather than silently resolved in favour of either.
 
 `vaultKeyName` is a REST-only field (`eddi-admin`). The MCP `setup_agent` / `create_api_agent` tools do not carry it — not to prevent reuse, which their `apiKey` already supports as a `${vault:...}` reference, but because the two things it *adds* (choosing the name of a newly created entry, and a value-must-match check on an existing one) are not needed to provision an agent and do not belong on the `eddi-editor` tier those tools are open to: name-squatting an entry an operator intends to create, and a per-request "does key X hold value V" oracle.
 
-Naming, or pasting a reference to, a secret whose `allowedAgents` is narrowed is accepted — the legitimate flow is setup without deploy, widen the grant to the new agent's ID, deploy — but a brand-new agent cannot be on any existing grant list, so under `enforce` a `deploy: true` setup will end as `deployed: false`. The response says so up front in `resources.vaultGrantWarning`. (Plaintext reuse simply skips such entries.)
+Naming, or pasting a reference to, a secret whose `allowedAgents` is narrowed is accepted — the legitimate flow is setup without deploy, widen the grant to the new agent's ID, deploy — but a brand-new agent cannot be on any existing grant list, so under `enforce` a `deploy: true` setup will end as `deployed: false`. The response says so up front in `resources.vaultWarning`. (Plaintext reuse simply skips such entries.)
 
 ### What rollback does with the vault
 
@@ -316,7 +330,9 @@ A setup that fails part-way rolls back the documents it created. It also removes
 
 ### Collision Prevention
 
-A generated vault key includes an epoch-millisecond timestamp suffix. This prevents key collisions when two agents share the same name — each gets a unique vault entry.
+A generated vault key is named `setup.<agent>.<timestamp>-<random>.apiKey`. The timestamp alone was not sufficient: two setups for agents with the same name landing in the same millisecond produced the same name, and `store` is an upsert, so one silently overwrote the other's credential. The random suffix is what makes the name unique; the timestamp is kept because it tells you when the entry was made.
+
+A **caller-chosen** `vaultKeyName` has no such suffix, by design — that is the point of naming it. Creating one is read-then-write rather than a conditional insert, so two setups naming the same new key with different values can race; the loser is detected on read-back and fails before anything is created, but a write landing after that read is not caught. Prefer creating a shared key through the secrets REST API first, then naming it.
 
 ### Graceful Degradation
 

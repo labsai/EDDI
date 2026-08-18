@@ -1089,10 +1089,18 @@ public class AgentSetupService {
         }
 
         try {
-            // Namespace: setup.<sanitized-agent-name>.<timestamp>.apiKey
-            // Timestamp suffix prevents collision when two agents share the same name
+            // Namespace: setup.<sanitized-agent-name>.<timestamp>-<random>.apiKey
+            //
+            // The timestamp alone did not make this unique. Two setups for agents with
+            // the same name, landing in the same millisecond, produced the same key
+            // name — and secretProvider.store is an UPSERT, so the second silently
+            // overwrote the first, leaving one agent referencing the other's
+            // credential. The random suffix is what actually prevents that; the
+            // timestamp stays because it tells an operator reading the vault when the
+            // entry was made.
             String sanitizedName = agentName.toLowerCase().replaceAll("[^a-z0-9]", "-");
-            String keyName = "setup." + sanitizedName + "." + System.currentTimeMillis() + ".apiKey";
+            String keyName = "setup." + sanitizedName + "." + System.currentTimeMillis() + "-"
+                    + UUID.randomUUID().toString().substring(0, 8) + ".apiKey";
             // Rollback deletes what is recorded here, and that is only safe while nobody
             // else can be referencing the entry. Under `never` that holds: the name is
             // unique and no other setup will find it. Under `checksum` it does not — the
@@ -1185,9 +1193,40 @@ public class AgentSetupService {
             // triggers rollback, a concurrent setup may already have reused the entry,
             // and rollback would pull the key out from under an agent that is not ours.
             // Leaving it also means the retry finds the key already in place.
-            return storeSecret(ref, key, agentName, null);
+            String reference = storeSecret(ref, key, agentName, null);
+            verifyStoredValue(ref, key);
+            return reference;
         } catch (ISecretProvider.SecretProviderException e) {
             throw new AgentSetupException("Could not store the API key under vault key '" + ref.keyName() + "': " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Read the entry back and fail if it does not hold what was just written.
+     * <p>
+     * The absent-then-create sequence above is not atomic: {@code store} is an
+     * UPSERT (every {@link ISecretProvider} caller uses it that way — there is no
+     * create-if-absent in the SPI), so two setups naming the same key with
+     * different values can both find it missing and both write. Without this check
+     * the loser proceeds and provisions an agent pointing at the winner's
+     * credential.
+     * <p>
+     * This narrows the window rather than closing it: a write that lands after this
+     * read is still missed. Closing it properly needs a conditional insert in the
+     * persistence layer (Mongo and Postgres both), which is an SPI change shared
+     * with three other callers and does not belong in this one. What it does buy is
+     * that the common interleaving fails loudly, here, before a single document is
+     * created — instead of silently.
+     */
+    private void verifyStoredValue(SecretReference ref, String expectedPlaintext) throws AgentSetupException {
+        try {
+            SecretMetadata written = secretProvider.getMetadata(ref);
+            if (written.checksum() != null && !EnvelopeCrypto.sha256Hex(expectedPlaintext).equals(written.checksum())) {
+                throw new AgentSetupException("Vault key '" + ref.keyName() + "' was written concurrently by another setup and now holds "
+                        + "a different value. Nothing was created; retry, or choose a vaultKeyName that is not in contention.");
+            }
+        } catch (ISecretProvider.SecretNotFoundException | ISecretProvider.SecretProviderException e) {
+            LOGGER.debugf("Could not read back vault key '%s' after storing it: %s", LogSanitizer.sanitize(ref.keyName()), e.getMessage());
         }
     }
 
@@ -1260,12 +1299,16 @@ public class AgentSetupService {
     }
 
     /**
-     * {@code SetupResult.resources} key under which a non-fatal vault warning is
-     * returned to the caller. {@code resources} is already the channel for
-     * {@code deployWarning}/{@code deployError}, and the REST and MCP callers see
-     * it; a server-side log line alone would not reach them.
+     * {@code SetupResult.resources} key under which a non-fatal problem with the
+     * vault key the new agent points at is returned to the caller — the key does
+     * not exist, or it is granted only to other agents. Both end the same way, in
+     * an agent that was created successfully and cannot use its credential, so both
+     * belong in the response: {@code resources} is already the channel for
+     * {@code deployWarning}/{@code deployError}, and a server-side log line alone
+     * does not reach the caller. Only one vault key is resolved per setup, so the
+     * two cases cannot collide over this entry.
      */
-    static final String VAULT_GRANT_WARNING = "vaultGrantWarning";
+    static final String VAULT_WARNING = "vaultWarning";
 
     /**
      * A pass-through {@code apiKey} reference is accepted as-is — that has always
@@ -1283,8 +1326,8 @@ public class AgentSetupService {
         try {
             warnIfRestricted(secretProvider.getMetadata(ref), agentName, resources);
         } catch (ISecretProvider.SecretNotFoundException e) {
-            LOGGER.warnf("Agent '%s' references vault key '%s', which does not exist (yet). The agent will fail to resolve its API "
-                    + "key at runtime until that secret is created.", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(ref.keyName()));
+            warn(resources, agentName, "Vault key '" + ref.keyName() + "' does not exist. The agent was created, but cannot resolve its "
+                    + "API key at runtime until that secret is stored (secrets REST API).");
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.debugf("Could not check vault key '%s': %s", LogSanitizer.sanitize(ref.keyName()), e.getMessage());
         }
@@ -1304,13 +1347,17 @@ public class AgentSetupService {
         if (metadata == null || isUnrestricted(metadata)) {
             return;
         }
-        String warning = "Vault key '" + metadata.keyName() + "' is granted only to " + metadata.allowedAgents()
+        warn(resources, agentName, "Vault key '" + metadata.keyName() + "' is granted only to " + metadata.allowedAgents()
                 + ". The agent being created cannot be on that list yet, so with eddi.vault.grant-enforcement=enforce its "
                 + "deployment will be blocked until the grant is widened to '*' or to the new agent's ID (secrets REST API, "
-                + "PATCH allowedAgents).";
+                + "PATCH allowedAgents).");
+    }
+
+    /** Log a non-fatal vault problem and return it to the caller. */
+    private void warn(Map<String, Object> resources, String agentName, String warning) {
         LOGGER.warnf("Agent '%s': %s", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(warning));
         if (resources != null) {
-            resources.put(VAULT_GRANT_WARNING, warning);
+            resources.put(VAULT_WARNING, warning);
         }
     }
 

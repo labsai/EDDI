@@ -62,7 +62,7 @@ decisions, not defaults. Field-injected like the neighbouring
 `vaultKeyName` is deliberately **not** exposed on the MCP `setup_agent` / `create_api_agent` tools. *(Rationale
 corrected in the third review pass below — an earlier version of this paragraph claimed it stopped a model
 pointing an agent at an arbitrary secret, which `apiKey: "${vault:...}"` already allows.)* The MCP path
-still de-duplicates by checksum, so it does not grow the vault either.
+still de-duplicates by checksum wherever the deployment leaves that enabled, so it does not grow the vault either.
 
 **Files:** `AgentSetupService.java` (trim, `useNamedVaultKey`, `findReusableSecret`, `storeSecret`,
 step-0 move, validation now accepts `vaultKeyName` in place of `apiKey` for cloud providers),
@@ -114,7 +114,7 @@ Checkstyle clean.
 
 One real bug and three smaller items, all fixed:
 
-- **`vaultKeyName: "${vault:acme/openai"` created the secret in the `default` tenant.** `useNamedVaultKey` parsed
+- **`vaultKeyName: "${vault:acme/openai}"` created the secret in the `default` tenant.** `useNamedVaultKey` parsed
   the tenant for the *lookup* but `storeSecret` rebuilt the reference with `DEFAULT_TENANT` for the *create* — so a
   missing tenant-qualified key produced a setup that "worked" and an agent whose reference pointed at nothing.
   `storeSecret` now takes the full `SecretReference`. Mutation-checked: reverting it fails the new test.
@@ -148,7 +148,7 @@ findings, all fixed:
 2. **Restricted grants were handled inconsistently.** The checksum path skipped narrowed entries (correctly),
    but naming one via `vaultKeyName`, or pasting its reference, sailed through and ended as `deployed: false`
    with the reason only in the server log — a brand-new agent's ID cannot be on any existing grant list, so
-   under `enforce` that outcome is certain. Both paths now WARN and put `resources.vaultGrantWarning` in the
+   under `enforce` that outcome is certain. Both paths now WARN and put `resources.vaultWarning` in the
    response. Not refused: setup-without-deploy → widen grant → deploy is the legitimate flow.
 3. **The MCP rationale was false.** "A model that could choose the name could point a new agent at any
    unrestricted secret" — the tool already advertises `apiKey: "${vault:name}"`, so it already can. The real
@@ -168,7 +168,7 @@ who can already read checksums via the secrets list gains no new oracle from che
 first-time setups with the same key can create two entries, and later setups converge on the older one.
 
 365 backend tests green (`AgentSetupVaultKeyReuseTest` at 34), Checkstyle clean. Manager: the wizard success screen
-now renders `resources.vaultGrantWarning` verbatim (backend-authored, no new i18n keys) — its picker lists every
+now renders `resources.vaultWarning` verbatim (backend-authored, no new i18n keys) — its picker lists every
 vault key including narrowly granted ones, and this is where the user learns why such an agent will not deploy.
 
 ### EDDI-Manager — `feat/setup-vault-key-reuse`

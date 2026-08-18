@@ -20,6 +20,7 @@ import org.mockito.Mock;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -132,6 +133,10 @@ class AgentSetupVaultKeyReuseTest {
 
             verify(secretProvider).getMetadata(new SecretReference(SecretReference.DEFAULT_TENANT, "typo-key"));
             verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            // A log line does not reach the caller. Both this and the restricted-grant
+            // case end in an agent that was created and cannot use its credential.
+            assertTrue(String.valueOf(createdResources.get(AgentSetupService.VAULT_WARNING)).contains("does not exist"),
+                    String.valueOf(createdResources.get(AgentSetupService.VAULT_WARNING)));
         }
 
         /**
@@ -147,7 +152,7 @@ class AgentSetupVaultKeyReuseTest {
 
             assertEquals("${vault:scoped}", vaultApiKey("${vault:scoped}", null));
 
-            String warning = String.valueOf(createdResources.get(AgentSetupService.VAULT_GRANT_WARNING));
+            String warning = String.valueOf(createdResources.get(AgentSetupService.VAULT_WARNING));
             assertTrue(warning.contains("agent-42") && warning.contains("blocked"), warning);
         }
 
@@ -158,7 +163,7 @@ class AgentSetupVaultKeyReuseTest {
 
             vaultApiKey("${vault:open}", null);
 
-            assertFalse(createdResources.containsKey(AgentSetupService.VAULT_GRANT_WARNING));
+            assertFalse(createdResources.containsKey(AgentSetupService.VAULT_WARNING));
         }
 
         @Test
@@ -294,6 +299,24 @@ class AgentSetupVaultKeyReuseTest {
             assertTrue(String.valueOf(createdResources.get(AgentSetupService.VAULTED_SECRET_KEY)).startsWith("setup.my-agent."));
         }
 
+        /**
+         * The timestamp alone did not make the name unique: two setups for agents with
+         * the same name in the same millisecond produced the same key, and store is an
+         * UPSERT, so one silently overwrote the other's credential.
+         */
+        @Test
+        @DisplayName("two same-named agents in the same millisecond get different keys")
+        void generatedNamesDoNotCollide() throws Exception {
+            var names = new HashSet<String>();
+            for (int i = 0; i < 50; i++) {
+                createdResources.clear();
+                service.vaultKeyReuse = AgentSetupService.VAULT_KEY_REUSE_NEVER;
+                names.add(vaultApiKey(KEY, null));
+            }
+
+            assertEquals(50, names.size(), "generated vault key names must be unique: " + names);
+        }
+
         @Test
         @DisplayName("the stored value is trimmed, not the raw paste")
         void storesTheTrimmedKey() throws Exception {
@@ -341,7 +364,7 @@ class AgentSetupVaultKeyReuseTest {
 
             assertEquals("${vault:scoped}", vaultApiKey(null, "scoped"));
 
-            assertTrue(String.valueOf(createdResources.get(AgentSetupService.VAULT_GRANT_WARNING)).contains("agent-42"));
+            assertTrue(String.valueOf(createdResources.get(AgentSetupService.VAULT_WARNING)).contains("agent-42"));
         }
 
         @Test
@@ -453,10 +476,31 @@ class AgentSetupVaultKeyReuseTest {
             assertEquals("openai-prod", ref.getValue().keyName());
         }
 
+        /**
+         * store is an UPSERT and the absent-then-create sequence is not atomic, so two
+         * setups naming one key with different values can both find it missing and both
+         * write. Reading back turns the common interleaving into a loud failure before
+         * any document exists, instead of an agent provisioned against the other
+         * caller's credential.
+         */
+        @Test
+        @DisplayName("a value overwritten concurrently is detected, not accepted")
+        void concurrentOverwriteIsDetected() throws Exception {
+            when(secretProvider.getMetadata(any()))
+                    .thenThrow(new ISecretProvider.SecretNotFoundException("absent"))
+                    .thenReturn(entry("openai-prod", "the-other-callers-key", Instant.EPOCH, List.of("*")));
+
+            var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
+
+            assertTrue(e.getMessage().contains("written concurrently"), e.getMessage());
+        }
+
         @Test
         @DisplayName("a missing entry is created under exactly that name")
         void createsUnderTheGivenName() throws Exception {
-            when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("nope"));
+            when(secretProvider.getMetadata(any()))
+                    .thenThrow(new ISecretProvider.SecretNotFoundException("nope"))
+                    .thenReturn(entry("openai-prod", KEY, Instant.EPOCH, List.of("*")));
 
             assertEquals("${vault:openai-prod}", vaultApiKey(KEY, "openai-prod"));
 
