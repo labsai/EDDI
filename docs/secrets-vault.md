@@ -302,6 +302,10 @@ Plaintext reuse is matched on the SHA-256 checksum the vault already stores per 
 
 Set `eddi.setup.vault-key-reuse=never` to switch plaintext reuse off and give every agent its own entry again — appropriate when two agents hold the same-valued key today but must be able to rotate independently. Neither setting affects the first two rows above: those are explicit caller decisions.
 
+Every setup response carries **`apiKeyVaultReference`** — the reference the created agent's LLM config actually points at, whether this call vaulted the key or reused an entry that already held it. Pass it straight back as `vaultKeyName` (or as `apiKey`) on the next setup to put another agent on the same credential. It is `null` when the vault is disabled and the key was stored in plaintext: the plaintext is a secret and is never echoed back in a response body.
+
+`vaultKeyName` must match `[a-zA-Z0-9._-]{1,128}` — the same charset the secrets REST API enforces, because the value gets embedded in `${vault:<tenant>/<key>}` where a `/` would re-parse as a tenant separator and a `}` would truncate the reference. Use the `${vault:tenant/key}` form for a non-default tenant. Naming one key in `vaultKeyName` and a *different* one in `apiKey` is rejected rather than silently resolved in favour of either.
+
 `vaultKeyName` is a REST-only field. It is deliberately absent from the MCP `setup_agent` / `create_api_agent` tools, where a model choosing the name could point a new agent at any unrestricted secret in the vault by naming it.
 
 ### Collision Prevention

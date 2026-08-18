@@ -702,9 +702,9 @@ class AgentSetupServiceBranchCoverageTest {
     class VaultApiKey {
 
         private String invokeVaultApiKey(String apiKey, String agentName) throws Exception {
-            var method = AgentSetupService.class.getDeclaredMethod("vaultApiKey", String.class, String.class);
+            var method = AgentSetupService.class.getDeclaredMethod("vaultApiKey", String.class, String.class, String.class, Map.class);
             method.setAccessible(true);
-            return (String) method.invoke(service, apiKey, agentName);
+            return (String) method.invoke(service, apiKey, agentName, null, null);
         }
 
         @Test

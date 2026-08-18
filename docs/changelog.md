@@ -77,11 +77,68 @@ so they are not passing for the wrong reason. Full local run of `AgentSetup*Test
 guards (`ImportStyleTest`, `DocumentationLinksTest`, `StrictBoundaryShippedConfigsTest`,
 `RuleSetStoreShippedRulesetsTest`) — all green.
 
-**What's next / not done here:** the Manager's agent wizard and Workforce team builder still render the
-API key as a bare text input. `operator-activation.tsx` already offers "Paste your API key, or pick a
-vault key" via `use-secrets` + `vault-ref.ts`; extending that picker to those two forms (and wiring it
-to `vaultKeyName`) is the matching EDDI-Manager change, and is where the multi-agent case gets a UI
-rather than a JSON field.
+### Review pass — findings addressed
+
+A second read of the change turned up six things, all fixed on this branch:
+
+1. **The reused key was invisible.** The whole complaint is "I can't reuse the key because I can't find
+   its name", and the first cut made that *worse*: a newly created key showed up in
+   `resources.vaultedSecretKeyName`, but a reused one appeared nowhere. `SetupResult` now carries
+   **`apiKeyVaultReference`** on every setup — created or reused — to hand straight back as
+   `vaultKeyName` next time. It is null when the vault is off and the key went in as plaintext:
+   `vaultReferenceOrNull()` gates it, because the "effective api key" is the caller's secret in that
+   case and echoing it in a response body would put it through every proxy log on the way out.
+2. **A named key was rollback fodder, and that was a cross-agent delete.** Agent A creates
+   `${vault:openai-prod}`, agent B reuses it, A then fails → A's rollback deleted the key B now points
+   at. Fixed by not registering caller-named creations at all: rollback exists to stop a retry loop
+   growing the vault, and a chosen name cannot grow it (a retry reuses the same name), so deleting was
+   the riskier of the two options rather than the safer one.
+3. **`vaultKeyName` was not validated.** The value gets embedded in `${vault:<tenant>/<key>}`, where a
+   bare name containing `/` silently re-parses as a tenant separator and a `}` truncates the reference —
+   the agent then resolves a *different* secret, or none. Now checked against `[a-zA-Z0-9._-]{1,128}`,
+   the same charset `RestSecretStore` enforces on create.
+4. **Contradictory input resolved silently.** `vaultKeyName: "a"` with `apiKey: "${vault:b}"` honoured
+   `a` and dropped `b` on the floor — deploying the agent against a credential the caller did not pick.
+   Rejected now.
+5. **The rollback record was written before the store succeeded**, so a failed write left a name for a
+   secret that never existed and rollback logged a "could not remove" warning chasing it. Recorded after.
+6. **Key resolution moved out of the `try`.** It was already at "step 0", but inside the block, so a
+   clean `vaultKeyName 'x' does not exist` came back wrapped in `Failed to set up agent:`. Outside, the
+   400 says what is actually wrong. Also dropped the now-dead two-arg `vaultApiKey` overload.
+
+`AgentSetupVaultKeyReuseTest` grew to 25 tests covering each of these; `DynamicAgentToolsTest` picked up
+the extra `SetupResult` component. 356 tests across the setup suites and repo-wide guards, green,
+Checkstyle clean.
+
+### EDDI-Manager — `feat/setup-vault-key-reuse`
+
+The earlier note in this entry said the wizard and team builder "still render the API key as a bare text
+input". That was wrong — both already use `SecretKeyPicker`, which lists vault keys and can create one
+inline. What was actually missing was everything *around* the pick:
+
+- **`SecretKeyPicker` trims before deciding a value is a reference**, and normalises a pasted one. This
+  is the frontend half of the backend trim bug: a reference pasted with whitespace failed
+  `startsWith("${vault:")`, so the field stayed a masked password and the user had no way to tell the
+  paste had registered as a reference at all.
+- **The success screen shows `apiKeyVaultReference`** with a copy button — the answer to "which key did
+  this agent end up on".
+- **"Create Another" carries provider, model and the credential forward**, but only when it came back as
+  a reference. A plaintext key must not survive an explicit form reset, and with the vault off there is
+  nothing to reuse anyway.
+- **The Workforce team builder seeds a new advisor from the previous one.** A board is one provider and
+  one key across every member; without this the vault key had to be picked once per advisor — the exact
+  repetition that motivated this work.
+- Types: `vaultKeyName` on both requests, `apiKeyVaultReference` on `SetupResult`. `vaultKeyName`
+  deliberately gets **no form field**: the picker on `apiKey` already produces `${vault:<name>}` and can
+  create a named entry inline, so a second field would only be a second way to say the same thing.
+- Eleven locales updated (the `i18n-drift` gate covers all of them, not just `en`).
+
+Manager: 5,383 tests green, `tsc -b` clean, `eslint --max-warnings 0` clean. The two behavioural
+frontend changes are mutation-checked — reverting the trim and the seeding fails four of them.
+
+**What's next:** nothing outstanding for this feature. The Manager change is a separate PR and needs
+this backend merged first; against an older backend `apiKeyVaultReference` is simply absent and the
+success-screen block does not render.
 
 ---
 

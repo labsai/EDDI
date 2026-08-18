@@ -34,11 +34,20 @@ import java.util.Map;
  *            whether sentiment analysis is enabled
  * @param resources
  *            map of created resource locations
+ * @param apiKeyVaultReference
+ *            the {@code ${vault:...}} reference the created agent's LLM config
+ *            points at — whether this setup vaulted the key or reused an entry
+ *            that already held it. Pass it back as {@code vaultKeyName} (or as
+ *            {@code apiKey}) on the next setup to put another agent on the same
+ *            credential without re-entering it. Null when the vault is disabled
+ *            and the key was stored in plaintext: the plaintext is a secret and
+ *            is deliberately never echoed back in a response body.
  *
  * @author ginccc
  */
 public record SetupResult(String action, String agentId, String agentName, String provider, String model, Boolean deployed, String deploymentStatus,
-        Integer endpointCount, List<String> groups, Boolean quickRepliesEnabled, Boolean sentimentAnalysisEnabled, Map<String, Object> resources) {
+        Integer endpointCount, List<String> groups, Boolean quickRepliesEnabled, Boolean sentimentAnalysisEnabled, Map<String, Object> resources,
+        String apiKeyVaultReference) {
 
     /**
      * Builder for fluent construction.
@@ -60,6 +69,7 @@ public record SetupResult(String action, String agentId, String agentName, Strin
         private Boolean quickRepliesEnabled;
         private Boolean sentimentAnalysisEnabled;
         private Map<String, Object> resources;
+        private String apiKeyVaultReference;
 
         public Builder action(String action) {
             this.action = action;
@@ -109,10 +119,14 @@ public record SetupResult(String action, String agentId, String agentName, Strin
             this.resources = resources;
             return this;
         }
+        public Builder apiKeyVaultReference(String apiKeyVaultReference) {
+            this.apiKeyVaultReference = apiKeyVaultReference;
+            return this;
+        }
 
         public SetupResult build() {
             return new SetupResult(action, agentId, agentName, provider, model, deployed, deploymentStatus, endpointCount, groups,
-                    quickRepliesEnabled, sentimentAnalysisEnabled, resources);
+                    quickRepliesEnabled, sentimentAnalysisEnabled, resources, apiKeyVaultReference);
         }
     }
 }

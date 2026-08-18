@@ -55,6 +55,7 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.*;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Service that encapsulates the business logic for setting up EDDI agents. Used
@@ -186,14 +187,16 @@ public class AgentSetupService {
 
         var createdResources = new LinkedHashMap<String, Object>();
 
-        try {
-            // --- Step 0: Resolve the API key against the vault ---
-            // Ahead of every store call, for the same reason the HITL config is
-            // validated above: an unusable vaultKeyName (missing, or holding a
-            // different value) has to fail while rollback still has nothing to undo,
-            // not after a parser, a ruleset and a workflow already exist.
-            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources);
+        // --- Step 0: Resolve the API key against the vault ---
+        // Outside the try, for the same reason the HITL config is validated above: an
+        // unusable vaultKeyName (missing, or holding a different value) has to fail
+        // while rollback still has nothing to undo, not after a parser, a ruleset and
+        // a workflow already exist. Outside also keeps the message intact — a caller
+        // reading a 400 wants "vaultKeyName 'x' does not exist", not that sentence
+        // wrapped in "Failed to set up agent".
+        String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources);
 
+        try {
             // --- Step 1: Create Parser ---
             var parserConfig = createParserConfig();
             Response parserResponse = getRestStore(IRestParserStore.class).createParser(parserConfig);
@@ -263,7 +266,10 @@ public class AgentSetupService {
 
             // --- Step 8: Deploy ---
             var resultBuilder = SetupResult.builder().action("setup_complete").agentId(agentId != null ? agentId : "unknown")
-                    .agentName(request.agentName()).provider(params.providerType).model(params.modelId);
+                    .agentName(request.agentName()).provider(params.providerType).model(params.modelId)
+                    // So the next agent can be put on this same credential without the
+                    // caller having to go digging for the generated key name.
+                    .apiKeyVaultReference(vaultReferenceOrNull(effectiveApiKey));
 
             if (quickReplies)
                 resultBuilder.quickRepliesEnabled(true);
@@ -432,12 +438,13 @@ public class AgentSetupService {
         var params = resolveParamsValidated(request.provider(), request.model(), request.deploy(), request.environment());
         var createdResources = new LinkedHashMap<String, Object>();
 
-        try {
-            // --- Step 0: Resolve the API key against the vault ---
-            // Ahead of every store call, so an unusable vaultKeyName fails while
-            // rollback still has nothing to undo. See setupAgent for the full note.
-            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources);
+        // --- Step 0: Resolve the API key against the vault ---
+        // Outside the try, so an unusable vaultKeyName fails while rollback still has
+        // nothing to undo and its message reaches the caller unwrapped. See setupAgent
+        // for the full note.
+        String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources);
 
+        try {
             // --- Step 1: Parse OpenAPI and build grouped httpcalls configs ---
             McpApiToolBuilder.ApiBuildResult buildResult;
             try {
@@ -528,7 +535,9 @@ public class AgentSetupService {
             // --- Step 8: Deploy ---
             var resultBuilder = SetupResult.builder().action("api_agent_created").agentId(agentId != null ? agentId : "unknown")
                     .agentName(request.agentName()).provider(params.providerType).model(params.modelId).endpointCount(buildResult.endpointCount())
-                    .groups(groupNames);
+                    .groups(groupNames)
+                    // See setupAgent: hands the caller the reference to reuse next time.
+                    .apiKeyVaultReference(vaultReferenceOrNull(effectiveApiKey));
 
             if (params.shouldDeploy && agentId != null) {
                 var deployResult = deployAndWait(params.env, agentId, agentVersion);
@@ -986,29 +995,6 @@ public class AgentSetupService {
     }
 
     /**
-     * Auto-vault an API key if the vault is available. When the vault is active,
-     * the plaintext key is stored encrypted and a vault reference string
-     * ({@code ${vault:keyName}}) is returned. Downstream consumers
-     * ({@link ai.labs.eddi.modules.llm.impl.ChatModelRegistry}) resolve vault
-     * references transparently at model-load time.
-     *
-     * <p>
-     * When the vault is <b>not</b> configured (common in dev mode without
-     * {@code EDDI_VAULT_MASTER_KEY}), the plaintext key is returned as-is. This
-     * ensures the setup flow never breaks due to missing vault config.
-     *
-     * @param apiKey
-     *            the plaintext API key (may be null for local LLM providers)
-     * @param agentName
-     *            used for the vault key namespace and description
-     * @return the vault reference string, or the plaintext key if vault is
-     *         unavailable
-     */
-    private String vaultApiKey(String apiKey, String agentName) throws AgentSetupException {
-        return vaultApiKey(apiKey, agentName, null, null);
-    }
-
-    /**
      * Resolve the value that goes into the generated LLM config's {@code apiKey}
      * parameter, vaulting the plaintext only when the vault does not already hold
      * it.
@@ -1108,6 +1094,22 @@ public class AgentSetupService {
         SecretReference ref = isVaultReference(requestedName)
                 ? SecretReference.parse(requestedName)
                 : new SecretReference(SecretReference.DEFAULT_TENANT, requestedName);
+        // Same charset the secrets REST API enforces on create. Not decoration: the
+        // value is about to be embedded in "${vault:<tenant>/<key>}", where a '/' in a
+        // BARE name would silently re-parse as a tenant separator and a '}' would
+        // truncate the reference — the agent would then resolve a different secret, or
+        // none. Multi-tenant callers use the ${vault:tenant/key} form, which is parsed
+        // above rather than guessed at here.
+        validateSecretName(ref.tenantId(), "tenant in vaultKeyName");
+        validateSecretName(ref.keyName(), "vaultKeyName");
+
+        // Two different keys named in one request. Honouring vaultKeyName and dropping
+        // the apiKey reference on the floor would deploy an agent against a credential
+        // the caller did not pick, so say so instead.
+        if (key != null && isVaultReference(key) && !SecretReference.parse(key).equals(ref)) {
+            throw new AgentSetupException("apiKey references vault key '" + SecretReference.parse(key).keyName()
+                    + "' but vaultKeyName says '" + ref.keyName() + "'. Pass one or the other.");
+        }
 
         if (!secretProvider.isAvailable()) {
             throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' cannot be used: the secrets vault is unavailable or "
@@ -1142,7 +1144,14 @@ public class AgentSetupService {
         }
 
         try {
-            return storeSecret(ref.keyName(), key, agentName, createdResources);
+            // Deliberately NOT registered for rollback (null, not createdResources).
+            // Rollback exists to stop a retry loop growing the vault without bound, and
+            // a caller-chosen name cannot: a retry reuses the same name. Deleting it
+            // would be the more dangerous act — between this store and the failure that
+            // triggers rollback, a concurrent setup may already have reused the entry,
+            // and rollback would pull the key out from under an agent that is not ours.
+            // Leaving it also means the retry finds the key already in place.
+            return storeSecret(ref.keyName(), key, agentName, null);
         } catch (ISecretProvider.SecretProviderException e) {
             throw new AgentSetupException("Could not store the API key under vault key '" + ref.keyName() + "': " + e.getMessage(), e);
         }
@@ -1154,9 +1163,6 @@ public class AgentSetupService {
      */
     private String storeSecret(String keyName, String plaintext, String agentName, Map<String, Object> createdResources)
             throws ISecretProvider.SecretProviderException {
-        if (createdResources != null) {
-            createdResources.put(VAULTED_SECRET_KEY, keyName);
-        }
         var ref = new SecretReference(SecretReference.DEFAULT_TENANT, keyName);
         // "*" is deliberate. allowedAgents IS enforced now (VaultGrantGate, at
         // deploy time), so this list is a real access-control decision — but the
@@ -1168,6 +1174,11 @@ public class AgentSetupService {
         // Operators who want a narrow grant set it after setup, via the secrets
         // REST API; see docs/secrets-vault.md "Agent Grants".
         secretProvider.store(ref, plaintext, "Auto-vaulted by AgentSetupService for agent: " + agentName, List.of("*"));
+        // Recorded only once the write succeeded: a name whose store threw does not
+        // exist, and rollback would log a spurious "could not remove" warning for it.
+        if (createdResources != null) {
+            createdResources.put(VAULTED_SECRET_KEY, keyName);
+        }
         LOGGER.infof("API key vaulted for agent '%s' (key: %s)", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(keyName));
         return ref.toReferenceString();
     }
@@ -1213,6 +1224,28 @@ public class AgentSetupService {
             LOGGER.debugf("Could not scan the vault for a reusable API key: %s", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Same charset the secrets REST API enforces, so a name created here stays
+     * addressable there.
+     */
+    private static final Pattern VALID_SECRET_NAME = Pattern.compile("[a-zA-Z0-9._-]{1,128}");
+
+    private static void validateSecretName(String value, String label) throws AgentSetupException {
+        if (value == null || !VALID_SECRET_NAME.matcher(value).matches()) {
+            throw new AgentSetupException(label + " must match [a-zA-Z0-9._-]{1,128}, got: " + value);
+        }
+    }
+
+    /**
+     * The reference, or null when the value is a plaintext key. Guards what reaches
+     * {@link SetupResult}: with the vault disabled the "effective api key" IS the
+     * caller's secret, and echoing that back in an HTTP response body would put it
+     * through every proxy log between here and the client.
+     */
+    private static String vaultReferenceOrNull(String effectiveApiKey) {
+        return effectiveApiKey != null && isVaultReference(effectiveApiKey) ? effectiveApiKey : null;
     }
 
     /**

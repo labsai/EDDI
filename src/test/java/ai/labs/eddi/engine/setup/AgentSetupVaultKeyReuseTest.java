@@ -26,11 +26,13 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -218,6 +220,20 @@ class AgentSetupVaultKeyReuseTest {
 
             verify(secretProvider).store(any(), eq(KEY), anyString(), any());
         }
+
+        /**
+         * A name recorded before the write would name a secret that does not exist, and
+         * rollback would log a "could not remove" warning chasing it.
+         */
+        @Test
+        @DisplayName("a failed store records nothing for rollback")
+        void failedStoreRecordsNothing() throws Exception {
+            doThrow(new ISecretProvider.SecretProviderException("disk full")).when(secretProvider).store(any(), anyString(), anyString(),
+                    any());
+
+            assertEquals(KEY, vaultApiKey(KEY, null), "falls back to plaintext");
+            assertFalse(createdResources.containsKey(AgentSetupService.VAULTED_SECRET_KEY));
+        }
     }
 
     // ─── an explicit vaultKeyName ────────────────────────────────────────
@@ -269,6 +285,63 @@ class AgentSetupVaultKeyReuseTest {
             verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
         }
 
+        /**
+         * Rollback deletes what it finds under VAULTED_SECRET_KEY. A caller-chosen name
+         * cannot grow the vault on retry (the retry reuses the name), while a
+         * concurrent setup may already have reused the entry — so deleting it is the
+         * riskier of the two options, not the safer one.
+         */
+        @Test
+        @DisplayName("a newly created NAMED entry is left alone by rollback")
+        void namedEntryIsNotRollbackFodder() throws Exception {
+            when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("nope"));
+
+            vaultApiKey(KEY, "openai-prod");
+
+            assertFalse(createdResources.containsKey(AgentSetupService.VAULTED_SECRET_KEY));
+        }
+
+        /**
+         * Honouring the name and dropping the reference silently would deploy the agent
+         * against a credential the caller did not pick.
+         */
+        @Test
+        @DisplayName("apiKey and vaultKeyName naming DIFFERENT keys is refused")
+        void contradictoryNamesAreRefused() throws Exception {
+            var e = assertThrows(AgentSetupService.AgentSetupException.class,
+                    () -> vaultApiKey("${vault:openai-dev}", "openai-prod"));
+
+            assertTrue(e.getMessage().contains("Pass one or the other"), e.getMessage());
+        }
+
+        @Test
+        @DisplayName("apiKey and vaultKeyName naming the SAME key is fine")
+        void agreeingNamesAreAccepted() throws Exception {
+            when(secretProvider.getMetadata(any())).thenReturn(entry("openai-prod", KEY, Instant.EPOCH, List.of("*")));
+
+            assertEquals("${vault:openai-prod}", vaultApiKey("${vault:openai-prod}", "openai-prod"));
+        }
+
+        /**
+         * The name is about to be embedded in "${vault:<tenant>/<key>}". A bare name
+         * containing '/' would re-parse as a tenant separator and a '}' would truncate
+         * the reference, so the agent would resolve a different secret — or none.
+         */
+        @Test
+        @DisplayName("a name that would not survive the reference syntax is refused")
+        void malformedNamesAreRefused() {
+            for (String bad : List.of("tenant/key", "key}", "key with spaces")) {
+                assertThrows(Exception.class, () -> vaultApiKey(KEY, bad), "should have refused: " + bad);
+            }
+        }
+
+        /** An empty field is "not supplied", not a name of zero characters. */
+        @Test
+        @DisplayName("blank vaultKeyName is treated as absent")
+        void blankNameIsAbsent() throws Exception {
+            assertTrue(vaultApiKey(KEY, "   ").startsWith("${vault:setup.my-agent."));
+        }
+
         @Test
         @DisplayName("a missing entry is created under exactly that name")
         void createsUnderTheGivenName() throws Exception {
@@ -279,8 +352,6 @@ class AgentSetupVaultKeyReuseTest {
             var ref = ArgumentCaptor.forClass(SecretReference.class);
             verify(secretProvider).store(ref.capture(), eq(KEY), anyString(), any());
             assertEquals("openai-prod", ref.getValue().keyName());
-            assertEquals("openai-prod", createdResources.get(AgentSetupService.VAULTED_SECRET_KEY),
-                    "A newly created entry IS this setup's to roll back");
         }
 
         @Test
@@ -307,6 +378,37 @@ class AgentSetupVaultKeyReuseTest {
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
 
             assertTrue(e.getMessage().contains("vault is unavailable"), e.getMessage());
+        }
+    }
+
+    // ─── what the response body is allowed to carry ──────────────────────
+
+    @Nested
+    @DisplayName("SetupResult.apiKeyVaultReference")
+    class ResultReference {
+
+        private String vaultReferenceOrNull(String effectiveApiKey) throws Exception {
+            Method method = AgentSetupService.class.getDeclaredMethod("vaultReferenceOrNull", String.class);
+            method.setAccessible(true);
+            return (String) method.invoke(null, effectiveApiKey);
+        }
+
+        @Test
+        @DisplayName("hands back the reference, so the next agent can name it")
+        void exposesTheReference() throws Exception {
+            assertEquals("${vault:openai-prod}", vaultReferenceOrNull("${vault:openai-prod}"));
+        }
+
+        /**
+         * With the vault disabled the "effective api key" IS the caller's secret.
+         * Echoing it in a response body would put it through every proxy log between
+         * here and the client.
+         */
+        @Test
+        @DisplayName("never echoes a plaintext key")
+        void neverEchoesPlaintext() throws Exception {
+            assertNull(vaultReferenceOrNull(KEY));
+            assertNull(vaultReferenceOrNull(null));
         }
     }
 }
