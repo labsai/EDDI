@@ -283,6 +283,11 @@ function TeamBuilder({
   );
 
   const addMember = useCallback(() => {
+    // Seed the LLM choice from the last advisor built here. A team is normally
+    // one provider and one credential across every member, and without this the
+    // vault key had to be picked again for each of them — the repetition this
+    // wizard exists to avoid. Still per-member state, so any slot can differ.
+    const previous = [...members].reverse().find((m) => m.mode === "new");
     onMembersChange([
       ...members,
       {
@@ -292,9 +297,9 @@ function TeamBuilder({
         mode: "new",
         agentId: "",
         systemPrompt: "",
-        provider: "",
-        model: "",
-        apiKey: "",
+        provider: previous?.provider ?? "",
+        model: previous?.model ?? "",
+        apiKey: previous?.apiKey ?? "",
       },
     ]);
   }, [members, onMembersChange]);

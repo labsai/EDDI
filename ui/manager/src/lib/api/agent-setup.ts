@@ -16,6 +16,15 @@ export interface SetupAgentRequest {
   enableSentimentAnalysis?: boolean;
   deploy?: boolean;
   environment?: string;
+  /**
+   * Name of the vault entry the LLM API key lives under, so several agents can
+   * share ONE stored credential. Not surfaced as its own form field: the
+   * `SecretKeyPicker` on `apiKey` already produces `${vault:<name>}` (and can
+   * create a named entry inline), which the backend reuses without re-vaulting.
+   * Typed here because the endpoint accepts it and a caller building a request
+   * by hand should see it.
+   */
+  vaultKeyName?: string;
 }
 
 export interface CreateApiAgentRequest {
@@ -60,6 +69,15 @@ export interface CreateApiAgentRequest {
    * resource is created).
    */
   maxToolIterations?: number;
+  /**
+   * Name of the vault entry the LLM API key lives under, so several agents can
+   * share ONE stored credential. Not surfaced as its own form field: the
+   * `SecretKeyPicker` on `apiKey` already produces `${vault:<name>}` (and can
+   * create a named entry inline), which the backend reuses without re-vaulting.
+   * Typed here because the endpoint accepts it and a caller building a request
+   * by hand should see it.
+   */
+  vaultKeyName?: string;
 }
 
 // ---------- Response type ----------
@@ -77,6 +95,14 @@ export interface SetupResult {
   quickRepliesEnabled?: boolean;
   sentimentAnalysisEnabled?: boolean;
   resources?: Record<string, unknown>;
+  /**
+   * The `${vault:...}` reference the created agent's LLM config points at —
+   * whether setup vaulted the key just now or reused an entry that already held
+   * it. Hand it to the next agent (as `apiKey` or `vaultKeyName`) to put both on
+   * the same credential. Absent when the vault is disabled and the key was
+   * stored in plain text: the backend never echoes a plaintext secret back.
+   */
+  apiKeyVaultReference?: string;
 }
 
 // ---------- Provider helpers ----------

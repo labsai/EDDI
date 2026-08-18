@@ -524,6 +524,8 @@
     "endpointsParsed": "{{count}} endpoints API analizados",
     "viewAgent": "Ver agent",
     "createAnother": "Crear otro",
+    "vaultKeyUsed": "Este agente usa la clave de la bóveda que aparece abajo. Elige la misma para tu próximo agente en lugar de volver a pegar la clave de API.",
+    "vaultKeyCopied": "Referencia de bóveda copiada",
     "allTools": "Todas las herramientas",
     "selectSpecific": "Selección manual",
     "allToolsInfo": "Las {{count}} herramientas integradas estarán disponibles para su agente. Elija «Selección manual» para limitar las herramientas activas.",

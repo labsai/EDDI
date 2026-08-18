@@ -24,6 +24,7 @@ import {
   ExternalLink,
   ListFilter,
   Info,
+  KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSetupAgent, useCreateApiAgent } from "@/hooks/use-agent-setup";
@@ -258,6 +259,38 @@ export function AgentWizardPage() {
             </div>
           )}
 
+          {result.apiKeyVaultReference && (
+            <div className="mt-4 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-start">
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "setupWizard.vaultKeyUsed",
+                  "This agent uses the vault key below. Pick the same one for your next agent instead of pasting the API key again.",
+                )}
+              </p>
+              <div className="mt-1.5 flex items-center gap-2">
+                <KeyRound className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                <code
+                  className="min-w-0 flex-1 truncate font-mono text-xs text-amber-700 dark:text-amber-300"
+                  title={result.apiKeyVaultReference}
+                  data-testid="wizard-vault-reference"
+                >
+                  {result.apiKeyVaultReference}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(result.apiKeyVaultReference!);
+                    toast.success(t("setupWizard.vaultKeyCopied", "Vault reference copied"));
+                  }}
+                  className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  data-testid="wizard-vault-reference-copy"
+                >
+                  {t("common.copy", "Copy")}
+                </button>
+              </div>
+            </div>
+          )}
+
           {result.endpointCount != null && (
             <p className="mt-3 text-sm text-muted-foreground">
               {t("setupWizard.endpointsParsed", "{{count}} API endpoints parsed", {
@@ -279,7 +312,18 @@ export function AgentWizardPage() {
             </Link>
             <button
               onClick={() => {
-                setState(INITIAL_STATE);
+                // Carry the LLM choice into the next run. Only when the key came
+                // back as a vault REFERENCE: that is the whole point of the
+                // reference (agent #2 needs no credential re-entry), whereas
+                // holding a plaintext key in form state across an explicit reset
+                // keeps a secret alive for no benefit — the vault is off in that
+                // case, so there is nothing to reuse anyway.
+                setState({
+                  ...INITIAL_STATE,
+                  provider: result.apiKeyVaultReference ? state.provider : INITIAL_STATE.provider,
+                  model: result.apiKeyVaultReference ? state.model : INITIAL_STATE.model,
+                  apiKey: result.apiKeyVaultReference ?? "",
+                });
                 setCurrentStep(0);
                 setResult(null);
                 setError("");

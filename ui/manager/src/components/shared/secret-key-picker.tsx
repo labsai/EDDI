@@ -42,13 +42,22 @@ const VAULT_EXPR_PREFIX = "${vault:";
 const LEGACY_VAULT_PREFIX = "eddivault:";
 const LEGACY_VAULT_EXPR_PREFIX = "${eddivault:";
 
-/** Check if a value is a vault reference (canonical or legacy prefix) */
+/**
+ * Check if a value is a vault reference (canonical or legacy prefix).
+ *
+ * Trimmed first: a reference copied out of this list, a config file or a chat
+ * message arrives with whitespace around it, and without the trim it fell
+ * through to the plaintext branch — the field stayed a masked password instead
+ * of showing the amber chip, so the user could not tell that the paste had
+ * landed as a reference at all.
+ */
 function isVaultRef(value: string): boolean {
+  const v = value.trim();
   return (
-    value.startsWith(VAULT_PREFIX) ||
-    value.startsWith(VAULT_EXPR_PREFIX) ||
-    value.startsWith(LEGACY_VAULT_PREFIX) ||
-    value.startsWith(LEGACY_VAULT_EXPR_PREFIX)
+    v.startsWith(VAULT_PREFIX) ||
+    v.startsWith(VAULT_EXPR_PREFIX) ||
+    v.startsWith(LEGACY_VAULT_PREFIX) ||
+    v.startsWith(LEGACY_VAULT_EXPR_PREFIX)
   );
 }
 
@@ -57,7 +66,8 @@ function isVaultRef(value: string): boolean {
  * For `${vault:keyName}` → returns `"keyName"`.
  * For `${vault:tenantId/keyName}` → returns `"tenantId/keyName"`.
  */
-function extractVaultKey(value: string): string {
+function extractVaultKey(input: string): string {
+  const value = input.trim();
   if (value.startsWith(VAULT_EXPR_PREFIX)) {
     return value.slice(
       VAULT_EXPR_PREFIX.length,
@@ -539,11 +549,17 @@ export function SecretKeyPicker({
 
   const handleDirectChange = useCallback(
     (newValue: string) => {
-      onChange(newValue);
-      // Auto-detect full vault reference paste
-      if (isVaultRef(newValue) && newValue.endsWith("}")) {
+      // Auto-detect a pasted reference and normalise it to the canonical form.
+      // Emitting the raw paste instead would send a trailing newline along with
+      // the reference as the api key — which the backend has to trim on its side
+      // to recognise, and which the chip below would render with the stray
+      // whitespace baked in.
+      if (isVaultRef(newValue) && newValue.trim().endsWith("}")) {
+        onChange(newValue.trim());
         closePopup();
+        return;
       }
+      onChange(newValue);
     },
     [onChange, closePopup],
   );
