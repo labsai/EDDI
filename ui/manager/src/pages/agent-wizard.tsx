@@ -24,8 +24,10 @@ import {
   ExternalLink,
   ListFilter,
   Info,
+  KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { useSetupAgent, useCreateApiAgent } from "@/hooks/use-agent-setup";
 import {
   LLM_PROVIDERS,
@@ -258,6 +260,60 @@ export function AgentWizardPage() {
             </div>
           )}
 
+          {/* Backend-authored, so rendered verbatim: the picker above lists every
+              vault key, including ones that do not exist any more and ones granted
+              only to other agents, and this is the one place the user learns that
+              the agent they just created cannot use its credential. */}
+          {typeof result.resources?.vaultWarning === "string" && (
+            <p
+              className="mx-auto mt-3 max-w-md text-start text-xs text-amber-700 dark:text-amber-300"
+              data-testid="wizard-vault-warning"
+            >
+              <AlertCircle className="me-1 inline h-3.5 w-3.5 align-text-bottom" />
+              {result.resources.vaultWarning}
+            </p>
+          )}
+
+          {result.apiKeyVaultReference && (
+            <div className="mt-4 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-start">
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "setupWizard.vaultKeyUsed",
+                  "This agent uses the vault key below. Pick the same one for your next agent instead of pasting the API key again.",
+                )}
+              </p>
+              <div className="mt-1.5 flex items-center gap-2">
+                <KeyRound className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                <code
+                  className="min-w-0 flex-1 truncate font-mono text-xs text-amber-700 dark:text-amber-300"
+                  title={result.apiKeyVaultReference}
+                  data-testid="wizard-vault-reference"
+                >
+                  {result.apiKeyVaultReference}
+                </code>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 shrink-0 text-xs"
+                  onClick={async () => {
+                    // Awaited: reporting "copied" before the write resolves is a lie
+                    // in a non-secure context or when permission is denied, and the
+                    // rejection would go unhandled.
+                    try {
+                      await navigator.clipboard.writeText(result.apiKeyVaultReference!);
+                      toast.success(t("setupWizard.vaultKeyCopied", "Vault reference copied"));
+                    } catch {
+                      toast.error(t("common.copyFailed", "Failed to copy to clipboard"));
+                    }
+                  }}
+                  data-testid="wizard-vault-reference-copy"
+                >
+                  {t("common.copy", "Copy")}
+                </Button>
+              </div>
+            </div>
+          )}
+
           {result.endpointCount != null && (
             <p className="mt-3 text-sm text-muted-foreground">
               {t("setupWizard.endpointsParsed", "{{count}} API endpoints parsed", {
@@ -279,7 +335,18 @@ export function AgentWizardPage() {
             </Link>
             <button
               onClick={() => {
-                setState(INITIAL_STATE);
+                // Carry the LLM choice into the next run. Only when the key came
+                // back as a vault REFERENCE: that is the whole point of the
+                // reference (agent #2 needs no credential re-entry), whereas
+                // holding a plaintext key in form state across an explicit reset
+                // keeps a secret alive for no benefit — the vault is off in that
+                // case, so there is nothing to reuse anyway.
+                setState({
+                  ...INITIAL_STATE,
+                  provider: result.apiKeyVaultReference ? state.provider : INITIAL_STATE.provider,
+                  model: result.apiKeyVaultReference ? state.model : INITIAL_STATE.model,
+                  apiKey: result.apiKeyVaultReference ?? "",
+                });
                 setCurrentStep(0);
                 setResult(null);
                 setError("");

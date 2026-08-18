@@ -580,6 +580,137 @@ describe("AgentWizardPage", () => {
     });
   });
 
+  // ── vault reference carried between agents ─────────────────────────
+
+  /**
+   * The whole point of reusing one vault key across agents: after setup the
+   * caller has to be able to SEE which key the agent landed on, otherwise the
+   * generated name (setup.<agent>.<timestamp>.apiKey) is unguessable and the
+   * next agent gets a fresh copy of the same credential.
+   */
+  it("shows the vault reference the created agent uses", async () => {
+    server.use(
+      http.post("*/administration/agents/setup", () =>
+        HttpResponse.json({
+          agentId: "agent-1",
+          agentName: "Agent",
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          apiKeyVaultReference: "${vault:openai-prod}",
+        })
+      )
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
+    });
+
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Prompt");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-model"), "claude-sonnet-4-6");
+    await user.type(screen.getByTestId("wizard-apikey-input"), "sk-key");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-deploy"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("wizard-vault-reference")).toHaveTextContent(
+        "${vault:openai-prod}"
+      );
+    });
+  });
+
+  /**
+   * "Create Another" used to wipe the credential, so setting up five agents on
+   * one key meant entering it five times. Carried only as a REFERENCE — a
+   * plaintext key must not survive an explicit reset.
+   */
+  it("Create Another keeps the vault reference for the next agent", async () => {
+    server.use(
+      http.post("*/administration/agents/setup", () =>
+        HttpResponse.json({
+          agentId: "agent-1",
+          agentName: "Agent",
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          apiKeyVaultReference: "${vault:openai-prod}",
+        })
+      )
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
+    });
+
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Prompt");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-model"), "claude-sonnet-4-6");
+    await user.type(screen.getByTestId("wizard-apikey-input"), "sk-key");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-deploy"));
+
+    await waitFor(() => expect(screen.getByText("Agent Created!")).toBeInTheDocument());
+    await user.click(screen.getByText("Create Another"));
+
+    // Back at step 1, and the LLM step now carries the reference as an amber
+    // chip rather than an empty password field.
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Second");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Prompt");
+    await user.click(screen.getByTestId("wizard-next"));
+
+    // The picker renders a reference as an amber chip showing the key name,
+    // so the field is no longer an empty password input.
+    expect(screen.getByText("openai-prod")).toBeInTheDocument();
+    expect(screen.queryByTestId("wizard-apikey-input")).not.toBeInTheDocument();
+  });
+
+  it("shows the backend's vault grant warning when the chosen key is narrowly granted", async () => {
+    server.use(
+      http.post("*/administration/agents/setup", () =>
+        HttpResponse.json({
+          agentId: "agent-1",
+          agentName: "Agent",
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          deployed: false,
+          deploymentStatus: "ERROR",
+          resources: { vaultWarning: "Vault key 'scoped' is granted only to [agent-42]." },
+        })
+      )
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
+    });
+
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Prompt");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-model"), "claude-sonnet-4-6");
+    await user.type(screen.getByTestId("wizard-apikey-input"), "sk-key");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-deploy"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("wizard-vault-warning")).toHaveTextContent("granted only to [agent-42]");
+    });
+  });
+
   // ── Create Another resets wizard ──────────────────────────────────
 
   it("Create Another resets to step 1", async () => {

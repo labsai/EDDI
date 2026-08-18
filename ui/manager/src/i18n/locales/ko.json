@@ -523,6 +523,8 @@
     "endpointsParsed": "{{count}}개의 API endpoints 분석 완료",
     "viewAgent": "Agent 보기",
     "createAnother": "다른 Agent 생성",
+    "vaultKeyUsed": "이 에이전트는 아래 볼트 키를 사용합니다. 다음 에이전트에서는 API 키를 다시 붙여넣지 말고 같은 키를 선택하세요.",
+    "vaultKeyCopied": "볼트 참조가 복사되었습니다",
     "allTools": "모든 도구",
     "selectSpecific": "직접 선택",
     "allToolsInfo": "모든 {{count}}개 내장 도구가 에이전트에 제공됩니다. 「직접 선택」으로 활성화할 도구를 제한하세요.",

@@ -98,6 +98,53 @@ describe("SecretKeyPicker", () => {
     expect(screen.getByTestId("secret-key-picker-clear")).toBeInTheDocument();
   });
 
+  /**
+   * A reference copied out of the vault list, a config file or a chat message
+   * arrives with whitespace around it. Without trimming, the field stayed a
+   * masked password: the user could not tell the paste had landed as a
+   * reference, and the backend received the raw paste.
+   */
+  it("recognises a pasted reference that carries whitespace", () => {
+    renderWithProviders(
+      <SecretKeyPicker value={"  ${vault:openai-key}  "} onChange={mockOnChange} />
+    );
+
+    expect(screen.getByText("openai-key")).toBeInTheDocument();
+    expect(screen.getByTestId("secret-key-picker-clear")).toBeInTheDocument();
+  });
+
+  /**
+   * isVaultRef also accepts the unbraced spellings. Gating normalisation on a
+   * trailing "}" left those untrimmed: the chip rendered from the trimmed value
+   * while the parent kept — and submitted — the raw paste.
+   */
+  it("normalises the unbraced and legacy reference forms too", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(
+      <SecretKeyPicker value="" onChange={mockOnChange} />
+    );
+
+    await user.click(screen.getByTestId("secret-key-picker-input"));
+    await user.paste("  vault:openai-key  ");
+    expect(mockOnChange).toHaveBeenLastCalledWith("vault:openai-key");
+
+    mockOnChange.mockReset();
+    rerender(<SecretKeyPicker value="" onChange={mockOnChange} />);
+    await user.click(screen.getByTestId("secret-key-picker-input"));
+    await user.paste("  eddivault:legacy-key  ");
+    expect(mockOnChange).toHaveBeenLastCalledWith("eddivault:legacy-key");
+  });
+
+  it("normalises a pasted reference before handing it up", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<SecretKeyPicker value="" onChange={mockOnChange} />);
+
+    await user.click(screen.getByTestId("secret-key-picker-input"));
+    await user.paste("  ${vault:openai-key}  ");
+
+    expect(mockOnChange).toHaveBeenLastCalledWith("${vault:openai-key}");
+  });
+
   it("shows warning icon if the vault reference key does not exist in secrets", async () => {
     renderWithProviders(
       <SecretKeyPicker value="${vault:non-existent-key}" onChange={mockOnChange} />

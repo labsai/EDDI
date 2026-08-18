@@ -524,6 +524,8 @@
     "endpointsParsed": "{{count}} endpoints API analysés",
     "viewAgent": "Voir l'agent",
     "createAnother": "Créer un autre",
+    "vaultKeyUsed": "Cet agent utilise la clé de coffre ci-dessous. Choisissez la même pour votre prochain agent au lieu de recoller la clé d'API.",
+    "vaultKeyCopied": "Référence de coffre copiée",
     "allTools": "Tous les outils",
     "selectSpecific": "Sélection manuelle",
     "allToolsInfo": "Les {{count}} outils intégrés seront accessibles à votre agent. Choisissez « Sélection manuelle » pour restreindre les outils actifs.",

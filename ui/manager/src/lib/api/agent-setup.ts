@@ -16,6 +16,15 @@ export interface SetupAgentRequest {
   enableSentimentAnalysis?: boolean;
   deploy?: boolean;
   environment?: string;
+  /**
+   * Name of the vault entry the LLM API key lives under, so several agents can
+   * share ONE stored credential. Not surfaced as its own form field: the
+   * `SecretKeyPicker` on `apiKey` already produces `${vault:<name>}` (and can
+   * create a named entry inline), which the backend reuses without re-vaulting.
+   * Typed here because the endpoint accepts it and a caller building a request
+   * by hand should see it.
+   */
+  vaultKeyName?: string;
 }
 
 export interface CreateApiAgentRequest {
@@ -60,6 +69,15 @@ export interface CreateApiAgentRequest {
    * resource is created).
    */
   maxToolIterations?: number;
+  /**
+   * Name of the vault entry the LLM API key lives under, so several agents can
+   * share ONE stored credential. Not surfaced as its own form field: the
+   * `SecretKeyPicker` on `apiKey` already produces `${vault:<name>}` (and can
+   * create a named entry inline), which the backend reuses without re-vaulting.
+   * Typed here because the endpoint accepts it and a caller building a request
+   * by hand should see it.
+   */
+  vaultKeyName?: string;
 }
 
 // ---------- Response type ----------
@@ -76,7 +94,23 @@ export interface SetupResult {
   groups?: string[];
   quickRepliesEnabled?: boolean;
   sentimentAnalysisEnabled?: boolean;
+  /**
+   * Created resource locations plus deploy outcome (`deployWarning`,
+   * `deployError`) and `vaultWarning` — the chosen vault key does not exist, or
+   * it is granted only to other agents (a new agent cannot be on that list yet,
+   * so under grant enforcement its deployment is blocked until the grant is
+   * widened). Neither fails the setup; both leave an agent that cannot use its
+   * credential, which is why the backend reports them rather than only logging.
+   */
   resources?: Record<string, unknown>;
+  /**
+   * The `${vault:...}` reference the created agent's LLM config points at —
+   * whether setup vaulted the key just now or reused an entry that already held
+   * it. Hand it to the next agent (as `apiKey` or `vaultKeyName`) to put both on
+   * the same credential. Absent when the vault is disabled and the key was
+   * stored in plain text: the backend never echoes a plaintext secret back.
+   */
+  apiKeyVaultReference?: string;
 }
 
 // ---------- Provider helpers ----------

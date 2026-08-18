@@ -555,6 +555,8 @@
     "endpointsParsed": "{{count}} API endpoints parsed",
     "viewAgent": "View Agent",
     "createAnother": "Create Another",
+    "vaultKeyUsed": "This agent uses the vault key below. Pick the same one for your next agent instead of pasting the API key again.",
+    "vaultKeyCopied": "Vault reference copied",
     "specTooLarge": "That specification is too large to load here",
     "specUrlInvalid": "That is not a valid URL",
     "specUrlScheme": "Only http:// and https:// URLs are supported"

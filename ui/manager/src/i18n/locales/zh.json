@@ -523,6 +523,8 @@
     "endpointsParsed": "已解析 {{count}} 个 API endpoints",
     "viewAgent": "查看 Agent",
     "createAnother": "创建另一个",
+    "vaultKeyUsed": "此智能体使用下方的保管库密钥。创建下一个智能体时请选择同一个密钥，无需再次粘贴 API 密钥。",
+    "vaultKeyCopied": "已复制保管库引用",
     "allTools": "全部工具",
     "selectSpecific": "手动选择",
     "allToolsInfo": "所有 {{count}} 个内置工具将对您的代理可用。选择「手动选择」来限制启用的工具。",

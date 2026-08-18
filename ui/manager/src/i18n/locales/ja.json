@@ -523,6 +523,8 @@
     "endpointsParsed": "{{count}} 個の API endpoints を解析",
     "viewAgent": "Agent を表示",
     "createAnother": "別の Agent を作成",
+    "vaultKeyUsed": "このエージェントは以下の Vault キーを使用します。次のエージェントでは API キーを貼り直さず、同じキーを選択してください。",
+    "vaultKeyCopied": "Vault 参照をコピーしました",
     "allTools": "すべてのツール",
     "selectSpecific": "個別指定",
     "allToolsInfo": "{{count}}個の組み込みツールすべてがエージェントで利用できます。「個別指定」を選択して有効にするツールを制限できます。",

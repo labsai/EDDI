@@ -523,6 +523,8 @@
     "endpointsParsed": "{{count}} API-Endpoints analysiert",
     "viewAgent": "Agent anzeigen",
     "createAnother": "Weiteren erstellen",
+    "vaultKeyUsed": "Dieser Agent verwendet den unten stehenden Vault-Schlüssel. Wählen Sie für Ihren nächsten Agenten denselben aus, statt den API-Schlüssel erneut einzufügen.",
+    "vaultKeyCopied": "Vault-Referenz kopiert",
     "allTools": "Alle Werkzeuge",
     "selectSpecific": "Manuell auswählen",
     "allToolsInfo": "Alle {{count}} integrierten Werkzeuge stehen Ihrem Agenten zur Verfügung. Wählen Sie „Manuell auswählen“, um die Auswahl einzuschränken.",
