@@ -89,7 +89,14 @@ public class McpSetupTools {
             // ungated agent at will. Provisioning a gated agent goes through the
             // REST setup endpoint.
             var request = new SetupAgentRequest(agentName, systemPrompt, provider, model, apiKey, baseUrl, introMessage, enableBuiltInTools,
-                    builtInToolsWhitelist, enableQuickReplies, enableSentimentAnalysis, mcpServerUrls, deploy, environment, null);
+                    builtInToolsWhitelist, enableQuickReplies, enableSentimentAnalysis, mcpServerUrls, deploy, environment, null,
+                    // vaultKeyName is not exposed here either: naming the vault entry
+                    // an agent's credential lands in is an operator decision, and a
+                    // model that could choose it could point a new agent at any
+                    // unrestricted secret in the vault by name. A plaintext apiKey
+                    // still de-duplicates by checksum, so the MCP path does not grow
+                    // the vault either.
+                    null);
             var result = agentSetupService.setupAgent(request);
             return jsonSerialization.serialize(result);
         } catch (AgentSetupException e) {
@@ -139,7 +146,8 @@ public class McpSetupTools {
             // Trailing null: maxToolIterations is not exposed on this MCP tool either —
             // a model provisioning an agent must not raise its own iteration budget.
             var request = new CreateApiAgentRequest(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints,
-                    enableQuickReplies, enableSentimentAnalysis, deploy, environment, llmBaseUrl, null, mcpServerUrls, null);
+                    enableQuickReplies, enableSentimentAnalysis, deploy, environment, llmBaseUrl, null, mcpServerUrls, null,
+                    null); // vaultKeyName — withheld from this tool for the reason given on setup_agent
             var result = agentSetupService.createApiAgent(request);
             return jsonSerialization.serialize(result);
         } catch (AgentSetupException e) {

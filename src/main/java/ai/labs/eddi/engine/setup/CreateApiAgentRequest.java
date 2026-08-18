@@ -64,5 +64,26 @@ public record CreateApiAgentRequest(@JsonProperty(required = true) String agentN
          * Appended last for the same positional-constructor reason as llmBaseUrl; the
          * MCP create_api_agent tool passes null.
          */
-        Integer maxToolIterations) {
+        Integer maxToolIterations,
+        /*
+         * Name of the vault entry the LLM API key lives under, so several agents can be
+         * provisioned against ONE stored credential.
+         *
+         * Without it the only way to share a key was to paste the previous agent's
+         * ${vault:...} reference into apiKey — which works, but only if you can find
+         * the reference, and the generated names (setup.<agent>.<timestamp>.apiKey) are
+         * neither guessable nor meaningful. Naming the entry makes the shared key a
+         * deliberate, stable choice: "${vault:openai-prod}", set once, reused by every
+         * agent that should rotate together.
+         *
+         * Accepts a bare name ("openai-prod") or the full reference form
+         * ("${vault:openai-prod}"). Combined with apiKey it CREATES the entry under
+         * that name; alone it REQUIRES the entry to already exist. It never overwrites
+         * an entry that holds a different value — see
+         * AgentSetupService.useNamedVaultKey.
+         *
+         * Appended last for the same positional-constructor reason as llmBaseUrl; the
+         * MCP create_api_agent tool passes null.
+         */
+        String vaultKeyName) {
 }

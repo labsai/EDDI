@@ -7,6 +7,84 @@
 
 
 
+## 🔑 fix(setup): stop agent setup minting a new vault key per agent (2026-08-18)
+
+**Repo:** EDDI (`fix/setup-vault-key-reuse`)
+
+Provisioning several agents against one provider key left one vault entry **per agent**
+(`setup.<agent>.<timestamp>.apiKey`), and pasting a `${vault:...}` reference into the wizard's API-key
+field did not reliably avoid it. Rotating that provider key then meant hunting down N unguessably named
+entries.
+
+**Root cause of the reference case.** `vaultApiKey()` recognised an existing reference with a
+**full-string** regex match, but never trimmed its input. A reference copied out of a UI list or a
+config carries surrounding whitespace, so `"${vault:openai-prod}\n"` failed the match, fell through to
+the "plaintext" branch, and was vaulted *as a secret whose value is a reference* — a brand-new, useless
+key on every setup. One `trim()`, applied before the check and to the stored value, closes it.
+
+**Three ways to share one key**, in the order `AgentSetupService.vaultApiKey()` considers them:
+
+1. **`vaultKeyName`** (new, REST-only field on `SetupAgentRequest` / `CreateApiAgentRequest`) — names
+   the entry. With `apiKey` it creates it under exactly that name; without one, the entry must already
+   exist, so a second agent needs no plaintext at all. Accepts `openai-prod` or `${vault:openai-prod}`.
+   Refuses to overwrite an entry holding a different value: other agents may already point at it, and
+   silently rewriting it rotates their credential. Also refuses (rather than degrading to plaintext)
+   when the vault is off — naming an entry is a request for one specific shared secret, and writing the
+   key in plaintext instead is not a smaller version of that request.
+2. **`apiKey` already a reference** — used as-is, now whitespace-tolerant.
+3. **`apiKey` plaintext the vault already holds** — reused instead of duplicated.
+
+**Plaintext reuse is checksum-based.** `SecretMetadata` already carries `sha256Hex(plaintext)` per
+entry, so a match needs no decryption and compares a digest of a value the caller just supplied — it
+reveals nothing they did not already know. Only entries with `allowedAgents` unset or `["*"]` qualify:
+referencing a deliberately narrowed grant from a new agent yields a config that `VaultGrantGate`
+rejects at deploy time, i.e. a reuse that "works" until it matters. Ties break oldest-first by
+`createdAt` then key name, so repeated setups converge on one entry instead of depending on listing
+order. A vault that cannot be listed falls through to storing a new entry — reuse is an optimisation,
+never a gate.
+
+**Configurable**, per §4.1 rule 1: `eddi.setup.vault-key-reuse=checksum|never`. `never` restores the
+pre-change per-agent behaviour, for deployments where two agents hold the same-valued key today but
+must be able to rotate independently. Neither value touches cases 1 and 2 — those are explicit caller
+decisions, not defaults. Field-injected like the neighbouring
+`eddi.setup.llm.log-conversation-content`, so directly constructed instances get the default.
+
+**Two correctness details worth naming:**
+
+- **A reused entry is never recorded under `VAULTED_SECRET_KEY`.** Rollback deletes whatever it finds
+  there; recording a shared entry would let a *later* agent's failed setup delete a key an earlier
+  agent is still referencing. Only `storeSecret()` — the single place that writes — records.
+- **Key resolution moved to "step 0"**, ahead of every store call in both `setupAgent` and
+  `createApiAgent`, matching the existing reasoning for up-front `hitlConfig` validation: an unusable
+  `vaultKeyName` must fail while rollback still has nothing to undo, not after a parser, ruleset, LLM
+  config and workflow already exist.
+
+`vaultKeyName` is deliberately **not** exposed on the MCP `setup_agent` / `create_api_agent` tools (the
+same call the existing `hitlConfig` and `maxToolIterations` comments make): a model that could choose
+the name could point a new agent at any unrestricted secret in the vault by naming it. The MCP path
+still de-duplicates by checksum, so it does not grow the vault either.
+
+**Files:** `AgentSetupService.java` (trim, `useNamedVaultKey`, `findReusableSecret`, `storeSecret`,
+step-0 move, validation now accepts `vaultKeyName` in place of `apiKey` for cloud providers),
+`SetupAgentRequest.java`, `CreateApiAgentRequest.java`, `McpSetupTools.java`, `CreateSubAgentTool.java`
+(both pass `null`), `application.properties`, `docs/secrets-vault.md`.
+
+**Tests:** new `AgentSetupVaultKeyReuseTest` — 17 tests over the trim regression, checksum reuse,
+grant-scoped skip, deterministic winner, the `never` switch, list-failure degradation, and all six
+`vaultKeyName` outcomes. Mutation-checked: reverting the `trim()` and the reuse lookup fails 5 of them,
+so they are not passing for the wrong reason. Full local run of `AgentSetup*Test`, `McpSetupToolsTest`,
+`CreateSubAgentTool*Test`, `SetupWizardConfigsPassStrictBoundaryTest` (261 tests) plus the repo-wide
+guards (`ImportStyleTest`, `DocumentationLinksTest`, `StrictBoundaryShippedConfigsTest`,
+`RuleSetStoreShippedRulesetsTest`) — all green.
+
+**What's next / not done here:** the Manager's agent wizard and Workforce team builder still render the
+API key as a bare text input. `operator-activation.tsx` already offers "Paste your API key, or pick a
+vault key" via `use-secrets` + `vault-ref.ts`; extending that picker to those two forms (and wiring it
+to `vaultKeyName`) is the matching EDDI-Manager change, and is where the multi-agent case gets a UI
+rather than a JSON field.
+
+---
+
 ## 🔒 fix(docker): bump UBI9 base digest for CVE-2026-11940 (python3 tarfile filter bypass) (2026-08-17)
 
 **Repo:** EDDI (`fix/trivy-cve-2026-11940-base-image`)

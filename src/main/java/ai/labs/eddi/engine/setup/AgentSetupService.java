@@ -41,6 +41,8 @@ import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.TemplateEscaping;
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -50,6 +52,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.*;
 import java.util.Map;
 
@@ -95,6 +98,42 @@ public class AgentSetupService {
     @ConfigProperty(name = "eddi.setup.llm.log-conversation-content", defaultValue = "false")
     boolean logConversationContent;
 
+    /**
+     * {@link #vaultKeyReuse} value: reuse a vault entry that already holds the same
+     * value.
+     */
+    static final String VAULT_KEY_REUSE_CHECKSUM = "checksum";
+
+    /** {@link #vaultKeyReuse} value: always vault a fresh, uniquely named entry. */
+    static final String VAULT_KEY_REUSE_NEVER = "never";
+
+    /**
+     * What setup does when it is handed a <b>plaintext</b> API key that the vault
+     * already holds under some key name.
+     * <ul>
+     * <li>{@code checksum} (default) — reuse that entry and reference it, so
+     * provisioning ten agents with one provider key leaves one secret in the vault
+     * rather than ten copies of it. Matching is by the SHA-256 checksum the vault
+     * already stores per entry, so no stored plaintext is decrypted to make the
+     * decision, and only unrestricted entries ({@code allowedAgents} unset or
+     * {@code ["*"]}) are candidates — reusing a narrowly granted secret would hand
+     * the new agent a reference that {@code VaultGrantGate} rejects at deploy
+     * time.</li>
+     * <li>{@code never} — restores the pre-6.3 behaviour: every setup writes its
+     * own {@code setup.<agent>.<timestamp>.apiKey} entry.</li>
+     * </ul>
+     * Neither value affects an {@code apiKey} that is already a
+     * {@code ${vault:...}} reference (always used as-is) or a request carrying an
+     * explicit {@code vaultKeyName} (always honoured) — those are caller decisions,
+     * not defaults.
+     * <p>
+     * Field-injected for the same reason as {@link #logConversationContent}: a
+     * directly constructed instance gets the default.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.setup.vault-key-reuse", defaultValue = VAULT_KEY_REUSE_CHECKSUM)
+    String vaultKeyReuse = VAULT_KEY_REUSE_CHECKSUM;
+
     @Inject
     public AgentSetupService(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin,
             ISecretProvider secretProvider,
@@ -120,8 +159,12 @@ public class AgentSetupService {
         // Validate required params
         validateNameAndPrompt(request.agentName(), request.systemPrompt());
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
-        if (!isLocalLLM && (request.apiKey() == null || request.apiKey().isBlank())) {
-            throw new AgentSetupException("API key is required for cloud LLM providers (anthropic, openai, gemini)");
+        // vaultKeyName alone is enough: it names a key the vault already holds, which
+        // is the whole point of provisioning a second agent against an existing one.
+        if (!isLocalLLM && isNullOrBlank(request.apiKey()) && isNullOrBlank(request.vaultKeyName())) {
+            throw new AgentSetupException(
+                    "API key is required for cloud LLM providers (anthropic, openai, gemini) — pass apiKey, or vaultKeyName to reuse a key "
+                            + "already in the vault");
         }
         // Validate the HITL config HERE, before a single resource exists — same
         // reasoning as createApiAgent: AgentStore.create validates it too, but only
@@ -144,6 +187,13 @@ public class AgentSetupService {
         var createdResources = new LinkedHashMap<String, Object>();
 
         try {
+            // --- Step 0: Resolve the API key against the vault ---
+            // Ahead of every store call, for the same reason the HITL config is
+            // validated above: an unusable vaultKeyName (missing, or holding a
+            // different value) has to fail while rollback still has nothing to undo,
+            // not after a parser, a ruleset and a workflow already exist.
+            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources);
+
             // --- Step 1: Create Parser ---
             var parserConfig = createParserConfig();
             Response parserResponse = getRestStore(IRestParserStore.class).createParser(parserConfig);
@@ -163,9 +213,6 @@ public class AgentSetupService {
             patchDescriptor(behaviorId, behaviorVersion, request.agentName());
 
             // --- Step 3: Create LLM Configuration ---
-            // Auto-vault the API key: store encrypted in vault, use vault reference in
-            // config
-            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), createdResources);
             var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, request.systemPrompt(), toolsEnabled,
                     request.builtInToolsWhitelist(), request.baseUrl(), promptResponseJson, quickReplies, sentiment, null);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
@@ -355,8 +402,10 @@ public class AgentSetupService {
             throw new AgentSetupException("OpenAPI spec is required");
         }
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
-        if (!isLocalLLM && (request.apiKey() == null || request.apiKey().isBlank())) {
-            throw new AgentSetupException("API key is required for cloud LLM providers");
+        // See setupAgent: vaultKeyName alone names a key the vault already holds.
+        if (!isLocalLLM && isNullOrBlank(request.apiKey()) && isNullOrBlank(request.vaultKeyName())) {
+            throw new AgentSetupException(
+                    "API key is required for cloud LLM providers — pass apiKey, or vaultKeyName to reuse a key already in the vault");
         }
         // Scheme-level check only. Full SSRF validation would reject loopback and
         // private addresses, which is precisely where a local LLM provider lives —
@@ -384,6 +433,11 @@ public class AgentSetupService {
         var createdResources = new LinkedHashMap<String, Object>();
 
         try {
+            // --- Step 0: Resolve the API key against the vault ---
+            // Ahead of every store call, so an unusable vaultKeyName fails while
+            // rollback still has nothing to undo. See setupAgent for the full note.
+            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources);
+
             // --- Step 1: Parse OpenAPI and build grouped httpcalls configs ---
             McpApiToolBuilder.ApiBuildResult buildResult;
             try {
@@ -428,8 +482,6 @@ public class AgentSetupService {
             boolean quickReplies = request.enableQuickReplies() != null && request.enableQuickReplies();
             boolean sentiment = request.enableSentimentAnalysis() != null && request.enableSentimentAnalysis();
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
-            // Auto-vault the API key before storing in LLM config
-            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), createdResources);
             // 7th slot is the LLM's own base URL — not apiBaseUrl, which is the target
             // server of the generated tools. Passing null here left local providers
             // (Ollama, Jlama) with no endpoint to reach.
@@ -910,6 +962,10 @@ public class AgentSetupService {
         return null;
     }
 
+    private static boolean isNullOrBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
     private static String firstNonBlank(String... values) {
         for (String value : values) {
             if (value != null && !value.isBlank()) {
@@ -948,32 +1004,80 @@ public class AgentSetupService {
      * @return the vault reference string, or the plaintext key if vault is
      *         unavailable
      */
-    private String vaultApiKey(String apiKey, String agentName) {
-        return vaultApiKey(apiKey, agentName, null);
+    private String vaultApiKey(String apiKey, String agentName) throws AgentSetupException {
+        return vaultApiKey(apiKey, agentName, null, null);
     }
 
     /**
+     * Resolve the value that goes into the generated LLM config's {@code apiKey}
+     * parameter, vaulting the plaintext only when the vault does not already hold
+     * it.
+     * <p>
+     * Four inputs, in the order they are considered:
+     * <ol>
+     * <li><b>{@code vaultKeyName} given</b> — the caller names the entry, so the
+     * caller decides. An existing entry is referenced (and, when {@code apiKey} is
+     * also given, must hold the same value — setup will not silently overwrite a
+     * secret other agents already point at); a missing one is created under exactly
+     * that name from the supplied {@code apiKey}. This is the field that makes
+     * "provision N agents against one key" a single, stable, human-readable
+     * reference.</li>
+     * <li><b>{@code apiKey} is already a {@code ${vault:...}} reference</b> — used
+     * as-is, never re-vaulted. Note the {@link String#trim()} below: the check is a
+     * full-string match, so before it a value pasted out of a UI list carried its
+     * trailing newline into the "not a reference" branch and was vaulted <em>as
+     * plaintext whose content is a reference</em> — a fresh, useless key on every
+     * setup, which is the very thing this method exists to prevent.</li>
+     * <li><b>{@code apiKey} is plaintext the vault already holds</b> — reused by
+     * checksum, unless {@code eddi.setup.vault-key-reuse=never}. See
+     * {@link #vaultKeyReuse}.</li>
+     * <li><b>{@code apiKey} is plaintext the vault does not hold</b> — stored under
+     * the generated {@code setup.<agent>.<timestamp>.apiKey} name, as before.</li>
+     * </ol>
+     *
+     * @param vaultKeyName
+     *            explicit vault key name (or full {@code ${vault:...}} reference)
+     *            to store under and reuse; null or blank to let this method choose
      * @param createdResources
-     *            when non-null, the key name of a secret vaulted by this call is
-     *            recorded here so a failed setup can remove it again
+     *            when non-null, the key name of a secret <b>newly created</b> by
+     *            this call is recorded here so a failed setup can remove it again.
+     *            A <em>reused</em> entry is deliberately never recorded: rollback
+     *            deletes what it finds there, and a shared key must survive the
+     *            failure of one agent that happened to reference it.
      */
-    private String vaultApiKey(String apiKey, String agentName, Map<String, Object> createdResources) {
-        if (apiKey == null || apiKey.isBlank()) {
+    private String vaultApiKey(String apiKey, String agentName, String vaultKeyName, Map<String, Object> createdResources)
+            throws AgentSetupException {
+        // Trimmed once, here, and used for every subsequent decision AND as the stored
+        // value: a key with a stray newline is not a usable credential either.
+        String key = apiKey == null ? null : apiKey.trim();
+        String requestedName = vaultKeyName == null ? null : vaultKeyName.trim();
+
+        if (requestedName != null && !requestedName.isEmpty()) {
+            return useNamedVaultKey(requestedName, key, agentName, createdResources);
+        }
+
+        if (key == null || key.isEmpty()) {
             return apiKey;
         }
 
         // Already a vault reference — use it directly, don't re-vault (supports legacy
         // ${eddivault:...})
-        if (SecretReference.isVaultReference(apiKey)
-                && SecretReference.compiledPattern().matcher(apiKey).matches()) {
-            LOGGER.infof("API key for agent '%s' is already a vault reference — using as-is.", agentName);
-            return apiKey;
+        if (isVaultReference(key)) {
+            LOGGER.infof("API key for agent '%s' is already a vault reference — using as-is.", LogSanitizer.sanitize(agentName));
+            return key;
         }
 
         if (!secretProvider.isAvailable()) {
             LOGGER.warn("Secrets Vault is not configured — API key will be stored in plaintext. "
                     + "Set EDDI_VAULT_MASTER_KEY to enable encrypted storage.");
-            return apiKey;
+            return key;
+        }
+
+        String reusable = findReusableSecret(key);
+        if (reusable != null) {
+            LOGGER.infof("API key for agent '%s' is already in the vault as '%s' — reusing it instead of storing a second copy.",
+                    LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(reusable));
+            return reusable;
         }
 
         try {
@@ -981,28 +1085,150 @@ public class AgentSetupService {
             // Timestamp suffix prevents collision when two agents share the same name
             String sanitizedName = agentName.toLowerCase().replaceAll("[^a-z0-9]", "-");
             String keyName = "setup." + sanitizedName + "." + System.currentTimeMillis() + ".apiKey";
-            if (createdResources != null) {
-                createdResources.put(VAULTED_SECRET_KEY, keyName);
-            }
-            var ref = new SecretReference(SecretReference.DEFAULT_TENANT, keyName);
-            // "*" is deliberate. allowedAgents IS enforced now (VaultGrantGate, at
-            // deploy time), so this list is a real access-control decision — but the
-            // agent being set up does not have an ID yet at this point, and the key is
-            // created for whichever agent this setup produces. Narrowing it here would
-            // have to guess that ID, and guessing wrong blocks the very agent the key
-            // was vaulted for.
-            //
-            // Operators who want a narrow grant set it after setup, via the secrets
-            // REST API; see docs/secrets-vault.md "Agent Grants".
-            secretProvider.store(ref, apiKey, "Auto-vaulted by AgentSetupService for agent: " + agentName,
-                    List.of("*"));
-            LOGGER.infof("API key vaulted for agent '%s' (key: %s)", agentName, keyName);
-            return ref.toReferenceString();
+            return storeSecret(keyName, key, agentName, createdResources);
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.error("Failed to vault API key for agent '" + agentName + "': " + e.getMessage()
+            LOGGER.error("Failed to vault API key for agent '" + LogSanitizer.sanitize(agentName) + "': " + e.getMessage()
                     + " — falling back to plaintext storage.");
-            return apiKey;
+            return key;
         }
+    }
+
+    /**
+     * Honour an explicit {@code vaultKeyName}. Unlike the generated-name path this
+     * one fails loudly rather than degrading: a caller who named a key asked for
+     * one specific shared secret, and quietly writing a plaintext key or a second
+     * copy under a different name would defeat the reason they named it.
+     */
+    private String useNamedVaultKey(String requestedName, String key, String agentName, Map<String, Object> createdResources)
+            throws AgentSetupException {
+        // Accept both "my-openai-key" and "${vault:my-openai-key}" — the Manager and
+        // the stored configs show the reference form, so pasting that form into a
+        // field labelled "key name" is the obvious mistake to absorb rather than
+        // reject.
+        SecretReference ref = isVaultReference(requestedName)
+                ? SecretReference.parse(requestedName)
+                : new SecretReference(SecretReference.DEFAULT_TENANT, requestedName);
+
+        if (!secretProvider.isAvailable()) {
+            throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' cannot be used: the secrets vault is unavailable or "
+                    + "disabled. Set EDDI_VAULT_MASTER_KEY, or omit vaultKeyName to pass the key through as plaintext.");
+        }
+
+        SecretMetadata existing;
+        try {
+            existing = secretProvider.getMetadata(ref);
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            existing = null;
+        } catch (ISecretProvider.SecretProviderException e) {
+            throw new AgentSetupException("Could not read vault key '" + ref.keyName() + "': " + e.getMessage(), e);
+        }
+
+        boolean haveNewPlaintext = key != null && !key.isEmpty() && !isVaultReference(key);
+
+        if (existing != null) {
+            if (haveNewPlaintext && !EnvelopeCrypto.sha256Hex(key).equals(existing.checksum())) {
+                throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' already holds a different value. Setup will not "
+                        + "overwrite it, because other agents may reference it. Use a different vaultKeyName, omit apiKey to reuse the "
+                        + "stored value, or rotate the key through the secrets API first.");
+            }
+            LOGGER.infof("Agent '%s' reuses existing vault key '%s'.", LogSanitizer.sanitize(agentName),
+                    LogSanitizer.sanitize(ref.keyName()));
+            return ref.toReferenceString();
+        }
+
+        if (!haveNewPlaintext) {
+            throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' does not exist in the vault and no apiKey was supplied to "
+                    + "create it. Supply apiKey to store the key under that name, or name an existing vault key.");
+        }
+
+        try {
+            return storeSecret(ref.keyName(), key, agentName, createdResources);
+        } catch (ISecretProvider.SecretProviderException e) {
+            throw new AgentSetupException("Could not store the API key under vault key '" + ref.keyName() + "': " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Write one secret and record it for rollback. Split out so the named and the
+     * generated path cannot drift on the grant list or the rollback bookkeeping.
+     */
+    private String storeSecret(String keyName, String plaintext, String agentName, Map<String, Object> createdResources)
+            throws ISecretProvider.SecretProviderException {
+        if (createdResources != null) {
+            createdResources.put(VAULTED_SECRET_KEY, keyName);
+        }
+        var ref = new SecretReference(SecretReference.DEFAULT_TENANT, keyName);
+        // "*" is deliberate. allowedAgents IS enforced now (VaultGrantGate, at
+        // deploy time), so this list is a real access-control decision — but the
+        // agent being set up does not have an ID yet at this point, and the key is
+        // created for whichever agent this setup produces. Narrowing it here would
+        // have to guess that ID, and guessing wrong blocks the very agent the key
+        // was vaulted for.
+        //
+        // Operators who want a narrow grant set it after setup, via the secrets
+        // REST API; see docs/secrets-vault.md "Agent Grants".
+        secretProvider.store(ref, plaintext, "Auto-vaulted by AgentSetupService for agent: " + agentName, List.of("*"));
+        LOGGER.infof("API key vaulted for agent '%s' (key: %s)", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(keyName));
+        return ref.toReferenceString();
+    }
+
+    /**
+     * Find a vault entry that already holds {@code plaintext}, so setup references
+     * it instead of storing a duplicate.
+     * <p>
+     * Matching is on the SHA-256 checksum the vault stores alongside every entry —
+     * nothing is decrypted, and the digest being compared is one this call computes
+     * from a value it was already handed, so the comparison reveals nothing the
+     * caller did not already know.
+     * <p>
+     * Only unrestricted entries qualify. A secret granted to specific agents was
+     * scoped deliberately, and handing its reference to a new agent would produce a
+     * config that {@code VaultGrantGate} refuses at deploy time — a reuse that
+     * "works" until the moment it matters.
+     *
+     * @return the reference string of the entry to reuse, or null
+     */
+    private String findReusableSecret(String plaintext) {
+        if (!VAULT_KEY_REUSE_CHECKSUM.equalsIgnoreCase(vaultKeyReuse)) {
+            return null;
+        }
+        try {
+            String checksum = EnvelopeCrypto.sha256Hex(plaintext);
+            return secretProvider.listKeys(SecretReference.DEFAULT_TENANT).stream()
+                    .filter(metadata -> checksum.equals(metadata.checksum()))
+                    .filter(AgentSetupService::isUnrestricted)
+                    // Oldest first, key name as tie-break: repeated setups with the same key
+                    // must converge on ONE entry, so the choice cannot depend on listing order.
+                    .min(Comparator
+                            .<SecretMetadata, Instant>comparing(
+                                    metadata -> metadata.createdAt() == null ? Instant.EPOCH : metadata.createdAt())
+                            .thenComparing(SecretMetadata::keyName))
+                    .map(metadata -> new SecretReference(
+                            metadata.tenantId() == null ? SecretReference.DEFAULT_TENANT : metadata.tenantId(), metadata.keyName())
+                            .toReferenceString())
+                    .orElse(null);
+        } catch (Exception e) {
+            // Reuse is an optimisation, never a gate: if the vault cannot be listed,
+            // fall through and store a new entry rather than failing the setup.
+            LOGGER.debugf("Could not scan the vault for a reusable API key: %s", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * {@code allowedAgents} unset, empty or {@code ["*"]} — usable by any agent.
+     */
+    private static boolean isUnrestricted(SecretMetadata metadata) {
+        List<String> allowed = metadata.allowedAgents();
+        return allowed == null || allowed.isEmpty() || allowed.contains("*");
+    }
+
+    /**
+     * True when the whole string is a {@code ${vault:...}} reference, not merely
+     * contains one — {@code "plaintext${vault:key}"} is not a reference.
+     */
+    private static boolean isVaultReference(String value) {
+        return SecretReference.isVaultReference(value) && SecretReference.compiledPattern().matcher(value).matches();
     }
 
     /**
