@@ -62,7 +62,7 @@ decisions, not defaults. Field-injected like the neighbouring
 `vaultKeyName` is deliberately **not** exposed on the MCP `setup_agent` / `create_api_agent` tools. *(Rationale
 corrected in the third review pass below — an earlier version of this paragraph claimed it stopped a model
 pointing an agent at an arbitrary secret, which `apiKey: "${vault:...}"` already allows.)* The MCP path
-still de-duplicates by checksum wherever the deployment leaves that enabled, so it does not grow the vault either.
+still de-duplicates by checksum wherever the deployment leaves that enabled and the matching entry is granted to all agents, so it does not grow the vault either.
 
 **Files:** `AgentSetupService.java` (trim, `useNamedVaultKey`, `findReusableSecret`, `storeSecret`,
 step-0 move, validation now accepts `vaultKeyName` in place of `apiKey` for cloud providers),
@@ -178,9 +178,9 @@ Both bots reviewed; every finding was valid. Two were real bugs this branch had 
 - **Generated key names could collide** (CodeRabbit). `setup.<agent>.<timestamp>.apiKey` is not unique for two
   same-named agents in the same millisecond, and `store` is an upsert — so one silently overwrote the other's
   credential. Now carries a random suffix; the timestamp stays only because it dates the entry for an operator.
-- **An unparseable OpenAPI spec leaked a vault secret** (Copilot). Moving key resolution to "step 0" put it ahead
+- **An unparseable OpenAPI spec left an orphaned vault entry** (Copilot). Moving key resolution to "step 0" put it ahead
   of the spec parse, and `createApiAgent`'s pre-existing `catch (AgentSetupException) { throw e; }` rethrows
-  without rolling back — so under `vault-key-reuse=never` every invalid request left an orphan secret. Fixed at
+  without rolling back — so under `vault-key-reuse=never` every invalid request left an orphaned secret behind. Fixed at
   both ends: the parse now runs first (it creates nothing, so a bad spec never reaches the vault at all), and
   that catch arm now rolls back, which also closes the pre-existing document leak on the same path.
 
