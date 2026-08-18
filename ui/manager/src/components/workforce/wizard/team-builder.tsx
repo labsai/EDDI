@@ -25,10 +25,17 @@ export interface MemberSlot {
   displayName: string;
   role: string;
   mode: "existing" | "new";
-  // For existing — and, once a `new` advisor has been provisioned by an
-  // earlier (partially failed) creation attempt, the id it was given, so a
-  // retry reuses it instead of creating a duplicate.
+  /** For `existing` mode: the agent the user picked. Never written by creation. */
   agentId: string;
+  /**
+   * For `new` mode: the id a previous, partially failed creation attempt
+   * minted for this advisor, so a retry reuses it instead of deploying a
+   * duplicate. Kept separate from `agentId` — when the two shared one field,
+   * picking an existing agent and then switching back to "Create new advisor"
+   * left the id behind, and the wizard silently reused that agent instead of
+   * creating anything, with no prompt or key ever required.
+   */
+  createdAgentId: string;
   // For new — each may be blank to inherit the workforce-wide LlmDefaults.
   systemPrompt: string;
   provider: string;
@@ -148,6 +155,11 @@ function LlmFields({
             value={value.apiKey}
             onChange={(v) => onChange({ apiKey: v })}
             testId={`apikey-${idPrefix}-picker`}
+            id={`apikey-${idPrefix}`}
+            aria-invalid={keyInvalid || undefined}
+            aria-describedby={
+              keyInvalid && keyError ? `apikey-${idPrefix}-error` : undefined
+            }
             placeholder={
               inherit?.apiKey
                 ? t("Workforce.wizard.useDefaultKey", "Workforce default key")
@@ -155,7 +167,11 @@ function LlmFields({
             }
           />
           {keyInvalid && keyError && (
-            <p role="alert" className="mt-1.5 text-xs text-destructive">
+            <p
+              id={`apikey-${idPrefix}-error`}
+              role="alert"
+              className="mt-1.5 text-xs text-destructive"
+            >
               {keyError}
             </p>
           )}
@@ -188,7 +204,7 @@ function MemberCard({
   const [expanded, setExpanded] = useState(false);
   const invalid = showErrors && issue !== null;
   /** Provisioned by an earlier, partially failed attempt — reused as is. */
-  const created = member.mode === "new" && member.agentId !== "";
+  const created = member.mode === "new" && member.createdAgentId !== "";
 
   // The system prompt, the API key and the agent picker all sit inside the
   // collapsed half of the card, so flagging one while the card is shut points
@@ -465,7 +481,7 @@ function TeamBuilder({
 }: TeamBuilderProps) {
   const { t } = useTranslation();
   const boardNameMissing = showErrors && boardName.trim().length === 0;
-  const hasNewMembers = members.some((m) => m.mode === "new" && !m.agentId);
+  const hasNewMembers = members.some((m) => m.mode === "new" && !m.createdAgentId);
   // Flag the shared key block itself when advisors are waiting on it — it
   // sits above the cards, so a failed Next lands focus on the one field that
   // fixes all of them, rather than on the first advisor's own key input.
@@ -498,6 +514,7 @@ function TeamBuilder({
         role: "",
         mode: "new",
         agentId: "",
+        createdAgentId: "",
         systemPrompt: "",
         provider: "",
         model: "",

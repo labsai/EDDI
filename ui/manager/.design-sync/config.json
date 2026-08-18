@@ -116,7 +116,7 @@
     "ModeSwitcher": "collapsed?: boolean;",
     "RefetchErrorNotice": "onRetry: () => void;\n  className?: string;\n  /** Overrides the default \"could not refresh\" wording */\n  message?: string;",
     "ResourceTypeBadge": "/** Resource slug. Known keys get a distinct color: agent, workflow, behavior,\n   *  rules, httpcalls, apicalls, langchain, llm, output, property, propertysetter,\n   *  dictionary, regulardictionary, mcpcalls, rag, snippet, snippets. Anything else\n   *  renders with a neutral fallback, and a trailing \".json\" is stripped. */\n  type: string;",
-    "SecretKeyPicker": "/** Plain text, or a vault reference of the form vault:<keyName> */\n  value: string;\n  onChange: (value: string) => void;\n  readOnly?: boolean;\n  tenantId?: string;\n  placeholder?: string;\n  testId?: string;",
+    "SecretKeyPicker": "/** Plain text, or a vault reference of the form vault:<keyName> */\n  value: string;\n  onChange: (value: string) => void;\n  readOnly?: boolean;\n  tenantId?: string;\n  placeholder?: string;\n  testId?: string;\n  /** Forwarded to the focusable control, so a caller's label htmlFor resolves. */\n  id?: string;\n  \"aria-invalid\"?: boolean;\n  \"aria-describedby\"?: string;",
     "ViewToggle": "view: \"card\" | \"list\";\n  onChange: (view: \"card\" | \"list\") => void;",
     "MockDataBanner": "/** Takes no props — self-hides unless mock data is active. */",
     "PageLoader": "/** Takes no props — route-level skeleton. */",

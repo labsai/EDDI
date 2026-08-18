@@ -195,6 +195,96 @@ describe("Workforce wizard — the team step says what the backend will refuse",
     expect(screen.getAllByRole("button", { name: /collapse/i })[0]).toBeEnabled();
   });
 
+  it("switching an advisor back to 'new' does not silently reuse the agent that was picked", async () => {
+    // `agentId` (the picked agent) and `createdAgentId` (what a failed attempt
+    // provisioned) were once one field. Picking an existing agent and then
+    // changing your mind left the id behind: the advisor counted as complete,
+    // never asked for a prompt or a key, was badged "Created", and the group
+    // was assembled with the picked agent instead of a new advisor.
+    const user = userEvent.setup();
+    renderWizard();
+    await fillNamesOnly(user);
+
+    await user.click(next()); // opens the cards on the prompt requirement
+    await screen.findAllByLabelText(/personality & expertise/i);
+
+    // Advisor 1: use an existing agent…
+    await user.click(screen.getAllByRole("button", { name: /use existing agent/i })[0]!);
+    await user.click(screen.getAllByPlaceholderText(/select agent/i)[0]!);
+    // AgentPicker's options carry no role/name of their own — the suite's own
+    // agent-picker tests reach them the same way.
+    const option = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-agent-item]");
+      if (!el) throw new Error("no agent options yet");
+      return el;
+    });
+    await user.click(option);
+    await waitFor(() => expect(screen.getByLabelText(/clear selection/i)).toBeInTheDocument());
+
+    // …then change your mind.
+    await user.click(screen.getAllByRole("button", { name: /create new advisor/i })[0]!);
+
+    // It is a new advisor again: no "Created" badge or note…
+    expect(screen.queryByText(/^created$/i)).toBeNull();
+    expect(screen.queryByTestId(/member-created-note-/)).toBeNull();
+
+    // …and it owes a prompt like any other. Count both advisors rather than
+    // reading the first alert: advisor 2 is flagged either way, so only the
+    // total distinguishes "advisor 1 still counts as complete" from the fix.
+    await user.click(next());
+    const flagged = await screen.findAllByTestId(/^member-error-/);
+    expect(flagged).toHaveLength(2);
+    for (const f of flagged) expect(f).toHaveTextContent(/system prompt is required/i);
+    expect(screen.getByLabelText(/workforce name/i)).toBeInTheDocument();
+  });
+
+  it("still requires a key for gemini-vertex, which LLM_PROVIDERS calls keyless", async () => {
+    // LLM_PROVIDERS marks gemini-vertex needsKey: false, but the backend's
+    // isLocalLlmProvider allow-list (ollama, jlama, bedrock, oracle-genai)
+    // does not include it — so a keyless request is rejected server-side,
+    // after earlier advisors have already been provisioned. Validation
+    // mirrors the backend's list, not the UI flag.
+    const user = userEvent.setup();
+    renderWizard();
+    await fillNamesOnly(user);
+    await fillPrompts(user);
+
+    await user.selectOptions(
+      screen.getByLabelText(/llm provider/i, { selector: "#provider-defaults" }),
+      "gemini-vertex",
+    );
+
+    expect(screen.getByTestId("apikey-defaults")).toBeInTheDocument();
+    await user.click(next());
+    expect(screen.getByLabelText(/workforce name/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("alert")[1]).toHaveTextContent(/google vertex ai needs an api key/i);
+  });
+
+  it("associates the API key label and its error with the input itself", async () => {
+    // SecretKeyPicker renders its own input, so the wrapper's htmlFor used to
+    // resolve to nothing: the required marker and the error were announced to
+    // nobody, on the very field the wizard had just moved focus to.
+    const user = userEvent.setup();
+    renderWizard();
+    await fillNamesOnly(user);
+    await fillPrompts(user);
+
+    await user.click(next());
+
+    const input = screen.getByTestId("apikey-defaults-picker-input");
+    // The label resolves to the focusable control…
+    // Scoped: every advisor renders its own key field with the same label.
+    const block = screen.getByTestId("apikey-defaults");
+    expect(within(block).getByLabelText(/api key/i)).toBe(input);
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    // …and the message it points at is the one on screen.
+    const describedBy = input.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)).toHaveTextContent(
+      /add a key here to cover every advisor/i,
+    );
+  });
+
   it("flags a missing board name rather than silently disabling Next", async () => {
     const user = userEvent.setup();
     renderWizard();
@@ -278,6 +368,50 @@ describe("Workforce wizard — templates and starter prompts", () => {
 });
 
 describe("Workforce wizard — creation failures", () => {
+  it("does not send the shared key to a provider that takes none", async () => {
+    // The shared defaults are inherited by every advisor, so a team key entered
+    // for Anthropic and then switched to a local provider would otherwise ride
+    // along into the setup request — where the backend vaults it and writes a
+    // reference into an LLM config that has no use for it.
+    const bodies: Array<Record<string, unknown>> = [];
+    server.use(
+      http.post("*/administration/agents/setup", async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        bodies.push(body);
+        return HttpResponse.json({
+          action: "created",
+          agentId: `agent-${bodies.length}`,
+          agentName: String(body.name),
+          provider: "ollama",
+          model: "llama3.3:70b",
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWizard();
+    await fillNamesOnly(user);
+    await fillPrompts(user);
+    // A key is entered first, while the default provider still needs one…
+    await setDefaultKey(user, "sk-secret");
+    // …then the team moves to a local provider, and the field disappears.
+    await user.selectOptions(
+      screen.getByLabelText(/llm provider/i, { selector: "#provider-defaults" }),
+      "ollama",
+    );
+    expect(screen.queryByTestId("apikey-defaults")).toBeNull();
+
+    await user.click(next());
+    await user.click(await screen.findByRole("button", { name: /create workforce/i }));
+
+    await waitFor(() => expect(bodies).toHaveLength(2));
+    for (const body of bodies) {
+      expect(body.provider).toBe("ollama");
+      expect(body.apiKey).toBeUndefined();
+    }
+    expect(JSON.stringify(bodies)).not.toContain("sk-secret");
+  });
+
   it("shows the backend's message instead of [object Object]", async () => {
     server.use(
       http.post("*/administration/agents/setup", () =>

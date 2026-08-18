@@ -34,23 +34,52 @@ export const INITIAL_LLM_DEFAULTS: LlmDefaults = {
   apiKey: "",
 };
 
-/** The provider/model/key that will actually be sent for a `new` advisor. */
+/**
+ * The provider/model/key that will actually be sent for a `new` advisor.
+ *
+ * A key is dropped when the effective provider takes none. The shared defaults
+ * are inherited by every advisor, so an advisor switched to Ollama would
+ * otherwise still carry the team's Anthropic key into its setup request —
+ * where the backend vaults it and writes a reference into an LLM config that
+ * has no use for it. The UI already hides the field in that case; this makes
+ * the request match what the UI shows.
+ */
 export function effectiveLlm(member: MemberSlot, defaults: LlmDefaults): LlmDefaults {
+  const provider = member.provider || defaults.provider;
   return {
-    provider: member.provider || defaults.provider,
+    provider,
     model: member.model || defaults.model,
-    apiKey: member.apiKey || defaults.apiKey,
+    apiKey: providerNeedsKey(provider) ? member.apiKey || defaults.apiKey : "",
   };
 }
 
 /**
- * Whether the backend will demand an API key for this provider. Unknown or
+ * Providers `AgentSetupService.isLocalLlmProvider` accepts without an API key:
+ * ollama/jlama run locally, bedrock uses the AWS credential chain, oracle-genai
+ * reads `~/.oci/config`.
+ *
+ * Deliberately NOT `LLM_PROVIDERS[].needsKey`. That flag decides whether the UI
+ * *offers* a key field and disagrees with the backend on `gemini-vertex`, which
+ * it marks keyless while `isLocalLlmProvider` does not — so trusting it would
+ * let the wizard wave through the one request the server is certain to reject,
+ * which is exactly the late failure this whole screen exists to prevent.
+ */
+const BACKEND_KEYLESS_PROVIDERS = new Set([
+  "ollama",
+  "jlama",
+  "bedrock",
+  "oracle-genai",
+]);
+
+/**
+ * Whether the backend will demand an API key for this provider. Unknown and
  * blank providers count as needing one — blank resolves to anthropic on the
- * server, and an unlisted provider is far more likely a cloud one.
+ * server, and the backend's own check is an allow-list, so anything it does not
+ * recognise needs a key there too.
  */
 export function providerNeedsKey(provider: string): boolean {
-  if (!provider.trim()) return true;
-  return getProviderConfig(provider)?.needsKey ?? true;
+  const id = provider.trim().toLowerCase() || BACKEND_DEFAULT_PROVIDER;
+  return !BACKEND_KEYLESS_PROVIDERS.has(id);
 }
 
 /**
@@ -73,8 +102,8 @@ export function memberIssue(member: MemberSlot, defaults: LlmDefaults): MemberIs
   if (!member.displayName.trim()) return "name";
   if (member.mode === "existing") return member.agentId.trim() ? null : "agent";
   // Already provisioned by an earlier, partially failed attempt — nothing to
-  // validate; it will be reused as-is.
-  if (member.agentId) return null;
+  // validate; it will be reused as is.
+  if (member.createdAgentId) return null;
   if (!member.systemPrompt.trim()) return "prompt";
   const llm = effectiveLlm(member, defaults);
   if (providerNeedsKey(llm.provider) && !llm.apiKey.trim()) return "apiKey";

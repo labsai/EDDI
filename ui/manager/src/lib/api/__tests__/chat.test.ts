@@ -149,6 +149,35 @@ describe("sendMessage", () => {
       sendMessage("production", "agent1", "conv-fail", "Hello")
     ).rejects.toMatchObject({ status: 500 });
   });
+
+  // These two paths bypass ApiClient (text/plain body, SSE stream), so they
+  // have to read the error body themselves. Before apiErrorFromResponse they
+  // reported only response.statusText, turning a backend sentence into a bare
+  // "Bad Request".
+  it("surfaces the backend's message rather than the status phrase", async () => {
+    server.use(
+      http.post("*/agents/:conversationId", () =>
+        HttpResponse.json({ error: "Conversation is already ended" }, {
+          status: 400,
+          statusText: "Bad Request",
+        })
+      )
+    );
+    await expect(
+      sendMessage("production", "agent1", "conv-fail", "Hello")
+    ).rejects.toMatchObject({ status: 400, message: "Conversation is already ended" });
+  });
+
+  it("falls back to the status phrase when the body carries no message", async () => {
+    server.use(
+      http.post("*/agents/:conversationId", () =>
+        new HttpResponse(null, { status: 502, statusText: "Bad Gateway" })
+      )
+    );
+    await expect(
+      sendMessage("production", "agent1", "conv-fail", "Hello")
+    ).rejects.toMatchObject({ status: 502, message: "Bad Gateway" });
+  });
 });
 
 describe("sendMessageWithContext", () => {
@@ -235,6 +264,40 @@ describe("rerunLastStep", () => {
 // ─── SSE streaming tests ──────────────────────────────────────────
 
 describe("sendMessageStreaming", () => {
+  it("surfaces the backend's message, keeping the 'Streaming failed' fallback", async () => {
+    server.use(
+      http.post("*/agents/:conversationId/stream", () =>
+        HttpResponse.json({ error: "Agent is not deployed" }, {
+          status: 409,
+          statusText: "Conflict",
+        })
+      )
+    );
+    const run = async () => {
+      // The request happens on the first pull, so the loop must start.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _event of sendMessageStreaming("production", "agent1", "conv-x", {
+        input: "Hello",
+      })) {
+        break;
+      }
+    };
+    await expect(run()).rejects.toMatchObject({
+      status: 409,
+      message: "Agent is not deployed",
+    });
+
+    server.use(
+      http.post("*/agents/:conversationId/stream", () =>
+        new HttpResponse(null, { status: 502, statusText: "Bad Gateway" })
+      )
+    );
+    await expect(run()).rejects.toMatchObject({
+      status: 502,
+      message: "Streaming failed: Bad Gateway",
+    });
+  });
+
   it("yields parsed SSE events from stream", async () => {
     const sseBody =
       "event: token\ndata: Hello\n\n" +

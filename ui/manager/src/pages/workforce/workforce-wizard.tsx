@@ -54,6 +54,7 @@ function emptySlot(
     role,
     mode: "new",
     agentId: "",
+    createdAgentId: "",
     systemPrompt,
     provider: "",
     model: "",
@@ -309,12 +310,15 @@ function WorkforceWizard() {
     for (let i = 0; i < resolvedMembers.length; i++) {
       const member = resolvedMembers[i]!;
 
-      // An existing agent, or a new advisor a previous attempt already
-      // provisioned (its agentId was written back into `members` below) —
-      // nothing to create. The old "resume" logic remembered only which
-      // *rows* had finished, not the ids they were given, so a retry skipped
-      // the setup call and then built the group with agentId "" for them.
-      if (member.agentId) {
+      // An existing agent the user picked, or a new advisor a previous attempt
+      // already provisioned (its id was written into `createdAgentId` below) —
+      // nothing to create. The old "resume" logic remembered only which *rows*
+      // had finished, not the ids they were given, so a retry skipped the setup
+      // call and then built the group with agentId "" for them.
+      const alreadyProvisioned =
+        member.mode === "existing" ? member.agentId : member.createdAgentId;
+      if (alreadyProvisioned) {
+        resolvedMembers[i] = { ...member, agentId: alreadyProvisioned };
         updateProgress(member.id, { status: "done" });
         continue;
       }
@@ -334,9 +338,12 @@ function WorkforceWizard() {
 
         resolvedMembers[i] = { ...member, agentId: result.agentId };
         // Persist the id so a retry after a later failure reuses this agent
-        // instead of deploying a duplicate.
+        // instead of deploying a duplicate. createdAgentId, not agentId:
+        // the latter belongs to the "use an existing agent" picker.
         setMembers((prev) =>
-          prev.map((m) => (m.id === member.id ? { ...m, agentId: result.agentId } : m)),
+          prev.map((m) =>
+            m.id === member.id ? { ...m, createdAgentId: result.agentId } : m,
+          ),
         );
         updateProgress(member.id, { status: "done" });
       } catch (err) {

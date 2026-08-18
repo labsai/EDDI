@@ -71,7 +71,7 @@
     "modeWorkforce": "Equipo",
     "switchMode": "Cambiar espacio",
     "operator": "Operador de plataforma",
-    "workforce": "Plantilla",
+    "workforce": "Grupo de trabajo",
     "monitoring": "Supervisión de conversaciones",
     "analytics": "Analíticas"
   },
@@ -3819,7 +3819,7 @@
       "step3Desc": "Plantea una pregunta y observa cómo tus agentes debaten, critican y sintetizan una respuesta.",
       "step3Title": "Pregunta y observa",
       "subtitle": "Reúne agentes de IA especializados en equipos colaborativos que debaten, analizan y resuelven juntos desafíos complejos.",
-      "welcome": "Bienvenido a la Plantilla"
+      "welcome": "Bienvenido a tu grupo de trabajo"
     },
     "openMenu": "Abrir menú",
     "shortcuts": {
@@ -3862,13 +3862,13 @@
       "back": "Atrás",
       "boardDescPlaceholder": "Describe brevemente el propósito de este consejo asesor…",
       "boardDescription": "Descripción (opcional)",
-      "boardName": "Nombre de la plantilla",
+      "boardName": "Nombre del grupo de trabajo",
       "boardNamePlaceholder": "p. ej., Consejo de estrategia de producto",
-      "boardNameRequired": "Asigna un nombre a esta plantilla.",
+      "boardNameRequired": "Asigna un nombre a este grupo de trabajo.",
       "cancel": "Cancelar",
       "collapse": "Contraer",
       "createNew": "Crear asesor nuevo",
-      "createWorkforce": "Crear plantilla",
+      "createWorkforce": "Crear grupo de trabajo",
       "creatingAgent": "Creando…",
       "creationFailed": "Error en la creación",
       "creationFailedDesc": "Algo salió mal. Puedes reintentarlo y continuará donde se quedó.",
@@ -3897,7 +3897,7 @@
       "role": "Rol",
       "selectAgent": "Seleccionar agente",
       "selectProvider": "Seleccionar proveedor…",
-      "settingUp": "Configurando tu plantilla…",
+      "settingUp": "Configurando tu grupo de trabajo…",
       "settingUpBoard": "Formando el grupo de trabajo…",
       "settingUpDesc": "Creando asesores y configurando el tablero. Esto puede tardar un momento.",
       "starterPrompt": "Eres {{name}}, la voz de {{role}} en este equipo. Habla desde esa perspectiva: aporta ideas claras, bien razonadas y accionables, señala los riesgos y las contrapartidas que veas y céntrate en lo que mejor conoces.",
@@ -3914,13 +3914,13 @@
       "tryAgain": "Reintentar",
       "unnamed": "Sin nombre",
       "untitled": "Tablero sin título",
-      "useDefault": "Predeterminado de la plantilla ({{value}})",
-      "useDefaultKey": "Clave predeterminada de la plantilla",
+      "useDefault": "Predeterminado del grupo de trabajo ({{value}})",
+      "useDefaultKey": "Clave predeterminada del grupo de trabajo",
       "useExisting": "Usar un agente existente",
       "useStarterPrompt": "Insertar un prompt inicial",
       "yourAdvisors": "Tus asesores"
     },
-    "workforce": "Plantilla"
+    "workforce": "Grupo de trabajo"
   },
   "operator": {
     "title": "Operador de plataforma",

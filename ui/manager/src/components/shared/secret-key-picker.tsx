@@ -30,6 +30,16 @@ interface SecretKeyPickerProps {
   placeholder?: string;
   /** data-testid attribute */
   testId?: string;
+  /**
+   * Forwarded to the control the user actually focuses, so a caller's
+   * `<label htmlFor>` resolves. Without it the label pointed at nothing and
+   * a required marker or error message was announced to nobody.
+   */
+  id?: string;
+  /** Forwarded alongside `id`, so the field itself carries its error state. */
+  "aria-invalid"?: boolean;
+  /** Id(s) of the element(s) describing this field — typically its error text. */
+  "aria-describedby"?: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -449,6 +459,9 @@ export function SecretKeyPicker({
   tenantId = "default",
   placeholder,
   testId = "secret-key-picker",
+  id,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
 }: SecretKeyPickerProps) {
   const { t } = useTranslation();
 
@@ -615,6 +628,10 @@ export function SecretKeyPicker({
     return (
       <div ref={containerRef} className="relative" data-testid={testId}>
         <div
+          id={id}
+          role="group"
+          aria-invalid={ariaInvalid}
+          aria-describedby={ariaDescribedBy}
           className={`flex h-7 items-center gap-1.5 rounded-md border px-2 ${
             readOnly
               ? "border-amber-500/30 bg-amber-500/5"
@@ -665,6 +682,9 @@ export function SecretKeyPicker({
         {/* Password input */}
         <div className="relative flex-1">
           <input
+            id={id}
+            aria-invalid={ariaInvalid}
+            aria-describedby={ariaDescribedBy}
             type={showPassword ? "text" : "password"}
             value={value}
             onChange={(e) => handleDirectChange(e.target.value)}

@@ -260,6 +260,7 @@ function ReviewLaunch({
         <div className="space-y-2">
           {members.map((member) => {
             const isNew = member.mode === "new";
+            const created = isNew && member.createdAgentId !== "";
             const llm = isNew ? effectiveLlm(member, llmDefaults) : null;
             return (
             <div
@@ -284,7 +285,7 @@ function ReviewLaunch({
                 {/* What a new advisor is built from — the review is the last
                     place to notice a wrong model or a template's starter prompt
                     that was never edited. */}
-                {isNew && llm && !member.agentId && (
+                {isNew && llm && !created && (
                   <>
                     <span className="mt-1 block truncate text-xs text-muted-foreground" dir="ltr">
                       {providerLabel(llm.provider)}
@@ -300,7 +301,7 @@ function ReviewLaunch({
               </div>
               {isNew ? (
                 <Badge variant="default" className="text-[10px]">
-                  {member.agentId
+                  {created
                     ? t("Workforce.wizard.alreadyCreated", "Created")
                     : t("Workforce.wizard.new", "New")}
                 </Badge>

@@ -30,6 +30,35 @@ export class ApiClientError extends Error implements ApiError {
   }
 }
 
+/**
+ * Build an `ApiClientError` from a failed `Response`, keeping whatever message
+ * the backend put in the body.
+ *
+ * Exported because the modules that must bypass `ApiClient` — `chat.ts` sends
+ * `text/plain` and reads an SSE stream — otherwise fall back to
+ * `response.statusText`, turning `400 {"error":"System prompt is required"}`
+ * into a bare "Bad Request". Consumes the body, so call it only on a response
+ * you are done with.
+ *
+ * `fallbackMessage` is used when the body carries nothing worth showing (empty,
+ * or a proxy's HTML error page); `url` defaults to the response's own, which is
+ * absent on a synthetic `Response` and can differ after a redirect.
+ */
+export async function apiErrorFromResponse(
+  response: Response,
+  fallbackMessage: string = response.statusText,
+  url: string = response.url,
+): Promise<ApiClientError> {
+  let message = fallbackMessage;
+  try {
+    const extracted = extractErrorMessage(await response.text());
+    if (extracted) message = extracted;
+  } catch {
+    // Body unreadable — keep the fallback.
+  }
+  return new ApiClientError(response.status, message, url);
+}
+
 /** Type guard to check if an error is an ApiError from our client */
 export function isApiError(error: unknown): error is ApiError {
   return (
@@ -163,14 +192,7 @@ class ApiClient {
     }
 
     if (!response.ok) {
-      let message = response.statusText;
-      try {
-        const extracted = extractErrorMessage(await response.text());
-        if (extracted) message = extracted;
-      } catch {
-        // Body unreadable — keep statusText.
-      }
-      throw new ApiClientError(response.status, message, url);
+      throw await apiErrorFromResponse(response, response.statusText, url);
     }
 
     // Handle 202 Accepted and 204 No Content (empty body responses)
