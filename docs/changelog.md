@@ -11,7 +11,7 @@
 
 **Repo:** EDDI (`fix/trivy-cve-2026-11940-base-image`)
 
-`main` was red: the blocking Trivy image scan in `ci.yml` flagged 2 HIGH CVEs against
+`main` was red: the blocking Trivy image scan in `ci.yml` flagged one HIGH CVE affecting two packages in
 `labsai/eddi:6.2.0-b1065` — `python3` and `python3-libs` at `3.9.25-7.el9_8.2`, both fixed in
 `3.9.25-7.el9_8.3` (CVE-2026-11940, CPython tarfile extraction filter bypass allowing escape from
 the destination directory). Both come from the UBI9 base layer, not from anything we build; the jar
