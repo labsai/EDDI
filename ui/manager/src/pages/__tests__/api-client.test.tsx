@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { api, isApiError } from "@/lib/api-client";
+import { api, isApiError, ApiClientError, getErrorMessage } from "@/lib/api-client";
 import { server } from "@/test/mocks/server";
 
 // Pause MSW so our manual fetch mocks take priority
@@ -12,6 +12,32 @@ afterEach(() => {
 });
 
 describe("ApiClient", () => {
+  it("throws a real Error, so `err instanceof Error ? err.message : String(err)` reads the backend text", async () => {
+    // Dozens of call sites unwrap failures exactly that way. When the client
+    // threw a plain object literal, the instanceof branch never matched and
+    // every backend rejection surfaced as "[object Object]" — the message that
+    // sent people to the server log to find out what the UI already had.
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "System prompt is required" }), {
+        status: 400,
+        statusText: "Bad Request",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const error = await api.post("/administration/agents/setup", {}).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect(isApiError(error)).toBe(true);
+    const unwrapped = error instanceof Error ? error.message : String(error);
+    expect(unwrapped).toBe("System prompt is required");
+    expect(getErrorMessage(error)).toBe("System prompt is required (HTTP 400)");
+    expect((error as ApiClientError).status).toBe(400);
+    expect((error as ApiClientError).url).toContain("/administration/agents/setup");
+    expect((error as Error).name).toBe("ApiClientError");
+  });
+
   it("throws on non-JSON 2xx response", async () => {
     vi.spyOn(global, "fetch").mockResolvedValue(
       new Response("<html>not json</html>", {

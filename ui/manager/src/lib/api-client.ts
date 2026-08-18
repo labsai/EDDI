@@ -6,6 +6,30 @@ export interface ApiError {
   url?: string;
 }
 
+/**
+ * What `ApiClient` actually throws.
+ *
+ * A real `Error`, not a plain object literal: dozens of call sites unwrap
+ * failures with `err instanceof Error ? err.message : String(err)`, and a
+ * literal falls through that to `String(err)` — so every backend rejection
+ * ("System prompt is required", "Missing role assignment(s): …") reached the
+ * user as `[object Object]` while the real sentence sat in the server log.
+ * Extending `Error` fixes all of them at once, keeps the stack trace, and
+ * still satisfies `isApiError` (a shape check) and the `ApiError` interface,
+ * so nothing that reads `status`/`url` changes.
+ */
+export class ApiClientError extends Error implements ApiError {
+  readonly status: number;
+  readonly url?: string;
+
+  constructor(status: number, message: string, url?: string) {
+    super(message);
+    this.name = "ApiClientError";
+    this.status = status;
+    if (url !== undefined) this.url = url;
+  }
+}
+
 /** Type guard to check if an error is an ApiError from our client */
 export function isApiError(error: unknown): error is ApiError {
   return (
@@ -129,30 +153,24 @@ class ApiClient {
       });
     } catch (networkError) {
       // Network failure (offline, DNS, CORS, etc.)
-      const error: ApiError = {
-        status: 0,
-        message:
-          networkError instanceof Error
-            ? `Network error: ${networkError.message}`
-            : "Network error: unable to reach server",
+      throw new ApiClientError(
+        0,
+        networkError instanceof Error
+          ? `Network error: ${networkError.message}`
+          : "Network error: unable to reach server",
         url,
-      };
-      throw error;
+      );
     }
 
     if (!response.ok) {
-      const error: ApiError = {
-        status: response.status,
-        message: response.statusText,
-        url,
-      };
+      let message = response.statusText;
       try {
         const extracted = extractErrorMessage(await response.text());
-        if (extracted) error.message = extracted;
+        if (extracted) message = extracted;
       } catch {
         // Body unreadable — keep statusText.
       }
-      throw error;
+      throw new ApiClientError(response.status, message, url);
     }
 
     // Handle 202 Accepted and 204 No Content (empty body responses)
@@ -189,12 +207,7 @@ class ApiClient {
       // Non-JSON body on a success response — treat as an error rather
       // than silently returning undefined (which would be cached by
       // TanStack Query as valid data, hiding the real problem).
-      const error: ApiError = {
-        status: response.status,
-        message: "Unexpected non-JSON response",
-        url,
-      };
-      throw error;
+      throw new ApiClientError(response.status, "Unexpected non-JSON response", url);
     }
   }
 

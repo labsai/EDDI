@@ -1,4 +1,4 @@
-import { api } from "../api-client";
+import { api, ApiClientError } from "../api-client";
 import { parseSseFrame } from "./sse-utils";
 import type { SimpleConversationMemorySnapshot } from "./conversations";
 import type { Environment } from "@/lib/constants";
@@ -166,11 +166,7 @@ export async function sendMessage(
     }
   );
   if (!response.ok) {
-    throw {
-      status: response.status,
-      message: response.statusText,
-      url: response.url,
-    };
+    throw new ApiClientError(response.status, response.statusText, response.url);
   }
   return response.json();
 }
@@ -219,11 +215,11 @@ export async function* sendMessageStreaming(
   );
 
   if (!response.ok) {
-    throw {
-      status: response.status,
-      message: `Streaming failed: ${response.statusText}`,
-      url: response.url,
-    };
+    throw new ApiClientError(
+      response.status,
+      `Streaming failed: ${response.statusText}`,
+      response.url,
+    );
   }
 
   const reader = response.body?.getReader();
