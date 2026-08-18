@@ -1378,7 +1378,6 @@
     "addDict": "เพิ่ม",
     "removeDict": "ลบพจนานุกรม",
     "noRegularDicts": "ไม่มีพจนานุกรมทั่วไปที่กำหนดค่า",
-    "regularDictLabel": "พจนานุกรมทั่วไป",
     "dictUri": "URI ทรัพยากรพจนานุกรม",
     "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "การแก้ไข",
@@ -1404,7 +1403,24 @@
       "specialCharacter": "ตัวปรับปกติอักขระพิเศษ",
       "contractedWords": "ตัวปรับปกติคำย่อ",
       "allowedCharacter": "ตัวปรับปกติอักขระที่อนุญาต"
-    }
+    },
+    "regularDictsHint": "คำ วลี และรูปแบบของคุณเอง จัดเก็บเป็นทรัพยากรพจนานุกรม",
+    "openDict": "เปิดพจนานุกรมในแท็บใหม่"
+  },
+  "dictionaryPicker": {
+    "title": "เพิ่มพจนานุกรมทั่วไป",
+    "searchPlaceholder": "ค้นหาพจนานุกรม…",
+    "added": "เพิ่มแล้ว",
+    "empty": "ยังไม่มีพจนานุกรม",
+    "emptyDescription": "พจนานุกรมสอนให้ตัวแยกวิเคราะห์รู้จักคำ วลี และรูปแบบของคุณเอง",
+    "create": "สร้างพจนานุกรม",
+    "createTitle": "พจนานุกรมใหม่",
+    "createHint": "ระบบจะสร้างพจนานุกรมเปล่าและเชื่อมกับตัวแยกวิเคราะห์นี้ทันที — เพิ่มคำ วลี และรูปแบบได้ในตัวแก้ไขพจนานุกรม",
+    "createFailed": "สร้างพจนานุกรมแล้ว แต่เชื่อมโยงไม่สำเร็จ",
+    "created": "สร้างและเชื่อมโยงพจนานุกรมแล้ว",
+    "defaultName": "พจนานุกรมใหม่",
+    "descriptionPlaceholder": "พจนานุกรมนี้สอนอะไรให้ตัวแยกวิเคราะห์…",
+    "manual": "เชื่อมโยงด้วย URI แทน"
   },
   "coordinator": {
     "activeConversations": "การสนทนาที่ใช้งานอยู่",

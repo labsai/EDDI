@@ -1378,7 +1378,6 @@
     "addDict": "添加",
     "removeDict": "移除词典",
     "noRegularDicts": "未配置常规词典",
-    "regularDictLabel": "常规词典",
     "dictUri": "词典资源 URI",
     "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "纠错",
@@ -1404,7 +1403,24 @@
       "specialCharacter": "特殊字符规范化器",
       "contractedWords": "缩略词规范化器",
       "allowedCharacter": "允许字符规范化器"
-    }
+    },
+    "regularDictsHint": "你自己的词语、短语和模式，保存为词典资源。",
+    "openDict": "在新标签页中打开词典"
+  },
+  "dictionaryPicker": {
+    "title": "添加常规词典",
+    "searchPlaceholder": "搜索词典…",
+    "added": "已添加",
+    "empty": "还没有词典",
+    "emptyDescription": "词典让解析器认识你自己的词语、短语和模式。",
+    "create": "创建词典",
+    "createTitle": "新建词典",
+    "createHint": "词典会以空白状态创建并立即链接到此解析器 — 请在词典编辑器中添加词语、短语和模式。",
+    "createFailed": "词典已创建，但无法链接。",
+    "created": "已创建并链接词典",
+    "defaultName": "新建词典",
+    "descriptionPlaceholder": "这个词典教给解析器的内容…",
+    "manual": "改用 URI 链接"
   },
   "coordinator": {
     "activeConversations": "活跃对话",

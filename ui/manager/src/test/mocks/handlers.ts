@@ -598,6 +598,21 @@ export const handlers = [
     return new HttpResponse(null, { status: 200 });
   }),
 
+  // Single descriptor GET — how a screen resolves the NAME behind a resource
+  // reference it holds only as an eddi:// URI (e.g. a parser's linked
+  // dictionaries). Echoes the id so a test can tell which one it asked for.
+  http.get("*/descriptorstore/descriptors/:id", ({ params, request }) => {
+    const version = Number(new URL(request.url).searchParams.get("version") ?? 1);
+    return HttpResponse.json({
+      resource: `eddi://ai.labs.mock/descriptorstore/descriptors/${params.id}?version=${version}`,
+      name: `Mock descriptor ${params.id}`,
+      description: "Mock document descriptor",
+      createdOn: Date.now() - 86400000,
+      lastModifiedOn: Date.now() - 3600000,
+      deleted: false,
+    });
+  }),
+
   // JSON Schema endpoints for agents and packages
   http.get("*/agentstore/agents/jsonSchema", () => {
     return HttpResponse.json({

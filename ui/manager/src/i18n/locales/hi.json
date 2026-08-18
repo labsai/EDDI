@@ -1378,7 +1378,6 @@
     "addDict": "जोड़ें",
     "removeDict": "शब्दकोश हटाएँ",
     "noRegularDicts": "कोई सामान्य शब्दकोश कॉन्फ़िगर नहीं हैं",
-    "regularDictLabel": "सामान्य शब्दकोश",
     "dictUri": "शब्दकोश संसाधन URI",
     "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "सुधार",
@@ -1404,7 +1403,24 @@
       "specialCharacter": "विशेष अक्षर नॉर्मलाइज़र",
       "contractedWords": "संक्षिप्त शब्द नॉर्मलाइज़र",
       "allowedCharacter": "अनुमत अक्षर नॉर्मलाइज़र"
-    }
+    },
+    "regularDictsHint": "आपके अपने शब्द, वाक्यांश और पैटर्न, शब्दकोश संसाधनों के रूप में संग्रहीत।",
+    "openDict": "शब्दकोश नए टैब में खोलें"
+  },
+  "dictionaryPicker": {
+    "title": "नियमित शब्दकोश जोड़ें",
+    "searchPlaceholder": "शब्दकोश खोजें…",
+    "added": "जोड़ा गया",
+    "empty": "अभी कोई शब्दकोश नहीं",
+    "emptyDescription": "शब्दकोश पार्सर को आपके अपने शब्द, वाक्यांश और पैटर्न सिखाता है।",
+    "create": "शब्दकोश बनाएँ",
+    "createTitle": "नया शब्दकोश",
+    "createHint": "यह खाली बनाया जाता है और तुरंत इस पार्सर से जुड़ जाता है — शब्द, वाक्यांश और पैटर्न शब्दकोश संपादक में जोड़ें।",
+    "createFailed": "शब्दकोश बन गया, लेकिन उसे जोड़ा नहीं जा सका।",
+    "created": "शब्दकोश बनाया और जोड़ा गया",
+    "defaultName": "नया शब्दकोश",
+    "descriptionPlaceholder": "यह शब्दकोश पार्सर को क्या सिखाता है…",
+    "manual": "इसके बजाय URI से जोड़ें"
   },
   "coordinator": {
     "activeConversations": "सक्रिय बातचीत",

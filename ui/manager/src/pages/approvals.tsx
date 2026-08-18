@@ -257,30 +257,42 @@ function ApprovalQueueRow({
       </tr>
       {isToolCall && expanded && (
         <tr data-testid={`tool-decision-row-${item.conversationId}`}>
-          <td colSpan={6} className="bg-muted/10 px-4 py-4">
-            <ApprovalBanner
-              surface="regular"
-              pauseReason={item.pauseReason ?? undefined}
-              pausedAt={item.pausedAt}
-              timeoutPolicy={item.timeoutPolicy ?? undefined}
-              approvalTimeout={item.approvalTimeout ?? undefined}
-              pauseDetails={approvalStatus.data?.pauseDetails ?? null}
-              // The query's own flags, not `!data`: that conflated a failed
-              // read with a successful one carrying no pauseDetails, and
-              // resolved the latter to "not pending" — enabling Approve on
-              // the surface where an approver has the LEAST context, while
-              // the operator chat blocked it for the same pause. All three
-              // approval surfaces now derive this identically.
-              pauseDetailsPending={approvalStatus.isLoading}
-              pauseDetailsError={approvalStatus.isError}
-              onRetryPauseDetails={() => void approvalStatus.refetch()}
-              isSubmitting={isSubmitting}
-              requireExplicitPerCall
-              blockedCalls={blockedCalls}
-              renderCallExtra={renderCallExtra}
-              onDecide={(verdict, note, _taskApprovals, toolDecisions) => onToolDecide(item, verdict, note, toolDecisions)}
-              onCancel={() => onToolCancel(item)}
-            />
+          <td colSpan={6} className="bg-muted/10 p-0">
+            {/* `w-0 min-w-full`, not padding on the cell: an auto-layout table
+                sizes its columns from their content's min-content width, and
+                the banner's redacted-arguments <pre> is a single very long
+                line — it stretched the whole table to several thousand px,
+                pushing every other row's columns off-screen. The <pre>'s own
+                `max-w-full` cannot help, because no ancestor inside the cell
+                has a definite width to resolve against. A wrapper with
+                `width: 0` contributes nothing to the column calculation, and
+                `min-width: 100%` then fills the cell the OTHER rows sized.
+                The inner panels keep scrolling within themselves as before. */}
+            <div className="w-0 min-w-full px-4 py-4">
+              <ApprovalBanner
+                surface="regular"
+                pauseReason={item.pauseReason ?? undefined}
+                pausedAt={item.pausedAt}
+                timeoutPolicy={item.timeoutPolicy ?? undefined}
+                approvalTimeout={item.approvalTimeout ?? undefined}
+                pauseDetails={approvalStatus.data?.pauseDetails ?? null}
+                // The query's own flags, not `!data`: that conflated a failed
+                // read with a successful one carrying no pauseDetails, and
+                // resolved the latter to "not pending" — enabling Approve on
+                // the surface where an approver has the LEAST context, while
+                // the operator chat blocked it for the same pause. All three
+                // approval surfaces now derive this identically.
+                pauseDetailsPending={approvalStatus.isLoading}
+                pauseDetailsError={approvalStatus.isError}
+                onRetryPauseDetails={() => void approvalStatus.refetch()}
+                isSubmitting={isSubmitting}
+                requireExplicitPerCall
+                blockedCalls={blockedCalls}
+                renderCallExtra={renderCallExtra}
+                onDecide={(verdict, note, _taskApprovals, toolDecisions) => onToolDecide(item, verdict, note, toolDecisions)}
+                onCancel={() => onToolCancel(item)}
+              />
+            </div>
           </td>
         </tr>
       )}
@@ -550,7 +562,11 @@ export function ApprovalsPage() {
         </div>
       ) : (
         /* Approval table */
-        <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+        // `overflow-x-auto`, not `overflow-hidden`: six columns do not fit a
+        // phone, and clipping them put Review/Approve/Reject permanently out
+        // of reach there — the decision buttons sat ~350px past the card edge
+        // with no way to scroll to them. Now the table scrolls inside its card.
+        <div className="rounded-xl border bg-card shadow-sm overflow-x-auto">
           <table className="w-full text-sm" data-testid="approval-queue-table">
             <thead>
               <tr className="border-b bg-muted/30">

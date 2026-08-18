@@ -570,7 +570,16 @@ export function OperatorChat({
         {/* A textarea, not an input: the old input's own keydown handler already
             special-cased !e.shiftKey, but an <input> cannot hold a second line,
             so Shift+Enter silently did nothing. Same Enter-sends /
-            Shift+Enter-newline contract and auto-resize as chat-drawer. */}
+            Shift+Enter-newline contract and auto-resize as chat-drawer.
+
+            `placeholder:truncate`: the composer is one line tall until you
+            type, but in the top-bar drawer it is only ~210px wide, where these
+            placeholders wrap to three lines — overflowing the 40px box and
+            putting a scrollbar on an EMPTY input, which reads as though it
+            already holds content. Ellipsising the placeholder keeps the
+            resting state honestly single-line; the full text stays available
+            to assistive tech via `aria-label`, and the wide operator page
+            still renders it whole. */}
         <textarea
           ref={inputRef}
           value={input}
@@ -602,7 +611,7 @@ export function OperatorChat({
                 : t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")
           }
           aria-label={t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")}
-          className="max-h-[120px] min-h-[40px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2.5 text-sm disabled:opacity-50"
+          className="max-h-[120px] min-h-[40px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2.5 text-sm placeholder:truncate disabled:opacity-50"
           data-testid="operator-input"
         />
         {isStreaming ? (

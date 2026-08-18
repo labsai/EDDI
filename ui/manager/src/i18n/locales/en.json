@@ -1418,7 +1418,6 @@
     "addDict": "Add",
     "removeDict": "Remove dictionary",
     "noRegularDicts": "No regular dictionaries configured",
-    "regularDictLabel": "Regular Dictionary",
     "dictUri": "Dictionary Resource URI",
     "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "Corrections",
@@ -1444,7 +1443,24 @@
       "specialCharacter": "Special Character Normalizer",
       "contractedWords": "Contracted Word Normalizer",
       "allowedCharacter": "Allowed Character Normalizer"
-    }
+    },
+    "regularDictsHint": "Your own words, phrases and patterns, stored as dictionary resources.",
+    "openDict": "Open dictionary in a new tab"
+  },
+  "dictionaryPicker": {
+    "title": "Add regular dictionary",
+    "searchPlaceholder": "Search dictionaries…",
+    "added": "Added",
+    "empty": "No dictionaries yet",
+    "emptyDescription": "A dictionary teaches the parser your own words, phrases and patterns.",
+    "create": "Create dictionary",
+    "createTitle": "New dictionary",
+    "createHint": "It is created empty and linked to this parser right away — add words, phrases and patterns in the dictionary editor.",
+    "createFailed": "The dictionary was created but could not be linked.",
+    "created": "Dictionary created and linked",
+    "defaultName": "New Dictionary",
+    "descriptionPlaceholder": "What this dictionary teaches the parser…",
+    "manual": "Link by URI instead"
   },
   "coordinator": {
     "activeConversations": "Active conversations",

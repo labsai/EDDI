@@ -22,14 +22,18 @@ import {
   BookOpen,
   Check,
   ChevronDown,
+  ExternalLink,
   Plus,
   Settings,
   Sparkles,
   Trash2,
   Type,
-  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useQueries } from "@tanstack/react-query";
+import { DictionaryPickerDialog } from "@/components/editors/dictionary-picker-dialog";
+import { parseDictionaryUri } from "@/lib/dictionary-uri";
+import { getDescriptor } from "@/lib/api/descriptors";
 
 export interface ParserEditorProps {
   data: ParserData;
@@ -140,7 +144,6 @@ function ToggleRow({
 export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
   const { t } = useTranslation();
   const [showDictPicker, setShowDictPicker] = useState(false);
-  const [newDictUri, setNewDictUri] = useState("");
 
   const config = useMemo(() => data.config ?? {}, [data.config]);
   const extensions = useMemo(() => data.extensions ?? {}, [data.extensions]);
@@ -184,6 +187,35 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
     () => dictionaries.filter((d) => d.type === REGULAR_DICT_TYPE),
     [dictionaries],
   );
+
+  /** The id and pinned version each linked dictionary points at, row-aligned. */
+  const linkedDicts = useMemo(
+    () => regularDicts.map((rd) => parseDictionaryUri((rd.config?.uri as string) ?? "")),
+    [regularDicts],
+  );
+
+  /**
+   * The linked dictionaries' names, read one descriptor at a time.
+   *
+   * Not taken from the `dictionary` store's descriptor listing, even though
+   * the picker already loads it: that listing is paginated, and on some
+   * deployments it comes back empty for a store whose individual descriptors
+   * resolve perfectly well — which would render every row as a raw
+   * `6a84cdfb…` id. There are as many requests here as the parser has linked
+   * dictionaries, which is a handful, and react-query caches them by id.
+   *
+   * A descriptor that cannot be read falls back to the id rather than to
+   * "unknown": a reference this page failed to resolve is not thereby broken.
+   */
+  const descriptorQueries = useQueries({
+    queries: linkedDicts.map(({ id, version }) => ({
+      queryKey: ["descriptor", id, version ?? 1],
+      queryFn: () => getDescriptor(id, version ?? 1),
+      enabled: Boolean(id),
+      staleTime: 5 * 60_000,
+      retry: false,
+    })),
+  });
 
   const addRegularDict = useCallback(
     (uri: string) => {
@@ -380,6 +412,12 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
                 </button>
               )}
             </div>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">
+              {t(
+                "parserEditor.regularDictsHint",
+                "Your own words, phrases and patterns, stored as dictionary resources.",
+              )}
+            </p>
 
             {regularDicts.length === 0 && (
               <p className="mt-1 text-xs text-muted-foreground" data-testid="no-regular-dicts">
@@ -389,23 +427,44 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
 
             {regularDicts.map((rd, idx) => {
               const uri = (rd.config?.uri as string) ?? "";
-              // Extract ID from eddi:// URI for display
-              const displayId = extractIdFromUri(uri);
+              const { id, version } = linkedDicts[idx] ?? { id: "", version: null };
+              // The descriptor's name once it resolves, the id until then (or
+              // if it never does), and the raw URI only when it carries no id
+              // at all — which means it was hand-written in the manual field.
+              const label = descriptorQueries[idx]?.data?.name || id || uri;
+              const detail = id ? `${id}${version !== null ? ` · v${version}` : ""}` : uri;
               return (
                 <div
-                  key={`regular-${(rd.config?.uri as string) ?? idx}`}
+                  // Index included: the picker refuses to link one dictionary
+                  // twice, but the manual URI field cannot, and two identical
+                  // URIs would otherwise share a key.
+                  key={`regular-${uri}-${idx}`}
                   className="mt-1 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2"
                   data-testid={`regular-dict-${idx}`}
                 >
-                  <BookOpen className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                  <BookOpen className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-foreground truncate">
-                      {t("parserEditor.regularDictLabel", "Regular Dictionary")}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground truncate" title={uri}>
-                      {displayId || uri}
+                    <p className="truncate text-xs font-medium text-foreground">{label}</p>
+                    <p className="truncate text-[10px] text-muted-foreground" title={uri}>
+                      {detail}
                     </p>
                   </div>
+                  {/* A new tab, not a route change: this editor is also rendered
+                      inside the workflow dialog, where navigating away discards
+                      whatever the operator has edited so far. */}
+                  {id && (
+                    <a
+                      href={`/manage/resources/dictionary/${id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      title={t("parserEditor.openDict", "Open dictionary in a new tab")}
+                      aria-label={t("parserEditor.openDict", "Open dictionary in a new tab")}
+                      data-testid={`open-regular-dict-${idx}`}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                    </a>
+                  )}
                   {!readOnly && (
                     <button
                       type="button"
@@ -422,51 +481,6 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
             })}
           </div>
 
-          {/* Dictionary URI picker (inline) */}
-          {showDictPicker && (
-            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2" data-testid="dict-uri-picker">
-              <label className="text-xs font-medium text-foreground">
-                {t("parserEditor.dictUri", "Dictionary Resource URI")}
-              </label>
-              <input
-                type="text"
-                value={newDictUri}
-                onChange={(e) => setNewDictUri(e.target.value)}
-                placeholder={t("parserEditor.dictUriPlaceholder", "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>")}
-                className="h-8 w-full rounded-md border border-input bg-background px-3 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                data-testid="dict-uri-input"
-                autoFocus
-              />
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    addRegularDict(newDictUri);
-                    setNewDictUri("");
-                    setShowDictPicker(false);
-                  }}
-                  disabled={!newDictUri.trim()}
-                  className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  data-testid="confirm-add-dict"
-                >
-                  <Plus className="h-3 w-3" />
-                  {t("parserEditor.addDict", "Add")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowDictPicker(false);
-                    setNewDictUri("");
-                  }}
-                  className="inline-flex items-center gap-1 rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  data-testid="cancel-add-dict"
-                >
-                  <X className="h-3 w-3" />
-                  {t("common.cancel", "Cancel")}
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       </Section>
 
@@ -575,25 +589,17 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
           })}
         </div>
       </Section>
+
+      {/* Pick an existing dictionary resource, or create one on the spot.
+          Rendered at the editor root rather than inside the Dictionaries
+          section, whose children unmount when it collapses — a modal has no
+          business sharing that lifetime. */}
+      <DictionaryPickerDialog
+        open={showDictPicker}
+        onClose={() => setShowDictPicker(false)}
+        onSelect={addRegularDict}
+        existingUris={regularDicts.map((rd) => (rd.config?.uri as string) ?? "")}
+      />
     </div>
   );
-}
-
-// ─── Utilities ───────────────────────────────────────────────────────────────
-
-/** Extract a human-readable ID from an eddi:// URI */
-function extractIdFromUri(uri: string): string {
-  try {
-    const normalised = uri.startsWith("eddi://")
-      ? uri.replace("eddi://", "http://")
-      : uri;
-    const url = new URL(normalised, "http://dummy");
-    const segments = url.pathname.split("/").filter(Boolean);
-    const id = segments.length >= 3 ? segments[2] : undefined;
-    const version = url.searchParams.get("version");
-    if (id) return `${id}${version ? ` v${version}` : ""}`;
-  } catch {
-    // ignore
-  }
-  return uri;
 }

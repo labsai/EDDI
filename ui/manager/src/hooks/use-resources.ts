@@ -29,13 +29,16 @@ export function useResourceDescriptors(
   slug: string,
   limit = 100,
   index = 0,
-  filter = ""
+  filter = "",
+  /** Set false to hold the request back — e.g. a picker that is mounted but
+   *  not open yet, which would otherwise list a store nobody asked to see. */
+  enabled = true
 ) {
   const rt = resolveType(slug);
   return useQuery({
     queryKey: [...resourceKeys(slug), "descriptors", { limit, index, filter }],
     queryFn: () => getResourceDescriptors(rt!, limit, index, filter),
-    enabled: !!rt,
+    enabled: !!rt && enabled,
   });
 }
 
