@@ -40,12 +40,14 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - **[Group Conversations](group-conversations.md)** — Multi-agent debates, voting, shared artifacts, and standing teams across 7 discussion styles (Round Table, Peer Review, Devil's Advocate, Delphi, Debate, Task Force, Negotiation)
 - **[Managed Agents](managed-agents.md)** — Intent-based auto-routing with one conversation per user per intent
 - **[Model Cascading](model-cascade.md)** — Cost-optimized multi-model routing with confidence-based escalation
+- **Platform Operator** — Meta-agent that reads and operates the deployment, including creating other agents, with every write behind a human approval gate. Activate it at `/manage/operator`, or use the form-based wizard at `/manage/agents/wizard` — see **[Getting Started](getting-started.md)**
 
 ### 🔗 Protocols & Interoperability
 
 - **[MCP Server](mcp-server.md)** (80+ tools) — Full EDDI control from Claude Desktop, IDE plugins, or any MCP client
 - **[A2A Protocol](a2a-protocol.md)** — Agent-to-Agent peer communication with skill discovery
 - **[OpenAI-Compatible API](open-webui-integration.md)** — Deployed agents presented as OpenAI models for Open WebUI and OpenAI SDK clients
+- **SSE Streaming** — Token-by-token responses, including tool-enabled turns, plus a live `tool_call` event so clients can show "Using {tool}…" while the turn is still running
 
 ### 🧠 Intelligence & Memory
 

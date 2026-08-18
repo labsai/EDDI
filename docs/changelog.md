@@ -1790,6 +1790,45 @@ rename arguably raises the stakes, since the config is now explicitly the canoni
 
 
 
+## 📘 docs(readme): sync both READMEs with what landed on main for 6.3.0 (2026-08-11)
+
+**Repo:** EDDI (`chore/eddi-version-6-3-0`)
+
+Audited `README.md` and `docs/README.md` against `origin/main` after merging 589 files of it into the
+release branch. Main had already swapped Agent Father for the **Platform Operator** in the root
+README (quick start, feature bullet, and the now-dead deep-dive doc row). Verified there is no
+surviving `Agent Father` / `agent-father` reference in either README, `SUMMARY.md` or `AGENTS.md`,
+that the `docs/agent-father-*.md` pages are gone, that `install.sh` no longer claims to deploy a
+starter agent, and that every relative doc link in both files still resolves.
+
+Two real gaps remained, both features main shipped that neither README mentioned:
+
+1. **`docs/README.md` never got the Platform Operator at all.** The root README names it twice; the
+   docs index still described orchestration as if the meta-agent did not exist. Added to *Multi-Agent
+   Orchestration* with the two real entry points (`/manage/operator`, `/manage/agents/wizard`) taken
+   from `getting-started.md` rather than invented. There is no dedicated operator page to link — a
+   gap worth closing separately.
+2. **Streaming was undersold in both.** Main shipped `ToolLoopStreamingChatModel` (tool-enabled turns
+   now stream token-by-token instead of going silent until the tool loop finishes) and a live
+   `tool_call` SSE event for "Using {tool}…" status. The root README's SSE row said only "real-time
+   chat responses"; the docs index listed no streaming at all under *Protocols & Interoperability*.
+   Both now say what actually happens. Verified in code first — `ToolLoopStreamingChatModel.java`,
+   `RestAgentEngineStreaming` emitting `event: tool_call`, and the `onToolCall` hook on
+   `ConversationEventSink` / `IConversationService.StreamingResponseHandler` — not from the changelog
+   alone.
+
+**Counts re-checked, none needed changing:** 84 entries in `McpToolFilter.MCP_TOOLS` against the
+"80+" floor; 14,645 test annotations against "14,000+"; 7 named `DiscussionStyle` values (`CUSTOM` is
+the eighth and correctly not counted as a preset style). These are deliberately floors, which is
+exactly why they survived a 589-file merge without edits.
+
+Deliberately unchanged: the "12 LLM Providers" figure (main added no provider; `docs/langchain.md`
+remains its source of truth) and `README.md:559`'s language-less code fence (pre-existing, nowhere
+near this edit).
+
+---
+
+
 ## 🏷️ docs(release): the release guide told you to push a tag that triggers nothing (2026-08-11)
 
 **Repo:** EDDI (`chore/eddi-version-6-3-0`)
