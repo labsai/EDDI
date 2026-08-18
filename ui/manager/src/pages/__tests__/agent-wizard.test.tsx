@@ -685,7 +685,7 @@ describe("AgentWizardPage", () => {
           model: "claude-sonnet-4-6",
           deployed: false,
           deploymentStatus: "ERROR",
-          resources: { vaultGrantWarning: "Vault key 'scoped' is granted only to [agent-42]." },
+          resources: { vaultWarning: "Vault key 'scoped' is granted only to [agent-42]." },
         })
       )
     );
@@ -707,7 +707,7 @@ describe("AgentWizardPage", () => {
     await user.click(screen.getByTestId("wizard-create-deploy"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("wizard-vault-grant-warning")).toHaveTextContent("granted only to [agent-42]");
+      expect(screen.getByTestId("wizard-vault-warning")).toHaveTextContent("granted only to [agent-42]");
     });
   });
 

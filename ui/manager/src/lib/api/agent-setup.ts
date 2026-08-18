@@ -96,10 +96,11 @@ export interface SetupResult {
   sentimentAnalysisEnabled?: boolean;
   /**
    * Created resource locations plus deploy outcome (`deployWarning`,
-   * `deployError`) and, when the chosen vault key is granted only to specific
-   * agents, `vaultGrantWarning` — the new agent cannot be on that list yet, so
-   * under grant enforcement its deployment is blocked until the grant is
-   * widened.
+   * `deployError`) and `vaultWarning` — the chosen vault key does not exist, or
+   * it is granted only to other agents (a new agent cannot be on that list yet,
+   * so under grant enforcement its deployment is blocked until the grant is
+   * widened). Neither fails the setup; both leave an agent that cannot use its
+   * credential, which is why the backend reports them rather than only logging.
    */
   resources?: Record<string, unknown>;
   /**
