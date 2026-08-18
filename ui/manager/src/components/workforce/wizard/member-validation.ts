@@ -77,9 +77,18 @@ const BACKEND_KEYLESS_PROVIDERS = new Set([
  * server, and the backend's own check is an allow-list, so anything it does not
  * recognise needs a key there too.
  */
+/**
+ * What the backend will read this provider as: trimmed, lower-cased, and blank
+ * resolved to `DEFAULT_PROVIDER` — the same normalisation `resolveParams`
+ * applies server-side. Shared so `providerNeedsKey` and `providerLabel` can
+ * never disagree about what a given value means.
+ */
+function normalizeProvider(provider: string): string {
+  return provider.trim().toLowerCase() || BACKEND_DEFAULT_PROVIDER;
+}
+
 export function providerNeedsKey(provider: string): boolean {
-  const id = provider.trim().toLowerCase() || BACKEND_DEFAULT_PROVIDER;
-  return !BACKEND_KEYLESS_PROVIDERS.has(id);
+  return !BACKEND_KEYLESS_PROVIDERS.has(normalizeProvider(provider));
 }
 
 /**
@@ -87,7 +96,7 @@ export function providerNeedsKey(provider: string): boolean {
  * anthropic, so it is labelled as such rather than as an empty string.
  */
 export function providerLabel(provider: string): string {
-  const id = provider || BACKEND_DEFAULT_PROVIDER;
+  const id = normalizeProvider(provider);
   return LLM_PROVIDERS.find((p) => p.id === id)?.name ?? id;
 }
 
