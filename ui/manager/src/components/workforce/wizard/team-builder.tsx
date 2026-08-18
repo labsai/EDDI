@@ -368,6 +368,7 @@ function TeamBuilder({
         variant="outline"
         className="mt-3 w-full"
         onClick={addMember}
+        data-testid="add-advisor-btn"
       >
         <Plus className="h-4 w-4" />
         {t("Workforce.wizard.addAdvisor", "Add Advisor")}

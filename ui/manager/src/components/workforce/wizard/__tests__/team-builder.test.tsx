@@ -48,7 +48,7 @@ describe("TeamBuilder — advisor slots", () => {
     });
     render([existing], onMembersChange);
 
-    await userEvent.setup().click(screen.getByText("Add Advisor"));
+    await userEvent.setup().click(screen.getByTestId("add-advisor-btn"));
 
     const added = onMembersChange.mock.calls[0]![0]!.at(-1)!;
     expect(added).toMatchObject({
@@ -73,7 +73,7 @@ describe("TeamBuilder — advisor slots", () => {
       onMembersChange
     );
 
-    await userEvent.setup().click(screen.getByText("Add Advisor"));
+    await userEvent.setup().click(screen.getByTestId("add-advisor-btn"));
 
     expect(onMembersChange.mock.calls[0]![0]!.at(-1)!).toMatchObject({
       provider: "openai",
@@ -86,7 +86,7 @@ describe("TeamBuilder — advisor slots", () => {
     const onMembersChange = vi.fn();
     render([member({ mode: "existing", agentId: "agent-1" })], onMembersChange);
 
-    await userEvent.setup().click(screen.getByText("Add Advisor"));
+    await userEvent.setup().click(screen.getByTestId("add-advisor-btn"));
 
     expect(onMembersChange.mock.calls[0]![0]!.at(-1)!).toMatchObject({
       provider: "",
