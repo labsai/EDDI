@@ -68,3 +68,17 @@ eebfe898b34858918d5cbbe11e60336d1b6a916e:src/test/java/ai/labs/eddi/secrets/sani
 # introduced it stays in history and still needs an entry. Never a real key: it
 # never authenticated against anything.
 96df3c83fa449e02250c08c1aa420a11617f2ebb:src/test/java/ai/labs/eddi/modules/apicalls/impl/ResolvedRequestTest.java:generic-api-key:193
+
+# AgentSetupVaultKeyReuseTest (PR #699): the same mistake as the two entries
+# above, made a third time. The fixture standing in for a provider API key was
+# written as a realistic "sk-live-" + hex literal, which is precisely the shape
+# a real leaked key takes. Renamed in a follow-up commit to a value that reads
+# as a fixture, but gitleaks scans a PR's whole commit range, so the commit that
+# introduced it stays in history and still needs an entry. Never a real key:
+# nothing in those tests authenticates against anything — the value is compared
+# for equality and hashed for a checksum, and any string would do.
+#
+# Landed on main ahead of #699 on purpose. The scan job restores this file from
+# the BASE branch, so an entry added inside the offending PR never applies to
+# that PR — it has to be here first.
+30ff68d1d2eaa568e7399fa24dc6acf7315b30f6:src/test/java/ai/labs/eddi/engine/setup/AgentSetupVaultKeyReuseTest.java:generic-api-key:50
