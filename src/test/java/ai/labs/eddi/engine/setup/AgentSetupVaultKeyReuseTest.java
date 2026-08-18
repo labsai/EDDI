@@ -49,7 +49,13 @@ import static org.mockito.MockitoAnnotations.openMocks;
 @DisplayName("AgentSetupService — vault key reuse")
 class AgentSetupVaultKeyReuseTest {
 
-    private static final String KEY = "sk-live-abcdef0123456789";
+    /**
+     * Deliberately shaped so it cannot be mistaken for a live credential: a
+     * realistic-looking "sk-live-..." fixture is exactly the pattern a real leaked
+     * key takes, and it tripped the gitleaks generic-api-key rule in CI. Nothing
+     * here depends on the value beyond it being distinct and stable.
+     */
+    private static final String KEY = "test-provider-key-not-a-real-secret";
 
     @Mock
     private IRestInterfaceFactory restInterfaceFactory;
@@ -217,7 +223,7 @@ class AgentSetupVaultKeyReuseTest {
         @DisplayName("a different value is not a match")
         void differentValueIsNotAMatch() throws Exception {
             when(secretProvider.listKeys(SecretReference.DEFAULT_TENANT))
-                    .thenReturn(List.of(entry("other.key", "sk-some-other-key", Instant.EPOCH, List.of("*"))));
+                    .thenReturn(List.of(entry("other.key", "test-a-different-key", Instant.EPOCH, List.of("*"))));
 
             assertTrue(vaultApiKey(KEY, null).startsWith("${vault:setup.my-agent."));
         }
@@ -363,7 +369,7 @@ class AgentSetupVaultKeyReuseTest {
         @Test
         @DisplayName("an existing entry holding a DIFFERENT value is refused, not overwritten")
         void differentValueIsRefused() throws Exception {
-            when(secretProvider.getMetadata(any())).thenReturn(entry("openai-prod", "sk-the-old-one", Instant.EPOCH, List.of("*")));
+            when(secretProvider.getMetadata(any())).thenReturn(entry("openai-prod", "test-the-previously-stored-key", Instant.EPOCH, List.of("*")));
 
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
 
