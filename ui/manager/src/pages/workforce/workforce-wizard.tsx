@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getErrorMessage } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { useSetupAgent } from "@/hooks/use-agent-setup";
 import { useCreateGroup, useAvailableStyles } from "@/hooks/use-groups";
@@ -25,6 +26,13 @@ import {
   type MemberSlot,
 } from "@/components/workforce/wizard/team-builder";
 import {
+  memberIssue,
+  effectiveLlm,
+  starterPrompt,
+  INITIAL_LLM_DEFAULTS,
+  type LlmDefaults,
+} from "@/components/workforce/wizard/member-validation";
+import {
   ReviewLaunch,
   type CreationProgressItem,
 } from "@/components/workforce/wizard/review-launch";
@@ -38,6 +46,7 @@ const Workforce_PROGRESS_ID = "__Workforce__";
 function emptySlot(
   displayName = "",
   role = "",
+  systemPrompt = "",
 ): MemberSlot {
   return {
     id: crypto.randomUUID(),
@@ -45,7 +54,7 @@ function emptySlot(
     role,
     mode: "new",
     agentId: "",
-    systemPrompt: "",
+    systemPrompt,
     provider: "",
     model: "",
     apiKey: "",
@@ -74,6 +83,13 @@ function WorkforceWizard() {
     style: DiscussionStyle;
     maxRounds: number;
   } | null>(null);
+  /** Provider/model/key every new advisor inherits unless it sets its own. */
+  const [llmDefaults, setLlmDefaults] = useState<LlmDefaults>(INITIAL_LLM_DEFAULTS);
+  /** Validation messages stay hidden until the user first tries to continue. */
+  const [showTeamErrors, setShowTeamErrors] = useState(false);
+  /** Bumped on each failed Next so the effect below moves focus to the first flagged field. */
+  const [focusFlaggedRequest, setFocusFlaggedRequest] = useState(0);
+  const teamStepRef = useRef<HTMLDivElement>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [creationProgress, setCreationProgress] = useState<
     CreationProgressItem[]
@@ -110,16 +126,67 @@ function WorkforceWizard() {
 
   // ─── Navigation guards ─────────────────────────────────────────────────
 
+  const teamComplete = useMemo(
+    () =>
+      boardName.trim().length > 0 &&
+      members.length > 0 &&
+      members.every((m) => memberIssue(m, llmDefaults) === null),
+    [boardName, members, llmDefaults],
+  );
+
+  // Step 1's Next stays clickable even when the team is incomplete: a disabled
+  // button gave no clue which field was missing, and the one that actually
+  // blocked creation — the system prompt — is hidden inside a collapsed card.
+  // Clicking now reveals the messages instead of advancing.
   const canProceed = useMemo(() => {
     if (currentStep === 0) return selectedTemplate !== null;
-    if (currentStep === 1)
-      return (
-        boardName.trim().length > 0 &&
-        members.length > 0 &&
-        members.every((m) => m.displayName.trim().length > 0)
-      );
+    if (currentStep === 1) return true;
     return false; // Step 2 uses CreateButton inside ReviewLaunch
-  }, [currentStep, selectedTemplate, boardName, members]);
+  }, [currentStep, selectedTemplate]);
+
+  const handleNext = useCallback(() => {
+    if (currentStep === 1 && !teamComplete) {
+      setShowTeamErrors(true);
+      setFocusFlaggedRequest((n) => n + 1);
+      return;
+    }
+    setShowTeamErrors(false);
+    setCurrentStep((s) => s + 1);
+  }, [currentStep, teamComplete]);
+
+  const handleBack = useCallback(() => {
+    if (currentStep === 0) {
+      navigate("/workforce");
+      return;
+    }
+    // Leaving the team step drops its "you tried to continue" state, so a
+    // freshly picked template does not arrive on the team step pre-flagged.
+    // Leaving the review step drops a previous attempt's progress list, so
+    // after fixing the cause the summary shows again instead of the failure —
+    // the advisors that attempt did create are kept via their agentId and
+    // reused, see handleCreate.
+    if (currentStep === 1) setShowTeamErrors(false);
+    if (currentStep === 2) setCreationProgress([]);
+    setCurrentStep((s) => s - 1);
+  }, [currentStep, navigate]);
+
+  // Move focus to the first flagged control after a failed Next. Read from the
+  // DOM rather than threaded through props: the flagged field can be any of a
+  // dozen inputs across the member cards, and `aria-invalid` (or
+  // `data-invalid` on the two composite pickers) already marks exactly it. The
+  // card holding it is derived-open in the same render, so it is present here.
+  useEffect(() => {
+    if (focusFlaggedRequest === 0) return;
+    const flagged = teamStepRef.current?.querySelector<HTMLElement>(
+      '[aria-invalid="true"], [data-invalid="true"]',
+    );
+    if (!flagged) return;
+    const target = flagged.matches("input, textarea, select, button")
+      ? flagged
+      : (flagged.querySelector<HTMLElement>("input, textarea, select, button") ?? flagged);
+    target.scrollIntoView?.({ block: "center" });
+    target.focus();
+  }, [focusFlaggedRequest]);
 
   // ─── Template selection handler ─────────────────────────────────────────
 
@@ -146,13 +213,17 @@ function WorkforceWizard() {
 
       setBoardName(tpl.name);
       setBoardDescription(tpl.description);
+      // A template is a quick start, so it seeds each role's system prompt
+      // too — editable in the card, and shown on the review step. Without it,
+      // "Advisory Board" meant writing five prompts before anything could be
+      // created.
       setMembers(
         tpl.roles.map((r) =>
-          emptySlot(r.displayName, r.role ?? ""),
+          emptySlot(r.displayName, r.role ?? "", starterPrompt(r.displayName, r.role ?? "", t)),
         ),
       );
     },
-    [templates],
+    [templates, t],
   );
 
   /**
@@ -193,10 +264,12 @@ function WorkforceWizard() {
     setBoardDescription(saved.description);
     setMembers(
       saved.members.length > 0
-        ? saved.members.map((m) => emptySlot(m.displayName, m.role))
+        ? saved.members.map((m) =>
+            emptySlot(m.displayName, m.role, starterPrompt(m.displayName, m.role, t)),
+          )
         : [emptySlot(), emptySlot()],
     );
-  }, [searchParams, templates, savedTemplates.templates, handleTemplateSelect]);
+  }, [searchParams, templates, savedTemplates.templates, handleTemplateSelect, t]);
 
   // ─── Creation flow ──────────────────────────────────────────────────────
 
@@ -213,13 +286,6 @@ function WorkforceWizard() {
     if (creatingRef.current) return;
     creatingRef.current = true;
     setIsCreating(true);
-
-    // Snapshot completed IDs before overwriting progress state
-    const completedIds = new Set(
-      creationProgress
-        .filter((p) => p.status === "done")
-        .map((_, i) => i),
-    );
 
     // Initialize progress entries
     const progressItems: CreationProgressItem[] = [
@@ -243,11 +309,12 @@ function WorkforceWizard() {
     for (let i = 0; i < resolvedMembers.length; i++) {
       const member = resolvedMembers[i]!;
 
-      // Skip members already completed in a previous attempt
-      if (completedIds.has(i)) continue;
-
-      if (member.mode === "existing") {
-        // Already has an agentId — mark as done immediately
+      // An existing agent, or a new advisor a previous attempt already
+      // provisioned (its agentId was written back into `members` below) —
+      // nothing to create. The old "resume" logic remembered only which
+      // *rows* had finished, not the ids they were given, so a retry skipped
+      // the setup call and then built the group with agentId "" for them.
+      if (member.agentId) {
         updateProgress(member.id, { status: "done" });
         continue;
       }
@@ -255,20 +322,31 @@ function WorkforceWizard() {
       updateProgress(member.id, { status: "creating" });
 
       try {
+        const llm = effectiveLlm(member, llmDefaults);
         const result = await setupAgent.mutateAsync({
           name: member.displayName,
           systemPrompt: member.systemPrompt,
-          provider: member.provider || undefined,
-          model: member.model || undefined,
-          apiKey: member.apiKey || undefined,
+          provider: llm.provider || undefined,
+          model: llm.model || undefined,
+          apiKey: llm.apiKey || undefined,
           deploy: true,
         });
 
         resolvedMembers[i] = { ...member, agentId: result.agentId };
+        // Persist the id so a retry after a later failure reuses this agent
+        // instead of deploying a duplicate.
+        setMembers((prev) =>
+          prev.map((m) => (m.id === member.id ? { ...m, agentId: result.agentId } : m)),
+        );
         updateProgress(member.id, { status: "done" });
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : String(err);
+        // getErrorMessage keeps the backend's sentence ("System prompt is
+        // required") and appends the status, which is what the rest of the
+        // app shows for API failures. This used to be `err instanceof Error ?
+        // err.message : String(err)` against a plain-object ApiError, which
+        // rendered every rejection as "[object Object]" — ApiClient now throws
+        // a real Error (ApiClientError), so that shape is safe again elsewhere.
+        const message = getErrorMessage(err);
         updateProgress(member.id, { status: "error", error: message });
         toast.error(
           t("Workforce.wizard.agentError", "Failed to create {{name}}: {{error}}", {
@@ -340,7 +418,7 @@ function WorkforceWizard() {
 
       navigate(`/workforce/${newGroupId}?version=1`);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       updateProgress(Workforce_PROGRESS_ID, {
         status: "error",
         error: message,
@@ -363,7 +441,7 @@ function WorkforceWizard() {
     boardDescription,
     createGroup,
     navigate,
-    creationProgress,
+    llmDefaults,
     // Read in the custom build path to reproduce a saved template's style and
     // round count. Omitting it would let this callback close over a stale value.
     savedTemplateConfig,
@@ -415,6 +493,7 @@ function WorkforceWizard() {
 
         {/* Step 1: Team builder */}
         <div
+          ref={teamStepRef}
           className={cn(
             "transition-all duration-300",
             currentStep === 1
@@ -430,6 +509,9 @@ function WorkforceWizard() {
               onBoardDescriptionChange={setBoardDescription}
               members={members}
               onMembersChange={setMembers}
+              llmDefaults={llmDefaults}
+              onLlmDefaultsChange={setLlmDefaults}
+              showErrors={showTeamErrors}
             />
           )}
         </div>
@@ -449,6 +531,7 @@ function WorkforceWizard() {
               boardDescription={boardDescription}
               style={resolvedStyle}
               members={members}
+              llmDefaults={llmDefaults}
               isCreating={isCreating}
               creationProgress={creationProgress}
               onCreateClick={handleCreate}
@@ -460,14 +543,7 @@ function WorkforceWizard() {
       {/* Navigation buttons */}
       {!isCreating && (
         <div className="mt-8 flex justify-between">
-          <Button
-            variant="outline"
-            onClick={() =>
-              currentStep === 0
-                ? navigate("/workforce")
-                : setCurrentStep((s) => s - 1)
-            }
-          >
+          <Button variant="outline" onClick={handleBack}>
             {t("Workforce.wizard.back", "Back")}
           </Button>
 
@@ -475,7 +551,7 @@ function WorkforceWizard() {
             <Button
               variant="primary"
               disabled={!canProceed}
-              onClick={() => setCurrentStep((s) => s + 1)}
+              onClick={handleNext}
             >
               {t("Workforce.wizard.next", "Next")}
             </Button>
