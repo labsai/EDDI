@@ -199,7 +199,9 @@ caller-named key is read-then-write, and the checksum scan is separate from the 
 concurrent setups can still race — the named path now reads back and fails loudly before anything is created,
 and both javadocs state exactly what remains open. Closing them needs a create-if-absent (and a checksum
 reservation) in the persistence layer for Mongo and Postgres both — an SPI change shared with the three other
-`store` callers, all of which upsert today, and deliberately not designed around this one caller. See the
+`store` callers, all of which upsert today, and deliberately not designed around this one caller. Tracked in
+[issue #700](https://github.com/labsai/EDDI/issues/700), which carries the caller inventory and the per-backend
+sketch; the mitigation's javadoc links it so it does not read as a finished job. See also the
 [thread](https://github.com/labsai/EDDI/pull/699#discussion_r3805688054).
 
 Doc claims that overstated the feature were made conditional: MCP checksum de-duplication depends on

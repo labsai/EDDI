@@ -1250,9 +1250,9 @@ public class AgentSetupService {
      * This narrows the window rather than closing it: a write that lands after this
      * read is still missed. Closing it properly needs a conditional insert in the
      * persistence layer (Mongo and Postgres both), which is an SPI change shared
-     * with three other callers and does not belong in this one. What it does buy is
-     * that the common interleaving fails loudly, here, before a single document is
-     * created — instead of silently.
+     * with three other callers and does not belong in this one — tracked in issue
+     * #700. What it does buy is that the common interleaving fails loudly, here,
+     * before a single document is created — instead of silently.
      */
     private void verifyStoredValue(SecretReference ref, String expectedPlaintext) throws AgentSetupException {
         try {

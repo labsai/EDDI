@@ -332,7 +332,7 @@ A setup that fails part-way rolls back the documents it created. It also removes
 
 A generated vault key is named `setup.<agent>.<timestamp>-<random>.apiKey`. The timestamp alone was not sufficient: two setups for agents with the same name landing in the same millisecond produced the same name, and `store` is an upsert, so one silently overwrote the other's credential. The random suffix is what makes the name unique; the timestamp is kept because it tells you when the entry was made.
 
-A **caller-chosen** `vaultKeyName` has no such suffix, by design — that is the point of naming it. Creating one is read-then-write rather than a conditional insert, so two setups naming the same new key with different values can race; the loser is detected on read-back and fails before anything is created, but a write landing after that read is not caught. Prefer creating a shared key through the secrets REST API first, then naming it.
+A **caller-chosen** `vaultKeyName` has no such suffix, by design — that is the point of naming it. Creating one is read-then-write rather than a conditional insert, so two setups naming the same new key with different values can race; the loser is detected on read-back and fails before anything is created, but a write landing after that read is not caught (an atomic create-if-absent for the vault SPI is tracked in [issue #700](https://github.com/labsai/EDDI/issues/700)). Prefer creating a shared key through the secrets REST API first, then naming it.
 
 ### Graceful Degradation
 
