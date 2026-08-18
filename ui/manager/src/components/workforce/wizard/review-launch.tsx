@@ -8,6 +8,7 @@ import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { type DiscussionStyle } from "@/lib/api/groups";
 import { styleDisplay } from "@/lib/discussion-styles";
 import type { MemberSlot } from "./team-builder";
+import { effectiveLlm, providerLabel, type LlmDefaults } from "./member-validation";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ interface ReviewLaunchProps {
   boardDescription: string;
   style: DiscussionStyle | null;
   members: MemberSlot[];
+  llmDefaults: LlmDefaults;
   isCreating: boolean;
   creationProgress: CreationProgressItem[];
   onCreateClick: () => void;
@@ -146,11 +148,19 @@ function ReviewLaunch({
   boardDescription,
   style,
   members,
+  llmDefaults,
   isCreating,
   creationProgress,
   onCreateClick,
 }: ReviewLaunchProps) {
   const { t } = useTranslation();
+
+  /** One line of the system prompt, so the review shows what each new
+   *  advisor will actually be told rather than only its name. */
+  const promptPreview = (prompt: string) => {
+    const oneLine = prompt.trim().replace(/\s+/g, " ");
+    return oneLine.length > 140 ? oneLine.slice(0, 140) + "…" : oneLine;
+  };
 
   // ─── Creation progress view ─────────────────────────────────────────────
   const hasError = creationProgress.some((p) => p.status === "error");
@@ -248,10 +258,15 @@ function ReviewLaunch({
           {t("Workforce.wizard.team", "Team")}
         </h3>
         <div className="space-y-2">
-          {members.map((member) => (
+          {members.map((member) => {
+            const isNew = member.mode === "new";
+            const created = isNew && member.createdAgentId !== "";
+            const llm = isNew ? effectiveLlm(member, llmDefaults) : null;
+            return (
             <div
               key={member.id}
-              className="flex items-center gap-3 rounded-lg border border-border p-3"
+              className="flex items-start gap-3 rounded-lg border border-border p-3"
+              data-testid={`review-member-${member.id}`}
             >
               <AdvisorAvatar
                 name={member.displayName || "?"}
@@ -267,10 +282,28 @@ function ReviewLaunch({
                     {member.role}
                   </span>
                 )}
+                {/* What a new advisor is built from — the review is the last
+                    place to notice a wrong model or a template's starter prompt
+                    that was never edited. */}
+                {isNew && llm && !created && (
+                  <>
+                    <span className="mt-1 block truncate text-xs text-muted-foreground" dir="ltr">
+                      {providerLabel(llm.provider)}
+                      {llm.model ? ` · ${llm.model}` : ""}
+                    </span>
+                    {member.systemPrompt.trim() && (
+                      <span className="mt-1 block text-xs text-muted-foreground/80 line-clamp-2">
+                        {promptPreview(member.systemPrompt)}
+                      </span>
+                    )}
+                  </>
+                )}
               </div>
-              {member.mode === "new" ? (
+              {isNew ? (
                 <Badge variant="default" className="text-[10px]">
-                  {t("Workforce.wizard.new", "New")}
+                  {created
+                    ? t("Workforce.wizard.alreadyCreated", "Created")
+                    : t("Workforce.wizard.new", "New")}
                 </Badge>
               ) : (
                 <Badge variant="secondary" className="max-w-28 truncate text-[10px]">
@@ -280,7 +313,8 @@ function ReviewLaunch({
                 </Badge>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

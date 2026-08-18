@@ -1,4 +1,4 @@
-import { api } from "../api-client";
+import { api, apiErrorFromResponse } from "../api-client";
 import { parseSseFrame } from "./sse-utils";
 import type { SimpleConversationMemorySnapshot } from "./conversations";
 import type { Environment } from "@/lib/constants";
@@ -166,11 +166,7 @@ export async function sendMessage(
     }
   );
   if (!response.ok) {
-    throw {
-      status: response.status,
-      message: response.statusText,
-      url: response.url,
-    };
+    throw await apiErrorFromResponse(response);
   }
   return response.json();
 }
@@ -219,11 +215,9 @@ export async function* sendMessageStreaming(
   );
 
   if (!response.ok) {
-    throw {
-      status: response.status,
-      message: `Streaming failed: ${response.statusText}`,
-      url: response.url,
-    };
+    // The backend's own sentence when it sends one; "Streaming failed: …" only
+    // when the body has nothing to say.
+    throw await apiErrorFromResponse(response, `Streaming failed: ${response.statusText}`);
   }
 
   const reader = response.body?.getReader();

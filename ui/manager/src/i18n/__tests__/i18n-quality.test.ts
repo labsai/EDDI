@@ -161,6 +161,34 @@ describe("i18n translation debt", () => {
   });
 });
 
+describe("the wizard's Template step and its Workforce name stay distinguishable", () => {
+  /**
+   * Spanish translated both concepts as "plantilla": step 1 of the Workforce
+   * wizard was called "Plantilla" while step 2 asked for the "Nombre de la
+   * plantilla", and "Predeterminado de la plantilla" read as a template
+   * default rather than a workforce one. The rest of the Workforce namespace
+   * already said "grupo de trabajo", so the outliers were realigned to it.
+   *
+   * Guarded rather than merely fixed because the two words are near-synonyms
+   * in several languages, so the collision is easy to reintroduce by
+   * translating one key in isolation.
+   */
+  for (const [code, locale] of Object.entries(LOCALES)) {
+    it(`${code}.json does not name the Workforce after the Template step`, () => {
+      const wizard = (locale as Json).Workforce as Json;
+      const step = ((wizard.wizard as Json).stepTemplate as string).toLowerCase();
+      const clashing = ["boardName", "boardNameRequired", "createWorkforce", "useDefault"]
+        .map((key) => [key, (wizard.wizard as Json)[key] as string] as const)
+        .filter(([, value]) => typeof value === "string" && value.toLowerCase().includes(step));
+
+      expect(
+        clashing.map(([key, value]) => `${key}: "${value}" contains stepTemplate "${step}"`),
+        "the Workforce and the Template step must not share a word",
+      ).toEqual([]);
+    });
+  }
+});
+
 describe("i18n interpolation integrity", () => {
   const enFlat = flatten(en as Json);
   const placeholders = (s: string) =>
