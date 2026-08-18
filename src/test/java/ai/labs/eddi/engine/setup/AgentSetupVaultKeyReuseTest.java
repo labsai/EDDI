@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.setup;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -36,6 +37,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.MockitoAnnotations.openMocks;
 
@@ -68,11 +70,15 @@ class AgentSetupVaultKeyReuseTest {
     private AgentSetupService service;
     private Map<String, Object> createdResources;
 
+    @Mock
+    private SecretResolver secretResolver;
+
     @BeforeEach
     void setUp() throws Exception {
         openMocks(this);
         service = new AgentSetupService(restInterfaceFactory, agentAdmin, secretProvider, "http://localhost:11434");
         service.vaultKeyReuse = AgentSetupService.VAULT_KEY_REUSE_CHECKSUM;
+        service.secretResolver = secretResolver;
         createdResources = new LinkedHashMap<>();
         when(secretProvider.isAvailable()).thenReturn(true);
         when(secretProvider.listKeys(anyString())).thenReturn(List.of());
@@ -315,6 +321,22 @@ class AgentSetupVaultKeyReuseTest {
             }
 
             assertEquals(50, names.size(), "generated vault key names must be unique: " + names);
+        }
+
+        /**
+         * The counter-intuitive half of this: it matters most on CREATION. An agent set
+         * up against a key that did not exist yet — which this service allows, warning
+         * rather than refusing — may already have a cached model holding the unresolved
+         * "${vault:...}" literal as its API key. Filling that key in later without
+         * invalidating leaves it broken until the model cache expires. RestSecretStore
+         * invalidates for exactly this reason; a direct write here has to as well.
+         */
+        @Test
+        @DisplayName("storing a secret invalidates the resolver cache")
+        void storeInvalidatesTheResolverCache() throws Exception {
+            vaultApiKey(KEY, null);
+
+            verify(secretResolver).invalidateCache(any(SecretReference.class));
         }
 
         @Test
@@ -595,6 +617,37 @@ class AgentSetupVaultKeyReuseTest {
                 service.vaultKeyReuse = ok;
                 service.validateVaultKeyReuse();
             }
+        }
+    }
+
+    // ─── ordering against the rest of setup ──────────────────────────────
+
+    @Nested
+    @DisplayName("createApiAgent ordering")
+    class ApiAgentOrdering {
+
+        /**
+         * Key resolution runs ahead of every store call so an unusable vaultKeyName
+         * fails while rollback has nothing to undo. That put it ahead of the OpenAPI
+         * parse too — and the parse is the likeliest way this call fails. Under
+         * vault-key-reuse=never the secret was written first and then leaked, because
+         * createApiAgent's AgentSetupException arm rethrows unwrapped.
+         *
+         * Parsing creates nothing, so it belongs first: an unparseable spec must not
+         * reach the vault at all rather than rely on rollback to undo a write that
+         * should never have happened.
+         */
+        @Test
+        @DisplayName("an unparseable spec never reaches the vault")
+        void invalidSpecDoesNotTouchTheVault() {
+            service.vaultKeyReuse = AgentSetupService.VAULT_KEY_REUSE_NEVER;
+            var request = new CreateApiAgentRequest("Api Agent", "be helpful", "this is not an OpenAPI document", "anthropic",
+                    "claude-sonnet-5", KEY, null, null, null, null, null, false, null, null, null, null, null, null);
+
+            var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.createApiAgent(request));
+
+            assertTrue(e.getMessage().contains("OpenAPI"), e.getMessage());
+            verifyNoInteractions(secretProvider);
         }
     }
 }

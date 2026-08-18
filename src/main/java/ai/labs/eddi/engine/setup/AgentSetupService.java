@@ -41,6 +41,7 @@ import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.TemplateEscaping;
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -135,6 +136,26 @@ public class AgentSetupService {
     @Inject
     @ConfigProperty(name = "eddi.setup.vault-key-reuse", defaultValue = VAULT_KEY_REUSE_CHECKSUM)
     String vaultKeyReuse = VAULT_KEY_REUSE_CHECKSUM;
+
+    /**
+     * Cache invalidation for secrets this service writes, exactly as
+     * {@code RestSecretStore} does after its own store.
+     * <p>
+     * It matters most on <em>creation</em>, which is counter-intuitive enough that
+     * {@code RestSecretStore} spells it out: a model may already be cached having
+     * resolved the reference to nothing and kept the literal {@code ${vault:...}}
+     * string as its API key. This service deliberately accepts such dangling
+     * references (it warns rather than refusing), so it is precisely the path that
+     * later fills one in — and without invalidating, every agent already pointing
+     * at that name keeps its broken cached model until the model cache expires.
+     * <p>
+     * Field-injected for the same reason as {@link #logConversationContent}: a
+     * directly constructed instance (tests, non-CDI callers) simply has none, and
+     * {@link #storeSecret} null-checks rather than requiring every call site to
+     * wire a resolver it does not otherwise need.
+     */
+    @Inject
+    SecretResolver secretResolver;
 
     /**
      * Strict parse, same reasoning as {@code VaultGrantGate.Mode.parseStrict}: an
@@ -303,6 +324,9 @@ public class AgentSetupService {
             return resultBuilder.build();
 
         } catch (Exception e) {
+            // No separate AgentSetupException arm here, unlike createApiAgent: nothing
+            // inside this try declares one, and every vault error is raised at step 0
+            // above, outside it. A catch for an unreachable case is not symmetry.
             rollbackCreatedResources(createdResources, request.agentName(), e);
             throw new AgentSetupException("Failed to set up agent: " + e.getMessage(), e);
         }
@@ -455,20 +479,25 @@ public class AgentSetupService {
         var params = resolveParamsValidated(request.provider(), request.model(), request.deploy(), request.environment());
         var createdResources = new LinkedHashMap<String, Object>();
 
-        // --- Step 0: Resolve the API key against the vault ---
+        // --- Step 0a: Parse the OpenAPI spec ---
+        // Before the vault, deliberately. Parsing creates nothing, so ordering it
+        // first means an unparseable spec — the likeliest way this call fails — never
+        // reaches the vault at all, rather than relying on rollback to remove a secret
+        // it should not have written. Key resolution still precedes every store call.
+        McpApiToolBuilder.ApiBuildResult buildResult;
+        try {
+            buildResult = McpApiToolBuilder.parseAndBuild(request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), request.apiAuth());
+        } catch (IllegalArgumentException e) {
+            throw new AgentSetupException("OpenAPI parsing failed: " + e.getMessage(), e);
+        }
+
+        // --- Step 0b: Resolve the API key against the vault ---
         // Outside the try, so an unusable vaultKeyName fails while rollback still has
         // nothing to undo and its message reaches the caller unwrapped. See setupAgent
         // for the full note.
         String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources);
 
         try {
-            // --- Step 1: Parse OpenAPI and build grouped httpcalls configs ---
-            McpApiToolBuilder.ApiBuildResult buildResult;
-            try {
-                buildResult = McpApiToolBuilder.parseAndBuild(request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), request.apiAuth());
-            } catch (IllegalArgumentException e) {
-                throw new AgentSetupException("OpenAPI parsing failed: " + e.getMessage(), e);
-            }
 
             // --- Step 2: Create ApiCalls resources (one per group) ---
             var httpCallsLocations = new ArrayList<String>();
@@ -567,6 +596,13 @@ public class AgentSetupService {
             return resultBuilder.build();
 
         } catch (AgentSetupException e) {
+            // Rethrown unwrapped, so the caller sees the real reason rather than it
+            // nested inside "Failed to create API agent:" — but it still has to roll
+            // back. Without this, every AgentSetupException raised AFTER the first
+            // store (an unparseable spec, a rejected maxToolIterations) orphaned
+            // everything created up to that point, and once key resolution moved
+            // ahead of the try that included the vaulted secret.
+            rollbackCreatedResources(createdResources, request.agentName(), e);
             throw e;
         } catch (Exception e) {
             rollbackCreatedResources(createdResources, request.agentName(), e);
@@ -1246,6 +1282,9 @@ public class AgentSetupService {
         // Operators who want a narrow grant set it after setup, via the secrets
         // REST API; see docs/secrets-vault.md "Agent Grants".
         secretProvider.store(ref, plaintext, "Auto-vaulted by AgentSetupService for agent: " + agentName, List.of("*"));
+        if (secretResolver != null) {
+            secretResolver.invalidateCache(ref);
+        }
         // Recorded only once the write succeeded: a name whose store threw does not
         // exist, and rollback would log a spurious "could not remove" warning for it.
         if (createdResources != null) {
@@ -1268,6 +1307,15 @@ public class AgentSetupService {
      * scoped deliberately, and handing its reference to a new agent would produce a
      * config that {@code VaultGrantGate} refuses at deploy time — a reuse that
      * "works" until the moment it matters.
+     * <p>
+     * <b>Convergence is eventual, not immediate.</b> The scan and the write that
+     * follows it are separate operations, so N setups running <em>concurrently</em>
+     * with the same first-time key can all see nothing to reuse and each store
+     * their own entry. Every later setup then finds one of them and reuses it, so
+     * the vault stops growing — but a parallel bulk provision can still leave more
+     * than one copy. Collapsing those would need a checksum reservation in the
+     * persistence layer; sequential provisioning, which is what the wizard and the
+     * setup API actually do, converges on the first entry immediately.
      *
      * @return the reference string of the entry to reuse, or null
      */

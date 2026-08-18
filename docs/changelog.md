@@ -171,6 +171,45 @@ first-time setups with the same key can create two entries, and later setups con
 now renders `resources.vaultWarning` verbatim (backend-authored, no new i18n keys) — its picker lists every
 vault key including narrowly granted ones, and this is where the user learns why such an agent will not deploy.
 
+### PR review — CodeRabbit and Copilot (#699)
+
+Both bots reviewed; every finding was valid. Two were real bugs this branch had introduced:
+
+- **Generated key names could collide** (CodeRabbit). `setup.<agent>.<timestamp>.apiKey` is not unique for two
+  same-named agents in the same millisecond, and `store` is an upsert — so one silently overwrote the other's
+  credential. Now carries a random suffix; the timestamp stays only because it dates the entry for an operator.
+- **An unparseable OpenAPI spec leaked a vault secret** (Copilot). Moving key resolution to "step 0" put it ahead
+  of the spec parse, and `createApiAgent`'s pre-existing `catch (AgentSetupException) { throw e; }` rethrows
+  without rolling back — so under `vault-key-reuse=never` every invalid request left an orphan secret. Fixed at
+  both ends: the parse now runs first (it creates nothing, so a bad spec never reaches the vault at all), and
+  that catch arm now rolls back, which also closes the pre-existing document leak on the same path.
+
+Two more were correct and are now handled:
+
+- **A direct vault write did not invalidate the resolver cache** (Copilot). `RestSecretStore` invalidates even on
+  creation, precisely because a model may be cached holding an unresolved `${vault:...}` literal — and this
+  service is the one that deliberately allows such dangling references and later fills them in. `storeSecret`
+  now invalidates, matching that path.
+- **The dangling-reference warning only reached the log** (CodeRabbit), while the restricted-grant warning
+  reached the caller. Both end in an agent that cannot use its credential, and only one vault key is resolved
+  per setup, so they were merged into one `resources.vaultWarning` (renamed from `vaultGrantWarning`).
+
+Two concurrency findings were partly addressed and honestly bounded rather than claimed fixed. Creating a
+caller-named key is read-then-write, and the checksum scan is separate from the write that follows it, so
+concurrent setups can still race — the named path now reads back and fails loudly before anything is created,
+and both javadocs state exactly what remains open. Closing them needs a create-if-absent (and a checksum
+reservation) in the persistence layer for Mongo and Postgres both — an SPI change shared with the three other
+`store` callers, all of which upsert today, and deliberately not designed around this one caller. See the
+[thread](https://github.com/labsai/EDDI/pull/699#discussion_r3805688054).
+
+Doc claims that overstated the feature were made conditional: MCP checksum de-duplication depends on
+`eddi.setup.vault-key-reuse` and on an unrestricted grant; `apiKeyVaultReference` is also null for keyless
+providers; and the `vaultKeyName` charset applies to the parsed tenant/key components, not the `${vault:…}`
+wrapper — it now ships as a table of the three accepted shapes. `ImportStyleTest` caught an inline
+`java.util.HashSet` in the new test (AGENTS.md 4.7).
+
+369 backend tests green; every fix above is mutation-checked.
+
 ### EDDI-Manager — `feat/setup-vault-key-reuse`
 
 The earlier note in this entry said the wizard and team builder "still render the API key as a bare text
