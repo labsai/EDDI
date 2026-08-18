@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Shared utility for extracting text from conversation outputs.
@@ -42,7 +43,7 @@ public final class ConversationOutputUtils {
             if (outputList.getFirst() instanceof Map) {
                 var mapList = (List<Map<String, Object>>) outputList;
                 String result = mapList.stream().filter(m -> m.get("text") != null).map(m -> m.get("text").toString())
-                        .collect(java.util.stream.Collectors.joining(" "));
+                        .collect(Collectors.joining(" "));
                 return result.isEmpty() ? null : result;
             }
         }

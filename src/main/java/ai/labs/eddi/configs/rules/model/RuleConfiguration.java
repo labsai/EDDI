@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.rules.model;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -50,12 +51,12 @@ public class RuleConfiguration {
         if (o == null || getClass() != o.getClass())
             return false;
         RuleConfiguration that = (RuleConfiguration) o;
-        return java.util.Objects.equals(name, that.name) && java.util.Objects.equals(actions, that.actions)
-                && java.util.Objects.equals(conditions, that.conditions);
+        return Objects.equals(name, that.name) && Objects.equals(actions, that.actions)
+                && Objects.equals(conditions, that.conditions);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(name, actions, conditions);
+        return Objects.hash(name, actions, conditions);
     }
 }

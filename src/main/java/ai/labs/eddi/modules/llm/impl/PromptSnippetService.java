@@ -31,13 +31,30 @@ import java.util.Map;
  * Cached service that loads all prompt snippets and provides them as a template
  * data map for LLM task system prompts.
  * <p>
- * All snippets are auto-available via {@code {{snippets.<name>}}} in system
+ * All snippets are auto-available via {@code {snippets.<name>}} in system
  * prompt templates. The cache auto-expires after 5 minutes (TTL) and can be
  * explicitly invalidated via {@link #invalidateCache()}.
  * <p>
- * For snippets with {@code templateEnabled=false}, the content is wrapped in a
- * Qute unparsed block so its {@code {...}} markers reach the model literally
- * instead of being resolved.
+ * <b>Content is stored raw.</b> A snippet is never concatenated into a
+ * template's SOURCE — it is put into the template DATA map and pulled in by an
+ * expression, and Qute does not re-parse what an expression resolved to. Any
+ * {@code {...}} inside a snippet therefore reaches the model literally already,
+ * which is exactly the {@code templateEnabled=false} guarantee, for free and
+ * for every snippet.
+ * <p>
+ * This used to wrap {@code templateEnabled=false} content in a Qute unparsed
+ * block. That protected nothing it was not already protected from, and since
+ * the wrapper is itself a resolved value it was likewise never re-parsed: the
+ * {@code {|…|}} delimiters travelled into the system prompt verbatim. Escaping
+ * belongs only where generated text is concatenated into template source — see
+ * {@link ai.labs.eddi.modules.templating.TemplateEscaping}.
+ * <p>
+ * The corollary is that {@code templateEnabled=true} does not make a snippet's
+ * markers resolve either; the flag currently has no effect on this path.
+ * Honouring it would mean rendering snippet content in a second pass, which is
+ * a design decision with an injection surface attached — snippet text is
+ * admin-authored, but a second evaluation pass over data is precisely the shape
+ * EDDI avoids elsewhere. Left as-is deliberately rather than by oversight.
  *
  * @author ginccc
  * @since 6.0.0
@@ -47,16 +64,6 @@ public class PromptSnippetService {
 
     private static final Logger LOGGER = Logger.getLogger(PromptSnippetService.class);
     private static final String CACHE_KEY = "all_snippets";
-    /**
-     * Qute's expression marker. Not "{{" — that is Jinja2 and Qute leaves it alone.
-     */
-    private static final String TEMPLATE_MARKER = "{";
-
-    /**
-     * Qute's unparsed-block delimiters: everything between them renders literally.
-     */
-    private static final String UNPARSED_START = "{|";
-    private static final String UNPARSED_END = "|}";
 
     private final IPromptSnippetStore snippetStore;
     private final IDocumentDescriptorStore descriptorStore;
@@ -96,12 +103,10 @@ public class PromptSnippetService {
 
     /**
      * Get all snippets as a map suitable for injection into the template data. The
-     * map keys are snippet names, values are snippet content strings.
+     * map keys are snippet names, values are snippet content strings, verbatim.
      * <p>
-     * For snippets with {@code templateEnabled=false}, template markers are escaped
-     * to prevent Qute resolution: it is wrapped in an unparsed block, with any
-     * occurrence of the block terminator split across a boundary so it cannot close
-     * the block early.
+     * Nothing is escaped on the way in, and nothing needs to be — see the class
+     * javadoc for why a value reached through this map is never re-parsed.
      *
      * @return unmodifiable map of snippet name → content
      */
@@ -145,11 +150,11 @@ public class PromptSnippetService {
                     Integer version = extractVersionFromUri(resourceUri);
                     PromptSnippet snippet = snippetStore.read(id, version);
                     if (snippet != null && snippet.getName() != null && snippet.getContent() != null) {
-                        String content = snippet.getContent();
-                        if (!snippet.isTemplateEnabled() && content.contains(TEMPLATE_MARKER)) {
-                            content = escapeTemplateMarkers(content);
-                        }
-                        result.put(snippet.getName(), content);
+                        // Stored RAW — see the class javadoc. A snippet reaches a prompt as a
+                        // template DATA VALUE, and Qute does not re-parse what an expression
+                        // resolved to, so its markers are already literal. Wrapping it in an
+                        // unparsed block only added the block's own delimiters to the prompt.
+                        result.put(snippet.getName(), snippet.getContent());
                     }
                 } catch (IResourceStore.ResourceNotFoundException e) {
                     LOGGER.debugv("Snippet descriptor references missing resource: {0}", descriptor.getResource());
@@ -163,26 +168,6 @@ public class PromptSnippetService {
             LOGGER.errorv("Failed to load prompt snippets: {0}", e.getMessage());
             return Collections.emptyMap();
         }
-    }
-
-    /**
-     * Wrap content in a Qute unparsed block so its template markers are output
-     * literally rather than resolved.
-     */
-    private static String escapeTemplateMarkers(String content) {
-        // Qute, not Jinja2. "{% raw %}" means nothing to Qute: it was emitted verbatim
-        // into the system prompt while the "{...}" markers it was supposed to protect
-        // were still resolved — the escape did the opposite of its job on both counts.
-        // Qute's own literal form is {| ... |}, which renders its contents unparsed.
-        //
-        // Content carrying the terminator itself would close the block early and hand
-        // the remainder back to the parser, reintroducing exactly the evaluation this
-        // is preventing. Verified: wrapping "a|} {properties.name} b" naively renders
-        // "a LEAKED b|}". So the pair is split across a block boundary — the "|" ends
-        // one unparsed block and the "}" opens the next — leaving neither block
-        // containing a terminator while the concatenated output is byte-identical.
-        String safe = content.replace(UNPARSED_END, "|" + UNPARSED_END + UNPARSED_START + "}");
-        return UNPARSED_START + safe + UNPARSED_END;
     }
 
     /**

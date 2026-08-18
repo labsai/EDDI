@@ -273,13 +273,13 @@ class PrePostUtilsTest {
     class PropertyTypeTests {
 
         private IConversationMemory memory;
-        private ai.labs.eddi.engine.memory.model.ConversationProperties conversationProperties;
+        private ConversationProperties conversationProperties;
         private Map<String, Object> templateData;
 
         @BeforeEach
         void setupMemory() throws Exception {
             memory = mock(IConversationMemory.class);
-            conversationProperties = mock(ai.labs.eddi.engine.memory.model.ConversationProperties.class);
+            conversationProperties = mock(ConversationProperties.class);
             when(memory.getConversationProperties()).thenReturn(conversationProperties);
             when(conversationProperties.toMap()).thenReturn(new HashMap<>());
             templateData = new HashMap<>();

@@ -3,8 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.configs.agents.model;
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
@@ -278,7 +280,7 @@ public class AgentConfiguration {
         /**
          * Versioned key list for rotation. If empty, falls back to {@code publicKey}.
          */
-        private List<ai.labs.eddi.configs.agents.crypto.AgentPublicKey> keys = new ArrayList<>();
+        private List<AgentPublicKey> keys = new ArrayList<>();
 
         public AgentIdentity() {
         }
@@ -304,11 +306,11 @@ public class AgentConfiguration {
             this.publicKey = publicKey;
         }
 
-        public List<ai.labs.eddi.configs.agents.crypto.AgentPublicKey> getKeys() {
+        public List<AgentPublicKey> getKeys() {
             return keys;
         }
 
-        public void setKeys(List<ai.labs.eddi.configs.agents.crypto.AgentPublicKey> keys) {
+        public void setKeys(List<AgentPublicKey> keys) {
             this.keys = keys != null ? keys : new ArrayList<>();
         }
 
@@ -326,7 +328,7 @@ public class AgentConfiguration {
             }
             String versioned = keys.stream()
                     .filter(k -> k.version() == version)
-                    .map(ai.labs.eddi.configs.agents.crypto.AgentPublicKey::publicKeyB64)
+                    .map(AgentPublicKey::publicKeyB64)
                     .findFirst()
                     .orElse(null);
             // Version 0 means "signed before key versioning existed", so the legacy
@@ -355,7 +357,7 @@ public class AgentConfiguration {
             return keys.stream()
                     .filter(k -> k.isValidAt(epochMs))
                     .reduce((a, b) -> a.version() > b.version() ? a : b)
-                    .map(ai.labs.eddi.configs.agents.crypto.AgentPublicKey::publicKeyB64)
+                    .map(AgentPublicKey::publicKeyB64)
                     .orElse(publicKey);
         }
     }
@@ -1048,13 +1050,13 @@ public class AgentConfiguration {
          *
          * @since 6.0.0
          */
-        private ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals;
+        private ToolApprovalsConfig toolApprovals;
 
-        public ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig getToolApprovals() {
+        public ToolApprovalsConfig getToolApprovals() {
             return toolApprovals;
         }
 
-        public void setToolApprovals(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals) {
+        public void setToolApprovals(ToolApprovalsConfig toolApprovals) {
             this.toolApprovals = toolApprovals;
         }
     }

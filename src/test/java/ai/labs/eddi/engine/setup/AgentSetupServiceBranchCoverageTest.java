@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -513,6 +514,25 @@ class AgentSetupServiceBranchCoverageTest {
             assertNull(params.get("authToken"));
         }
 
+        /**
+         * The wizard used to pin {@code temperature=0.3} into every config it wrote,
+         * for every provider and every model. Anthropic's current models reject the
+         * parameter outright ("`temperature` is deprecated for this model"), so the
+         * hard-coded value turned into a 400 on every turn of every agent created this
+         * way — including the Platform Operator, on the default model. Omitting it
+         * leaves the provider's own default in force; an agent designer who wants a
+         * specific temperature sets it explicitly on the generated config.
+         */
+        @Test
+        @DisplayName("no provider gets a hard-coded temperature")
+        void noHardCodedTemperature() {
+            for (String provider : List.of("anthropic", "openai", "ollama", "jlama", "bedrock", "azure-openai", "oracle-genai")) {
+                var config = service.createLlmConfig(provider, "some-model", "key", "prompt",
+                        false, null, null, null, false, false, null);
+                assertNull(config.tasks().get(0).getParameters().get("temperature"), provider + " must not pin a sampling temperature");
+            }
+        }
+
         @Test
         @DisplayName("bedrock provider sets modelId")
         void bedrockProvider() {
@@ -594,7 +614,7 @@ class AgentSetupServiceBranchCoverageTest {
         @Test
         @DisplayName("tool URIs set tools list")
         void toolUris() {
-            var uris = java.util.List.of("/httpcalls/loc1", "/httpcalls/loc2");
+            var uris = List.of("/httpcalls/loc1", "/httpcalls/loc2");
             var config = service.createLlmConfig("anthropic", "claude-3", "key", "prompt",
                     false, null, null, null, false, false, uris);
             var task = config.tasks().get(0);
@@ -647,8 +667,8 @@ class AgentSetupServiceBranchCoverageTest {
         void fullPipeline() {
             var config = service.createWorkflowConfig(
                     "/parser/loc", "/behavior/loc",
-                    java.util.List.of("/http1", "/http2"),
-                    java.util.List.of("/mcp1"),
+                    List.of("/http1", "/http2"),
+                    List.of("/mcp1"),
                     "/langchain/loc", "/output/loc");
             // parser + behavior + 2 httpcalls + 1 mcpcalls + langchain + output = 7
             assertEquals(7, config.getWorkflowSteps().size());

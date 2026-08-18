@@ -22,9 +22,11 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @ApplicationScoped
 public class HttpClientWrapper implements IHttpClient {
@@ -188,7 +190,7 @@ public class HttpClientWrapper implements IHttpClient {
                 // block indefinitely
                 // if the callback never fires (though Vert.x should handle the timeout).
                 return future.get(currentTimeout + 1000, TimeUnit.MILLISECONDS);
-            } catch (java.util.concurrent.TimeoutException e) {
+            } catch (TimeoutException e) {
                 throw new HttpRequestException("Request timed out while waiting for response", e);
             } catch (InterruptedException | ExecutionException e) {
                 if (e instanceof InterruptedException) {
@@ -334,15 +336,15 @@ public class HttpClientWrapper implements IHttpClient {
             if (o == null || getClass() != o.getClass())
                 return false;
             RequestWrapper that = (RequestWrapper) o;
-            return maxLength == that.maxLength && currentTimeout == that.currentTimeout && java.util.Objects.equals(uri, that.uri)
-                    && java.util.Objects.equals(request, that.request) && java.util.Objects.equals(method, that.method)
-                    && java.util.Objects.equals(requestBody, that.requestBody) && java.util.Objects.equals(requestEncoding, that.requestEncoding)
-                    && java.util.Objects.equals(queryParamsMap, that.queryParamsMap);
+            return maxLength == that.maxLength && currentTimeout == that.currentTimeout && Objects.equals(uri, that.uri)
+                    && Objects.equals(request, that.request) && Objects.equals(method, that.method)
+                    && Objects.equals(requestBody, that.requestBody) && Objects.equals(requestEncoding, that.requestEncoding)
+                    && Objects.equals(queryParamsMap, that.queryParamsMap);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(uri, request, method, maxLength, requestBody, requestEncoding, currentTimeout, queryParamsMap);
+            return Objects.hash(uri, request, method, maxLength, requestBody, requestEncoding, currentTimeout, queryParamsMap);
         }
     }
 
@@ -401,13 +403,13 @@ public class HttpClientWrapper implements IHttpClient {
             if (o == null || getClass() != o.getClass())
                 return false;
             ResponseWrapper that = (ResponseWrapper) o;
-            return httpCode == that.httpCode && java.util.Objects.equals(contentAsString, that.contentAsString)
-                    && java.util.Objects.equals(httpCodeMessage, that.httpCodeMessage) && java.util.Objects.equals(httpHeader, that.httpHeader);
+            return httpCode == that.httpCode && Objects.equals(contentAsString, that.contentAsString)
+                    && Objects.equals(httpCodeMessage, that.httpCodeMessage) && Objects.equals(httpHeader, that.httpHeader);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(contentAsString, httpCode, httpCodeMessage, httpHeader);
+            return Objects.hash(contentAsString, httpCode, httpCodeMessage, httpHeader);
         }
     }
 
@@ -425,9 +427,32 @@ public class HttpClientWrapper implements IHttpClient {
         return text;
     }
 
-    // Package-private for testability (HttpClientWrapperTest)
+    /**
+     * Response headers as a map, looked up case-INSENSITIVELY.
+     * <p>
+     * HTTP field names are case-insensitive by specification, and HTTP/2 mandates
+     * lowercase on the wire — so the same endpoint answers {@code Location} over h1
+     * and {@code location} over h2. A plain {@link HashMap} made that difference
+     * load-bearing, and this codebase was already losing on it:
+     * {@code ApiCallExecutor} looks the content type up as the literal
+     * {@code "Content-Type"}, so against a lowercase-header response it found
+     * nothing, took the {@code <not-present>} branch, and stored every JSON body as
+     * a raw String instead of parsed JSON.
+     * <p>
+     * A {@link TreeMap} with {@link String#CASE_INSENSITIVE_ORDER} keeps the casing
+     * the server actually sent — anything serializing this map still shows the real
+     * header names — while making {@code get} agree with the specification. Callers
+     * templating a header by name ({@code {tool_responseHeaders.Location}}) gain
+     * the same tolerance.
+     * <p>
+     * Repeated headers still collapse to the last value, unchanged: this returns
+     * one value per name, and a multi-value accessor would be a different method
+     * with different callers.
+     * <p>
+     * Package-private for testability (HttpClientWrapperTest).
+     */
     static Map<String, String> convertHeaderToMap(MultiMap headers) {
-        Map<String, String> httpHeader = new HashMap<>();
+        Map<String, String> httpHeader = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         for (Map.Entry<String, String> header : headers) {
             httpHeader.put(header.getKey(), header.getValue());
         }

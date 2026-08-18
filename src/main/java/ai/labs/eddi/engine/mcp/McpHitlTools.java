@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.mcp;
+import ai.labs.eddi.configs.groups.IGroupConversationStore;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
@@ -26,7 +27,6 @@ import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
-import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -136,7 +136,6 @@ public class McpHitlTools {
           description = "List regular (1:1) conversations awaiting human approval. Admins and approvers see all; "
                   + "other callers see only their own; unauthenticated callers see nothing. Includes RULE and "
                   + "TOOL_CALL pauses.")
-    @Blocking
     public String listPendingApprovals(
                                        @ToolArg(description = "Max entries to return (optional, default 200, capped at 1000)") String limit) {
         try {
@@ -154,7 +153,6 @@ public class McpHitlTools {
           description = "Read the approval status of a paused regular conversation. detail=summary (default) returns "
                   + "pause metadata incl. pauseType (RULE or TOOL_CALL); detail=full returns the full memory snapshot "
                   + "(incl. any pending tool-call batch) — owner/admin, or approver only while awaiting approval.")
-    @Blocking
     public String getApprovalStatus(
                                     @ToolArg(description = "Conversation ID") String conversationId,
                                     @ToolArg(description = "summary (default) or full (optional)") String detail) {
@@ -203,7 +201,6 @@ public class McpHitlTools {
           description = "Resume a paused regular conversation with a human decision. verdict=APPROVED or REJECTED "
                   + "(case-insensitive). Resolves both RULE and TOOL_CALL pauses. The decision is attributed to the "
                   + "authenticated caller.")
-    @Blocking
     public String resumeConversation(
                                      @ToolArg(description = "Conversation ID awaiting approval") String conversationId,
                                      @ToolArg(description = "APPROVED or REJECTED (case-insensitive)") String verdict,
@@ -254,7 +251,6 @@ public class McpHitlTools {
 
     @Tool(name = "cancel_conversation",
           description = "Cancel a paused or running regular conversation. Attributed to the authenticated caller.")
-    @Blocking
     public String cancelConversation(
                                      @ToolArg(description = "Conversation ID") String conversationId) {
         String disabled = disabledIfMutationsOff();
@@ -291,7 +287,6 @@ public class McpHitlTools {
     @Tool(name = "list_group_pending_approvals",
           description = "List a group's conversations awaiting human approval. Admins and approvers see all; other "
                   + "callers see only their own; unauthenticated callers see nothing.")
-    @Blocking
     public String listGroupPendingApprovals(
                                             @ToolArg(description = "Group ID") String groupId,
                                             @ToolArg(description = "Max entries to return (optional, default 100)") String limit) {
@@ -311,7 +306,6 @@ public class McpHitlTools {
     @Tool(name = "list_all_group_pending_approvals",
           description = "Cross-group HITL inbox: all group conversations awaiting approval across all groups. Admins "
                   + "and approvers see all; other callers see only their own; unauthenticated callers see nothing.")
-    @Blocking
     public String listAllGroupPendingApprovals(
                                                @ToolArg(description = "Max entries to return (optional, default 100)") String limit) {
         try {
@@ -328,7 +322,6 @@ public class McpHitlTools {
           description = "Read the approval status (summary) of a paused group discussion — state, paused phase, "
                   + "pauseType, and the task ids awaiting approval. detail=full returns the whole group conversation "
                   + "(incl. transcript) — owner/admin, or approver only while awaiting approval.")
-    @Blocking
     public String getGroupApprovalStatus(
                                          @ToolArg(description = "Group ID") String groupId,
                                          @ToolArg(description = "Group conversation ID") String conversationId,
@@ -399,7 +392,6 @@ public class McpHitlTools {
                   + "verdict=APPROVED or REJECTED (case-insensitive). taskApprovals is an optional JSON object mapping "
                   + "task-id to APPROVED/REJECTED. Returns the resumed group conversation. The decision is attributed "
                   + "to the authenticated caller.")
-    @Blocking
     @SuppressWarnings("unchecked")
     public String approveGroupPhase(
                                     @ToolArg(description = "Group ID") String groupId,
@@ -436,7 +428,7 @@ public class McpHitlTools {
             // (e.g. {"t1": 5}) would otherwise survive to resumeDiscussion and throw
             // a ClassCastException that surfaces as INTERNAL instead of the correct
             // BAD_REQUEST. Fail fast with a clear message; keys are always JSON strings.
-            taskApprovals = new java.util.LinkedHashMap<>();
+            taskApprovals = new LinkedHashMap<>();
             for (var entry : rawApprovals.entrySet()) {
                 if (!(entry.getValue() instanceof String value) || value.isBlank()) {
                     return errorJson("Invalid taskApprovals: each value must be a non-empty string "
@@ -464,7 +456,7 @@ public class McpHitlTools {
         } catch (IResourceStore.ResourceModifiedException e) {
             return errorJson("The group conversation was modified concurrently — reload and retry", "CONFLICT", null);
         } catch (ResourceNotFoundException
-                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+                | IGroupConversationStore.GroupConversationGoneException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
         } catch (IGroupConversationService.GroupDiscussionException e) {
             return errorJson("Group conversation is not awaiting approval — it may have been resolved, cancelled, "
@@ -483,7 +475,6 @@ public class McpHitlTools {
                   + "waiting on (I6). The response is recorded as the member's transcript entry and the discussion "
                   + "resumes from the next speaker. Only the pending member's own principal (or an admin) may submit "
                   + "— this is the member SPEAKING, not an approval.")
-    @Blocking
     public String submitGroupHumanInput(
                                         @ToolArg(description = "Group ID") String groupId,
                                         @ToolArg(description = "Group conversation ID") String conversationId,
@@ -510,7 +501,7 @@ public class McpHitlTools {
         } catch (IResourceStore.ResourceModifiedException e) {
             return errorJson("The group conversation was modified concurrently — reload and retry", "CONFLICT", null);
         } catch (ResourceNotFoundException
-                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+                | IGroupConversationStore.GroupConversationGoneException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
         } catch (IGroupConversationService.GroupDiscussionException e) {
             return errorJson("Group conversation is not awaiting human input — the turn may have been resolved, "
@@ -526,7 +517,6 @@ public class McpHitlTools {
 
     @Tool(name = "cancel_group_discussion",
           description = "Cancel an in-progress or paused group discussion. Attributed to the authenticated caller.")
-    @Blocking
     public String cancelGroupDiscussion(
                                         @ToolArg(description = "Group ID") String groupId,
                                         @ToolArg(description = "Group conversation ID") String conversationId) {
@@ -550,7 +540,7 @@ public class McpHitlTools {
         } catch (jakarta.ws.rs.NotFoundException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
         } catch (ResourceNotFoundException
-                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+                | IGroupConversationStore.GroupConversationGoneException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
         } catch (Exception e) {
             LOGGER.warn("MCP cancel_group_discussion failed", e);

@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 
@@ -12,6 +13,7 @@ import javax.sql.DataSource;
 import java.io.IOException;
 import java.sql.SQLException;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -35,7 +37,7 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
     @BeforeEach
     void initStorage() throws SQLException {
         var json = new JsonSerialization(
-                ai.labs.eddi.datastore.serialization.SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
+                SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
         @SuppressWarnings("unchecked")
         Class<Map<String, Object>> type = (Class<Map<String, Object>>) (Class<?>) Map.class;
         storage = new PostgresResourceStorage<>(ds, COLLECTION, json, type);
@@ -73,7 +75,7 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
         @Test
         @DisplayName("newResource with explicit id and version")
         void storeWithExplicitId() throws IOException {
-            var id = java.util.UUID.randomUUID().toString();
+            var id = UUID.randomUUID().toString();
             var resource = storage.newResource(id, 3, Map.of("key", "value"));
             storage.store(resource);
 
@@ -86,7 +88,7 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
         @Test
         @DisplayName("read non-existent — returns null")
         void readNonExistent() {
-            var id = java.util.UUID.randomUUID().toString();
+            var id = UUID.randomUUID().toString();
             assertNull(storage.read(id, 1));
         }
 
@@ -188,7 +190,7 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
         @Test
         @DisplayName("readHistoryLatest returns highest version")
         void readHistoryLatest() throws IOException {
-            var id = java.util.UUID.randomUUID().toString();
+            var id = UUID.randomUUID().toString();
 
             var v1 = storage.newResource(id, 1, Map.of("v", 1));
             var h1 = storage.newHistoryResourceFor(v1, false);
@@ -235,7 +237,7 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
         @Test
         @DisplayName("returns -1 for non-existent resource")
         void nonExistent() {
-            assertEquals(-1, storage.getCurrentVersion(java.util.UUID.randomUUID().toString()));
+            assertEquals(-1, storage.getCurrentVersion(UUID.randomUUID().toString()));
         }
 
         @Test

@@ -477,7 +477,7 @@ class LlmTaskBranchTest {
             when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
 
             // ConversationSummarizer.readSummary needs conversationProperties mock
-            var props = mock(ai.labs.eddi.engine.memory.model.ConversationProperties.class);
+            var props = mock(ConversationProperties.class);
             when(memory.getConversationProperties()).thenReturn(props);
             when(props.get(anyString())).thenReturn(null);
 

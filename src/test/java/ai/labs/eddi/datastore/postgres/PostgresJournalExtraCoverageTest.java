@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.datastore.postgres;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
@@ -37,6 +38,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -215,7 +217,7 @@ class PostgresJournalExtraCoverageTest {
         void listScopedGroup_approverSeesAll() throws Exception {
             when(ownershipValidator.isAdmin(identity)).thenReturn(false);
             when(ownershipValidator.isApprover(identity)).thenReturn(true);
-            when(groupConversationService.listGroupPendingApprovals(null, 10)).thenReturn(java.util.List.of());
+            when(groupConversationService.listGroupPendingApprovals(null, 10)).thenReturn(List.of());
 
             assertTrue(guard.listScopedGroupPendingApprovals(null, 10).isEmpty());
         }
@@ -228,7 +230,7 @@ class PostgresJournalExtraCoverageTest {
             Principal p = mock(Principal.class);
             when(p.getName()).thenReturn(""); // blank → isBlank() branch
             when(identity.getPrincipal()).thenReturn(p);
-            when(groupConversationService.listGroupPendingApprovals("g1", 10)).thenReturn(java.util.List.of());
+            when(groupConversationService.listGroupPendingApprovals("g1", 10)).thenReturn(List.of());
 
             assertTrue(guard.listScopedGroupPendingApprovals("g1", 10).isEmpty());
         }
@@ -246,7 +248,7 @@ class PostgresJournalExtraCoverageTest {
         @Test
         @DisplayName("requireGroupConversationHitlAccess: null groupId skips the group-match check")
         void requireGroup_nullGroupId_skipsMatch() throws Exception {
-            ai.labs.eddi.configs.groups.model.GroupConversation gc = mock(ai.labs.eddi.configs.groups.model.GroupConversation.class);
+            GroupConversation gc = mock(GroupConversation.class);
             when(gc.getUserId()).thenReturn("owner1");
             when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
 

@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.agents.rest;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -326,7 +327,7 @@ class RestAgentStoreTest {
             var identity = new AgentConfiguration.AgentIdentity();
             // No legacy publicKey, but rotated keys list is populated
             identity.setKeys(List.of(
-                    ai.labs.eddi.configs.agents.crypto.AgentPublicKey.createCurrent(1, "base64key==")));
+                    AgentPublicKey.createCurrent(1, "base64key==")));
             config.setIdentity(identity);
 
             when(AgentStore.create(any())).thenReturn(new IResourceStore.IResourceId() {

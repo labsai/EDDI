@@ -22,7 +22,7 @@ Typically, Behavior Rules decide **when** to make an API call by triggering an a
 - **Business workflows**: Processing payments, sending notifications, triggering events
 - **Multi-step APIs**: First call gets auth token, second call uses it to access protected resources
 - **Analytics**: Sending conversation data to external analytics platforms
-- **Self-modification**: The "Agent Father" agent uses HttpCalls to create other agents via EDDI's own API
+- **Self-modification**: The Platform Operator calls EDDI's own API to create other agents, through configs generated from EDDI's OpenAPI spec by `McpApiToolBuilder`. Those are the same documents this page describes: the store and URI call them `apicalls`, the workflow step and file extension say `httpcalls` (see AGENTS.md §5.5)
 
 ### Key Features
 
@@ -197,6 +197,7 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
 | httpCall.saveResponse                                                       | (`Boolean`) whether to save the `JSON` response into `${memory.current.httpCalls}`                                                                                                                                               |
 | httpCall.fireAndForget                                                      | (`Boolean`) whether to execute the request without waiting for a response to be returned, (useful for `POST`)                                                                                                                    |
 | httpCall.responseObjectName                                                 | (`String`) name of the `JSON` object so it can be accessed from other `httpCalls` or `outputsets`.                                                                                                                               |
+| httpCall.responseHeaderObjectName                                           | (`String`) name under which the RESPONSE headers are stored, reachable as `{memory.current.httpCalls.<responseHeaderObjectName>.<Header-Name>}` and, for an LLM tool, returned under the result's `headers` key. Unset by default — set it only when the answer you need is in a header (a `201`'s `Location`, say) rather than the body, since headers reach conversation memory unredacted. Header names are matched case-insensitively, and credential-bearing headers (`Set-Cookie`, `WWW-Authenticate`, …) are never stored. |
 | httpCall.actions                                                            | (`String`) name of the `output`/`behavior` set mapped to this http call.                                                                                                                                                         |
 | httpCall.preRequest.batchRequests.pathToTargetArray                         | (`String`) `JSON` path to the target array to be used as body of requests e.g: "`memory.current.output`"                                                                                                                         |
 | httpCall.preRequest.batchRequests.iterationObjectName                       | (`String`) name of the variable to be used for each element of array found in `pathToTargetArray`                                                                                                                                |
@@ -790,4 +791,9 @@ _Response Code_
 
 ## Full Example
 
-Download the [Weather Agent Postman Collection](.gitbook/assets/EDDI%20-%20Weather%20bot.postman_collection.json) to run the full example.
+> **Run it yourself.** The GitBook-hosted Postman collections that used to be linked here
+> were lost in the migration. You do not need them: every request is shown inline above,
+> and Postman can import EDDI's own spec directly — **Import → Link →**
+> `<your-eddi-host>/openapi` (`http://localhost:7070/openapi` for a local install).
+> It is generated from the running build, so unlike a committed collection it cannot go
+> out of date. The same spec is browsable at `<your-eddi-host>/q/swagger-ui`.

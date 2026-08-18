@@ -115,7 +115,7 @@ public final class McpApiToolBuilder {
                     // Determine group (first tag, or "General")
                     String group = (operation.getTags() != null && !operation.getTags().isEmpty()) ? operation.getTags().get(0) : DEFAULT_GROUP;
 
-                    ApiCall httpCall = buildApiCall(method, path, operation, apiAuth);
+                    ApiCall httpCall = buildApiCall(method, path, operation, apiAuth, openAPI);
                     callsByGroup.computeIfAbsent(group, k -> new ArrayList<>()).add(httpCall);
                     endpointCount++;
 
@@ -210,7 +210,7 @@ public final class McpApiToolBuilder {
     /**
      * Build a single ApiCall from an OpenAPI operation.
      */
-    private static ApiCall buildApiCall(String method, String path, Operation operation, String apiAuth) {
+    private static ApiCall buildApiCall(String method, String path, Operation operation, String apiAuth, OpenAPI openAPI) {
         var httpCall = new ApiCall();
 
         // Name: operationId or generated slug
@@ -236,6 +236,30 @@ public final class McpApiToolBuilder {
         // Save response for post-processing
         httpCall.setSaveResponse(true);
         httpCall.setResponseObjectName(name + "_response");
+        // Response headers, but only where the operation plausibly answers IN one.
+        //
+        // Without any, a whole class of REST API is unusable as a generated tool:
+        // the "create" convention is 201 with an EMPTY body and the new resource's
+        // id only in Location. EDDI's own POST /agents/{agentId}/start is exactly
+        // that — Response.created(conversationUri).build() — so a model that
+        // started a conversation received {"httpCode": 201} and had no way to learn
+        // the id every following call needs. ApiCallExecutor populates the
+        // "headers" key only when this name is set, and it is null by default,
+        // which is why nothing generated here has ever seen a response header.
+        //
+        // Granting it to EVERY operation was the first version of this and it is
+        // not worth the exposure. Response headers reach the tool result, the LLM
+        // context and conversation memory (persisted), and nothing on that path
+        // redacts them — RequestRedactor is request-only by construction and
+        // SecretRedactionFilter runs on the display copy. Set-Cookie is the case
+        // that matters: HttpClientModule builds a cookie-aware, application-scoped
+        // WebClientSession, so that value is a live session credential EDDI is
+        // actively replaying, and copying it into prompt-injectable context is
+        // exactly what HttpOnly exists to prevent. A plain GET that answers with a
+        // body has nothing to gain from it, so it does not get it.
+        if (returnsDataInHeaders(operation)) {
+            httpCall.setResponseHeaderObjectName(name + "_responseHeaders");
+        }
 
         // Build request
         var request = new Request();
@@ -260,6 +284,14 @@ public final class McpApiToolBuilder {
             for (Parameter param : operation.getParameters()) {
                 String paramName = param.getName();
                 String paramDesc = param.getDescription() != null ? param.getDescription() : paramName;
+                // The description is the model's ONLY view of the value space —
+                // the generated tool schema types every parameter as a plain
+                // string, and every one is REQUIRED. Without the allowed values
+                // and the default spelled out, the model guesses: observed with
+                // `environment`, where a guessed value silently falls back to
+                // production on the lenient server-side enum parse — a
+                // test-drive that quietly exercises the wrong deployment.
+                paramDesc = appendSchemaHints(paramDesc, param.getSchema());
 
                 if ("query".equals(param.getIn())) {
                     // Query params use Qute template for LLM-provided values
@@ -279,7 +311,18 @@ public final class McpApiToolBuilder {
             MediaType jsonMedia = content.get("application/json");
             if (jsonMedia != null) {
                 request.setContentType("application/json");
-                var body = buildBodyTemplate(jsonMedia.getSchema());
+                // One level of $ref resolution, HERE and deliberately not resolveFully():
+                // the parser leaves component references unresolved, so a body
+                // declared as $ref: InputData reached describeBodySchema as a
+                // nameless shell and the parameter description degraded to "a
+                // single JSON object" with ZERO field names. The model then
+                // guesses keys — observed with the say tool, where a guessed
+                // {"message": ...} bound to InputData's DEFAULTS, returned 200,
+                // and the approved test message was silently never delivered.
+                // Nested property refs stay unresolved: the top-level field
+                // names and requiredness are what the model needs to write a
+                // correct body.
+                var body = buildBodyTemplate(resolveComponentRef(jsonMedia.getSchema(), openAPI));
                 // The body template's variables must be declared as tool parameters,
                 // or the model has no documented way to fill them: the tool schema is
                 // built from getParameters() alone (AgentOrchestrator), and with
@@ -316,6 +359,56 @@ public final class McpApiToolBuilder {
         }
 
         return httpCall;
+    }
+
+    /**
+     * Whether this operation's useful answer can be in a response HEADER rather
+     * than the body — the only case where binding them is worth the exposure
+     * described at the call site.
+     * <p>
+     * Two shapes qualify, and both are the same underlying convention:
+     * <ul>
+     * <li>a declared {@code 201}/{@code 202} or any {@code 3xx} — "created" and
+     * "redirected" both answer with a {@code Location} and routinely no body;</li>
+     * <li>a {@code 2xx} that declares NO content — a {@code 204}, or a spec that
+     * documents success with nothing in it. There is no body to read, so a header
+     * is the only place an answer could be.</li>
+     * </ul>
+     * An operation whose success response declares content is answering in the body
+     * and gets nothing.
+     * <p>
+     * A spec that documents no responses at all gets nothing either. That is the
+     * deliberately safe reading of missing information: the cost is a capability an
+     * undocumented endpoint silently lacks, against copying every future
+     * {@code Set-Cookie} of an unknown API into conversation memory. EDDI's own
+     * spec documents {@code 201} on {@code /agents/{agentId}/start}, which is the
+     * case this exists for.
+     */
+    static boolean returnsDataInHeaders(Operation operation) {
+        var responses = operation.getResponses();
+        if (responses == null || responses.isEmpty()) {
+            return false;
+        }
+        for (var entry : responses.entrySet()) {
+            String status = entry.getKey();
+            if (status == null) {
+                continue;
+            }
+            if ("201".equals(status) || "202".equals(status) || status.startsWith("3")) {
+                return true;
+            }
+            // A success that declares no content cannot be answering in the body.
+            // "default" is deliberately not treated as a success here — it covers
+            // errors just as often, and guessing wrong grants headers to every
+            // operation that documents one.
+            if (status.startsWith("2")) {
+                var content = entry.getValue() == null ? null : entry.getValue().getContent();
+                if (content == null || content.isEmpty()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -367,6 +460,29 @@ public final class McpApiToolBuilder {
     /** Name of the whole-body variable used when the schema has no properties. */
     static final String WHOLE_BODY_VARIABLE = "requestBody";
 
+    /**
+     * Resolves a top-level {@code $ref: #/components/schemas/X} to its component
+     * schema, one level deep. Anything else — no ref, unknown name, no components —
+     * returns the input unchanged.
+     */
+    private static Schema<?> resolveComponentRef(Schema<?> schema, OpenAPI openAPI) {
+        if (schema == null || schema.get$ref() == null || openAPI == null
+                || openAPI.getComponents() == null || openAPI.getComponents().getSchemas() == null) {
+            return schema;
+        }
+        String ref = schema.get$ref();
+        // Schemas namespace ONLY: a malformed ref into another components
+        // namespace (requestBodies, parameters) must degrade to the safe
+        // nameless form rather than resolving a same-named SCHEMA and
+        // describing the wrong type's fields.
+        String prefix = "#/components/schemas/";
+        if (!ref.startsWith(prefix)) {
+            return schema;
+        }
+        Schema<?> resolved = openAPI.getComponents().getSchemas().get(ref.substring(prefix.length()));
+        return resolved != null ? resolved : schema;
+    }
+
     private static BodyTemplate buildBodyTemplate(Schema<?> schema) {
         if (schema == null) {
             // A declared body with no schema still needs a variable, or the model has
@@ -404,6 +520,29 @@ public final class McpApiToolBuilder {
      * and marks which are required. Types are included because the model must
      * produce real JSON — an integer field unquoted, a string field quoted.
      */
+    /**
+     * Appends the schema's allowed values and default to a parameter description,
+     * when it declares them. See the call site for why this is the model's only
+     * channel for either.
+     */
+    private static String appendSchemaHints(String description, Schema<?> schema) {
+        if (schema == null) {
+            return description;
+        }
+        var sb = new StringBuilder(description);
+        List<?> allowed = schema.getEnum();
+        if (allowed != null && !allowed.isEmpty()) {
+            sb.append(" Allowed values: ");
+            sb.append(String.join(", ", allowed.stream().map(String::valueOf).toList()));
+            sb.append(".");
+        }
+        Object defaultValue = schema.getDefault();
+        if (defaultValue != null && !String.valueOf(defaultValue).isBlank()) {
+            sb.append(" Default: ").append(defaultValue).append(".");
+        }
+        return sb.toString();
+    }
+
     private static String describeBodySchema(Schema<?> schema) {
         // Name the container the schema actually declares. Saying "a single JSON
         // object" for a top-level array makes the model wrap the payload in braces,

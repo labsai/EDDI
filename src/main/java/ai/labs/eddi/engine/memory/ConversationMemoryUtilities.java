@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.model.Context;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
@@ -411,6 +412,72 @@ public class ConversationMemoryUtilities {
         return snapshot;
     }
 
+    /**
+     * Sanitizes a snapshot about to be returned in FULL to an approver
+     * ({@code approval-status?detail=full}, and the MCP mirror of it).
+     * <p>
+     * The approver's contract is the redacted arguments and the redacted request
+     * preview — {@link #stripRequestFingerprintsForRead} handled the digest, but
+     * three other fields rode along that the approver never needs and must not see:
+     * <ul>
+     * <li>{@code argumentsRaw} — unredacted by definition (execution needs it);
+     * observed carrying a clear-text API key the model had embedded in a
+     * create-agent call</li>
+     * <li>{@code chatTranscriptJson} — the frozen LLM transcript for resume, which
+     * contains every raw tool argument again</li>
+     * <li>{@code traceSoFar} — the running tool trace, same exposure</li>
+     * </ul>
+     * All three are resume/execution machinery read from the PERSISTED document —
+     * this method mutates only the freshly-deserialized, caller-owned snapshot
+     * (same contract as the two projections above), so resume is unaffected.
+     * <p>
+     * The fields the approver DOES read are additionally re-redacted through the
+     * CURRENT {@link SecretRedactionFilter} at serve time: {@code
+     * argumentsRedacted} and the preview were redacted once, at pause time, with
+     * whatever filter version existed then — a pause stored before a filter
+     * improvement would otherwise keep leaking forever.
+     */
+    public static ConversationMemorySnapshot sanitizePendingToolCallsForApprover(ConversationMemorySnapshot snapshot) {
+        stripRequestFingerprintsForRead(snapshot);
+        if (snapshot == null || snapshot.getHitlPendingToolCalls() == null) {
+            return snapshot;
+        }
+        var batch = snapshot.getHitlPendingToolCalls();
+        batch.setChatTranscriptJson(null);
+        batch.setTraceSoFar(null);
+        if (batch.getCalls() == null) {
+            return snapshot;
+        }
+        for (var call : batch.getCalls()) {
+            if (call == null) {
+                continue;
+            }
+            call.setArgumentsRaw(null);
+            call.setArgumentsRedacted(SecretRedactionFilter.redact(call.getArgumentsRedacted()));
+            var preview = call.getRequestPreview();
+            if (preview != null) {
+                preview.setUri(SecretRedactionFilter.redact(preview.getUri()));
+                preview.setBody(SecretRedactionFilter.redact(preview.getBody()));
+                preview.setQueryParams(redactMapValues(preview.getQueryParams()));
+                preview.setHeaders(redactMapValues(preview.getHeaders()));
+            }
+        }
+        return snapshot;
+    }
+
+    /**
+     * Value-wise {@link SecretRedactionFilter} pass over a string map; keys are
+     * structural.
+     */
+    private static Map<String, String> redactMapValues(Map<String, String> source) {
+        if (source == null || source.isEmpty()) {
+            return source;
+        }
+        var redacted = new LinkedHashMap<String, String>(source.size());
+        source.forEach((key, value) -> redacted.put(key, SecretRedactionFilter.redact(value)));
+        return redacted;
+    }
+
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(IConversationMemory returnConversationMemory,
                                                                                            Boolean returnDetailed, Boolean returnCurrentStepOnly,
                                                                                            List<String> returningFields) {
@@ -424,6 +491,18 @@ public class ConversationMemoryUtilities {
                                                                                            List<String> returningFields) {
 
         var memorySnapshot = convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly);
+
+        // Blank entries mean NO filter, not "select nothing". A present-but-empty
+        // query parameter (?returningFields=) binds as [""], and LLM-generated
+        // tools make that shape routine: every generated parameter is required,
+        // so a model with no filter to express sends the empty string — and the
+        // branches below would then null out steps, outputs AND properties,
+        // leaving the operator's test-drive read-back with nothing to quote.
+        // "" selects no field under any reading, so dropping blanks recovers the
+        // caller's intent on every interpretation.
+        if (returningFields != null) {
+            returningFields = returningFields.stream().filter(f -> f != null && !f.isBlank()).toList();
+        }
 
         if (returnCurrentStepOnly) {
             if (isNullOrEmpty(returningFields) || returningFields.contains(KEY_CONVERSATION_STEPS)) {

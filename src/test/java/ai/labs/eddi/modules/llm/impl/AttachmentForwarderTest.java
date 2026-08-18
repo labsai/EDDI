@@ -6,10 +6,13 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Attachment;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor;
 import dev.langchain4j.data.message.*;
@@ -28,6 +31,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -59,11 +63,18 @@ class AttachmentForwarderTest {
         forwarder = newForwarder(10L * 1024 * 1024, 20L * 1024 * 1024);
     }
 
+    /**
+     * The registry backing the most recently built forwarder — for counter
+     * assertions.
+     */
+    private io.micrometer.core.instrument.simple.SimpleMeterRegistry meterRegistry;
+
     private AttachmentForwarder newForwarder(long perFile, long aggregate) {
         var capability = new ModelCapabilityService(k -> Optional.empty());
         var extractor = new AttachmentTextExtractor(10_000);
+        meterRegistry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
         return new AttachmentForwarder(store, capability, extractor, httpClient,
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), perFile, aggregate);
+                meterRegistry, perFile, aggregate);
     }
 
     // ==================== No-op cases ====================
@@ -129,6 +140,141 @@ class AttachmentForwarderTest {
         }
 
         /**
+         * Images are the exception to note-only: there is no OCR, so a note plus
+         * readAttachment dead-ends in "no readable content" — the exact reply that made
+         * an operator user believe upload was broken. A vision model gets the recent
+         * images again as real image content.
+         */
+        @Test
+        void earlierTurnImage_isReinlinedForAVisionModel() throws Exception {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            when(store.load(eq("img-1"), any())).thenReturn("pngbytes".getBytes());
+            mockPreviousTurnAttachments(storedImage("img-1", "screenshot.png"));
+            List<ChatMessage> messages = messages(UserMessage.from("what does the image say?"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            assertEquals(2, enhanced.contents().size(), "the image must ride the message again, not a note");
+            assertInstanceOf(ImageContent.class, enhanced.contents().get(1));
+        }
+
+        @Test
+        void earlierTurnImage_staysANoteForANonVisionModel() {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            mockPreviousTurnAttachments(storedImage("img-1", "screenshot.png"));
+            List<ChatMessage> messages = messages(UserMessage.from("what does the image say?"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-3.5-turbo");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            assertEquals(2, enhanced.contents().size());
+            String note = ((TextContent) enhanced.contents().get(1)).text();
+            assertTrue(note.contains("screenshot.png"), note);
+        }
+
+        @Test
+        void earlierTurnMixedFiles_reinlinesTheImageAndNotesTheRest() throws Exception {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            when(store.load(eq("img-1"), any())).thenReturn("pngbytes".getBytes());
+            mockPreviousTurnAttachments(storedImage("img-1", "screenshot.png"), storedPdf("ref-1", "earlier.pdf"));
+            List<ChatMessage> messages = messages(UserMessage.from("and the pdf?"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            // text + re-inlined image + note about the pdf
+            assertEquals(3, enhanced.contents().size());
+            assertInstanceOf(ImageContent.class, enhanced.contents().get(1));
+            String note = ((TextContent) enhanced.contents().get(2)).text();
+            assertTrue(note.contains("earlier.pdf"), note);
+            assertFalse(note.contains("screenshot.png"), "a re-inlined image must not also be listed as unavailable: " + note);
+        }
+
+        /**
+         * A failed store load on the re-inline path must NOT be counted or metered as a
+         * re-inlined image: the failure note informs the model, but a permanently
+         * missing blob would otherwise claim a successful re-inline (and bump the
+         * counter) on every remaining turn.
+         */
+        @Test
+        void earlierTurnImage_storeLoadFailure_isANoteAndNotCountedAsReinlined() throws Exception {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            when(store.load(eq("img-1"), any()))
+                    .thenThrow(new IAttachmentStore.AttachmentStoreException("blob gone"));
+            mockPreviousTurnAttachments(storedImage("img-1", "screenshot.png"));
+            List<ChatMessage> messages = messages(UserMessage.from("the screenshot?"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            assertEquals(2, enhanced.contents().size());
+            assertInstanceOf(TextContent.class, enhanced.contents().get(1), "the model must be told, via a note");
+            assertTrue(((TextContent) enhanced.contents().get(1)).text().contains("could not be loaded"));
+            assertEquals(0.0, meterRegistry.counter("eddi.attachment.reinlined").count(),
+                    "a failed load is not a re-inline");
+            assertEquals(1.0, meterRegistry.counter("eddi.attachment.errors").count());
+        }
+
+        /**
+         * The override parameter this path explicitly threads through must be honored —
+         * vision=OFF on a vision-capable model keeps the note.
+         */
+        @Test
+        void earlierTurnImage_visionOverrideOff_staysANote() {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            mockPreviousTurnAttachments(storedImage("img-1", "screenshot.png"));
+            List<ChatMessage> messages = messages(UserMessage.from("the screenshot?"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o",
+                    ModelCapabilityService.Support.OFF,
+                    ModelCapabilityService.Support.AUTO,
+                    ModelCapabilityService.Support.AUTO);
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            assertEquals(2, enhanced.contents().size());
+            String note = ((TextContent) enhanced.contents().get(1)).text();
+            assertTrue(note.contains("screenshot.png"), note);
+        }
+
+        @Test
+        void earlierTurnImages_aggregateCapSkipsTheOverflowWithANote() throws Exception {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            when(store.load(any(), any())).thenReturn("12345678".getBytes());
+            mockPreviousTurnAttachments(storedImage("img-1", "first.png"), storedImage("img-2", "second.png"));
+            List<ChatMessage> messages = messages(UserMessage.from("both screenshots?"));
+
+            // Aggregate budget fits exactly one 8-byte image.
+            var capped = newForwarder(1024, 10);
+            capped.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            long images = enhanced.contents().stream().filter(c -> c instanceof ImageContent).count();
+            assertEquals(1, images, "only what fits the aggregate budget is re-inlined");
+            assertTrue(enhanced.contents().stream().anyMatch(
+                    c -> c instanceof TextContent tc && tc.text().contains("second.png")),
+                    "the skipped image must be reported, not silently dropped");
+        }
+
+        @Test
+        void earlierTurnImages_reinliningIsCappedAtTheMostRecentThree() throws Exception {
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
+            when(store.load(any(), any())).thenReturn("pngbytes".getBytes());
+            mockPreviousTurnAttachments(
+                    storedImage("img-1", "newest.png"), storedImage("img-2", "second.png"),
+                    storedImage("img-3", "third.png"), storedImage("img-4", "oldest.png"));
+            List<ChatMessage> messages = messages(UserMessage.from("the screenshots?"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            long images = enhanced.contents().stream().filter(c -> c instanceof ImageContent).count();
+            assertEquals(3, images, "the gallery must not be re-paid whole every turn");
+            String note = ((TextContent) enhanced.contents().get(enhanced.contents().size() - 1)).text();
+            assertTrue(note.contains("oldest.png"), "the capped-out image must stay reachable via the note: " + note);
+        }
+
+        /**
          * A HITL resume re-enters the SAME step of a conversation reloaded from the
          * store, so "current step" does not imply "live objects" — the entries are
          * plain maps there. Casting instead of coercing dropped every attachment on a
@@ -141,7 +287,7 @@ class AttachmentForwarderTest {
             when(store.load(eq("ref-1"), any())).thenReturn(pdf);
 
             // The map form Jackson hands back for a persisted Attachment.
-            Map<String, Object> persisted = new java.util.HashMap<>();
+            Map<String, Object> persisted = new HashMap<>();
             persisted.put("storageRef", "ref-1");
             persisted.put("fileName", "report.pdf");
             persisted.put("mimeType", "application/pdf");
@@ -545,18 +691,18 @@ class AttachmentForwarderTest {
         // attachments:extracts / attachments:errors keys. A prefix read of
         // "attachments" would return one of those List<String> entries and forward
         // nothing; the exact-match read must still find the List<Attachment>.
-        var realMemory = new ai.labs.eddi.engine.memory.ConversationMemory("agent-1", 1, "user-1");
+        var realMemory = new ConversationMemory("agent-1", 1, "user-1");
         var step = realMemory.getCurrentStep();
         Attachment att = new Attachment();
         att.setMimeType("image/png");
         att.setBase64Data(Base64.getEncoder().encodeToString("png".getBytes()));
-        step.storeData(new ai.labs.eddi.engine.memory.model.Data<>(ATTACHMENTS.key(), List.of(att)));
+        step.storeData(new Data<>(ATTACHMENTS.key(), List.of(att)));
         // Inserted AFTER attachments — this is what a prefix reverse-scan would return
         // first.
-        step.storeData(new ai.labs.eddi.engine.memory.model.Data<>(
-                ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENT_ERRORS.key(), List.of("earlier error")));
-        step.storeData(new ai.labs.eddi.engine.memory.model.Data<>(
-                ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENT_EXTRACTS.key(), List.of("doc: earlier extract")));
+        step.storeData(new Data<>(
+                MemoryKeys.ATTACHMENT_ERRORS.key(), List.of("earlier error")));
+        step.storeData(new Data<>(
+                MemoryKeys.ATTACHMENT_EXTRACTS.key(), List.of("doc: earlier extract")));
 
         List<ChatMessage> messages = messages(UserMessage.from("look"));
         forwarder.forward(messages, realMemory, "openai", "gpt-4o");
@@ -652,6 +798,14 @@ class AttachmentForwarderTest {
         att.setStorageRef(ref);
         att.setFileName(fileName);
         att.setMimeType("application/pdf");
+        return att;
+    }
+
+    private static Attachment storedImage(String ref, String fileName) {
+        Attachment att = new Attachment();
+        att.setStorageRef(ref);
+        att.setFileName(fileName);
+        att.setMimeType("image/png");
         return att;
     }
 

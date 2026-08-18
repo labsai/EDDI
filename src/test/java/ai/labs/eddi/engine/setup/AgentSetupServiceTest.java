@@ -3,11 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.setup;
+import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.configs.llm.IRestLlmStore;
 
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
+import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
+import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -46,9 +54,9 @@ class AgentSetupServiceTest {
     @BeforeEach
     void setUp() {
         service = new AgentSetupService(
-                mock(ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory.class),
-                mock(ai.labs.eddi.engine.api.IRestAgentAdministration.class),
-                mock(ai.labs.eddi.secrets.ISecretProvider.class),
+                mock(IRestInterfaceFactory.class),
+                mock(IRestAgentAdministration.class),
+                mock(ISecretProvider.class),
                 "http://localhost:11434");
     }
 
@@ -617,8 +625,8 @@ class AgentSetupServiceTest {
             var guardedService = new AgentSetupService(restInterfaceFactory,
                     mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
 
-            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             toolApprovals.setRequireApproval(List.of("mcp:/agentstore/agents"));
             hitl.setToolApprovals(toolApprovals);
 
@@ -640,8 +648,8 @@ class AgentSetupServiceTest {
             var guardedService = new AgentSetupService(restInterfaceFactory,
                     mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
 
-            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.delete:*"));
             toolApprovals.setExempt(List.of("http.get:*"));
             hitl.setToolApprovals(toolApprovals);
@@ -679,7 +687,7 @@ class AgentSetupServiceTest {
         }
 
         private IRestInterfaceFactory wireMinimalHappyPath(
-                                                           org.mockito.ArgumentCaptor<ai.labs.eddi.configs.agents.model.AgentConfiguration> agentCaptor)
+                                                           org.mockito.ArgumentCaptor<AgentConfiguration> agentCaptor)
                 throws Exception {
             var factory = mock(IRestInterfaceFactory.class);
 
@@ -690,34 +698,34 @@ class AgentSetupServiceTest {
             // leaves BOTH unfinished (UnfinishedStubbingException) — not a
             // compile error, only a test-time one, so this is worth spelling out.
             var parserResponse = located("/parserstore/parsers/000000000000000000000001?version=1");
-            var parserStore = mock(ai.labs.eddi.configs.parser.IRestParserStore.class);
+            var parserStore = mock(IRestParserStore.class);
             when(parserStore.createParser(any())).thenReturn(parserResponse);
-            when(factory.get(ai.labs.eddi.configs.parser.IRestParserStore.class)).thenReturn(parserStore);
+            when(factory.get(IRestParserStore.class)).thenReturn(parserStore);
 
             var ruleSetResponse = located("/rulestore/rulesets/000000000000000000000002?version=1");
-            var ruleSetStore = mock(ai.labs.eddi.configs.rules.IRestRuleSetStore.class);
+            var ruleSetStore = mock(IRestRuleSetStore.class);
             when(ruleSetStore.createRuleSet(any())).thenReturn(ruleSetResponse);
-            when(factory.get(ai.labs.eddi.configs.rules.IRestRuleSetStore.class)).thenReturn(ruleSetStore);
+            when(factory.get(IRestRuleSetStore.class)).thenReturn(ruleSetStore);
 
             var llmResponse = located("/llmstore/llms/000000000000000000000003?version=1");
-            var llmStore = mock(ai.labs.eddi.configs.llm.IRestLlmStore.class);
+            var llmStore = mock(IRestLlmStore.class);
             when(llmStore.createLlm(any())).thenReturn(llmResponse);
-            when(factory.get(ai.labs.eddi.configs.llm.IRestLlmStore.class)).thenReturn(llmStore);
+            when(factory.get(IRestLlmStore.class)).thenReturn(llmStore);
 
             var workflowResponse = located("/workflowstore/workflows/000000000000000000000004?version=1");
-            var workflowStore = mock(ai.labs.eddi.configs.workflows.IRestWorkflowStore.class);
+            var workflowStore = mock(IRestWorkflowStore.class);
             when(workflowStore.createWorkflow(any())).thenReturn(workflowResponse);
-            when(factory.get(ai.labs.eddi.configs.workflows.IRestWorkflowStore.class)).thenReturn(workflowStore);
+            when(factory.get(IRestWorkflowStore.class)).thenReturn(workflowStore);
 
             var agentResponse = located("/agentstore/agents/000000000000000000000005?version=1");
-            var agentStore = mock(ai.labs.eddi.configs.agents.IRestAgentStore.class);
+            var agentStore = mock(IRestAgentStore.class);
             when(agentStore.createAgent(agentCaptor.capture())).thenReturn(agentResponse);
-            when(factory.get(ai.labs.eddi.configs.agents.IRestAgentStore.class)).thenReturn(agentStore);
+            when(factory.get(IRestAgentStore.class)).thenReturn(agentStore);
 
             // patchDescriptor fires after every creation; an unstubbed mock returning
             // null for it is fine, but factory.get(...) still has to resolve the class.
-            when(factory.get(ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore.class))
-                    .thenReturn(mock(ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore.class));
+            when(factory.get(IRestDocumentDescriptorStore.class))
+                    .thenReturn(mock(IRestDocumentDescriptorStore.class));
 
             return factory;
         }
@@ -725,13 +733,13 @@ class AgentSetupServiceTest {
         @Test
         @DisplayName("a configured hitlConfig is set on the AgentConfiguration handed to createAgent")
         void hitlConfigReachesTheCreatedAgentConfiguration() throws Exception {
-            var agentCaptor = org.mockito.ArgumentCaptor.forClass(ai.labs.eddi.configs.agents.model.AgentConfiguration.class);
+            var agentCaptor = org.mockito.ArgumentCaptor.forClass(AgentConfiguration.class);
             var factory = wireMinimalHappyPath(agentCaptor);
             var wiredService = new AgentSetupService(factory, mock(IRestAgentAdministration.class), mock(ISecretProvider.class),
                     "http://localhost:11434");
 
-            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.delete:*"));
             toolApprovals.setExempt(List.of("http.get:*"));
             hitl.setToolApprovals(toolApprovals);
@@ -754,7 +762,7 @@ class AgentSetupServiceTest {
             // The mirror of the test above: this field is opt-in. A caller that
             // supplies none must not have one silently invented for them — that
             // would be a correctness bug in the other direction.
-            var agentCaptor = org.mockito.ArgumentCaptor.forClass(ai.labs.eddi.configs.agents.model.AgentConfiguration.class);
+            var agentCaptor = org.mockito.ArgumentCaptor.forClass(AgentConfiguration.class);
             var factory = wireMinimalHappyPath(agentCaptor);
             var wiredService = new AgentSetupService(factory, mock(IRestAgentAdministration.class), mock(ISecretProvider.class),
                     "http://localhost:11434");
@@ -779,7 +787,7 @@ class AgentSetupServiceTest {
         void nullAgentName() {
             var request = new CreateApiAgentRequest(
                     null, "prompt", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("Agent name is required"));
@@ -790,7 +798,7 @@ class AgentSetupServiceTest {
         void blankSystemPrompt() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "   ", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("System prompt is required"));
@@ -801,7 +809,7 @@ class AgentSetupServiceTest {
         void blankOpenApiSpec() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("OpenAPI spec is required"));
@@ -812,10 +820,55 @@ class AgentSetupServiceTest {
         void cloudProviderNoApiKey() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
-                    null, null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("API key is required"));
+        }
+
+        /**
+         * Runs BEFORE the OpenAPI parse and any resource creation — the invalid spec
+         * text here would itself throw later, so reaching the iterations message proves
+         * the up-front ordering. Both bounds, because each fails differently in
+         * production: 0 is a loop that never runs (an agent that can never call a
+         * tool), an absurd value is a cost and latency hazard per turn.
+         */
+        @Test
+        @DisplayName("maxToolIterations outside 1..MAX is refused before any resource is created")
+        void maxToolIterationsOutOfRangeRefusedUpFront() {
+            for (int bad : new int[]{0, -1, AgentSetupService.MAX_TOOL_ITERATIONS + 1}) {
+                var request = new CreateApiAgentRequest(
+                        "My Agent", "You are helpful", "not-even-openapi", "openai", "gpt-4",
+                        "sk-key", null, null, null, null, null, null, null, null, null, null, bad);
+                var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                        () -> service.createApiAgent(request), "value " + bad + " must be rejected");
+                assertTrue(ex.getMessage().contains("maxToolIterations"),
+                        "the message must name the offending field, got: " + ex.getMessage());
+                assertTrue(ex.getMessage().contains(String.valueOf(AgentSetupService.MAX_TOOL_ITERATIONS)),
+                        "the message must state the actual bound, got: " + ex.getMessage());
+            }
+        }
+
+        /**
+         * Both bounds must be ACCEPTED, not just the outside rejected: a {@code >} →
+         * {@code >=} regression would refuse exactly
+         * {@link AgentSetupService#MAX_TOOL_ITERATIONS} — the value the Manager
+         * provisions the operator with — while every rejection test stays green. The
+         * invalid spec text guarantees a later failure whose message must NOT be about
+         * the iterations bound.
+         */
+        @Test
+        @DisplayName("maxToolIterations at 1 and at MAX passes validation")
+        void maxToolIterationsBoundariesAccepted() {
+            for (int ok : new int[]{1, AgentSetupService.MAX_TOOL_ITERATIONS}) {
+                var request = new CreateApiAgentRequest(
+                        "My Agent", "You are helpful", "not-even-openapi", "openai", "gpt-4",
+                        "sk-key", null, null, null, null, null, null, null, null, null, null, ok);
+                var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                        () -> service.createApiAgent(request), "value " + ok + " must reach the spec parse");
+                assertFalse(ex.getMessage().contains("maxToolIterations"),
+                        "boundary value " + ok + " must pass validation; failed with: " + ex.getMessage());
+            }
         }
 
         @Test
@@ -829,8 +882,8 @@ class AgentSetupServiceTest {
             var guardedService = new AgentSetupService(restInterfaceFactory,
                     mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
 
-            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             // 'mcp' tools carry no endpoint, so this pattern can never match — it would
             // save as a gate that gates nothing.
             toolApprovals.setRequireApproval(List.of("mcp:/agentstore/agents"));
@@ -838,7 +891,7 @@ class AgentSetupServiceTest {
 
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, hitl, null);
+                    "sk-key", null, null, null, null, null, null, null, null, hitl, null, null);
 
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> guardedService.createApiAgent(request));
@@ -860,7 +913,7 @@ class AgentSetupServiceTest {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
                     "sk-key", null, null, null, null, null, null, null, null, null,
-                    "https://good.example.com/mcp,ftp://bad.example.com/mcp");
+                    "https://good.example.com/mcp,ftp://bad.example.com/mcp", null);
 
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> guardedService.createApiAgent(request));
@@ -879,7 +932,7 @@ class AgentSetupServiceTest {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
                     "sk-key", null, null, null, null, null, null, null, null, null,
-                    "https://a.example.com/mcp, https://b.example.com/mcp");
+                    "https://a.example.com/mcp, https://b.example.com/mcp", null);
 
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> guardedService.createApiAgent(request));
@@ -897,15 +950,15 @@ class AgentSetupServiceTest {
             var guardedService = new AgentSetupService(restInterfaceFactory,
                     mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
 
-            var hitl = new ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig();
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.delete:*"));
             toolApprovals.setExempt(List.of("http.get:*"));
             hitl.setToolApprovals(toolApprovals);
 
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, hitl, null);
+                    "sk-key", null, null, null, null, null, null, null, null, hitl, null, null);
 
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> guardedService.createApiAgent(request));

@@ -289,8 +289,11 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                 throw new IllegalArgumentException(path + " with optionsSource EXPLICIT needs at least 2 options");
             }
             if (voteConfig.tiePolicy() == AgentGroupConfiguration.TiePolicy.HUMAN_DECIDES) {
-                throw new IllegalArgumentException(path + ".tiePolicy HUMAN_DECIDES needs human group members (I6), which are "
-                        + "not available yet — use MODERATOR_DECIDES or NO_DECISION");
+                // HUMAN members themselves DO ship (see the I6 matrix above, which
+                // validates them). What is missing is the resume machinery a tie
+                // break needs: a tally that stops mid-phase has no pause to re-enter.
+                throw new IllegalArgumentException(path + ".tiePolicy HUMAN_DECIDES is not supported yet — breaking a tie needs a "
+                        + "resume path that a paused VOTE phase does not have. Use MODERATOR_DECIDES or NO_DECISION");
             }
             for (Map.Entry<String, Double> weight : voteConfig.weights().entrySet()) {
                 // isFinite: NaN passes every < comparison and would poison the

@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.output.model;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -34,11 +35,11 @@ public class OutputValue {
         if (o == null || getClass() != o.getClass())
             return false;
         OutputValue that = (OutputValue) o;
-        return java.util.Objects.equals(valueAlternatives, that.valueAlternatives);
+        return Objects.equals(valueAlternatives, that.valueAlternatives);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(valueAlternatives);
+        return Objects.hash(valueAlternatives);
     }
 }

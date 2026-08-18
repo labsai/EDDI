@@ -690,63 +690,32 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 ---
 
-## Case Study: The "Agent Father"
+## Case Study: The Platform Operator
 
-The **Agent Father** is a meta-agent that demonstrates EDDI's architecture in action. It's an agent that creates other agents.
+The **Platform Operator** is a meta-agent that demonstrates EDDI's architecture in action: an agent that reads and operates the deployment it runs inside — including creating other agents.
 
-> **For a comprehensive, step-by-step walkthrough of Agent Father, see [Agent Father: A Deep Dive](agent-father-deep-dive.md)**
+It is provisioned by EDDI-Manager (at `/manage/operator`) through `POST /administration/agents/setup-api`, which is the same OpenAPI-to-agent path any user can call.
 
 ### How It Works
 
-1. **Conversation Start**: User starts chat with Agent Father
-2. **Information Gathering**: Agent Father asks questions:
-   - "What do you want to call your agent?"
-   - "What should it do?"
-   - "Which LLM API should it use?"
-3. **Memory Storage**: Property setters save answers to conversation memory:
-   - `context.agentName`
-   - `context.agentDescription`
-   - `context.llmType`
-4. **Condition Triggers**: Behavior rule monitors memory:
-   ```json
-   {
-     "conditions": [
-       {
-         "type": "contextmatcher",
-         "configs": {
-           "contextKey": "agentName",
-           "contextType": "string"
-         }
-       }
-     ],
-     "actions": ["httpcall(create-agent)"]
-   }
-   ```
-5. **API Call Execution**: HTTP Calls extension triggers:
-   ```json
-   {
-     "name": "create-agent",
-     "request": {
-       "method": "POST",
-       "path": "/agentstore/agents",
-       "body": "{\"agentName\": \"${context.agentName}\"}"
-     }
-   }
-   ```
-6. **Self-Modification**: Agent Father calls EDDI's own API to create a new agent configuration
+1. **Tool generation**: the Manager fetches EDDI's own OpenAPI spec and passes it to `setup-api` with an endpoint allow-list. `McpApiToolBuilder` turns each allow-listed operation into an `apicalls` tool, named by its `operationId` (falling back to a `method_path` slug) and grouped by its first OpenAPI tag.
+2. **Provisioning**: `AgentSetupService.createApiAgent` creates the parser, behaviour rules, one `apicalls` config per group, LLM config, workflow and agent — in that order, with compensating deletes if any step fails.
+3. **Gating**: the agent is created *with* its `hitlConfig` on v1, so the approval gate cannot be bypassed by redeploying an earlier version. The gate requires approval by HTTP *method* — `http.post:*`, `http.put:*`, `http.patch:*`, `http.delete:*` — and exempts `http.get:*`. Gating by method rather than by an enumerated list of tool names is what keeps it fail-safe: a write endpoint granted later is covered the moment it exists, with nobody having to remember to add its name.
+4. **Operation**: the model calls a tool; `ToolApprovalGate` classifies it; a write pauses the conversation (`hitlPauseType: "TOOL_CALL"`) until a human approves the *resolved request*, which is fingerprinted at gate time and re-checked before execution.
+5. **Self-modification**: on approval, the tool call reaches EDDI's REST API and the new agent configuration is written.
 
 ### Key Insight
 
-Agent Father isn't special code—it's a **regular EDDI agent** that uses:
+The operator isn't special code—it's a **regular EDDI agent** that uses:
 
-- Behavior rules to control conversation flow
-- Property extraction to gather data
+- An LLM task with tools generated from an ordinary OpenAPI spec
 - HTTP Calls to invoke EDDI's REST API
-- Output templates to guide the user
+- The HITL approval gate to keep every write under human control
+- Behavior rules and output templates like any other agent
 
-This demonstrates EDDI's power: **the same architecture that powers conversational agents can orchestrate complex, multi-step workflows**, even self-modifying the system itself.
+This demonstrates EDDI's power: **the same architecture that powers conversational agents can orchestrate complex, multi-step workflows**, even self-modifying the system itself — and the deterministic governance layer (Pillar 2) is what makes that safe rather than reckless.
 
-**See the [Agent Father Deep Dive](agent-father-deep-dive.md) for complete implementation details, code examples, and real-world applications.**
+**See [Human-in-the-Loop](hitl.md) for the approval gate, and [HTTP Calls](httpcalls.md) for how the generated tools are executed.**
 
 ---
 
@@ -1043,7 +1012,7 @@ Production response headers (configured via `application.properties`):
 
 - [Getting Started](getting-started.md) - Setup and installation
 - [Conversation Memory & State Management](conversation-memory.md) - Deep dive into conversation state
-- [Agent Father: A Deep Dive](agent-father-deep-dive.md) - Complete walkthrough of a real-world example
+- [Human-in-the-Loop](hitl.md) - The approval gate the Platform Operator runs behind
 - [Behavior Rules](behavior-rules.md) - Configure decision logic
 - [HTTP Calls](httpcalls.md) - External API integration
 - [LLM Integration](langchain.md) - Connect to LLM APIs

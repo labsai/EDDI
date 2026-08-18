@@ -6,6 +6,7 @@ package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
@@ -43,7 +44,7 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
         var dsInstance = createDataSourceInstance();
         ds = dsInstance.get();
         store = new PostgresScheduleStore(dsInstance,
-                new JsonSerialization(ai.labs.eddi.datastore.serialization.SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false)),
+                new JsonSerialization(SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false)),
                 100);
     }
 

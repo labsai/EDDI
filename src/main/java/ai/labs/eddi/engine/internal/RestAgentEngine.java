@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
@@ -435,10 +436,14 @@ public class RestAgentEngine implements IRestAgentEngine {
                                     + "is awaiting approval — use the summary view")
                             .build();
                 }
-                // The fingerprint is internal: it digests the RAW body and query
-                // values, which is exactly what the preview beside it redacts.
-                // See ConversationMemoryUtilities#stripRequestFingerprintsForRead.
-                return Response.ok(ConversationMemoryUtilities.stripRequestFingerprintsForRead(snapshot)).build();
+                // The approver's contract is the REDACTED arguments and preview.
+                // Beyond the fingerprint (which digests the raw values the preview
+                // redacts), this strips argumentsRaw, the frozen LLM transcript and
+                // the running trace — all resume machinery carrying raw arguments —
+                // and re-redacts the served fields through the CURRENT filter, so a
+                // pause stored before a filter improvement stops leaking.
+                // See ConversationMemoryUtilities#sanitizePendingToolCallsForApprover.
+                return Response.ok(ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(snapshot)).build();
             }
             // Bookmark fields describe the pause — suppress them once the
             // conversation left AWAITING_HUMAN so stale fields (e.g. after a
@@ -500,8 +505,11 @@ public class RestAgentEngine implements IRestAgentEngine {
             callView.put("toolName", call.getToolName());
             callView.put("source", call.getSource());
             // ONLY the redacted, capped value is ever surfaced here — never
-            // call.getArgumentsRaw().
-            callView.put("arguments", call.getArgumentsRedacted());
+            // call.getArgumentsRaw(). Re-redacted through the CURRENT filter at
+            // serve time: argumentsRedacted was computed once, at pause time, so a
+            // pause stored before a filter improvement (e.g. the underscored
+            // sk-ant fix) would otherwise keep serving its old, leaky redaction.
+            callView.put("arguments", SecretRedactionFilter.redact(call.getArgumentsRedacted()));
             callView.put("argsTruncated", call.isArgsTruncated());
             callView.put("gateReason", call.getGateReason());
             // The approver's honest replacement for guessing a method/path from a
@@ -548,13 +556,26 @@ public class RestAgentEngine implements IRestAgentEngine {
             return null;
         }
         var view = new LinkedHashMap<String, Object>();
+        // Serve-time re-redaction, same reasoning as the arguments field above:
+        // the preview was redacted once, at gate time, with the filter of that
+        // day. The method stays literal — a fixed verb, never user data.
         view.put("method", preview.getMethod());
-        view.put("uri", preview.getUri());
-        view.put("queryParams", preview.getQueryParams() != null ? preview.getQueryParams() : Map.of());
-        view.put("headers", preview.getHeaders() != null ? preview.getHeaders() : Map.of());
-        view.put("body", preview.getBody());
+        view.put("uri", SecretRedactionFilter.redact(preview.getUri()));
+        view.put("queryParams", redactValues(preview.getQueryParams()));
+        view.put("headers", redactValues(preview.getHeaders()));
+        view.put("body", SecretRedactionFilter.redact(preview.getBody()));
         view.put("bodyTruncated", preview.isBodyTruncated());
         return view;
+    }
+
+    /** Value-wise re-redaction of a preview map; keys are structural names. */
+    private static Map<String, String> redactValues(Map<String, String> source) {
+        if (source == null || source.isEmpty()) {
+            return Map.of();
+        }
+        var redacted = new LinkedHashMap<String, String>(source.size());
+        source.forEach((key, value) -> redacted.put(key, SecretRedactionFilter.redact(value)));
+        return redacted;
     }
 
     private Map<String, Object> buildRulePauseDetails(ConversationMemorySnapshot snapshot) {

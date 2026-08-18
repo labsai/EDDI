@@ -3,8 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.internal;
+import ai.labs.eddi.configs.groups.IGroupConversationStore;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
@@ -15,6 +17,7 @@ import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.memory.model.Attachment;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -29,6 +32,7 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -390,7 +394,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             var gc = groupConversationService.readGroupConversation(gcId);
             return Response.ok(gc).build();
         } catch (IResourceStore.ResourceNotFoundException
-                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+                | IGroupConversationStore.GroupConversationGoneException e) {
             // Curated body: GroupConversationGoneException embeds the caller-supplied
             // gcId — never reflect it (CodeQL reflected-value/XSS) and never echo the
             // raw exception text; the detail is logged server-side with the id sanitized
@@ -433,7 +437,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
                     .entity("The group conversation was modified concurrently — reload and retry.").build();
         } catch (IResourceStore.ResourceNotFoundException
-                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+                | IGroupConversationStore.GroupConversationGoneException e) {
             // deleted concurrently — a genuine 404, not a state conflict
             LOGGER.infof("Approve of group conversation %s → not found: %s", sanitize(gcId), e.getMessage());
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
@@ -483,7 +487,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
                     .entity("The group conversation was modified concurrently — reload and retry.").build();
         } catch (IResourceStore.ResourceNotFoundException
-                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+                | IGroupConversationStore.GroupConversationGoneException e) {
             LOGGER.infof("Human input for group conversation %s → not found: %s", sanitize(gcId), e.getMessage());
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
                     .entity("Group conversation not found.").build();
@@ -665,7 +669,7 @@ public class RestGroupConversation implements IRestGroupConversation {
                     "The group conversation was modified concurrently — reload and retry.");
             closeQuietly(eventSink);
         } catch (IResourceStore.ResourceNotFoundException
-                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+                | IGroupConversationStore.GroupConversationGoneException e) {
             // deleted concurrently — a genuine 404 equivalent
             sendErrorEvent(eventSink, sse, "Group conversation not found.");
             closeQuietly(eventSink);
@@ -766,11 +770,11 @@ public class RestGroupConversation implements IRestGroupConversation {
             // never mislead dashboards.
             List<String> awaitingTaskIds = paused && gc.getTaskList() != null
                     ? gc.getTaskList().all().stream()
-                            .filter(t -> t.status() == ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus.AWAITING_APPROVAL)
-                            .map(ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem::id)
+                            .filter(t -> t.status() == SharedTaskList.TaskStatus.AWAITING_APPROVAL)
+                            .map(SharedTaskList.TaskItem::id)
                             .toList()
                     : List.of();
-            var summary = new java.util.LinkedHashMap<String, Object>();
+            var summary = new LinkedHashMap<String, Object>();
             summary.put("groupConversationId", gcId);
             summary.put("state", gc.getState() != null ? gc.getState().name() : "");
             summary.put("pausedAt", paused && gc.getPausedAt() != null ? gc.getPausedAt().toString() : "");
@@ -1005,14 +1009,14 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     @Override
-    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> listGroupPendingApprovals(String groupId, Integer limit) {
+    public List<PendingApprovalSummary> listGroupPendingApprovals(String groupId, Integer limit) {
         // Scoped to the group in the path — the query-level filter keeps the listing
         // from leaking other groups.
         return listPendingApprovals(groupId, limit);
     }
 
     @Override
-    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> listAllGroupPendingApprovals(Integer limit) {
+    public List<PendingApprovalSummary> listAllGroupPendingApprovals(Integer limit) {
         // #21: cross-group inbox — groupId=null lists pending approvals across all
         // groups (the store's existing findByState(state, null, limit) variant, the
         // same one crash recovery uses). Same authz as the per-group endpoint.
@@ -1025,7 +1029,7 @@ public class RestGroupConversation implements IRestGroupConversation {
      * see all pending items, other callers only their own conversations; anonymous
      * or principal-less callers see nothing (fail-closed).
      */
-    private List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(String groupId, Integer limit) {
+    private List<PendingApprovalSummary> listPendingApprovals(String groupId, Integer limit) {
         try {
             // Owner-scoping (admins/approvers see all; others see only their own;
             // anonymous sees nothing) lives in HitlAccessGuard so the MCP surface

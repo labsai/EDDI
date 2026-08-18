@@ -20,8 +20,6 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.api.IRestAgentAdministration;
-import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.ws.rs.InternalServerErrorException;
@@ -93,8 +91,8 @@ class RestImportServiceRollbackAndCleanupTest {
         upgradeExecutor = mock(UpgradeExecutor.class);
 
         importService = new RestImportService(
-                zipArchive, jsonSerialization, mock(IRestAgentAdministration.class),
-                mock(IMigrationManager.class), mock(IDeploymentListener.class), documentDescriptorStore,
+                zipArchive, jsonSerialization,
+                mock(IMigrationManager.class), documentDescriptorStore,
                 mock(TemplateSyntaxMigrator.class), structuralMatcher, upgradeExecutor);
     }
 

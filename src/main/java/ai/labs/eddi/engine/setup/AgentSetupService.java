@@ -39,6 +39,7 @@ import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
+import ai.labs.eddi.modules.templating.TemplateEscaping;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -50,6 +51,7 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.util.*;
+import java.util.Map;
 
 /**
  * Service that encapsulates the business logic for setting up EDDI agents. Used
@@ -104,8 +106,9 @@ public class AgentSetupService {
     }
 
     /**
-     * Create a fully configured and optionally deployed agent. Equivalent to the
-     * Agent Father's 12-step workflow.
+     * Create a fully configured and optionally deployed agent: parser, behaviour
+     * rules, LLM config, optional MCP calls and output set, workflow and agent, in
+     * one call.
      *
      * @param request
      *            the setup parameters
@@ -373,6 +376,9 @@ public class AgentSetupService {
             throw new AgentSetupException("Invalid hitlConfig: " + e.getMessage(), e);
         }
         validateMcpServerUrls(request.mcpServerUrls());
+        // Same up-front reasoning as hitlConfig: an out-of-range value must fail
+        // before the first resource exists, not after six of them do.
+        validateMaxToolIterations(request.maxToolIterations());
 
         var params = resolveParamsValidated(request.provider(), request.model(), request.deploy(), request.environment());
         var createdResources = new LinkedHashMap<String, Object>();
@@ -418,9 +424,7 @@ public class AgentSetupService {
             createdResources.put("behaviorLocation", behaviorLocation);
             patchDescriptor(extractIdFromLocation(behaviorLocation), extractVersionFromLocation(behaviorLocation), request.agentName());
 
-            // Enrich the system prompt with API endpoint summary so the LLM
-            // understands which endpoints are available and how to use them.
-            String enrichedPrompt = request.systemPrompt() + "\n\n" + buildResult.apiSummary();
+            String enrichedPrompt = enrichSystemPrompt(request.systemPrompt(), buildResult.apiSummary());
             boolean quickReplies = request.enableQuickReplies() != null && request.enableQuickReplies();
             boolean sentiment = request.enableSentimentAnalysis() != null && request.enableSentimentAnalysis();
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
@@ -431,6 +435,13 @@ public class AgentSetupService {
             // (Ollama, Jlama) with no endpoint to reach.
             var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, enrichedPrompt, false, null,
                     request.llmBaseUrl(), promptResponseJson, quickReplies, sentiment, httpCallsLocations);
+            // Set post-build rather than threading a 12th parameter through
+            // createLlmConfig: the task is mutable, only this path accepts the value,
+            // and every other caller (setupAgent, four test sites) keeps the engine
+            // default untouched. Validated up front — see validateMaxToolIterations.
+            if (request.maxToolIterations() != null) {
+                llmConfig.tasks().getFirst().setMaxToolIterations(request.maxToolIterations());
+            }
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
@@ -482,6 +493,35 @@ public class AgentSetupService {
         } catch (Exception e) {
             rollbackCreatedResources(createdResources, request.agentName(), e);
             throw new AgentSetupException("Failed to create API agent: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Ceiling for a caller-supplied {@code maxToolIterations}. Each iteration is a
+     * full LLM round-trip carrying the tool context, so the value multiplies both
+     * cost and worst-case turn latency; nothing in the engine bounds the task field
+     * itself ({@code ToolLoopRunner} honours whatever the config says). 100 is ten
+     * times the engine default — and deliberately exactly the value the Platform
+     * Operator provisions with: an operator turn is one admin task of arbitrary
+     * length (an agent build via granular endpoints already burns ~22 calls), and
+     * it runs under the HITL gate, which paces every write regardless of budget.
+     * The ceiling exists to cap a typo like 5000, not to second-guess a legitimate
+     * long chain; raising it is a deliberate one-line change, not a config knob.
+     */
+    public static final int MAX_TOOL_ITERATIONS = 100;
+
+    /**
+     * Same up-front contract as the other validators: reject before the first
+     * resource exists. {@code null} is valid and keeps the engine default.
+     */
+    private void validateMaxToolIterations(Integer maxToolIterations) throws AgentSetupException {
+        if (maxToolIterations == null) {
+            return;
+        }
+        if (maxToolIterations < 1 || maxToolIterations > MAX_TOOL_ITERATIONS) {
+            throw new AgentSetupException(
+                    "maxToolIterations must be between 1 and " + MAX_TOOL_ITERATIONS + " (was " + maxToolIterations
+                            + "); omit it to use the engine default");
         }
     }
 
@@ -577,6 +617,31 @@ public class AgentSetupService {
     }
 
     /**
+     * Appends the generated API endpoint summary to the caller's system prompt, so
+     * the LLM knows which endpoints exist and how to use them.
+     * <p>
+     * The summary is wrapped in a Qute unparsed block; the caller's own prompt is
+     * not. A summary line is a raw OpenAPI path, and a path parameter is
+     * indistinguishable from a Qute expression —
+     * {@code /administration/docs/{name}} <em>is</em> <code>{name}</code>.
+     * {@code LlmTask} renders the system prompt on every turn, so an unescaped
+     * summary failed the render with {@code Key "name" not found}, naming a key
+     * nobody wrote in a prompt fragment the agent's author never saw.
+     * <p>
+     * The turn then continued, which is the part worth knowing:
+     * {@code runTemplateEngineOnParams} logs the failure per parameter and leaves
+     * the RAW value in place, so the model was sent the whole system prompt
+     * unrendered — including the caller's own <code>{#if}</code> sections,
+     * verbatim. A silently degraded prompt on every turn, plus a stack trace per
+     * turn, rather than a clean failure. Escaping only the generated half leaves
+     * the caller's prompt a live template, which is what it is meant to be: the
+     * Manager's operator prompt uses <code>{#if context.screen}</code>.
+     */
+    static String enrichSystemPrompt(String systemPrompt, String apiSummary) {
+        return systemPrompt + "\n\n" + TemplateEscaping.unparsedBlock(apiSummary);
+    }
+
+    /**
      * Create LLM config with the specified model, system prompt, and tool settings.
      */
     public LlmConfiguration createLlmConfig(String modelType, String modelId, String apiKey, String systemPrompt, boolean enableTooling,
@@ -597,7 +662,14 @@ public class AgentSetupService {
         params.put("systemMessage", effectiveSystemPrompt);
         params.put("addToOutput", promptResponseJson == null ? "true" : "false");
         params.put("timeout", "60000");
-        params.put("temperature", "0.3");
+        // No "temperature" is written. It used to be pinned to 0.3 for every provider
+        // and every model, which is not a value this service is in a position to have
+        // an opinion about: current frontier models REJECT the parameter outright
+        // ("`temperature` is deprecated for this model" — a 400 from Anthropic on the
+        // default model, so every turn of a wizard-created agent failed). Omitting it
+        // lets each provider apply its own default; an agent designer who wants a
+        // specific sampling temperature adds it to the generated config, where it is
+        // an explicit choice rather than an invisible inherited one.
         // Written explicitly (rather than omitted) so the setting is visible and
         // flippable on the generated config in the Manager. See
         // #logConversationContent for why the default is off.
@@ -1153,7 +1225,7 @@ public class AgentSetupService {
             if (httpStatus == 200) {
                 try {
                     @SuppressWarnings("unchecked")
-                    var body = (java.util.Map<String, Object>) response.getEntity();
+                    var body = (Map<String, Object>) response.getEntity();
                     String deployStatus = body != null && body.containsKey("status") ? body.get("status").toString() : "UNKNOWN";
                     result.put("deployed", "READY".equals(deployStatus));
                     result.put("deploymentStatus", deployStatus);

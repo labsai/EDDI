@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.nlp.model;
 
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -55,6 +56,6 @@ public class FoundDictionaryEntry extends DictionaryEntry {
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), isCorrected, matchingAccuracy);
+        return Objects.hash(super.hashCode(), isCorrected, matchingAccuracy);
     }
 }

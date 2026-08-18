@@ -40,7 +40,7 @@ Unblock-File .\install.ps1
 .\install.ps1
 ```
 
-The wizard guides you through choosing a database (MongoDB or PostgreSQL), optional authentication (Keycloak), and monitoring (Grafana). After setup, Agent Father is deployed automatically to help you create your first AI agent.
+The wizard guides you through choosing a database (MongoDB or PostgreSQL), optional authentication (Keycloak), and monitoring (Grafana). EDDI starts with no agents deployed — to create your first one, activate the **Platform Operator** at `/manage/operator` and describe the agent you want, or fill in the form-based wizard at `/manage/agents/wizard`.
 
 ### Option 1 - EDDI with Docker (Manual)
 

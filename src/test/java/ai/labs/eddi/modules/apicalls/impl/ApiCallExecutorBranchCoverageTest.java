@@ -25,6 +25,10 @@ import org.mockito.Mock;
 
 import java.net.URI;
 import java.util.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -203,7 +207,7 @@ class ApiCallExecutorBranchCoverageTest {
         }
 
         @Test
-        @DisplayName("non-2xx response with saveResponse=true → doesn't save body")
+        @DisplayName("non-2xx response → error body and code reach the tool result, response object untouched")
         void non2xxResponse() throws Exception {
             ApiCall call = createCall("fail-call", true);
             when(mockResponse.getHttpCode()).thenReturn(500);
@@ -212,7 +216,10 @@ class ApiCallExecutorBranchCoverageTest {
             when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
 
             Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
-            assertFalse(result.containsKey("body"));
+            // The result map is the LLM's tool result; "{}" on failure made a
+            // 400'd call indistinguishable from one that worked.
+            assertEquals("error", result.get("body"));
+            assertEquals(500, result.get("httpCode"));
         }
     }
 
@@ -481,6 +488,95 @@ class ApiCallExecutorBranchCoverageTest {
             // Verify memory entry was created for headers
             verify(prePostUtils).createMemoryEntry(eq(currentStep), any(), eq("respHeaders"), eq("httpCalls"));
         }
+
+        /**
+         * The result map is serialized verbatim as the LLM tool result and truncated
+         * from the FRONT ({@code ToolResponseTruncator} cuts
+         * {@code result.substring(0, maxChars)}), so whatever serializes first is what
+         * survives a cap.
+         * <p>
+         * With a plain {@code HashMap}, {@code "headers"} hashed ahead of
+         * {@code "body"} on BOTH the success and the error path regardless of insertion
+         * order — so a per-tool limit, or the always-on tool-context budget, spent the
+         * allowance on a header block and cut away the response body the model actually
+         * asked for. Headers are the disposable half of this map; the body is not.
+         */
+        @Test
+        @DisplayName("should order body before headers so truncation drops headers first")
+        void ordersBodyBeforeHeaders() throws Exception {
+            ApiCall call = createCall("header-call", true);
+            call.setResponseHeaderObjectName("respHeaders");
+            Map<String, String> responseHeaders = new HashMap<>();
+            responseHeaders.put("Set-Cookie", "session=secret");
+            when(mockResponse.getHttpCode()).thenReturn(200);
+            when(mockResponse.getContentAsString()).thenReturn("\"ok\"");
+            when(mockResponse.getHttpHeader()).thenReturn(responseHeaders);
+
+            Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+            var keys = new ArrayList<>(result.keySet());
+            assertTrue(keys.indexOf("headers") > keys.indexOf("body"),
+                    "headers must serialize after body, or truncation eats the body first: " + keys);
+        }
+
+        /**
+         * The error path puts its own body/httpCode, so it needs the same guarantee — a
+         * failed call's error body is exactly what the model needs in order to decide
+         * whether to retry.
+         */
+        /**
+         * Choosing which operations may BIND headers is not the same control as
+         * choosing which headers may be STORED, and only the second one closes this. An
+         * operation that qualifies on its documented 201 still answers some calls — the
+         * error path especially — with a {@code Set-Cookie}, and that value is a live
+         * session credential: {@code HttpClientModule} builds a cookie-aware,
+         * application-scoped {@code WebClientSession}, so EDDI actively replays it. It
+         * must reach neither the tool result, the template data, nor conversation
+         * memory.
+         */
+        @Test
+        @DisplayName("should never store or return credential-bearing response headers")
+        void dropsCredentialHeaders() throws Exception {
+            ApiCall call = createCall("header-call", true);
+            call.setResponseHeaderObjectName("respHeaders");
+            Map<String, String> responseHeaders = new HashMap<>();
+            responseHeaders.put("set-cookie", "JSESSIONID=SUPERSECRET; HttpOnly");
+            responseHeaders.put("WWW-Authenticate", "Bearer realm=\"x\"");
+            responseHeaders.put("Location", "/agents/conv-1");
+            when(mockResponse.getHttpCode()).thenReturn(201);
+            when(mockResponse.getContentAsString()).thenReturn("\"\"");
+            when(mockResponse.getHttpHeader()).thenReturn(responseHeaders);
+
+            Map<String, Object> templateData = new HashMap<>();
+            Map<String, Object> result = executor.execute(call, memory, templateData, "http://example.com");
+
+            String returned = String.valueOf(result.get("headers"));
+            assertFalse(returned.contains("SUPERSECRET"), "Set-Cookie reached the tool result: " + returned);
+            assertFalse(returned.contains("Bearer realm"), "an authenticate challenge reached the tool result");
+            // ...while the header the whole capture exists for still arrives.
+            assertTrue(returned.contains("/agents/conv-1"), "Location must survive the filter: " + returned);
+
+            assertFalse(String.valueOf(templateData.get("respHeaders")).contains("SUPERSECRET"),
+                    "Set-Cookie reached the template data");
+        }
+
+        @Test
+        @DisplayName("should order the error body before headers too")
+        void ordersErrorBodyBeforeHeaders() throws Exception {
+            ApiCall call = createCall("header-call", true);
+            call.setResponseHeaderObjectName("respHeaders");
+            Map<String, String> responseHeaders = new HashMap<>();
+            responseHeaders.put("Set-Cookie", "session=secret");
+            when(mockResponse.getHttpCode()).thenReturn(400);
+            when(mockResponse.getContentAsString()).thenReturn("bad request");
+            when(mockResponse.getHttpHeader()).thenReturn(responseHeaders);
+
+            Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+            var keys = new ArrayList<>(result.keySet());
+            assertTrue(keys.indexOf("headers") > keys.indexOf("body"),
+                    "headers must serialize after the error body: " + keys);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -550,7 +646,7 @@ class ApiCallExecutorBranchCoverageTest {
     class SaveResponseFalse {
 
         @Test
-        @DisplayName("should not include body in result when saveResponse is false")
+        @DisplayName("should not include body in result when saveResponse is false — but the code still travels")
         void noBodyInResult() throws Exception {
             ApiCall call = createCall("no-save", false);
             setupSuccessResponse(200, "response-body", "application/json");
@@ -558,7 +654,8 @@ class ApiCallExecutorBranchCoverageTest {
             Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
             assertFalse(result.containsKey("body"));
-            assertFalse(result.containsKey("httpCode"));
+            // A model whose tool returned "{}" cannot tell a success from a crash.
+            assertEquals(200, result.get("httpCode"));
         }
     }
 
@@ -716,20 +813,20 @@ class ApiCallExecutorBranchCoverageTest {
             call.setPreRequest(preRequest);
             setupSuccessResponse(200, "ok", "text/plain");
 
-            var scheduledExecutorService = mock(java.util.concurrent.ScheduledExecutorService.class);
+            var scheduledExecutorService = mock(ScheduledExecutorService.class);
             when(runtime.getScheduledExecutorService()).thenReturn(scheduledExecutorService);
 
             @SuppressWarnings("unchecked")
-            java.util.concurrent.ScheduledFuture<IResponse> future = mock(java.util.concurrent.ScheduledFuture.class);
+            ScheduledFuture<IResponse> future = mock(ScheduledFuture.class);
             when(future.get()).thenReturn(mockResponse);
-            when(scheduledExecutorService.schedule(any(java.util.concurrent.Callable.class), eq(500L),
-                    eq(java.util.concurrent.TimeUnit.MILLISECONDS)))
+            when(scheduledExecutorService.schedule(any(Callable.class), eq(500L),
+                    eq(TimeUnit.MILLISECONDS)))
                     .thenReturn(future);
 
             Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
-            verify(scheduledExecutorService).schedule(any(java.util.concurrent.Callable.class), eq(500L),
-                    eq(java.util.concurrent.TimeUnit.MILLISECONDS));
+            verify(scheduledExecutorService).schedule(any(Callable.class), eq(500L),
+                    eq(TimeUnit.MILLISECONDS));
             assertNotNull(result);
         }
     }

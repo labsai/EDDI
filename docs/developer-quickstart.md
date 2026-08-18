@@ -520,7 +520,7 @@ Hello {context.userName}!
 - **[Behavior Rules](behavior-rules.md)** - Master decision logic
 - **[HTTP Calls](httpcalls.md)** - Integrate external APIs
 - **[LangChain Integration](langchain.md)** - Configure LLMs
-- **[Agent Father Deep Dive](agent-father-deep-dive.md)** - Real-world example
+- **[Human-in-the-Loop](hitl.md)** - Gate an agent's writes on human approval
 
 ### Use the Dashboard
 

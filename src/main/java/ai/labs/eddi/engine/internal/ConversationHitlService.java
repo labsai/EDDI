@@ -18,9 +18,11 @@ import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 import ai.labs.eddi.engine.runtime.ExecutionAbandonedException;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
@@ -30,6 +32,7 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -37,6 +40,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.event.Event;
@@ -132,7 +136,7 @@ class ConversationHitlService {
 
     // --- HITL lifecycle ---
     public IConversationService.CancelOutcome cancelConversation(String conversationId,
-                                                                 ai.labs.eddi.engine.lifecycle.model.ControlSignal mode,
+                                                                 ControlSignal mode,
                                                                  String cancelledBy)
             throws ResourceStoreException {
         ConversationState currentState = conversationMemoryStore.getConversationState(conversationId);
@@ -206,7 +210,7 @@ class ConversationHitlService {
         }
     }
     public void resumeConversation(String conversationId,
-                                   ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                                   HitlDecision decision,
                                    ConversationResponseHandler handler)
             throws ResourceStoreException, ResourceNotFoundException {
         // See resumeConversation's @throws IllegalArgumentException javadoc
@@ -415,7 +419,7 @@ class ConversationHitlService {
                             if (noProgress == NoProgressOutcome.ABORT) {
                                 // Cancel owns the terminal state — do NOT persist a re-pause.
                                 cancelConversation(conversationId,
-                                        ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL,
+                                        ControlSignal.CANCEL_GRACEFUL,
                                         "system:no-progress");
                                 return;
                             }
@@ -569,7 +573,7 @@ class ConversationHitlService {
      * Semantics: calls not listed in {@code toolDecisions} inherit the top-level
      * {@link HitlDecision#getVerdict()} — they are not required to appear here.
      */
-    void validateToolDecisions(HitlDecision decision, ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot snapshot) {
+    void validateToolDecisions(HitlDecision decision, ConversationMemorySnapshot snapshot) {
         Map<String, ToolCallDecision> toolDecisions = decision.getToolDecisions();
 
         if (!"TOOL_CALL".equals(snapshot.getHitlPauseType())) {
@@ -690,7 +694,7 @@ class ConversationHitlService {
      */
     NoProgressOutcome evaluateAndApplyNoProgressGuard(String conversationId, String agentId,
                                                       Integer agentVersion, IConversationMemory memory, Environment environment,
-                                                      ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                                                      HitlDecision decision,
                                                       String prePauseFingerprint, int prePauseAutoApproveCount) {
         PendingToolCallBatch newBatch = memory.getHitlPendingToolCalls();
         if (newBatch == null) {
@@ -794,8 +798,8 @@ class ConversationHitlService {
      * human.
      */
     void issueNoProgressRejectAllResume(String conversationId) {
-        var reject = new ai.labs.eddi.engine.lifecycle.model.HitlDecision();
-        reject.setVerdict(ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.REJECTED);
+        var reject = new HitlDecision();
+        reject.setVerdict(HitlDecision.HitlVerdict.REJECTED);
         reject.setDecidedBy("system:no-progress");
         reject.setNote("Automatic reject-all: repeated identical tool-call pause made no progress");
         try {
@@ -840,7 +844,7 @@ class ConversationHitlService {
             if (fingerprint != null) {
                 detail.put("fingerprint", fingerprint);
             }
-            auditLedgerService.submit(new ai.labs.eddi.engine.audit.model.AuditEntry(
+            auditLedgerService.submit(new AuditEntry(
                     UUID.randomUUID().toString(), conversationId, agentId, agentVersion, userId,
                     environment != null ? environment.toString() : null, -1,
                     "hitl.tool." + guard, "hitl", -1, 0L,
@@ -858,7 +862,7 @@ class ConversationHitlService {
      */
     void auditHitlDecision(String conversationId, String agentId, Integer agentVersion,
                            String userId, Environment environment,
-                           ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                           HitlDecision decision,
                            boolean toolCallPause, PendingToolCallBatch pendingBatch) {
         if (!auditLedgerService.isEnabled()) {
             return;
@@ -880,7 +884,7 @@ class ConversationHitlService {
                 detail.put("pauseType", ConversationPauseException.PauseOrigin.TOOL_CALL.name());
                 detail.put("toolDecisions", buildToolDecisionSummary(decision, pendingBatch));
             }
-            auditLedgerService.submit(new ai.labs.eddi.engine.audit.model.AuditEntry(
+            auditLedgerService.submit(new AuditEntry(
                     UUID.randomUUID().toString(), conversationId, agentId, agentVersion, userId,
                     environment != null ? environment.toString() : null, -1,
                     "hitl.approval", "hitl", -1, 0L,
@@ -902,7 +906,7 @@ class ConversationHitlService {
      * written.
      */
     List<Map<String, Object>> buildToolDecisionSummary(
-                                                       ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                                                       HitlDecision decision,
                                                        PendingToolCallBatch pendingBatch) {
         List<Map<String, Object>> summary = new ArrayList<>();
         if (pendingBatch == null || pendingBatch.getCalls() == null) {
@@ -947,7 +951,7 @@ class ConversationHitlService {
     /**
      * Aggregate verdict for the tool-resume metric: approved | rejected | mixed.
      */
-    void recordToolResumeMetric(ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+    void recordToolResumeMetric(HitlDecision decision,
                                 PendingToolCallBatch pendingBatch) {
         String verdict = aggregateVerdict(decision, pendingBatch);
         meterRegistry.counter("eddi_hitl_tool_resume_count", "verdict", verdict).increment();
@@ -958,7 +962,7 @@ class ConversationHitlService {
      * every call resolves APPROVED, {@code rejected} when every call resolves
      * REJECTED, {@code mixed} otherwise (per-call verdicts diverge).
      */
-    static String aggregateVerdict(ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+    static String aggregateVerdict(HitlDecision decision,
                                    PendingToolCallBatch pendingBatch) {
         var top = decision.getVerdict();
         Map<String, ToolCallDecision> perCall = decision.getToolDecisions() != null
@@ -994,7 +998,7 @@ class ConversationHitlService {
      */
     void fireHitlResumeCompleted(String conversationId, Environment environment,
                                  IConversationMemory memory,
-                                 ai.labs.eddi.engine.lifecycle.model.HitlDecision decision) {
+                                 HitlDecision decision) {
         try {
             var snapshot = convertSimpleConversationMemorySnapshot(memory, false, true, List.of());
             snapshot.setEnvironment(environment);
@@ -1045,7 +1049,7 @@ class ConversationHitlService {
      * Audits the termination of a pending human approval by cancel/ABORT — cancels
      * are HITL decisions too and must be attributable in the oversight trail.
      */
-    void auditHitlCancellation(String conversationId, ai.labs.eddi.engine.lifecycle.model.ControlSignal mode,
+    void auditHitlCancellation(String conversationId, ControlSignal mode,
                                String cancelledBy) {
         if (!auditLedgerService.isEnabled()) {
             return;
@@ -1056,7 +1060,7 @@ class ConversationHitlService {
             detail.put("mode", mode != null ? mode.name() : "CANCEL_GRACEFUL");
             detail.put("decidedBy", cancelledBy != null ? cancelledBy : "unknown");
             detail.put("automated", cancelledBy != null && cancelledBy.startsWith("system:"));
-            auditLedgerService.submit(new ai.labs.eddi.engine.audit.model.AuditEntry(
+            auditLedgerService.submit(new AuditEntry(
                     UUID.randomUUID().toString(), conversationId, null, null, null,
                     null, -1, "hitl.approval", "hitl", -1, 0L,
                     Map.of(), detail, null, null, List.of(), 0.0,
@@ -1143,7 +1147,7 @@ class ConversationHitlService {
             memory.setHitlApprovalTimeout(hitlConfig.getApprovalTimeout());
         } catch (Exception e) {
             LOGGER.warnf("Could not populate HITL timeout bookmark for %s: %s",
-                    memory.getConversationId(), e.getMessage());
+                    sanitize(memory.getConversationId()), sanitize(e.getMessage()));
         }
     }
 
@@ -1261,37 +1265,86 @@ class ConversationHitlService {
      */
     void populateToolApprovalsConfig(IConversationMemory memory) {
         try {
-            AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
+            var lookup = lookupAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
+            // A FAILED read is not "no policy". Collapsing the two left the carrier
+            // null, which makes the gate wholly inert — so a store blip while
+            // resuming became a window in which every write executed unapproved.
+            // Fail closed on not-knowing; see ToolApprovalsConfig#UNDETERMINED.
+            if (lookup.readFailed()) {
+                LOGGER.warnf("Could not read the tool-approval policy for %s — gating every tool call until it can be read",
+                        sanitize(memory.getConversationId()));
+                memory.setAgentToolApprovalsConfig(ToolApprovalsConfig.UNDETERMINED);
+                return;
+            }
+            AgentConfiguration agentConfig = lookup.config();
             if (agentConfig == null || agentConfig.getHitlConfig() == null) {
                 memory.setAgentToolApprovalsConfig(null);
                 return;
             }
             memory.setAgentToolApprovalsConfig(agentConfig.getHitlConfig().getToolApprovals());
         } catch (Exception e) {
-            LOGGER.warnf("Could not populate tool-approval config for %s: %s",
-                    memory.getConversationId(), e.getMessage());
+            // Same reasoning: this catch used to leave the carrier untouched (null on
+            // a fresh memory), which is the fail-open again by a different route.
+            LOGGER.warnf("Could not populate tool-approval config for %s: %s — gating every tool call",
+                    sanitize(memory.getConversationId()), sanitize(e.getMessage()));
+            memory.setAgentToolApprovalsConfig(ToolApprovalsConfig.UNDETERMINED);
         }
     }
 
     /** Reads the agent config at the pinned version, falling back to the latest. */
     AgentConfiguration readAgentConfigPinned(String agentId, Integer agentVersion) {
+        return lookupAgentConfigPinned(agentId, agentVersion).config();
+    }
+
+    /**
+     * An agent-config read, together with whether it actually FAILED.
+     * <p>
+     * {@link #readAgentConfigPinned} collapses both outcomes to {@code null}, which
+     * is fine for callers that only want a best-effort config. It is not fine for
+     * the approval gate: there, "no config" means run ungated, and "could not read"
+     * has to mean the opposite. See {@link #populateToolApprovalsConfig}.
+     *
+     * @param readFailed
+     *            true when the store ERRORED, at either step. An agent (or a pinned
+     *            version) that genuinely does not exist yields
+     *            {@code (config, false)} — absence is an answer, not a failure to
+     *            obtain one.
+     */
+    record AgentConfigLookup(AgentConfiguration config, boolean readFailed) {
+    }
+
+    AgentConfigLookup lookupAgentConfigPinned(String agentId, Integer agentVersion) {
         try {
             if (agentVersion != null && agentVersion > 0) {
-                return agentStore.read(agentId, agentVersion);
+                return new AgentConfigLookup(agentStore.read(agentId, agentVersion), false);
             }
-        } catch (Exception pinnedMiss) {
-            LOGGER.debugf("Pinned agent config %s v%s unavailable, falling back to latest: %s",
-                    agentId, agentVersion, pinnedMiss.getMessage());
+        } catch (IResourceStore.ResourceNotFoundException pinnedGone) {
+            // The pinned VERSION is genuinely absent (deleted, or never existed).
+            // That is an answer, so falling back to the latest is legitimate.
+            LOGGER.debugf("Pinned agent config %s v%s does not exist, falling back to latest", agentId, agentVersion);
+        } catch (Exception pinnedError) {
+            // Anything else means the store could not answer for the PINNED version.
+            // Falling through to the latest would then silently swap in a DIFFERENT
+            // version's policy — and a later version may have relaxed the gate the
+            // conversation is pinned to. Report the failure instead; the caller that
+            // cares (populateToolApprovalsConfig) fails closed on it.
+            LOGGER.warnf("Could not read the pinned agent config %s v%s: %s",
+                    sanitize(agentId), agentVersion, sanitize(pinnedError.getMessage()));
+            return new AgentConfigLookup(null, true);
         }
         try {
             IResourceStore.IResourceId currentId = agentStore.getCurrentResourceId(agentId);
-            return currentId != null ? agentStore.read(agentId, currentId.getVersion()) : null;
+            return new AgentConfigLookup(currentId != null ? agentStore.read(agentId, currentId.getVersion()) : null, false);
+        } catch (IResourceStore.ResourceNotFoundException absent) {
+            // The agent itself is gone — again an answer, not a store failure.
+            LOGGER.debugf("Agent config %s does not exist", agentId);
+            return new AgentConfigLookup(null, false);
         } catch (Exception e) {
-            LOGGER.warnf("Could not read agent config %s: %s", agentId, e.getMessage());
-            return null;
+            LOGGER.warnf("Could not read agent config %s: %s", sanitize(agentId), sanitize(e.getMessage()));
+            return new AgentConfigLookup(null, true);
         }
     }
-    public ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
+    public ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
             throws ResourceStoreException, ResourceNotFoundException {
         var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
         if (snapshot == null) {
@@ -1299,13 +1352,13 @@ class ConversationHitlService {
         }
         return snapshot;
     }
-    public java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(int limit)
+    public List<PendingApprovalSummary> listPendingApprovals(int limit)
             throws ResourceStoreException {
         // #17: bounded, projection-based listing — never deserializes full
         // conversation documents on the Mongo backend.
         return conversationMemoryStore.findPendingApprovalSummaries(Math.max(1, Math.min(limit, 1000)));
     }
-    public java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
+    public List<PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
             throws ResourceStoreException {
         // Owner filter is pushed into the query so the limit applies AFTER the
         // restriction — a non-admin inbox can't be starved by others' backlog.

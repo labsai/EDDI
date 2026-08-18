@@ -66,6 +66,8 @@ import io.micrometer.core.instrument.Timer;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -698,7 +700,7 @@ public class GroupConversationService implements IGroupConversationService {
         // AtomicInteger: shared across the phase loop; parallel phases increment
         // from virtual threads. Seed from pausedTurnCount to preserve budget across
         // resumes (M3).
-        var turnCounter = new java.util.concurrent.atomic.AtomicInteger(
+        var turnCounter = new AtomicInteger(
                 gc.getPausedTurnCount() > 0 ? gc.getPausedTurnCount() : 0);
 
         // Resolve HITL granularity from group config
@@ -1647,7 +1649,7 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     @Override
-    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> listGroupPendingApprovals(String groupId, int limit)
+    public List<PendingApprovalSummary> listGroupPendingApprovals(String groupId, int limit)
             throws IResourceStore.ResourceStoreException {
         return lifecycleOps().listGroupPendingApprovals(groupId, limit);
     }
@@ -1669,7 +1671,7 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     public static void propagateDynamicAgentTracking(
-                                                     ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot,
+                                                     SimpleConversationMemorySnapshot snapshot,
                                                      GroupConversation gc) {
         GroupLifecycleOps.propagateDynamicAgentTracking(snapshot, gc);
     }
@@ -2006,14 +2008,14 @@ public class GroupConversationService implements IGroupConversationService {
 
     private void executeTaskPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
                                   DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
-                                  GroupDiscussionEventListener listener, java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns)
+                                  GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
         taskForceEngine.executeTaskPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
     }
 
     private void executeTaskExecutionPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
                                            DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
-                                           GroupDiscussionEventListener listener, java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns)
+                                           GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
         taskForceEngine.executeTaskExecutionPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
     }
@@ -2024,7 +2026,7 @@ public class GroupConversationService implements IGroupConversationService {
 
     private void executeTaskVerificationPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
                                               DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
-                                              GroupDiscussionEventListener listener, java.util.concurrent.atomic.AtomicInteger turnCounter,
+                                              GroupDiscussionEventListener listener, AtomicInteger turnCounter,
                                               int maxTurns)
             throws GroupDiscussionException {
         taskForceEngine.executeTaskVerificationPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
@@ -2073,7 +2075,7 @@ public class GroupConversationService implements IGroupConversationService {
     // just one calling convention, when sweeping for these).
     private void executeParallelPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
                                       ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
-                                      java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns)
+                                      AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
         phaseExecutionEngine.executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
     }
@@ -2083,7 +2085,7 @@ public class GroupConversationService implements IGroupConversationService {
      */
     private void executeParallelPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
                                       ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
-                                      java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns, Integer humanResumeIdx)
+                                      AtomicInteger turnCounter, int maxTurns, Integer humanResumeIdx)
             throws GroupDiscussionException {
         phaseExecutionEngine.executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns,
                 humanResumeIdx);
@@ -2224,7 +2226,7 @@ public class GroupConversationService implements IGroupConversationService {
      * reflection, and public since GroupLifecycleOps.followUpWithMember (Wave R, R1
      * step 8) calls it back.
      */
-    public String extractResponse(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
+    public String extractResponse(SimpleConversationMemorySnapshot snapshot) {
         return contextBuilder.extractResponse(snapshot);
     }
 

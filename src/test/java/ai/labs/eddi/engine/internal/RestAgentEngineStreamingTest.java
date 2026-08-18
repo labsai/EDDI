@@ -7,10 +7,12 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.utils.LogSanitizer;
 import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
@@ -24,6 +26,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -54,10 +57,10 @@ class RestAgentEngineStreamingTest {
         @Test
         @DisplayName("should replace newlines, carriage returns, and tabs")
         void replacesControlChars() {
-            assertEquals("hello_world", ai.labs.eddi.utils.LogSanitizer.sanitize("hello\nworld"));
-            assertEquals("hello_world", ai.labs.eddi.utils.LogSanitizer.sanitize("hello\rworld"));
-            assertEquals("hello_world", ai.labs.eddi.utils.LogSanitizer.sanitize("hello\tworld"));
-            assertEquals("null", ai.labs.eddi.utils.LogSanitizer.sanitize(null));
+            assertEquals("hello_world", LogSanitizer.sanitize("hello\nworld"));
+            assertEquals("hello_world", LogSanitizer.sanitize("hello\rworld"));
+            assertEquals("hello_world", LogSanitizer.sanitize("hello\tworld"));
+            assertEquals("null", LogSanitizer.sanitize(null));
         }
     }
 
@@ -115,7 +118,7 @@ class RestAgentEngineStreamingTest {
             method.setAccessible(true);
 
             var snapshot = new SimpleConversationMemorySnapshot();
-            snapshot.setConversationState(ai.labs.eddi.engine.memory.model.ConversationState.READY);
+            snapshot.setConversationState(ConversationState.READY);
 
             String json = (String) method.invoke(streaming, snapshot);
 
@@ -129,14 +132,50 @@ class RestAgentEngineStreamingTest {
             method.setAccessible(true);
 
             var snapshot = new SimpleConversationMemorySnapshot();
-            snapshot.setConversationState(ai.labs.eddi.engine.memory.model.ConversationState.READY);
-            var output = new ai.labs.eddi.engine.memory.model.ConversationOutput();
+            snapshot.setConversationState(ConversationState.READY);
+            var output = new ConversationOutput();
             output.put("output", List.of("Hello!"));
             snapshot.setConversationOutputs(List.of(output));
 
             String json = (String) method.invoke(streaming, snapshot);
 
             assertTrue(json.contains("conversationOutputs"));
+        }
+
+        @Test
+        @DisplayName("carries the pause identity: hitlPausedAt as the ISO instant, verbatim")
+        void includesPauseIdentity() throws Exception {
+            // hitlPausedAt is the only field distinguishing one pause of a turn
+            // from the next. The done event omitting it left streamed pauses
+            // identityless: the Manager's settle-poll read every re-pause as
+            // the pause it had already decided and spun to its timeout with
+            // the Approve button dead. The value must be the same ISO_INSTANT
+            // string the REST snapshot serializes, so cross-channel string
+            // comparison stays sound.
+            Method method = RestAgentEngineStreaming.class.getDeclaredMethod("toJson", SimpleConversationMemorySnapshot.class);
+            method.setAccessible(true);
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPausedAt(Instant.parse("2026-08-16T00:05:41.984599700Z"));
+
+            String json = (String) method.invoke(streaming, snapshot);
+
+            assertTrue(json.contains("\"hitlPausedAt\":\"2026-08-16T00:05:41.984599700Z\""), json);
+        }
+
+        @Test
+        @DisplayName("omits hitlPausedAt when the conversation is not paused")
+        void omitsPauseIdentityWhenAbsent() throws Exception {
+            Method method = RestAgentEngineStreaming.class.getDeclaredMethod("toJson", SimpleConversationMemorySnapshot.class);
+            method.setAccessible(true);
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+
+            String json = (String) method.invoke(streaming, snapshot);
+
+            assertFalse(json.contains("hitlPausedAt"), json);
         }
     }
 
@@ -517,6 +556,178 @@ class RestAgentEngineStreamingTest {
                     "the disconnect cancel must be bound to eddi.streaming.cancel-on-client-disconnect so operators can turn it off");
             assertTrue(Boolean.parseBoolean(defaultValue),
                     "the shipped default must keep the cost-saving cancel enabled");
+        }
+    }
+
+    /**
+     * The SSE grammar is `field ":" [ space ] value`, and every consumer strips one
+     * leading space per {@code data:} line — it cannot tell the separator from the
+     * payload's own first character. RESTEasy Reactive writes {@code data:} with no
+     * separator, so an unpadded payload beginning with a space arrived one space
+     * short.
+     * <p>
+     * Observed: the model emitted {@code "-"} then {@code " alpha"} and the client
+     * reassembled {@code "-alpha"} — no longer a Markdown list item — while words
+     * split across tokens ran together. Whole replies rendered as one mangled
+     * paragraph.
+     */
+    @org.junit.jupiter.api.Nested
+    @org.junit.jupiter.api.DisplayName("SSE data lines are padded so a leading space survives")
+    class DataLinePadding {
+
+        @Test
+        @DisplayName("a bare carriage return is normalised so its continuation line stays padded")
+        void carriageReturnContinuationIsPadded() {
+            // RESTEasy's SSE serializer starts a new data: line on \r as well
+            // as \n - an unnormalised \r would produce an UNPADDED continuation
+            // whose first character the consumer then eats.
+            String padded = RestAgentEngineStreaming.padDataLines("a\rb\r\nc");
+            assertEquals(" a\n b\n c", padded);
+        }
+
+        @org.junit.jupiter.api.Test
+        void aLeadingSpaceSurvivesTheConsumersStrip() {
+            String padded = RestAgentEngineStreaming.padDataLines(" alpha");
+            // What the consumer does: drop exactly one leading space per line.
+            assertEquals(" alpha", stripOneSpacePerLine(padded));
+        }
+
+        @org.junit.jupiter.api.Test
+        void everyLineIsPadded_notOnlyTheFirst() {
+            // RESTEasy emits one data: line per newline, so an indented continuation
+            // line loses a space of its own indentation unless each line is padded.
+            String value = "a\n  indented";
+            assertEquals(value, stripOneSpacePerLine(RestAgentEngineStreaming.padDataLines(value)));
+        }
+
+        @org.junit.jupiter.api.Test
+        void ordinaryPayloadsRoundTripUnchanged() {
+            for (String value : new String[]{"-", "plain token", "{\"taskId\":\"x\"}", "line1\nline2"}) {
+                assertEquals(value, stripOneSpacePerLine(RestAgentEngineStreaming.padDataLines(value)),
+                        "round-trip must be lossless for: " + value);
+            }
+        }
+
+        @org.junit.jupiter.api.Test
+        void nullAndEmptyAreLeftAlone() {
+            assertNull(RestAgentEngineStreaming.padDataLines(null));
+            assertEquals("", RestAgentEngineStreaming.padDataLines(""));
+        }
+
+        /** The consumer half of the contract, per the SSE spec. */
+        private String stripOneSpacePerLine(String wire) {
+            var out = new StringBuilder();
+            String[] lines = wire.split("\n", -1);
+            for (int i = 0; i < lines.length; i++) {
+                if (i > 0) {
+                    out.append('\n');
+                }
+                String line = lines[i];
+                out.append(line.startsWith(" ") ? line.substring(1) : line);
+            }
+            return out.toString();
+        }
+    }
+
+    /**
+     * The known client conditions {@code ConversationService.sayStreaming} rejects
+     * synchronously must surface as TYPED error events —
+     * {@code {"message":…,"code":…}} — not the opaque internal-error shape.
+     * Observed live: input sent into an AWAITING_HUMAN conversation was refused
+     * correctly by the backend but reached the client as
+     * {@code {"message":"Internal server error"}}, which the Manager rendered as a
+     * dead error blob instead of re-showing the approval banner.
+     */
+    @Nested
+    @DisplayName("sayStreaming known client conditions (typed error events)")
+    class KnownConditionErrorEvents {
+
+        private SseEventSink eventSink;
+        private Sse sse;
+        private OutboundSseEvent.Builder eventBuilder;
+        private ArgumentCaptor<String> payloads;
+
+        @BeforeEach
+        void wireSse() {
+            eventSink = mock(SseEventSink.class);
+            sse = mock(Sse.class);
+            eventBuilder = mock(OutboundSseEvent.Builder.class);
+            var sseEvent = mock(OutboundSseEvent.class);
+            payloads = ArgumentCaptor.forClass(String.class);
+            when(eventSink.isClosed()).thenReturn(false);
+            when(sse.newEventBuilder()).thenReturn(eventBuilder);
+            when(eventBuilder.name(anyString())).thenReturn(eventBuilder);
+            when(eventBuilder.data(any(Class.class), payloads.capture())).thenReturn(eventBuilder);
+            when(eventBuilder.build()).thenReturn(sseEvent);
+        }
+
+        private String errorPayloadFor(Exception thrown) throws Exception {
+            doThrow(thrown).when(conversationService)
+                    .sayStreaming(anyString(), any(), any(), any(), any(), any());
+            var inputData = new InputData();
+            inputData.setInput("Hello");
+            streaming.sayStreaming("conv-1", false, false, List.of(), inputData, eventSink, sse);
+            verify(eventBuilder, atLeastOnce()).name("error");
+            return payloads.getValue();
+        }
+
+        @Test
+        @DisplayName("awaiting approval → code=awaiting_approval with the twin's 409 message")
+        void awaitingApprovalIsTyped() throws Exception {
+            String message = "Conversation is awaiting human approval — a reviewer must resolve it via"
+                    + " POST /agents/conv-1/resume (or cancel) before new input is accepted";
+            String payload = errorPayloadFor(
+                    new IConversationService.ConversationAwaitingApprovalException(message));
+
+            assertTrue(payload.contains("\"code\":\"awaiting_approval\""), payload);
+            assertTrue(payload.contains("awaiting human approval"), payload);
+            assertFalse(payload.contains("Internal server error"), payload);
+        }
+
+        @Test
+        @DisplayName("conversation ended → code=conversation_ended")
+        void conversationEndedIsTyped() throws Exception {
+            String payload = errorPayloadFor(
+                    new IConversationService.ConversationEndedException("Conversation has ended!"));
+
+            assertTrue(payload.contains("\"code\":\"conversation_ended\""), payload);
+            assertFalse(payload.contains("Internal server error"), payload);
+        }
+
+        @Test
+        @DisplayName("agent not ready → fixed text, NOT the message naming environment and agentId")
+        void agentNotReadyDisclosesNothing() throws Exception {
+            String payload = errorPayloadFor(new IConversationService.AgentNotReadyException(
+                    "Agent not deployed (environment=restricted, conversationId=conv-1, version=7)"));
+
+            assertTrue(payload.contains("\"code\":\"agent_not_ready\""), payload);
+            assertTrue(payload.contains("Agent is not deployed or not ready"), payload);
+            // The exception's own message mirrors what the non-streaming twin
+            // withholds behind a bare 404 — it must not leak here either.
+            assertFalse(payload.contains("environment=restricted"), payload);
+        }
+
+        @Test
+        @DisplayName("agent mismatch → the twin's fixed 409 text, not the id-bearing message")
+        void agentMismatchUsesFixedText() throws Exception {
+            String payload = errorPayloadFor(new IConversationService.AgentMismatchException(
+                    "Supplied agentId (agent-7) is incompatible with conversationId (conv-1)"));
+
+            assertTrue(payload.contains("\"code\":\"agent_mismatch\""), payload);
+            assertTrue(payload.contains("Agent version mismatch"), payload);
+            assertFalse(payload.contains("agent-7"), payload);
+        }
+
+        @Test
+        @DisplayName("anything else stays opaque: fixed message + correlationId, no code")
+        void unknownExceptionsStayOpaque() throws Exception {
+            String payload = errorPayloadFor(
+                    new RuntimeException("mongodb://replica-set-member:27017 unreachable"));
+
+            assertTrue(payload.contains("Internal server error"), payload);
+            assertTrue(payload.contains("correlationId"), payload);
+            assertFalse(payload.contains("\"code\""), payload);
+            assertFalse(payload.contains("mongodb://"), payload);
         }
     }
 }

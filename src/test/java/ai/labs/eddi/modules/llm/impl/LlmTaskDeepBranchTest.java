@@ -22,6 +22,8 @@ import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
+import ai.labs.eddi.engine.runtime.service.ServiceException;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
@@ -237,14 +239,14 @@ class LlmTaskDeepBranchTest {
         @Test
         @DisplayName("null URI in configuration throws WorkflowConfigurationException")
         void nullUri() {
-            assertThrows(ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException.class,
+            assertThrows(WorkflowConfigurationException.class,
                     () -> llmTask.configure(Map.of(), Map.of()));
         }
 
         @Test
         @DisplayName("empty URI in configuration throws WorkflowConfigurationException")
         void emptyUri() {
-            assertThrows(ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException.class,
+            assertThrows(WorkflowConfigurationException.class,
                     () -> llmTask.configure(Map.of("uri", ""), Map.of()));
         }
 
@@ -263,9 +265,9 @@ class LlmTaskDeepBranchTest {
         @DisplayName("ServiceException from resource library wraps in WorkflowConfigurationException")
         void serviceException() throws Exception {
             when(resourceClientLibrary.getResource(any(), eq(LlmConfiguration.class)))
-                    .thenThrow(new ai.labs.eddi.engine.runtime.service.ServiceException("fail"));
+                    .thenThrow(new ServiceException("fail"));
 
-            assertThrows(ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException.class,
+            assertThrows(WorkflowConfigurationException.class,
                     () -> llmTask.configure(Map.of("uri", "eddi://ai.labs.llm/llmstore/llmconfigs/abc123?version=1"), Map.of()));
         }
     }

@@ -30,7 +30,6 @@ import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
-import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -361,7 +360,6 @@ public class McpGroupTools {
 
     // --- Group Conversation ---
 
-    @Blocking
     @Tool(description = "Start a structured multi-agent discussion and wait for it to complete. "
             + "All configured member agents participate using the group's discussion style. "
             + "Returns the full GroupConversation including transcript, task list (for TASK_FORCE), "
@@ -454,7 +452,7 @@ public class McpGroupTools {
         try {
             String user = resolveOwner(userId);
             GroupConversation gc = groupConversationService.startAndDiscussAsync(groupId, question, user, null);
-            return jsonSerialization.serialize(java.util.Map.of(
+            return jsonSerialization.serialize(Map.of(
                     "groupConversationId", gc.getId(),
                     "state", String.valueOf(gc.getState()),
                     "message", "Discussion started. Poll read_group_conversation with this ID to check progress."));
@@ -485,7 +483,6 @@ public class McpGroupTools {
 
     // --- Follow-up Operations ---
 
-    @Blocking
     @Tool(description = "Ask a follow-up question to a specific member agent in a "
             + "completed group conversation. The agent retains full context from "
             + "the discussion. Both the question and response are recorded on the "
@@ -512,7 +509,6 @@ public class McpGroupTools {
         }
     }
 
-    @Blocking
     @Tool(description = "Continue a completed group conversation with a new question. "
             + "All agents re-run through the full discussion phases, retaining memory "
             + "of prior rounds. The round counter increments. Returns the updated "
@@ -560,7 +556,6 @@ public class McpGroupTools {
     @Tool(description = "Add a task to a standing team's backlog (I13). The backlog persists across "
             + "discussions; scheduled cadences pull executable tasks from it into task-force runs. "
             + "Higher priority runs earlier. Returns the created task.")
-    @Blocking
     public String add_team_task(@ToolArg(description = "Group configuration ID") String groupId,
                                 @ToolArg(description = "Task subject (short, unique within the backlog)") String subject,
                                 @ToolArg(description = "Task description (optional)") String description,
@@ -608,7 +603,6 @@ public class McpGroupTools {
 
     @Tool(description = "List a standing team's backlog (I13): every task with its status, priority, "
             + "assignee and verification outcome.")
-    @Blocking
     public String list_team_backlog(@ToolArg(description = "Group configuration ID") String groupId) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
@@ -644,7 +638,6 @@ public class McpGroupTools {
     @Tool(description = "Create a group from a packaged template (I10) by assigning agents to its named roles. "
             + "roleAssignments is a JSON object mapping role -> agent id (for HUMAN roles: the principal id). "
             + "Saves through the normal store path, so every save-time validation applies.")
-    @Blocking
     public String create_group_from_template(@ToolArg(description = "Template id, e.g. 'research-pod'") String templateId,
                                              @ToolArg(description = "Name for the new group (optional)") String name,
                                              @ToolArg(description = "JSON object: role -> agent id") String roleAssignments) {

@@ -320,19 +320,6 @@ function Test-Prerequisites {
     }
 }
 
-# -- Detect deployed agents ---------------------------------
-
-function Get-DeployedAgentCount {
-    try {
-        $response = Invoke-RestMethod -Uri "http://localhost:${EddiPort}/administration/production/deploymentstatus" -TimeoutSec 5 -ErrorAction Stop
-        if ($response -is [array]) { return $response.Count }
-        return 0
-    }
-    catch {
-        return 0
-    }
-}
-
 # -- Wizard steps ------------------------------------------
 
 $TotalSteps = 5
@@ -535,7 +522,8 @@ function Get-ComposeFiles {
             "docs/monitoring/prometheus.yml",
             "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml",
             "docs/monitoring/grafana-provisioning/datasources/datasources.yml",
-            "docs/monitoring/eddi-grafana-dashboard.json"
+            "docs/monitoring/eddi-grafana-dashboard.json",
+            "docs/monitoring/eddi-operations-dashboard.json"
         )
         foreach ($mf in $monitoringFiles) {
             $mfTarget = Join-Path -Path $EddiDir -ChildPath $mf
@@ -554,7 +542,16 @@ function Get-ComposeFiles {
                     Write-Information -MessageData "✅"
                 }
                 catch {
-                    Write-Warn "Failed to download $mf (monitoring may not work)"
+                    # Bind-mounted as a FILE by docker-compose.monitoring.yml, so a
+                    # missing one is worse than it sounds: Docker creates a
+                    # *directory* at the mount path and Grafana then fails to
+                    # provision, including the dashboards that did download. Same
+                    # reasoning as the Keycloak realm below.
+                    # -Recurse as well as -Force: what is in the way is most
+                    # likely a DIRECTORY left by a previous run's failed mount,
+                    # and -Force alone will not remove one.
+                    if (Test-Path $mfTarget) { Remove-Item -Path $mfTarget -Recurse -Force -ErrorAction SilentlyContinue }
+                    Write-Fail "Failed to download $mf (required for -WithMonitoring).`n     URL: $mfUrl"
                 }
             }
         }
@@ -727,26 +724,6 @@ function Wait-ForReady {
     exit 1
 }
 
-# -- Import initial agents ----------------------------------
-
-function Import-InitialAgents {
-    $agentCount = Get-DeployedAgentCount
-
-    if ($agentCount -eq 0) {
-        Write-Information -MessageData "  Deploying Agent Father...  "
-        try {
-            Invoke-RestMethod -Uri "http://localhost:${EddiPort}/backup/import/initialAgents" -Method Post -TimeoutSec 60 -ErrorAction Stop | Out-Null
-            Write-Information -MessageData "✅"
-        }
-        catch {
-            Write-Information -MessageData "⚠️  (non-fatal -- EDDI is still usable)"
-        }
-    }
-    else {
-        Write-Ok "Found $agentCount deployed agent(s), skipping initial import."
-    }
-}
-
 # -- Success banner ---------------------------------------
 
 function Write-Success {
@@ -786,9 +763,9 @@ function Write-Success {
     Write-Information -MessageData "  +----------------------------------------------------+"
     Write-Information -MessageData ""
     Write-Information -MessageData "  [bot] Ready to create your first agent?"
-    Write-Information -MessageData "     Open the dashboard and chat with Agent Father!"
-    Write-Information -MessageData "     It will guide you through choosing an AI provider,"
-    Write-Information -MessageData "     setting up API keys, and building your first agent."
+    Write-Information -MessageData "     Activate the Platform Operator at http://localhost:${EddiPort}/manage/operator"
+    Write-Information -MessageData "     and just describe the agent you want -- it builds and deploys it for you."
+    Write-Information -MessageData "     Prefer a form? The wizard is at http://localhost:${EddiPort}/manage/agents/wizard"
     Write-Information -MessageData ""
     Write-Information -MessageData "  +- Claude Desktop / Cursor --------------------------+"
     Write-Information -MessageData "  | Add to your MCP config:                            |"
@@ -986,7 +963,6 @@ EDDI_PORT=$EddiPort
 EDDI_HTTPS_PORT=$EddiHttpsPort
 "@ | Set-Content -Path $configPath
         }
-        Import-InitialAgents
         Write-Success
         Install-CliWrapper
         exit 0
@@ -1003,7 +979,6 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
 
     Start-Eddi
     Wait-ForReady
-    Import-InitialAgents
     Write-Success
     Install-CliWrapper
     $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds)

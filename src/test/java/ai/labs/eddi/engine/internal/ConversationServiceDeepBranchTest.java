@@ -36,6 +36,7 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -44,6 +45,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
 import java.util.*;
+import java.util.HashSet;
+import java.util.Stack;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -343,13 +346,13 @@ class ConversationServiceDeepBranchTest {
             when(conversationMemory.getUserId()).thenReturn(USER_ID);
             when(conversationMemory.getAgentId()).thenReturn(AGENT_ID);
             when(conversationMemory.getAgentVersion()).thenReturn(1);
-            when(conversationMemory.getRedoCache()).thenReturn(new java.util.Stack<>());
+            when(conversationMemory.getRedoCache()).thenReturn(new Stack<>());
             var stepStack = mock(IConversationMemory.IConversationStepStack.class);
             when(stepStack.size()).thenReturn(0);
             when(conversationMemory.getAllSteps()).thenReturn(stepStack);
             when(conversationMemory.getConversationOutputs()).thenReturn(new ArrayList<>());
-            var conversationProperties = mock(ai.labs.eddi.engine.memory.model.ConversationProperties.class);
-            doReturn(new java.util.HashSet<>()).when(conversationProperties).entrySet();
+            var conversationProperties = mock(ConversationProperties.class);
+            doReturn(new HashSet<>()).when(conversationProperties).entrySet();
             when(conversationMemory.getConversationProperties()).thenReturn(conversationProperties);
             when(mockAgent.startConversation(any(), any(), any(), any())).thenReturn(conversation);
             when(conversationMemoryStore.storeConversationMemorySnapshot(any()))

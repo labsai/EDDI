@@ -322,13 +322,6 @@ check_prerequisites() {
     fail "curl is required but not found.\n     Install: apt install curl / brew install curl"
   fi
 
-  # jq (optional but used for agent count check)
-  if ! command -v jq &>/dev/null; then
-    JQ_AVAILABLE=false
-  else
-    JQ_AVAILABLE=true
-  fi
-
   # Docker
   if ! command -v docker &>/dev/null; then
     case "$PLATFORM" in
@@ -395,23 +388,6 @@ check_prerequisites() {
   else
     EDDI_ALREADY_RUNNING=false
   fi
-}
-
-# ── Detect existing state ─────────────────────────────────
-
-detect_deployed_agents() {
-  local count=0
-  local response
-  response=$(curl -sf "http://localhost:${EDDI_PORT}/administration/production/deploymentstatus" 2>/dev/null) || return 1
-
-  if [[ "$JQ_AVAILABLE" == "true" ]]; then
-    count=$(echo "$response" | jq 'length' 2>/dev/null) || count=0
-  else
-    # Fallback: count array elements by counting "agentId" occurrences
-    count=$(echo "$response" | grep -o '"agentId"' | wc -l | tr -d ' ') || count=0
-  fi
-
-  echo "$count"
 }
 
 # ── Wizard steps ───────────────────────────────────────────
@@ -620,6 +596,7 @@ resolve_compose_files() {
       "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml"
       "docs/monitoring/grafana-provisioning/datasources/datasources.yml"
       "docs/monitoring/eddi-grafana-dashboard.json"
+      "docs/monitoring/eddi-operations-dashboard.json"
     )
     for mf in "${monitoring_files[@]}"; do
       local mf_target="$EDDI_DIR/$mf"
@@ -635,7 +612,20 @@ resolve_compose_files() {
         if curl -fsSL "${mf_url}" -o "$mf_target"; then
           echo -e "${GREEN}✅${RESET}"
         else
-          warn "Failed to download ${mf} (monitoring may not work)"
+          # Every one of these is bind-mounted as a FILE by
+          # docker-compose.monitoring.yml, so a missing one is worse than it
+          # sounds: Docker creates a *directory* at the mount path, and Grafana
+          # then fails to provision — including the dashboards that did
+          # download. Same reasoning as the Keycloak realm below; a half-built
+          # monitoring stack is not better than a refusal to build one.
+          # -rf, not -f: the thing in the way is most likely a DIRECTORY that a
+          # previous run's failed mount left behind, and `rm -f` cannot remove
+          # one. Under `set -e` that turns this cleanup into the script's exit
+          # point, so the user sees "rm: cannot remove ...: Is a directory"
+          # instead of the message below, and the stale path survives to break
+          # the next run too.
+          rm -rf "$mf_target"
+          fail "Failed to download ${mf} (required for --with-monitoring).\n     URL: ${mf_url}"
         fi
       fi
     done
@@ -1115,28 +1105,6 @@ print(', '.join(n for n in names if n in ('eddi-admin', 'eddi-editor')))" 2>/dev
   fi
 }
 
-# ── Import initial agents ──────────────────────────────────
-
-maybe_import_initial_agents() {
-  local agent_count
-  agent_count=$(detect_deployed_agents) || agent_count=0
-
-  if [[ "$agent_count" -eq 0 ]]; then
-    echo -ne "  Deploying Agent Father...  "
-    local status
-    status=$(curl -sf -o /dev/null -w "%{http_code}" \
-      -X POST "http://localhost:${EDDI_PORT}/backup/import/initialAgents" 2>/dev/null) || status="000"
-
-    if [[ "$status" == "200" ]]; then
-      echo -e "${GREEN}✅${RESET}"
-    else
-      echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${status} — non-fatal, EDDI is still usable)${RESET}"
-    fi
-  else
-    info "Found ${agent_count} deployed agent(s), skipping initial import."
-  fi
-}
-
 # ── Success banner ────────────────────────────────────────
 
 print_success() {
@@ -1176,9 +1144,9 @@ print_success() {
   echo -e "  ${YELLOW}└────────────────────────────────────────────────────┘${RESET}"
   echo ""
   echo -e "  ${BOLD}🤖 Ready to create your first agent?${RESET}"
-  echo "     Open the dashboard and chat with Agent Father!"
-  echo "     It will guide you through choosing an AI provider,"
-  echo "     setting up API keys, and building your first agent."
+  echo -e "     Activate the Platform Operator at ${CYAN}http://localhost:${EDDI_PORT}/manage/operator${RESET}"
+  echo "     and just describe the agent you want — it builds and deploys it for you."
+  echo -e "     Prefer a form? The wizard is at ${CYAN}http://localhost:${EDDI_PORT}/manage/agents/wizard${RESET}"
   echo ""
   echo -e "  ${DIM}┌─ Claude Desktop / Cursor ──────────────────────────┐${RESET}"
   echo -e "  ${DIM}│ Add to your MCP config:                            │${RESET}"
@@ -1407,7 +1375,6 @@ EDDI_HTTPS_PORT=$EDDI_HTTPS_PORT
 CFGEOF
       chmod 600 "$EDDI_DIR/.eddi-config"
     fi
-    maybe_import_initial_agents
     install_cli_wrapper
     print_success
     exit 0
@@ -1428,7 +1395,6 @@ CFGEOF
   start_eddi
   wait_for_ready
   configure_keycloak_client
-  maybe_import_initial_agents
 
   # Install CLI wrapper
   install_cli_wrapper

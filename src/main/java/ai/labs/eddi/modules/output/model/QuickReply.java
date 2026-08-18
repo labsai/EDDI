@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.modules.output.model;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -57,12 +58,12 @@ public class QuickReply {
         if (o == null || getClass() != o.getClass())
             return false;
         QuickReply that = (QuickReply) o;
-        return java.util.Objects.equals(value, that.value) && java.util.Objects.equals(expressions, that.expressions)
-                && java.util.Objects.equals(isDefault, that.isDefault);
+        return Objects.equals(value, that.value) && Objects.equals(expressions, that.expressions)
+                && Objects.equals(isDefault, that.isDefault);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(value, expressions, isDefault);
+        return Objects.hash(value, expressions, isDefault);
     }
 }

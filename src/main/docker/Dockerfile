@@ -78,7 +78,7 @@
 #   accessed directly. (example: "foo.example.com,bar.example.com")
 #
 ###
-FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24@sha256:de073e98f1bb4be12f1454e1685c37db876af845896e0495f4eab0931154f9e4
+FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24@sha256:6b320cbb20bd8b74ed4b44d0ea086cc9651bfc64396fbe6c0d906a8da12bdd20
 
 ### Red Hat Container Certification — required labels
 ARG EDDI_VERSION=6.3.0
@@ -120,8 +120,8 @@ COPY --chown=185 licenses/ /licenses/
 # Only the TOP-LEVEL *.md pages are ever reachable at runtime: listDocs() calls
 # Files.newDirectoryStream(docsDir, "*.md") — non-recursive — and readDoc()
 # rejects any name containing '/', so nothing under docs/agent-configs/,
-# docs/templates/, docs/your-first-agent/ etc. can be requested. Copying the
-# whole tree (~2.2 MB) shipped those subdirectories as dead weight.
+# docs/templates/, docs/creating-your-first-agent/ etc. can be requested.
+# Copying the whole tree (~2.2 MB) shipped those subdirectories as dead weight.
 COPY --chown=185 docs/*.md /deployments/docs/
 
 # Drop the internal-only pages that have no business being served to an MCP

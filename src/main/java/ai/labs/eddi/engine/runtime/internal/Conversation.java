@@ -27,6 +27,8 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.regex.Pattern;
+import java.util.ArrayList;
 
 import static ai.labs.eddi.engine.memory.ContextUtilities.storeContextLanguageInLongTermMemory;
 import static ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -766,10 +768,36 @@ public class Conversation implements IConversation {
             // templating tasks run, so without this the chat client renders NOTHING
             // for the paused turn. Mirror the REJECTED path's Data/output pattern.
             String pending = resolvePendingMessage(conversationMemory);
-            var pendingData = new Data<>(MemoryKeys.OUTPUT_PREFIX, List.of(pending));
+            // The model's own narration of what it is about to do goes AHEAD of the
+            // placeholder — see PendingToolCallBatch#interimText. Without it a resumed
+            // (non-streamed) turn's second approval arrived with no explanation at all,
+            // and even a streamed one lost the explanation on reload.
+            var outputs = new ArrayList<String>(2);
+            var batch = conversationMemory.getHitlPendingToolCalls();
+            String interim = batch != null ? batch.getInterimText() : null;
+            if (interim != null && !interim.isBlank() && !interim.equals(pending)) {
+                outputs.add(interim);
+            }
+            outputs.add(pending);
+            var step = conversationMemory.getCurrentStep();
+            // The Data twin must ACCUMULATE, exactly as the output list does: a turn
+            // may pause several times, and each pause's explanation is a permanent
+            // part of the record — retrospectively, the admin must be able to see
+            // everything the model said it was doing. Replacing the twin (as a bare
+            // storeData would) kept only the latest pause's text in the detailed
+            // step view while the output list kept them all, and two channels that
+            // disagree is exactly the class of bug the surgical placeholder drop
+            // exists to prevent.
+            var accumulated = new ArrayList<Object>();
+            IData<?> previous = step.getData(MemoryKeys.OUTPUT_PREFIX);
+            if (previous != null && previous.getResult() instanceof List<?> prior) {
+                accumulated.addAll(prior);
+            }
+            accumulated.addAll(outputs);
+            var pendingData = new Data<>(MemoryKeys.OUTPUT_PREFIX, accumulated);
             pendingData.setPublic(true);
-            conversationMemory.getCurrentStep().storeData(pendingData);
-            conversationMemory.getCurrentStep().addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.of(pending));
+            step.storeData(pendingData);
+            step.addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.copyOf(outputs));
         } else {
             // A RULE pause must never carry a stale tool batch (e.g. the gate tripped
             // earlier in the same turn on a path that recovered) — belt and braces.
@@ -790,17 +818,38 @@ public class Conversation implements IConversation {
 
     /**
      * Default end-user pending message used when the agent config does not supply a
-     * {@code toolApprovals.pendingMessage}.
+     * {@code toolApprovals.pendingMessage} <b>and</b> the gated call names are
+     * unknown (a legacy batch, or one whose calls carry no tool name).
      */
     private static final String DEFAULT_PENDING_MESSAGE = "This action requires human approval before it can proceed. "
+            + "You will receive the result once a reviewer decides.";
+
+    /** Matches a rendered default carrying the repeat-pause ordinal suffix. */
+    private static final Pattern ORDINAL_SUFFIX = Pattern.compile(
+            "^(.*) \\(approval \\d+ this turn\\)$", Pattern.DOTALL);
+
+    /**
+     * Default pending message when the gated call names ARE known — the normal
+     * case.
+     * <p>
+     * Naming them is what makes a multi-pause turn legible. A turn may pause up to
+     * {@code maxPausesPerTurn} times (default 3), and every pause writes this
+     * message into the same step's output while the previous one is dropped on
+     * resume. With a constant sentence, deciding a batch and landing on the very
+     * next pause re-rendered a bubble with byte-identical text — which reads as "I
+     * approved it and nothing happened". The gated tool is the thing that actually
+     * changed between the two, so it is the thing the message says.
+     */
+    private static final String DEFAULT_PENDING_MESSAGE_WITH_TOOLS = "I need your approval before I can run {toolNames}. "
             + "You will receive the result once a reviewer decides.";
 
     /**
      * Resolves the end-user-facing pending message for a tool pause: the governing
      * {@code toolApprovals.rules} entry's {@code pendingMessage} if it set one,
      * else {@code toolApprovals.pendingMessage}, with {@code {toolNames}}
-     * substituted from the pending batch's gated call names, falling back to a
-     * generic default.
+     * substituted from the pending batch's gated call names, falling back to
+     * {@link #DEFAULT_PENDING_MESSAGE_WITH_TOOLS} (or, with no names to show,
+     * {@link #DEFAULT_PENDING_MESSAGE}).
      * <p>
      * Must stay deterministic from the persisted batch alone —
      * {@code dropPendingApprovalPlaceholder} recomputes this exact string on resume
@@ -826,9 +875,6 @@ public class Conversation implements IConversation {
         } else if (cfg != null && !isNullOrEmpty(cfg.getPendingMessage())) {
             template = cfg.getPendingMessage();
         }
-        if (template == null) {
-            template = DEFAULT_PENDING_MESSAGE;
-        }
         String names = "";
         if (batch != null && batch.getCalls() != null) {
             names = batch.getCalls().stream()
@@ -838,42 +884,142 @@ public class Conversation implements IConversation {
                     .reduce((a, b) -> a + ", " + b)
                     .orElse("");
         }
-        return template.replace("{toolNames}", names);
+        // Resolved AFTER the names, because which default applies depends on whether
+        // there are any. A configured template is used as-is either way — an operator
+        // who wrote their own wording keeps it, with or without {toolNames} in it.
+        boolean usedDefault = template == null;
+        if (usedDefault) {
+            template = names.isBlank() ? DEFAULT_PENDING_MESSAGE : DEFAULT_PENDING_MESSAGE_WITH_TOOLS;
+        }
+        String rendered = template.replace("{toolNames}", names);
+        // Naming the tool made pauses on DIFFERENT tools distinguishable; a turn
+        // that pauses twice on the SAME tool (approve → the call fails → the model
+        // retries with fixed arguments) still rendered byte-identical text, which
+        // reads as a duplicated bubble — or a dead Approve button. The batch's own
+        // pause ordinal disambiguates. It is persisted WITH the batch, so the
+        // resume-time recomputation in dropPendingApprovalPlaceholder reads the
+        // identical value — the determinism that placeholder-dropping requires.
+        // Only the built-in default gains the suffix: a configured template is the
+        // operator's wording, kept verbatim. First pauses (and legacy batches,
+        // whose ordinal is 0) stay clean.
+        int pauseOrdinal = batch != null ? batch.getPauseCountThisTurn() : 0;
+        if (usedDefault && pauseOrdinal >= 2) {
+            rendered += " (approval " + pauseOrdinal + " this turn)";
+        }
+        return rendered;
+    }
+
+    /**
+     * Every string {@link #pauseConversation} may have written as the pending
+     * placeholder for the CURRENT batch — under this build or a previous one. First
+     * entry is what this build writes; the rest are legacy renderings.
+     * <p>
+     * Exists because the determinism argument ("recompute the exact string on
+     * resume") silently assumed pause and resume run the same build. Two releases
+     * changed the DEFAULT wording — the tool-named default, then the repeat-pause
+     * ordinal — so a conversation paused under the previous build recomputes a
+     * string that is not in its output list, the removal no-ops, and the resolved
+     * turn renders [stale placeholder, answer]: the exact artifact those changes
+     * exist to kill, once per in-flight pause on the first post-upgrade resume.
+     * There is no schema migration for conversation output, so the resume path
+     * itself must recognise its predecessors' wording.
+     * <p>
+     * Only DEFAULT renderings accumulate variants — a configured
+     * {@code pendingMessage} has never been rewritten by a release, so it stays a
+     * single candidate. (An operator editing their template between pause and
+     * resume strands the placeholder exactly as before; that is config drift, not a
+     * version boundary, and predates all of this.)
+     */
+    private List<String> pendingPlaceholderCandidates(IConversationMemory memory) {
+        String current = resolvePendingMessage(memory);
+        var candidates = new ArrayList<String>();
+        candidates.add(current);
+
+        var batch = memory.getHitlPendingToolCalls();
+        var cfg = batch != null && batch.getEffectiveToolApprovals() != null
+                ? batch.getEffectiveToolApprovals()
+                : memory.getAgentToolApprovalsConfig();
+        var rule = batch != null ? batch.getEffectiveRule() : null;
+        boolean configured = (rule != null && rule.getPendingMessage() != null && !rule.getPendingMessage().isBlank())
+                || (cfg != null && !isNullOrEmpty(cfg.getPendingMessage()));
+        if (!configured) {
+            // Pre-ordinal build: the tool-named default without the suffix. The
+            // ordinal itself predates the suffix (it was persisted for cap
+            // enforcement), so a repeat pause persisted by that build re-reads
+            // its ordinal today and gains a suffix the stored text never had.
+            var suffix = ORDINAL_SUFFIX.matcher(current);
+            if (suffix.matches()) {
+                candidates.add(suffix.group(1));
+            }
+            // Pre-tool-named build: the constant, regardless of names.
+            if (!candidates.contains(DEFAULT_PENDING_MESSAGE)) {
+                candidates.add(DEFAULT_PENDING_MESSAGE);
+            }
+        }
+        return candidates;
     }
 
     /**
      * Removes the pending-approval placeholder that {@link #pauseConversation}
-     * added to the current step on a TOOL_CALL pause, so the resumed step renders
-     * ONLY the final answer.
+     * added to the current step on a TOOL_CALL pause — and ONLY the placeholder, so
+     * the resumed step keeps everything the model said it was doing (the interim
+     * narration written ahead of the placeholder, and every earlier pause's
+     * narration in a multi-pause turn) and gains the final answer.
      * <p>
-     * Robust identification without dropping legitimate earlier output: the
-     * placeholder is the exact string produced by {@link #resolvePendingMessage},
-     * which is deterministic from the still-present pending batch (its effective
-     * tool-approvals config and gated call names survive on memory until LlmTask
-     * consumes them). We recompute that string and remove ONLY that value from the
-     * {@code "output"} conversation-output list — an earlier task's output in a
-     * multi-task step (e.g. {@code [earlierOutput, placeholder]}) keeps its entry.
-     * <p>
-     * We also blank the mirror public step-{@code Data<>} that pauseConversation
-     * stored under the bare {@code "output"} key (surfaced in detailed step-data
-     * snapshots via {@code startsWith("output")}) when it still holds exactly the
-     * placeholder — otherwise a client reading the detailed view would see the
-     * stale placeholder a second time. We overwrite that EXACT key with an empty
-     * list (not {@code removeData}, whose {@code startsWith} semantics would also
-     * wipe an earlier task's {@code output:text:*} data in a multi-task step) and
-     * only when it is untouched (equals {@code [placeholder]}); if some other
-     * writer replaced it we leave it alone.
+     * Identification: the placeholder is the exact string produced by
+     * {@link #resolvePendingMessage} (or a previous build's rendering — see
+     * {@link #pendingPlaceholderCandidates}), deterministic from the still-present
+     * pending batch. It is always the TRAILING element the latest pause appended,
+     * so the LAST occurrence of a candidate is the one removed — never the first,
+     * which on a mixed list could be an earlier output or a piece of narration that
+     * happens to equal a candidate string. Applied identically to both channels:
+     * the {@code "output"} conversation-output list and its mirror public
+     * step-{@code Data<>} under the bare {@code "output"} key (surfaced in detailed
+     * step-data snapshots via {@code startsWith("output")}). The Data twin is
+     * overwritten with the stripped list on that EXACT key — not
+     * {@code removeData}, whose {@code startsWith} semantics would also wipe an
+     * earlier task's {@code output:text:*} data in a multi-task step.
      */
     private void dropPendingApprovalPlaceholder(IWritableConversationStep currentStep) {
-        String pending = resolvePendingMessage(conversationMemory);
-        currentStep.removeConversationOutputListItem(MemoryKeys.OUTPUT_PREFIX, pending);
+        List<String> candidates = pendingPlaceholderCandidates(conversationMemory);
 
-        IData<?> outputData = currentStep.getData(MemoryKeys.OUTPUT_PREFIX);
-        if (outputData != null && List.of(pending).equals(outputData.getResult())) {
-            var blanked = new Data<>(MemoryKeys.OUTPUT_PREFIX, new ArrayList<>());
-            blanked.setPublic(true);
-            currentStep.storeData(blanked);
+        // Output list: drop the LAST candidate occurrence only.
+        Object rawList = currentStep.getConversationOutput().get(MemoryKeys.OUTPUT_PREFIX);
+        if (rawList instanceof List<?> outputList) {
+            int idx = lastCandidateIndex(outputList, candidates);
+            if (idx >= 0) {
+                outputList.remove(idx);
+            }
         }
+
+        // Data twin: same rule, written back on the exact key.
+        IData<?> outputData = currentStep.getData(MemoryKeys.OUTPUT_PREFIX);
+        if (outputData != null && outputData.getResult() instanceof List<?> stored) {
+            int idx = lastCandidateIndex(stored, candidates);
+            if (idx >= 0) {
+                var kept = new ArrayList<Object>(stored);
+                kept.remove(idx);
+                var stripped = new Data<>(MemoryKeys.OUTPUT_PREFIX, kept);
+                stripped.setPublic(true);
+                currentStep.storeData(stripped);
+            }
+        }
+    }
+
+    /**
+     * Index of the last element that IS one of the candidate strings, or -1. Object
+     * equality on purpose: the placeholder is stored as a plain String, and a
+     * rendered {@code TextOutputItem} whose text merely reads the same must not be
+     * mistaken for it.
+     */
+    private static int lastCandidateIndex(List<?> items, List<String> candidates) {
+        for (int i = items.size() - 1; i >= 0; i--) {
+            Object item = items.get(i);
+            if (item instanceof String text && candidates.contains(text)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /**
@@ -1070,7 +1216,7 @@ public class Conversation implements IConversation {
             return;
         List<String> actions = actionData.getResult();
         if (actions != null && actions.contains(IConversation.PAUSE_CONVERSATION)) {
-            List<String> cleaned = new java.util.ArrayList<>(actions);
+            List<String> cleaned = new ArrayList<>(actions);
             cleaned.remove(IConversation.PAUSE_CONVERSATION);
             IData<List<String>> replacement = new Data<>(ACTIONS.key(), cleaned);
             step.storeData(replacement);

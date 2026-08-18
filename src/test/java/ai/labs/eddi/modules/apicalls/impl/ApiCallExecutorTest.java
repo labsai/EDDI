@@ -26,6 +26,12 @@ import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.*;
+import java.util.ArrayList;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -240,6 +246,130 @@ class ApiCallExecutorTest {
         verify(mockRequest, times(1)).send();
     }
 
+    // ==================== Tool-result contract (what the LLM sees)
+    // ====================
+    //
+    // HttpCallToolsProvider serializes execute()'s returned map VERBATIM as the
+    // tool result. It used to stay empty on a non-2xx — the model was handed "{}"
+    // for a failed call, so a human-approved setupAgent that 400'd looked exactly
+    // like one that worked, and the model could neither report the failure nor
+    // tell the approver anything happened at all.
+
+    @Test
+    void execute_non2xx_resultCarriesHttpCodeAndErrorBody() throws Exception {
+        ApiCall call = createSimpleApiCall("failing-call", true);
+        when(mockResponse.getHttpCode()).thenReturn(400);
+        when(mockResponse.getContentAsString()).thenReturn("{\"attributeName\":\"systemPrompt\",\"column\":593}");
+        when(mockResponse.getHttpCodeMessage()).thenReturn("Bad Request");
+        when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals(400, result.get("httpCode"));
+        assertEquals("{\"attributeName\":\"systemPrompt\",\"column\":593}", result.get("body"));
+    }
+
+    @Test
+    void execute_non2xxWithEmptyBody_resultFallsBackToStatusMessage() throws Exception {
+        // saveResponse=false as well: the tool-result contract must not depend on
+        // the memory-persistence flag.
+        ApiCall call = createSimpleApiCall("failing-call", false);
+        when(mockResponse.getHttpCode()).thenReturn(503);
+        when(mockResponse.getContentAsString()).thenReturn("");
+        when(mockResponse.getHttpCodeMessage()).thenReturn("Service Unavailable");
+        when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals(503, result.get("httpCode"));
+        assertEquals("Service Unavailable", result.get("body"));
+    }
+
+    @Test
+    void execute_non2xx_errorBodyIsTruncatedInTheResultToo() throws Exception {
+        ApiCall call = createSimpleApiCall("failing-call", false);
+        when(mockResponse.getHttpCode()).thenReturn(500);
+        when(mockResponse.getContentAsString()).thenReturn("x".repeat(5000));
+        when(mockResponse.getHttpCodeMessage()).thenReturn("Internal Server Error");
+        when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals(2000, ((String) result.get("body")).length());
+    }
+
+    @Test
+    void execute_retriedFailureThenQuietSuccess_doesNotLeakTheErrorBody() throws Exception {
+        // A 503 populates "body" with its error on the first pass through the
+        // retry loop; the succeeding retry has saveResponse=false, so it writes
+        // only "httpCode". Without clearing between attempts the model would be
+        // handed {"httpCode": 200, "body": "<the 503's error>"} — a
+        // self-contradictory tool result.
+        ApiCall call = createSimpleApiCall("flaky-call", false);
+        HttpPostResponse postResponse = new HttpPostResponse();
+        RetryApiCallInstruction retryInstruction = new RetryApiCallInstruction();
+        retryInstruction.setMaxRetries(1);
+        retryInstruction.setRetryOnHttpCodes(List.of(503));
+        retryInstruction.setExponentialBackoffDelayInMillis(0);
+        postResponse.setRetryApiCallInstruction(retryInstruction);
+        call.setPostResponse(postResponse);
+
+        // Two distinct response mocks, switched per ATTEMPT via send(): the code
+        // under test reads getHttpCode() several times within one iteration, so
+        // sequential stubbing on a single mock would flip mid-attempt.
+        IResponse failing = mock(IResponse.class);
+        when(failing.getHttpCode()).thenReturn(503);
+        when(failing.getContentAsString()).thenReturn("upstream flaked");
+        when(failing.getHttpCodeMessage()).thenReturn("Service Unavailable");
+        when(failing.getHttpHeader()).thenReturn(new HashMap<>());
+        IResponse succeeding = mock(IResponse.class);
+        when(succeeding.getHttpCode()).thenReturn(200);
+        when(succeeding.getContentAsString()).thenReturn("ok");
+        when(succeeding.getHttpHeader()).thenReturn(new HashMap<>());
+        when(mockRequest.send()).thenReturn(failing).thenReturn(succeeding);
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals(200, result.get("httpCode"));
+        assertFalse(result.containsKey("body"), "the failed attempt's error body must not survive the retry");
+    }
+
+    /**
+     * An error body is server-authored text, and a 401 routinely echoes the
+     * credential that failed. The body flows into the LLM transcript (and from
+     * there into pause batches and traces), so it is redacted on the way into the
+     * tool result. The memory-side *Error entry keeps the raw text, as it always
+     * has, for operators debugging via the store.
+     */
+    @Test
+    void execute_non2xx_errorBodyIsRedactedInTheToolResult() throws Exception {
+        ApiCall call = createSimpleApiCall("auth-call", true);
+        when(mockResponse.getHttpCode()).thenReturn(401);
+        when(mockResponse.getContentAsString())
+                .thenReturn("invalid api key sk-ant-api03-verySecretValue1234567890abcdefghij provided");
+        when(mockResponse.getHttpCodeMessage()).thenReturn("Unauthorized");
+        when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        String body = (String) result.get("body");
+        assertFalse(body.contains("verySecretValue"), "the echoed credential must not reach the model: " + body);
+        assertTrue(body.contains("invalid api key"), "the failure REASON must survive redaction: " + body);
+    }
+
+    @Test
+    void execute_successWithoutSaveResponse_resultStillCarriesHttpCode() throws Exception {
+        // The body stays out (that is what saveResponse=false means), but a model
+        // whose tool returned "{}" cannot tell a 204 from a crash.
+        ApiCall call = createSimpleApiCall("quiet-call", false);
+        setupSuccessResponse(204, "", "text/plain");
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals(204, result.get("httpCode"));
+        assertNull(result.get("body"));
+    }
+
     // ==================== Validation Tests ====================
 
     @Test
@@ -421,7 +551,7 @@ class ApiCallExecutorTest {
         // while execute() sent a request with every {arg} rendered empty.
         ApiCall call = createSimpleApiCall("empty-instructions-call", false);
         var preRequest = new HttpPreRequest();
-        preRequest.setPropertyInstructions(new java.util.ArrayList<>());
+        preRequest.setPropertyInstructions(new ArrayList<>());
         call.setPreRequest(preRequest);
         stubRequestMap();
 
@@ -721,7 +851,7 @@ class ApiCallExecutorTest {
     // ==================== Non-2xx Response Tests ====================
 
     @Test
-    void execute_non2xxResponse_doesNotSaveBody() throws Exception {
+    void execute_non2xxResponse_doesNotPromoteBodyToTheResponseObject() throws Exception {
         ApiCall call = createSimpleApiCall("err-call", true);
         when(mockResponse.getHttpCode()).thenReturn(500);
         when(mockResponse.getHttpCodeMessage()).thenReturn("Internal Server Error");
@@ -730,8 +860,13 @@ class ApiCallExecutorTest {
 
         Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
-        assertFalse(result.containsKey("body"));
+        // The error body IS the tool result now (an LLM whose tool returned "{}"
+        // could not report the failure) — but it is never parsed as the response
+        // object, and memory only ever sees it under the *Error key.
+        assertEquals("error body", result.get("body"));
+        assertEquals(500, result.get("httpCode"));
         verify(jsonSerialization, never()).deserialize(any(), any());
+        verify(prePostUtils, never()).createMemoryEntry(eq(currentStep), any(), eq("response"), any());
     }
 
     @Test
@@ -973,11 +1108,11 @@ class ApiCallExecutorTest {
         preRequest.setDelayBeforeExecutingInMillis(100);
         call.setPreRequest(preRequest);
 
-        var scheduledExecutor = mock(java.util.concurrent.ScheduledExecutorService.class);
+        var scheduledExecutor = mock(ScheduledExecutorService.class);
         @SuppressWarnings("unchecked")
-        var future = mock(java.util.concurrent.ScheduledFuture.class);
+        var future = mock(ScheduledFuture.class);
         when(future.get()).thenReturn(mockResponse);
-        when(scheduledExecutor.schedule(any(java.util.concurrent.Callable.class), eq(100L), eq(java.util.concurrent.TimeUnit.MILLISECONDS)))
+        when(scheduledExecutor.schedule(any(Callable.class), eq(100L), eq(TimeUnit.MILLISECONDS)))
                 .thenReturn(future);
         when(runtime.getScheduledExecutorService()).thenReturn(scheduledExecutor);
 
@@ -985,7 +1120,7 @@ class ApiCallExecutorTest {
 
         executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
-        verify(scheduledExecutor).schedule(any(java.util.concurrent.Callable.class), eq(100L), eq(java.util.concurrent.TimeUnit.MILLISECONDS));
+        verify(scheduledExecutor).schedule(any(Callable.class), eq(100L), eq(TimeUnit.MILLISECONDS));
     }
 
     // ==================== Retry with Exponential Backoff Tests
@@ -1002,13 +1137,13 @@ class ApiCallExecutorTest {
         postResponse.setRetryApiCallInstruction(retryInstruction);
         call.setPostResponse(postResponse);
 
-        var scheduledExecutor = mock(java.util.concurrent.ScheduledExecutorService.class);
+        var scheduledExecutor = mock(ScheduledExecutorService.class);
         @SuppressWarnings("unchecked")
-        var future = mock(java.util.concurrent.ScheduledFuture.class);
+        var future = mock(ScheduledFuture.class);
         when(runtime.getScheduledExecutorService()).thenReturn(scheduledExecutor);
 
         // Use a flag to switch from 503 to 200; toggled when the scheduler is invoked.
-        var retried = new java.util.concurrent.atomic.AtomicBoolean(false);
+        var retried = new AtomicBoolean(false);
         when(mockResponse.getHttpCode()).thenAnswer(inv -> retried.get() ? 200 : 503);
         when(mockResponse.getContentAsString()).thenAnswer(inv -> retried.get() ? "ok" : "retry");
         when(mockResponse.getHttpCodeMessage()).thenAnswer(inv -> retried.get() ? "OK" : "Service Unavailable");
@@ -1019,17 +1154,17 @@ class ApiCallExecutorTest {
         doAnswer(inv -> {
             retried.set(true);
             @SuppressWarnings("unchecked")
-            java.util.concurrent.Callable<IResponse> callable = inv.getArgument(0);
+            Callable<IResponse> callable = inv.getArgument(0);
             IResponse result = callable.call();
             when(future.get()).thenReturn(result);
             return future;
-        }).when(scheduledExecutor).schedule(any(java.util.concurrent.Callable.class), anyLong(), any());
+        }).when(scheduledExecutor).schedule(any(Callable.class), anyLong(), any());
 
         executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
         verify(scheduledExecutor, times(1)).schedule(
-                any(java.util.concurrent.Callable.class), eq(50L),
-                eq(java.util.concurrent.TimeUnit.MILLISECONDS));
+                any(Callable.class), eq(50L),
+                eq(TimeUnit.MILLISECONDS));
     }
 
     // ==================== Null PostResponse RetryInstruction Tests
@@ -1060,7 +1195,7 @@ class ApiCallExecutorTest {
 
         executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
-        verify(mockRequest).setTimeout(DEFAULT_TIMEOUT_MILLIS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        verify(mockRequest).setTimeout(DEFAULT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
         verify(mockRequest).setMaxResponseSize(ApiCallExecutor.MAX_TRANSPORT_RESPONSE_SIZE_BYTES);
     }
 
@@ -1073,7 +1208,7 @@ class ApiCallExecutorTest {
 
         executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
-        verify(mockRequest).setTimeout(1_500L, java.util.concurrent.TimeUnit.MILLISECONDS);
+        verify(mockRequest).setTimeout(1_500L, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -1137,9 +1272,9 @@ class ApiCallExecutorTest {
     @Test
     void execute_requestSendThrowsException_wrapsInLifecycleException() throws Exception {
         ApiCall call = createSimpleApiCall("err-call", false);
-        when(mockRequest.send()).thenThrow(new ai.labs.eddi.engine.httpclient.IRequest.HttpRequestException("Connection refused"));
+        when(mockRequest.send()).thenThrow(new IRequest.HttpRequestException("Connection refused"));
 
-        assertThrows(ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException.class,
+        assertThrows(LifecycleException.class,
                 () -> executor.execute(call, memory, new HashMap<>(), "http://example.com"));
     }
 }

@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -29,6 +30,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -396,8 +398,8 @@ public class SlackEventHandler {
      * last read produced — possibly {@code null} — so the notices degrade
      * gracefully.
      */
-    private ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot loadHitlBookmark(String conversationId) {
-        ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot last = null;
+    private ConversationMemorySnapshot loadHitlBookmark(String conversationId) {
+        ConversationMemorySnapshot last = null;
         for (int attempt = 0; attempt < HITL_BOOKMARK_READ_ATTEMPTS; attempt++) {
             try {
                 last = conversationService.getConversationMemorySnapshot(conversationId);
@@ -424,7 +426,7 @@ public class SlackEventHandler {
      * Build the in-thread pause notice, appending the pause reason from the HITL
      * bookmark when available.
      */
-    private String buildPauseNotice(ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot bookmark) {
+    private String buildPauseNotice(ConversationMemorySnapshot bookmark) {
         String reason = bookmark != null ? bookmark.getHitlPauseReason() : null;
         if (reason != null && !reason.isBlank()) {
             return SlackHitlSupport.PAUSE_NOTICE + "\n> " + reason;
@@ -444,7 +446,7 @@ public class SlackEventHandler {
     // Package-private for unit testing (F12): the idempotency keying and
     // failed-delivery marker-clear are verified directly against this method.
     void notifyApprovers(ResolvedTarget resolved, String conversationId,
-                         String agentId, ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot bookmark) {
+                         String agentId, ConversationMemorySnapshot bookmark) {
         var integration = resolved.integration();
         if (integration == null || integration.getPlatformConfig() == null) {
             return; // legacy connectors have no HITL config
@@ -594,7 +596,7 @@ public class SlackEventHandler {
      */
     private void registerAgentThreadMappings(SlackGroupDiscussionListener listener) {
         // Wait for the group discussion to complete via the listener's latch
-        boolean completed = listener.awaitCompletion(300, java.util.concurrent.TimeUnit.SECONDS);
+        boolean completed = listener.awaitCompletion(300, TimeUnit.SECONDS);
         if (!completed) {
             LOGGER.warnf("Group discussion did not complete within timeout — follow-up routing may be incomplete");
         }

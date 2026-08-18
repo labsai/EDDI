@@ -23,6 +23,7 @@ import org.mockito.InOrder;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -295,12 +296,12 @@ class MongoResourceStorageTest {
         FindIterable<Document> iterable = mock(FindIterable.class);
         when(currentCollection.find(any(Bson.class))).thenReturn(iterable);
         doAnswer(inv -> {
-            java.util.function.Consumer<Document> consumer = inv.getArgument(0);
+            Consumer<Document> consumer = inv.getArgument(0);
             // Cursor order deliberately differs from the requested order.
             consumer.accept(first);
             consumer.accept(second);
             return null;
-        }).when(iterable).forEach(any(java.util.function.Consumer.class));
+        }).when(iterable).forEach(any(Consumer.class));
 
         var results = storage.readMany(List.of(resourceId(otherId, 1), resourceId(VALID_ID, 1)));
 
@@ -405,10 +406,10 @@ class MongoResourceStorageTest {
         when(currentCollection.find(any(Document.class))).thenReturn(iterable);
 
         doAnswer(inv -> {
-            java.util.function.Consumer<Document> consumer = inv.getArgument(0);
+            Consumer<Document> consumer = inv.getArgument(0);
             consumer.accept(doc);
             return null;
-        }).when(iterable).forEach(any(java.util.function.Consumer.class));
+        }).when(iterable).forEach(any(Consumer.class));
 
         List<IResourceStore.IResourceId> result = storage.findResourceIdsContaining("field.path", "value");
         assertEquals(1, result.size());

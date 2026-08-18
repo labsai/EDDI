@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.apicalls.model.*;
+import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
@@ -20,18 +21,22 @@ import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -76,6 +81,37 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     static final int MAX_TRANSPORT_RESPONSE_SIZE_BYTES = 8 * 1024 * 1024;
 
+    /**
+     * Response headers that are credentials, and are dropped before the header map
+     * reaches conversation memory, the template data or an LLM tool result.
+     * <p>
+     * Choosing which headers to BIND is not the same control as choosing which to
+     * STORE, and only the second one closes this. An operation can qualify for
+     * header capture on its documented 201 and still answer some other call with a
+     * {@code Set-Cookie} — the error path especially — so gating on the declared
+     * status alone leaves the live session cookie flowing into persisted memory and
+     * the model's context.
+     * <p>
+     * {@code Set-Cookie} is the case that matters: {@code HttpClientModule} builds
+     * a cookie-aware, application-scoped {@code WebClientSession}, so that value is
+     * a session credential EDDI is actively replaying, and {@code HttpOnly} exists
+     * precisely to keep such values out of scriptable — here, prompt-injectable —
+     * context. The authenticate headers carry challenge material with the same
+     * property.
+     * <p>
+     * A deny-list rather than an allow-list, deliberately: the useful header on any
+     * given API is not knowable here ({@code Location}, {@code ETag}, a pagination
+     * cursor, a rate-limit budget, some vendor {@code X-*}), and an allow-list
+     * would silently break every hand-authored config templating one of those. What
+     * IS knowable is the small closed set that is never data.
+     */
+    private static final Set<String> CREDENTIAL_RESPONSE_HEADERS = Set.of(
+            "set-cookie", "set-cookie2", "authorization", "proxy-authorization",
+            "www-authenticate", "proxy-authenticate",
+            // RFC 7615: server-authentication material (rspauth, nextnonce) —
+            // challenge-response state, never data.
+            "authentication-info", "proxy-authentication-info");
+
     private final IHttpClient httpClient;
     private final IJsonSerialization jsonSerialization;
     private final IRuntime runtime;
@@ -110,6 +146,27 @@ public class ApiCallExecutor implements IApiCallExecutor {
         this.defaultMaxResponseSizeInBytes = defaultMaxResponseSizeInBytes;
     }
 
+    /**
+     * The response headers, minus {@link #CREDENTIAL_RESPONSE_HEADERS}.
+     * <p>
+     * Case-insensitive, because {@code HttpClientWrapper.convertHeaderToMap}
+     * preserves whatever casing the wire used and HTTP/2 mandates lowercase — a
+     * filter keyed on {@code "Set-Cookie"} would miss {@code set-cookie} and defend
+     * nothing over h2.
+     */
+    static Map<String, String> withoutCredentialHeaders(Map<String, String> headers) {
+        var filtered = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+        if (headers == null) {
+            return filtered;
+        }
+        headers.forEach((name, value) -> {
+            if (name != null && !CREDENTIAL_RESPONSE_HEADERS.contains(name.toLowerCase(Locale.ROOT))) {
+                filtered.put(name, value);
+            }
+        });
+        return filtered;
+    }
+
     @Override
     public Map<String, Object> execute(ApiCall call, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl)
             throws LifecycleException {
@@ -140,9 +197,18 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 IResponse response = null;
                 boolean retryCall = false;
                 int amountOfExecutions = 0;
-                Map<String, Object> result = new HashMap<>();
+                // LinkedHashMap, not HashMap: this map is serialized verbatim as the
+                // LLM tool result and truncated from the front, so key order decides
+                // what survives a cap. See the ordered "headers" insert below.
+                Map<String, Object> result = new LinkedHashMap<>();
 
                 do {
+                    // Final attempt wins, entirely: a retried failure populated
+                    // "body"/"httpCode" on its pass through the loop, and a
+                    // succeeding retry that does NOT save its response would
+                    // otherwise inherit the failed attempt's error body next to
+                    // its own 2xx code — a self-contradictory tool result.
+                    result.clear();
                     request = buildRequest(targetServerUrl, call, templateDataObjects);
                     var objectName = call.getName() + "Request";
                     var requestMap = request.toMap();
@@ -162,14 +228,41 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
                         LOGGER.warn("Error Msg:" + response.getHttpCodeMessage());
 
+                        String errorBody = response.getContentAsString();
+                        String truncatedError = errorBody != null && errorBody.length() > 2000
+                                ? errorBody.substring(0, 2000)
+                                : errorBody;
+
+                        // The returned map is what an LLM tool call receives as its result
+                        // (HttpCallToolsProvider serializes it verbatim). It used to stay
+                        // EMPTY on a non-2xx, so the model was handed "{}" for a failed
+                        // call — with no httpCode and no error it could neither report the
+                        // failure nor tell it apart from success, and a human-approved
+                        // setupAgent that 400'd looked exactly like one that worked. Same
+                        // keys as the success path ("body"/"httpCode"), not a new "error"
+                        // namespace: ApiCallsTask merges this map into template data,
+                        // where that vocabulary is already established.
+                        result.put("httpCode", response.getHttpCode());
+                        // REDACTED before it reaches the model: an error body is
+                        // server-authored text, and a 401/403 routinely echoes the
+                        // credential that failed ("invalid api key sk-…"). The
+                        // success path stays untouched — response bodies are the
+                        // data the call exists to fetch — but an error body's
+                        // value to the model is the failure REASON, which survives
+                        // redaction. The memory-side {name}Error entry keeps the
+                        // raw text, as it always has, for operators debugging via
+                        // the store.
+                        // The status-message fallback is server-authored text of the
+                        // same trust class as the body — redacted for the same reason.
+                        String toolErrorBody = truncatedError != null && !truncatedError.isBlank()
+                                ? SecretRedactionFilter.redact(truncatedError)
+                                : SecretRedactionFilter.redact(response.getHttpCodeMessage());
+                        result.put("body", toolErrorBody);
+
                         // Store error body in memory so downstream templates / rules can inspect it
                         if (call.getSaveResponse()) {
-                            String errorBody = response.getContentAsString();
                             String errorObjectName = call.getResponseObjectName() + "Error";
-                            if (errorBody != null && !errorBody.isBlank()) {
-                                String truncatedError = errorBody.length() > 2000
-                                        ? errorBody.substring(0, 2000)
-                                        : errorBody;
+                            if (truncatedError != null && !truncatedError.isBlank()) {
                                 prePostUtils.createMemoryEntry(currentStep, truncatedError, errorObjectName, KEY_HTTP_CALLS);
                                 templateDataObjects.put(errorObjectName, truncatedError);
                             }
@@ -180,11 +273,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     }
 
                     var responseHeaderObjectName = call.getResponseHeaderObjectName();
+                    Object responseObjectHeader = null;
                     if (!isNullOrEmpty(responseHeaderObjectName)) {
-                        var responseObjectHeader = requireNonNullElse(response.getHttpHeader(), new HashMap<>());
+                        responseObjectHeader = withoutCredentialHeaders(response.getHttpHeader());
                         templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
                         prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName, KEY_HTTP_CALLS);
-                        result.put("headers", responseObjectHeader);
+                        // NOT put into `result` here — see the ordered insert below.
                     }
 
                     if (isResponseSuccessful && call.getSaveResponse()) {
@@ -222,6 +316,28 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         prePostUtils.createMemoryEntry(currentStep, responseObject, responseObjectName, KEY_HTTP_CALLS);
                         result.put("body", responseObject);
                         result.put("httpCode", response.getHttpCode());
+                    } else if (isResponseSuccessful) {
+                        // saveResponse=false keeps the BODY out of memory and out of the
+                        // tool result on purpose, but the status code still travels: a
+                        // model whose tool returned "{}" cannot tell a 204 from a crash,
+                        // and honestly reporting "it worked" requires knowing that it did.
+                        result.put("httpCode", response.getHttpCode());
+                    }
+
+                    // Headers go in LAST, on purpose, and `result` is a LinkedHashMap
+                    // so that ordering survives serialization.
+                    //
+                    // The tool result is truncated from the FRONT
+                    // (ToolResponseTruncator cuts `result.substring(0, maxChars)`),
+                    // so whatever serializes first is what survives. With a plain
+                    // HashMap "headers" hashed ahead of "body" on both the success and
+                    // the error path regardless of insertion order — so a per-tool
+                    // limit, or the always-on tool-context budget, would spend the
+                    // allowance on a header block and cut away the response body the
+                    // model actually asked for. Headers are the disposable half of
+                    // this map; the body is not.
+                    if (responseObjectHeader != null) {
+                        result.put("headers", responseObjectHeader);
                     }
 
                     amountOfExecutions++;
@@ -389,7 +505,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // attempt 1. Keyed on the instruction being present and actually able
         // to fire (maxRetries >= 1), which is exactly what retryCall() tests.
         var postResponse = call.getPostResponse();
-        if (postResponse instanceof ai.labs.eddi.configs.apicalls.model.HttpPostResponse httpPostResponse) {
+        if (postResponse instanceof HttpPostResponse httpPostResponse) {
             var retry = httpPostResponse.getRetryApiCallInstruction();
             return retry != null && retry.getMaxRetries() >= 1;
         }
@@ -609,7 +725,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             path = SLASH_CHAR + path;
         }
         var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
-        var targetUriStr = prePostUtils.templateValues(targetDestination, templateDataObjects);
+        var targetUriStr = prePostUtils.templateValues(targetDestination, pathSafeView(templateDataObjects));
         // Resolve global variable references, then vault references in URL
         targetUriStr = globalVariableResolver.resolveValue(targetUriStr);
         targetUriStr = secretResolver.resolveValue(targetUriStr);
@@ -679,6 +795,112 @@ public class ApiCallExecutor implements IApiCallExecutor {
             request.setQueryParam(queryParam, qpValue);
         }
         return request;
+    }
+
+    /**
+     * Bytes that may appear un-encoded in a substituted path value: RFC 3986
+     * "unreserved", minus {@code .} — everything else is percent-encoded, including
+     * {@code /}, {@code ?} and {@code #}, which is the point.
+     * <p>
+     * The dot is excluded deliberately: a substituted value of exactly {@code ..}
+     * would otherwise survive as a dot-segment and normalize one level up even with
+     * every slash encoded. Dot-segment removal (RFC 3986 §5.2.4) runs on the raw
+     * path BEFORE percent-decoding, so {@code %2E%2E} is not a dot-segment; the
+     * server then decodes it back to the literal value. Identifiers like
+     * {@code 6.2.0} round-trip unchanged.
+     */
+    private static final String PATH_SEGMENT_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~";
+
+    /**
+     * A view of the template data whose top-level String values are percent-encoded
+     * as single path segments. Used for rendering the request PATH only — never the
+     * body or query.
+     * <p>
+     * <b>Why:</b> LLM tool arguments are merged into the template data as top-level
+     * entries ({@code HttpCallToolsProvider#safeTemplateMerge}) and are substituted
+     * into path templates like {@code /agentstore/agents/{id}} as raw text. A
+     * model- or prompt-injection-supplied value of
+     * {@code ../../secretstore/secrets/default/key} therefore rewrites which
+     * endpoint the call hits — and because read patterns are commonly exempt from
+     * the HITL gate (gate classification uses the CONFIGURED endpoint, not the
+     * resolved one), a GET tool could be steered to any same-host GET endpoint with
+     * no human in the loop, carrying whatever Authorization the config resolves.
+     * {@code ?} and {@code #} similarly let a value rewrite the query or truncate
+     * the URL. Percent-encoding the substituted value makes it one literal path
+     * segment, whatever it contains.
+     * <p>
+     * <b>Nested values are encoded too.</b> An earlier version of this stopped at
+     * the top level, reasoning that tool arguments are the model-controlled surface
+     * while conversation state under {@code properties} / {@code memory} /
+     * {@code context} belongs to the agent author. That was wrong: a property is
+     * routinely captured FROM user input — {@code PropertySetterTask} with
+     * {@code valueString: "{memory.current.input}"} is the documented slot-filling
+     * pattern — so {@code /agentstore/agents/{properties.agentId}} substitutes
+     * whatever the user typed. The same injection, one indirection further out. Who
+     * <em>authored</em> the template is not who <em>controls</em> the value.
+     * <p>
+     * Recursion is depth-bounded ({@link #MAX_PATH_VIEW_DEPTH}). Template data is
+     * rebuilt per turn from conversation memory and is not expected to nest deeply;
+     * the bound exists so a pathological or self-referential structure cannot turn
+     * a request into a stack overflow. Past it the value is passed through
+     * unencoded rather than dropped: losing data would silently change what a
+     * legitimate template renders, and nothing that deep is reachable by a path
+     * expression in practice.
+     * <p>
+     * Non-String scalars (numbers, booleans) are left alone — Qute renders them via
+     * {@code toString()} and none can yield a {@code /}, {@code ?} or {@code #}.
+     * Lists are walked because {@code {items.0}} is a valid expression.
+     * <p>
+     * Applied inside {@code buildRequest}, which serves both {@code resolve()} and
+     * {@code execute()} — the gate-time fingerprint and the executed request see
+     * identical encoding, so request pinning is unaffected.
+     */
+    private static Map<String, Object> pathSafeView(Map<String, Object> templateDataObjects) {
+        var view = new HashMap<String, Object>(templateDataObjects.size());
+        templateDataObjects.forEach((key, value) -> view.put(key, encodePathValue(value, 0)));
+        return view;
+    }
+
+    /**
+     * Depth ceiling for {@link #pathSafeView}'s recursion — see its javadoc for why
+     * the bound exists and why exceeding it passes the value through.
+     */
+    static final int MAX_PATH_VIEW_DEPTH = 10;
+
+    static Object encodePathValue(Object value, int depth) {
+        if (value instanceof String stringValue) {
+            return encodePathSegment(stringValue);
+        }
+        if (depth >= MAX_PATH_VIEW_DEPTH) {
+            return value;
+        }
+        if (value instanceof Map<?, ?> nested) {
+            var copy = new LinkedHashMap<Object, Object>(nested.size());
+            nested.forEach((nestedKey, nestedValue) -> copy.put(nestedKey, encodePathValue(nestedValue, depth + 1)));
+            return copy;
+        }
+        if (value instanceof List<?> items) {
+            var copy = new ArrayList<>(items.size());
+            for (Object item : items) {
+                copy.add(encodePathValue(item, depth + 1));
+            }
+            return copy;
+        }
+        return value;
+    }
+
+    /** Percent-encodes every byte outside RFC 3986 unreserved, UTF-8. */
+    static String encodePathSegment(String value) {
+        var out = new StringBuilder(value.length());
+        for (byte b : value.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+            char c = (char) (b & 0xFF);
+            if (PATH_SEGMENT_UNRESERVED.indexOf(c) >= 0) {
+                out.append(c);
+            } else {
+                out.append('%').append(String.format("%02X", b & 0xFF));
+            }
+        }
+        return out.toString();
     }
 
 }

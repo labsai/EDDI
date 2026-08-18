@@ -22,6 +22,7 @@ import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.llm.tools.impl.*;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -483,7 +484,7 @@ class LlmTaskTest {
                     "Non-blank text should pass the output guard");
 
             // Verify TextOutputItem can be created with valid text
-            var outputItem = new ai.labs.eddi.modules.output.model.types.TextOutputItem("Valid output", 0);
+            var outputItem = new TextOutputItem("Valid output", 0);
             assertEquals("Valid output", outputItem.getText());
         }
 
