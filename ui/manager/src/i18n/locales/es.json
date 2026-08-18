@@ -1434,7 +1434,8 @@
     "created": "Diccionario creado y vinculado",
     "defaultName": "Nuevo diccionario",
     "descriptionPlaceholder": "Qué le enseña este diccionario al analizador…",
-    "manual": "Vincular por URI en su lugar"
+    "manual": "Vincular por URI en su lugar",
+    "createdUnnamed": "Diccionario creado y vinculado, pero no se pudo guardar su nombre: renómbralo en el editor de diccionarios."
   },
   "coordinator": {
     "activeConversations": "Conversaciones activas",

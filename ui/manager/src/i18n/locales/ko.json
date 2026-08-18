@@ -1420,7 +1420,8 @@
     "created": "사전을 만들고 연결했습니다",
     "defaultName": "새 사전",
     "descriptionPlaceholder": "이 사전이 파서에 가르치는 내용…",
-    "manual": "대신 URI로 연결"
+    "manual": "대신 URI로 연결",
+    "createdUnnamed": "사전을 만들고 연결했지만 이름을 저장하지 못했습니다. 사전 편집기에서 이름을 변경하세요."
   },
   "coordinator": {
     "activeConversations": "활성 대화",

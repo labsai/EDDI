@@ -1460,7 +1460,8 @@
     "created": "Dictionary created and linked",
     "defaultName": "New Dictionary",
     "descriptionPlaceholder": "What this dictionary teaches the parser…",
-    "manual": "Link by URI instead"
+    "manual": "Link by URI instead",
+    "createdUnnamed": "Dictionary created and linked, but its name could not be saved — rename it in the dictionary editor."
   },
   "coordinator": {
     "activeConversations": "Active conversations",

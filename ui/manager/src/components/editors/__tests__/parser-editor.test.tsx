@@ -263,7 +263,7 @@ describe("ParserEditor", () => {
     );
   });
 
-  it("closes the picker without adding anything", async () => {
+  it("backs out of the manual field to the list, without adding anything", async () => {
     const data: ParserData = {
       config: {},
       extensions: { dictionaries: [], corrections: [], normalizer: [] },
@@ -274,8 +274,29 @@ describe("ParserEditor", () => {
     await userEvent.click(await screen.findByTestId("dict-manual-open"));
     await userEvent.click(screen.getByTestId("cancel-add-dict"));
 
+    // Cancel here backs out of the URI field, it does not close the dialog —
+    // the list is still there to pick from.
     expect(screen.queryByTestId("dict-uri-picker")).not.toBeInTheDocument();
+    expect(screen.getByTestId("dictionary-picker-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("dict-search")).toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("closes the picker on Escape without adding anything", async () => {
+    const data: ParserData = {
+      config: {},
+      extensions: { dictionaries: [], corrections: [], normalizer: [] },
+    };
+    const { onChange } = renderEditor(data);
+
+    await userEvent.click(screen.getByTestId("add-regular-dict-btn"));
+    expect(await screen.findByTestId("dict-option-res1")).toBeInTheDocument();
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.queryByTestId("dictionary-picker-dialog")).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId("no-regular-dicts")).toBeInTheDocument();
   });
 
   it("removes a regular dictionary", async () => {
@@ -611,5 +632,28 @@ describe("ParserEditor", () => {
       "href",
       "/manage/resources/dictionary/res1",
     );
+  });
+
+  it("shows a non-dictionary URI as itself, with no link to a resource that isn't there", () => {
+    renderEditor({
+      config: {},
+      extensions: {
+        dictionaries: [
+          // What the manual field accepts but the dictionary store cannot
+          // resolve — linking to /manage/resources/dictionary/beh1 would point
+          // at a page for a ruleset.
+          {
+            type: REGULAR_DICT_TYPE,
+            config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
+          },
+        ],
+        corrections: [],
+        normalizer: [],
+      },
+    });
+
+    const row = screen.getByTestId("regular-dict-0");
+    expect(row).toHaveTextContent("eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1");
+    expect(screen.queryByTestId("open-regular-dict-0")).not.toBeInTheDocument();
   });
 });

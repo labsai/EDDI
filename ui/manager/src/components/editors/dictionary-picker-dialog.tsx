@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useCreateResource, useResourceDescriptors } from "@/hooks/use-resources";
+import { updateDescriptor } from "@/lib/api/descriptors";
 import { buildDictionaryUri, dictionaryIdFromUri, parseDictionaryUri } from "@/lib/dictionary-uri";
 import type { AgentDescriptor } from "@/lib/api/agents";
 
@@ -55,6 +56,10 @@ export function DictionaryPickerDialog({
   const [manualUri, setManualUri] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  /** Covers the POST *and* the rename that follows it — `mutation.isPending`
+   *  alone re-enables Create the moment the POST resolves, and a second click
+   *  in that window creates a second dictionary. */
+  const [creating, setCreating] = useState(false);
 
   // Held back until the dialog is actually open: this component stays mounted
   // for the whole life of the editor, and listing every dictionary on a page
@@ -108,12 +113,15 @@ export function DictionaryPickerDialog({
   );
 
   const handleCreate = useCallback(async () => {
+    setCreating(true);
     try {
-      const result = await createMutation.mutateAsync({
-        body: {},
-        name: name.trim() || undefined,
-        description: description.trim() || undefined,
-      });
+      // Created WITHOUT name/description, then named in a second step, rather
+      // than letting `useCreateResource` do both: it awaits the descriptor
+      // PATCH inside the mutation, so a failure there rejects a call whose
+      // POST already succeeded. The dictionary would exist, unnamed and
+      // unlinked, and the obvious retry would create a second one. A rename
+      // that fails is worth a warning, not an orphan.
+      const result = await createMutation.mutateAsync({ body: {} });
       // The Location header is the only place the new id exists — the POST
       // response carries no body.
       const { id, version } = parseDictionaryUri(result.location ?? "");
@@ -122,10 +130,34 @@ export function DictionaryPickerDialog({
           t("dictionaryPicker.createFailed", "The dictionary was created but could not be linked."),
         );
       }
-      toast.success(t("dictionaryPicker.created", "Dictionary created and linked"));
+
+      let named = true;
+      if (name.trim() || description.trim()) {
+        try {
+          await updateDescriptor(id, version ?? 1, {
+            name: name.trim() || undefined,
+            description: description.trim() || undefined,
+          });
+        } catch {
+          named = false;
+        }
+      }
+
+      if (named) {
+        toast.success(t("dictionaryPicker.created", "Dictionary created and linked"));
+      } else {
+        toast.warning(
+          t(
+            "dictionaryPicker.createdUnnamed",
+            "Dictionary created and linked, but its name could not be saved — rename it in the dictionary editor.",
+          ),
+        );
+      }
       handlePick(buildDictionaryUri(id, version ?? 1));
     } catch (err) {
       toast.error(getErrorMessage(err));
+    } finally {
+      setCreating(false);
     }
   }, [createMutation, name, description, handlePick, t]);
 
@@ -187,10 +219,10 @@ export function DictionaryPickerDialog({
             <Button
               size="sm"
               onClick={handleCreate}
-              disabled={createMutation.isPending}
+              disabled={creating}
               data-testid="dict-create-submit"
             >
-              {createMutation.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
+              {creating ? <Loader2 className="animate-spin" /> : <Plus />}
               {t("common.create", "Create")}
             </Button>
           </div>
@@ -248,7 +280,9 @@ export function DictionaryPickerDialog({
               />
             ))}
 
-          <div className="max-h-72 space-y-1 overflow-y-auto" data-testid="dict-list">
+          {/* Viewport-relative as well as fixed: 18rem of list is right on a
+              laptop and taller than the whole window on a landscape phone. */}
+          <div className="max-h-[min(18rem,40dvh)] space-y-1 overflow-y-auto" data-testid="dict-list">
             {items.map((item) => {
               const alreadyLinked = linkedIds.has(item.id);
               return (
@@ -258,17 +292,20 @@ export function DictionaryPickerDialog({
                   disabled={alreadyLinked}
                   onClick={() => handlePick(item.resource)}
                   className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 text-start transition-colors hover:border-primary/40 hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-card"
-                  // The row shows the description when there is one, so the id
-                  // — the only thing that tells two same-named dictionaries
-                  // apart — lives here rather than crowding a third line.
-                  title={`${item.id} · v${item.version}`}
                   data-testid={`dict-option-${item.id}`}
                 >
                   <BookOpen className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium text-foreground">{item.name}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {item.description || `${item.id} · v${item.version}`}
+                    {item.description && (
+                      <span className="block truncate text-xs text-muted-foreground">{item.description}</span>
+                    )}
+                    {/* Rendered, not a `title`: two dictionaries can carry the
+                        same name, and the id is the only thing that tells them
+                        apart — a tooltip says that to a mouse and to nobody
+                        else. */}
+                    <span className="block truncate font-mono text-[10px] text-muted-foreground">
+                      {item.id} · v{item.version}
                     </span>
                   </span>
                   {alreadyLinked ? (

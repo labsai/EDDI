@@ -223,6 +223,14 @@ export function OperatorChat({
   // button, the attach button and the drop target cannot drift apart.
   const composerClosed = isPaused || isReadOnly;
 
+  /** Derived once so the placeholder and the `aria-label` cannot say different
+   *  things — the state-specific texts were reaching sighted users only. */
+  const composerPlaceholder = isPaused
+    ? t("operator.chat.pausedPlaceholder", "Awaiting a decision above before the operator can continue…")
+    : isReadOnly
+      ? t("operator.chat.readOnlyPlaceholder", "This conversation is finished — start a new one to continue.")
+      : t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…");
+
   const { isDragOver, dropHandlers } = useFileDrop(attachEnabled && !composerClosed, (files) => {
     void stageFiles(files);
   });
@@ -603,14 +611,11 @@ export function OperatorChat({
           }}
           disabled={composerClosed}
           rows={1}
-          placeholder={
-            isPaused
-              ? t("operator.chat.pausedPlaceholder", "Awaiting a decision above before the operator can continue…")
-              : isReadOnly
-                ? t("operator.chat.readOnlyPlaceholder", "This conversation is finished — start a new one to continue.")
-                : t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")
-          }
-          aria-label={t("operator.chat.placeholder", "Ask about agents, conversations, deployments, logs…")}
+          placeholder={composerPlaceholder}
+          // The same string, not the generic one: the placeholder is ellipsised
+          // in the drawer, so this is where its full text lives — and while the
+          // composer is closed it is also the only thing that says WHY.
+          aria-label={composerPlaceholder}
           className="max-h-[120px] min-h-[40px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2.5 text-sm placeholder:truncate disabled:opacity-50"
           data-testid="operator-input"
         />

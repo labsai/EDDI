@@ -1420,7 +1420,8 @@
     "created": "Wörterbuch erstellt und verknüpft",
     "defaultName": "Neues Wörterbuch",
     "descriptionPlaceholder": "Was dieses Wörterbuch dem Parser beibringt…",
-    "manual": "Stattdessen per URI verknüpfen"
+    "manual": "Stattdessen per URI verknüpfen",
+    "createdUnnamed": "Wörterbuch erstellt und verknüpft, aber sein Name konnte nicht gespeichert werden — benennen Sie es im Wörterbuch-Editor um."
   },
   "coordinator": {
     "activeConversations": "Aktive Gespräche",

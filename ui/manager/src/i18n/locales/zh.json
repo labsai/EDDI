@@ -1420,7 +1420,8 @@
     "created": "已创建并链接词典",
     "defaultName": "新建词典",
     "descriptionPlaceholder": "这个词典教给解析器的内容…",
-    "manual": "改用 URI 链接"
+    "manual": "改用 URI 链接",
+    "createdUnnamed": "已创建并链接词典，但名称未能保存 — 请在词典编辑器中重命名。"
   },
   "coordinator": {
     "activeConversations": "活跃对话",

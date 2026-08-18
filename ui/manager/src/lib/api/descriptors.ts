@@ -35,8 +35,11 @@ export function getDescriptor(
   id: string,
   version: number
 ): Promise<AgentDescriptor> {
+  // Encoded: this id can come from a URI someone typed by hand, and a `?`,
+  // `#` or `..` in it would otherwise re-point the request at another path.
+  const params = new URLSearchParams({ version: String(version) });
   return api.get<AgentDescriptor>(
-    `/descriptorstore/descriptors/${id}?version=${version}`
+    `/descriptorstore/descriptors/${encodeURIComponent(id)}?${params.toString()}`
   );
 }
 

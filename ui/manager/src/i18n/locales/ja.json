@@ -1420,7 +1420,8 @@
     "created": "辞書を作成してリンクしました",
     "defaultName": "新しい辞書",
     "descriptionPlaceholder": "この辞書がパーサーに教える内容…",
-    "manual": "代わりに URI でリンク"
+    "manual": "代わりに URI でリンク",
+    "createdUnnamed": "辞書を作成してリンクしましたが、名前を保存できませんでした。辞書エディターで名前を変更してください。"
   },
   "coordinator": {
     "activeConversations": "アクティブな会話",

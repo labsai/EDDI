@@ -1434,7 +1434,8 @@
     "created": "Dictionnaire créé et lié",
     "defaultName": "Nouveau dictionnaire",
     "descriptionPlaceholder": "Ce que ce dictionnaire apprend à l'analyseur…",
-    "manual": "Lier par URI à la place"
+    "manual": "Lier par URI à la place",
+    "createdUnnamed": "Dictionnaire créé et lié, mais son nom n'a pas pu être enregistré — renommez-le dans l'éditeur de dictionnaire."
   },
   "coordinator": {
     "activeConversations": "Conversations actives",
